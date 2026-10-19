@@ -16,7 +16,8 @@ from enum import Enum
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ConsistencyError, ObjectId
+from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.values import ConsistencyError, ObjectId, parse_object_id
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
@@ -35,6 +36,7 @@ __all__ = [
     "SourceLookup",
     "SourceResolution",
     "SourceSpec",
+    "read_source_spec",
     "resolve_source",
     "select_for_original",
     "select_outputs",
@@ -124,6 +126,26 @@ class SourceSpec:
         for text in (self.group, self.action_name):
             if text is not None and not text:
                 raise ValueError("来源名称引用不能为空")
+
+
+def read_source_spec(input_fields_json: str) -> SourceSpec:
+    """从保存的取回或范围清理输入重建来源，拒绝不可解释的引用。"""
+    fields = parse_exact_json(input_fields_json)
+    params = fields.get("params") if isinstance(fields, dict) else None
+    source = params.get("source") if isinstance(params, dict) else None
+    if not isinstance(source, dict):
+        raise ConsistencyError("产物动作缺少来源引用")
+    values = dict(source)
+    for key in ("action_instance_id", "plan_instance_id"):
+        if values.get(key) is not None:
+            try:
+                values[key] = parse_object_id(values[key])
+            except (TypeError, ValueError) as error:
+                raise ConsistencyError(f"产物来源引用不可解释: {error}") from error
+    try:
+        return SourceSpec(**values)
+    except (TypeError, ValueError) as error:
+        raise ConsistencyError(f"产物来源引用不可解释: {error}") from error
 
 
 @dataclass(frozen=True)

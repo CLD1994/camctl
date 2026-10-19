@@ -79,7 +79,9 @@ def save_cleanup_request(runtime, method: str, request, *, action=False):
         pending.last_kind = None
         from camctl.outputs.cleanup_flow import (
             CleanupItemSaved, CleanupStartResult, CleanupTargetsSaved, CleanupActionFinished)
+        from camctl.persistence.repositories.outputs import ResolveSourcesOutcome
         expected = ({"start_cleanup_action": CleanupStartResult,
+                     "resolve_sources": ResolveSourcesOutcome,
                      "fix_cleanup_targets": CleanupTargetsSaved,
                      "finish_cleanup_action": CleanupActionFinished}.get(method, CleanupItemSaved))
         if (not isinstance(result.value, expected)

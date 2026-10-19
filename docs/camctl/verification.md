@@ -6,6 +6,28 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 范围清理来源解析修复的软件验证（2026-10-19 UTC）
+
+按[来源解析修复计划](../superpowers/plans/2026-10-19-cleanup-source-resolution.md)，修复跨计划或按动作实例清理在来源仍为 `PENDING` 时直接固定目标，导致会话以 `state_db_error` 退出的问题。范围清理复用来源解析事务；来源及依赖可靠保存后才选择产物，只有取回创建 `obtain_source_selections`。公共输入、设备命令及数据库结构保持现行契约。
+
+Linux x86_64、Python 3.11.16、SQLite 3.53.1 下，各目录分别启动 pytest 并串行执行。首轮七个新场景重现原来源守卫错误；最终结果如下：
+
+| 范围 | 实际结果 |
+| --- | --- |
+| unit | 5950 passed、1 skipped、2 条既有 asyncio 标记警告。 |
+| outputs 完整目录 | 2198 passed、35 failed、2 skipped；35 个用例 ID 和首个错误与既有归档逐项相同，无新增或消失的失败。 |
+| bootstrap 完整目录 | 1308 passed、1 skipped。 |
+| acceptance | 266 passed。 |
+| cancellation | 103 passed。 |
+| history | 212 passed。 |
+| reporting | 373 passed。 |
+| 新增来源事务文件，含完整目录结束后追加的多来源场景 | 7 passed；覆盖保存回滚、提交前后未知、原键续接、固定来源复用、整计划／组／指定动作及三种拍摄来源。 |
+| 新增正式装配文件 | 8 passed；覆盖跨计划与动作实例引用、来源缺失、有效空范围、原执行中动作恢复、等待和取消，并核对实际报告。 |
+
+从 TX2 原库只读取得一致性副本后，在本地副本使用生产仓储续接原清理 action `6`：其状态由 `running + source=PENDING + targets=PENDING` 推进为两个集合均 `FIXED`，来源为原 action `1`、`3`，目标为原 output `1`—`4`，未创建取回选择。操作尝试总数保持 9，没有执行文件端口。此项证明原事务入口可续接现场状态，不等同于真实文件删除验收。
+
+命令、UTC、JUnit、日志、源码摘要、历史失败逐项比较及本地副本凭据保存在 `.local/verification/cleanup-source-resolution-20261019T020920Z/`，现场只读快照保存在 `.local/diagnostics/20261019T015606Z-cleanup-error/`。独立只读评审核对来源、空集合、取消及原保存责任，未发现本次改动引入的确定性正确性问题；本项没有新增拍摄或操作真实文件删除。
+
 ## 当前驱动的 TX2 部署与能力同步（2026-10-19 UTC）
 
 从 `937b134` 构建 wheel 和锁定运行依赖清单。构建产物中的 238 份 Python 源码及 27 份资源分别与仓库权威输入核对；TX2 的 ARM64、Python 3.11.17 和 SQLite 3.53.1 环境完成依赖安装检查及 wheel 更新，265 份安装文件与发行物逐字节一致。OSMO 使用必填码率和仅模式曝光的新参数；两个拍摄任务均由实际安装版导出。

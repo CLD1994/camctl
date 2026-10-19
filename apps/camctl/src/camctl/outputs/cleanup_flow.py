@@ -36,6 +36,7 @@ from camctl.operations.validation import OutcomeValidationError
 from camctl.outputs.cleanup_ownership import (
     CleanupSaveNotApplicable, PendingCleanupSave, save_cleanup_request,
     verify_cleanup_transaction)
+from camctl.outputs.sources import ResolutionState, read_source_spec
 
 __all__ = [
     "CancelCleanupItem",
@@ -2448,7 +2449,7 @@ async def _advance_cleanup_action(
 
     connection = runtime.owned.connection
     with closing(connection.execute(
-        "SELECT target_selection_state, cancel_requested"
+        "SELECT target_selection_state, cancel_requested, source_resolution_state, input_fields_json"
         " FROM actions WHERE id = ?",
         (action_id,),
     )) as cursor:
@@ -2461,6 +2462,9 @@ async def _advance_cleanup_action(
         # 零成员目标由取消结算直接终态化。
         if canceled:
             return
+        if row[2] == int(ResolutionState.PENDING):
+            if not _resolve_cleanup_sources(runtime, action_id, row[3], now):
+                return
         # 范围来源未就绪或零产物收场时本动作结束本轮推进。
         if not _fix_targets(runtime, action_id, now):
             return
@@ -2486,6 +2490,21 @@ async def _advance_cleanup_action(
         raise ConsistencyError(
             f"清理汇总事务未完成（{outcome.kind.value}）:"
             f" {outcome.error}")
+
+
+def _resolve_cleanup_sources(runtime: CleanupRuntime, action_id: int,
+                             input_fields_json: str, now: int) -> bool:
+    """先保存完整范围来源；取消及保存不确定时沿原申请处理。"""
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.outputs import ResolveSources
+
+    outcome = save_cleanup_request(runtime, "resolve_sources",
+        ResolveSources(action_id=action_id, spec=read_source_spec(input_fields_json),
+                       occurred_at=now), action=True)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"清理来源解析事务未完成（{outcome.kind.value}）: {outcome.error}")
+    return outcome.value.fixed
 
 
 def _fix_targets(runtime: CleanupRuntime, action_id: int, now: int) -> bool:

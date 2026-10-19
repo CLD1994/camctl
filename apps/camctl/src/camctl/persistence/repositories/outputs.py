@@ -1,7 +1,7 @@
 """取回来源固定与逐来源选择的持久化事务。
 
-SOURCE_RESOLVED 在取得执行资格后一次固定跨计划来源成员（或可
-靠失败），每个固定成员在同一事件共同初始化 PENDING 选择；
+SOURCE_RESOLVED 在取得执行资格后一次固定取回或范围清理的跨计划
+来源成员（或可靠失败），取回成员在同一事件共同初始化 PENDING 选择；
 TARGETS_FIXED 将一个来源的完整选择（含合法空选择与逐项失败）与
 FIXED 状态同一事务保存。已固定的来源与选择不因重送、重启或新文
 件出现而重选或扩大；此前已可靠确认存在的产物记录缺失按状态库
@@ -699,9 +699,9 @@ class _ResolveSourcesCommand:
         command = self._command
         action = row_facts(connection, "actions", command.action_id)
         if action is None:
-            raise TransactionError(f"取回动作不存在: {command.action_id}")
-        if action["type"] != _OBTAIN_TYPE:
-            raise TransactionError(f"来源解析只适用于取回动作: {command.action_id}")
+            raise TransactionError(f"产物动作不存在: {command.action_id}")
+        if action["type"] not in (_OBTAIN_TYPE, _DELETE_ACTION_TYPE):
+            raise TransactionError(f"来源解析只适用于取回或范围清理动作: {command.action_id}")
         state = action["source_resolution_state"]
         if state == int(_RESOLUTION_STATE.FIXED):
             # 已固定集合不重新解析或扩大：按已保存事实返回。
@@ -729,7 +729,7 @@ class _ResolveSourcesCommand:
                 f"来源解析状态不可解释: {command.action_id} {state!r}"
             )
         if action["status"] != int(_ACTION_STATUS.RUNNING) or not action["execution_started"]:
-            raise TransactionError("执行期来源解析要求取回动作处于执行中")
+            raise TransactionError("执行期来源解析要求产物动作处于执行中")
         self._state["actions"] = {command.action_id: action}
 
         resolution = resolve_source(
@@ -813,7 +813,8 @@ class _ResolveSourcesCommand:
         self._owners[("actions", command.action_id)] = ("action", command.action_id)
 
         dependency_id = next_row_id(connection, "action_dependencies")
-        selection_id = next_row_id(connection, "obtain_source_selections")
+        selection_id = (next_row_id(connection, "obtain_source_selections")
+                        if action["type"] == _OBTAIN_TYPE else None)
         selection_ids: list[int] = []
         for member_id in resolution.member_action_ids:
             rows.append(
@@ -826,27 +827,21 @@ class _ResolveSourcesCommand:
                     },
                 )
             )
-            rows.append(
-                _row(
-                    "obtain_source_selections",
-                    selection_id,
-                    {
-                        "dependency_id": dependency_id,
-                        "status": int(_SELECTION_STATUS.PENDING),
-                        "error_code": None,
-                        "error_details_json": None,
-                    },
-                )
-            )
             self._owners[("action_dependencies", dependency_id)] = (
                 "action", command.action_id,
             )
-            self._owners[("obtain_source_selections", selection_id)] = (
-                "action", command.action_id,
-            )
-            selection_ids.append(selection_id)
+            if selection_id is not None:
+                rows.append(_row("obtain_source_selections", selection_id, {
+                    "dependency_id": dependency_id,
+                    "status": int(_SELECTION_STATUS.PENDING),
+                    "error_code": None, "error_details_json": None,
+                }))
+                self._owners[("obtain_source_selections", selection_id)] = (
+                    "action", command.action_id,
+                )
+                selection_ids.append(selection_id)
+                selection_id += 1
             dependency_id += 1
-            selection_id += 1
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id,
@@ -5953,6 +5948,12 @@ def _selection_initialization_guard(event, context) -> None:
         for row in event.rows
         if row.table == "obtain_source_selections" and not row.before.exists
     ]
+    owner_id = next((row.row_id for row in event.rows
+                     if row.table == "actions" and row.before.exists), None)
+    if owner_id is not None and _guard_facts(context, "actions", owner_id).get("type") == _DELETE_ACTION_TYPE:
+        if created:
+            raise EventValidationError("只有取回动作可以初始化来源选择")
+        return
     if event.event_type == _SOURCE_RESOLVED_EVENT and event.reason == _FIX_REASON:
         dependencies = [
             row
@@ -7392,8 +7393,8 @@ class _FixCleanupTargetsCommand:
                 if dependency is not None:
                     dependencies[int(dependency_id)] = dependency
         if not sources:
-            raise ConsistencyError(
-                f"范围清理缺少固定来源: {self._command.action_id}")
+            # 来源计划真实存在但没有拍摄成员，是已经固定的合法空范围。
+            return ()
         actions = self._state["actions"]
         for source_id in sources:
             source = row_facts(connection, "actions", source_id)

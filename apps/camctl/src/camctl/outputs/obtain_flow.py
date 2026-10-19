@@ -57,7 +57,7 @@ from camctl.outputs.read_attempts import acquire_read_attempt, recover_unavailab
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.sources import (
     ResolutionState, SelectionSnapshot, SourceResolution, SourceSpec,
-    select_outputs)
+    read_source_spec, select_outputs)
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -227,25 +227,7 @@ def _resolve_sources(
 
 def _source_spec(action: Mapping) -> SourceSpec:
     """从原请求重建来源引用；不可解释的输入按状态库错误拒绝。"""
-    from camctl.contracts.values import parse_object_id
-
-    fields = parse_exact_json(action["input_fields_json"])
-    params = fields.get("params") if isinstance(fields, dict) else None
-    source = params.get("source") if isinstance(params, dict) else None
-    if not isinstance(source, dict):
-        raise ConsistencyError("取回动作缺少来源引用")
-    values = dict(source)
-    for key in ("action_instance_id", "plan_instance_id"):
-        if values.get(key) is not None:
-            try:
-                values[key] = parse_object_id(values[key])
-            except (TypeError, ValueError) as error:
-                raise ConsistencyError(
-                    f"取回来源引用不可解释: {error}") from error
-    try:
-        return SourceSpec(**values)
-    except (TypeError, ValueError) as error:
-        raise ConsistencyError(f"取回来源引用不可解释: {error}") from error
+    return read_source_spec(action["input_fields_json"])
 
 
 def _fix_pending_selections(
