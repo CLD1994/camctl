@@ -9,7 +9,7 @@ import {
   parameterFieldOptions,
   parameterFieldIndependent,
 } from "../../src/web/parameter-options";
-import { DIALECT } from "../../src/shared/validation";
+import { createValidator, DIALECT } from "../../src/shared/validation";
 import type { ParameterType } from "../../src/shared/types";
 import {
   parseJson,
@@ -995,3 +995,109 @@ it.each([
   Object.assign(p.schema.properties as object, change.properties);
   expect(() => parameterOptions(p)).toThrow();
 });
+
+it("titled scalar constants preserve exact machine values", () => {
+  const p = independent();
+  (p.schema.properties as any).bitrate_mode = parseJson(
+    '{"type":"number","oneOf":[{"const":0.000667,"title":"短档"},{"const":0.000333,"title":"短档"},{"const":0.00025}]}',
+  );
+  const catalog = parameterOptions(p);
+  expect(catalog.kind).toBe("independent");
+  const values = compatibleValues(catalog, {}, "bitrate_mode");
+  expect(stringifyJson(values)).toBe("[0.000667,0.000333,0.00025]");
+  expect(sameValueAt(values, 0, parseJson("[0.0006670]") as unknown[], 0)).toBe(
+    true,
+  );
+});
+it.each([
+  '{"type":"number","oneOf":[{"const":1},{"const":1.0}]}',
+  '{"type":"number","oneOf":[{"const":1},{"const":"2"}]}',
+  '{"type":"string","oneOf":[{"const":"a"},{"const":"b","not":{}}]}',
+  '{"type":"number","oneOf":[{"const":1.0000000000000001},{"const":2}]}',
+])("命名选项无法准确解释时保留该字段 JSON %s", (text) => {
+  const p = independent();
+  (p.schema.properties as any).bitrate_mode = parseJson(text);
+  const catalog = parameterOptions(p);
+  expect(catalog.kind).toBe("independent");
+  if (catalog.kind !== "unavailable")
+    expect(catalog.fields.some((f) => f.name === "bitrate_mode")).toBe(false);
+});
+it.each([4096, 4097])("命名标量选项遵守单字段候选上限 %s", (size) => {
+  const p = independent();
+  (p.schema.properties as any).bitrate_mode = {
+    type: "string",
+    oneOf: Array.from({ length: size }, (_, i) => ({
+      const: String(i),
+      title: `档位 ${i}`,
+    })),
+  };
+  const catalog = parameterOptions(p);
+  expect(catalog.kind).toBe("independent");
+  if (catalog.kind !== "unavailable")
+    expect(
+      catalog.fields.find((f) => f.name === "bitrate_mode")?.values.length,
+    ).toBe(size === 4096 ? 4096 : undefined);
+  expect(
+    createValidator().compile(p.schema)({
+      type: "example_record",
+      bitrate_mode: String(size - 1),
+      duration_s: 1,
+    }),
+  ).toBe(true);
+});
+it("本地引用中的命名常量参与完整目录并保留数字上下文", () => {
+  const p = parameter();
+  p.schema = parseJson(
+    '{"type":"object","additionalProperties":false,"$defs":{"choice":{"type":"number","oneOf":[{"const":0.000667,"title":"短档"},{"const":0.00025,"title":"更短"}]}},"properties":{"value":{"$ref":"#/$defs/choice"}},"required":["value"]}',
+  ) as any;
+  const catalog = parameterOptions(p);
+  expect(catalog.kind).toBe("finite");
+  expect(stringifyJson(compatibleValues(catalog, {}, "value"))).toBe(
+    "[0.000667,0.00025]",
+  );
+});
+
+it("修改选项标题只影响展示，合法性与机器值保持", async () => {
+  const { scalarChoices } = await import("../../src/web/scalar-options");
+  const first = parseJson(
+    '{"type":"number","oneOf":[{"const":0.000667,"title":"原档位"}]}',
+  ) as Record<string, unknown>;
+  const second = parseJson(
+    '{"type":"number","oneOf":[{"const":0.000667,"title":"新档位"}]}',
+  ) as Record<string, unknown>;
+  expect(scalarChoices(first)?.[0].label).toBe("原档位");
+  expect(scalarChoices(second)?.[0].label).toBe("新档位");
+  expect(createValidator().compile(first)(0.000667)).toBe(true);
+  expect(createValidator().compile(second)(0.000667)).toBe(true);
+  expect(createValidator().compile(second)(0.000666)).toBe(false);
+  expect(stringifyJson(first)).toContain('"const":0.000667');
+});
+
+it.each([4096, 4097])(
+  "整节点本地引用的 %s 个命名常量保持候选上限与完整校验",
+  (size) => {
+    const p = independent();
+    p.schema = {
+      type: "object",
+      additionalProperties: false,
+      $defs: {
+        choice: {
+          type: "string",
+          oneOf: Array.from({ length: size }, (_, index) => ({
+            const: String(index),
+            title: `档位 ${index}`,
+          })),
+        },
+      },
+      properties: { value: { $ref: "#/$defs/choice" } },
+      required: ["value"],
+    };
+    const catalog = parameterOptions(p);
+    expect(catalog.kind).toBe(size === 4096 ? "finite" : "unavailable");
+    if (catalog.kind === "unavailable") expect(catalog.reason).toBe("limit");
+    else if (catalog.kind === "finite") expect(catalog.rows).toHaveLength(4096);
+    expect(
+      createValidator().compile(p.schema)({ value: String(size - 1) }),
+    ).toBe(true);
+  },
+);

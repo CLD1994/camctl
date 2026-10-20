@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Application } from "../../src/server/application";
@@ -9,6 +9,7 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import { parseJson, stringifyJson } from "../../src/shared/json";
 import { choose, readOptions } from "./select-support";
+import { titledParameter } from "../fixtures/titled-parameters";
 import {
   clientTestCapabilitiesText,
   clientTestTasks,
@@ -92,7 +93,7 @@ async function setup(
     `http://127.0.0.1:${(server.address() as { port: number }).port}`,
   );
   await page.getByTestId("draft-open-button").click();
-  return { app, page, draft };
+  return { app, page, draft, directory };
 }
 
 it("曝光缺省时先选择模式，浏览页面不自动填写任何选项", async () => {
@@ -1473,3 +1474,169 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
     }
   }
 }, 60000);
+
+it.each([
+  ["0", "1/1500 秒", "0.000667"],
+  ["1", "1/3000 秒", "0.000333"],
+  ["2", "1/4000 秒", "0.00025"],
+])(
+  "short shutter choices survive preset reopen and export: %s",
+  async (choice, label, token) => {
+    const capabilities = {
+      devices: [
+        {
+          device_id: "generic",
+          driver_id: "test",
+          actions: [
+            { type: "camera_take_photo", parameter_types: [titledParameter()] },
+          ],
+        },
+      ],
+    };
+    const { app, page, draft, directory } = await setup("10", false, {
+      capabilities: stringifyJson(capabilities),
+      draftText:
+        '{"name":"命名参数往返","actions":[{"name":"照片","type":"camera_take_photo","device_id":"generic","scheduled_at":"2026-10-21 12:00:00","policy":{"max_delay_ms":0},"params":{"type":"titled_photo","capture_format":"jpeg","exposure":{"mode":"M"},"white_balance":{"mode":"manual"},"focus":{"mode":"MF"}}}]}',
+    });
+    const current = (id = draft.id) =>
+      (parseJson(app.draft(id).content.text) as any).actions[0].params;
+    const control = (name: string) =>
+      page.getByRole("combobox", { name, exact: true });
+    const exposure = () => control("曝光模式 (mode)");
+    expect(
+      (await readOptions(exposure()))
+        .filter((item) => item.value !== "")
+        .map((item) => item.text),
+    ).toEqual(["手动曝光", "光圈优先", "快门优先", "程序曝光"]);
+    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
+      "data-value",
+      "",
+    );
+    expect(current().focus).toEqual({ mode: "MF" });
+    const temperature = page.getByLabel("色温 (temperature_k)", {
+      exact: true,
+    });
+    await check(temperature).toHaveValue("");
+    await temperature.fill("5e");
+    await check
+      .poll(
+        () =>
+          app.draft(draft.id).content.pending?.[
+            "/actions/0/params/white_balance/temperature_k"
+          ]?.text,
+      )
+      .toBe("5e");
+    await check(control("快门 (shutter_s)")).toBeEnabled();
+    await choose(control("ISO 感光度 (iso)"), "1");
+    await choose(control("光圈 (aperture)"), "1");
+    await choose(control("快门 (shutter_s)"), choice);
+    await check(control("快门 (shutter_s)")).toContainText(label);
+    await choose(control("白平衡模式 (mode)"), "branch:0");
+    await choose(control("白平衡模式 (mode)"), "branch:1");
+    await check(temperature).toHaveValue("5e");
+    await temperature.fill("5500");
+    await choose(control("手动调焦相对移动量 (relative_move)"), "1");
+    await choose(control("对焦模式 (mode)"), "branch:1");
+    await choose(control("对焦模式 (mode)"), "branch:0");
+    await check(control("手动调焦相对移动量 (relative_move)")).toHaveAttribute(
+      "data-value",
+      "1",
+    );
+    await page
+      .getByRole("button", {
+        name: "清空手动调焦相对移动量 (relative_move)",
+        exact: true,
+      })
+      .click();
+    await choose(exposure(), "branch:1");
+    await choose(control("ISO 感光度 (iso)"), "0");
+    await choose(exposure(), "branch:2");
+    await choose(control("ISO 感光度 (iso)"), "1");
+    await choose(control("快门 (shutter_s)"), "2");
+    await choose(exposure(), "branch:3");
+    await choose(exposure(), "branch:0");
+    await check(control("快门 (shutter_s)")).toContainText(label);
+    await check.poll(() => current().white_balance.temperature_k).toBe(5500);
+    await check.poll(() => current().focus).toEqual({ mode: "MF" });
+    const beforeView = app.draft(draft.id).content;
+    await page.getByRole("button", { name: "参数 JSON", exact: true }).click();
+    await page.getByRole("button", { name: "参数表单", exact: true }).click();
+    await page.locator(".preset-box > summary").click();
+    expect(app.draft(draft.id).content).toEqual(beforeView);
+    await page.getByLabel("预设名称", { exact: true }).fill(label);
+    await page
+      .getByRole("button", { name: "保存为新预设", exact: true })
+      .click();
+    await check.poll(() => app.state().presets!.length).toBe(1);
+    const preset = app.state().presets![0];
+    expect(stringifyJson(preset.params)).toContain('"shutter_s":' + token);
+    await page.reload();
+    await page.getByTestId("draft-open-button").click();
+    await check(control("快门 (shutter_s)")).toContainText(label);
+    const target = app.createDraft({
+      ...app.draft(draft.id).content,
+      text: app
+        .draft(draft.id)
+        .content.text.replace("命名参数往返", "预设独立副本"),
+    });
+    await page.reload();
+    await page
+      .getByTestId("draft-open-button")
+      .filter({ hasText: "预设独立副本" })
+      .click();
+    await choose(exposure(), "branch:3");
+    await check.poll(() => current(target.id).exposure.mode).toBe("P");
+    await page.locator(".preset-box > summary").click();
+    await choose(control("已有预设"), preset.id);
+    await page.getByRole("button", { name: "应用预设", exact: true }).click();
+    await check.poll(() => current(target.id)).toEqual(preset.params);
+    expect(app.draft(target.id).content.objectVariants ?? {}).toEqual({});
+    expect(current(target.id).focus).not.toHaveProperty("relative_move");
+    const beforeReload = app.draft(target.id);
+    await page.getByRole("button", { name: /设备说明/ }).click();
+    const guide = page.getByTestId("device-guide");
+    await check(guide).toContainText(label);
+    await check(guide).toContainText("f/4.8");
+    writeFileSync(join(directory, "device-capabilities.json"), "{invalid");
+    await page
+      .getByRole("button", { name: "重新加载能力说明", exact: true })
+      .click();
+    await check(
+      page.locator(".notice").filter({ hasText: "此前成功启用" }),
+    ).toBeVisible();
+    await check(guide).toBeVisible();
+    await check(guide).toContainText(label);
+    expect(app.draft(target.id)).toEqual(beforeReload);
+    writeFileSync(
+      join(directory, "device-capabilities.json"),
+      stringifyJson(capabilities),
+    );
+    await page
+      .getByRole("button", { name: "重新加载能力说明", exact: true })
+      .click();
+    await check(
+      page.locator(".notice").filter({ hasText: "此前成功启用" }),
+    ).toHaveCount(0);
+    await page.getByTestId("nav-plans").click();
+    await page
+      .getByTestId("draft-open-button")
+      .filter({ hasText: "预设独立副本" })
+      .click();
+    const downloadEvent = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "校验并导出 JSON", exact: true })
+      .click();
+    const downloaded = readFileSync(
+      (await (await downloadEvent).path())!,
+      "utf8",
+    );
+    expect(downloaded).toContain('"shutter_s": ' + token);
+    const exported = parseJson(downloaded) as any;
+    expect(exported.actions[0].params).toEqual(preset.params);
+    expect(exported).not.toHaveProperty("objectVariants");
+    expect(exported.actions[0].params.focus).not.toHaveProperty(
+      "relative_move",
+    );
+    expect(current()).toEqual(preset.params);
+  },
+);

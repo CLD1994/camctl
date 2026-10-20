@@ -9,6 +9,7 @@ import {
 import { actionLabel } from "./common";
 import { stringifyJson } from "../shared/json";
 import { JsonFieldRules } from "./JsonFieldRules";
+import { scalarChoiceLabel } from "./scalar-options";
 
 export function DeviceGuide({
   capabilities,
@@ -232,7 +233,7 @@ function TaskGuide({
                         {catalog.fields
                           .find((field) => field.name === name)!
                           .values.map((value, index, values) =>
-                            optionLabel(value, values, index),
+                            scalarChoiceLabel(schema, value, values, index),
                           )
                           .join("、") || "没有允许值"}
                         。
@@ -289,10 +290,15 @@ function TaskGuide({
                     <tbody>
                       {combinations.rows.map((row, i) => (
                         <tr key={i}>
-                          {combinationFields.map(({ name }) => (
+                          {combinationFields.map(({ name, schema }) => (
                             <td key={name}>
                               {Object.hasOwn(row, name)
-                                ? optionLabel(row[name], row, name)
+                                ? scalarChoiceLabel(
+                                    schema,
+                                    row[name],
+                                    row,
+                                    name,
+                                  )
                                 : "不填写"}
                             </td>
                           ))}

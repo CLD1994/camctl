@@ -1,5 +1,6 @@
 import { displayJsonValue, stringifyJson } from "../shared/json";
 import { isObject } from "../shared/validation";
+import { scalarChoices } from "./scalar-options";
 
 const otherStructures = [
   "$ref",
@@ -71,6 +72,14 @@ function ObjectRules({ schema }: { schema: Record<string, unknown> }) {
                     <p>
                       允许值（enum）：
                       <code>{displayJsonValue(field, "enum", field.enum)}</code>
+                    </p>
+                  )}
+                  {scalarChoices(field) && (
+                    <p>
+                      允许值：
+                      {scalarChoices(field)!
+                        .map((choice) => choice.label)
+                        .join("、")}
                     </p>
                   )}
                   {Object.hasOwn(field, "minimum") && (
@@ -150,6 +159,14 @@ export function JsonFieldRules({
           下方仅说明规则直接声明的字段事实；所有输入仍须满足完整字段规则中的其他约束。
         </p>
       )}
+      {isObject(schema) && scalarChoices(schema) && (
+        <p>
+          允许值：
+          {scalarChoices(schema)!
+            .map((choice) => choice.label)
+            .join("、")}
+        </p>
+      )}
       {branches ? (
         <>
           <p>
@@ -157,7 +174,11 @@ export function JsonFieldRules({
           </p>
           {branches.map((branch, index) => (
             <section key={index} className="json-rule-branch">
-              <h5>分支 {index + 1}</h5>
+              <h5>
+                {typeof branch.title === "string" && branch.title.trim()
+                  ? branch.title
+                  : `分支 ${index + 1}`}
+              </h5>
               <ObjectRules schema={branch} />
             </section>
           ))}

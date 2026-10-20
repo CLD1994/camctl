@@ -2,6 +2,7 @@ import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ErrorObject } from "ajv";
 import type { Issue } from "./types";
+import { compactConstantOneOf } from "./constant-oneof";
 import {
   compareJsonNumberTokens,
   jsonNumberIsMultipleOf,
@@ -300,6 +301,24 @@ export function createValidator() {
     });
   }
   addFormats(ajv);
+  const compile = ajv.compile;
+  const compactSchemas = new WeakMap<object, unknown>();
+  ajv.compile = function (
+    this: typeof ajv,
+    schema: Parameters<typeof compile>[0],
+  ) {
+    let compact: unknown = schema;
+    if (typeof schema === "object" && schema !== null) {
+      if (compactSchemas.has(schema)) compact = compactSchemas.get(schema);
+      else {
+        compact = compactConstantOneOf(schema);
+        compactSchemas.set(schema, compact);
+      }
+    }
+    if (compact !== schema && !this.validateSchema(schema))
+      throw new Error(this.errorsText(this.errors));
+    return compile.call(this, compact as Parameters<typeof compile>[0]);
+  } as typeof ajv.compile;
   return ajv;
 }
 export function schemaIssues(

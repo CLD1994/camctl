@@ -177,3 +177,28 @@ it("查看说明不改输入 Schema 或把 default 和 examples 转成字段内�
   expect(html).toContain("1e-999");
   expect(html).not.toMatch(/<(input|textarea|select)\b/);
 });
+
+it("命名标量与对象分支说明消费同源标题并保留机器值", () => {
+  const html = facts(
+    render({
+      oneOf: [
+        {
+          type: "object",
+          title: "手动曝光",
+          properties: {
+            aperture: {
+              type: "number",
+              oneOf: [
+                { const: 4.8, title: "f/4.8" },
+                { const: 8, title: "f/8" },
+              ],
+            },
+          },
+        },
+      ],
+    }),
+  );
+  expect(html).toContain("手动曝光");
+  expect(html).toContain("f/4.8");
+  expect(html).toContain("f/8");
+});

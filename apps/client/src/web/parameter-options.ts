@@ -5,12 +5,13 @@ import { parseDraft, pointerPath, type Path } from "./editing";
 import type { DraftContent } from "../server/models";
 import { SCHEMA_ANNOTATIONS, visitSchemaNodes } from "../shared/schema-nodes";
 import { isLocalScalarSchema } from "./scalar-schema";
+import { scalarChoices, scalarChoiceValues } from "./scalar-options";
+export { optionLabel } from "./scalar-options";
 import {
   cloneClientJson,
   exactJsonValueIdentity,
   originalNumberToken,
   rememberNumberToken,
-  displayJsonValue,
 } from "../shared/json";
 
 export interface ParameterField {
@@ -97,6 +98,10 @@ function domain(
   seen = new Set<string>(),
 ): unknown[] | undefined {
   if (!isObject(field)) return undefined;
+  if (Object.hasOwn(field, "oneOf")) {
+    const choices = scalarChoices(field);
+    return choices ? scalarChoiceValues(choices) : undefined;
+  }
   if (Object.hasOwn(field, "const")) {
     const values = [field.const];
     rememberNumberToken(
@@ -531,14 +536,4 @@ export function parameterRequired(
   if (scope.kind === "independent") return scope.required.includes(field);
   const rows = compatibleRows(scope, params, field, catalog.kind === "grouped");
   return rows.length > 0 && rows.every((row) => Object.hasOwn(row, field));
-}
-
-export function optionLabel(
-  value: unknown,
-  parent?: unknown,
-  key: string | number = "",
-): string {
-  if (typeof value === "string") return value === "" ? "空字符串" : value;
-  if (typeof value === "boolean") return value ? "是" : "否";
-  return displayJsonValue(parent, key, value);
 }

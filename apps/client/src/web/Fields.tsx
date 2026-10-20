@@ -11,6 +11,11 @@ import {
 } from "./editing";
 import { sameValueAt, optionLabel } from "./parameter-options";
 import {
+  scalarChoices,
+  scalarChoiceValues,
+  scalarChoiceLabel,
+} from "./scalar-options";
+import {
   displayNumber,
   displayJsonValue,
   originalNumberToken,
@@ -106,8 +111,14 @@ export function Field({
     label = `${typeof schema.title === "string" ? schema.title : name} (${name})`;
   const set = (v: unknown, omit = false, numberToken?: string) =>
     change(setValue(content, path, v, omit, false, numberToken));
+  const named = scalarChoices(schema);
   const declared =
-    choices ?? (Array.isArray(schema.enum) ? schema.enum : undefined);
+    choices ??
+    (Array.isArray(schema.enum)
+      ? schema.enum
+      : named
+        ? scalarChoiceValues(named)
+        : undefined);
   const enumeration = jsonChoices ? undefined : declared;
   const type = Array.isArray(schema.type)
     ? schema.type.filter((t) => t !== "null").length === 1
@@ -137,7 +148,10 @@ export function Field({
         : undefined;
   const unsupportedChoice =
     jsonChoices &&
-    (!!declared || type === "boolean" || Object.hasOwn(schema, "const"));
+    (!!declared ||
+      type === "boolean" ||
+      Object.hasOwn(schema, "const") ||
+      Object.hasOwn(schema, "oneOf"));
   const jsonEditor =
     unsupportedChoice ||
     (!enumeration &&
@@ -227,7 +241,7 @@ export function Field({
                   (v, i) =>
                     candidateAllowed(i) && (
                       <SelectItem key={i} value={i}>
-                        {optionLabel(v, enumeration, i)}
+                        {scalarChoiceLabel(schema, v, enumeration, i)}
                       </SelectItem>
                     ),
                 )}

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SchemaFields } from "../../src/web/Editor";
 import type { DraftContent } from "../../src/server/models";
 import type { ParameterType } from "../../src/shared/types";
-import { editValue, parseDraft } from "../../src/web/editing";
+import { editValue, parseDraft, setValue } from "../../src/web/editing";
 import { switchObjectBranch } from "../../src/shared/object-variants";
 import { objectBranchJsonEdit } from "../../src/web/object-branches";
 import { replaceObjectValue } from "../../src/shared/object-variants";
@@ -332,4 +332,96 @@ it("同一动作的设备身份尚未完成时不回显旧模式", () => {
   });
   expect(html).not.toContain('aria-label="mode (mode)"');
   expect(html).toContain('aria-label="重新填写exposure" disabled');
+});
+
+it("incomplete white balance does not disable exposure choices", async () => {
+  const { titledParameter } = await import("../fixtures/titled-parameters");
+  const p = titledParameter();
+  const html = render('{"mode":"M","iso":100}', p, {
+    "/actions/0/params/white_balance/temperature_k": {
+      kind: "number",
+      text: "5e",
+    },
+  });
+  expect(html).toContain('aria-label="曝光模式 (mode)"');
+  expect(html).toContain('aria-label="快门 (shutter_s)"');
+  expect(html).toContain('aria-label="光圈 (aperture)"');
+  expect(html).not.toContain('aria-label="曝光设置 (exposure)"');
+});
+it("object branches use titles and preserve per-branch drafts", async () => {
+  const { titledParameter } = await import("../fixtures/titled-parameters");
+  const { objectBranches } = await import("../../src/web/object-branches");
+  const catalog = objectBranches(titledParameter(), "exposure");
+  expect(catalog?.branches.map((branch) => (branch as any).label)).toEqual([
+    "手动曝光",
+    "光圈优先",
+    "快门优先",
+    "程序曝光",
+  ]);
+  const initial = {
+    text: '{"actions":[{"type":"camera_take_photo","params":{"type":"titled_photo","exposure":{"mode":"M","shutter_s":0.000667,"extra":7}}}]}',
+  };
+  const switched = switchObjectBranch(initial, 0, ["exposure"], "mode", "P");
+  const restored = switchObjectBranch(switched, 0, ["exposure"], "mode", "M");
+  expect((parseDraft(restored).actions[0].params as any).exposure).toEqual({
+    mode: "M",
+    shutter_s: 0.000667,
+    extra: 7,
+  });
+  expect(render('{"mode":"M","extra":7}', titledParameter())).toContain(
+    'aria-label="重新填写曝光设置"',
+  );
+});
+
+it("换设备只改变当前校验依据，模式内容与未完成输入继续随原字段恢复", async () => {
+  const { titledParameter } = await import("../fixtures/titled-parameters");
+  const initial: DraftContent = {
+    text: '{"actions":[{"type":"camera_take_photo","device_id":"first","params":{"type":"titled_photo","exposure":{"mode":"M","iso":100,"shutter_s":0.000667}}}]}',
+    pending: {
+      "/actions/0/params/exposure/aperture": { kind: "number", text: "4e" },
+    },
+  };
+  const switched = switchObjectBranch(initial, 0, ["exposure"], "mode", "A");
+  const changed = setValue(switched, ["actions", 0, "device_id"], "second");
+  expect(changed.objectVariants).toEqual(switched.objectVariants);
+  const restored = switchObjectBranch(changed, 0, ["exposure"], "mode", "M");
+  expect((parseDraft(restored).actions[0].params as any).exposure).toEqual({
+    mode: "M",
+    iso: 100,
+    shutter_s: 0.000667,
+  });
+  expect(restored.pending?.["/actions/0/params/exposure/aperture"]?.text).toBe(
+    "4e",
+  );
+  const parameter = titledParameter();
+  (parameter.schema.properties as any).exposure.oneOf[0].properties.iso.enum = [
+    64,
+  ];
+  const html = renderToStaticMarkup(
+    createElement(SchemaFields, {
+      parameter,
+      content: restored,
+      path: ["actions", 0, "params"],
+      change: () => {
+        throw new Error("查看不能修改");
+      },
+    }),
+  );
+  expect(html).toContain("100");
+  expect(html).toContain('data-value="invalid"');
+  expect(html).toContain("4e");
+});
+it("对象模式缺少标题时回退机器值，同名标题仍区分模式身份", async () => {
+  const { titledParameter } = await import("../fixtures/titled-parameters");
+  const { objectBranches } = await import("../../src/web/object-branches");
+  const parameter = titledParameter();
+  const branches = (parameter.schema.properties as any).exposure.oneOf;
+  branches[0].title = branches[1].title = "同名";
+  delete branches[2].title;
+  branches[3].title = " ";
+  expect(
+    objectBranches(parameter, "exposure")?.branches.map(
+      (branch) => branch.label,
+    ),
+  ).toEqual(["同名（M）", "同名（A）", "S", "P"]);
 });
