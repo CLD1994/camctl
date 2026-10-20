@@ -122,8 +122,8 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
     try:
         if interruption == "archive":
             original=host_photo.archive_capture_file
-            async def interrupted(*args):
-                await original(*args)
+            async def interrupted(*args, **kwargs):
+                await original(*args, **kwargs)
                 raise OSError("归档中断")
             monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
         else:
@@ -166,9 +166,9 @@ async def test_cancel_after_reliable_photo_retains_device_pair(tmp_path, monkeyp
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device",cancel_action=True)
     original=host_photo.archive_capture_file
     canceled=False
-    async def cancel_after_archive(*args):
+    async def cancel_after_archive(*args, **kwargs):
         nonlocal canceled
-        await original(*args)
+        await original(*args, **kwargs)
         if not canceled:
             canceled=True
             _apply_cancel(owned,2,1)
@@ -274,7 +274,7 @@ async def test_failed_host_copy_cleanup_retries_on_next_maintenance(tmp_path,mon
         owned.connection.close()
 
 
-@pytest.mark.parametrize("defect",["empty","single","host","sha","pair","role","owner","complete","support"])
+@pytest.mark.parametrize("defect",["empty","single","host","sha","pair","role","owner","complete","support","media","locator","variant"])
 async def test_device_success_requires_complete_matching_device_pair(tmp_path,monkeypatch,defect):
     from dataclasses import replace
     from camctl.contracts.values import new_operation_key
@@ -296,6 +296,17 @@ async def test_device_success_requires_complete_matching_device_pair(tmp_path,mo
         elif defect=="host": command=replace(command,drafts=(replace(original,file=FileReference(intermediate_file_id=1),original_name="capture.3fr",media_type="image/x-hasselblad-3fr"),preview))
         elif defect=="sha": command=replace(command,drafts=(replace(original,sha256="f"*64),preview))
         elif defect=="pair": command=replace(command,drafts=(original,replace(preview,original_batch_file_id=2)))
+        elif defect in ("media", "locator", "variant"):
+            if defect == "media":
+                owned.connection.execute("UPDATE device_files SET media_type='image/png' WHERE id=2")
+            else:
+                locator = json.loads(owned.connection.execute("SELECT locator_json FROM device_files WHERE id=2").fetchone()[0])
+                if defect == "locator":
+                    locator["camera_name"] = "other.3FR"
+                else:
+                    locator["variant"] = "original"
+                owned.connection.execute("UPDATE device_files SET locator_json=? WHERE id=2", (json.dumps(locator),))
+            owned.connection.commit()
         else:
             column,value={"role":("role",1),"owner":("source_action_id",None),"complete":("completion_state",1),"support":("checksum_support",1)}[defect]
             # 故障注入制造不一致投影；仓储不得把损坏事实登记为成功。
@@ -326,8 +337,8 @@ async def test_restart_without_configured_camera_finishes_original_registration(
         monkeypatch.setattr(runtime.capture,"save_file_checksum",interrupted)
     else:
         original=host_photo.archive_capture_file
-        async def interrupted(*args):
-            await original(*args)
+        async def interrupted(*args, **kwargs):
+            await original(*args, **kwargs)
             raise OSError("归档后会话中断")
         monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
     try:
@@ -430,5 +441,268 @@ async def test_event_guards_reject_partial_device_pair(tmp_path, entry):
             )
         with pytest.raises(EventValidationError, match="原图.*预览|两份"):
             guard(SimpleNamespace(rows=(row,), event_type=None), Context())
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format,camera_name", [("raw", "B9996039.3FR"), ("jpeg", "B9996039.JPG")])
+async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, capture_format, camera_name):
+    import asyncio
+    from decimal import Decimal
+    from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
+    from camctl.devices.read_session import SourceFile
+    from camctl.host_files.models import BoundDirectories
+    from camctl.operations.models import AttemptTicket
+    from camctl.operations.process import LocalExit, RawToolOutcome
+    from .test_host_photo_flow import _JPEG_ORIGINAL
+
+    cfg, owned, captured_driver, runtime, _ = await _world(tmp_path, storage="device", capture_format=capture_format)
+    original_bytes = _JPEG_ORIGINAL if capture_format == "jpeg" else _ORIGINAL
+    payloads = {"original": original_bytes, "thumbnail": _PREVIEW}
+
+    class CapturedDownloadTransport:
+        def __init__(self):
+            self.downloads = []
+
+        async def run(self, spec, _stop):
+            command = spec.argv[3]
+            if command == "list":
+                output = b"vid=0x2756 pid=0x000a  bus=  1 addr= 23\n"
+            elif command == "info":
+                output = b"serial : SERIAL-1\n"
+            else:
+                assert spec.argv[3] == "download"
+                variant = spec.argv[4]
+                assert spec.argv[5] == camera_name
+                assert spec.argv[6] == "--output"
+                self.downloads.append((variant, spec.argv[5]))
+                (Path(spec.argv[7]) / "downloaded.bin").write_bytes(payloads[variant])
+                output = b"downloaded\n"
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None)
+
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        rows = owned.connection.execute("SELECT identity_key,locator_json,size_bytes,sha256 FROM device_files ORDER BY id").fetchall()
+        assert len(rows) == 2
+        transport = CapturedDownloadTransport()
+        downloader = HasselbladDriver(cfg.devices, BoundDirectories(Path(cfg.paths.staging)),
+            monotonic_ns=lambda: 0, transport=transport)
+        for (identity_key, locator_json, size, digest), variant in zip(rows, ("original", "thumbnail")):
+            locator = json.loads(locator_json)
+            assert locator["camera_path"] == "/mnt/media/DCIM/" + camera_name
+            assert locator["camera_name"] == camera_name
+            assert locator["variant"] == variant
+            assert locator["sha256"] == digest == hashlib.sha256(payloads[variant]).hexdigest()
+            source = SourceFile(identity_key, locator, size)
+            session = await downloader.open_read(source, 0, AttemptTicket(1, "read", "22", "read/22", 31), idle_timeout_s=Decimal("10"))
+            chunk = await asyncio.to_thread(session.read_chunk, size)
+            assert chunk.eof and chunk.data == payloads[variant]
+            assert (await session.wait_stopped()).stopped
+        assert transport.downloads == [("original", camera_name), ("thumbnail", camera_name)]
+        assert len(captured_driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+@pytest.mark.parametrize("storage", ["host", "device"])
+async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, monkeypatch, capture_format, storage):
+    from camctl.bootstrap.capture_assembly import session_capture_assembly
+    from camctl.capture import host_photo
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.persistence.repositories.history import HistoryRepository
+    from .test_host_photo_flow import _JPEG_ORIGINAL
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage=storage, capture_format=capture_format)
+    archive = host_photo.archive_capture_file
+
+    async def interrupt_after_original(*args, **kwargs):
+        await archive(*args, **kwargs)
+        raise OSError("原图归档后重启")
+
+    monkeypatch.setattr(host_photo, "archive_capture_file", interrupt_after_original)
+    try:
+        with pytest.raises(OSError, match="原图归档后重启"):
+            await capture_handler("camera_take_photo")(1, runtime)
+        pair_before = owned.connection.execute("SELECT id,purpose,relative_path FROM intermediate_files ORDER BY id").fetchall()
+        start_before = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
+        monkeypatch.setattr(host_photo, "archive_capture_file", archive)
+        owned.connection.close()
+        owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        resumed = session_capture_assembly(devices={}, drivers=DriverRegistry(()),
+            staging=Path(cfg.paths.staging), wait_config=lambda _: None, wall_us=lambda: _NOW)(owned, "cam-1")
+        await capture_handler("camera_take_photo")(1, resumed)
+        assert owned.connection.execute("SELECT id,purpose,relative_path FROM intermediate_files ORDER BY id").fetchall() == pair_before
+        assert owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone() == start_before
+        original_bytes = _JPEG_ORIGINAL if capture_format == "jpeg" else _ORIGINAL
+        assert [row[0] for row in owned.connection.execute("SELECT size_bytes FROM intermediate_files ORDER BY id")] == [len(original_bytes), len(_PREVIEW)]
+        assert [row[0] for row in owned.connection.execute("SELECT sha256 FROM intermediate_files ORDER BY id")] == [hashlib.sha256(original_bytes).hexdigest(), hashlib.sha256(_PREVIEW).hexdigest()]
+        extension = "jpg" if capture_format == "jpeg" else "3fr"
+        assert pair_before[0][2].endswith("." + extension)
+        history = HistoryRepository(Path(cfg.paths.state_db))
+        boundary = history.current_boundary()
+        at_boundary = history.restore_entity("action", 1, boundary)
+        assert at_boundary[("actions", 1)]["status"] == 3
+        assert len(driver.requests) == 1
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+        if storage == "device":
+            expected_name = "B9996039.JPG" if capture_format == "jpeg" else "B9996039.3FR"
+            for (locator_json,) in owned.connection.execute("SELECT locator_json FROM device_files"):
+                assert json.loads(locator_json)["camera_path"] == "/mnt/media/DCIM/" + expected_name
+        await capture_handler("camera_take_photo")(1, resumed)
+        assert history.restore_entity("action", 1, boundary) == at_boundary
+        assert len(driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+@pytest.mark.parametrize("cleanup_state", ["pending", "running", "completed", "failed", "unknown"])
+async def test_device_photo_original_file_requests_remain_verifiable_after_copy_cleanup(tmp_path, capture_format, cleanup_state):
+    from camctl.contracts.values import new_operation_key
+    from camctl.history.host_photo_request import PrepareHostPhoto, parse_host_photo_request
+    from camctl.history.events import branch_of
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.host_capture import HostCaptureRepository
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device", capture_format=capture_format)
+    verification = None
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        repository = HostCaptureRepository()
+        before = repository.prepare_host_photo(1, _NOW, new_operation_key(), owned)
+        assert before.kind is DbOutcomeKind.COMPLETED, before.error
+        original_requests = []
+        for key, body_json in owned.connection.execute(
+                "SELECT t.operation_key,e.body_json FROM history_transactions t JOIN history_events e ON e.transaction_id=t.id WHERE e.event_type=26 ORDER BY e.id"):
+            body = json.loads(body_json)
+            raw = body["evidence"].get("host_photo_request")
+            if raw is not None:
+                branch, _ = branch_of(26, body["reason"])
+                request_reason = {"CREATE": 1, "HOST_PHOTO_COMPLETE": 2}[branch]
+                original_requests.append((parse_host_photo_request(raw, reason=request_reason), key))
+        assert len(original_requests) == 2
+        await _advance_photo_copy_cleanup(cfg, owned, cleanup_state)
+        expected_cleanup = {"pending": 2, "running": 3, "completed": 4, "failed": 5, "unknown": 6}[cleanup_state]
+        assert owned.connection.execute("SELECT retention_state,cleanup_state FROM intermediate_files").fetchall() == [(2, expected_cleanup)] * 2
+        verification = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        transaction_count = owned.connection.execute("SELECT COUNT(*) FROM history_transactions").fetchone()
+        for request, key in original_requests:
+            verified = repository.verify_operation(request, key, verification)
+            assert verified.kind is DbOutcomeKind.COMPLETED, verified.error
+            assert verified.value == before.value
+            if isinstance(request, PrepareHostPhoto):
+                repeated = repository.prepare_host_photo(request.action_id, request.occurred_at, key, owned)
+                fresh = repository.prepare_host_photo(request.action_id, request.occurred_at, new_operation_key(), owned)
+            else:
+                repeated = repository.save_host_photo_complete(request, key, owned)
+                fresh = repository.save_host_photo_complete(request, new_operation_key(), owned)
+            assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+            assert repeated.value == before.value
+            assert fresh.kind is DbOutcomeKind.ROLLED_BACK
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions").fetchone() == transaction_count
+        assert len(driver.requests) == 1
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
+    finally:
+        if verification is not None:
+            verification.connection.close()
+        owned.connection.close()
+
+
+async def _advance_photo_copy_cleanup(cfg, owned, cleanup_state):
+    from dataclasses import replace
+    from camctl.contracts.values import new_operation_key
+    from camctl.outputs.work_files import (
+        CleanupIntent, CleanupResultSave, RetentionRelease, WorkFileFailure, WorkFileOutcome,
+    )
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.outputs import OutputsRepository, _CleanupResultCommand
+    from camctl.persistence.transaction import commit_operation
+
+    if cleanup_state == "completed":
+        await _maintain(cfg, owned)
+        return
+    repository = OutputsRepository()
+    file_ids = [row[0] for row in owned.connection.execute("SELECT id FROM intermediate_files ORDER BY id")]
+    for file_id in file_ids:
+        released = repository.save_retention_release(RetentionRelease(file_id, _NOW), new_operation_key(), owned)
+        assert released.kind is DbOutcomeKind.COMPLETED, released.error
+        if cleanup_state == "pending":
+            continue
+        intent = repository.save_cleanup_intent(CleanupIntent(file_id, _NOW), new_operation_key(), owned)
+        assert intent.kind is DbOutcomeKind.COMPLETED, intent.error
+        if cleanup_state == "running":
+            continue
+        request = CleanupResultSave(file_id, WorkFileOutcome.FAILED,
+            WorkFileFailure("action_work_file_delete_failed", {"file_id": str(file_id)}), _NOW)
+        if cleanup_state == "failed":
+            result = repository.save_cleanup_result(request, new_operation_key(), owned)
+            assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        else:
+            class UnknownCleanupResult(_CleanupResultCommand):
+                """在真实事件事务边界注入清理效果未知，保留完整历史。"""
+                def plan(self, scope):
+                    plan = super().plan(scope)
+                    event = plan.events[0]
+                    row = event.rows[0]
+                    row = replace(row, after=replace(row.after, values={**row.after.values, "cleanup_state": 6}))
+                    return replace(plan, events=(replace(event, rows=(row,)),))
+            key = new_operation_key()
+            receipt = commit_operation(UnknownCleanupResult(request, key), key, owned)
+            assert receipt.kind == "completed", receipt.error
+
+
+@pytest.mark.parametrize("phase", ["running", "failed"])
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+async def test_photo_original_requests_reject_released_copies_without_registered_pair(tmp_path, monkeypatch, phase, capture_format):
+    from dataclasses import replace
+    from camctl.capture.media import RecordingFailure
+    from camctl.contracts.values import new_operation_key
+    from camctl.history.host_photo_request import HostPhotoComplete
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.repositories.host_capture import HostCaptureRepository
+
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage="device", capture_format=capture_format)
+    commands = []
+    def interrupt(request):
+        commands.append(request)
+        raise OSError("正式产物登记前中断")
+    monkeypatch.setattr(runtime, "save_capture_completion", interrupt)
+    try:
+        with pytest.raises(OSError, match="正式产物登记前中断"):
+            await capture_handler("camera_take_photo")(1, runtime)
+        original = commands[0]
+        if phase == "failed":
+            failed = runtime.capture.finish_capture(replace(original, drafts=(),
+                failure=RecordingFailure("capture_failed", {"activity_id": "1", "reason": "invalid_outputs"})),
+                new_operation_key(), owned)
+            assert failed.kind is DbOutcomeKind.COMPLETED, failed.error
+            await _advance_photo_copy_cleanup(cfg, owned, "pending")
+        else:
+            from camctl.outputs.work_files import RetentionRelease
+            from camctl.persistence.repositories.outputs import OutputsRepository
+            for file_id in (1, 2):
+                refused = OutputsRepository().save_retention_release(RetentionRelease(file_id, _NOW), new_operation_key(), owned)
+                assert refused.kind is DbOutcomeKind.ROLLED_BACK
+            # 投影故障注入：即使错误状态出现，原申请核实也不能据此放行。
+            owned.connection.execute("UPDATE intermediate_files SET retention_state=2,cleanup_state=2")
+            owned.connection.commit()
+        repository = HostCaptureRepository()
+        for key, body_json in owned.connection.execute(
+                "SELECT t.operation_key,e.body_json FROM history_transactions t JOIN history_events e ON e.transaction_id=t.id WHERE e.event_type=26 ORDER BY e.id").fetchall():
+            body = json.loads(body_json)
+            raw = body["evidence"].get("host_photo_request")
+            if raw is None:
+                continue
+            from camctl.history.host_photo_request import parse_host_photo_request
+            request = parse_host_photo_request(raw, reason=2 if "original_file_id" in raw else 1)
+            assert repository.verify_operation(request, key, owned).kind is DbOutcomeKind.UNKNOWN
+            if isinstance(request, HostPhotoComplete):
+                fresh = repository.save_host_photo_complete(request, new_operation_key(), owned)
+            else:
+                fresh = repository.prepare_host_photo(request.action_id, request.occurred_at, new_operation_key(), owned)
+            assert fresh.kind is DbOutcomeKind.ROLLED_BACK
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+        assert len(driver.requests) == 1
     finally:
         owned.connection.close()

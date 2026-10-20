@@ -102,6 +102,7 @@ pytestmark = pytest.mark.asyncio
 _NOW = 1_750_000_000_000_000
 _ORIGINAL = b"II*\x00hasselblad-raw"
 _PREVIEW = b"\xff\xd8preview\xff\xd9"
+_JPEG_ORIGINAL = b"\xff\xd8jpeg-original\xff\xd9"
 _RETURNED = EvidenceRegistry((
     EvidenceContract("operation_returned", 1, "control", frozenset()),
     EvidenceContract("photo_taken", 1, "control",
@@ -192,19 +193,26 @@ class _PhotoDriver:
             "camera_path": "/mnt/media/DCIM/B9996039.3FR",
             "camera_name": "B9996039.3FR",
         }
+        if self.response == "missing_camera_name":
+            steps[-1]["camera_locator"] = {"status": "explicit_missing", "camera_path": None, "camera_name": None}
+        jpeg = request.params.get("capture_format") == "jpeg"
+        original_name = "capture.jpg" if jpeg else "capture.3fr"
+        original_bytes = _JPEG_ORIGINAL if jpeg else _ORIGINAL
+        if jpeg and self.response != "missing_camera_name":
+            steps[-1]["camera_locator"] = {"status": "path", "camera_path": "/mnt/media/DCIM/B9996039.JPG", "camera_name": "B9996039.JPG"}
         if self.response == "malformed_steps":
             steps = "not-a-step-list"
         return DeviceCallResult(observations=(DeviceObservation(
             "photo_taken", 1, {
                 "activity_id": request.ticket.target_id,
                 "original": {
-                    "original_name": "capture.3fr",
-                    "size_bytes": len(_ORIGINAL),
-                    "sha256": hashlib.sha256(_ORIGINAL).hexdigest(),
-                    "media_type": "image/x-hasselblad-3fr",
+                    "original_name": original_name,
+                    "size_bytes": len(original_bytes),
+                    "sha256": hashlib.sha256(original_bytes).hexdigest(),
+                    "media_type": "image/jpeg" if jpeg else "image/x-hasselblad-3fr",
                 },
                 "preview": {
-                    "original_name": "capture.jpg",
+                    "original_name": original_name + ".thumbnail.jpg",
                     "size_bytes": len(_PREVIEW),
                     "sha256": hashlib.sha256(_PREVIEW).hexdigest(),
                     "media_type": "image/jpeg",
@@ -215,8 +223,10 @@ class _PhotoDriver:
     async def _write_workspace(self, request: ControlRequest) -> None:
         identity = request.ticket.target_id
         directory = await prepare_capture_workspace(self.roots, identity)
-        (directory / "capture.3fr").write_bytes(_ORIGINAL)
-        (directory / "capture.jpg").write_bytes(_PREVIEW)
+        jpeg = request.params.get("capture_format") == "jpeg"
+        original_name = "capture.jpg" if jpeg else "capture.3fr"
+        (directory / original_name).write_bytes(_JPEG_ORIGINAL if jpeg else _ORIGINAL)
+        (directory / (original_name + ".thumbnail.jpg")).write_bytes(_PREVIEW)
 
 
 def _step_fact(name: str) -> dict[str, object]:
@@ -340,7 +350,7 @@ def _apply_cancel(owned, cancel_action_id: int, action_id: int) -> None:
 async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                  cancel_action: bool = False, legacy: bool = False,
                  wall: list[int] | None = None, results=None, evidence=None,
-                 driver_factory=None, storage="host"):
+                 driver_factory=None, storage="host", capture_format="raw"):
     cfg = _config(tmp_path, storage=storage)
     state_db = Path(cfg.paths.state_db)
     initialized = initialize_state(cfg, state_db)
@@ -353,7 +363,7 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
         "scheduled_at": _input_time(), "params": (
             {"type": "photo"} if legacy else {
                 "type": "hasselblad_photo",
-                "capture_format": "raw",
+                "capture_format": capture_format,
                 "exposure": {"mode": "P", "iso": 100},
                 "white_balance": {"mode": "auto"},
                 "focus": {"mode": "MF"},
@@ -451,7 +461,7 @@ async def test_host_photo_uses_saved_task_and_real_assembly_to_register_pair(tmp
         original = next(row for row in outputs if row[1] == int(enum_for("outputs.kind").ORIGINAL))
         preview = next(row for row in outputs if row[1] == int(enum_for("outputs.kind").PREVIEW))
         assert (original[2], original[3]) == ("capture.3fr", "image/x-hasselblad-3fr")
-        assert (preview[2], preview[3]) == ("capture.jpg", "image/jpeg")
+        assert (preview[2], preview[3]) == ("capture.3fr.thumbnail.jpg", "image/jpeg")
         assert owned.connection.execute(
             "SELECT output_id,original_output_id FROM output_origins"
         ).fetchall() == [(preview[0], original[0])]
@@ -672,9 +682,9 @@ async def test_host_photo_resumes_after_original_archive_and_ignores_later_bindi
     archive = host_photo.archive_capture_file
     stopped = False
 
-    async def archive_then_interrupt(roots, activity_id, artifact, target):
+    async def archive_then_interrupt(roots, activity_id, artifact, target, **kwargs):
         nonlocal stopped
-        await archive(roots, activity_id, artifact, target)
+        await archive(roots, activity_id, artifact, target, **kwargs)
         if target.purpose is FilePurpose.CAPTURE_ORIGINAL and not stopped:
             stopped = True
             raise RuntimeError("测试在原图归档后中断")
@@ -725,7 +735,7 @@ async def test_unknown_capture_keeps_work_files_and_never_retries(tmp_path):
             "SELECT id FROM device_activities WHERE action_id=1").fetchone()
         work = workspace_path(runtime.roots, str(activity_id))
         assert (work / "capture.3fr").read_bytes() == _ORIGINAL
-        assert (work / "capture.jpg").read_bytes() == _PREVIEW
+        assert (work / "capture.3fr.thumbnail.jpg").read_bytes() == _PREVIEW
         assert _saved_output_rows(owned) == []
     finally:
         owned.connection.close()
@@ -832,8 +842,9 @@ async def test_legacy_photo_with_result_port_keeps_device_listing_path(tmp_path)
         owned.connection.close()
 
 
-async def test_complete_receipt_unknown_verifies_same_request_and_key(tmp_path):
-    _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_path, capture_format):
+    _cfg, owned, driver, runtime, _clock = await _world(tmp_path, capture_format=capture_format)
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
 
     real = HostCaptureRepository()
@@ -867,6 +878,8 @@ async def test_complete_receipt_unknown_verifies_same_request_and_key(tmp_path):
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(driver.requests) == 1
+        assert owned.connection.execute("SELECT COUNT(*) FROM intermediate_files").fetchone() == (2,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM output_origins").fetchone() == (1,)
         assert len(uncertain.saved) == len(uncertain.verified) == 1
         assert uncertain.saved[0] == uncertain.verified[0]
         with pytest.raises(sqlite3.ProgrammingError):
@@ -976,5 +989,52 @@ async def test_v1_metadata_rejects_host_photo_before_grant_or_workspace(tmp_path
         assert list((Path(cfg.paths.staging) / "capture-work").iterdir()) == []
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+@pytest.mark.parametrize("storage", ["host", "device"])
+async def test_explicit_missing_camera_name_only_allows_host_source(tmp_path, capture_format, storage):
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage=storage, capture_format=capture_format)
+    driver.response = "missing_camera_name"
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+        expected_status = 3 if storage == "host" else 4
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (expected_status,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (0,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == ((2 if storage == "host" else 0),)
+        result_json, = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
+        assert json.loads(result_json)["observations"][0]["data"]["steps"][-1]["camera_locator"]["status"] == "explicit_missing"
+        if storage == "device":
+            assert json.loads(owned.connection.execute("SELECT error_details_json FROM actions WHERE id=1").fetchone()[0]) == {"activity_id": "1", "reason": "invalid_outputs"}
+            original_name = "capture.jpg" if capture_format == "jpeg" else "capture.3fr"
+            workspace = workspace_path(runtime.roots, "1")
+            assert (workspace / original_name).is_file()
+            assert (workspace / (original_name + ".thumbnail.jpg")).read_bytes() == _PREVIEW
+            assert owned.connection.execute("SELECT retention_state,cleanup_state FROM intermediate_files").fetchall() == [(1,1),(1,1)]
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("storage", ["host", "device"])
+async def test_jpeg_photo_keeps_both_roles_and_distinct_content(tmp_path, storage):
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage=storage, capture_format="jpeg")
+    try:
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        source_table = "intermediate_files" if storage == "host" else "device_files"
+        source_column = "intermediate_file_id" if storage == "host" else "device_file_id"
+        rows = owned.connection.execute(f"SELECT o.kind,o.media_type,f.size_bytes,f.sha256 FROM outputs o JOIN {source_table} f ON f.id=o.{source_column} ORDER BY o.kind").fetchall()
+        assert rows == [(1, "image/jpeg", len(_JPEG_ORIGINAL), hashlib.sha256(_JPEG_ORIGINAL).hexdigest()),
+                        (3, "image/jpeg", len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest())]
+        paths = [Path(cfg.paths.staging) / value[0] for value in owned.connection.execute("SELECT relative_path FROM intermediate_files ORDER BY id")]
+        assert [path.read_bytes() for path in paths] == [_JPEG_ORIGINAL, _PREVIEW]
+        assert [path.parent.name for path in paths] == ["capture-originals", "capture-previews"]
+        assert all(path.suffix == ".jpg" for path in paths)
+        assert owned.connection.execute("SELECT COUNT(*) FROM output_origins").fetchone() == (1,)
     finally:
         owned.connection.close()

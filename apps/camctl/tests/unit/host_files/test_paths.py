@@ -19,7 +19,6 @@ from camctl.host_files.models import (
 )
 from camctl.host_files.paths import (
     HOST_PHOTO_PURPOSES,
-    PURPOSE_FIXED_EXTENSIONS,
     inspect_file,
     relative_file_path,
     resolve_file,
@@ -103,29 +102,25 @@ class TestResolveRules:
         with pytest.raises(ValueError):
             resolve_file(_ref(f"recording-inputs/{long_name}"), _ROOTS)
 
-    def test_capture_purposes_have_one_shared_fixed_extension_rule(self) -> None:
-        assert PURPOSE_FIXED_EXTENSIONS == {
-            FilePurpose.CAPTURE_ORIGINAL: "3fr",
-            FilePurpose.CAPTURE_PREVIEW: "jpg",
-        }
-        assert HOST_PHOTO_PURPOSES == frozenset(PURPOSE_FIXED_EXTENSIONS)
-        assert relative_file_path(FilePurpose.CAPTURE_ORIGINAL, 28, "3fr") == "capture-originals/28.3fr"
-        assert relative_file_path(FilePurpose.CAPTURE_PREVIEW, 28, "jpg") == "capture-previews/28.jpg"
+    @pytest.mark.parametrize("purpose,extension,path", [
+        (FilePurpose.CAPTURE_ORIGINAL, "3fr", "capture-originals/28.3fr"),
+        (FilePurpose.CAPTURE_ORIGINAL, "jpg", "capture-originals/28.jpg"),
+        (FilePurpose.CAPTURE_PREVIEW, "jpg", "capture-previews/28.jpg"),
+    ])
+    def test_photo_paths_allow_original_formats_and_preserve_role(self, purpose, extension, path):
+        assert relative_file_path(purpose, 28, extension) == path
+        assert resolve_file(_ref(path, purpose=purpose), _ROOTS).path == _STAGING / path
 
-    @pytest.mark.parametrize(
-        "purpose,wrong_extension,wrong_path",
-        [
-            (FilePurpose.CAPTURE_ORIGINAL, "jpg", "capture-originals/28.jpg"),
-            (FilePurpose.CAPTURE_PREVIEW, "3fr", "capture-previews/28.3fr"),
-        ],
-    )
-    def test_capture_fixed_extension_is_enforced_by_producer_and_resolver(
-        self, purpose, wrong_extension, wrong_path
-    ) -> None:
-        with pytest.raises(ValueError, match="扩展名"):
-            relative_file_path(purpose, 28, wrong_extension)
-        with pytest.raises(ValueError, match="扩展名"):
-            resolve_file(_ref(wrong_path, purpose=purpose), _ROOTS)
+    @pytest.mark.parametrize("purpose,extension,path", [
+        (FilePurpose.CAPTURE_ORIGINAL, "png", "capture-originals/28.png"),
+        (FilePurpose.CAPTURE_ORIGINAL, None, "capture-originals/28"),
+        (FilePurpose.CAPTURE_PREVIEW, "3fr", "capture-previews/28.3fr"),
+    ])
+    def test_photo_paths_reject_unsupported_role_extensions(self, purpose, extension, path):
+        with pytest.raises(ValueError):
+            relative_file_path(purpose, 28, extension)
+        with pytest.raises(ValueError):
+            resolve_file(_ref(path, purpose=purpose), _ROOTS)
 
 
 class TestInspectRules:

@@ -12,7 +12,6 @@ from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     HOST_PHOTO_PURPOSES,
-    PURPOSE_FIXED_EXTENSIONS,
     validate_relative_file_path,
 )
 

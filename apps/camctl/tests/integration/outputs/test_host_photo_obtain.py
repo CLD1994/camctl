@@ -13,6 +13,7 @@ from .test_read_associations import read_targets, _command
 
 @pytest.mark.parametrize("kind,purpose,directory,extension", [
     (1, 5, "capture-originals", "3fr"),
+    (1, 5, "capture-originals", "jpg"),
     (3, 6, "capture-previews", "jpg"),
 ])
 @pytest.mark.parametrize("cleaned", [False, True])
@@ -29,7 +30,11 @@ def test_two_obtains_make_independent_copies_of_promoted_photo_source(
         " VALUES (801, 11, NULL, ?, ?, 3, 1, 4096, ?, NULL, 1, 1, 1)",
         (purpose, f"{directory}/801.{extension}", "a" * 64),
     )
-    connection.execute("UPDATE outputs SET kind=?, device_file_id=NULL, intermediate_file_id=801 WHERE id=701", (kind,))
+    source_name = "capture.3fr" if extension == "3fr" else "capture.jpg"
+    if kind == 3:
+        source_name = "capture.3fr.thumbnail.jpg"
+    media_type = "image/x-hasselblad-3fr" if extension == "3fr" else "image/jpeg"
+    connection.execute("UPDATE outputs SET kind=?, device_file_id=NULL, intermediate_file_id=801, original_name=?,media_type=? WHERE id=701", (kind, source_name, media_type))
     if kind == 3:
         connection.execute(
             "INSERT INTO intermediate_files (id, owner_action_id, owner_delivery_id, purpose,"
@@ -45,6 +50,7 @@ def test_two_obtains_make_independent_copies_of_promoted_photo_source(
             " SELECT 703, source_action_id, 1, NULL, 800, original_name, media_type, availability,"
             " error_json, media_json, cleanup_status, cleanup_error_json, created_event_id, last_event_id, change_count"
             " FROM outputs WHERE id=701")
+        connection.execute("UPDATE outputs SET original_name='capture.3fr',media_type='image/x-hasselblad-3fr' WHERE id=703")
         connection.execute("INSERT INTO output_origins (id, output_id, original_output_id) VALUES (1, 701, 703)")
         connection.execute("UPDATE obtain_items SET basis=3, original_output_id=703, preview_output_id=701 WHERE id=101")
     connection.execute("UPDATE action_dependencies SET depends_on_action_id=11 WHERE id=32")
