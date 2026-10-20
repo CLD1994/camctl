@@ -337,3 +337,54 @@ async def test_all_necessary_original_metadata_precedes_optional_preview_metadat
     result = await _list(fs, context=_natural())
     assert result.error is None and fs.metadata_paths == [OSV, other, LRF]
     assert [entry["identity"] for entry in _page(result)["entries"]] == [OSV, LRF, other]
+
+
+def test_osmo_segment_sort_uses_numeric_cam_and_index_with_rollover():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_key
+
+    before = parse_osmo_segment_key(
+        "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0999_D.OSV")
+    after = parse_osmo_segment_key(
+        "/mnt/media_rw/emulated/DCIM/CAM002/CAM_20200101000000_0001_D.OSV")
+    assert before < after
+    assert (before.directory_number, before.index) == (1, 999)
+    assert (after.directory_number, after.index) == (2, 1)
+
+
+def test_osmo_segment_name_ignores_datetime_for_sort_but_pairs_full_stem_only():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_name
+
+    original = parse_osmo_segment_name(
+        "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0001_D.OSV")
+    preview = parse_osmo_segment_name(
+        "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0001_D.lRf")
+    other_datetime = parse_osmo_segment_name(
+        "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20200101000000_0001_D.LRF")
+    renamed_stem = parse_osmo_segment_name(
+        "/mnt/media_rw/emulated/DCIM/CAM001/cam_20261021090000_0001_D.LRF")
+    other_directory = parse_osmo_segment_name(
+        "/mnt/media_rw/emulated/DCIM/CAM002/CAM_20261021090000_0001_D.LRF")
+    assert original.key == preview.key == other_datetime.key
+    assert original.pairing_identity == preview.pairing_identity
+    assert original.pairing_identity != other_datetime.pairing_identity
+    assert original.suffix == ".osv" and preview.suffix == ".lrf"
+    assert original.pairing_identity != renamed_stem.pairing_identity
+    assert original.pairing_identity != other_directory.pairing_identity
+    with pytest.raises(ValueError, match="后缀"):
+        type(original)(original.key, original.pairing_identity, ".mp4")
+
+
+@pytest.mark.parametrize("path", [
+    "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0000_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_1000_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM000/CAM_20261021090000_0001_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM0001/CAM_20261021090000_0001_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM001/../CAM001/CAM_20261021090000_0001_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0001_D.MP4",
+    "/mnt/media_rw/emulated/DCIM/CAM001/nested/CAM_20261021090000_0001_D.OSV",
+    "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261021090000_0001_OSV",
+])
+def test_osmo_segment_name_rejects_invalid_folder_name_and_index(path):
+    from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_key
+
+    assert parse_osmo_segment_key(path) is None
