@@ -144,7 +144,7 @@ async def test_stop_return_is_resaved_with_original_key_without_second_device_ca
     try:
         runtime = await _started(owned)
         before_result = []
-        stopper = ReturnedCall(_outcome("stop", confirmed=True), returned=lambda: before_result.append(
+        stopper = ReturnedCall(_diagnosed_stop(runtime), returned=lambda: before_result.append(
             tuple(owned.connection.iterdump())))
         proxy = CallWriteFault(owned.connection, stopper, mode)
         runtime.owned = replace(owned, connection=proxy)
@@ -156,6 +156,8 @@ async def test_stop_return_is_resaved_with_original_key_without_second_device_ca
         _assert_actual_saved(owned, request.ticket, assumed=False, confirmed=True,
                              occurred_at=_RETURNED_AT)
         assert len(set(proxy.result_keys)) == 1
+        result_json, = owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=?", (request.ticket.run_id,)).fetchone()
+        assert json.loads(result_json)["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
         if mode in ("projection", "commit_before"):
             assert proxy.rolled_back_images == before_result
     finally:
@@ -166,7 +168,7 @@ async def test_stop_pending_actual_result_precedes_unknown_recovery_without_boun
     owned = _world(tmp_path)
     try:
         runtime = await _started(owned)
-        stopper = ReturnedCall(_outcome("stop", confirmed=True))
+        stopper = ReturnedCall(_diagnosed_stop(runtime))
         proxy = CallWriteFault(owned.connection, stopper, "persistent")
         runtime.owned = replace(owned, connection=proxy)
         runtime.stopper = stopper
@@ -316,5 +318,132 @@ async def test_start_return_is_held_before_first_action_read(tmp_path, operation
         assert len(returned.calls) == 1
         assert set(proxy.result_keys) == {str(original_key)}
         assert runtime.pending_start_results == {}
+    finally:
+        owned.connection.close()
+
+
+def _diagnosed_stop(runtime):
+    from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState
+    value = ToolDiagnostics(2, (ToolCallOutput(1, "stop", ToolStream(ToolStreamState.COMPLETE, b"\x00\xff"), ToolStream(ToolStreamState.COMPLETE, b"")),))
+    runtime.evidence = runtime.evidence.with_contract(replace(runtime.evidence.contract("stop_returned", 1), max_diagnostic_calls=2))
+    return replace(_outcome("stop", confirmed=True), diagnostics=value)
+
+
+async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_path, monkeypatch):
+    from camctl.operations import result_format
+    from camctl.operations.tool_diagnostics import ResultEncodingError
+    owned = _world(tmp_path)
+    try:
+        runtime = await _started(owned)
+        actual = _diagnosed_stop(runtime)
+        stopper = ReturnedCall(actual)
+        runtime.stopper = stopper
+        runtime.wall_us = lambda: _RETURNED_AT
+        encode = result_format.encode_diagnostics
+        count = 0
+        def failing(value):
+            nonlocal count
+            count += 1
+            if count == 1:
+                raise ResultEncodingError("诊断编码注入失败")
+            return encode(value)
+        monkeypatch.setattr(result_format, "encode_diagnostics", failing)
+        with pytest.raises(ConsistencyError):
+            await _stop_call(runtime, runtime.action(12))
+        assert count == 1
+        pending, = runtime.pending_start_results.values()
+        ticket = pending.finish.ticket
+        original_key = pending.key
+        assert pending.finish.outcome.outcome is actual
+        assert pending.finish.occurred_at == _RETURNED_AT
+        assert actual.diagnostics.calls[0].stdout.data == b"\x00\xff"
+        runtime.wall_us = lambda: _RETURNED_AT + 99
+        assert runtime.recover_attempt(ticket)
+        assert not runtime.pending_start_results
+        assert len(stopper.calls) == 1
+        row = owned.connection.execute("SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id JOIN history_transactions t ON e.id BETWEEN t.first_event_id AND t.last_event_id WHERE a.run_id=?", (ticket.run_id,)).fetchone()
+        assert json.loads(row[0])["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
+        assert row[1] == _RETURNED_AT
+        assert row[2] == str(original_key)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("operation", ["control", "stop"])
+async def test_diagnostic_validation_failure_holds_original_at_both_capture_exits(tmp_path, monkeypatch, operation):
+    """录像 hold 与 STOP finish 在校验器故障前均持有原失败和字节。"""
+    from camctl.operations import tool_diagnostics
+    owned = _world(tmp_path)
+    try:
+        runtime = (_configured(owned, StartDriver(_result())) if operation == "control"
+                   else await _started(owned))
+        runtime.evidence = _CALL_EVIDENCE
+        diagnosed = _diagnosed_stop(runtime)
+        actual = (replace(_result(confirmed=True, error=ErrorValue("transport_timeout", "transport")),
+                          diagnostics=diagnosed.diagnostics) if operation == "control" else diagnosed)
+        if operation == "control":
+            runtime.evidence = runtime.evidence.with_contract(replace(
+                runtime.evidence.contract("operation_returned", 1), max_diagnostic_calls=2))
+            returned = StartDriver(actual)
+            runtime.driver = returned
+        else:
+            returned = ReturnedCall(actual)
+            runtime.stopper = returned
+        original = tool_diagnostics.validate_diagnostics
+        count = 0
+        def temporary(value):
+            nonlocal count
+            count += 1
+            if count == 1:
+                raise ValueError("原合法诊断的一次临时校验故障")
+            return original(value)
+        monkeypatch.setattr(tool_diagnostics, "validate_diagnostics", temporary)
+        runtime.wall_us = lambda: _RETURNED_AT
+        runtime.monotonic_ns = lambda: 8_000_000_000
+        with pytest.raises(ConsistencyError, match="诊断校验失败"):
+            if operation == "control":
+                await capture_handler("camera_record")(12, runtime)
+            else:
+                await _stop_call(runtime, runtime.action(12))
+        assert count == 1
+        pending, = runtime.pending_start_results.values()
+        ticket, key = pending.finish.ticket, pending.key
+        assert not pending.validated
+        assert pending.finish.outcome.outcome is actual
+        assert pending.finish.outcome.outcome.error is actual.error
+        assert actual.diagnostics.calls[0].stdout.data == b"\x00\xff"
+        assert pending.finish.occurred_at == _RETURNED_AT
+        assert pending.returned_ns == 8_000_000_000
+        assert runtime.recover_attempt(ticket)
+        assert not runtime.pending_start_results
+        assert len(returned.calls) == 1
+        saved, occurred_at, saved_key = owned.connection.execute(
+            "SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a"
+            " JOIN history_events e ON e.id=a.result_event_id"
+            " JOIN history_transactions t ON e.id BETWEEN t.first_event_id AND t.last_event_id WHERE a.run_id=?",
+            (ticket.run_id,)).fetchone()
+        assert json.loads(saved)["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
+        assert occurred_at == _RETURNED_AT
+        assert saved_key == str(key)
+    finally:
+        owned.connection.close()
+
+
+async def test_general_invalid_stop_observation_still_uses_existing_rejection(tmp_path):
+    owned = _world(tmp_path)
+    try:
+        runtime = await _started(owned)
+        actual = _outcome("stop", confirmed=True)
+        actual = replace(actual, observations=(replace(actual.observations[0], type="unregistered"),))
+        stopper = ReturnedCall(actual)
+        runtime.stopper = stopper
+        result = await _stop_call(runtime, runtime.action(12))
+        assert result.detail == "invalid_device_result"
+        assert not runtime.pending_start_results
+        error, = owned.connection.execute(
+            "SELECT a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.responsibility_key='stop/12'").fetchone()
+        assert json.loads(error)["code"] == "invalid_device_result"
+        assert len(stopper.calls) == 1
     finally:
         owned.connection.close()

@@ -54,6 +54,8 @@ class EvidenceContract:
     fields: frozenset[str]
     identity_field: str | None = None
     max_observations: int = 1
+    # 内部诊断数量约束是合同元数据，不是收场证据正文。
+    max_diagnostic_calls: int | None = None
 
     def __post_init__(self) -> None:
         if not self.type or not isinstance(self.type, str):
@@ -70,6 +72,10 @@ class EvidenceContract:
             raise EvidenceError("fields 必须是 frozenset")
         if self.max_observations < 1:
             raise EvidenceError("观察数量上限必须为正整数")
+        if self.max_diagnostic_calls is not None and (
+            type(self.max_diagnostic_calls) is not int or self.max_diagnostic_calls < 1
+        ):
+            raise EvidenceError("诊断数量上限必须为正整数")
         if self.identity_field is not None and self.identity_field not in self.fields:
             raise EvidenceError("身份成员必须属于 fields")
 

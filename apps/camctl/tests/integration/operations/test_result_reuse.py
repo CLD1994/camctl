@@ -609,3 +609,57 @@ def test_result_redelivery_uses_physical_row_id_instead_of_attempt_number(enviro
     again = _unchanged_reuse(repository, owned, finish, key)
     assert again.kind is DbOutcomeKind.COMPLETED, again.error
     assert again.value == first
+
+
+def _finish_with_diagnostics(ticket):
+    from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState
+    finish = _finish(ticket)
+    actual = finish.outcome.outcome
+    diagnostics = ToolDiagnostics(2, (ToolCallOutput(1, "delete", ToolStream(ToolStreamState.UNCONFIRMED, b"\x00\xff\n"), ToolStream(ToolStreamState.UNAVAILABLE, None)),))
+    contract = _CONTRACTS.contract(actual.settlement.evidence.type, 1)
+    registry = _CONTRACTS.with_contract(replace(contract, max_diagnostic_calls=2))
+    return replace(finish, outcome=validate_outcome(ticket, replace(actual, diagnostics=diagnostics), registry)), registry
+
+
+@pytest.mark.parametrize("fault", [False, True])
+def test_diagnostics_saved_atomically_with_original_result_and_history(environment, fault):
+    from camctl.operations.result_format import read_result_document
+    owned, repository = environment
+    ticket = repository.begin_attempt(_delete_intent(), new_operation_key(), owned).value.ticket
+    finish, _ = _finish_with_diagnostics(ticket)
+    key = new_operation_key()
+    before = tuple(owned.connection.iterdump())
+    if fault:
+        result = repository.finish_attempt(finish, key, replace(owned, connection=_FaultConnection(owned.connection, "INSERT INTO entity_event_links")))
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert tuple(owned.connection.iterdump()) == before
+    _saved(repository, owned, finish, key)
+    row = owned.connection.execute("SELECT a.status,a.effect_state,a.result_json,a.error_json,e.body_json FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id WHERE a.run_id=?", (ticket.run_id,)).fetchone()
+    actual = read_result_document(row[0], row[1], json.loads(row[2]), json.loads(row[3]))
+    assert actual == finish.outcome.outcome
+    body = json.loads(row[4])
+    assert body["rows"][0]["after"]["values"]["result_json"]["diagnostics"] == json.loads(row[2])["diagnostics"]
+    assert _unchanged_reuse(repository, owned, finish, key).kind is DbOutcomeKind.COMPLETED
+
+
+@pytest.mark.parametrize("change", ["byte", "empty", "state", "step", "limit"])
+def test_diagnostics_redelivery_rejects_any_changed_original_context(environment, change):
+    from camctl.operations.tool_diagnostics import ToolStream, ToolStreamState
+    owned, repository = environment
+    ticket = repository.begin_attempt(_delete_intent(), new_operation_key(), owned).value.ticket
+    finish, registry = _finish_with_diagnostics(ticket)
+    key = new_operation_key()
+    _saved(repository, owned, finish, key)
+    outcome = finish.outcome.outcome
+    diag = outcome.diagnostics
+    call = diag.calls[0]
+    if change == "byte": call = replace(call, stdout=replace(call.stdout, data=b"\x00\xfe\n"))
+    elif change == "empty": call = replace(call, stderr=ToolStream(ToolStreamState.UNCONFIRMED, b""))
+    elif change == "state": call = replace(call, stdout=replace(call.stdout, state=ToolStreamState.COMPLETE), stderr=ToolStream(ToolStreamState.COMPLETE, b""))
+    elif change == "step": call = replace(call, step_name="other")
+    else:
+        diag = replace(diag, call_limit=3)
+        registry = registry.with_contract(replace(registry.contract(outcome.settlement.evidence.type, 1), max_diagnostic_calls=3))
+    changed = replace(outcome, diagnostics=replace(diag, calls=(call,)))
+    result = _unchanged_reuse(repository, owned, replace(finish, outcome=validate_outcome(ticket, changed, registry)), key)
+    assert result.kind is DbOutcomeKind.ROLLED_BACK

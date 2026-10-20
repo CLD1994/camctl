@@ -14,7 +14,6 @@ from camctl.devices.evidence import (
     DeviceObservation,
     EvidenceContract,
     EvidenceRegistry,
-    validate_observation,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
@@ -45,11 +44,14 @@ from camctl.operations.process import (
     ToolStartError,
     execute_tool,
 )
-from camctl.operations.validation import validate_outcome
 
+from camctl.operations.tool_diagnostics import (
+    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState,
+)
+from .commands import PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
 from .definitions import DRIVER_DECLARATION, DRIVER_ID
-from .parameters import CAPTURE_FORMATS, PhotoSettings, parse_photo_settings
+from .parameters import PhotoSettings, parse_photo_settings
 from .responses import (
     CaptureResponse,
     CliParseError,
@@ -70,10 +72,12 @@ _PHOTO_TAKEN = EvidenceContract(
     identity_field="activity_id",
 )
 _OPERATION_RETURNED = EvidenceContract(
-    "operation_returned", 1, "control", frozenset({"terminate_grace_s"})
+    "operation_returned", 1, "control", frozenset({"terminate_grace_s"}),
+    max_diagnostic_calls=PHOTO_START_CALL_LIMIT
 )
 _DISPATCH_PREVENTED = EvidenceContract(
-    "dispatch_prevented", 1, "control", frozenset()
+    "dispatch_prevented", 1, "control", frozenset(),
+    max_diagnostic_calls=PHOTO_START_CALL_LIMIT
 )
 EVIDENCE = EvidenceRegistry((
     _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED,
@@ -114,7 +118,7 @@ class _ExecuteToolTransport:
 
 
 class HasselbladDriver:
-    """验证绑定机身身份后执行一次 RAW 拍摄，不重试业务命令。"""
+    """核对绑定机身后，在一次 START 内按完整参数执行有限命令。"""
 
     driver_id = DRIVER_ID
     evidence = EVIDENCE
@@ -271,7 +275,6 @@ class HasselbladDriver:
             "local_signal": None if raw.exit is None else raw.exit.signal,
             "transport_error": raw.error,
             "output_failure": raw.output_failure,
-            "stderr_hex": None if raw.stderr is None else raw.stderr.hex(),
             "stdout_size_bytes": None if output is None else len(output),
             "stdout_sha256": None if output is None else hashlib.sha256(output).hexdigest(),
             "signal_failures": [
@@ -298,133 +301,6 @@ class HasselbladDriver:
         if needs_stdout and raw.output is None:
             return "stdout_unavailable"
         return None
-
-    def _result(
-        self,
-        request: ControlRequest,
-        *,
-        status: AttemptStatus,
-        effect: EffectState,
-        last_raw: RawToolOutcome | None,
-        error: ErrorValue | None = None,
-        observation: DeviceObservation | None = None,
-        settlement_basis: SettlementBasis | None = None,
-    ) -> DeviceCallResult:
-        if settlement_basis is None:
-            settlement_basis = (
-                SettlementBasis.OBSERVED
-                if last_raw is not None
-                else SettlementBasis.NOT_DISPATCHED
-            )
-        evidence_type = (
-            "operation_returned"
-            if settlement_basis is SettlementBasis.OBSERVED
-            else "dispatch_prevented"
-        )
-        settlement_data: dict[str, object] = {}
-        if (
-            settlement_basis is SettlementBasis.OBSERVED
-            and last_raw is not None
-            and last_raw.used_grace_s is not None
-        ):
-            settlement_data["terminate_grace_s"] = last_raw.used_grace_s
-        outcome = CallOutcome(
-            status=status,
-            error=error,
-            effect=effect,
-            settlement=Settlement(
-                settlement_basis, EvidenceValue(evidence_type, 1, settlement_data)
-            ),
-            observations=() if observation is None else (observation,),
-            call_info=self._call_info(last_raw),
-        )
-        validate_outcome(request.ticket, outcome, self.evidence)
-        return DeviceCallResult.from_outcome(outcome)
-
-    def _failed(
-        self,
-        request: ControlRequest,
-        *,
-        step: str,
-        reason: str,
-        steps: list[dict[str, object]],
-        last_raw: RawToolOutcome | None,
-        effect: EffectState,
-        extra: Mapping[str, object] | None = None,
-        error_code: str = "device_error",
-        error_stage: str = "control",
-        settlement_basis: SettlementBasis | None = None,
-    ) -> DeviceCallResult:
-        details: dict[str, object] = {
-            "step": step,
-            "reason": reason,
-            "steps": [dict(fact) for fact in steps],
-        }
-        if extra is not None:
-            details.update(extra)
-        return self._result(
-            request,
-            status=AttemptStatus.UNKNOWN if effect is EffectState.UNKNOWN else AttemptStatus.FAILED,
-            effect=effect,
-            last_raw=last_raw,
-            error=ErrorValue(error_code, error_stage, details),
-            settlement_basis=settlement_basis,
-        )
-
-    def _prevented(
-        self,
-        request: ControlRequest,
-        *,
-        step: str,
-        reason: str,
-        steps: list[dict[str, object]],
-        last_raw: RawToolOutcome | None,
-        error_code: str,
-    ) -> DeviceCallResult:
-        return self._failed(
-            request,
-            step=step,
-            reason=reason,
-            steps=steps,
-            last_raw=last_raw,
-            effect=EffectState.NO_EFFECT,
-            error_code=error_code,
-            error_stage="dispatch",
-        )
-
-    def _next_dispatch(
-        self,
-        request: ControlRequest,
-        *,
-        step: str,
-        began_ns: int,
-        steps: list[dict[str, object]],
-        last_raw: RawToolOutcome | None,
-    ) -> Decimal | DeviceCallResult:
-        reason = request.dispatch_check()
-        if reason is not None:
-            if not isinstance(reason, str) or not reason:
-                raise ValueError("派发检查必须返回非空原因或 None")
-            return self._prevented(
-                request, step=step, reason=reason, steps=steps, last_raw=last_raw,
-                error_code=reason,
-            )
-        scope = current_call_scope()
-        if scope is not None and scope.interrupted is not None:
-            return self._prevented(
-                request, step=step, reason="transport_cancelled", steps=steps,
-                last_raw=last_raw, error_code="transport_cancelled",
-            )
-        now_ns = self.monotonic_ns()
-        if isinstance(now_ns, bool) or not isinstance(now_ns, int):
-            raise TypeError("monotonic_ns 必须返回整数纳秒")
-        remaining = request.timeout_s - Decimal(now_ns - began_ns) / _NANOSECONDS_PER_SECOND
-        if remaining <= 0:
-            return self._prevented(
-                request, step=step, reason="deadline_elapsed", steps=steps,
-                last_raw=last_raw, error_code="start_preparation_timeout",
-            )
-        return remaining
 
     async def _run_step(
         self,
@@ -469,198 +345,142 @@ class HasselbladDriver:
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         activity_id, config, settings = self._request_config(request)
         roots = self.roots
+        commands = photo_start_commands(settings)
         began_ns = self.monotonic_ns()
-        if isinstance(began_ns, bool) or not isinstance(began_ns, int):
+        if type(began_ns) is not int:
             raise TypeError("monotonic_ns 必须返回整数纳秒")
         steps: list[dict[str, object]] = []
+        calls: list[ToolCallOutput] = []
         last_raw: RawToolOutcome | None = None
 
-        async def run_checked(name: str, args: tuple[str, ...]):
-            nonlocal last_raw
-            remaining = self._next_dispatch(
-                request, step=name, began_ns=began_ns, steps=steps, last_raw=last_raw
+        def finish(status, effect, *, error=None, observation=None):
+            # 原关联由票据确定；这里只保留实际取得的双流和步骤对应关系。
+            basis = SettlementBasis.OBSERVED if last_raw is not None else SettlementBasis.NOT_DISPATCHED
+            data = {} if last_raw is None or last_raw.used_grace_s is None else {
+                "terminate_grace_s": last_raw.used_grace_s}
+            outcome = CallOutcome(
+                status=status, error=error, effect=effect,
+                settlement=Settlement(basis, EvidenceValue(
+                    "operation_returned" if last_raw is not None else "dispatch_prevented", 1, data)),
+                observations=() if observation is None else (observation,),
+                call_info=self._call_info(last_raw),
+                diagnostics=ToolDiagnostics(PHOTO_START_CALL_LIMIT, tuple(calls)),
             )
-            if isinstance(remaining, DeviceCallResult):
-                return remaining, None
-            raw = await self._run_step(
-                config=config, name=name, args=args, timeout_s=remaining, steps=steps
-            )
-            if raw is not None:
-                last_raw = raw
-            return None, raw
+            # 两份名称目录随本次返回冻结，不在接手时读取驱动或重新规划。
+            planned_names = tuple(command.name.value for command in commands)
+            actual_names = tuple(step["name"] for step in steps)
 
-        result, raw = await run_checked("list", ("list",))
-        if result is not None:
-            return result
-        if raw is None:
-            return self._failed(
-                request, step="list", reason="tool_start_failed", steps=steps,
-                last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                extra={"start_error": steps[-1]["start_error"]},
-                settlement_basis=(SettlementBasis.NOT_DISPATCHED if last_raw is None
-                                  else SettlementBasis.OBSERVED),
-            )
-        failure = self._local_return_failure(raw, needs_stdout=True)
-        if failure is not None:
-            return self._failed(request, step="list", reason=failure, steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT)
-        try:
-            cameras = parse_devices(raw.output)
-        except CliParseError as failure:
-            return self._failed(request, step="list", reason="response_unconfirmed", steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                                extra={"response_error": str(failure)})
-        matching = tuple(
-            camera for camera in cameras
-            if camera.vendor_id == _VENDOR_ID and camera.product_id == config.product_id
-        )
-        steps[-1]["devices"] = [
-            {"vendor_id": camera.vendor_id, "product_id": camera.product_id,
-             "bus": camera.bus, "address": camera.address}
-            for camera in cameras
-        ]
-        steps[-1]["matching_count"] = len(matching)
-        if not matching:
-            return self._failed(request, step="list", reason="no_matching_device", steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT)
-        if len(matching) != 1:
-            return self._failed(request, step="list", reason="multiple_matching_devices", steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT)
+            def check_prefix(original):
+                diagnostic_calls = original.diagnostics.calls
+                if (len(diagnostic_calls) > len(planned_names)
+                        or len(diagnostic_calls) != len(actual_names)
+                        or any(call.step_name != planned or actual != call.step_name
+                               for call, planned, actual in zip(
+                                   diagnostic_calls, planned_names, actual_names))):
+                    raise ValueError("原工具诊断与实际命令前缀不符")
 
-        result, raw = await run_checked("info", ("info",))
-        if result is not None:
-            return result
-        if raw is None:
-            return self._failed(
-                request, step="info", reason="tool_start_failed", steps=steps,
-                last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                extra={"start_error": steps[-1]["start_error"]},
-            )
-        failure = self._local_return_failure(raw, needs_stdout=True)
-        if failure is not None:
-            return self._failed(request, step="info", reason=failure, steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT)
-        try:
-            observed_serial = parse_serial(raw.output)
-        except CliParseError as failure:
-            return self._failed(request, step="info", reason="response_unconfirmed", steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                                extra={"response_error": str(failure)})
-        steps[-1]["observed_serial"] = observed_serial
-        if observed_serial != config.serial:
-            return self._failed(request, step="info", reason="serial_mismatch", steps=steps,
-                                last_raw=last_raw, effect=EffectState.NO_EFFECT)
-        steps[-1]["serial_verified"] = True
+            return DeviceCallResult.from_outcome(outcome, diagnostics_check=check_prefix)
 
-        for setting, args in (
-            ("drive_mode_single", ("set", "drive-mode", "single")),
-            ("capture_format", ("set", "capture-format",
-                                 CAPTURE_FORMATS[settings.capture_format].command_value)),
-        ):
-            result, raw = await run_checked(setting, args)
-            if result is not None:
-                return result
+        def failed(step, reason, *, effect=EffectState.NO_EFFECT, extra=None, stage="control", code="device_error"):
+            details = {"step": step, "reason": reason, "steps": [dict(fact) for fact in steps]}
+            if extra is not None:
+                details.update(extra)
+            # 实际调用/解释失败已取得，照片是否未知不改变这次失败的确定性。
+            return finish(AttemptStatus.FAILED, effect, error=ErrorValue(code, stage, details))
+
+        def remaining(name):
+            reason = request.dispatch_check()
+            if reason is not None:
+                if not isinstance(reason, str) or not reason:
+                    raise ValueError("派发检查必须返回非空原因或 None")
+                return failed(name, reason, stage="dispatch", code=reason)
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return failed(name, "transport_cancelled", stage="dispatch", code="transport_cancelled")
+            now_ns = self.monotonic_ns()
+            if type(now_ns) is not int:
+                raise TypeError("monotonic_ns 必须返回整数纳秒")
+            budget = request.timeout_s - Decimal(now_ns - began_ns) / _NANOSECONDS_PER_SECOND
+            if budget <= 0:
+                return failed(name, "deadline_elapsed", stage="dispatch", code="start_preparation_timeout")
+            return budget
+
+        for command in commands:
+            name, args = command.name.value, command.argv
+            budget = remaining(name)
+            if isinstance(budget, DeviceCallResult):
+                return budget
+            if command.name is PhotoStep.CAPTURE:
+                try:
+                    workspace = await prepare_capture_workspace(roots, activity_id)
+                except (CaptureFileError, OSError) as error:
+                    return failed("prepare_workspace", getattr(error, "stage", "workspace_prepare_failed"),
+                                  extra={"workspace_error": str(error)})
+                budget = remaining(name)
+                if isinstance(budget, DeviceCallResult):
+                    return budget
+                args = (*args, "--output", str(workspace))
+            raw = await self._run_step(config=config, name=name, args=args, timeout_s=budget, steps=steps)
+            complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
+            def stream(data):
+                state = ToolStreamState.UNAVAILABLE if data is None else (
+                    ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                                       stream(None if raw is None else raw.output),
+                                       stream(None if raw is None else raw.stderr)))
             if raw is None:
-                return self._failed(
-                    request, step=setting, reason="tool_start_failed", steps=steps,
-                    last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                    extra={"start_error": steps[-1]["start_error"]},
-                )
-            failure = self._local_return_failure(raw, needs_stdout=False)
+                return failed(name, "tool_start_failed", extra={"start_error": steps[-1]["start_error"]})
+            last_raw = raw
+            failure = self._local_return_failure(raw, needs_stdout=command.name in (PhotoStep.LIST, PhotoStep.INFO, PhotoStep.CAPTURE))
+            if failure is None and command.name is PhotoStep.CAPTURE and raw.stderr is None:
+                failure = "stderr_unavailable"
             if failure is not None:
-                return self._failed(request, step=setting, reason=failure, steps=steps,
-                                    last_raw=last_raw, effect=EffectState.NO_EFFECT)
-            steps[-1]["setting_returned"] = True
-
-        # 本地目录创建前先核一次剩余资格，避免取消或期限耗尽后创建
-        # 一个永远不会用于拍摄的工作目录；目录准备之后仍在 run_checked
-        # 中再次检查，覆盖准备期间发生的状态变化。
-        before_workspace = self._next_dispatch(
-            request, step="capture", began_ns=began_ns, steps=steps, last_raw=last_raw
-        )
-        if isinstance(before_workspace, DeviceCallResult):
-            return before_workspace
+                return failed(name, failure, effect=EffectState.UNKNOWN if command.name is PhotoStep.CAPTURE else EffectState.NO_EFFECT)
+            if command.name is PhotoStep.LIST:
+                try:
+                    cameras = parse_devices(raw.output)
+                except CliParseError as error:
+                    return failed(name, "response_unconfirmed", extra={"response_error": str(error)})
+                matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID and camera.product_id == config.product_id)
+                steps[-1]["devices"] = [{"vendor_id": c.vendor_id, "product_id": c.product_id, "bus": c.bus, "address": c.address} for c in cameras]
+                steps[-1]["matching_count"] = len(matching)
+                if len(matching) != 1:
+                    return failed(name, "no_matching_device" if not matching else "multiple_matching_devices")
+            elif command.name is PhotoStep.INFO:
+                try:
+                    serial = parse_serial(raw.output)
+                except CliParseError as error:
+                    return failed(name, "response_unconfirmed", extra={"response_error": str(error)})
+                steps[-1]["observed_serial"] = serial
+                if serial != config.serial:
+                    return failed(name, "serial_mismatch")
+                steps[-1]["serial_verified"] = True
+            elif command.name is not PhotoStep.CAPTURE:
+                steps[-1]["setting_returned"] = True
+                if command.name in (PhotoStep.FOCUS, PhotoStep.AUTOFOCUS):
+                    steps[-1]["lens_operation_returned"] = True
 
         try:
-            workspace = await prepare_capture_workspace(roots, activity_id)
-        except CaptureFileError as failure:
-            return self._failed(request, step="prepare_workspace", reason=failure.stage,
-                                steps=steps, last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                                extra={"workspace_error": str(failure)})
-        except OSError as failure:
-            return self._failed(request, step="prepare_workspace", reason="workspace_prepare_failed",
-                                steps=steps, last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                                extra={"workspace_error": f"{type(failure).__name__}: {failure}"})
-
-        result, raw = await run_checked("capture", ("capture", "--output", str(workspace)))
-        if result is not None:
-            return result
-        if raw is None:
-            return self._failed(
-                request, step="capture", reason="tool_start_failed", steps=steps,
-                last_raw=last_raw, effect=EffectState.NO_EFFECT,
-                extra={"start_error": steps[-1]["start_error"]},
-            )
-        failure = self._local_return_failure(raw, needs_stdout=True)
-        if failure is not None:
-            return self._failed(request, step="capture", reason=failure, steps=steps,
-                                last_raw=last_raw, effect=EffectState.UNKNOWN)
-        try:
-            response: CaptureResponse = parse_capture(
-                raw.output,
-                capture_format=settings.capture_format,
-                output_directory=str(workspace),
-            )
-        except CliParseError as failure:
-            return self._failed(request, step="capture", reason="capture_response_unconfirmed",
-                                steps=steps, last_raw=last_raw, effect=EffectState.UNKNOWN,
-                                extra={"response_error": str(failure),
-                                       "response_code": failure.code})
-        steps[-1]["files"] = [
-            {"host_name": response.original.host_name,
-             "size_bytes": response.original.size,
-             "media_type": response.original.media_type},
-            {"host_name": response.preview.host_name,
-             "size_bytes": response.preview.size,
-             "media_type": response.preview.media_type},
-        ]
+            response: CaptureResponse = parse_capture(raw.output, raw.stderr, output_complete=complete,
+                capture_format=settings.capture_format, output_directory=str(workspace))
+        except CliParseError as error:
+            return failed("capture", "capture_response_unconfirmed", effect=EffectState.UNKNOWN,
+                          extra={"response_error": str(error), "response_code": error.code})
+        steps[-1]["files"] = [{"host_name": item.host_name, "size_bytes": item.size, "media_type": item.media_type}
+                              for item in (response.original, response.preview)]
         steps[-1]["camera_locator"] = response.camera_locator.as_json()
-        specs = (
-            CaptureFileSpec(
-                response.original.host_name, response.original.size, response.original.media_type
-            ),
-            CaptureFileSpec(
-                response.preview.host_name, response.preview.size, response.preview.media_type
-            ),
-        )
+        specs = tuple(CaptureFileSpec(item.host_name, item.size, item.media_type) for item in (response.original, response.preview))
         try:
             artifacts = await verify_capture_files(roots, activity_id, specs)
-        except CaptureFileError as failure:
-            return self._failed(request, step="verify_files", reason=failure.stage,
-                                steps=steps, last_raw=last_raw, effect=EffectState.UNKNOWN,
-                                extra={"file_error": str(failure)})
-        if (
-            not isinstance(artifacts, tuple)
-            or len(artifacts) != 2
-            or any(not isinstance(artifact, CapturedArtifact) for artifact in artifacts)
-            or tuple((artifact.original_name, artifact.size_bytes, artifact.media_type)
-                     for artifact in artifacts)
-            != tuple((spec.original_name, spec.size_bytes, spec.media_type) for spec in specs)
-        ):
-            return self._failed(request, step="verify_files", reason="verified_file_pair_mismatch",
-                                steps=steps, last_raw=last_raw, effect=EffectState.UNKNOWN)
-
-        photo = DeviceObservation("photo_taken", 1, {
-            "activity_id": activity_id,
-            "original": artifacts[0].as_json(),
-            "preview": artifacts[1].as_json(),
-            "steps": [dict(fact) for fact in steps],
-        })
-        validate_observation(photo, _PHOTO_TAKEN, expected_identity=activity_id)
-        return self._result(
-            request,
-            status=AttemptStatus.SUCCEEDED,
-            effect=EffectState.CONFIRMED,
-            last_raw=last_raw,
-            observation=photo,
-        )
+        except CaptureFileError as error:
+            return failed("verify_files", error.stage, effect=EffectState.UNKNOWN, extra={"file_error": str(error)})
+        if (not isinstance(artifacts, tuple) or len(artifacts) != 2
+                or any(not isinstance(item, CapturedArtifact) for item in artifacts)
+                or tuple((item.original_name, item.size_bytes, item.media_type) for item in artifacts)
+                != tuple((spec.original_name, spec.size_bytes, spec.media_type) for spec in specs)):
+            return failed("verify_files", "verified_file_pair_mismatch", effect=EffectState.UNKNOWN)
+        observation = DeviceObservation("photo_taken", 1, {
+            "activity_id": activity_id, "original": artifacts[0].as_json(), "preview": artifacts[1].as_json(),
+            "steps": [dict(fact) for fact in steps]})
+        return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observation=observation)

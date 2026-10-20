@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Mapping
 
 from camctl.devices.evidence import DeviceObservation, EvidenceContract
+from camctl.operations.tool_diagnostics import ToolDiagnostics
 
 __all__ = [
     "RESULT_FORMAT_VERSION",
@@ -127,6 +128,7 @@ class CallOutcome:
     settlement: Settlement | None = None
     observations: tuple[DeviceObservation, ...] = ()
     call_info: CallInfo | None = None
+    diagnostics: ToolDiagnostics | None = None
 
     def __post_init__(self) -> None:
         if self.format_version != RESULT_FORMAT_VERSION:
