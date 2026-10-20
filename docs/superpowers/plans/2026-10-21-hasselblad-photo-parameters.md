@@ -1,6 +1,6 @@
 # Hasselblad 单张拍摄参数与中文选项执行计划
 
-> **执行者要求：** 阅读本计划及其规格后，按用户选择使用 `superpowers:executing-plans` 或 `superpowers:subagent-driven-development` 逐项实施。用 `- [ ]` 跟踪实际结果。本文件当前记录待执行工作，不构成代码、部署或真机验收结果。
+> **执行者要求：** 阅读本计划及其规格后，按用户选择使用 `superpowers:executing-plans` 或 `superpowers:subagent-driven-development` 逐项实施。用 `- [ ]` 跟踪实际结果。本文件按任务记录实施结果与待完成工作；软件、部署和真机证据分别核对。
 
 **目标：** 让用户通过同源能力说明选择 Hasselblad 的图片格式、曝光、白平衡和对焦，并使这些明确参数经过客户端、受理、驱动、文件登记、恢复和交付后仍保持一致。
 
@@ -42,9 +42,9 @@
 | 工具明确缺少机内名称，或响应含重复、畸形及相互冲突的名称 | 合法的明确缺名只允许主机源继续；异常响应不形成可靠成功结果 | H2、H3 |
 | 完成事务回执丢失，之后媒体只到了一部分 | 原申请核实后只登记一次；各次交付有独立身份，媒体导入和报告 ACK 分别成立 | H3、H5、H8 |
 
-## 当前代码与实施顺序
+## 实施起点与实施顺序
 
-当前 `devices/drivers/hasselblad/definitions.py` 只声明 `type`，`capability()` 还用不完整的示例参数调用任务工厂。`driver.py::control()` 固定设置 RAW，尚未执行曝光、白平衡及对焦参数。因此，先完成权威参数与内部输入表示，再接入真实命令。
+在实施基线 `61459de` 中，`devices/drivers/hasselblad/definitions.py` 只声明 `type`，`capability()` 还用不完整的示例参数调用任务工厂。`driver.py::control()` 固定设置 RAW，尚未执行曝光、白平衡及对焦参数。因此，先完成权威参数与内部输入表示，再接入真实命令。
 
 文件路径也有独立缺口：`host_files/paths.py` 将原图扩展名固定为 `.3fr`，`capture_sources.py` 按 MIME 推断角色，`capture/host_photo.py` 只接受 3FR 原图，并把主机文件名用于设备源身份。仅增加 JPEG 能力声明会使这些消费者互相矛盾。
 
@@ -106,7 +106,7 @@ camctl_pytest() {
 - [x] **步骤 5：验证受理和保存。** 扩展 `test_photo_acceptance_saves_explicit_params_and_call_budget`：完整参数按原始／生效输入保存，源模式和 180 秒进入执行定义；修改当前配置不改变原动作。`describe` 在无设备及无可执行工具的测试环境仍成功。运行上述单元及 `camctl_pytest apps/camctl/tests/integration/acceptance -q`。
 - [x] **步骤 6：审查并形成阶段提交。** 建议提交名为“定义 Hasselblad 完整单张参数与同源能力”；交接实际字段类型、Schema、格式描述及 task factory 行为。
 
-**阶段证据：** 实现提交 `8df61f8`、修复提交 `a0447ac` 已通过独立规格及质量复核，并合入协调提交 `8bea559`。协调工作区以 Python 3.11.16 运行参数／定义及直接受理消费者单元测试，23 项通过；独立运行 acceptance 集成目录，268 项通过。验证包含完整参数原样保存、原源模式和 180 秒预算、无工具路径离线 describe，以及低精度首次导入时的精确快门目录。本阶段不包含实际命令执行、双格式产物流程、安装包或真机验收；这些继续由后续任务负责。
+**阶段证据：** 实现提交 `8df61f8`、修复提交 `a0447ac` 已通过独立规格及质量复核，并合入协调提交 `8bea559`。协调工作区以 Python 3.11.16 运行参数／定义及直接受理消费者单元测试，23 项通过；独立运行 acceptance 集成目录，268 项通过。验证包含完整参数原样保存、原正式源模式和 180 秒预算、无工具路径离线 describe，以及低精度首次导入时的精确快门目录。本阶段不包含实际命令执行、双格式产物流程、安装包或真机验收；这些继续由后续任务负责。
 
 ## H2：解析 RAW／JPEG 响应并固定机内身份
 
@@ -189,12 +189,14 @@ camctl_pytest() {
 
 **输入与交付：** 消费导出的通用 Schema，交付带原数值上下文的 `ScalarChoice`、合法对象分支及统一标签；选择器、字段说明和设备指南共同消费元数据。
 
-- [ ] **步骤 1：增加选项资格测试。** `titled scalar constants preserve exact machine values` 覆盖字符串／数字 const、缺失标题的机器值回退、重复标题的值区分、精确重复 const 的拒绝资格、非法或不可解析分支的 JSON 编辑回退；沿现有候选限制覆盖 4096／4097 边界。修改标题、打开说明和切换表单／JSON 均不改变正文及合法性。
-- [ ] **步骤 2：增加分支和独立编辑测试。** `incomplete white balance does not disable exposure choices` 验证色温未填不阻断曝光独立选择；`object branches use titles and preserve per-branch drafts` 验证中文模式名、切换后恢复各分支私有值、未选择保持缺省、当前额外字段保留并报错。换设备只改变校验依据，缓存身份沿现有契约。
-- [ ] **步骤 3：确认失败。** 执行 `pnpm --dir apps/client exec vitest run tests/unit/parameter-options.test.ts tests/unit/object-branch-controls.test.ts tests/unit/fields.test.ts tests/unit/json-field-rules.test.ts`。
-- [ ] **步骤 4：实现通用解析及控件接入。** 只接受公共编辑契约允许的直接标量 `oneOf` 常量选项，解析本地引用及其原数字上下文；相同机器值比较使用精确 JSON 身份。对象分支资格调用共同标量规则，模式选项使用分支标题；`Field`、规则提示、指南显示使用同一标签来源。非法规则、合法规则下的非法输入分别呈现。
-- [ ] **步骤 5：增加真实浏览器往返。** `short shutter choices survive preset reopen and export` 在浏览器选择三个短快门，保存并重开预设、应用到独立草稿、导出并比较精确值；曝光／白平衡／对焦切换后子参数保持。验证 ISO／光圈／快门下拉、色温整数输入及 MF 真正未填写状态，并核对曝光四模式的中文标签。预设按现有整体替换规则清理相关缓存，私有缓存不进入公共计划；重新加载能力失败时保留上一份规则与当前输入。
-- [ ] **步骤 6：验证通过并形成阶段提交。** 运行步骤 3、`pnpm --dir apps/client run typecheck`、`pnpm --dir apps/client run build`，再运行 `VITEST_MAX_WORKERS=2 pnpm --dir apps/client run test:integration`。建议提交名为“支持 Schema 中文常量选项与精确分支编辑”。
+- [x] **步骤 1：增加选项资格测试。** `titled scalar constants preserve exact machine values` 覆盖字符串／数字 const、缺失标题的机器值回退、重复标题的值区分、精确重复 const 的拒绝资格、非法或不可解析分支的 JSON 编辑回退；沿现有候选限制覆盖 4096／4097 边界。修改标题、打开说明和切换表单／JSON 均不改变正文及合法性。
+- [x] **步骤 2：增加分支和独立编辑测试。** `incomplete white balance does not disable exposure choices` 验证色温未填不阻断曝光独立选择；`object branches use titles and preserve per-branch drafts` 验证中文模式名、切换后恢复各分支私有值、未选择保持缺省、当前额外字段保留并报错。换设备只改变校验依据，缓存身份沿现有契约。
+- [x] **步骤 3：确认失败。** 执行 `pnpm --dir apps/client exec vitest run tests/unit/parameter-options.test.ts tests/unit/object-branch-controls.test.ts tests/unit/fields.test.ts tests/unit/json-field-rules.test.ts`。
+- [x] **步骤 4：实现通用解析及控件接入。** 只接受公共编辑契约允许的直接标量 `oneOf` 常量选项，解析本地引用及其原数字上下文；相同机器值比较使用精确 JSON 身份。对象分支资格调用共同标量规则，模式选项使用分支标题；`Field`、规则提示、指南显示使用同一标签来源。非法规则、合法规则下的非法输入分别呈现。
+- [x] **步骤 5：增加真实浏览器往返。** `short shutter choices survive preset reopen and export` 在浏览器选择三个短快门，保存并重开预设、应用到独立草稿、导出并比较精确值；曝光／白平衡／对焦切换后子参数保持。验证 ISO／光圈／快门下拉、色温整数输入及 MF 真正未填写状态，并核对曝光四模式的中文标签。预设按现有整体替换规则清理相关缓存，私有缓存不进入公共计划；重新加载能力失败时保留上一份规则与当前输入。
+- [x] **步骤 6：验证通过并形成阶段提交。** 运行步骤 3、`pnpm --dir apps/client run typecheck`、`pnpm --dir apps/client run build`，再运行 `VITEST_MAX_WORKERS=2 pnpm --dir apps/client run test:integration`。建议提交名为“支持 Schema 中文常量选项与精确分支编辑”。
+
+**阶段证据：** 实现提交 `83a6d9f`、修复提交 `38fc635` 已通过独立规格及质量复核，并合入协调提交 `126222d`。任务工作区在 Node.js 24.20.0 下完成 2936 项单元、1379 项集成，以及类型检查和构建；协调工作区的六文件单元 302 项、真实 Node 首次导入集成 5 项和类型检查通过。验证覆盖命名常量的精确数字、模式缓存、实际浏览器预设／导出，以及附带局部断言的 4096／4097 常量目录。构建保留主包 858.52 kB 的体积提示。实际安装版 describe、相机拍摄、媒体及 ACK 联合证据继续由 H8、H9 取得。
 
 ## H7：更新完整样例及安装资源消费者
 
