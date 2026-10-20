@@ -171,7 +171,7 @@ export function ObjectBranchField({
                 <SelectItem value="">请选择</SelectItem>
                 {catalog.branches.map((branch, i) => (
                   <SelectItem key={branch.value} value={`branch:${i}`}>
-                    {branch.value}
+                    {branch.label}
                   </SelectItem>
                 ))}
               </Select>

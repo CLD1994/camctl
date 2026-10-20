@@ -345,3 +345,56 @@ it("引用旁裸值覆盖同Number投影时不恢复目标旧边界词元", () =
   expect(html).toContain("必须小于 2。");
   expect(html).not.toContain("小于 2.0000000000000001");
 });
+
+it("命名常量字段回显中文标题，无标题回退机器值，同名标题区分机器值", () => {
+  const schema = {
+    type: "string",
+    oneOf: [
+      { const: "a", title: "中文格式" },
+      { const: "b", title: "中文格式" },
+      { const: "c", title: " " },
+    ],
+  };
+  const html = renderToStaticMarkup(
+    createElement(Field, { ...props, schema, content: content('"a"') }),
+  );
+  expect(html).toContain("中文格式");
+  expect(html).toContain('data-value="0"');
+  expect(html).toContain('role="combobox"');
+});
+it("不可解释的直接 oneOf 标量不会退为普通输入框", () => {
+  const schema = { type: "string", oneOf: [{ const: "a" }, { const: "a" }] };
+  const html = renderToStaticMarkup(
+    createElement(Field, {
+      ...props,
+      schema,
+      jsonChoices: true,
+      content: content('"a"'),
+    }),
+  );
+  expect(html).toContain("<textarea");
+  expect(html).toContain("完整选项无法");
+});
+
+it.each([
+  ["a", "中文格式（a）"],
+  ["b", "中文格式（b）"],
+  ["c", "c"],
+])("命名常量 %s 的标题不承担机器身份", (value, label) => {
+  const schema = {
+    type: "string",
+    oneOf: [
+      { const: "a", title: "中文格式" },
+      { const: "b", title: "中文格式" },
+      { const: "c", title: " " },
+    ],
+  };
+  const html = renderToStaticMarkup(
+    createElement(Field, {
+      ...props,
+      schema,
+      content: content(JSON.stringify(value)),
+    }),
+  );
+  expect(html).toContain(`class="select-value">${label}</span>`);
+});

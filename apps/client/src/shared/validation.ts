@@ -2,6 +2,9 @@ import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ErrorObject } from "ajv";
 import type { Issue } from "./types";
+import { compactConstantOneOf } from "./constant-oneof";
+import { SCHEMA_ANNOTATIONS } from "./schema-nodes";
+import type { ValidateFunction } from "ajv";
 import {
   compareJsonNumberTokens,
   jsonNumberIsMultipleOf,
@@ -13,8 +16,7 @@ import {
 } from "./json";
 
 export const DIALECT = "https://json-schema.org/draft/2020-12/schema";
-export const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+export { isObject } from "./json";
 export const isId = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) &&
@@ -300,6 +302,42 @@ export function createValidator() {
     });
   }
   addFormats(ajv);
+  const compile = ajv.compile;
+  const compactSchemas = new WeakMap<object, unknown>();
+  const constantAssertions = new Map<string, ValidateFunction>();
+  ajv.compile = function (
+    this: typeof ajv,
+    schema: Parameters<typeof compile>[0],
+  ) {
+    let compact: unknown = schema;
+    if (typeof schema === "object" && schema !== null) {
+      if (compactSchemas.has(schema)) compact = compactSchemas.get(schema);
+      else {
+        // 删除常量分支之前校验原规则，不能因压缩隐藏非法断言或元数据。
+        if (!this.validateSchema(schema))
+          throw new Error(this.errorsText(this.errors));
+        compact = compactConstantOneOf(schema, (branch) => {
+          const assertions = cloneClientJson(branch);
+          delete assertions.const;
+          for (const annotation of SCHEMA_ANNOTATIONS)
+            delete assertions[annotation];
+          const identity = exactJsonValueIdentity(assertions);
+          let check = constantAssertions.get(identity);
+          if (!check) {
+            // 此处仅有共同标量子集，无组合及引用；复用完整校验器的实际断言语义。
+            check = compile.call(this, assertions);
+            constantAssertions.set(identity, check);
+          }
+          return check.call(
+            { numberToken: originalNumberToken(branch, "const", branch.const) },
+            branch.const,
+          );
+        });
+        compactSchemas.set(schema, compact);
+      }
+    }
+    return compile.call(this, compact as Parameters<typeof compile>[0]);
+  } as typeof ajv.compile;
   return ajv;
 }
 export function schemaIssues(

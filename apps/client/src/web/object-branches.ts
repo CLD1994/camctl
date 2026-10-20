@@ -21,6 +21,7 @@ import {
   parameterFieldIndependent,
 } from "./parameter-options";
 import { isLocalScalarSchema } from "./scalar-schema";
+import { titledChoiceLabels } from "./scalar-options";
 import { inspectActionPending } from "../shared/draft-plan";
 
 export interface ObjectBranchMember {
@@ -30,6 +31,7 @@ export interface ObjectBranchMember {
   choices?: unknown[];
 }
 export interface ObjectBranch {
+  label: string;
   value: string;
   schema: Record<string, unknown>;
   members: ObjectBranchMember[];
@@ -115,6 +117,7 @@ function buildBranches(
           return (
             Object.hasOwn(field, "const") ||
             Array.isArray(field.enum) ||
+            Array.isArray(field.oneOf) ||
             types.length > 0
           );
         }),
@@ -157,6 +160,7 @@ function buildBranches(
       const finite =
         Object.hasOwn(field, "const") ||
         Array.isArray(field.enum) ||
+        Array.isArray(field.oneOf) ||
         field.type === "boolean" ||
         field.type === "null" ||
         (Array.isArray(field.type) &&
@@ -180,8 +184,21 @@ function buildBranches(
         ...(choices ? { choices } : {}),
       });
     }
-    result.push({ value, schema: branch, members });
+    result.push({ value, label: value, schema: branch, members });
   }
+  const labels = titledChoiceLabels(
+    result.map((branch) => ({
+      value: branch.value,
+      parent: (branch.schema.properties as Record<string, object>)[
+        discriminator
+      ],
+      key: "const",
+      title: branch.schema.title,
+    })),
+  );
+  result.forEach((branch, index) => {
+    branch.label = labels[index].label;
+  });
   return { discriminator, schema, branches: result };
 }
 
