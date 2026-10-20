@@ -1,4 +1,4 @@
-import { isObject } from "./validation";
+import { isObject } from "./json";
 
 /** 已知说明注释只属于 Schema 节点，业务值中的同名成员仍是数据。 */
 export const SCHEMA_ANNOTATIONS = [

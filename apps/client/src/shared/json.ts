@@ -1,5 +1,8 @@
 import { visit, parseTree, findNodeAtLocation, type Node } from "jsonc-parser";
 
+export const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 type JsonPath = Array<string | number>;
 export const MOTOR_ORIGINAL_INPUT_FIELDS = [
   "input_params",

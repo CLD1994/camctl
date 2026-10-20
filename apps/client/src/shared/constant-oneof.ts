@@ -5,10 +5,14 @@ import {
   rememberNumberToken,
 } from "./json";
 import { SCHEMA_ANNOTATIONS, visitSchemaNodes } from "./schema-nodes";
+import { isLocalScalarAssertions } from "./scalar-schema";
 
 const annotations = new Set<string>(SCHEMA_ANNOTATIONS);
-/** Ajv 的 oneOf 代码生成逐分支嵌套。大纯常量目录改为等价交集，原规则保持。 */
-export function compactConstantOneOf(schema: unknown): unknown {
+/** 按各常量满足自身局部断言的数量生成等价交集，原 Schema 保持。 */
+export function compactConstantOneOf(
+  schema: unknown,
+  branchMatches: (branch: Record<string, unknown>) => boolean,
+): unknown {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema))
     return schema;
   let branchReference = false;
@@ -37,9 +41,10 @@ export function compactConstantOneOf(schema: unknown): unknown {
         branch !== null &&
         !Array.isArray(branch) &&
         Object.hasOwn(branch, "const") &&
-        Object.keys(branch).every(
-          (key) => key === "const" || annotations.has(key),
-        ),
+        (isLocalScalarAssertions(branch) ||
+          Object.keys(branch).every(
+            (key) => key === "const" || annotations.has(key),
+          )),
     );
   visitSchemaNodes(schema as Record<string, unknown>, (node) => {
     if (eligible(node))
@@ -56,12 +61,14 @@ export function compactConstantOneOf(schema: unknown): unknown {
         key: "const",
       }),
     );
-    for (const identity of identities)
-      counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    const matches = branches.map(branchMatches);
+    identities.forEach((identity, index) => {
+      if (matches[index]) counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    });
     const values: unknown[] = [];
     branches.forEach((branch, index) => {
-      // oneOf 恰好满足一次；重复常量因此没有合法值，不能直接并入 enum。
-      if (counts.get(identities[index]) !== 1) return;
+      // 同一精确身份恰好一个分支满足自身断言时，才保留该值。
+      if (!matches[index] || counts.get(identities[index]) !== 1) return;
       values.push(cloneClientJson(branch.const));
       rememberNumberToken(
         values,
