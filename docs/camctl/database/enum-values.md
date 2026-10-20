@@ -619,6 +619,66 @@
 | 4 | `FAILED` |
 | 5 | `UNCONFIRMED` |
 
+### `segment_gaps.kind`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `MISSING_POSITION` |
+| 2 | `ZERO_BYTE_NON_TAIL` |
+
+### `segment_members.pairing_state`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `NOT_APPLICABLE` |
+| 2 | `PAIRED` |
+| 3 | `UNPAIRED` |
+| 4 | `UNKNOWN` |
+
+### `segment_members.completion`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `COMPLETE` |
+| 2 | `INCOMPLETE` |
+| 3 | `UNKNOWN` |
+
+### `segment_members.ownership`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `OWNED` |
+| 2 | `NOT_OWNED` |
+| 3 | `UNKNOWN` |
+
+### `segment_members.role`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `ORIGINAL` |
+| 2 | `PREVIEW` |
+| 3 | `OTHER` |
+
+### `segment_sets.state`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `COLLECTING` |
+| 2 | `MEMBERS_FIXED` |
+| 3 | `ASSESSED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`
@@ -680,6 +740,98 @@
 | 3 | `NO_USABLE_INPUT` |
 | 4 | `CANCELED` |
 
+### `segment_gaps.neighbors_json.state`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `KNOWN` |
+| 2 | `ABSENT` |
+| 3 | `UNKNOWN` |
+
+### `segment_sets.assessment_json.scope_basis`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `UNKNOWN` |
+| 2 | `ALL_QUALIFYING` |
+| 3 | `FIRST_N` |
+| 4 | `CONTIGUOUS_PREFIX` |
+| 5 | `PREFIX_FIRST_N` |
+| 6 | `EMPTY_PREFIX` |
+
+### `segment_sets.assessment_json.scope_state`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `UNKNOWN` |
+| 2 | `EMPTY` |
+| 3 | `NONEMPTY` |
+
+### `segment_sets.assessment_json.overrecord`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `CONFIRMED` |
+| 2 | `NOT_CONFIRMED` |
+| 3 | `UNKNOWN` |
+
+### `segment_sets.assessment_json.basis`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `CONTROL` |
+| 2 | `SEGMENT_LOWER_BOUND` |
+| 3 | `NONE` |
+
+### `segment_sets.assessment_json.reason`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `NONE` |
+| 2 | `EXPLICIT_ERROR` |
+| 3 | `STOP_UNCONFIRMED` |
+| 4 | `FILE_WAIT_UNCONFIRMED` |
+| 5 | `SCAN_UNCONFIRMED` |
+| 6 | `ORDER_UNKNOWN` |
+| 7 | `MEMBER_UNKNOWN` |
+| 8 | `NO_NONZERO_ORIGINAL` |
+| 9 | `GAP` |
+| 10 | `COMPLETION_UNCONFIRMED` |
+| 11 | `LOWER_BOUND_INSUFFICIENT` |
+| 12 | `PREVIEW_UNKNOWN` |
+
+### `segment_sets.assessment_json.status`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `SUCCEEDED` |
+| 2 | `FAILED` |
+| 3 | `UNCONFIRMED` |
+
+### `segment_sets.facts_json.evidence`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `CONFIRMED` |
+| 2 | `REJECTED` |
+| 3 | `UNKNOWN` |
+
 ## 动作及逐项错误
 
 编号、公共错误码、阶段与详情共用[公共错误定义](../../../protocol/errors/workflow-codes.json)。详情由对应条目的 `details_schema` 定义。
@@ -711,6 +863,7 @@
 | 27 | `motor_channel_unavailable` | `execution` |
 | 28 | `motor_notification_failed` | `execution` |
 | 29 | `motor_notification_unconfirmed` | `execution` |
+| 30 | `capture_segment_gap` | `execution` |
 
 ### `cancel_delivery_items.error_code`
 
@@ -758,6 +911,8 @@
 | --- | --- | --- |
 | 1 | `no_outputs` | `output_selection` |
 | 2 | `preview_missing` | `output_selection` |
+| 3 | `default_segment_scope_empty` | `output_selection` |
+| 4 | `default_segment_scope_unconfirmed` | `output_selection` |
 
 ## 其他编号来源
 

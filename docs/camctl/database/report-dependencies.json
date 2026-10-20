@@ -161,6 +161,36 @@
       "from": "file_copies.target_file_id",
       "to": "intermediate_files.id",
       "cardinality": "one"
+    },
+    "action_segment_sets": {
+      "from": "actions.id",
+      "to": "segment_sets.action_id",
+      "cardinality": "many"
+    },
+    "segment_set_members": {
+      "from": "segment_sets.id",
+      "to": "segment_members.set_id",
+      "cardinality": "many"
+    },
+    "segment_set_gaps": {
+      "from": "segment_sets.id",
+      "to": "segment_gaps.set_id",
+      "cardinality": "many"
+    },
+    "segment_set_scope": {
+      "from": "segment_sets.id",
+      "to": "segment_scope_members.set_id",
+      "cardinality": "many"
+    },
+    "segment_scope_output": {
+      "from": "segment_scope_members.output_id",
+      "to": "outputs.id",
+      "cardinality": "optional_one"
+    },
+    "segment_member_file": {
+      "from": "segment_members.file_id",
+      "to": "device_files.id",
+      "cardinality": "one"
     }
   },
   "projections": {
@@ -326,7 +356,14 @@
       "schema": "#/$defs/action",
       "root_table": "actions",
       "entity": "action",
-      "relations": [],
+      "relations": [
+        "action_segment_sets",
+        "segment_set_members",
+        "segment_set_gaps",
+        "segment_set_scope",
+        "segment_scope_output",
+        "segment_member_file"
+      ],
       "when": {
         "op": "literal",
         "value": true
@@ -782,7 +819,8 @@
       },
       "assertions": [
         "original_input_unique_source",
-        "action_saved_state_combinations"
+        "action_saved_state_combinations",
+        "segment_error_expansion_at_same_h"
       ]
     },
     "automation": {
@@ -2360,6 +2398,46 @@
         "obtain_source_selections.status"
       ],
       "contract": "waiting.md#来源等待的记录与转换"
+    },
+    "segment_error_expansion_at_same_h": {
+      "columns": [
+        "actions.error_code",
+        "actions.error_details_json",
+        "segment_sets.action_id",
+        "segment_sets.version",
+        "segment_sets.state",
+        "segment_sets.member_count",
+        "segment_sets.assessment_json",
+        "segment_sets.published_event_id",
+        "segment_members.id",
+        "segment_members.set_id",
+        "segment_members.file_id",
+        "segment_members.identity",
+        "segment_members.directory_number",
+        "segment_members.segment_index",
+        "segment_members.role",
+        "segment_members.ownership",
+        "segment_members.completion",
+        "segment_gaps.set_id",
+        "segment_gaps.gap_no",
+        "segment_gaps.start_directory",
+        "segment_gaps.start_index",
+        "segment_gaps.end_directory",
+        "segment_gaps.end_index",
+        "segment_gaps.kind",
+        "segment_gaps.left_member_id",
+        "segment_gaps.right_member_id",
+        "segment_gaps.empty_member_id",
+        "segment_gaps.neighbors_json",
+        "segment_scope_members.set_id",
+        "segment_scope_members.ordinal",
+        "segment_scope_members.member_id",
+        "segment_scope_members.output_id",
+        "outputs.source_action_id",
+        "outputs.device_file_id",
+        "device_files.size_bytes"
+      ],
+      "contract": "segments.md#错误头与完整公开详情"
     }
   },
   "routes": {
@@ -2495,6 +2573,69 @@
           "when": {
             "op": "not_null",
             "column": "file_copies.delivery_id"
+          }
+        }
+      ]
+    },
+    "segment_sets": {
+      "entity": "action",
+      "identity": "segment_sets.action_id",
+      "mode": "public_change",
+      "relations": [
+        "action_segment_sets"
+      ],
+      "when": {
+        "op": "not_null",
+        "column": "segment_sets.published_event_id"
+      }
+    },
+    "segment_members": {
+      "mode": "per_relation",
+      "targets": [
+        {
+          "entity": "action",
+          "identity": "segment_sets.action_id",
+          "relations": [
+            "segment_set_members",
+            "action_segment_sets"
+          ],
+          "when": {
+            "op": "not_null",
+            "column": "segment_sets.published_event_id"
+          }
+        }
+      ]
+    },
+    "segment_gaps": {
+      "mode": "per_relation",
+      "targets": [
+        {
+          "entity": "action",
+          "identity": "segment_sets.action_id",
+          "relations": [
+            "segment_set_gaps",
+            "action_segment_sets"
+          ],
+          "when": {
+            "op": "not_null",
+            "column": "segment_sets.published_event_id"
+          }
+        }
+      ]
+    },
+    "segment_scope_members": {
+      "mode": "per_relation",
+      "targets": [
+        {
+          "entity": "action",
+          "identity": "segment_sets.action_id",
+          "relations": [
+            "segment_set_scope",
+            "action_segment_sets"
+          ],
+          "when": {
+            "op": "not_null",
+            "column": "segment_sets.published_event_id"
           }
         }
       ]

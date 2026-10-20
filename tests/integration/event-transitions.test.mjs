@@ -50,6 +50,12 @@ for (const [name, change] of [
   ['行规则漏掉仍由其承担的状态边', f => { const row=f.registry.events.ACTION_FINISHED.branches.FAIL.rows[0]; row.transitions.status=[]; }],
   ['集合固定校验不适用于已有成员的逐项核实', f => { const b=f.registry.events.READ_PERMISSION_CHANGED.branches.RESOLVE; b.guards=b.guards.filter(g=>g!=='source_selection'); b.guards.push('source_selection'); }],
   ['业务事件引用没有目标规则', f => delete f.registry.history_references['operation_attempts.result_event_id']],
+  ['固定文件事件不能指向事务末位', f => { f.registry.history_references['segment_members.file_event_id'].target = 'creating_transaction_end'; }],
+  ['分段创建引用不能开放为可变列', f => {
+    const table = f.registry.tables.segment_members;
+    table.immutable = table.immutable.filter(name => name !== 'created_event_id');
+    table.mutable.push('created_event_id');
+  }],
   ['派生历史列没有计算规则', f => delete f.registry.derived_history['reports.last_event_id']],
   ['尝试意图不能被改为派生元数据', f => {
     const table = f.registry.tables.operation_attempts;

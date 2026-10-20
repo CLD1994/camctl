@@ -57,7 +57,7 @@ class CaptureResultReadScope:
 
 
 class CurrentEventReads(Protocol):
-    """原写事务内的当前事实；实现必须应用已验证前序事件并限制每批。"""
+    """原写事务的已验证前序事实；正式发布只另提供单事件身份查证。"""
 
     scope: ProductReadScope | PlanReadScope | CaptureResultReadScope
     ACTION_COLUMNS: tuple[str, ...]
@@ -69,6 +69,7 @@ class CurrentEventReads(Protocol):
                      limit: int | None = None) -> Iterable[tuple[tuple[int, Mapping[str, Any]], ...]]: ...
     def actions(self) -> Iterable[tuple[int, Mapping[str, Any]]]: ...
     def result_pages(self, ticket, cursor, batch): ...
+    def segment_activation_event(self, event_id, transaction): ...
     def recording_input_issues(self, action_id: int) -> tuple: ...
     def repair_media_proof(self, action_id: int, processing_id: int, output_file_id: int,
         *, output_probe=None, saved: bool = False) -> None: ...
@@ -113,3 +114,15 @@ class ReadCoverage:
     def covers(self, table: str, column: str, identity: int) -> bool:
         """该身份的等值查询是否完整；不从当前行或其他范围推断。"""
         return ObjectId(identity) in self.ranges.get((table, column), ())
+
+
+@dataclass(frozen=True)
+class SegmentReadScope:
+    """仅限原冻结集合的分段事实复核，不授权设备操作。"""
+    ref: object
+    batch_size: int = 128
+
+    def __post_init__(self):
+        from camctl.capture.segment_models import SegmentSetRef
+        if not isinstance(self.ref, SegmentSetRef) or type(self.batch_size) is not int or not 1 <= self.batch_size <= 128:
+            raise ValueError('分段复核要求冻结集合和有限批次')

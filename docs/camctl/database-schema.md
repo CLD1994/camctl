@@ -67,6 +67,10 @@
 | `cleanup_items` | [清理的逐目标处理及删除限制](database/cleanup-cancellation.md#清理目标明细) |
 | `cancel_items` | [取消的逐目标处理](database/cleanup-cancellation.md#取消目标明细) |
 | `cancel_delivery_items` | [取消目标中的逐交付处理](database/cleanup-cancellation.md#取消动作的交付处理明细) |
+| `segment_sets` | [分段集合、判断与默认范围](database/segments.md) |
+| `segment_members` | [分段集合、判断与默认范围](database/segments.md) |
+| `segment_gaps` | [分段集合、判断与默认范围](database/segments.md) |
+| `segment_scope_members` | [分段集合、判断与默认范围](database/segments.md) |
 | `operation_runs` | [具体操作责任及整体进度](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `operation_attempts` | [操作流程的一次业务尝试](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `device_activities` | [设备持续活动及可靠观察](database/operations-devices.md#设备活动记录) |

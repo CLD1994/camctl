@@ -811,6 +811,114 @@
       "state_columns": [
         "outcome"
       ]
+    },
+    "segment_sets": {
+      "immutable": [
+        "action_id",
+        "activity_id",
+        "run_id",
+        "attempt_id",
+        "final_page_event_id",
+        "version",
+        "target_duration_ms",
+        "created_event_id"
+      ],
+      "mutable": [
+        "state",
+        "member_count",
+        "facts_json",
+        "assessment_json",
+        "published_event_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "member_count",
+        "facts_json",
+        "assessment_json",
+        "published_event_id"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": [
+        "state"
+      ]
+    },
+    "segment_members": {
+      "immutable": [
+        "set_id",
+        "file_id",
+        "page_event_id",
+        "file_event_id",
+        "identity",
+        "directory_number",
+        "segment_index",
+        "role",
+        "ownership",
+        "completion",
+        "pairing_state",
+        "pairing_identity",
+        "created_event_id"
+      ],
+      "mutable": [],
+      "derived": [
+        "id"
+      ],
+      "write_once": [],
+      "owner": {
+        "inherit": "set_id"
+      },
+      "state_columns": []
+    },
+    "segment_gaps": {
+      "immutable": [
+        "set_id",
+        "gap_no",
+        "start_directory",
+        "start_index",
+        "end_directory",
+        "end_index",
+        "kind",
+        "left_member_id",
+        "right_member_id",
+        "empty_member_id",
+        "neighbors_json",
+        "created_event_id"
+      ],
+      "mutable": [],
+      "derived": [
+        "id"
+      ],
+      "write_once": [],
+      "owner": {
+        "inherit": "set_id"
+      },
+      "state_columns": []
+    },
+    "segment_scope_members": {
+      "immutable": [
+        "set_id",
+        "ordinal",
+        "member_id",
+        "created_event_id"
+      ],
+      "mutable": [
+        "output_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "output_id"
+      ],
+      "owner": {
+        "inherit": "set_id"
+      },
+      "state_columns": []
     }
   },
   "guards": {
@@ -1130,6 +1238,11 @@
     "cleanup_result_source": {
       "contract": "cleanup-coordination.md",
       "rule": "纯文件交接只引用原终态成员已可靠保存的精确 DELETE 或 QUERY 缺席结果，产物观察核对原结果与唯一承载文件关联及前序文件完成事实；保存命令约束完整实际变化事件组，原键核实完整事务、来源、目标与时刻。原成员、动作、流程及调用事实保持。",
+      "scope": "transaction"
+    },
+    "segments": {
+      "contract": "segments.md",
+      "rule": "分段引用必须属于原扫描和动作；有限批次、固定成员、两遍判断及范围成员分别校验，正式 output 关联只在终态事务发布。",
       "scope": "transaction"
     }
   },
@@ -3297,6 +3410,26 @@
             "MOTOR_CHANGED.UNCONFIRMED"
           ],
           "id": "transition_4"
+        }
+      ]
+    },
+    "segment_sets.state": {
+      "edges": [
+        {
+          "from": 1,
+          "to": 2,
+          "by": [
+            "SEGMENT_FACTS.FIX_MEMBERS"
+          ],
+          "id": "transition_1"
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "by": [
+            "SEGMENT_FACTS.ASSESS"
+          ],
+          "id": "transition_2"
         }
       ]
     }
@@ -9190,6 +9323,250 @@
           ]
         }
       }
+    },
+    "SEGMENT_FACTS": {
+      "id": 36,
+      "version": 1,
+      "branches": {
+        "CREATE": {
+          "reason": 1,
+          "title": "建立原扫描的分段集合",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "MEMBERS": {
+          "reason": 2,
+          "title": "保存有限原扫描成员",
+          "rows": [
+            {
+              "table": "segment_members",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "FIX_MEMBERS": {
+          "reason": 3,
+          "title": "固定完整分段成员",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "update",
+              "columns": [
+                "state",
+                "member_count"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  2
+                ]
+              },
+              "required": [
+                "state",
+                "member_count"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_1"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "GAPS": {
+          "reason": 4,
+          "title": "保存第二遍缺口事实",
+          "rows": [
+            {
+              "table": "segment_gaps",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "ASSESS": {
+          "reason": 5,
+          "title": "固定两遍完整判断",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "update",
+              "columns": [
+                "state",
+                "facts_json",
+                "assessment_json"
+              ],
+              "before": {
+                "state": [
+                  2
+                ]
+              },
+              "after": {
+                "state": [
+                  3
+                ]
+              },
+              "required": [
+                "state",
+                "facts_json",
+                "assessment_json"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_2"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "SCOPE": {
+          "reason": 6,
+          "title": "保存有序默认原片成员",
+          "rows": [
+            {
+              "table": "segment_scope_members",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "PUBLISH": {
+          "reason": 7,
+          "title": "发布默认成员的实际产物关联",
+          "rows": [
+            {
+              "table": "segment_scope_members",
+              "op": "update",
+              "columns": [
+                "output_id"
+              ],
+              "before": {
+                "output_id": [
+                  null
+                ]
+              },
+              "after": {},
+              "required": [
+                "output_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "ACTIVATE": {
+          "reason": 8,
+          "title": "共同发布唯一正式分段集合",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "update",
+              "columns": [
+                "published_event_id"
+              ],
+              "before": {
+                "published_event_id": [
+                  null
+                ]
+              },
+              "after": {},
+              "required": [
+                "published_event_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        }
+      }
     }
   },
   "history_references": {
@@ -9242,6 +9619,33 @@
       "exception": "RESULT_PAGE 首批共同赋值为本页 E；首引用保持，末引用随每页推进；没有页时共同为空。"
     },
     "device_activities.output_set_finalized_event_id": {
+      "target": "assigning_event"
+    },
+    "segment_sets.final_page_event_id": {
+      "target": "prior_event",
+      "exception": "原冻结扫描或独立文件事实引用；在原事务中核对目标类型、所属与原输入。"
+    },
+    "segment_members.page_event_id": {
+      "target": "prior_event",
+      "exception": "原冻结扫描或独立文件事实引用；在原事务中核对目标类型、所属与原输入。"
+    },
+    "segment_members.file_event_id": {
+      "target": "prior_event",
+      "exception": "原冻结扫描或独立文件事实引用；在原事务中核对目标类型、所属与原输入。"
+    },
+    "segment_sets.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_members.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_gaps.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_scope_members.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_sets.published_event_id": {
       "target": "assigning_event"
     }
   },

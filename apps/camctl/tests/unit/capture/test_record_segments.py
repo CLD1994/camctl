@@ -916,3 +916,19 @@ def test_second_pass_keeps_all_zero_files_as_tail_and_finds_trusted_start_gap():
     assert gaps[0].start_key == api["SegmentKey"](1, 1)
     assert gaps[0].end_key == api["SegmentKey"](1, 2)
     assert result.default_scope.state is api["DefaultScopeState"].EMPTY
+
+@pytest.mark.parametrize('case', ['duplicate','partial_duplicate','unknown_key','before_start'])
+def test_unclassified_order_has_nullable_gap_summary(case):
+    from dataclasses import replace
+    api=_api()
+    members=[_member(api,1),_member(api,3)] if case=='partial_duplicate' else [_member(api,1)]
+    facts=_facts(api)
+    if case in ('duplicate','partial_duplicate'):
+        members.append(_member(api,members[-1].key.index,name='/DCIM/CAM001/CAM_20261021100000_0003_D.OSV'))
+    elif case=='unknown_key': members=[replace(members[0],key=None)]
+    else: facts=_facts(api,start_key=(1,2))
+    _,result=_assess(api,members,facts=facts)
+    assert result.gap_count is None
+    assert result.first_gap is None
+    assert result.default_scope.state.value=='unknown'
+    assert result.lower_bound_ms is None

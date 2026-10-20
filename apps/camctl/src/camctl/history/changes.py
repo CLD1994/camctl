@@ -127,6 +127,8 @@ def public_columns() -> dict[str, frozenset[str]]:
                 walk(value)
 
     walk(_dependencies().get("projections", {}))
+    # 路由资格本身发生变化时，也须重新发布其公开目标。
+    walk(_dependencies().get("routes", {}))
     return {table: frozenset(names) for table, names in collected.items()}
 
 

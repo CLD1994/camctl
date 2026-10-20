@@ -37,7 +37,7 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope
+from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope, SegmentReadScope
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -87,6 +87,7 @@ class CommandPlan:
     product_read_scope: ProductReadScope | None = None
     plan_read_scope: PlanReadScope | None = None
     capture_result_read_scope: CaptureResultReadScope | None = None
+    segment_read_scope: SegmentReadScope | None = None
 
 
 class TransactionScope:
@@ -519,7 +520,7 @@ def commit_operation(
         )
         from camctl.persistence.event_reads import SqlEventReads
 
-        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope)
+        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope, plan.segment_read_scope)
         if sum(value is not None for value in scopes) > 1:
             raise TransactionError("同一命令不能混用不同事实读取范围")
         read_scope = next((value for value in scopes if value is not None), None)
@@ -532,7 +533,7 @@ def commit_operation(
                 read_coverage=plan.read_coverage,
                 baseline_reads=plan.baseline_reads,
                 current_reads=(None if read_scope is None else
-                               SqlEventReads(connection, read_scope, validated)),
+                               SqlEventReads(connection, read_scope, validated, sequenced)),
             )
             validated.append(validate_event(event, context))
             _apply_rows(validation_state, (event,))

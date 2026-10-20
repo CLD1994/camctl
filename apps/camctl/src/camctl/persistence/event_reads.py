@@ -1,9 +1,9 @@
-"""原写事务的提交前投影与已验证事件覆盖；不读取未来提案。"""
+"""原写事务的已验证事件覆盖，以及正式发布身份的单事件查证。"""
 
 from contextlib import closing
 
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope
+from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope
 
 
 class SqlEventReads:
@@ -11,6 +11,7 @@ class SqlEventReads:
 
     查询字段由内部白名单限定。每批 SQL 游标在交付前关闭；覆盖表
     只含本事务已经验证的变化，读错误与失效事务直接传播。
+    正式marker另按原提案的一条事件证明固定身份，不提供未来资格。
     """
 
     _RANGES = {
@@ -29,10 +30,12 @@ class SqlEventReads:
     SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
-    def __init__(self, connection, scope, validated=()):
-        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope)):
+    def __init__(self, connection, scope, validated=(), planned_events=()):
+        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
+        self._planned_events = planned_events
+        self._validated = validated
         self._result_file_ids = frozenset()
         self._overlay = {}
         for accepted in validated:
@@ -45,9 +48,44 @@ class SqlEventReads:
                     prior = self._overlay.get(key, {})
                     self._overlay[key] = {**(prior or {}), **row.after.values}
 
+    def segment_activation_event(self, event_id, transaction):
+        """只定位原提案中的一个发布事件，不向业务提供未来状态资格。"""
+        ObjectId(event_id)
+        if (not self.connection.in_transaction
+                or not isinstance(self.scope,(SegmentReadScope,PlanReadScope))
+                or not transaction.first_event_id<=event_id<=transaction.last_event_id):
+            raise ConsistencyError('正式marker不属于原完整完成事务')
+        offset=event_id-transaction.first_event_id
+        if offset>=len(self._planned_events):
+            raise ConsistencyError('正式marker没有原事务实际ACTIVATE事件')
+        found=self._planned_events[offset]
+        if found.event_id!=event_id or found.transaction_id!=transaction.txn_id:
+            raise ConsistencyError('正式marker的实际事件位置或事务不同')
+        return found
+
+    def verify_segment_event(self, event, context):
+        from camctl.persistence.repositories.segments import verify_segment_event
+        from camctl.capture.segment_models import SegmentSetRef
+        from camctl.persistence.transaction import row_facts
+        if not self.connection.in_transaction:
+            raise ConsistencyError('分段守卫只能复核原写事务集合')
+        if isinstance(self.scope, SegmentReadScope):
+            ref = self.scope.ref
+        elif isinstance(self.scope, PlanReadScope):
+            ref = SegmentSetRef(**event.evidence['segment_request']['ref'])
+            action = row_facts(self.connection,'actions',ref.action_id)
+            if action is None or action['plan_id'] != self.scope.plan_id:
+                raise ConsistencyError('共同发布集合不属于原计划')
+        else:
+            raise ConsistencyError('分段守卫缺少原集合或原计划范围')
+        verify_segment_event(self.connection, ref, event, context,
+            prior_events=self._validated)
+
     def _check(self, table, column="id", identity=None):
         if not self.connection.in_transaction:
             raise ConsistencyError("当前事件事实端口必须在原写事务内使用")
+        if isinstance(self.scope, SegmentReadScope):
+            raise ConsistencyError('分段端口只提供原集合专属复核')
         if table not in self._RANGES or column not in self._RANGES[table]:
             raise ConsistencyError("当前事件事实查询超出内部允许范围")
         if identity is not None:

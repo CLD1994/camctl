@@ -194,6 +194,23 @@ def check_integer_definitions(db: sqlite3.Connection, write_doc: bool) -> None:
         contract_valid(rule, name)
         add(name, {'FIXED': rule['value']})
 
+    # 分段公共字面量由整数登记的成员名生成，不另维护完整值清单。
+    public_path = ROOT / 'protocol/errors/workflow-codes.json'
+    public = read_unique_json(public_path)
+    generated_public = json.loads(json.dumps(public))
+    for definition, field, source in (
+        ('segment_error_header', 'default_scope', 'segment_sets.assessment_json.scope_state'),
+        ('segment_neighbor', 'state', 'segment_gaps.neighbors_json.state'),
+        ('segment_gap', 'kind', 'segment_gaps.kind'),
+    ):
+        properties = generated_public['$defs'][definition]['properties']
+        target = properties[field]['properties']['state'] if field == 'default_scope' else properties[field]
+        rule = definitions['json_enums'].get(source) or definitions['enums'][source]
+        target['enum'] = [name.lower() for name in rule['members']]
+    if write_doc:
+        public_path.write_text(json.dumps(generated_public, ensure_ascii=False, indent=2) + '\n')
+    verify(write_doc or public == generated_public, '分段公共枚举等于权威整数登记生成值')
+
     # 公共错误按所属列分别核对，组间相同编号合法；本文件不再保存另一份完整编号表。
     error_groups = {'actions.error_code': {}}
     for code, rule in errors.items():
@@ -410,6 +427,16 @@ def main() -> None:
     insert(db, 'entity_snapshots', id=1, entity_type=1, entity_id=1, boundary_event_id=2, change_count=64, format_version=1, content=b'{}\n')
     insert(db, 'entity_snapshot_progress', id=1, entity_type=1, entity_id=1, current_change_count=70,
            snapshot_change_count=64, latest_snapshot_id=1)
+    insert(db, 'segment_sets', id=1, created_event_id=1, action_id=1, activity_id=1, run_id=1, attempt_id=1,
+           final_page_event_id=2, version=1, target_duration_ms=60000, state=1)
+    rejects(db, 'UPDATE segment_sets SET published_event_id=1 WHERE id=1')
+    insert(db, 'segment_members', id=1, created_event_id=1, set_id=1, file_id=1, page_event_id=2, file_event_id=2,
+           identity='real-osv', directory_number=1, segment_index=1, role=1, ownership=1,
+           completion=1, pairing_state=1)
+    insert(db, 'segment_gaps', id=1, created_event_id=1, set_id=1, gap_no=1, start_directory=1, start_index=2,
+           end_directory=1, end_index=3, kind=1, left_member_id=1,
+           neighbors_json='{"left":1,"right":3}')
+    insert(db, 'segment_scope_members', id=1, created_event_id=1, set_id=1, ordinal=1, member_id=1)
     db.commit()
     verify(list(db.execute('PRAGMA foreign_key_check')) == [], '全部表样本及共同建档引用在提交时有效')
     verify(all(db.execute(f'SELECT count(*) FROM {name}').fetchone()[0] for name in tables), '全部表都有结构样本')
