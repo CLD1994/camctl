@@ -54,7 +54,16 @@ def test_photo_acceptance_uses_the_parameter_definition_task_factory():
     validation = SimpleNamespace(
         action_type="camera_take_photo",
         name="shoot",
-        effective_params={"type": "hasselblad_photo"},
+        effective_params={
+            "type": "hasselblad_photo",
+            "capture_format": "raw",
+            "exposure": {
+                "mode": "M", "iso": 800, "aperture": Decimal("8"),
+                "shutter_s": Decimal("0.008"),
+            },
+            "white_balance": {"mode": "manual", "temperature_k": 5500},
+            "focus": {"mode": "MF"},
+        },
         parameter_definition=capability(),
     )
 
