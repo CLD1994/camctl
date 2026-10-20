@@ -54,3 +54,13 @@ ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISH
 分段公共 scope/neighbor/kind 字面量由 enum-registry.json 的成员名小写生成；check-database-spec.py --write-enum-doc 同步公开 Schema 并在只读检查时核对。Python StrEnum 类同样从该登记生成，数据库使用原整数编号。事件类型与分支由 event-transitions.json 生成，动作及逐项错误编号从公共错误登记生成。
 
 四表的报告路由只在所属集合 published_event_id 非空时成立；失败来源下新建未发布版本仍是内部事实，不推进该集合的公开水位。公开列依赖同时读取权威 projection 和 route.when 中的 column，保证正式发布条件本身改变时会通知原 action。内核按公开事件分别保留 change_seq 和目录记录，报告选择按实体合并；整个完成事务的 marker 与完整关系原子可见。
+
+## 正式产物候选与同组闭合
+
+`segment_output_candidate(ref, member_id, owned)` 从固定 `file_event_id` 返回一项 `SegmentOutputCandidate` 或 `None`。候选只含 `member_id`、`file_id`、既有 `OutputKind`；预览另外含 `original_member_id`、`original_file_id`，不复制大小或摘要。`SegmentRepository.read_output_candidates(ref, cursor, batch, owned)` 沿原成员技术游标返回最多128项候选；过滤后空页仍可能有继续位置，调用方必须读到 `next_cursor=None`。P3 的候选计数和事件规划使用此端口。
+
+原片只有归属可靠、形成完整且非零时成为候选。预览除自身符合这些条件，还须可靠 PAIRED 到同集合、完整名称主干一致的合格原片；配到空尾、非尾零文件或冻结资格未知的原片时不登记预览，也不补造原片 output。零字节、未完成、未知或未配对的可选 LRF 保留原始观察；跨集合、缺失或错误名称的已声称配对仍是错误。输出逐项资格、全体候选覆盖和默认原片准备均复用这一判定；预览 origin 精确指向候选给出的原片实际 output。
+
+每条 PUBLISH 还须证明本组最终存在同 ref/set 的唯一准确 ACTIVATE。`SqlEventReads.segment_activation_event(event_id, transaction)` 只按 marker 身份定位原事务提案的一条实际事件；它引用既有提案序列，不复制增长事件。该端口证明提案结构闭合，不将未来终态、output 或范围当成已验证资格。PUBLISH 的来源和产物仍只取此前已经验证的事件，未来 ACTIVATE 仍按正常次序完成全部独立守卫；任何一处不合法都整组回滚。仅伪造 `transaction_rows` 中的 marker 值不能通过。
+
+完整录像成功收场保持原 PlanReadScope；SegmentReadScope 仍只授权 P2 具名事实核验。该新增单事件证明端口可由 P3 的有界事务读取实现替换，不要求业务资格改成读取未来状态。

@@ -7,6 +7,7 @@ from camctl.capture.segment_models import SegmentSetRef, SegmentMember, Completi
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.devices.segments import SegmentKey
+from camctl.outputs.catalog import OutputKind
 
 # 类型映射不维护成员清单；编号和值只从权威登记派生。
 _ENUM_COLUMNS = {
@@ -199,3 +200,25 @@ class StoredSegmentMember:
     page_event_id: int
     file_event_id: int
     member: SegmentMember
+
+
+@dataclass(frozen=True)
+class SegmentOutputCandidate:
+    """一个冻结成员应登记的正式产物及其固定原片关联，不携带文件属性。"""
+    member_id: int
+    file_id: int
+    kind: OutputKind
+    original_member_id: int | None = None
+    original_file_id: int | None = None
+
+    def __post_init__(self):
+        ObjectId(self.member_id)
+        ObjectId(self.file_id)
+        if self.kind not in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
+            raise ValueError('分段候选只能为原片或预览')
+        paired=self.kind is OutputKind.PREVIEW
+        if (self.original_member_id is not None)!=paired or (self.original_file_id is not None)!=paired:
+            raise ValueError('预览候选必须明确其合格原片，原片不得携带origin')
+        if paired:
+            ObjectId(self.original_member_id)
+            ObjectId(self.original_file_id)

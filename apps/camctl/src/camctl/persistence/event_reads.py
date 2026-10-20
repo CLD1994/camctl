@@ -1,4 +1,4 @@
-"""原写事务的提交前投影与已验证事件覆盖；不读取未来提案。"""
+"""原写事务的已验证事件覆盖，以及正式发布身份的单事件查证。"""
 
 from contextlib import closing
 
@@ -11,6 +11,7 @@ class SqlEventReads:
 
     查询字段由内部白名单限定。每批 SQL 游标在交付前关闭；覆盖表
     只含本事务已经验证的变化，读错误与失效事务直接传播。
+    正式marker另按原提案的一条事件证明固定身份，不提供未来资格。
     """
 
     _RANGES = {
@@ -29,10 +30,11 @@ class SqlEventReads:
     SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
-    def __init__(self, connection, scope, validated=()):
+    def __init__(self, connection, scope, validated=(), planned_events=()):
         if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
+        self._planned_events = planned_events
         self._validated = validated
         self._result_file_ids = frozenset()
         self._overlay = {}
@@ -45,6 +47,21 @@ class SqlEventReads:
                 else:
                     prior = self._overlay.get(key, {})
                     self._overlay[key] = {**(prior or {}), **row.after.values}
+
+    def segment_activation_event(self, event_id, transaction):
+        """只定位原提案中的一个发布事件，不向业务提供未来状态资格。"""
+        ObjectId(event_id)
+        if (not self.connection.in_transaction
+                or not isinstance(self.scope,(SegmentReadScope,PlanReadScope))
+                or not transaction.first_event_id<=event_id<=transaction.last_event_id):
+            raise ConsistencyError('正式marker不属于原完整完成事务')
+        offset=event_id-transaction.first_event_id
+        if offset>=len(self._planned_events):
+            raise ConsistencyError('正式marker没有原事务实际ACTIVATE事件')
+        found=self._planned_events[offset]
+        if found.event_id!=event_id or found.transaction_id!=transaction.txn_id:
+            raise ConsistencyError('正式marker的实际事件位置或事务不同')
+        return found
 
     def verify_segment_event(self, event, context):
         from camctl.persistence.repositories.segments import verify_segment_event

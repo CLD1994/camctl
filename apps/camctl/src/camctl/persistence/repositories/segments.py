@@ -4,7 +4,7 @@ from itertools import zip_longest
 
 from camctl.capture.segment_models import *
 from camctl.capture.segment_storage import (
-    SegmentSetCreate, SegmentMemberInput, SegmentMemberCursor, SegmentGapCursor, SegmentScopeCursor, StoredSegmentMember,
+    SegmentSetCreate, SegmentMemberInput, SegmentMemberCursor, SegmentGapCursor, SegmentScopeCursor, StoredSegmentMember, SegmentOutputCandidate,
     document, encode_enum, decode_enum, assessment_document, assessment_from_document,
     facts_from_document,
 )
@@ -18,6 +18,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, MAX_O
 from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_name
 from camctl.devices.segments import SegmentKey
 from camctl.devices.tasks import CaptureResultPolicy
+from camctl.outputs.catalog import OutputKind
 from camctl.history.events import load_event_registry, business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.history.validators import register_guard, EventValidationError
@@ -104,6 +105,53 @@ def _read_member(db,row):
         decode_enum(FileCompletionState,row['completion']),file['size_bytes'],
         row['pairing_identity'],decode_enum(PreviewPairingState,row['pairing_state']))
     return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],member)
+
+
+def _eligible_original(member):
+    return (member.role is SegmentMemberRole.ORIGINAL
+        and member.ownership is OwnershipState.OWNED
+        and member.completion is FileCompletionState.COMPLETE
+        and member.size_bytes is not None and member.size_bytes>0)
+
+
+def _output_candidate(db,setrow,stored):
+    """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
+    member=stored.member
+    if _eligible_original(member):
+        return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
+    if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
+        return None
+    paired=_read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity))
+    left=parse_osmo_segment_name(member.identity)
+    right=parse_osmo_segment_name(paired.member.identity)
+    if (paired.member.role is not SegmentMemberRole.ORIGINAL or left is None or right is None
+            or left.pairing_identity!=right.pairing_identity):
+        raise ConsistencyError('预览没有同集合、同完整名称主干的真实原片')
+    if (member.ownership is not OwnershipState.OWNED
+            or member.completion is not FileCompletionState.COMPLETE
+            or member.size_bytes is None or member.size_bytes<=0
+            or not _eligible_original(paired.member)):
+        return None
+    return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.PREVIEW,paired.member_id,paired.file_id)
+
+
+def segment_output_candidate(ref,member_id,owned):
+    """P3单成员候选计数/事件规划端口；不以当前文件状态替代冻结事实。"""
+    ObjectId(member_id)
+    row=_set(owned.connection,ref,fixed=True)
+    member=row_facts(owned.connection,'segment_members',member_id)
+    if member is None or member['set_id']!=row['id']:
+        raise ConsistencyError('产物候选成员不属于原冻结集合')
+    return _output_candidate(owned.connection,row,_read_member(owned.connection,member))
+
+
+def read_segment_output_candidates(ref,cursor,batch,owned):
+    """按原始成员技术游标续读；空候选页仍可能有继续位置。"""
+    page=read_segment_members(ref,cursor,batch,owned)
+    row=_set(owned.connection,ref,fixed=True)
+    candidates=tuple(candidate for stored in page.items
+        if (candidate:=_output_candidate(owned.connection,row,stored)) is not None)
+    return Page(candidates,page.next_cursor)
 
 
 def read_segment_members(ref,cursor,batch,owned):
@@ -355,13 +403,17 @@ def _expected_scope_ids(db,setrow,count):
     after=(first.key.directory_number,first.key.index,first.member_identity,0) if previous is None else _position(row_facts(db,'segment_members',previous[1]))
     upper=(last.key.directory_number,last.key.index,last.member_identity,MAX_OBJECT_ID)
     order='(COALESCE(m.directory_number,0),COALESCE(m.segment_index,0),m.identity,m.id)'
-    with closing(db.execute(f'SELECT m.id FROM segment_members m JOIN device_files f ON f.id=m.file_id '
-        f'WHERE m.set_id=? AND m.role=? AND m.ownership=? AND m.completion=? AND f.size_bytes>0 '
+    with closing(db.execute(f'SELECT m.id FROM segment_members m '
+        f'WHERE m.set_id=? AND m.role=? AND m.ownership=? AND m.completion=? '
         f'AND {order}>(?,?,?,?) AND {order}<=(?,?,?,?) ORDER BY {order[1:-1]} LIMIT ?',
         (setrow['id'],encode_enum(SegmentMemberRole.ORIGINAL),encode_enum(OwnershipState.OWNED),
          encode_enum(FileCompletionState.COMPLETE),*after,*upper,count))) as reader:
         ids=tuple(row[0] for row in reader.fetchmany(count))
     if len(ids)!=count:raise ConsistencyError('范围成员不能覆盖所请求的可靠连续次序')
+    for identity in ids:
+        candidate=_output_candidate(db,setrow,_read_member(db,row_facts(db,'segment_members',identity)))
+        if candidate is None or candidate.kind is not OutputKind.ORIGINAL:
+            raise ConsistencyError('范围成员不是冻结事实中的合格原片')
     return number,ids
 
 
@@ -533,8 +585,10 @@ class _Command:
                 for i,member_id in enumerate(payload):
                     member=row_facts(db,'segment_members',member_id)
                     if member is None or member['set_id']!=sid:raise ConsistencyError('范围成员来自其他集合')
-                    actual=_read_member(db,member).member
-                    if actual.role is not SegmentMemberRole.ORIGINAL or actual.ownership is not OwnershipState.OWNED or actual.completion is not FileCompletionState.COMPLETE or not actual.size_bytes or not selected.first_cursor<=actual.cursor<=selected.last_cursor:
+                    stored=_read_member(db,member)
+                    actual=stored.member
+                    candidate=_output_candidate(db,setrow,stored)
+                    if candidate is None or candidate.kind is not OutputKind.ORIGINAL or not selected.first_cursor<=actual.cursor<=selected.last_cursor:
                         raise ConsistencyError('范围成员不是已保存范围内合格原片')
                     rows.append(row_change('segment_scope_members',start+i,dict(set_id=sid,ordinal=number+i+1,member_id=member_id,output_id=None)))
                 if number+len(payload)>selected.member_count:raise ConsistencyError('范围成员超过原判断数量')
@@ -569,6 +623,32 @@ def segment_activation_rows(ref,event_id,owned):
     return (update_change('segment_sets',row['id'],{'published_event_id':None},{'published_event_id':event_id}),)
 
 
+def _verify_final_activation(ref,setrow,event,context):
+    """最终只证明固定marker身份；所有未来事件仍须顺序通过完整守卫。"""
+    final=None if context.transaction_rows is None else context.transaction_rows.get('segment_sets',{}).get(setrow['id'])
+    if final is None or final.get('published_event_id') is None:
+        raise ConsistencyError('分段发布缺少同一完成事务的正式marker')
+    marker=final['published_event_id']
+    ObjectId(marker)
+    if (marker<event.event_id
+            or (event.reason==_EVENT['branches']['ACTIVATE']['reason'] and marker!=event.event_id)
+            or context.current_reads is None
+            or sum(row.get('action_id')==ref.action_id and row.get('published_event_id') is not None
+                for row in context.transaction_rows.get('segment_sets',{}).values())!=1):
+        raise ConsistencyError('正式marker必须唯一并在原发布范围之后')
+    activation=context.current_reads.segment_activation_event(marker,context.transaction)
+    expected={'segment_request':{'ref':document(ref),'input':None}}
+    if (activation.event_type!=_EVENT['id'] or activation.reason!=_EVENT['branches']['ACTIVATE']['reason']
+            or not json_equal(activation.evidence,expected) or len(activation.rows)!=1):
+        raise ConsistencyError('正式marker没有同ref的唯一实际ACTIVATE')
+    change=activation.rows[0]
+    if (change.table!='segment_sets' or change.row_id!=setrow['id']
+            or not change.before.exists or not change.after.exists
+            or not json_equal(change.before.values,{'published_event_id':None})
+            or not json_equal(change.after.values,{'published_event_id':marker})):
+        raise ConsistencyError('正式marker必须精确引用同集合自己的ACTIVATE事件')
+
+
 def _verify_publication(db,ref,event,context,prior):
     """只承认本完成事务中已验证事件，不以当前终态代替同组证明。"""
     def events():
@@ -579,6 +659,9 @@ def _verify_publication(db,ref,event,context,prior):
     if _one(db,'SELECT 1 FROM segment_sets WHERE action_id=? AND published_event_id IS NOT NULL',(ref.action_id,)):
         raise ConsistencyError('原动作已有唯一正式分段集合')
     assessment=assessment_from_document(setrow['assessment_json'])
+    _verify_final_activation(ref,setrow,event,context)
+    if event.reason==_EVENT['branches']['PUBLISH']['reason'] and assessment.default_scope.state is not DefaultScopeState.NONEMPTY:
+        raise ConsistencyError('未知或空范围不能发布默认成员关联')
     terminal=any(accepted.event_type==load_event_registry()['events']['ACTION_FINISHED']['id']
         and any(row.table=='actions' and row.row_id==ref.action_id and row.after.values.get('status') in (3,4,5,6)
             for row in accepted.rows) for accepted in events())
@@ -608,11 +691,8 @@ def _verify_publication(db,ref,event,context,prior):
             if change.table!='outputs' or change.before.exists or values.get('source_action_id')!=ref.action_id:continue
             found=_one(db,'SELECT id FROM segment_members WHERE set_id=? AND file_id=?',(setrow['id'],values.get('device_file_id')))
             if found is None:raise ConsistencyError('完成组产物不属于原完整冻结成员')
-            stored=_read_member(db,row_facts(db,'segment_members',found[0])).member
-            expected_kind=1 if stored.role is SegmentMemberRole.ORIGINAL else 3 if stored.role is SegmentMemberRole.PREVIEW else None
-            if (values.get('kind')!=expected_kind or stored.ownership is not OwnershipState.OWNED
-                    or stored.completion is not FileCompletionState.COMPLETE
-                    or stored.size_bytes is None or stored.size_bytes<=0):
+            candidate=_output_candidate(db,setrow,_read_member(db,row_facts(db,'segment_members',found[0])))
+            if candidate is None or values.get('kind')!=int(enum_for('outputs.kind')[candidate.kind.name]):
                 raise ConsistencyError('完成组登记了不合格冻结成员')
     # PUBLISH 的每个 output 必须来自同组已验证创建事件。
     for change in event.rows:
@@ -629,19 +709,16 @@ def _verify_publication(db,ref,event,context,prior):
     while True:
         page=read_segment_members(ref,cursor,128,Reader)
         for stored in page.items:
-            member=stored.member
-            eligible=(member.ownership is OwnershipState.OWNED and member.completion is FileCompletionState.COMPLETE
-                and member.size_bytes is not None and member.size_bytes>0)
-            if eligible and member.role is SegmentMemberRole.ORIGINAL:original_count+=1
-            if eligible and member.role in (SegmentMemberRole.ORIGINAL,SegmentMemberRole.PREVIEW):
-                kind=1 if member.role is SegmentMemberRole.ORIGINAL else 3
-                identity=created_output(stored.file_id,kind)
-                if identity is None:raise ConsistencyError('完成组遗漏应保留的实际原片或预览')
-                if kind==3:
-                    paired=_member_by_identity(db,setrow['id'],member.pairing_identity) if member.pairing_identity else None
-                    original=None if paired is None else created_output(paired['file_id'],1)
-                    if original is None or not any(row.table=='output_origins' and not row.before.exists and row.after.values.get('output_id')==identity and row.after.values.get('original_output_id')==original for accepted in events() for row in accepted.rows):
-                        raise ConsistencyError('完成组预览缺少同一真实原片的 origin')
+            candidate=_output_candidate(db,setrow,stored)
+            if candidate is None:continue
+            if candidate.kind is OutputKind.ORIGINAL:original_count+=1
+            kind=int(enum_for('outputs.kind')[candidate.kind.name])
+            identity=created_output(candidate.file_id,kind)
+            if identity is None:raise ConsistencyError('完成组遗漏应保留的实际原片或预览')
+            if candidate.kind is OutputKind.PREVIEW:
+                original=created_output(candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
+                if original is None or not any(row.table=='output_origins' and not row.before.exists and row.after.values.get('output_id')==identity and row.after.values.get('original_output_id')==original for accepted in events() for row in accepted.rows):
+                    raise ConsistencyError('完成组预览缺少同一真实原片的origin')
         if page.next_cursor is None:break
         cursor=page.next_cursor
     from camctl.contracts.workflow_errors import registered_error
@@ -730,6 +807,7 @@ class SegmentRepository:
 
     def read_members(self,ref,cursor,batch,owned):return read_segment_members(ref,cursor,batch,owned)
     def read_gaps(self,ref,cursor,batch,owned):return read_segment_gaps(ref,cursor,batch,owned)
+    def read_output_candidates(self,ref,cursor,batch,owned):return read_segment_output_candidates(ref,cursor,batch,owned)
     def read_scope(self,ref,cursor,batch,owned,*,published=True):return read_segment_scope(ref,cursor,batch,owned,published=published)
     def read_assessment(self,ref,owned):
         row=_set(owned.connection,ref,fixed=True)

@@ -533,7 +533,7 @@ def commit_operation(
                 read_coverage=plan.read_coverage,
                 baseline_reads=plan.baseline_reads,
                 current_reads=(None if read_scope is None else
-                               SqlEventReads(connection, read_scope, validated)),
+                               SqlEventReads(connection, read_scope, validated, sequenced)),
             )
             validated.append(validate_event(event, context))
             _apply_rows(validation_state, (event,))
