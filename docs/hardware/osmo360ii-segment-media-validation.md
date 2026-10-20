@@ -33,6 +33,7 @@
       "source_size_bytes": null,
       "source_sha256": null,
       "source_evidence_ref": null,
+      "source_locator_basis_ref": "camera-directory-listing.json#osv-0034-path",
       "local_copy_path": "media/CAM_20261021_120000_0034_D.OSV"
     },
     {
@@ -44,6 +45,7 @@
       "source_size_bytes": null,
       "source_sha256": null,
       "source_evidence_ref": null,
+      "source_locator_basis_ref": "camera-directory-listing.json#osv-0035-path",
       "local_copy_path": "media/CAM_20261021_120000_0035_D.OSV"
     },
     {
@@ -63,6 +65,8 @@
 
 `retained_file_ids` 只列非零、正式保留的 OSV 原片；它必须覆盖全部保留原片，或将 `retained_scope_status` 标为 `unknown`。`default_file_ids` 必须是该集合的子集；它表示默认交付范围，不得通过集合以外的原片补足时长。把某个范围标成 `unknown` 时，清单可以保留已观察到的成员，但工具不会将这些成员当成完整范围。范围状态为 `complete` 且文件列表为空时，工具按已确定的空范围比较；空列表配合 `unknown` 则表示范围未确定。
 
+`source_evidence_ref` 指向源文件长度和摘要依据；`source_locator_basis_ref` 指向设备路径依据。两者表达不同事实，同一份真实记录可以同时作为两类依据。只要 `source_device_path` 或 `source_locator_basis_ref` 缺失，工具就把源路径身份范围保留为未知，不会用本地摘要推断设备源身份。对于已提供路径依据的保留范围，同一规范化 `source_device_path` 不能重复登记，即使两项使用不同 `file_id`、`output_id`、本地副本或路径依据引用也会拒绝。设备路径不同的源文件即使字节摘要相同仍分别计入范围；工具不会按 SHA-256 去重。
+
 清单中的 `files` 可以同时列出原片、配对预览和空文件观察。每项都需要唯一 `file_id`；`role` 只能是 `original` 或 `preview`。预览需要以 `preview_of_output_id` 指向它配对的正式原片。空文件观察使用 `file_status: "observed_empty"`、`source_size_bytes: 0` 和 `output_id: null`。预览和空文件观察不进入原片时长范围。
 
 | 字段 | 含义 |
@@ -75,12 +79,13 @@
 | `retained_scope_status`、`retained_file_ids` | 全部保留原片的完整性状态及其 `file_id` 集合。状态为 `complete` 或 `unknown`。 |
 | `default_scope_status`、`default_file_ids` | 默认交付范围的完整性状态及其 `file_id` 集合。状态为 `complete` 或 `unknown`。 |
 | `files[].output_id` | 已知时记录正式产物 ID；历史记录没有该 ID 时填 `null`。`file_id` 仍是清单内必需的独立文件标识。 |
-| `files[].source_device_path` | 原设备目录中的文件路径，仅作为身份记录，不执行设备读取。 |
+| `files[].source_device_path` | 原设备目录中的文件路径，仅作为身份记录，不执行设备读取；需配合下方路径依据才能确认源定位。 |
 | `files[].source_size_bytes`、`source_sha256` | 从独立来源记录的源长度和 SHA-256；可暂填 `null`，但身份核对将保持未知。 |
-| `files[].source_evidence_ref` | 指向来源长度和摘要依据的文档、记录或归档条目。 |
+| `files[].source_evidence_ref` | 指向来源长度和摘要依据的文档、记录或归档条目，只证明字节身份依据。 |
+| `files[].source_locator_basis_ref` | 指向设备路径依据的文档、目录记录或归档条目；缺失时源定位身份保持未知。 |
 | `files[].local_copy_path` | 本地副本路径。相对路径以清单所在目录为基准，绝对路径也可使用。 |
 
-源副本身份只有在源长度、源摘要和证据引用都存在，且实测本地副本的长度与 SHA-256 一致时才标为 `match`。摘要或长度不一致时，工具保留 `mismatch`；缺少来源依据或本地文件时保留 `unknown`。媒体时长描述本地副本；源副本身份未核实时，工具不会把本地副本时长提升为源文件的时长结论。
+`byte_identity_status` 只比较源长度、源摘要依据与本地副本的实测值；缺少字节依据时为 `unknown`，实测不一致时为 `mismatch`。`source_locator_status` 只表示设备路径和路径依据是否齐全。总 `identity_status` 只有字节身份匹配且源定位已知时才为 `match`；任一身份依据缺失时为 `unknown`，字节不一致时为 `mismatch`。媒体时长描述本地副本；总身份未核实时，工具不会把本地副本时长提升为源文件的时长结论。
 
 普通录像的 `target_duration_ms` 来自原任务。正常录像的保留范围应完整；当默认范围也标为完整时，它必须与全部保留原片相同。异常录像分别列出全部保留原片和默认范围，范围外原片只会进入 `all_retained` 的测量，不会进入 `default_delivery` 的测量。
 
@@ -104,7 +109,13 @@
 
 ## 运行工具
 
-运行环境需要 Python 3.11、`ffprobe` 和 `ffmpeg`。工具只读取清单引用的本地副本；它不修改媒体文件。省略容限参数时采用规格默认值 100 ms；部署可以提供其他非负整数毫秒值，`0` 表示不允许短缺。
+运行环境需要 Python 3.11、`ffprobe`、`ffmpeg` 和清单解析依赖 `ijson`。依赖只供这个离线验收工具使用，不进入 camctl 运行依赖。先在验收环境安装唯一权威依赖清单：
+
+```bash
+python3.11 -m pip install -r docs/hardware/requirements-osmo-media-validation.txt
+```
+
+工具只读取清单引用的本地副本；它不修改媒体文件。省略容限参数时采用规格默认值 100 ms；部署可以提供其他非负整数毫秒值，`0` 表示不允许短缺。
 
 报告输出路径必须与输入清单和所有本地媒体副本分开。工具会拒绝覆盖这些输入，并使用独立临时文件写入报告。
 
@@ -112,10 +123,13 @@
 python3.11 docs/hardware/validate_osmo_segments.py \
   --manifest /path/to/osmo-media-manifest.json \
   --shortfall-tolerance-ms 100 \
+  --batch-size 64 \
   --output /path/to/osmo-media-report.json
 ```
 
 可省略 `--shortfall-tolerance-ms` 使用默认值，也可传入 `0` 或其他非负整数。负值、布尔值、浮点值及非整数输入不接受。报告会记录实际生效的 `shortfall_tolerance_ms`。
+
+`--batch-size` 必须是正整数，默认 `64`。工具用本地临时 SQLite 文件索引清单项、范围成员、逐文件结果和 findings，并按该批次大小读取索引及写出报告；SQLite 文件和诊断工件都在运行结束后清理。工具不会访问 camctl 业务数据库。ffprobe 帧时间戳逐行摘要，子进程 stderr 由独立读取线程写入临时工件，报告编码时再完整写回对应诊断字段。报告先写入输出目录中的临时文件，全部编码成功后才原子替换目标；校验或编码失败不会发布半份报告，也不会覆盖清单或媒体副本。报告记录 `processing_batch_size`，不同批次大小不改变验收结论。
 
 ## 报告与判定
 

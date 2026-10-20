@@ -4,15 +4,21 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import csv
 import hashlib
+import io
 import json
 import os
+import posixpath
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import threading
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
@@ -345,6 +351,10 @@ def validate_manifest(raw: object) -> dict[str, Any]:
         if not isinstance(state, str) or state not in {"retained", "observed_empty"}:
             raise ManifestError(f"{prefix}.file_status must be retained or observed_empty")
         _require_text(entry.get("local_copy_path"), f"{prefix}.local_copy_path")
+        for field in ("source_device_path", "source_locator_basis_ref"):
+            value = entry.get(field)
+            if value is not None:
+                _require_text(value, f"{prefix}.{field}")
         source_size = entry.get("source_size_bytes")
         if source_size is not None and _nonnegative_int(source_size) is None:
             raise ManifestError(
@@ -380,8 +390,39 @@ def validate_manifest(raw: object) -> dict[str, Any]:
         entry = file_map[file_id]
         if entry.get("role") != "original" or entry.get("file_status", "retained") != "retained":
             raise ManifestError("retained_file_ids may contain only retained original files")
+
+    if raw["retained_scope_status"] == "complete":
+        all_retained_ids = [
+            entry["file_id"]
+            for entry in files
+            if entry["role"] == "original"
+            and entry.get("file_status", "retained") == "retained"
+        ]
+        if set(retained_ids) != set(all_retained_ids):
+            raise ManifestError(
+                "retained_file_ids must cover every retained original when "
+                "retained_scope_status is complete"
+            )
+
     if any(file_id not in set(retained_ids) for file_id in default_ids):
         raise ManifestError("default_file_ids must be a subset of retained_file_ids")
+
+    for scope_name, scope_ids in (
+        ("retained", retained_ids),
+        ("default", default_ids),
+    ):
+        seen_source_locators: dict[str, str] = {}
+        for file_id in scope_ids:
+            source_locator = _source_locator_key(file_map[file_id])
+            if source_locator is None:
+                continue
+            previous_file_id = seen_source_locators.get(source_locator)
+            if previous_file_id is not None:
+                raise ManifestError(
+                    f"duplicate reliable source locator in {scope_name} scope: "
+                    f"{previous_file_id} and {file_id} ({source_locator})"
+                )
+            seen_source_locators[source_locator] = file_id
 
     if (
         raw["recording_class"] == "normal"
@@ -397,6 +438,17 @@ def validate_manifest(raw: object) -> dict[str, Any]:
     normalized["target_duration_ms"] = target_ms
     normalized["source_action_instance_id"] = source_action_id
     return normalized
+
+
+def _source_locator_key(entry: dict[str, Any]) -> str | None:
+    """Return a normalized device path only when independent locator evidence exists."""
+
+    device_path = entry.get("source_device_path")
+    locator_basis = entry.get("source_locator_basis_ref")
+    if not _has_text(device_path) or not _has_text(locator_basis):
+        return None
+    normalized = posixpath.normpath(device_path.strip())
+    return normalized if normalized not in {"", "."} else None
 
 
 def _unique_file_ids(raw: object, available: set[str], field: str) -> list[str]:
@@ -417,6 +469,28 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+STREAM_MARKER = "$osmo_p7_stream"
+
+
+class DiagnosticArtifacts:
+    """把子进程 stderr 暂存到验收专用临时目录。"""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+        self.session_id = uuid.uuid4().hex
+
+    def create(self) -> tuple[str, Path]:
+        token = f"{self.session_id}-{uuid.uuid4().hex}"
+        return token, self.directory / f"{token}.stderr"
+
+    def marker(self, token: str) -> dict[str, Any]:
+        return {STREAM_MARKER: {"kind": "diagnostic", "token": token}}
+
+
+def _stream_marker(kind: str, key: object = None) -> dict[str, Any]:
+    return {STREAM_MARKER: {"kind": kind, "key": key}}
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -432,35 +506,82 @@ def _resolve_copy_path(manifest_path: Path, raw_path: str) -> Path:
     return copy_path.resolve()
 
 
-def _run_command(argv: Sequence[str]) -> dict[str, Any]:
+def _drain_stderr(pipe: Any, path: Path, state: dict[str, Any]) -> None:
+    output = None
     try:
-        completed = subprocess.run(
-            list(argv),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+        try:
+            output = path.open("wb")
+        except OSError as exc:
+            state["write_error"] = str(exc)
+        while True:
+            chunk = pipe.read(64 * 1024)
+            if not chunk:
+                break
+            state["size"] += len(chunk)
+            if output is not None:
+                try:
+                    output.write(chunk)
+                except OSError as exc:
+                    state["write_error"] = str(exc)
+                    output.close()
+                    output = None
+    finally:
+        if output is not None:
+            output.close()
+        pipe.close()
+
+
+def _run_command(
+    argv: Sequence[str], diagnostics: DiagnosticArtifacts
+) -> dict[str, Any]:
+    token, stderr_path = diagnostics.create()
+    stderr_state: dict[str, Any] = {"size": 0, "write_error": None}
+    try:
+        process = subprocess.Popen(
+            list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
     except OSError as exc:
+        stderr_path.write_text(str(exc), encoding="utf-8")
         return {
             "command": list(argv),
             "exit_code": None,
             "stdout": "",
-            "stderr": str(exc),
+            "stderr": diagnostics.marker(token),
+            "stderr_present": True,
             "execution_error": str(exc),
         }
+
+    assert process.stdout is not None and process.stderr is not None
+    drainer = threading.Thread(
+        target=_drain_stderr,
+        args=(process.stderr, stderr_path, stderr_state),
+        name="osmo-media-stderr-drain",
+        daemon=True,
+    )
+    drainer.start()
+    stdout_bytes = process.stdout.read()
+    process.stdout.close()
+    exit_code = process.wait()
+    drainer.join()
+    if stderr_state["write_error"] is not None:
+        raise OSError(f"cannot stage subprocess stderr: {stderr_state['write_error']}")
+    if stderr_state["size"] == 0:
+        stderr_path.unlink(missing_ok=True)
+        stderr_value: Any = ""
+    else:
+        stderr_value = diagnostics.marker(token)
     return {
         "command": list(argv),
-        "exit_code": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
+        "exit_code": exit_code,
+        "stdout": stdout_bytes.decode("utf-8", errors="replace"),
+        "stderr": stderr_value,
+        "stderr_present": stderr_state["size"] > 0,
         "execution_error": None,
     }
 
 
-def _tool_version(executable: str) -> dict[str, Any]:
-    result = _run_command([executable, "-version"])
+def _tool_version(executable: str, diagnostics: DiagnosticArtifacts) -> dict[str, Any]:
+    result = _run_command([executable, "-version"], diagnostics)
     lines = result["stdout"].splitlines()
     return {
         "executable": shutil.which(executable),
@@ -530,7 +651,10 @@ def _parse_index(value: object) -> int | None:
 
 
 def _frame_coverage(
-    path: Path, ffprobe: str, main_video_indexes: set[int]
+    path: Path,
+    ffprobe: str,
+    main_video_indexes: set[int],
+    diagnostics: DiagnosticArtifacts,
 ) -> dict[int, dict[str, Any]]:
     coverage: dict[int, dict[str, Any]] = {
         stream_index: {
@@ -558,39 +682,75 @@ def _frame_coverage(
         "csv=p=0",
         str(path),
     ]
-    result = _run_command(argv)
     previous: dict[int, Fraction] = {}
     max_gaps: dict[int, Fraction] = {}
+    token, stderr_path = diagnostics.create()
+    stderr_state: dict[str, Any] = {"size": 0, "write_error": None}
+    parse_error: str | None = None
+    exit_code: int | None = None
     try:
-        for row in csv.reader(result["stdout"].splitlines()):
-            if len(row) < 2:
-                continue
-            stream_index = _parse_index(row[0])
-            if stream_index not in coverage:
-                continue
-            timestamp = _decimal_fraction(row[1])
-            record = coverage[stream_index]
-            if timestamp is None:
-                record["missing_timestamp_count"] += 1
-                continue
-            record["decoded_frame_timestamp_count"] += 1
-            if record["first_timestamp_seconds_exact"] is None:
-                record["first_timestamp_seconds_exact"] = _fraction_text(timestamp)
-            record["last_timestamp_seconds_exact"] = _fraction_text(timestamp)
-            if stream_index in previous:
-                gap = timestamp - previous[stream_index]
-                if gap < 0:
-                    record["timestamps_monotonic"] = False
-                else:
-                    max_gaps[stream_index] = max(max_gaps.get(stream_index, Fraction(0)), gap)
-            previous[stream_index] = timestamp
-    except csv.Error as exc:
-        for record in coverage.values():
-            record["parse_error"] = str(exc)
+        process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        stderr_path.write_text(str(exc), encoding="utf-8")
+        parse_error = None
+        exit_code = None
+        stderr_state["size"] = len(str(exc).encode("utf-8"))
+    else:
+        assert process.stdout is not None and process.stderr is not None
+        drainer = threading.Thread(
+            target=_drain_stderr,
+            args=(process.stderr, stderr_path, stderr_state),
+            name="osmo-frame-stderr-drain",
+            daemon=True,
+        )
+        drainer.start()
+        text_stream = io.TextIOWrapper(
+            process.stdout, encoding="utf-8", errors="replace", newline=""
+        )
+        try:
+            for row in csv.reader(text_stream):
+                if len(row) < 2:
+                    continue
+                stream_index = _parse_index(row[0])
+                if stream_index not in coverage:
+                    continue
+                timestamp = _decimal_fraction(row[1])
+                record = coverage[stream_index]
+                if timestamp is None:
+                    record["missing_timestamp_count"] += 1
+                    continue
+                record["decoded_frame_timestamp_count"] += 1
+                if record["first_timestamp_seconds_exact"] is None:
+                    record["first_timestamp_seconds_exact"] = _fraction_text(timestamp)
+                record["last_timestamp_seconds_exact"] = _fraction_text(timestamp)
+                if stream_index in previous:
+                    gap = timestamp - previous[stream_index]
+                    if gap < 0:
+                        record["timestamps_monotonic"] = False
+                    else:
+                        max_gaps[stream_index] = max(
+                            max_gaps.get(stream_index, Fraction(0)), gap
+                        )
+                previous[stream_index] = timestamp
+        except csv.Error as exc:
+            parse_error = str(exc)
+            for record in coverage.values():
+                record["parse_error"] = parse_error
+        finally:
+            # CSV 损坏后仍读完 stdout，避免 ffprobe 阻塞或丢失退出状态。
+            while text_stream.read(64 * 1024):
+                pass
+            text_stream.close()
+            exit_code = process.wait()
+            drainer.join()
+        if stderr_state["write_error"] is not None:
+            raise OSError(f"cannot stage ffprobe frame stderr: {stderr_state['write_error']}")
 
     for stream_index, record in coverage.items():
-        record["probe_exit_code"] = result["exit_code"]
-        record["probe_stderr"] = result["stderr"]
+        record["probe_exit_code"] = exit_code
+        record["probe_stderr"] = (
+            diagnostics.marker(token) if stderr_state["size"] else ""
+        )
         max_gap = max_gaps.get(stream_index)
         record["max_interframe_gap_ms_exact"] = (
             _fraction_text(max_gap * 1000) if max_gap is not None else None
@@ -598,7 +758,12 @@ def _frame_coverage(
     return coverage
 
 
-def _decode_stream(path: Path, ffmpeg: str, stream_index: int) -> dict[str, Any]:
+def _decode_stream(
+    path: Path,
+    ffmpeg: str,
+    stream_index: int,
+    diagnostics: DiagnosticArtifacts,
+) -> dict[str, Any]:
     argv = [
         ffmpeg,
         "-nostdin",
@@ -615,19 +780,23 @@ def _decode_stream(path: Path, ffmpeg: str, stream_index: int) -> dict[str, Any]
         "null",
         "-",
     ]
-    result = _run_command(argv)
+    result = _run_command(argv, diagnostics)
     return {
         "command": result["command"],
         "exit_code": result["exit_code"],
         "status": "decoded" if result["exit_code"] == 0 else "decode_failed",
-        "diagnostics_present": bool(result["stderr"]),
+        "diagnostics_present": result["stderr_present"],
         "diagnostics": result["stderr"],
         "execution_error": result["execution_error"],
     }
 
 
 def _inspect_file(
-    entry: dict[str, Any], manifest_path: Path, ffprobe: str, ffmpeg: str
+    entry: dict[str, Any],
+    manifest_path: Path,
+    ffprobe: str,
+    ffmpeg: str,
+    diagnostics: DiagnosticArtifacts,
 ) -> dict[str, Any]:
     local_path = _resolve_copy_path(manifest_path, entry["local_copy_path"])
     result: dict[str, Any] = {
@@ -638,6 +807,7 @@ def _inspect_file(
         "preview_of_output_id": entry.get("preview_of_output_id"),
         "source": {
             "device_path": entry.get("source_device_path"),
+            "locator_basis_ref": entry.get("source_locator_basis_ref"),
             "size_bytes": entry.get("source_size_bytes"),
             "sha256": entry.get("source_sha256"),
             "evidence_ref": entry.get("source_evidence_ref"),
@@ -648,7 +818,10 @@ def _inspect_file(
             "size_bytes": None,
             "sha256": None,
             "identity_status": "unknown",
+            "byte_identity_status": "unknown",
+            "source_locator_status": "unknown",
             "identity_unknown_reasons": [],
+            "byte_identity_unknown_reasons": [],
         },
         "media": {
             "status": "not_assessed",
@@ -665,33 +838,54 @@ def _inspect_file(
     }
 
     local_copy = result["local_copy"]
+    byte_identity_reasons: list[str] = []
     if not local_copy["exists"]:
-        local_copy["identity_unknown_reasons"].append("local_copy_missing")
+        byte_identity_reasons.append("local_copy_missing")
     else:
         try:
             local_copy["size_bytes"] = local_path.stat().st_size
             local_copy["sha256"] = _file_sha256(local_path)
         except OSError as exc:
-            local_copy["identity_unknown_reasons"].append(f"local_copy_read_error:{exc}")
+            byte_identity_reasons.append(f"local_copy_read_error:{exc}")
 
     source_size = entry.get("source_size_bytes")
     source_sha = entry.get("source_sha256")
     source_basis = entry.get("source_evidence_ref")
     if not _has_text(source_basis):
-        local_copy["identity_unknown_reasons"].append("missing_source_identity_basis")
+        byte_identity_reasons.append("missing_source_identity_basis")
     if source_size is None:
-        local_copy["identity_unknown_reasons"].append("source_size_unavailable")
+        byte_identity_reasons.append("source_size_unavailable")
     elif local_copy["size_bytes"] is not None and source_size != local_copy["size_bytes"]:
-        local_copy["identity_unknown_reasons"].append("source_copy_size_mismatch")
+        byte_identity_reasons.append("source_copy_size_mismatch")
     if source_sha is None:
-        local_copy["identity_unknown_reasons"].append("source_sha256_unavailable")
+        byte_identity_reasons.append("source_sha256_unavailable")
     elif local_copy["sha256"] is not None and source_sha.lower() != local_copy["sha256"]:
-        local_copy["identity_unknown_reasons"].append("source_copy_sha256_mismatch")
+        byte_identity_reasons.append("source_copy_sha256_mismatch")
 
     identity_mismatches = {"source_copy_size_mismatch", "source_copy_sha256_mismatch"}
-    if any(reason in identity_mismatches for reason in local_copy["identity_unknown_reasons"]):
+    if any(reason in identity_mismatches for reason in byte_identity_reasons):
+        local_copy["byte_identity_status"] = "mismatch"
+    elif not byte_identity_reasons:
+        local_copy["byte_identity_status"] = "match"
+
+    locator_reasons: list[str] = []
+    if not _has_text(entry.get("source_device_path")):
+        locator_reasons.append("source_device_path_unavailable")
+    if not _has_text(entry.get("source_locator_basis_ref")):
+        locator_reasons.append("missing_source_locator_basis")
+    if not locator_reasons:
+        local_copy["source_locator_status"] = "known"
+
+    local_copy["byte_identity_unknown_reasons"] = _unique(byte_identity_reasons)
+    local_copy["identity_unknown_reasons"] = _unique(
+        [*byte_identity_reasons, *locator_reasons]
+    )
+    if local_copy["byte_identity_status"] == "mismatch":
         local_copy["identity_status"] = "mismatch"
-    elif not local_copy["identity_unknown_reasons"]:
+    elif (
+        local_copy["byte_identity_status"] == "match"
+        and local_copy["source_locator_status"] == "known"
+    ):
         local_copy["identity_status"] = "match"
 
     if entry["role"] == "preview":
@@ -715,7 +909,7 @@ def _inspect_file(
         "json",
         str(local_path),
     ]
-    probe = _run_command(probe_argv)
+    probe = _run_command(probe_argv, diagnostics)
     media = result["media"]
     media["probe_command"] = probe["command"]
     media["probe_exit_code"] = probe["exit_code"]
@@ -773,12 +967,16 @@ def _inspect_file(
     audio_entries.sort(key=lambda pair: pair[0])
     attached_entries.sort(key=lambda pair: pair[0])
     main_indexes = {stream_index for stream_index, _ in main_entries}
-    coverage = _frame_coverage(local_path, ffprobe, main_indexes) if main_indexes else {}
+    coverage = (
+        _frame_coverage(local_path, ffprobe, main_indexes, diagnostics)
+        if main_indexes
+        else {}
+    )
 
     for ordinal, (stream_index, stream) in enumerate(main_entries):
         duration_fields = _stream_duration_fields(stream)
         duration_ms = _stream_duration_ms(stream)[0]
-        decode = _decode_stream(local_path, ffmpeg, stream_index)
+        decode = _decode_stream(local_path, ffmpeg, stream_index, diagnostics)
         video_result = {
             "main_video_ordinal": ordinal,
             "stream_index": stream_index,
@@ -823,7 +1021,7 @@ def _inspect_file(
 
     for stream_index, stream in audio_entries:
         duration_fields = _stream_duration_fields(stream)
-        decode = _decode_stream(local_path, ffmpeg, stream_index)
+        decode = _decode_stream(local_path, ffmpeg, stream_index, diagnostics)
         media["audio_streams"].append(
             {
                 "stream_index": stream_index,
@@ -867,258 +1065,851 @@ def _file_duration_ms(file_result: dict[str, Any], ordinal: int) -> Fraction | N
         return None
 
 
-def _scope_result(
+
+def _validate_streamed_header(
+    metadata: dict[str, Any], scope_shapes: dict[str, bool]
+) -> dict[str, Any]:
+    version = metadata.get("manifest_version")
+    if type(version) is not int or version != MANIFEST_VERSION:
+        raise ManifestError(f"manifest_version must be {MANIFEST_VERSION}")
+    _require_text(metadata.get("acceptance_id"), "acceptance_id")
+    source_action_id = metadata.get("source_action_instance_id")
+    if source_action_id is not None:
+        _require_text(source_action_id, "source_action_instance_id")
+    recording_kind = metadata.get("recording_kind")
+    if not isinstance(recording_kind, str) or recording_kind not in {
+        "ordinary_recording",
+        "native_timelapse",
+    }:
+        raise ManifestError("recording_kind must be ordinary_recording or native_timelapse")
+    recording_class = metadata.get("recording_class")
+    if not isinstance(recording_class, str) or recording_class not in {"normal", "abnormal"}:
+        raise ManifestError("recording_class must be normal or abnormal")
+    target_ms = _nonnegative_int(metadata.get("target_duration_ms"))
+    if target_ms is None or target_ms == 0:
+        raise ManifestError("target_duration_ms must be a positive integer")
+    for field in ("retained_scope_status", "default_scope_status"):
+        value = metadata.get(field)
+        if not isinstance(value, str) or value not in {"complete", "unknown"}:
+            raise ManifestError(f"{field} must be complete or unknown")
+    for field in ("retained_file_ids", "default_file_ids"):
+        if not scope_shapes.get(field, False):
+            raise ManifestError(f"{field} must be an array")
+    metadata["target_duration_ms"] = target_ms
+    metadata["source_action_instance_id"] = source_action_id
+    return metadata
+
+
+def _validate_streamed_file(entry: object, ordinal: int) -> dict[str, Any]:
+    prefix = f"files[{ordinal}]"
+    if not isinstance(entry, dict):
+        raise ManifestError(f"{prefix} must be a JSON object")
+    file_id = _require_text(entry.get("file_id"), f"{prefix}.file_id")
+    role = entry.get("role")
+    if not isinstance(role, str) or role not in {"original", "preview"}:
+        raise ManifestError(f"{prefix}.role must be original or preview")
+    state = entry.get("file_status", "retained")
+    if not isinstance(state, str) or state not in {"retained", "observed_empty"}:
+        raise ManifestError(f"{prefix}.file_status must be retained or observed_empty")
+    _require_text(entry.get("local_copy_path"), f"{prefix}.local_copy_path")
+    for field in ("source_device_path", "source_locator_basis_ref"):
+        value = entry.get(field)
+        if value is not None:
+            _require_text(value, f"{prefix}.{field}")
+    source_size = entry.get("source_size_bytes")
+    if source_size is not None and _nonnegative_int(source_size) is None:
+        raise ManifestError(
+            f"{prefix}.source_size_bytes must be a non-negative integer or null"
+        )
+    source_hash = entry.get("source_sha256")
+    if source_hash is not None and (
+        not isinstance(source_hash, str) or SHA256_PATTERN.fullmatch(source_hash) is None
+    ):
+        raise ManifestError(
+            f"{prefix}.source_sha256 must be 64 hexadecimal characters or null"
+        )
+    output_id = entry.get("output_id")
+    if output_id is not None:
+        _require_text(output_id, f"{prefix}.output_id")
+    if state == "observed_empty" and output_id is not None:
+        raise ManifestError(f"{prefix}.observed_empty must not have output_id")
+    if state == "observed_empty" and source_size not in {None, 0}:
+        raise ManifestError(f"{prefix}.observed_empty must have source_size_bytes 0 or null")
+    if role == "preview" and not _has_text(entry.get("preview_of_output_id")):
+        raise ManifestError(f"{prefix}.preview files require preview_of_output_id")
+    normalized = dict(entry)
+    normalized["file_id"] = file_id
+    return normalized
+
+
+def _json_compatible_value(value: Any) -> Any:
+    """Match json.loads numeric values while keeping each manifest item bounded."""
+
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, list):
+        return [_json_compatible_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_compatible_value(item) for key, item in value.items()}
+    return value
+
+
+def _initialize_index(connection: sqlite3.Connection) -> None:
+    connection.execute("PRAGMA journal_mode=DELETE")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA temp_store=FILE")
+    connection.execute("PRAGMA cache_size=-8192")
+    connection.executescript(
+        """
+        CREATE TABLE files (
+            ordinal INTEGER PRIMARY KEY,
+            file_id TEXT NOT NULL UNIQUE,
+            output_id TEXT UNIQUE,
+            role TEXT NOT NULL,
+            file_status TEXT NOT NULL,
+            source_device_path TEXT,
+            source_locator_basis_ref TEXT,
+            local_copy_path TEXT NOT NULL,
+            entry_json TEXT NOT NULL,
+            result_json TEXT
+        );
+        CREATE TABLE scope_ids (
+            scope TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            file_id TEXT NOT NULL,
+            PRIMARY KEY (scope, ordinal),
+            UNIQUE (scope, file_id)
+        );
+        CREATE TABLE findings (
+            ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+            result_json TEXT NOT NULL
+        );
+        CREATE TABLE scope_reasons (
+            scope TEXT NOT NULL,
+            stream_ordinal INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            UNIQUE (scope, stream_ordinal, reason)
+        );
+        """
+    )
+
+
+def _load_manifest_index(
+    manifest_path: Path, connection: sqlite3.Connection
+) -> dict[str, Any]:
+    try:
+        import ijson
+        from ijson.common import ObjectBuilder
+    except ImportError as exc:
+        raise ManifestError(
+            "缺少流式 JSON 依赖 ijson；请安装 "
+            "docs/hardware/requirements-osmo-media-validation.txt"
+        ) from exc
+
+    metadata: dict[str, Any] = {}
+    scope_shapes = {"retained_file_ids": False, "default_file_ids": False}
+    scope_positions = {"retained_file_ids": 0, "default_file_ids": 0}
+    root_is_object = False
+    files_is_array = False
+    file_ordinal = 0
+    builder: Any = None
+    builder_depth = 0
+
+    try:
+        with manifest_path.open("rb") as source:
+            for prefix, event, value in ijson.parse(source):
+                if builder is not None:
+                    builder.event(event, value)
+                    if event in {"start_map", "start_array"}:
+                        builder_depth += 1
+                    elif event in {"end_map", "end_array"}:
+                        builder_depth -= 1
+                    if builder_depth == 0:
+                        entry = _json_compatible_value(
+                            _validate_streamed_file(builder.value, file_ordinal)
+                        )
+                        file_id = entry["file_id"]
+                        output_id = entry.get("output_id")
+                        try:
+                            connection.execute(
+                                """
+                                INSERT INTO files (
+                                    ordinal, file_id, output_id, role, file_status,
+                                    source_device_path, source_locator_basis_ref,
+                                    local_copy_path, entry_json
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    file_ordinal,
+                                    file_id,
+                                    output_id.strip() if isinstance(output_id, str) else None,
+                                    entry["role"],
+                                    entry.get("file_status", "retained"),
+                                    entry.get("source_device_path"),
+                                    entry.get("source_locator_basis_ref"),
+                                    entry["local_copy_path"],
+                                    json.dumps(entry, ensure_ascii=False, separators=(",", ":")),
+                                ),
+                            )
+                        except sqlite3.IntegrityError as exc:
+                            if connection.execute(
+                                "SELECT 1 FROM files WHERE file_id = ?", (file_id,)
+                            ).fetchone():
+                                raise ManifestError(f"duplicate file_id: {file_id}") from exc
+                            if output_id is not None:
+                                raise ManifestError(
+                                    f"duplicate output_id: {output_id.strip()}"
+                                ) from exc
+                            raise ManifestError(f"invalid files[{file_ordinal}]") from exc
+                        file_ordinal += 1
+                        builder = None
+                        builder_depth = 0
+                    continue
+
+                if prefix == "" and event == "start_map":
+                    root_is_object = True
+                    continue
+                if prefix == "files" and event == "start_array":
+                    connection.execute("DELETE FROM files")
+                    files_is_array = True
+                    file_ordinal = 0
+                    continue
+                if prefix == "files" and event not in {"end_array"}:
+                    # 重复 files 键遵循最后成员；非数组会清除先前索引。
+                    if event != "start_array":
+                        connection.execute("DELETE FROM files")
+                        files_is_array = False
+                        file_ordinal = 0
+                    continue
+                if prefix == "files.item":
+                    if event != "start_map":
+                        raise ManifestError(f"files[{file_ordinal}] must be a JSON object")
+                    builder = ObjectBuilder()
+                    builder.event(event, value)
+                    builder_depth = 1
+                    continue
+
+                if prefix in scope_shapes and event == "start_array":
+                    connection.execute(
+                        "DELETE FROM scope_ids WHERE scope = ?", (prefix,)
+                    )
+                    scope_shapes[prefix] = True
+                    scope_positions[prefix] = 0
+                    metadata.pop(prefix, None)
+                    continue
+                if prefix in scope_shapes and event not in {"end_array"}:
+                    # 非数组成员按最后一个同名 JSON 成员处理。
+                    if event != "start_array":
+                        connection.execute(
+                            "DELETE FROM scope_ids WHERE scope = ?", (prefix,)
+                        )
+                        scope_shapes[prefix] = False
+                    continue
+                if prefix.endswith(".item") and prefix.rsplit(".", 1)[0] in scope_shapes:
+                    scope_name = prefix.rsplit(".", 1)[0]
+                    if event != "string":
+                        raise ManifestError(f"{scope_name} entries must be strings")
+                    file_id = _require_text(value, f"{scope_name}[{scope_positions[scope_name]}]")
+                    try:
+                        connection.execute(
+                            "INSERT INTO scope_ids (scope, ordinal, file_id) VALUES (?, ?, ?)",
+                            (scope_name, scope_positions[scope_name], file_id),
+                        )
+                    except sqlite3.IntegrityError as exc:
+                        raise ManifestError(
+                            f"{scope_name} contains duplicate file_id: {file_id}"
+                        ) from exc
+                    scope_positions[scope_name] += 1
+                    continue
+
+                if prefix in {
+                    "manifest_version",
+                    "acceptance_id",
+                    "source_action_instance_id",
+                    "recording_kind",
+                    "recording_class",
+                    "target_duration_ms",
+                    "target_basis_ref",
+                    "retained_scope_status",
+                    "default_scope_status",
+                    "sampling_interval_ms",
+                    "sampling_interval_basis_ref",
+                    "playback_frame_rate",
+                    "frame_rate_basis_ref",
+                    "sample_endpoint_rule",
+                    "endpoint_rule_basis_ref",
+                }:
+                    if event in {"string", "number", "null", "boolean"}:
+                        metadata[prefix] = value
+                    elif event in {"start_map", "start_array"}:
+                        metadata[prefix] = {} if event == "start_map" else []
+    except ManifestError:
+        raise
+    except (OSError, ijson.JSONError, UnicodeError) as exc:
+        raise ManifestError(f"cannot read manifest: {exc}") from exc
+
+    if not root_is_object:
+        raise ManifestError("manifest root must be a JSON object")
+    if not files_is_array:
+        raise ManifestError("files must be an array")
+    normalized = _validate_streamed_header(metadata, scope_shapes)
+    _validate_index_scopes(connection, normalized)
+    return normalized
+
+
+def _validate_index_scopes(
+    connection: sqlite3.Connection, manifest: dict[str, Any]
+) -> None:
+    for scope in ("retained_file_ids", "default_file_ids"):
+        unknown = connection.execute(
+            """
+            SELECT ids.file_id
+            FROM scope_ids AS ids
+            LEFT JOIN files ON files.file_id = ids.file_id
+            WHERE ids.scope = ? AND files.file_id IS NULL
+            LIMIT 1
+            """,
+            (scope,),
+        ).fetchone()
+        if unknown:
+            raise ManifestError(f"{scope} references unknown file_id: {unknown[0]}")
+
+    invalid_retained = connection.execute(
+        """
+        SELECT ids.file_id
+        FROM scope_ids AS ids
+        JOIN files ON files.file_id = ids.file_id
+        WHERE ids.scope = 'retained_file_ids'
+          AND (files.role != 'original' OR files.file_status != 'retained')
+        LIMIT 1
+        """
+    ).fetchone()
+    if invalid_retained:
+        raise ManifestError("retained_file_ids may contain only retained original files")
+
+    if manifest["retained_scope_status"] == "complete":
+        total = connection.execute(
+            """
+            SELECT COUNT(*) FROM files
+            WHERE role = 'original' AND file_status = 'retained'
+            """
+        ).fetchone()[0]
+        selected = connection.execute(
+            "SELECT COUNT(*) FROM scope_ids WHERE scope = 'retained_file_ids'"
+        ).fetchone()[0]
+        missing = connection.execute(
+            """
+            SELECT file_id FROM files
+            WHERE role = 'original' AND file_status = 'retained'
+            EXCEPT
+            SELECT file_id FROM scope_ids WHERE scope = 'retained_file_ids'
+            LIMIT 1
+            """
+        ).fetchone()
+        if total != selected or missing:
+            raise ManifestError(
+                "retained_file_ids must cover every retained original when "
+                "retained_scope_status is complete"
+            )
+
+    default_outside_retained = connection.execute(
+        """
+        SELECT delivery.file_id
+        FROM scope_ids AS delivery
+        LEFT JOIN scope_ids AS retained
+          ON retained.scope = 'retained_file_ids' AND retained.file_id = delivery.file_id
+        WHERE delivery.scope = 'default_file_ids' AND retained.file_id IS NULL
+        LIMIT 1
+        """
+    ).fetchone()
+    if default_outside_retained:
+        raise ManifestError("default_file_ids must be a subset of retained_file_ids")
+
+    if (
+        manifest["recording_class"] == "normal"
+        and manifest["default_scope_status"] == "complete"
+    ):
+        retained_count = connection.execute(
+            "SELECT COUNT(*) FROM scope_ids WHERE scope = 'retained_file_ids'"
+        ).fetchone()[0]
+        default_count = connection.execute(
+            "SELECT COUNT(*) FROM scope_ids WHERE scope = 'default_file_ids'"
+        ).fetchone()[0]
+        order_mismatch = connection.execute(
+            """
+            SELECT 1
+            FROM scope_ids AS retained
+            LEFT JOIN scope_ids AS delivery
+              ON delivery.scope = 'default_file_ids' AND delivery.ordinal = retained.ordinal
+            WHERE retained.scope = 'retained_file_ids'
+              AND delivery.file_id IS NOT retained.file_id
+            LIMIT 1
+            """
+        ).fetchone()
+        if retained_count != default_count or order_mismatch:
+            raise ManifestError(
+                "normal recording default_file_ids must equal retained_file_ids"
+            )
+
+    connection.execute("DELETE FROM scope_reasons")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reliable_locators (
+            scope TEXT NOT NULL,
+            locator TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            PRIMARY KEY (scope, locator)
+        )
+        """
+    )
+    connection.execute("DELETE FROM reliable_locators")
+    for scope, scope_label in (
+        ("retained_file_ids", "retained"),
+        ("default_file_ids", "default"),
+    ):
+        rows = connection.execute(
+            """
+            SELECT ids.file_id, files.entry_json
+            FROM scope_ids AS ids
+            JOIN files ON files.file_id = ids.file_id
+            WHERE ids.scope = ?
+            ORDER BY ids.ordinal
+            """,
+            (scope,),
+        )
+        while batch := rows.fetchmany(256):
+            for file_id, entry_json in batch:
+                locator = _source_locator_key(json.loads(entry_json))
+                if locator is None:
+                    continue
+                try:
+                    connection.execute(
+                        "INSERT INTO reliable_locators (scope, locator, file_id) VALUES (?, ?, ?)",
+                        (scope_label, locator, file_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    previous = connection.execute(
+                        "SELECT file_id FROM reliable_locators WHERE scope = ? AND locator = ?",
+                        (scope_label, locator),
+                    ).fetchone()[0]
+                    raise ManifestError(
+                        f"duplicate reliable source locator in {scope_label} scope: "
+                        f"{previous} and {file_id} ({locator})"
+                    ) from exc
+
+
+def _output_path_conflict(
+    output_path: Path, manifest_path: Path, connection: sqlite3.Connection
+) -> Path | None:
+    if output_path == manifest_path:
+        return manifest_path
+    rows = connection.execute("SELECT local_copy_path FROM files ORDER BY ordinal")
+    while batch := rows.fetchmany(256):
+        for (local_copy_path,) in batch:
+            copy_path = _resolve_copy_path(manifest_path, local_copy_path)
+            if output_path == copy_path:
+                return copy_path
+    return None
+
+
+def _append_finding(connection: sqlite3.Connection, finding: dict[str, Any]) -> None:
+    connection.execute(
+        "INSERT INTO findings (result_json) VALUES (?)",
+        (json.dumps(finding, ensure_ascii=False, separators=(",", ":")),),
+    )
+
+
+def _append_file_findings(
+    connection: sqlite3.Connection, file_result: dict[str, Any]
+) -> None:
+    media = file_result["media"]
+    local_copy = file_result["local_copy"]
+    file_id = file_result["file_id"]
+    if local_copy["identity_status"] != "match":
+        _append_finding(
+            connection,
+            {
+                "file_id": file_id,
+                "category": "source_copy_identity",
+                "status": local_copy["identity_status"],
+                "reasons": local_copy["identity_unknown_reasons"],
+            },
+        )
+    if media.get("probe_stderr"):
+        _append_finding(
+            connection,
+            {
+                "file_id": file_id,
+                "category": "probe_diagnostic",
+                "exit_code": media.get("probe_exit_code"),
+                "diagnostics": media["probe_stderr"],
+            },
+        )
+    for check in media["decode_checks"]:
+        if check.get("status") == "decode_failed" or check.get("diagnostics_present"):
+            _append_finding(
+                connection,
+                {
+                    "file_id": file_id,
+                    "category": "decode_diagnostic",
+                    "stream_index": check.get("stream_index"),
+                    "stream_type": check.get("stream_type"),
+                    "exit_code": check.get("exit_code"),
+                    "diagnostics": check.get("diagnostics", ""),
+                },
+            )
+    main_video_count = len(media.get("main_videos", []))
+    if main_video_count != EXPECTED_MAIN_VIDEO_STREAMS:
+        _append_finding(
+            connection,
+            {
+                "file_id": file_id,
+                "category": "main_video_stream_count",
+                "status": "unknown",
+                "observed": main_video_count,
+                "required": EXPECTED_MAIN_VIDEO_STREAMS,
+            },
+        )
+
+
+def _expected_fraction(expected: dict[str, Any]) -> Fraction | None:
+    raw = expected.get("expected_duration_ms_exact")
+    if not isinstance(raw, str):
+        return None
+    try:
+        if "/" in raw:
+            numerator, denominator = raw.split("/", 1)
+            return Fraction(int(numerator), int(denominator))
+        return Fraction(int(raw))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _build_scope_indexed(
+    connection: sqlite3.Connection,
     scope_name: str,
-    file_ids: list[str],
+    scope_key: str,
     declared_status: str,
-    file_results_by_id: dict[str, dict[str, Any]],
     expected: dict[str, Any],
     tolerance_ms: int,
+    batch_size: int,
 ) -> dict[str, Any]:
-    expected_ms: Fraction | None = None
-    expected_exact = expected.get("expected_duration_ms_exact")
-    if isinstance(expected_exact, str):
-        if "/" in expected_exact:
-            numerator, denominator = expected_exact.split("/", 1)
-            expected_ms = Fraction(int(numerator), int(denominator))
-        else:
-            expected_ms = Fraction(int(expected_exact))
-
-    stream_results: list[dict[str, Any]] = []
-    statuses: list[str] = []
-    for ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
-        total = Fraction(0)
-        contributing_count = 0
-        reasons: list[str] = []
-        for file_id in file_ids:
-            file_result = file_results_by_id[file_id]
-            media = file_result["media"]
+    totals = [Fraction(0), Fraction(0)]
+    contributing = [0, 0]
+    file_count = connection.execute(
+        "SELECT COUNT(*) FROM scope_ids WHERE scope = ?", (scope_key,)
+    ).fetchone()[0]
+    identity_matches = 0
+    identity_mismatches = 0
+    rows = connection.execute(
+        """
+        SELECT ids.ordinal, ids.file_id, files.result_json
+        FROM scope_ids AS ids
+        JOIN files ON files.file_id = ids.file_id
+        WHERE ids.scope = ?
+        ORDER BY ids.ordinal
+        """,
+        (scope_key,),
+    )
+    while batch := rows.fetchmany(batch_size):
+        for ordinal, file_id, result_json in batch:
+            result = json.loads(result_json)
+            media = result["media"]
+            identity_status = result["local_copy"]["identity_status"]
+            identity_matches += identity_status == "match"
+            identity_mismatches += identity_status == "mismatch"
             videos = media.get("main_videos", [])
-            if media.get("probe_exit_code") != 0:
-                reasons.append(f"{file_id}:media_probe_not_successfully_completed")
-            if len(videos) > EXPECTED_MAIN_VIDEO_STREAMS:
-                reasons.append(f"{file_id}:unexpected_main_video_stream_count")
-            duration = _file_duration_ms(file_result, ordinal)
-            if duration is None:
-                reasons.append(f"{file_id}:main_video_{ordinal}_duration_unavailable")
-            else:
-                total += duration
-                contributing_count += 1
-        if declared_status == "unknown":
-            reasons.append(f"{scope_name}_scope_not_confirmed_complete")
-        measured = total if not reasons else None
-        comparison = compare_duration(
-            expected_ms,
-            measured,
-            tolerance_ms,
-            unknown_reason=";".join(_unique(reasons)) or None,
+            for stream_ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
+                position = ordinal * 4
+                if media.get("probe_exit_code") != 0:
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO scope_reasons
+                            (scope, stream_ordinal, position, reason)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            scope_name,
+                            stream_ordinal,
+                            position,
+                            f"{file_id}:media_probe_not_successfully_completed",
+                        ),
+                    )
+                    position += 1
+                if len(videos) > EXPECTED_MAIN_VIDEO_STREAMS:
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO scope_reasons
+                            (scope, stream_ordinal, position, reason)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            scope_name,
+                            stream_ordinal,
+                            position,
+                            f"{file_id}:unexpected_main_video_stream_count",
+                        ),
+                    )
+                    position += 1
+                duration = _file_duration_ms(result, stream_ordinal)
+                if duration is None:
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO scope_reasons
+                            (scope, stream_ordinal, position, reason)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            scope_name,
+                            stream_ordinal,
+                            position,
+                            f"{file_id}:main_video_{stream_ordinal}_duration_unavailable",
+                        ),
+                    )
+                else:
+                    totals[stream_ordinal] += duration
+                    contributing[stream_ordinal] += 1
+
+    if declared_status == "unknown":
+        for stream_ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO scope_reasons
+                    (scope, stream_ordinal, position, reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    scope_name,
+                    stream_ordinal,
+                    2**63 - 1,
+                    f"{scope_name}_scope_not_confirmed_complete",
+                ),
+            )
+
+    expected_ms = _expected_fraction(expected)
+    streams: list[dict[str, Any]] = []
+    statuses: list[str] = []
+    for stream_ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
+        reason_count = connection.execute(
+            "SELECT COUNT(*) FROM scope_reasons WHERE scope = ? AND stream_ordinal = ?",
+            (scope_name, stream_ordinal),
+        ).fetchone()[0]
+        measured = totals[stream_ordinal] if reason_count == 0 else None
+        comparison = compare_duration(expected_ms, measured, tolerance_ms)
+        if reason_count:
+            unknown_reasons: list[Any] = []
+            if expected_ms is None:
+                unknown_reasons.append("expected_playback_duration_unavailable")
+            unknown_reasons.append(
+                _stream_marker(
+                    "scope_reasons",
+                    {"scope": scope_name, "stream_ordinal": stream_ordinal},
+                )
+            )
+            comparison["unknown_reasons"] = unknown_reasons
+        comparison["main_video_ordinal"] = stream_ordinal
+        comparison["observed_partial_duration_ms_exact"] = _fraction_text(
+            totals[stream_ordinal]
         )
-        comparison["main_video_ordinal"] = ordinal
-        comparison["observed_partial_duration_ms_exact"] = _fraction_text(total)
-        comparison["contributing_file_count"] = contributing_count
-        comparison["required_file_count"] = len(file_ids)
-        stream_results.append(comparison)
+        comparison["contributing_file_count"] = contributing[stream_ordinal]
+        comparison["required_file_count"] = file_count
+        streams.append(comparison)
         statuses.append(comparison["status"])
 
     local_status = _combine_statuses(statuses)
-    identity_statuses = [
-        file_results_by_id[file_id]["local_copy"]["identity_status"] for file_id in file_ids
-    ]
-    if not file_ids:
+    if file_count == 0:
         identity_status = "empty_scope"
-    elif any(status == "mismatch" for status in identity_statuses):
+    elif identity_mismatches:
         identity_status = "mismatch"
-    elif all(status == "match" for status in identity_statuses):
+    elif identity_matches == file_count:
         identity_status = "verified"
     else:
         identity_status = "unknown"
-    source_duration_status = (
-        local_status if identity_status in {"verified", "empty_scope"} else "unknown"
-    )
-
     return {
         "scope_id": scope_name,
         "declared_scope_status": declared_status,
-        "file_ids": file_ids,
+        "file_ids": _stream_marker("scope_file_ids", scope_key),
         "local_copy_duration_comparison": {
             "status": local_status,
             "expected_basis": expected,
-            "streams": stream_results,
+            "streams": streams,
             "cross_segment_continuity": "not_assessed",
             "continuity_unknown_reason": "summed_stream_duration_does_not_prove_no_gap_or_overlap",
         },
         "source_copy_identity_status": identity_status,
-        "source_duration_status": source_duration_status,
-    }
-
-
-def _read_manifest(manifest_path: Path) -> dict[str, Any]:
-    try:
-        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ManifestError(f"cannot read manifest: {exc}") from exc
-    return validate_manifest(raw)
-
-
-def _output_path_conflict(
-    output_path: Path, manifest_path: Path, manifest: dict[str, Any]
-) -> Path | None:
-    """拒绝让报告覆盖清单或任何被测本地副本。"""
-
-    if output_path == manifest_path:
-        return manifest_path
-    for entry in manifest["files"]:
-        copy_path = _resolve_copy_path(manifest_path, entry["local_copy_path"])
-        if output_path == copy_path:
-            return copy_path
-    return None
-
-
-def build_report(
-    manifest: dict[str, Any],
-    manifest_path: Path,
-    tolerance_ms: int = DEFAULT_SHORTFALL_TOLERANCE_MS,
-    *,
-    ffprobe: str = "ffprobe",
-    ffmpeg: str = "ffmpeg",
-) -> dict[str, Any]:
-    tolerance = parse_shortfall_tolerance_ms(tolerance_ms)
-    expected = derive_expected_playback_duration(manifest)
-    ffprobe_version = _tool_version(ffprobe)
-    ffmpeg_version = _tool_version(ffmpeg)
-    tool_errors = [
-        {"tool": name, "error": tool["execution_error"] or tool["stderr"]}
-        for name, tool in (("ffprobe", ffprobe_version), ("ffmpeg", ffmpeg_version))
-        if tool["exit_code"] != 0
-    ]
-    file_results = [
-        _inspect_file(entry, manifest_path, ffprobe, ffmpeg) for entry in manifest["files"]
-    ]
-    by_id = {entry["file_id"]: entry for entry in file_results}
-    scopes = {
-        "all_retained": _scope_result(
-            "all_retained",
-            manifest["retained_file_ids"],
-            manifest["retained_scope_status"],
-            by_id,
-            expected,
-            tolerance,
-        ),
-        "default_delivery": _scope_result(
-            "default_delivery",
-            manifest["default_file_ids"],
-            manifest["default_scope_status"],
-            by_id,
-            expected,
-            tolerance,
+        "source_duration_status": (
+            local_status
+            if identity_status in {"verified", "empty_scope"}
+            else "unknown"
         ),
     }
-    findings = _collect_findings(file_results, scopes, expected)
-    if manifest.get("source_action_instance_id") is None:
-        findings.insert(
-            0,
-            {
-                "category": "source_action_identity",
-                "status": "unknown",
-                "reason": "source_action_instance_id_not_available_in_manifest",
-            },
-        )
-    return {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "generated_at_utc": _utc_now(),
-        "execution_status": "completed_with_tool_errors" if tool_errors else "completed",
-        "acceptance_id": manifest["acceptance_id"],
-        "source_action_instance_id": manifest["source_action_instance_id"],
-        "source_action_instance_id_status": (
-            "known" if manifest["source_action_instance_id"] is not None else "unknown"
-        ),
-        "recording_kind": manifest["recording_kind"],
-        "recording_class": manifest["recording_class"],
-        "task_target_duration_ms": manifest["target_duration_ms"],
-        "shortfall_tolerance_ms": tolerance,
-        "expected_playback": expected,
-        "tools": {"ffprobe": ffprobe_version, "ffmpeg": ffmpeg_version},
-        "tool_errors": tool_errors,
-        "files": file_results,
-        "scopes": scopes,
-        "findings": findings,
-        "exit_code_meaning": "report_generation_status_only; media_findings_remain_authoritative",
-    }
 
 
-def _collect_findings(
-    file_results: list[dict[str, Any]],
-    scopes: dict[str, dict[str, Any]],
-    expected: dict[str, Any],
-) -> list[dict[str, Any]]:
-    findings: list[dict[str, Any]] = []
-    for file_result in file_results:
-        media = file_result["media"]
-        if file_result["local_copy"]["identity_status"] != "match":
-            findings.append(
-                {
-                    "file_id": file_result["file_id"],
-                    "category": "source_copy_identity",
-                    "status": file_result["local_copy"]["identity_status"],
-                    "reasons": file_result["local_copy"]["identity_unknown_reasons"],
-                }
+def _write_json_string_from_chunks(stream: Any, chunks: Iterable[str]) -> None:
+    stream.write('"')
+    for chunk in chunks:
+        if chunk:
+            stream.write(json.dumps(chunk, ensure_ascii=False)[1:-1])
+    stream.write('"')
+
+
+def _diagnostic_chunks(path: Path) -> Iterable[str]:
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    with path.open("rb") as source:
+        while chunk := source.read(64 * 1024):
+            text = decoder.decode(chunk)
+            if text:
+                yield text
+        final_text = decoder.decode(b"", final=True)
+        if final_text:
+            yield final_text
+
+
+def _write_streamed_value(
+    stream: Any,
+    value: Any,
+    connection: sqlite3.Connection,
+    diagnostic_dir: Path,
+    diagnostic_session_id: str,
+    batch_size: int,
+) -> None:
+    if isinstance(value, dict) and set(value) == {STREAM_MARKER}:
+        marker = value[STREAM_MARKER]
+        kind = marker.get("kind") if isinstance(marker, dict) else None
+        if kind == "diagnostic":
+            token = marker.get("token")
+            if not isinstance(token, str) or not token.startswith(diagnostic_session_id + "-"):
+                raise ValueError("invalid staged diagnostic reference")
+            path = diagnostic_dir / f"{token}.stderr"
+            _write_json_string_from_chunks(stream, _diagnostic_chunks(path))
+            return
+        if kind == "files":
+            stream.write("[")
+            rows = connection.execute(
+                "SELECT result_json FROM files ORDER BY ordinal"
             )
-        if media.get("probe_stderr"):
-            findings.append(
-                {
-                    "file_id": file_result["file_id"],
-                    "category": "probe_diagnostic",
-                    "exit_code": media.get("probe_exit_code"),
-                    "diagnostics": media["probe_stderr"],
-                }
+            first = True
+            while batch := rows.fetchmany(batch_size):
+                for (result_json,) in batch:
+                    if not first:
+                        stream.write(",")
+                    first = False
+                    _write_streamed_value(
+                        stream,
+                        json.loads(result_json),
+                        connection,
+                        diagnostic_dir,
+                        diagnostic_session_id,
+                        batch_size,
+                    )
+            stream.write("]")
+            return
+        if kind == "findings":
+            stream.write("[")
+            rows = connection.execute(
+                "SELECT result_json FROM findings ORDER BY ordinal"
             )
-        for check in media["decode_checks"]:
-            if check.get("status") == "decode_failed" or check.get("diagnostics_present"):
-                findings.append(
-                    {
-                        "file_id": file_result["file_id"],
-                        "category": "decode_diagnostic",
-                        "stream_index": check.get("stream_index"),
-                        "stream_type": check.get("stream_type"),
-                        "exit_code": check.get("exit_code"),
-                        "diagnostics": check.get("diagnostics", ""),
-                    }
-                )
-        main_video_count = len(media.get("main_videos", []))
-        if main_video_count != EXPECTED_MAIN_VIDEO_STREAMS:
-            findings.append(
-                {
-                    "file_id": file_result["file_id"],
-                    "category": "main_video_stream_count",
-                    "status": "unknown",
-                    "observed": main_video_count,
-                    "required": EXPECTED_MAIN_VIDEO_STREAMS,
-                }
+            first = True
+            while batch := rows.fetchmany(batch_size):
+                for (finding_json,) in batch:
+                    if not first:
+                        stream.write(",")
+                    first = False
+                    _write_streamed_value(
+                        stream,
+                        json.loads(finding_json),
+                        connection,
+                        diagnostic_dir,
+                        diagnostic_session_id,
+                        batch_size,
+                    )
+            stream.write("]")
+            return
+        if kind == "scope_file_ids":
+            scope_key = marker.get("key")
+            stream.write("[")
+            rows = connection.execute(
+                "SELECT file_id FROM scope_ids WHERE scope = ? ORDER BY ordinal",
+                (scope_key,),
+            )
+            first = True
+            while batch := rows.fetchmany(batch_size):
+                for (file_id,) in batch:
+                    if not first:
+                        stream.write(",")
+                    first = False
+                    stream.write(json.dumps(file_id, ensure_ascii=False))
+            stream.write("]")
+            return
+        if kind == "scope_reasons":
+            key = marker.get("key")
+            if not isinstance(key, dict):
+                raise ValueError("invalid streamed scope reason reference")
+            rows = connection.execute(
+                """
+                SELECT reason FROM scope_reasons
+                WHERE scope = ? AND stream_ordinal = ?
+                ORDER BY position, reason
+                """,
+                (key["scope"], key["stream_ordinal"]),
             )
 
-    if expected["status"] == "unknown":
-        findings.append(
-            {
-                "category": "expected_playback_duration",
-                "status": "unknown",
-                "reasons": expected["unknown_reasons"],
-            }
-        )
-    for scope in scopes.values():
-        comparison = scope["local_copy_duration_comparison"]
-        if comparison["status"] != "pass":
-            findings.append(
-                {
-                    "category": "scope_duration",
-                    "scope_id": scope["scope_id"],
-                    "status": comparison["status"],
-                    "streams": comparison["streams"],
-                }
+            def joined_reasons() -> Iterable[str]:
+                first_reason = True
+                while batch := rows.fetchmany(batch_size):
+                    for (reason,) in batch:
+                        if not first_reason:
+                            yield ";"
+                        first_reason = False
+                        yield reason
+
+            _write_json_string_from_chunks(stream, joined_reasons())
+            return
+        raise ValueError("unknown streamed report value")
+
+    if isinstance(value, dict):
+        stream.write("{")
+        for position, key in enumerate(sorted(value)):
+            if position:
+                stream.write(",")
+            stream.write(json.dumps(key, ensure_ascii=False))
+            stream.write(":")
+            _write_streamed_value(
+                stream,
+                value[key],
+                connection,
+                diagnostic_dir,
+                diagnostic_session_id,
+                batch_size,
             )
-    return findings
+        stream.write("}")
+        return
+    if isinstance(value, list):
+        stream.write("[")
+        for position, item in enumerate(value):
+            if position:
+                stream.write(",")
+            _write_streamed_value(
+                stream,
+                item,
+                connection,
+                diagnostic_dir,
+                diagnostic_session_id,
+                batch_size,
+            )
+        stream.write("]")
+        return
+    stream.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
-def _write_json(path: Path, document: dict[str, Any]) -> None:
+def _write_report_atomic(
+    path: Path,
+    report: dict[str, Any],
+    connection: sqlite3.Connection,
+    diagnostics: DiagnosticArtifacts,
+    batch_size: int,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -1126,11 +1917,30 @@ def _write_json(path: Path, document: dict[str, Any]) -> None:
     temporary_path = Path(temporary_name)
     try:
         with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(document, stream, ensure_ascii=False, indent=2, sort_keys=True)
+            _write_streamed_value(
+                stream,
+                report,
+                connection,
+                diagnostics.directory,
+                diagnostics.session_id,
+                batch_size,
+            )
             stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         temporary_path.replace(path)
     finally:
         temporary_path.unlink(missing_ok=True)
+
+
+def _positive_batch_size(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("batch size must be a positive integer") from exc
+    if parsed <= 0 or str(parsed) != value:
+        raise argparse.ArgumentTypeError("batch size must be a positive integer")
+    return parsed
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1145,7 +1955,129 @@ def _parser() -> argparse.ArgumentParser:
         help="整体时长短缺容限（非负整数毫秒，默认 100，允许 0）",
     )
     parser.add_argument("--output", required=True, type=Path, help="验收证据 JSON 输出路径")
+    parser.add_argument(
+        "--batch-size",
+        type=_positive_batch_size,
+        default=64,
+        help="临时 SQLite 索引和最终报告写出的批次大小（默认 64）",
+    )
     return parser
+
+
+def _run_indexed_validation(
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    output_path: Path,
+    connection: sqlite3.Connection,
+    diagnostics: DiagnosticArtifacts,
+    tolerance: int,
+    batch_size: int,
+) -> bool:
+    ffprobe_version = _tool_version("ffprobe", diagnostics)
+    ffmpeg_version = _tool_version("ffmpeg", diagnostics)
+    tool_errors = [
+        {
+            "tool": name,
+            "error": tool["execution_error"] or tool["stderr"],
+        }
+        for name, tool in (("ffprobe", ffprobe_version), ("ffmpeg", ffmpeg_version))
+        if tool["exit_code"] != 0
+    ]
+
+    if manifest.get("source_action_instance_id") is None:
+        _append_finding(
+            connection,
+            {
+                "category": "source_action_identity",
+                "status": "unknown",
+                "reason": "source_action_instance_id_not_available_in_manifest",
+            },
+        )
+
+    rows = connection.execute(
+        "SELECT ordinal, entry_json FROM files ORDER BY ordinal"
+    )
+    while batch := rows.fetchmany(batch_size):
+        for ordinal, entry_json in batch:
+            entry = json.loads(entry_json)
+            result = _inspect_file(entry, manifest_path, "ffprobe", "ffmpeg", diagnostics)
+            result_json = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            connection.execute(
+                "UPDATE files SET result_json = ? WHERE ordinal = ?",
+                (result_json, ordinal),
+            )
+            _append_file_findings(connection, result)
+        connection.commit()
+
+    expected = derive_expected_playback_duration(manifest)
+    scopes = {
+        "all_retained": _build_scope_indexed(
+            connection,
+            "all_retained",
+            "retained_file_ids",
+            manifest["retained_scope_status"],
+            expected,
+            tolerance,
+            batch_size,
+        ),
+        "default_delivery": _build_scope_indexed(
+            connection,
+            "default_delivery",
+            "default_file_ids",
+            manifest["default_scope_status"],
+            expected,
+            tolerance,
+            batch_size,
+        ),
+    }
+    if expected["status"] == "unknown":
+        _append_finding(
+            connection,
+            {
+                "category": "expected_playback_duration",
+                "status": "unknown",
+                "reasons": expected["unknown_reasons"],
+            },
+        )
+    for scope in scopes.values():
+        comparison = scope["local_copy_duration_comparison"]
+        if comparison["status"] != "pass":
+            _append_finding(
+                connection,
+                {
+                    "category": "scope_duration",
+                    "scope_id": scope["scope_id"],
+                    "status": comparison["status"],
+                    "streams": comparison["streams"],
+                },
+            )
+
+    report = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "generated_at_utc": _utc_now(),
+        "execution_status": (
+            "completed_with_tool_errors" if tool_errors else "completed"
+        ),
+        "acceptance_id": manifest["acceptance_id"],
+        "source_action_instance_id": manifest["source_action_instance_id"],
+        "source_action_instance_id_status": (
+            "known" if manifest["source_action_instance_id"] is not None else "unknown"
+        ),
+        "recording_kind": manifest["recording_kind"],
+        "recording_class": manifest["recording_class"],
+        "task_target_duration_ms": manifest["target_duration_ms"],
+        "shortfall_tolerance_ms": tolerance,
+        "processing_batch_size": batch_size,
+        "expected_playback": expected,
+        "tools": {"ffprobe": ffprobe_version, "ffmpeg": ffmpeg_version},
+        "tool_errors": tool_errors,
+        "files": _stream_marker("files"),
+        "scopes": scopes,
+        "findings": _stream_marker("findings"),
+        "exit_code_meaning": "report_generation_status_only; media_findings_remain_authoritative",
+    }
+    _write_report_atomic(output_path, report, connection, diagnostics, batch_size)
+    return bool(tool_errors)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1160,30 +2092,45 @@ def main(argv: Sequence[str] | None = None) -> int:
     if output_path == manifest_path:
         print("验收报告输出路径不能覆盖输入清单", file=sys.stderr)
         return 2
+
     try:
-        manifest = _read_manifest(manifest_path)
+        with tempfile.TemporaryDirectory(prefix="osmo-media-validation-") as temporary_root:
+            temporary_directory = Path(temporary_root)
+            database_path = temporary_directory / "acceptance-index.sqlite3"
+            diagnostics_directory = temporary_directory / "diagnostics"
+            diagnostics_directory.mkdir()
+            diagnostics = DiagnosticArtifacts(diagnostics_directory)
+            with sqlite3.connect(database_path) as connection:
+                _initialize_index(connection)
+                manifest = _load_manifest_index(manifest_path, connection)
+                conflict = _output_path_conflict(output_path, manifest_path, connection)
+                if conflict is not None:
+                    print(
+                        f"验收报告输出路径不能覆盖输入文件：{conflict}",
+                        file=sys.stderr,
+                    )
+                    return 2
+                tool_errors = _run_indexed_validation(
+                    manifest,
+                    manifest_path,
+                    output_path,
+                    connection,
+                    diagnostics,
+                    tolerance,
+                    args.batch_size,
+                )
     except ManifestError as exc:
         print(f"验收清单无效：{exc}", file=sys.stderr)
         return 2
-
-    conflict = _output_path_conflict(output_path, manifest_path, manifest)
-    if conflict is not None:
-        print(f"验收报告输出路径不能覆盖输入文件：{conflict}", file=sys.stderr)
-        return 2
-
-    report = build_report(manifest, manifest_path, tolerance)
-    try:
-        _write_json(output_path, report)
-    except OSError as exc:
-        print(f"无法写入验收报告：{exc}", file=sys.stderr)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        print(f"无法完成媒体验收：{exc}", file=sys.stderr)
         return 2
     print(f"已写入验收证据：{output_path}")
     print(
         "媒体结论见报告中的 scopes、findings 与逐流 decode 诊断；"
         "退出码 0 仅表示报告已生成。"
     )
-    return 2 if report["tool_errors"] else 0
-
+    return 2 if tool_errors else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

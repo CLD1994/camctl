@@ -42,6 +42,7 @@ def valid_manifest():
                 "source_size_bytes": 10,
                 "source_sha256": "a" * 64,
                 "source_evidence_ref": "capture-record.json#file-1",
+                "source_locator_basis_ref": "camera-readback.json#file-1-path",
                 "local_copy_path": "segment-1.OSV",
             }
         ],
@@ -226,7 +227,13 @@ def test_abnormal_manifest_keeps_partial_default_scope_separate_from_retained_sc
     subject = load_subject()
     manifest = valid_manifest()
     second = dict(manifest["files"][0])
-    second.update(file_id="segment-2", output_id="output-2")
+    second.update(
+        file_id="segment-2",
+        output_id="output-2",
+        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_locator_basis_ref="camera-readback.json#file-2-path",
+        local_copy_path="segment-2.OSV",
+    )
     manifest["files"].append(second)
     manifest.update(
         recording_class="abnormal",
@@ -238,6 +245,141 @@ def test_abnormal_manifest_keeps_partial_default_scope_separate_from_retained_sc
 
     assert result["retained_file_ids"] == ["segment-1", "segment-2"]
     assert result["default_file_ids"] == ["segment-1"]
+
+
+@pytest.mark.parametrize("recording_class", ["normal", "abnormal"])
+def test_complete_retained_scope_must_cover_every_retained_original(recording_class):
+    subject = load_subject()
+    manifest = valid_manifest()
+    second = dict(manifest["files"][0])
+    second.update(
+        file_id="segment-2",
+        output_id="output-2",
+        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_locator_basis_ref="camera-readback.json#file-2-path",
+        local_copy_path="segment-2.OSV",
+    )
+    manifest["files"].append(second)
+    manifest.update(
+        recording_class=recording_class,
+        retained_scope_status="complete",
+        retained_file_ids=["segment-1"],
+        default_scope_status="unknown",
+        default_file_ids=["segment-1"],
+    )
+
+    with pytest.raises(subject.ManifestError, match="retained_file_ids must cover"):
+        subject.validate_manifest(manifest)
+
+
+def test_unknown_retained_scope_can_keep_a_partial_list_of_retained_originals():
+    subject = load_subject()
+    manifest = valid_manifest()
+    second = dict(manifest["files"][0])
+    second.update(
+        file_id="segment-2",
+        output_id="output-2",
+        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_locator_basis_ref="camera-readback.json#file-2-path",
+        local_copy_path="segment-2.OSV",
+    )
+    manifest["files"].append(second)
+    manifest.update(
+        retained_scope_status="unknown",
+        retained_file_ids=["segment-1"],
+        default_scope_status="unknown",
+        default_file_ids=["segment-1"],
+    )
+
+    result = subject.validate_manifest(manifest)
+
+    assert result["retained_scope_status"] == "unknown"
+    assert result["retained_file_ids"] == ["segment-1"]
+
+
+def test_preview_and_observed_empty_files_do_not_expand_complete_retained_scope():
+    subject = load_subject()
+    manifest = valid_manifest()
+    preview = dict(manifest["files"][0])
+    preview.update(
+        file_id="preview-1",
+        output_id="preview-output-1",
+        role="preview",
+        source_device_path="DCIM/CAM001/segment-1.LRF",
+        source_locator_basis_ref="camera-readback.json#preview-1-path",
+        local_copy_path="segment-1.LRF",
+        preview_of_output_id="output-1",
+    )
+    empty = dict(manifest["files"][0])
+    empty.update(
+        file_id="empty-tail",
+        output_id=None,
+        source_device_path="DCIM/CAM001/empty-tail.OSV",
+        source_locator_basis_ref="camera-readback.json#empty-tail-path",
+        source_size_bytes=0,
+        file_status="observed_empty",
+        local_copy_path="empty-tail.OSV",
+    )
+    manifest["files"].extend([preview, empty])
+
+    result = subject.validate_manifest(manifest)
+
+    assert result["retained_file_ids"] == ["segment-1"]
+
+
+@pytest.mark.parametrize("local_copy_path", ["segment-1.OSV", "second-copy.OSV"])
+def test_complete_scope_rejects_duplicate_reliable_source_locator(local_copy_path):
+    subject = load_subject()
+    manifest = valid_manifest()
+    second = dict(manifest["files"][0])
+    second.update(
+        file_id="segment-alias",
+        output_id="output-alias",
+        source_locator_basis_ref="camera-readback.json#independent-record-for-same-path",
+        local_copy_path=local_copy_path,
+    )
+    manifest["files"].append(second)
+    manifest.update(
+        recording_class="abnormal",
+        retained_file_ids=["segment-1", "segment-alias"],
+        default_scope_status="unknown",
+        default_file_ids=["segment-1"],
+    )
+
+    with pytest.raises(subject.ManifestError, match="duplicate reliable source locator"):
+        subject.validate_manifest(manifest)
+
+
+def test_same_bytes_at_distinct_reliable_source_paths_remain_distinct_files():
+    subject = load_subject()
+    manifest = valid_manifest()
+    second = dict(manifest["files"][0])
+    second.update(
+        file_id="segment-2",
+        output_id="output-2",
+        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_locator_basis_ref=manifest["files"][0]["source_locator_basis_ref"],
+        local_copy_path="segment-2.OSV",
+    )
+    manifest["files"].append(second)
+    manifest.update(
+        recording_class="abnormal",
+        retained_file_ids=["segment-1", "segment-2"],
+        default_scope_status="unknown",
+        default_file_ids=["segment-1"],
+    )
+
+    result = subject.validate_manifest(manifest)
+
+    assert result["retained_file_ids"] == ["segment-1", "segment-2"]
+
+
+def test_local_source_hash_cannot_make_a_missing_locator_reliable():
+    subject = load_subject()
+    entry = valid_manifest()["files"][0]
+    entry["source_locator_basis_ref"] = None
+
+    assert subject._source_locator_key(entry) is None
 
 
 def test_normal_manifest_can_preserve_unknown_collection_or_default_scope():
