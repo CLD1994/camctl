@@ -99,12 +99,14 @@ camctl_pytest() {
 
 **输入与交付：** 消费规格中的完整结构及档位表，交付 `PhotoSettings`、`CaptureFormat`、同源 Schema、格式描述和命令所需元数据。沿用原执行定义保存 `output_storage` 与 `start_call_timeout_s`。
 
-- [ ] **步骤 1：增加允许域及分支测试。** 建议用 `test_photo_schema_has_closed_independent_branches` 验证五字段、四种曝光、八种白平衡及两种对焦；以独立的合法／非法样例断言缺项、`null`、错误类型、额外 `tint`、不适用字段均失败。`test_photo_domains_are_exact_and_positive` 核对 10 档 ISO、13 档光圈、34 档快门的目录数量、独立代表值、全部候选可通过及相邻域外值失败；不在测试另抄完整生产表。
-- [ ] **步骤 2：增加数值及缺省边界测试。** `test_short_shutters_keep_distinct_decimal_values` 精确核对三个短快门，并以 `1/6→0.167`、`1/180→0.00556` 及有限小数代表值独立验证目录生成的精度；域外邻近值不能靠近似匹配通过。`test_manual_white_balance_integer_bounds` 覆盖 2000、10000、区间整数及 1999、10001、小数、缺项；`test_manual_focus_absence_differs_from_zero` 覆盖省略、`-5`、`5`、`0` 和 AF-S 错带字段。
-- [ ] **步骤 3：确认当前测试失败。** 执行 `camctl_pytest apps/camctl/tests/unit/devices/test_hasselblad_definitions.py apps/camctl/tests/unit/devices/test_hasselblad_parameters.py -q`，确认失败指向缺少完整参数契约。
-- [ ] **步骤 4：实现同源定义及真实任务校验。** 用一份字段目录生成各曝光分支的共享节点、标题和说明；图片格式及数值档位使用规格要求的带标题常量表示。将同一校验用于 `parse_photo_settings` 与真实任务工厂；`capability()` 从固定任务事实生成说明，离线导出完整能力。手动调焦说明标明临时选项及省略语义。
-- [ ] **步骤 5：验证受理和保存。** 扩展 `test_photo_acceptance_saves_explicit_params_and_call_budget`：完整参数按原始／生效输入保存，源模式和 180 秒进入执行定义；修改当前配置不改变原动作。`describe` 在无设备及无可执行工具的测试环境仍成功。运行上述单元及 `camctl_pytest apps/camctl/tests/integration/acceptance -q`。
-- [ ] **步骤 6：审查并形成阶段提交。** 建议提交名为“定义 Hasselblad 完整单张参数与同源能力”；交接实际字段类型、Schema、格式描述及 task factory 行为。
+- [x] **步骤 1：增加允许域及分支测试。** 建议用 `test_photo_schema_has_closed_independent_branches` 验证五字段、四种曝光、八种白平衡及两种对焦；以独立的合法／非法样例断言缺项、`null`、错误类型、额外 `tint`、不适用字段均失败。`test_photo_domains_are_exact_and_positive` 核对 10 档 ISO、13 档光圈、34 档快门的目录数量、独立代表值、全部候选可通过及相邻域外值失败；不在测试另抄完整生产表。
+- [x] **步骤 2：增加数值及缺省边界测试。** `test_short_shutters_keep_distinct_decimal_values` 精确核对三个短快门，并以 `1/6→0.167`、`1/180→0.00556` 及有限小数代表值独立验证目录生成的精度；域外邻近值不能靠近似匹配通过。`test_manual_white_balance_integer_bounds` 覆盖 2000、10000、区间整数及 1999、10001、小数、缺项；`test_manual_focus_absence_differs_from_zero` 覆盖省略、`-5`、`5`、`0` 和 AF-S 错带字段。
+- [x] **步骤 3：确认当前测试失败。** 执行 `camctl_pytest apps/camctl/tests/unit/devices/test_hasselblad_definitions.py apps/camctl/tests/unit/devices/test_hasselblad_parameters.py -q`，确认失败指向缺少完整参数契约。
+- [x] **步骤 4：实现同源定义及真实任务校验。** 用一份字段目录生成各曝光分支的共享节点、标题和说明；图片格式及数值档位使用规格要求的带标题常量表示。将同一校验用于 `parse_photo_settings` 与真实任务工厂；`capability()` 从固定任务事实生成说明，离线导出完整能力。手动调焦说明标明临时选项及省略语义。
+- [x] **步骤 5：验证受理和保存。** 扩展 `test_photo_acceptance_saves_explicit_params_and_call_budget`：完整参数按原始／生效输入保存，源模式和 180 秒进入执行定义；修改当前配置不改变原动作。`describe` 在无设备及无可执行工具的测试环境仍成功。运行上述单元及 `camctl_pytest apps/camctl/tests/integration/acceptance -q`。
+- [x] **步骤 6：审查并形成阶段提交。** 建议提交名为“定义 Hasselblad 完整单张参数与同源能力”；交接实际字段类型、Schema、格式描述及 task factory 行为。
+
+**阶段证据：** 实现提交 `8df61f8`、修复提交 `a0447ac` 已通过独立规格及质量复核，并合入协调提交 `8bea559`。协调工作区以 Python 3.11.16 运行参数／定义及直接受理消费者单元测试，23 项通过；独立运行 acceptance 集成目录，268 项通过。验证包含完整参数原样保存、原源模式和 180 秒预算、无工具路径离线 describe，以及低精度首次导入时的精确快门目录。本阶段不包含实际命令执行、双格式产物流程、安装包或真机验收；这些继续由后续任务负责。
 
 ## H2：解析 RAW／JPEG 响应并固定机内身份
 
