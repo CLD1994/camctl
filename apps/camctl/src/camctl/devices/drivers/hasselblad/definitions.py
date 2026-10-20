@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 from typing import Mapping
 
 from camctl.contracts.json_values import JsonValue
 from camctl.devices.catalog import ActionCapability, DriverDefinition
+from camctl.devices.drivers.hasselblad.parameters import (
+    PHOTO_COMMANDS,
+    parse_photo_settings,
+    photo_schema,
+)
 from camctl.devices.ports import DriverDeclaration
 from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
 from camctl.devices.task_metadata import cancellation_description
@@ -23,6 +27,8 @@ __all__ = [
 
 DRIVER_ID = "hasselblad_cfv100c"
 PARAMETER_TYPE = "hasselblad_photo"
+_PHOTO_ACTION_TYPE = "camera_take_photo"
+_PHOTO_START_CALL_TIMEOUT_S = Decimal("180")
 DRIVER_DECLARATION = DriverDeclaration(
     control_supported=True,
     stop_supported=False,
@@ -35,21 +41,18 @@ DRIVER_DECLARATION = DriverDeclaration(
     local_read_recovery_supported=True,
 )
 
-_PHOTO_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {"type": {"const": PARAMETER_TYPE}},
-    "required": ["type"],
-    "additionalProperties": False,
-}
 
-
-def _photo_task(_effective_params: Mapping[str, JsonValue]) -> CaptureTask:
+def _photo_task_facts(output_storage: CaptureStorage = CaptureStorage.HOST) -> CaptureTask:
     return CaptureTask(
-        action_type="camera_take_photo",
-        output_storage=CaptureStorage.HOST,
-        start_call_timeout_s=Decimal("180"),
+        action_type=_PHOTO_ACTION_TYPE,
+        output_storage=output_storage,
+        start_call_timeout_s=_PHOTO_START_CALL_TIMEOUT_S,
     )
+
+
+def _photo_task(effective_params: Mapping[str, JsonValue]) -> CaptureTask:
+    parse_photo_settings(effective_params)
+    return _photo_task_facts()
 
 
 def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFactory:
@@ -65,15 +68,23 @@ def _deployed_photo_factory(declaration: Mapping[str, object]) -> CaptureTaskFac
 
 def capability() -> ActionCapability:
     """返回唯一权威的单张参数定义，供说明导出与受理共同使用。"""
-    task = _photo_task({"type": PARAMETER_TYPE})
+    task = _photo_task_facts()
     return ActionCapability(
-        action_type="camera_take_photo",
+        action_type=_PHOTO_ACTION_TYPE,
         parameter_type=PARAMETER_TYPE,
-        name="Hasselblad 单张 RAW",
-        description=("执行一次单张 RAW 拍摄；驱动沿用机身已有曝光、白平衡和对焦设置。"
-                     + cancellation_description(task)),
+        name="Hasselblad 单张拍照",
+        description=(
+            "用户明确选择图片格式、曝光、白平衡和对焦后，驱动执行一次拍摄。"
+            f"每次单张拍摄均将 `{PHOTO_COMMANDS.DRIVE_MODE_FIELD.value}` 设置为 "
+            f"`{PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value}`。"
+            f"手动白平衡通过 `{PHOTO_COMMANDS.WHITE_BALANCE_FIELD.value}` 设置，"
+            f"色调固定为 `{PHOTO_COMMANDS.WHITE_BALANCE_TINT.value}`。"
+            "手动调焦相对移动量是开发验证临时选项；省略时不移动焦点，正值向无限远，"
+            "负值向近处，单位为 CLI 调焦单位。"
+            + cancellation_description(task)
+        ),
         preview_supported=True,
-        schema=deepcopy(_PHOTO_SCHEMA),
+        schema=photo_schema(),
         defaults={},
         task_factory=_photo_task,
         deployment_task_factory=_deployed_photo_factory,
