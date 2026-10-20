@@ -8,7 +8,11 @@ from typing import Mapping
 
 from camctl.contracts.json_values import JsonValue
 from camctl.devices.catalog import ActionCapability, DriverDefinition
-from camctl.devices.drivers.hasselblad.parameters import parse_photo_settings, photo_schema
+from camctl.devices.drivers.hasselblad.parameters import (
+    PHOTO_COMMANDS,
+    parse_photo_settings,
+    photo_schema,
+)
 from camctl.devices.ports import DriverDeclaration
 from camctl.devices.tasks import CaptureStorage, CaptureTask, CaptureTaskFactory
 from camctl.devices.task_metadata import cancellation_description
@@ -71,6 +75,10 @@ def capability() -> ActionCapability:
         name="Hasselblad 单张拍照",
         description=(
             "用户明确选择图片格式、曝光、白平衡和对焦后，驱动执行一次拍摄。"
+            f"每次单张拍摄均将 `{PHOTO_COMMANDS.DRIVE_MODE_FIELD.value}` 设置为 "
+            f"`{PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value}`。"
+            f"手动白平衡通过 `{PHOTO_COMMANDS.WHITE_BALANCE_FIELD.value}` 设置，"
+            f"色调固定为 `{PHOTO_COMMANDS.WHITE_BALANCE_TINT.value}`。"
             "手动调焦相对移动量是开发验证临时选项；省略时不移动焦点，正值向无限远，"
             "负值向近处，单位为 CLI 调焦单位。"
             + cancellation_description(task)

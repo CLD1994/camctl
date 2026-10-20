@@ -16,6 +16,7 @@ from camctl.devices.drivers.hasselblad.definitions import (
 from camctl.devices.drivers.hasselblad.parameters import (
     CAPTURE_FORMATS,
     CaptureFormat,
+    PHOTO_COMMANDS,
     photo_schema,
 )
 from camctl.devices.tasks import CaptureStorage
@@ -86,6 +87,14 @@ def test_hasselblad_photo_definition_is_exported_with_its_fixed_task():
         for item in CAPTURE_FORMATS.values()
     ]
     assert all(word in description["description"] for word in ("曝光", "白平衡", "对焦", "开发验证临时选项"))
+    assert (
+        f"`{PHOTO_COMMANDS.DRIVE_MODE_FIELD.value}` 设置为 "
+        f"`{PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value}`"
+    ) in description["description"]
+    assert (
+        f"`{PHOTO_COMMANDS.WHITE_BALANCE_FIELD.value}` 设置，色调固定为 "
+        f"`{PHOTO_COMMANDS.WHITE_BALANCE_TINT.value}`"
+    ) in description["description"]
     assert all(word in description["description"] for word in ("启动前", "启动后", "不支持取消"))
     assert parameter is not None
     assert parameter.defaults == {}

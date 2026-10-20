@@ -1,6 +1,8 @@
 """真实部署目录、首次受理和历史恢复固定 Hasselblad 正式源选择。"""
 
 import json
+import subprocess
+import sys
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
@@ -167,3 +169,53 @@ async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path
     }
     assert stdout.getvalue().count("\n") == 1
     assert stderr.getvalue() == ""
+
+
+async def test_first_import_under_low_decimal_precision_keeps_shutter_domain_exact():
+    script = """
+import sys
+sys.dont_write_bytecode = True
+from decimal import Decimal, localcontext
+with localcontext() as context:
+    context.prec = 1
+    from camctl.devices.drivers.hasselblad.parameters import parse_photo_settings, photo_schema
+
+schema = photo_schema()
+manual = next(
+    branch for branch in schema["properties"]["exposure"]["oneOf"]
+    if branch["properties"]["mode"]["const"] == "M"
+)
+shutters = {choice["const"] for choice in manual["properties"]["shutter_s"]["oneOf"]}
+assert Decimal("0.00025") in shutters
+assert Decimal("0.0002") not in shutters
+assert Decimal("0.167") in shutters
+assert Decimal("0.00556") in shutters
+
+def params(shutter):
+    return {
+        "type": "hasselblad_photo",
+        "capture_format": "raw",
+        "exposure": {
+            "mode": "M", "iso": 800, "aperture": Decimal("8"),
+            "shutter_s": Decimal(shutter),
+        },
+        "white_balance": {"mode": "auto"},
+        "focus": {"mode": "MF"},
+    }
+
+assert parse_photo_settings(params("0.00025")).exposure.shutter_s == Decimal("0.00025")
+from camctl.acceptance.schema import BodySchemaError
+try:
+    parse_photo_settings(params("0.0002"))
+except BodySchemaError:
+    pass
+else:
+    raise AssertionError("0.0002 must be rejected")
+print("finite=0.00025; invalid=0.0002; recurring=0.167,0.00556")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "finite=0.00025; invalid=0.0002; recurring=0.167,0.00556"

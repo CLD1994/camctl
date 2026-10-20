@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP, localcontext
+from decimal import Decimal
 from enum import StrEnum
 from fractions import Fraction
 from types import MappingProxyType
@@ -163,7 +163,40 @@ def _finite_fraction(value: Fraction) -> Decimal | None:
         return None
     scale = max(twos, fives)
     coefficient = value.numerator * 2 ** (scale - twos) * 5 ** (scale - fives)
-    return Decimal(coefficient).scaleb(-scale)
+    digits = tuple(int(digit) for digit in str(abs(coefficient)))
+    return Decimal((int(coefficient < 0), digits, -scale))
+
+
+def _round_fraction_to_three_significant_digits(value: Fraction) -> Decimal:
+    """用整数运算把循环分数按三位有效数字 half-up 舍入一次。"""
+    numerator = abs(value.numerator)
+    denominator = value.denominator
+    if numerator == 0:
+        return Decimal(0)
+
+    exponent = len(str(numerator)) - len(str(denominator))
+    if exponent >= 0:
+        if numerator < denominator * 10**exponent:
+            exponent -= 1
+    elif numerator * 10 ** (-exponent) < denominator:
+        exponent -= 1
+
+    decimal_places = 2 - exponent
+    if decimal_places >= 0:
+        scaled_numerator = numerator * 10**decimal_places
+        scaled_denominator = denominator
+    else:
+        scaled_numerator = numerator
+        scaled_denominator = denominator * 10 ** (-decimal_places)
+    coefficient, remainder = divmod(scaled_numerator, scaled_denominator)
+    if 2 * remainder >= scaled_denominator:
+        coefficient += 1
+    if coefficient == 1000:
+        coefficient //= 10
+        decimal_places -= 1
+
+    digits = tuple(int(digit) for digit in str(coefficient))
+    return Decimal((int(value.numerator < 0), digits, -decimal_places))
 
 
 def _shutter_seconds(value: Decimal | Fraction) -> Decimal:
@@ -172,11 +205,7 @@ def _shutter_seconds(value: Decimal | Fraction) -> Decimal:
     exact = _finite_fraction(value)
     if exact is not None:
         return exact
-    with localcontext() as context:
-        context.prec = 64
-        quotient = Decimal(value.numerator) / Decimal(value.denominator)
-        quantum = Decimal(1).scaleb(quotient.adjusted() - 2)
-        return quotient.quantize(quantum, rounding=ROUND_HALF_UP)
+    return _round_fraction_to_three_significant_digits(value)
 
 
 _ISO_VALUES = (64, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600)
