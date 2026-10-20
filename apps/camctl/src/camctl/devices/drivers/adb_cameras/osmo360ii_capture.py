@@ -6,7 +6,7 @@ import shlex
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
-from camctl.devices.tasks import (CancelCompletionPolicy, CaptureTask, CompletionMode, EndControl, StartReturn)
+from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, CaptureTask, CompletionMode, EndControl, StartReturn)
 from .action6_record import _digest_timeout
 from .commands import CameraModel, OSMO_RECORD_FORMAT, OSMO_SESSION_SETUP
 from .contracts import CameraCall, CameraContract
@@ -25,7 +25,9 @@ def _task(params):
         file_completion_wait_s=Decimal("30"), ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "osv", "min_count": 1,
-            "exact_count": None if timelapse else 1, "require_pairing": False, "min_size_bytes": 1},))
+            "exact_count": None, "require_pairing": False, "min_size_bytes": 1},),
+        result_policy=(CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1 if timelapse
+            else CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1))
     if timelapse:
         task = replace(task, duration_based=True, wait_after_send=True, end_control=EndControl.DEVICE,
             start_return_meaning=StartReturn.SENT, completion_mode=CompletionMode.TIME_AND_OUTPUTS,

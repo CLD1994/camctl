@@ -22,6 +22,13 @@ class CompletionMode(IntEnum):
     TIME_AND_OUTPUTS = 2
 
 
+class CaptureResultPolicy(StrEnum):
+    """显式固定拍摄结果的设备专属解释方式。"""
+
+    OSMO360II_RECORD_SEGMENTS_V1 = "osmo360ii_record_segments_v1"
+    OSMO_EMPTY_TAIL_CLASSIFICATION_V1 = "osmo_empty_tail_classification_v1"
+
+
 class CaptureStorage(StrEnum):
     """拍摄任务正式产物由设备保留还是写入主机。"""
 
@@ -51,6 +58,7 @@ class CaptureTask:
     ownership_mode: int | None = None
     output_scope: dict[str, JsonValue] | None = None
     product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
+    result_policy: CaptureResultPolicy | None = None
     file_completion_wait_s: JsonValue = None
     output_storage: CaptureStorage | None = None
     cancel_completion_policy: CancelCompletionPolicy | None = None

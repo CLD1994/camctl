@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from camctl.capture.models import build_capture_spec, validate_capture_spec
+from camctl.capture.models import CaptureDefinition, CaptureInput, build_capture_spec, validate_capture_spec
 from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
 
 
@@ -283,3 +283,48 @@ def test_task_factory_can_freeze_startup_margin(margin_ms):
         start_return_meaning=StartReturn.SENT, startup_margin_ms=margin_ms)
     assert build_capture_spec("camera_record", task) == {
         "target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": margin_ms}
+
+
+@pytest.mark.parametrize(("parameter_type", "action_type", "policy"), [
+    ("osmo360ii_record", "camera_record", "osmo360ii_record_segments_v1"),
+    ("osmo360ii_timelapse", "camera_timelapse", "osmo_empty_tail_classification_v1"),
+])
+def test_osmo_result_policy_survives_task_build_acceptance_and_saved_definition_read(
+    parameter_type, action_type, policy
+):
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+
+    task = osmo360ii_contract().task_factories[parameter_type]({"duration_s": 12})
+    spec = build_capture_spec(action_type, task)
+    assert task.result_policy.value == policy
+    assert spec["result_policy"] == policy
+    assert validate_capture_spec(action_type, spec)["result_policy"] == policy
+    definition = CaptureDefinition.build(CaptureInput(action_type, {}, task))
+    assert definition.result_policy.value == policy
+
+
+def test_capture_result_policy_rejects_unknown_policy_and_fixed_segment_count():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+
+    task = osmo360ii_contract().task_factories["osmo360ii_record"]({"duration_s": 12})
+    spec = build_capture_spec("camera_record", task)
+    invalid_policy = {**spec, "result_policy": "unregistered_policy"}
+    with pytest.raises(ValueError, match="策略未登记"):
+        validate_capture_spec("camera_record", invalid_policy)
+
+    limited_products = {**spec, "product_rules": [
+        {**spec["product_rules"][0], "exact_count": 1}
+    ]}
+    with pytest.raises(ValueError, match="不得限制段数"):
+        validate_capture_spec("camera_record", limited_products)
+
+
+def test_capture_result_policy_cannot_be_reused_for_another_capture_action():
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+
+    task = osmo360ii_contract().task_factories["osmo360ii_timelapse"]({"duration_s": 12})
+    spec = build_capture_spec("camera_timelapse", task)
+    with pytest.raises(ValueError, match="只适用于 camera_record"):
+        validate_capture_spec("camera_timelapse", {
+            **spec, "result_policy": "osmo360ii_record_segments_v1"
+        })

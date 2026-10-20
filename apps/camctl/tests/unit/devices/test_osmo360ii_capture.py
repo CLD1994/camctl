@@ -66,7 +66,7 @@ def test_record_task_requires_one_nonzero_osv_and_independent_stop_wait():
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     assert task.ownership_mode == 2
     assert task.product_rules == ({"kind": "video", "format_id": "osv", "min_count": 1,
-        "exact_count": 1, "require_pairing": False, "min_size_bytes": 1},)
+        "exact_count": None, "require_pairing": False, "min_size_bytes": 1},)
 
 
 def test_timelapse_task_freezes_natural_wait_and_finite_cancel_policy():
@@ -204,3 +204,10 @@ async def test_current_driver_interprets_start_using_original_frozen_record_cont
     result = await _driver(transport).control(request)
     assert [item.type for item in result.observations] == [observation]
     assert sum(command[-2:] == ['02', '01'] for command in transport.commands) == 1
+
+
+def test_osmo_record_task_declares_segment_policy_without_fixed_osv_count():
+    task = _contract().task_factories["osmo360ii_record"]({"duration_s": 12})
+    assert task.result_policy.value == "osmo360ii_record_segments_v1"
+    assert task.product_rules == ({"kind": "video", "format_id": "osv", "min_count": 1,
+        "exact_count": None, "require_pairing": False, "min_size_bytes": 1},)

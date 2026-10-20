@@ -1,0 +1,369 @@
+"""拍摄分段规则使用的稳定事实、有限摘要与结果分类。"""
+
+from dataclasses import dataclass
+from enum import StrEnum
+
+from camctl.contracts.values import MAX_OBJECT_ID
+from camctl.devices.segments import SegmentKey
+
+
+class EvidenceState(StrEnum):
+    """事实为真、已证伪或仍未知。"""
+
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    UNKNOWN = "unknown"
+
+
+class SegmentMemberRole(StrEnum):
+    ORIGINAL = "original"
+    PREVIEW = "preview"
+    OTHER = "other"
+
+
+class OwnershipState(StrEnum):
+    OWNED = "owned"
+    NOT_OWNED = "not_owned"
+    UNKNOWN = "unknown"
+
+
+class FileCompletionState(StrEnum):
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    UNKNOWN = "unknown"
+
+
+class SegmentAssessmentStatus(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNCONFIRMED = "unconfirmed"
+
+
+class SegmentAssessmentReason(StrEnum):
+    NONE = "none"
+    EXPLICIT_ERROR = "explicit_error"
+    STOP_UNCONFIRMED = "stop_unconfirmed"
+    FILE_WAIT_UNCONFIRMED = "file_wait_unconfirmed"
+    SCAN_UNCONFIRMED = "scan_unconfirmed"
+    ORDER_UNKNOWN = "order_unknown"
+    MEMBER_UNKNOWN = "member_unknown"
+    NO_NONZERO_ORIGINAL = "no_nonzero_original"
+    GAP = "gap"
+    COMPLETION_UNCONFIRMED = "completion_unconfirmed"
+    LOWER_BOUND_INSUFFICIENT = "lower_bound_insufficient"
+
+
+class CompletionBasis(StrEnum):
+    CONTROL = "control"
+    SEGMENT_LOWER_BOUND = "segment_lower_bound"
+    NONE = "none"
+
+
+class OverrecordStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    NOT_CONFIRMED = "not_confirmed"
+    UNKNOWN = "unknown"
+
+
+class DefaultScopeState(StrEnum):
+    UNKNOWN = "unknown"
+    EMPTY = "empty"
+    NONEMPTY = "nonempty"
+
+
+class DefaultScopeBasis(StrEnum):
+    UNKNOWN = "unknown"
+    ALL_QUALIFYING = "all_qualifying"
+    FIRST_N = "first_n"
+    CONTIGUOUS_PREFIX = "contiguous_prefix"
+    PREFIX_FIRST_N = "prefix_first_n"
+    EMPTY_PREFIX = "empty_prefix"
+
+
+class SegmentGapKind(StrEnum):
+    MISSING_POSITION = "missing_position"
+    ZERO_BYTE_NON_TAIL = "zero_byte_non_tail"
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentSetRef:
+    """一个冻结结果集合的有限稳定引用。"""
+
+    action_id: int
+    scan_id: int
+    final_page_event_id: int
+    version: int
+
+    def __post_init__(self) -> None:
+        for name in ("action_id", "scan_id", "final_page_event_id", "version"):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= MAX_OBJECT_ID:
+                raise ValueError(f"{name} 必须是正安全整数")
+
+
+@dataclass(frozen=True, order=True, slots=True)
+class SegmentCursor:
+    """集合内一个成员的完整设备顺序键和稳定身份。"""
+
+    key: SegmentKey
+    member_identity: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, SegmentKey):
+            raise ValueError("分段游标必须携带设备顺序键")
+        if not isinstance(self.member_identity, str) or not self.member_identity:
+            raise ValueError("分段游标必须携带稳定成员身份")
+        self.member_identity.encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentMember:
+    """单个文件的有界事实；不携带整个结果集合。"""
+
+    identity: str
+    key: SegmentKey | None
+    role: SegmentMemberRole
+    ownership: OwnershipState
+    completion: FileCompletionState
+    size_bytes: int | None
+    pairing_identity: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, str) or not self.identity:
+            raise ValueError("分段成员必须携带稳定文件身份")
+        self.identity.encode("utf-8")
+        if self.key is not None and not isinstance(self.key, SegmentKey):
+            raise ValueError("分段成员顺序键无效")
+        if not isinstance(self.role, SegmentMemberRole):
+            raise ValueError("分段成员角色未登记")
+        if not isinstance(self.ownership, OwnershipState):
+            raise ValueError("分段成员归属状态未登记")
+        if not isinstance(self.completion, FileCompletionState):
+            raise ValueError("分段成员写入状态未登记")
+        if self.size_bytes is not None and (
+                type(self.size_bytes) is not int
+                or not 0 <= self.size_bytes <= MAX_OBJECT_ID):
+            raise ValueError("文件长度必须是安全非负整数或未知")
+        if self.pairing_identity is not None:
+            if not isinstance(self.pairing_identity, str) or not self.pairing_identity:
+                raise ValueError("配对身份必须是非空文本或未知")
+            self.pairing_identity.encode("utf-8")
+
+    @property
+    def cursor(self) -> SegmentCursor | None:
+        return None if self.key is None else SegmentCursor(self.key, self.identity)
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionFacts:
+    """完成判定所需的控制、扫描、起点和有限核实事实。"""
+
+    stop: EvidenceState
+    file_wait: EvidenceState
+    scan: EvidenceState
+    start: EvidenceState
+    start_key: SegmentKey | None
+    control_completion: EvidenceState
+    control_overrun: EvidenceState
+    finite_check_complete: bool
+    explicit_error: bool
+
+    def __post_init__(self) -> None:
+        for name in ("stop", "file_wait", "scan", "start",
+                     "control_completion", "control_overrun"):
+            if not isinstance(getattr(self, name), EvidenceState):
+                raise ValueError(f"{name} 状态未登记")
+        if self.start_key is not None and not isinstance(self.start_key, SegmentKey):
+            raise ValueError("可靠起点必须使用分段顺序键")
+        if (self.start is EvidenceState.CONFIRMED) != (self.start_key is not None):
+            raise ValueError("可靠起点状态与起点顺序键必须共同表达")
+        if type(self.finite_check_complete) is not bool or type(self.explicit_error) is not bool:
+            raise ValueError("有限核实与明确错误必须是布尔值")
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultSegmentScope:
+    """冻结结果集合中的默认原片范围，不展开成员列表。"""
+
+    state: DefaultScopeState
+    basis: DefaultScopeBasis
+    set_ref: SegmentSetRef
+    first_cursor: SegmentCursor | None
+    last_cursor: SegmentCursor | None
+    member_count: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.state, DefaultScopeState) or not isinstance(self.basis, DefaultScopeBasis):
+            raise ValueError("默认范围状态或依据未登记")
+        if not isinstance(self.set_ref, SegmentSetRef):
+            raise ValueError("默认范围必须引用冻结结果集合")
+        if self.state is DefaultScopeState.UNKNOWN:
+            if (self.basis is not DefaultScopeBasis.UNKNOWN or self.first_cursor is not None
+                    or self.last_cursor is not None or self.member_count is not None):
+                raise ValueError("未知默认范围不得携带猜测边界")
+        elif self.state is DefaultScopeState.EMPTY:
+            if (self.basis is DefaultScopeBasis.UNKNOWN or self.first_cursor is not None
+                    or self.last_cursor is not None or self.member_count != 0):
+                raise ValueError("已确定空范围必须明确为零成员且不带游标")
+        else:
+            if (self.basis is DefaultScopeBasis.UNKNOWN or self.first_cursor is None
+                    or self.last_cursor is None or type(self.member_count) is not int
+                    or self.member_count <= 0 or self.last_cursor < self.first_cursor):
+                raise ValueError("非空默认范围必须提供有效首尾游标和成员数")
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentGap:
+    """一个缺失区间或一个非尾部零字节原片的结构化诊断。"""
+
+    start_key: SegmentKey
+    end_key: SegmentKey
+    kind: SegmentGapKind
+    left_member_identity: str | None
+    right_member_identity: str | None
+    empty_member_identity: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start_key, SegmentKey) or not isinstance(self.end_key, SegmentKey):
+            raise ValueError("缺口必须提供可靠起止顺序键")
+        if self.end_key < self.start_key:
+            raise ValueError("缺口结束位置不能早于起始位置")
+        if not isinstance(self.kind, SegmentGapKind):
+            raise ValueError("缺口类型未登记")
+        for name in ("left_member_identity", "right_member_identity", "empty_member_identity"):
+            value = getattr(self, name)
+            if value is not None:
+                if not isinstance(value, str) or not value:
+                    raise ValueError(f"{name} 必须是非空文件身份或未知")
+                value.encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentAccumulator:
+    """逐成员推进的 O(1) 状态；完整缺口由冻结集合第二遍生成。"""
+
+    set_ref: SegmentSetRef
+    target_duration_ms: int
+    last_original: SegmentMember | None = None
+    first_original: SegmentMember | None = None
+    last_nonzero_cursor: SegmentCursor | None = None
+    nonzero_original_count: int = 0
+    unknown_original: bool = False
+    order_unknown: bool = False
+    conflicting_key: bool = False
+    gap_count: int = 0
+    first_gap: SegmentGap | None = None
+    prefix_open: bool = True
+    prefix_first_cursor: SegmentCursor | None = None
+    prefix_last_cursor: SegmentCursor | None = None
+    prefix_limit_cursor: SegmentCursor | None = None
+    prefix_count: int = 0
+    trailing_zero_count: int = 0
+    trailing_zero_first: SegmentMember | None = None
+    first_n_cursor: SegmentCursor | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.set_ref, SegmentSetRef):
+            raise ValueError("分段累积器必须绑定冻结结果集合")
+        if type(self.target_duration_ms) is not int or not 1 <= self.target_duration_ms <= MAX_OBJECT_ID:
+            raise ValueError("目标时长必须是正安全整数毫秒")
+        for name in ("nonzero_original_count", "gap_count", "prefix_count", "trailing_zero_count"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} 必须是非负整数")
+        for name in ("last_original", "first_original", "trailing_zero_first"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, SegmentMember):
+                raise ValueError(f"{name} 必须是 SegmentMember 或未知")
+        for name in ("last_nonzero_cursor", "prefix_first_cursor", "prefix_last_cursor",
+                     "prefix_limit_cursor", "first_n_cursor"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, SegmentCursor):
+                raise ValueError(f"{name} 必须是 SegmentCursor 或未知")
+        if self.first_gap is not None and not isinstance(self.first_gap, SegmentGap):
+            raise ValueError("首个缺口必须是 SegmentGap 或未知")
+        if (self.gap_count == 0) != (self.first_gap is None):
+            raise ValueError("缺口数量与首缺口摘要必须同时存在或缺省")
+        if (self.trailing_zero_count == 0) != (self.trailing_zero_first is None):
+            raise ValueError("尾部零字节数量与首个成员锚点必须同时存在或缺省")
+        if self.trailing_zero_first is not None and (
+                self.trailing_zero_first.key is None
+                or self.trailing_zero_first.size_bytes != 0
+                or self.trailing_zero_first.completion is not FileCompletionState.COMPLETE
+                or self.trailing_zero_first.ownership is not OwnershipState.OWNED
+                or self.trailing_zero_first.role is not SegmentMemberRole.ORIGINAL):
+            raise ValueError("尾部零字节锚点必须是完整、归属确认的零字节 OSV")
+        if (self.prefix_count == 0) != (self.prefix_first_cursor is None):
+            raise ValueError("连续前缀数量与首游标必须同时存在或缺省")
+        if (self.prefix_count == 0) != (self.prefix_last_cursor is None):
+            raise ValueError("连续前缀数量与末游标必须同时存在或缺省")
+        if self.prefix_first_cursor is not None and self.prefix_last_cursor < self.prefix_first_cursor:
+            raise ValueError("连续前缀末游标不能早于首游标")
+        if self.prefix_count > self.nonzero_original_count:
+            raise ValueError("连续前缀成员数不能超过已知非零原片数")
+        if type(self.unknown_original) is not bool or type(self.order_unknown) is not bool:
+            raise ValueError("成员未知与顺序未知必须是布尔值")
+        if type(self.conflicting_key) is not bool or type(self.prefix_open) is not bool:
+            raise ValueError("排序键冲突与连续前缀状态必须是布尔值")
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentAssessment:
+    """完成依据、结果分类与稳定默认范围的有限摘要。"""
+
+    status: SegmentAssessmentStatus
+    reason: SegmentAssessmentReason
+    basis: CompletionBasis
+    complete_segment_count: int | None
+    lower_bound_ms: int | None
+    last_nonzero_cursor: SegmentCursor | None
+    overrecord: OverrecordStatus
+    default_scope: DefaultSegmentScope
+    set_ref: SegmentSetRef
+    target_duration_ms: int
+    gap_count: int
+    first_gap: SegmentGap | None
+    empty_tail_count: int | None
+
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, SegmentAssessmentStatus):
+            raise ValueError("分段结果状态未登记")
+        if not isinstance(self.reason, SegmentAssessmentReason):
+            raise ValueError("分段结果原因未登记")
+        if not isinstance(self.basis, CompletionBasis):
+            raise ValueError("分段完成依据未登记")
+        if not isinstance(self.overrecord, OverrecordStatus):
+            raise ValueError("异常多录状态未登记")
+        if self.complete_segment_count is not None and (
+                type(self.complete_segment_count) is not int
+                or self.complete_segment_count < 0):
+            raise ValueError("完整非尾段数必须是非负整数或未知")
+        if self.lower_bound_ms is not None and (
+                type(self.lower_bound_ms) is not int or self.lower_bound_ms < 0):
+            raise ValueError("分段时长下界必须是非负整数毫秒或未知")
+        if (self.complete_segment_count is None) != (self.lower_bound_ms is None):
+            raise ValueError("完整段数与时长下界必须共同确定或共同未知")
+        if self.last_nonzero_cursor is not None and not isinstance(self.last_nonzero_cursor, SegmentCursor):
+            raise ValueError("最后非零原片必须通过稳定游标引用")
+        if not isinstance(self.default_scope, DefaultSegmentScope):
+            raise ValueError("默认范围必须是 DefaultSegmentScope")
+        if not isinstance(self.set_ref, SegmentSetRef) or self.default_scope.set_ref != self.set_ref:
+            raise ValueError("结果与默认范围必须引用同一冻结集合")
+        if (type(self.target_duration_ms) is not int
+                or not 1 <= self.target_duration_ms <= MAX_OBJECT_ID):
+            raise ValueError("目标时长必须是正安全整数毫秒")
+        if type(self.gap_count) is not int or self.gap_count < 0:
+            raise ValueError("缺口数量必须是非负整数")
+        if self.first_gap is not None and not isinstance(self.first_gap, SegmentGap):
+            raise ValueError("首个缺口必须是 SegmentGap 或未知")
+        if (self.gap_count == 0) != (self.first_gap is None):
+            raise ValueError("缺口数量与首缺口摘要必须同时存在或缺省")
+        if self.empty_tail_count is not None and (
+                type(self.empty_tail_count) is not int or self.empty_tail_count < 0):
+            raise ValueError("空尾原片数必须是非负整数或未知")
+        if self.status is SegmentAssessmentStatus.SUCCEEDED:
+            if self.reason is not SegmentAssessmentReason.NONE or self.basis is CompletionBasis.NONE:
+                raise ValueError("成功结果必须带已登记完成依据且不带失败原因")
+        elif self.basis is not CompletionBasis.NONE:
+            raise ValueError("非成功结果不能声明完成依据")
