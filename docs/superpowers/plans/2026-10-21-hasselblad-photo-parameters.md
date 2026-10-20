@@ -133,13 +133,15 @@ camctl_pytest() {
 
 **输入与交付：** 消费原动作生效格式、H2 的双文件及机内定位；交付正确的两份文件责任、正式源及预览关系。沿用 `PrepareHostPhoto`、`HostPhotoComplete`、原操作键核实及完成事务。
 
-- [ ] **步骤 1：增加路径及角色测试。** `test_photo_file_responsibilities_follow_saved_capture_format` 验证 RAW／JPEG 原图分别分配对应扩展名，preview 始终为 JPEG，重复 prepare 复用原身份；`test_archive_uses_explicit_role_for_two_jpegs` 验证相同 MIME 下分别归档，并拒绝用途不符、内容不符及同文件引用。
-- [ ] **步骤 2：增加主机／设备源分类测试。** `test_explicit_missing_camera_name_only_allows_host_source` 覆盖规格的名称分类与两种源模式；设备缺名时保留工作副本及诊断，不能形成伪造设备源。`test_device_source_uses_camera_basename_and_full_locator` 验证登记和随后下载消费原机内身份。
-- [ ] **步骤 3：确认失败。** 先运行相应纯单元；再分别运行 `camctl_pytest apps/camctl/tests/integration/host_files -q` 与 `camctl_pytest apps/camctl/tests/integration/capture/test_host_photo_storage.py apps/camctl/tests/integration/capture/test_host_photo_flow.py apps/camctl/tests/integration/capture/test_device_photo_flow.py -q`。两条集成命令顺序执行。
-- [ ] **步骤 4：实现责任创建与共同校验。** `prepare` 从已保存 action 推导格式并在分配时生成正确路径；归档按显式用途选择角色，再验证 MIME／签名。同步 `_files`、成功双文件守卫、晋升守卫及历史申请校验。仅能看事件的解析层检查合法结构；能读取 action 的仓储继续检查格式与路径相符。
-- [ ] **步骤 5：实现双正式源登记。** `_photo_artifacts` 核对保存格式和显式角色；主机源消费本地结果，设备源消费可靠机内定位。保留工作区边界、完整长度、签名、SHA-256、文件及目录同步；成功双文件、输出关系与适用终态共同提交，设备源可靠登记后才按原规则回收工作文件。
-- [ ] **步骤 6：固定回执未知及恢复。** `test_jpeg_photo_unknown_complete_reuses_original_request_and_pair` 在事务提交但回执丢失时核实原完整申请，断言只有一对身份和一次输出登记。`test_photo_recovery_uses_saved_format_and_camera_locator` 验证恢复、同历史边界重建、长度及摘要继续匹配原事实。重跑上述范围和相关历史测试。
-- [ ] **步骤 7：审查并形成阶段提交。** 建议提交名为“贯通 Hasselblad 双格式文件责任与正式源”；交接归档／登记输入、完整申请和恢复不变量。
+- [x] **步骤 1：增加路径及角色测试。** `test_photo_file_responsibilities_follow_saved_capture_format` 验证 RAW／JPEG 原图分别分配对应扩展名，preview 始终为 JPEG，重复 prepare 复用原身份；`test_archive_uses_explicit_role_for_two_jpegs` 验证相同 MIME 下分别归档，并拒绝用途不符、内容不符及同文件引用。
+- [x] **步骤 2：增加主机／设备源分类测试。** `test_explicit_missing_camera_name_only_allows_host_source` 覆盖规格的名称分类与两种源模式；设备缺名时保留工作副本及诊断，不能形成伪造设备源。`test_device_source_uses_camera_basename_and_full_locator` 验证登记和随后下载消费原机内身份。
+- [x] **步骤 3：确认失败。** 先运行相应纯单元；再分别运行 `camctl_pytest apps/camctl/tests/integration/host_files -q` 与 `camctl_pytest apps/camctl/tests/integration/capture/test_host_photo_storage.py apps/camctl/tests/integration/capture/test_host_photo_flow.py apps/camctl/tests/integration/capture/test_device_photo_flow.py -q`。两条集成命令顺序执行。
+- [x] **步骤 4：实现责任创建与共同校验。** `prepare` 从已保存 action 推导格式并在分配时生成正确路径；归档按显式用途选择角色，再验证 MIME／签名。同步 `_files`、成功双文件守卫、晋升守卫及历史申请校验。仅能看事件的解析层检查合法结构；能读取 action 的仓储继续检查格式与路径相符。
+- [x] **步骤 5：实现双正式源登记。** `_photo_artifacts` 核对保存格式和显式角色；主机源消费本地结果，设备源消费可靠机内定位。保留工作区边界、完整长度、签名、SHA-256、文件及目录同步；成功双文件、输出关系与适用终态共同提交，设备源可靠登记后才按原规则回收工作文件。
+- [x] **步骤 6：固定回执未知及恢复。** `test_jpeg_photo_unknown_complete_reuses_original_request_and_pair` 在事务提交但回执丢失时核实原完整申请，断言只有一对身份和一次输出登记。`test_photo_recovery_uses_saved_format_and_camera_locator` 验证恢复、同历史边界重建、长度及摘要继续匹配原事实。重跑上述范围和相关历史测试。
+- [x] **步骤 7：审查并形成阶段提交。** 建议提交名为“贯通 Hasselblad 双格式文件责任与正式源”；交接归档／登记输入、完整申请和恢复不变量。
+
+**阶段证据：** 实现提交 `930870a` 已通过独立规格及质量审查，并合入协调提交 `19e3f73`。协调工作区以 Python 3.11.16 顺序完成全量单元测试，6204 项通过、1 项跳过，保留 2 条既有 pytest 标记警告；拍摄与历史直接组合 135 项、host_files 全目录 120 项、主机照片取回 6 项及实际依赖检查 7 项全部通过。任务分支另完成 devices 全目录 220 项验证。测试覆盖 RAW／JPEG 与 host／device、明确缺名分类、独立角色和机内定位，以及原事务回执未知和合法回收后的同键核实。完整 capture 目录、安装包、ARM、真机、客户端导入及 ACK 尚须由后续任务完成，H2 的全目录结果不替代本阶段新代码的扩大验证。
 
 ## H4：按完整参数执行一次有限命令序列
 
