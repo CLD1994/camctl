@@ -11,17 +11,12 @@ from enum import StrEnum
 
 from camctl.contracts.json_values import JsonValue, is_json_integer
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
+from .action6_formats import OutputSelection
 
 
 class CameraModel(StrEnum):
     ACTION6 = "dji-action6"
     OSMO360II = "dji-osmo360-ii"
-
-
-class OutputSelection(StrEnum):
-    VIDEO = "video"
-    VIDEO_RAW = "video_raw"
-    VIDEO_JPEG = "video_jpeg"
 
 
 class TimelapseCandidateTemplate(StrEnum):
@@ -123,6 +118,8 @@ _ACTION6_SHUTTER = FixedSettingRequest(
     "shutter", "1/60", (_cmd("28", "013C8000"),))
 _ACTION6_WHITE_BALANCE = FixedSettingRequest(
     "white_balance", 5200, (_cmd("0x2c", "0634000000", test=True),))
+_ACTION6_RECORD_COLOR_PROFILE = FixedSettingRequest(
+    "color_profile", "D-Log M", (_cmd("42", "3d", test=True),))
 _OSMO_SHUTTER = FixedSettingRequest(
     "shutter", "1/60", (_cmd("28", "013c8000", test=True, reply=True),))
 _OSMO_WHITE_BALANCE = FixedSettingRequest(
@@ -164,7 +161,7 @@ FIXED_SETTING_PLANS: dict[tuple[CameraModel, str], TaskSettingPlan] = {
             "auto": (_ACTION6_AUTO_MODE, _ACTION6_WHITE_BALANCE,
                      ParameterSettingRequest("compensation_ev", ACTION_EV)),
         },
-        (),
+        (_ACTION6_RECORD_COLOR_PROFILE,),
     ),
     (CameraModel.ACTION6, "camera_timelapse"): TaskSettingPlan(
         (),
@@ -289,6 +286,8 @@ def stop_for(driver_id: str, action_type: str) -> Command:
     model = CameraModel(driver_id)
     if action_type == "camera_record":
         return _cmd("02", "00")
+    if action_type == "camera_timelapse" and model is CameraModel.ACTION6:
+        return _cmd("01", "00")
     if action_type == "camera_timelapse" and model is CameraModel.OSMO360II:
         return _cmd("01", "00")
     raise ValueError("没有该动作的停止候选命令")
@@ -489,7 +488,7 @@ def _encode_settings(model, action_type, params):
             bitrate_settings = ((ACTION_BITRATE[params["bitrate"]],)
                                 if "bitrate" in params else ())
             return (_cmd("0xe1", "01"), ACTION_RESOLUTIONS[params["resolution"]],
-                    *exposure_settings, _cmd("42", "3d", test=True),
+                    *exposure_settings, *_commands_for_steps(plan.after_exposure, {}),
                     ACTION_FOV[params["fov"]], ACTION_STABILIZATION[params["stabilization"]],
                     *aperture_settings, *bitrate_settings)
         if exposure["mode"] == "manual":

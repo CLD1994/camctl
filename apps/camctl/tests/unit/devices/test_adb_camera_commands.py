@@ -39,7 +39,7 @@ def test_record_setting_lookup_rejects_fractional_seconds_before_mapping(driver)
         "dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x2e 10",
     )),
 ])
-def test_action_record_omitted_aperture_sends_only_other_requested_settings(exposure, exposure_commands):
+def test_legacy_effective_record_without_aperture_keeps_other_settings(exposure, exposure_commands):
     params = {**recording_params(), "resolution": "4k30", "exposure": exposure}
     del params["aperture"]
     expected = (
@@ -52,7 +52,7 @@ def test_action_record_omitted_aperture_sends_only_other_requested_settings(expo
         "simulate_device -s bitrate 2",
     )
 
-    assert commands.settings_for("dji-action6", "camera_record", params) == tuple(
+    assert commands.settings_from_effective_params("dji-action6", "camera_record", params) == tuple(
         tuple(shlex.split(command)) for command in expected)
 
 
@@ -91,7 +91,7 @@ def test_action_record_explicit_aperture_keeps_original_command_before_bitrate(e
     (None, ()),
     ("f2.8", ("dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x26 1801",)),
 ])
-def test_action_record_omitted_bitrate_keeps_other_settings_without_simulation(
+def test_legacy_effective_record_without_bitrate_keeps_other_settings_without_simulation(
         exposure, exposure_commands, aperture, aperture_commands):
     params = {**recording_params(), "resolution": "4k30", "exposure": exposure}
     del params["bitrate"]
@@ -107,7 +107,7 @@ def test_action_record_omitted_bitrate_keeps_other_settings_without_simulation(
         *aperture_commands,
     )
 
-    assert commands.settings_for("dji-action6", "camera_record", params) == tuple(
+    assert commands.settings_from_effective_params("dji-action6", "camera_record", params) == tuple(
         tuple(shlex.split(command)) for command in expected)
 
 
@@ -602,9 +602,10 @@ def test_control_literals(driver, action, control, suffix):
     assert getattr(commands, f"{control}_for")(driver, action)[-2:] == suffix
 
 
-def test_action_timelapse_stop_remains_unavailable():
-    with pytest.raises(ValueError):
-        commands.stop_for("dji-action6", "camera_timelapse")
+def test_action6_timelapse_stop_uses_its_complete_device_command():
+    assert commands.stop_for("dji-action6", "camera_timelapse") == (
+        "dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+        "-c", "01", "00")
 
 
 def test_uncertain_commands_remain_named_candidates():

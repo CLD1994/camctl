@@ -1,4 +1,4 @@
-"""Action6 普通录像的响应解释与运行假设标识。"""
+"""Action6 录像和原生有限延时的响应解释及运行假设标识。"""
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,6 +16,7 @@ from .contracts import CameraCall
 
 _ACK_FIELDS = frozenset({"activity_id", "response_payload", "confirmation_basis"})
 ACTION6_RECORD_ACK_BASIS = "action6_record_ack/v1"
+ACTION6_TIMELAPSE_ACK_BASIS = "action6_timelapse_ack/v1"
 _ACK_PHASES = {
     CameraCall.SETTING: ("start_recording", EvidenceContract(
         "setting_applied", 1, "control", _ACK_FIELDS, identity_field="activity_id")),
@@ -25,7 +26,11 @@ _ACK_PHASES = {
         "stop_confirmed", 1, "stop", _ACK_FIELDS, identity_field="activity_id")),
 }
 ACTION6_RECORD_OBSERVATIONS = (*tuple(contract for _, contract in _ACK_PHASES.values()),
-    EvidenceContract("recording_sent", 1, "control", _ACK_FIELDS, identity_field="activity_id"))
+    EvidenceContract("recording_sent", 1, "control", _ACK_FIELDS, identity_field="activity_id"),
+    EvidenceContract("setting_command_accepted", 1, "control", _ACK_FIELDS,
+                      identity_field="activity_id"))
+ACTION6_TIMELAPSE_OBSERVATIONS = (EvidenceContract(
+    "timelapse_sent", 1, "control", _ACK_FIELDS, identity_field="activity_id"),)
 
 
 class _FailureReason(StrEnum):
@@ -114,13 +119,20 @@ class Action6DjiInterpreter:
 
     def __post_init__(self):
         if not isinstance(self.kind, CameraCall) or self.kind not in _ACK_PHASES:
-            raise ValueError("Action6 响应解释器只接受录像设置、开始和停止")
-        operation, _ = _ACK_PHASES[self.kind]
-        if self.operation != operation:
-            raise ValueError("Action6 响应阶段与普通录像操作不符")
+            raise ValueError("Action6 响应解释器只接受拍摄设置、开始和停止")
+        allowed_operations = {
+            CameraCall.SETTING: {"start_recording", "start_timelapse"},
+            CameraCall.START: {"start_recording", "start_timelapse"},
+            CameraCall.STOP: {"stop_recording", "stop_timelapse"},
+        }
+        if self.operation not in allowed_operations[self.kind]:
+            raise ValueError("Action6 响应阶段与拍摄操作不符")
         parse_object_id(self.activity_id)
         if self.start_return_meaning is not None and self.start_return_meaning not in (StartReturn.SENT, StartReturn.STARTED):
-            raise ValueError("普通录像必须沿原 SENT 或 STARTED 返回含义执行")
+            raise ValueError("Action6 拍摄必须沿已登记的启动返回含义执行")
+        if (self.kind is CameraCall.START and self.operation == "start_timelapse"
+                and self.start_return_meaning not in (None, StartReturn.SENT)):
+            raise ValueError("Action6 原生延时的启动返回含义固定为 SENT")
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
@@ -132,18 +144,37 @@ class Action6DjiInterpreter:
             return InterpretedFacts((), ErrorValue(
                 "action6_response_unconfirmed", "device_response", details), EffectState.UNKNOWN)
         _, contract = _ACK_PHASES[self.kind]
-        name = ("recording_sent" if self.kind is CameraCall.START and self.start_return_meaning == StartReturn.SENT else contract.type)
+        name = ("timelapse_sent" if self.kind is CameraCall.START and self.operation == "start_timelapse"
+                else "recording_sent" if self.kind is CameraCall.START
+                and self.start_return_meaning == StartReturn.SENT else contract.type)
+        confirmation_basis = (ACTION6_TIMELAPSE_ACK_BASIS
+            if self.operation.endswith("timelapse") else ACTION6_RECORD_ACK_BASIS)
         observation = DeviceObservation(name, contract.version, {
             "activity_id": self.activity_id, "response_payload": "00",
-            "confirmation_basis": ACTION6_RECORD_ACK_BASIS,
+            "confirmation_basis": confirmation_basis,
         })
         return InterpretedFacts((observation,), None, EffectState.CONFIRMED)
 
 
-class Action6UnconfirmedSettingInterpreter:
+@dataclass(frozen=True)
+class Action6SimulationSettingInterpreter:
+    """`simulate_device` 的本地成功只确认码率命令已接受，不确认实际码率。"""
+
+    activity_id: str
+
+    def __post_init__(self):
+        parse_object_id(self.activity_id)
+
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
-        details.update(reason=_FailureReason.CONFIRMATION_UNAVAILABLE.value,
-                       stdout_hex=None if raw.output is None else raw.output.hex())
-        return InterpretedFacts((), ErrorValue(
-            "action6_setting_unconfirmed", "device_settings", details), EffectState.UNKNOWN)
+        failure = _call_failure(raw)
+        if failure is not None:
+            details["reason"] = failure.value
+            return InterpretedFacts((), ErrorValue(
+                "action6_response_unconfirmed", "device_settings", details), EffectState.UNKNOWN)
+        observation = DeviceObservation("setting_command_accepted", 1, {
+            "activity_id": self.activity_id,
+            "response_payload": None,
+            "confirmation_basis": "action6_simulate_device_exit/v1",
+        })
+        return InterpretedFacts((observation,), None, EffectState.CONFIRMED)

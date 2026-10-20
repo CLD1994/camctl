@@ -98,7 +98,7 @@ def test_builtin_adb_contracts_keep_device_source_and_declared_delete_value(isol
         declaration = definitions.drivers[driver_id].declaration
         assert catalog.source_delete_supported(device_id) is declaration.delete_supported
     assert definitions.drivers[CameraModel.OSMO360II].declaration.delete_supported
-    assert not definitions.drivers[CameraModel.ACTION6].declaration.delete_supported
+    assert definitions.drivers[CameraModel.ACTION6].declaration.delete_supported
 
 
 @pytest.mark.parametrize("missing", [CameraCall.SETTING, CameraCall.START, CameraCall.RESULT, "task", "files", "evidence"])
@@ -176,7 +176,7 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
     assert (await driver.control(request)).error is None
     assert all(commands.count(command) == 2 for command in fixed)
     action6 = drivers_runtime.current_registry().entry(CameraModel.ACTION6).declaration
-    assert not action6.file_query_supported and not action6.delete_supported
+    assert action6.file_query_supported and action6.delete_supported
 
 
 @pytest.mark.asyncio
@@ -287,7 +287,7 @@ def test_fresh_cli_registers_camera_without_device_io(tmp_path, model):
     device = json.loads(result.stdout)["devices"][0]
     assert device["device_id"] == "cam-1" and device["driver_id"] == model
     expected_actions = {
-        CameraModel.ACTION6: ["camera_record"],
+        CameraModel.ACTION6: ["camera_record", "camera_timelapse"],
         CameraModel.OSMO360II: ["camera_record", "camera_timelapse"],
     }
     assert [action["type"] for action in device["actions"]] == expected_actions[model]

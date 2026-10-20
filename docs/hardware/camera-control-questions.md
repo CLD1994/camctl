@@ -32,7 +32,7 @@ dji_mb_ctrl -S test -R diag -g 1 -t 0 -s 2 -c 0x26 9001
 
 目前没有取得光圈读回结果，不能确认这三次请求是否改变了实际光圈。`e3` 的含义及出现原因尚未明确。
 
-这项未知仅影响显式要求调整光圈的计划，不表示当前 Action6 普通录像演示未验收：该能力允许省略 `aperture` 并保留相机原设置，现场演示结果见[验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)，参数规则见[录像参数规格](../architecture/camera-parameters.md#action6-的光圈要求)。
+`e3` 的含义和实际光圈仍未确认。当前 Action6 普通录像要求新请求显式提供 `aperture` 和 `bitrate`；驱动发送所选完整光圈命令并保存实际响应或错误。仅普通录像中的精确光圈命令在已收场后允许后续设置和 START，保存结果不表示光圈已应用。历史 ARM 演示记录见[验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)，当前参数与调用规则见[录像参数规格](../architecture/camera-parameters.md#action6-的光圈要求)。
 
 ### 设置光圈前的操作顺序
 

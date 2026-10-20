@@ -37,6 +37,19 @@ def test_candidate_schema_is_self_contained_and_accepts_recording(driver):
     assert cap.defaults == {}
 
 
+def test_action6_dlog_m_is_fixed_in_the_authoritative_record_plan_and_description():
+    from camctl.devices.drivers.adb_cameras.commands import ACTION_FOV, settings_for
+
+    cap = capability("dji-action6", "camera_record")
+    settings = settings_for("dji-action6", "camera_record", recording_params())
+    dlog = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+            "-c", "42", "3d")
+
+    assert dlog in settings
+    assert settings.index(dlog) < settings.index(ACTION_FOV["wide"])
+    assert "D-Log M" in cap.description and "42 3d" in cap.description
+
+
 def _schema_fields(schema):
     for name, field in schema.get("properties", {}).items():
         if name != "type":
@@ -58,6 +71,7 @@ def test_formal_adb_parameters_describe_every_field_and_exposure_branch():
     ]
     assert {cap.parameter_type for cap in capabilities} == {
         "action6_record",
+        "action6_timelapse",
         "osmo360ii_record",
         "osmo360ii_timelapse",
     }
@@ -86,22 +100,30 @@ def test_formal_adb_parameters_describe_every_field_and_exposure_branch():
                 assert "ISO" in field["description"]
 
     action6 = fields_by_type["action6_record"]
-    assert "可选" in action6["aperture"]["description"]
-    assert "省略" in action6["aperture"]["description"]
-    assert "可选" in action6["bitrate"]["description"]
-    assert "省略" in action6["bitrate"]["description"]
+    for field in ("aperture", "bitrate"):
+        assert action6[field]["description"]
+    action6_capability = next(cap for cap in capabilities if cap.parameter_type == "action6_record")
+    assert {"aperture", "bitrate"} <= set(action6_capability.schema["required"])
+
+    action6_timelapse = next(cap for cap in capabilities if cap.parameter_type == "action6_timelapse")
+    assert {"outputs", "interval_s", "duration_s", "exposure"} <= set(
+        action6_timelapse.schema["required"])
+    assert not {"aperture", "bitrate", "resolution", "fov", "stabilization"} & set(
+        action6_timelapse.schema["properties"])
+    assert "DNG 照片" in action6_timelapse.schema["properties"]["outputs"]["description"]
 
 
 @pytest.mark.parametrize("exposure", [
     {"mode": "manual", "iso": 800},
     {"mode": "auto", "compensation_ev": 0},
 ])
-def test_action_record_accepts_omitted_aperture_without_a_default(exposure):
+def test_action_record_rejects_missing_aperture_without_a_default(exposure):
     params = {**recording_params(), "exposure": exposure}
     del params["aperture"]
     cap = capability("dji-action6", "camera_record")
 
-    validate_precise(cap.schema, params)
+    with pytest.raises(BodySchemaError):
+        validate_precise(cap.schema, params)
 
     assert "aperture" not in params
     assert cap.defaults == {}
@@ -124,14 +146,15 @@ def test_action_record_rejects_null_or_unknown_explicit_aperture(exposure, apert
     {"mode": "auto", "compensation_ev": 0},
 ])
 @pytest.mark.parametrize("omit_aperture", [False, True])
-def test_action_record_accepts_omitted_bitrate_without_a_default(exposure, omit_aperture):
+def test_action_record_rejects_missing_bitrate_without_a_default(exposure, omit_aperture):
     params = {**recording_params(), "exposure": exposure}
     del params["bitrate"]
     if omit_aperture:
         del params["aperture"]
     cap = capability("dji-action6", "camera_record")
 
-    validate_precise(cap.schema, params)
+    with pytest.raises(BodySchemaError):
+        validate_precise(cap.schema, params)
 
     assert "bitrate" not in params
     assert cap.defaults == {}
@@ -154,12 +177,10 @@ def test_action_record_rejects_null_or_unknown_explicit_bitrate(exposure, bitrat
     {"mode": "auto", "compensation_ev": 0},
 ])
 @pytest.mark.parametrize("field", [
-    "type", "duration_s", "resolution", "fov", "stabilization", "exposure",
+    "type", "duration_s", "resolution", "fov", "stabilization", "aperture", "bitrate", "exposure",
 ])
-def test_action_record_without_aperture_or_bitrate_still_requires_other_fields(exposure, field):
+def test_action_record_requires_every_declared_field(exposure, field):
     params = {**recording_params(), "exposure": exposure}
-    del params["aperture"]
-    del params["bitrate"]
     del params[field]
 
     with pytest.raises(BodySchemaError):

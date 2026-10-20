@@ -4,7 +4,7 @@
 
 ARM 上的 Action6 普通录像演示已由用户于 2026-10-11 确认正常，该次十秒演示范围已完成，不需要重复拍摄或补交报告。该次原始计划、正式报告、媒体文件和确认水位未归档；其范围与 2026-10-17 的扩大验证分别记录，详见[普通录像现场验收记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。
 
-Action6 原生延时的 STOP、返回、结束和产物完成契约仍待闭合，并且该设备的真机验证继续等待固件修复。OSMO 360 II 的[1 秒／300 秒历史手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)；该确认针对历史请求，不代表当前最短 2 秒新请求的实机验收。OSMO 正式普通录像、原生延时、低功耗中断恢复及有限取消的 TX2 业务链现已按[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；本轮启动余量软件、ARM 安装和 2 秒／300 秒新请求实机结果见[启动余量 TX2 定点验收](../camctl/verification.md#启动余量-tx2-定点验收2026-10-18)。Auto 1 秒／300 秒旧样片的实际采样间隔未独立读回；不能由其帧数确认 1 秒效果。其他范围与历史设备证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+Action6 原生延时的正式软件执行及产物契约已定义，涵盖 STOP 响应确认、自然结束、有限取消和产物核实；这些规则是软件实现与验证范围，不代表设备已经接受 STOP、自然结束或完成写入。该设备的真机验证仍等待固件修复，尚无本契约的实机结果。OSMO 360 II 的[1 秒／300 秒历史手工演示已由用户现场确认通过](../camctl/verification.md#osmo-360-ii-最短延时手工演示的现场验收2026-10-16)；该确认针对历史请求，不代表当前最短 2 秒新请求的实机验收。OSMO 正式普通录像、原生延时、低功耗中断恢复及有限取消的 TX2 业务链现已按[完成契约计划任务 6](../superpowers/plans/2026-10-18-osmo360ii-capture-completion.md#任务-6tx2-正式链与定点异常验收)完成；本轮启动余量软件、ARM 安装和 2 秒／300 秒新请求实机结果见[启动余量 TX2 定点验收](../camctl/verification.md#启动余量-tx2-定点验收2026-10-18)。Auto 1 秒／300 秒旧样片的实际采样间隔未独立读回；不能由其帧数确认 1 秒效果。其他范围与历史设备证据见[实施计划 T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)。Hasselblad 单张 RAW 的操作步骤见[安装演示说明](hasselblad/validation.md)，ARM 验收结果由[组件验证记录](../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
 
 真实目标主机性能测量、物理断电后的持久性验证和真实第三方传输方联调采用独立验收范围；边界见[第一版完善与验收范围](../architecture/README.md#第一版完善与验收范围)和[文件交接规格](../architecture/file-handoff.md)。本文保留相机资料采集、诊断工具说明以及 ARM 安装版 host 演示的操作步骤，设备当前结果以组件验证记录为准。
 
@@ -93,7 +93,7 @@ python .\action6_record_probe.py --serial 123456789ABCDEF --ffprobe "C:\path\to\
 
 每次采集或复查中，每份 MP4 只下载一次，下载前后分别读取一次源长度及摘要。`video-<序号>-copy.json` 保留两组源观测、副本值、长度和摘要各自是否变化，以及副本是否与下载后的源观测一致；比对不一致时，脚本先保存该记录，再报告实际数值并结束。后续源查询失败或结果无效时直接报错，不使用早期值代替。长度和摘要是分开的查询，不能视为同一时刻的文件快照；这些检查不证明源文件以后保持不变，也不证明本次全部文件已写完。
 
-`simulate_device` 只核对已有样例中的属性匹配和服务连接、注册日志，码率生效仍标为未确认。十秒从启动调用返回后计算；没有实际开始、结束观察时，不把这段主机等待认作十秒有效视频。成功执行只证明本次诊断步骤及副本一致性检查完成，`summary.json` 保留实际媒体属性；设置生效、全部产物写完、驱动启用和 ARM Linux 完整验收继续按相应设备契约核实。
+`simulate_device` 的属性匹配和服务连接、注册日志不证明实际码率。普通录像驱动在本地工具、通道、退出状态和输出完整性检查通过时记录 `setting_command_accepted`，只表示码率命令已接受，不表示相机实际码率独立读回。十秒从启动调用返回后计算；没有实际开始、结束观察时，不把这段主机等待认作十秒有效视频。成功执行只证明本次诊断步骤及副本一致性检查完成，`summary.json` 保留实际媒体属性；设置生效、全部产物写完、驱动启用和 ARM Linux 完整验收继续按相应设备契约核实。
 
 脚本响应与副本比对的单元测试可在容器中使用 `apps/camctl/.venv/bin/python -m unittest discover -s docs/hardware/tests/unit` 执行；测试使用采集样式和故障输入，不连接相机。
 
@@ -212,7 +212,7 @@ adb -s 123456789ABCDEF shell -T 'dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 -o 200
 
 用户已完成长间隔延时的手工专项，确认当前固件在该场景下不会自行恢复 ADB 连接，详见[用户现场记录](../camctl/verification.md#action6-长间隔延时固件缺陷与验证暂停2026-10-17)。本次提供的用例为 30 秒间隔、300 秒（5 分钟）采集、仅视频、手动 ISO 800；原命令和历史失败记录保留，不作为继续运行当前固件的操作入口。
 
-Action6 的后续真机验证按[T9 暂停及恢复前提](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)等待固件修复。恢复安排确定后，先核对实际修复固件、型号和现场状态，再复核长间隔采集完成后的自动重连及媒体完整性；不采用 OSMO 的约 5 秒作为 Action6 的恢复保证。原生延时 STOP 和正式执行合同仍待闭合。
+Action6 的后续真机验证按[T9 暂停及恢复前提](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#当前真机验证安排)等待固件修复。恢复安排确定后，先核对实际修复固件、型号和现场状态，再复核长间隔采集完成后的自动重连及媒体完整性；不采用 OSMO 的约 5 秒作为 Action6 的恢复保证。软件 STOP 命令、严格响应和有限执行契约见[Action6 原生有限延时任务](../architecture/camera-capture.md#action6-原生有限延时任务)；设备是否接受并执行 STOP、是否自然结束及产物是否写完仍须另行实机核验。
 
 ### Action6 原生延时的统一采集
 
@@ -286,7 +286,7 @@ Action6 原生延时的 START 候选及原表组合见[相机控制交接资料]
 
 OSMO 使用独立资料目录和自己的 serial。记录启动调用是在发送后、实际开始后，还是整项任务完成后返回。等待预设的真实持续时间，观察相机是否自行结束、是否进入视频处理阶段，以及最终全部文件何时写完。
 
-OSMO 的停止候选和适用前提见[相机控制交接资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)。现有候选不能证明设备已经接受或停止采集；Action6 延时 STOP 接口仍缺真机核验。
+OSMO 的停止候选和适用前提见[相机控制交接资料](camera-control-handoff.md#osmo-360--360-ii-全景静止延时摄影)。现有 OSMO 候选不能证明设备已经接受或停止采集；Action6 延时 STOP 的软件命令与响应规则见[正式任务契约](../architecture/camera-capture.md#action6-原生有限延时任务)，设备实际接受并执行该命令仍待真机核验。
 
 设备接受有限目标并自行结束时，保存实际结束或明确等待假设所需的证据。由主机负责结束时，保存实际开始、计时和停止证据。启动调用一直等待整项任务结束的情况，记录完整耗时及处理阶段，用于确定驱动的有限完整调用期限。
 
@@ -331,7 +331,7 @@ PY
 
 提取出的 [osmo360ii-config.toml](../camctl/examples/camera-demo/osmo360ii-config.toml) 用于后续 [OSMO 最短实机演示](#osmo-360-ii-的最短实机演示)，设备标识为 `osmo360ii`；将其中 `REPLACE_OSMO360II_SERIAL` 替换为 `adb devices -l` 列出的实际 serial。该样例使用当前运行账户的默认路径。已有部署将 OSMO 设备项合并到原配置，保留原设备、状态库和交接目录。[E3 的设备与正式软件前置](../superpowers/plans/2026-10-16-osmo360ii-timelapse-delivery.md#e3-arm-最短实机演示)满足后，初始化、实际 `describe` 和 host 统一使用这份现场配置；已有状态库不重新初始化。
 
-提取目录中同时保留 Action6 延时和 OSMO 的候选计划模板，供后续接入使用；当前演示使用 `action6-record`、`obtain` 和 `report-ack`。在提取的 `config.toml` 中，将 Action6 的 serial 替换为 `adb devices -l` 列出的实际标识，`device_id` 为 `action6`。配置只包含这款相机，不要求填写 OSMO 绑定；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将 Action6 设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
+提取目录保留 Action6 延时与 OSMO 的计划模板。Action6 延时现有正式软件任务；这些模板用于提供示例请求，不代表真机验收。当前演示使用 `action6-record`、`obtain` 和 `report-ack`。在提取的 `config.toml` 中，将 Action6 的 serial 替换为 `adb devices -l` 列出的实际标识，`device_id` 为 `action6`。配置只包含这款相机，不要求填写 OSMO 绑定；样例省略 `[paths]`，使用运行账户的默认部署目录。已有部署保留原配置，将 Action6 设备项合并到实际使用的配置中。初始化、能力导出和 host 始终使用同一份配置：
 
 ```bash
 "$HOME/.camctl/venv/bin/camctl" init --config "$HOME/.camctl/camera-demo/config.toml"
@@ -339,9 +339,9 @@ PY
   > "$HOME/.camctl/camera-demo/capabilities.json"
 ```
 
-`prepare-plan.py` 从安装包读取计划模板，生成新的正整数请求身份和 UTC 时间，并按刚导出的能力 Schema 校验拍摄参数。默认安排在生成后 10 秒开始，允许迟到 30 秒。每份新计划选择尚不存在的输出文件名并在提交前生成；原键重送时继续使用原文件。内置 Action6 驱动导出普通录像能力，其他拍摄候选等待各自设备接入。实际能力不支持计划时，生成器在写入前拒绝生成，不能用候选 Schema 代替实际 `describe`。
+`prepare-plan.py` 从安装包读取计划模板，生成新的正整数请求身份和 UTC 时间，并按刚导出的能力 Schema 校验拍摄参数。默认安排在生成后 10 秒开始，允许迟到 30 秒。每份新计划选择尚不存在的输出文件名并在提交前生成；原键重送时继续使用原文件。内置 Action6 驱动导出普通录像和原生有限延时能力；其余未启用的拍摄候选仍等待各自设备接入。实际能力不支持计划时，生成器在写入前拒绝生成，不能用候选 Schema 代替实际 `describe`。
 
-Action6 录像模板按[参数规则](../architecture/camera-parameters.md)省略 `aperture` 和 `bitrate`，驱动保留相机原设置，不将实际值补写为用户要求。其他计划明确请求这些参数时，仍须执行设置；设置失败或未确认时停止后续设置和 START，保留实际错误。已有码率工具只提供服务日志，显式码率要求尚不能取得生效确认。
+Action6 录像模板按[参数规则](../architecture/camera-parameters.md)显式选择 `aperture=f2.8` 和 `bitrate=high`。新计划必须包含两项；`prepare-plan.py` 依据刚导出的实际 Schema 校验缺失、空值和非法选项。光圈响应未知或调用失败会保留在设置调用历史中，收场后继续后续设置和 START；码率调用通过本地完整性检查时只记录命令已接受，不代表实际码率独立读回。
 
 正式驱动的停止及文件完成规则见[Action6 录像规格](../architecture/camera-recording.md#action6-普通录像的运行假设)，本文不重复定义其确认语义。当前 ARM 普通录像演示已获用户整体确认；原始报告、媒体及确认水位未归档，因此不据此填写具体响应、计时或媒体测量值。
 

@@ -2,7 +2,7 @@
 
 本目录用于客户端、camctl CLI 和 C 接入模块之间的真实协作验证。终端演示使用同一模块；组件内部测试放在各自目录，目前客户端测试入口为 `apps/client/tests`。
 
-`test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
+`test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。Action6 普通录像表单读取实际必填光圈／码率，原生延时表单读取实际参数类型、三种输出和预览声明；Action6 的 `delete_supported=true`、Hasselblad 设备源的 `false` 也按安装版输出核对。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
 
 页面联合链使用两份实际安装版导出验证当前源变更、逐设备指南及动作／产物清理入口。非法字段和重复键重载失败后仍按旧有效目录展示；首次加载失败与有效空目录按未知保留入口。混合来源、原片、预览、修复成品和产物状态分别核对，草稿及已导出原请求保持不变。
 
@@ -24,9 +24,17 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capabili
 
 `test_camctl_directory_switch.py` 使用真实 CLI 和 C 模块完成旧目录报告发布、领取与主程序清理，再由显式 `init` 切换三个绑定目录。新会话向新 `ready` 发布报告，重新配置的 C 模块从该目录领取至新 `processing`；测试核对原始字节、数据库身份及报告编号继续增长。组件内的目录切换测试另外验证历史、ACK、绑定提交中断和目录资格。
 
-`test_action6_builtin_demo_roundtrip.py` 在源码目录之外构建并独立安装 wheel 和锁定依赖，从安装包提取 Action6 录像预设，经真实 C host 完成十秒录像、独立取回、文件与报告领取、客户端导入及累计确认。它加载内置驱动，只在 ADB 进程边界提供受接口约束的响应和文件；测试核对 START 返回 `00` 后保存的 `SENT` 语义、未知实际开始时刻、1000 毫秒启动余量、至少 11 秒后发出的唯一 STOP、STOP 后的实际五秒等待、文件完成来源、原动作关联、源与副本摘要及源文件保留。这条链不连接真实相机，其媒体样例不证明设备的分辨率、帧率或时长，目标主机验收见[演示操作说明](../../docs/hardware/camera-demo-validation.md#arm-linux-的完整验收)。
+`test_action6_builtin_demo_roundtrip.py` 在源码目录之外构建并独立安装 wheel 和锁定依赖，从安装包提取 Action6 录像预设，经真实 C host 完成十秒录像、独立取回、文件与报告领取、客户端导入及累计确认。新请求明确提交必填 `aperture=f2.8` 和 `bitrate=high`；测试核对启动记录中的版本化调用历史保留 `e3` 光圈结果且效果未知，之后仍按序执行码率与 START，并将码率命令只记录为本地已接受。START 返回 `00` 后保存 `SENT` 语义和未知实际开始时刻，1000 毫秒启动余量、至少 11 秒后发出的唯一 STOP、STOP 后实际五秒等待及原请求重送不重复派发保持；结果关联 MP4 与同目录 LRF，照片不生成预览。测试只在 ADB 进程边界提供受接口约束的响应和文件，不连接真实相机；样例媒体不证明设备分辨率、帧率或时长，目标主机验收见[演示操作说明](../../docs/hardware/camera-demo-validation.md#arm-linux-的完整验收)。
 
-`test_timelapse_time_parameters.py` 使用 Action6 与 OSMO 360 II 的生产候选 Schema，经测试任务工厂、真实 `describe`、Python 精确校验、Chromium 中的客户端共享模块及 Node.js 后端真实导出，遍历同源时间域并核对精确词元、严格关系、型号曝光及输出。最短参数经过受理、未启动取消、报告发布和客户端导入，验证估算信息不进入生效参数或报告；该路径不执行设备命令。生成器在临时资料副本中验证漂移检查和重新生成。此候选测试不直接调用正式 OSMO 合同；正式安装版业务链由 [OSMO 内置合同联合链](#osmo-360-ii-正式内置合同安装版联合链)验证，Action6 的正式启用条件仍单独验收。
+### Action6 原生有限延时安装版联合链
+
+`test_action6_builtin_timelapse_roundtrip.py` 使用独立安装 wheel、真实 C host、CLI、SQLite 和受约束的 ADB 文件替身，验证 Action6 原生延时从原 `SENT` 恢复自然完成期限：冻结业务时钟在第 329 秒仍不发 STOP 或读取，第 330 秒后进入结果核实；设备目标保持 300 秒、启动余量为 0、结果余量为 30 秒。`video_jpeg` 输出登记非空 MP4、可选配对 LRF 和独立 JPEG 原片，并分别取回；按精确 output ID 删除 LRF 后 MP4 仍在，删除 MP4 后 JPEG 仍在。该链无真实相机，不证明实际 STOP 或设备端采集；合成预览／照片字节不证明媒体格式质量。
+
+```bash
+apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
+```
+
+`test_timelapse_time_parameters.py` 使用 Action6 与 OSMO 360 II 的生产候选 Schema，经测试任务工厂、真实 `describe`、Python 精确校验、Chromium 中的客户端共享模块及 Node.js 后端真实导出，遍历同源时间域并核对精确词元、严格关系、型号曝光及输出。最短参数经过受理、未启动取消、报告发布和客户端导入，验证估算信息不进入生效参数或报告；该路径不执行设备命令。生成器在临时资料副本中验证漂移检查和重新生成。此时间域测试不直接调用正式合同；Action6 和 OSMO 360 II 的正式安装版业务链分别由[Action6 原生有限延时安装版联合链](#action6-原生有限延时安装版联合链)和[OSMO 内置合同联合链](#osmo-360-ii-正式内置合同安装版联合链)验证。
 
 ```bash
 UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_timelapse_time_parameters.py -q

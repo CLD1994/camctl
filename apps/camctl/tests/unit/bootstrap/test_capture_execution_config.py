@@ -6,7 +6,8 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
+from camctl.bootstrap.capture_assembly import (DriverResultListing, execution_wait_config,
+    session_capture_assembly)
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.handlers import ResultFilesPort
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
@@ -77,3 +78,29 @@ def test_recording_grant_saves_current_start_budget():
     assert reason is None
     request = runtime.scheduling.grant_start.call_args.args[0]
     assert request.config == AttemptConfig(6, Decimal("0.375"), Decimal("1.5"))
+
+
+def test_formal_result_adapter_shares_runtime_repository_and_owned_connection():
+    config = load_config({"devices": {"cam-1": {
+        "kind": "camera", "driver": "driver-1",
+    }}}, ConfigDefaults())
+
+    class Driver:
+        async def control(self, _request):
+            raise AssertionError("装配测试不执行控制端口")
+
+        async def list_results(self, _request, _batch):
+            raise AssertionError("装配测试不执行结果端口")
+
+    entry = DriverEntry("driver-1", Driver(), DriverDeclaration(
+        control_supported=True, stop_supported=False, query_supported=False,
+        result_supported=True, read_supported=False, digest_supported=False,
+        delete_supported=False), EvidenceRegistry(()), DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    owned = object()
+    runtime = session_capture_assembly(devices=config.devices,
+        drivers=DriverRegistry((entry,)), staging=Path("/staging"),
+        wait_config=execution_wait_config, media_enabled=False)(owned, "cam-1")
+
+    assert isinstance(runtime.results, DriverResultListing)
+    assert runtime.results._capture_repository is runtime.capture
+    assert runtime.results._owned is owned

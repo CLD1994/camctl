@@ -12,6 +12,7 @@ from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError
 from camctl.devices.drivers.adb_cameras import commands as camera_commands
 from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_for, start_for
+from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
@@ -19,7 +20,7 @@ from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest
 from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, ErrorValue, SettlementBasis
-from camctl.operations.process import LocalExit, RawToolOutcome
+from camctl.operations.process import LocalExit, RawToolOutcome, ToolStartError
 
 
 RETURNED = EvidenceContract("operation_returned", 1, "control", frozenset())
@@ -116,6 +117,38 @@ class Transport:
             self.fail_output if len(self.calls) == self.fail_at else b"OK", None, None, stderr=b"")
 
 
+class Action6ContractTransport:
+    """替换 ADB 进程边界，保留正式 Action6 命令和响应解释器。"""
+
+    def __init__(self, *, aperture_payload="00", overrides=None, exceptions=None, on_command=None):
+        self.calls = []
+        self.aperture_payload = aperture_payload
+        self.overrides = overrides or {}
+        self.exceptions = exceptions or {}
+        self.on_command = on_command
+        self.aperture_seen = False
+
+    async def run(self, spec, stop):
+        self.calls.append(spec)
+        command = tuple(shlex.split(shlex.split(spec.argv[5])[2]))
+        if command[-3:-1] == ("-c", "0x26"):
+            self.aperture_seen = True
+        if self.on_command is not None:
+            self.on_command(command)
+        if command in self.exceptions:
+            raise self.exceptions[command]
+        if command in self.overrides:
+            return self.overrides[command]
+        if command[0] == "simulate_device":
+            output = (b"name [DeviceRecordRecSettingBitRate]\n"
+                      b"link to server rlt 0\nregister to server successs\n")
+        else:
+            payload = (self.aperture_payload if command[-3:-1] == ("-c", "0x26")
+                       else "00")
+            output = f"Resp message, len = 1, data:\n {payload}\n".encode()
+        return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+
+
 def _params(model):
     if model is CameraModel.ACTION6:
         return {"type": "action6_record", "duration_s": 10, "resolution": "4k30", "fov": "wide",
@@ -188,6 +221,539 @@ def _driver(model, transport, *, clock=lambda: 0, devices=None):
         transport, terminate_grace_s=Decimal("1"), monotonic_ns=clock)
 
 
+def _action6_contract_driver(transport, *, clock=lambda: 0):
+    return AdbCameraDriver(action6_record_contract(), {
+        "cam-1": {"driver": "dji-action6", "adb": {"serial": "serial-1"}}},
+        transport, terminate_grace_s=Decimal("1"), monotonic_ns=clock)
+
+
+def _attached_call(result, command):
+    return next(call for call in result.outcome.settlement.evidence.data["calls"]
+                if call["command"] == list(command))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("aperture,payload", [("f2.8", "1801"), ("f4.0", "9001")])
+@pytest.mark.parametrize("response", ["00", "e3", "26"])
+async def test_action6_record_aperture_response_is_retained_and_does_not_block_one_start(
+        exposure, aperture, payload, response):
+    request = replace(_request(), params={**_request().params, "exposure": exposure, "aperture": aperture})
+    transport = Action6ContractTransport(aperture_payload=response)
+
+    result = await _action6_contract_driver(transport).control(request)
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    start = ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01"]
+    aperture_command = ["dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0",
+                        "-s", "2", "-c", "0x26", payload]
+    assert scripts.count(start) == 1
+    assert aperture_command in scripts
+    assert scripts.index(start) > scripts.index(aperture_command)
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    attached = result.outcome.settlement.evidence.data["calls"]
+    assert len(attached) == len(scripts) - 1
+    call = _attached_call(result, aperture_command)
+    assert call["command"] == aperture_command
+    assert call["status"] == ("succeeded" if response == "00" else "failed")
+    assert call["effect"] == ("confirmed" if response == "00" else "unknown")
+    if response == "00":
+        assert call["error"] is None
+        assert any(item["type"] == "setting_applied" for item in call["result_document"]["observations"])
+    else:
+        assert call["error"]["details"]["response_payload"] == response
+        assert call["result_document"]["observations"] == []
+    assert call["stdout_hex"] == f"Resp message, len = 1, data:\n {response}\n".encode().hex()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exposure", [
+    {"mode": "manual", "iso": 800},
+    {"mode": "auto", "compensation_ev": 0},
+])
+@pytest.mark.parametrize("bitrate,value", [("standard", "1"), ("high", "2")])
+async def test_action6_record_simulate_device_zero_exit_accepts_bitrate_command(exposure, bitrate, value):
+    request = replace(_request(), params={**_request().params, "exposure": exposure, "bitrate": bitrate})
+    transport = Action6ContractTransport()
+
+    result = await _action6_contract_driver(transport).control(request)
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    start = ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01"]
+    assert [script for script in scripts if script[0] == "simulate_device"] == [
+        ["simulate_device", "-s", "bitrate", value]
+    ]
+    assert scripts.count(start) == 1
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    bitrate_call = _attached_call(result, ("simulate_device", "-s", "bitrate", value))
+    assert [(item["type"], item["data"])
+            for item in bitrate_call["result_document"]["observations"]
+            if item["type"] == "setting_command_accepted"] == [
+        ("setting_command_accepted", {
+            "activity_id": "7", "response_payload": None,
+            "confirmation_basis": "action6_simulate_device_exit/v1",
+        })
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [
+    RawToolOutcome(LocalExit(exit_code=9), b"service error", None, None, stderr=b""),
+    RawToolOutcome(LocalExit(exit_code=0), b"service error", "timeout", Decimal("1"), stderr=b""),
+    RawToolOutcome(LocalExit(exit_code=0), b"partial", None, None,
+                   output_failure="stdout read failed", stderr=b""),
+    RawToolOutcome(LocalExit(exit_code=0), b"service error", None, None, stderr=b"warning\n"),
+    RawToolOutcome(LocalExit(exit_code=0), None, None, None, stderr=b""),
+    RawToolOutcome(None, b"service error", None, None, stderr=b""),
+])
+async def test_action6_simulate_device_integrity_errors_fail_and_preserve_setting_history(raw):
+    bitrate = ("simulate_device", "-s", "bitrate", "2")
+    transport = Action6ContractTransport(overrides={bitrate: raw})
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts[-1] == bitrate
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.code == (
+        "transport_timeout" if raw.error is not None else "action6_response_unconfirmed")
+    attached = _attached_call(result, bitrate)
+    assert attached["status"] == "failed"
+    assert attached["effect"] == "unknown"
+    assert attached["result_document"]["observations"] == []
+    if raw.output is None:
+        assert attached["stdout_hex"] is None
+    else:
+        assert attached["stdout_hex"] == raw.output.hex()
+
+
+@pytest.mark.asyncio
+async def test_action6_aperture_failure_is_saved_when_later_bitrate_fails():
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    bitrate = ("simulate_device", "-s", "bitrate", "2")
+    transport = Action6ContractTransport(aperture_payload="e3", overrides={
+        bitrate: RawToolOutcome(LocalExit(exit_code=9), b"failed to connect", None, None, stderr=b"")
+    })
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert bitrate in scripts
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.details["reason"] == "exit_nonzero"
+    assert result.outcome.call_info.local_exit_code == 9
+    attached = result.outcome.settlement.evidence.data["calls"]
+    assert len(attached) == len(scripts)
+    assert _attached_call(result, aperture)["error"]["details"]["response_payload"] == "e3"
+    assert _attached_call(result, bitrate)["error"]["details"]["reason"] == "exit_nonzero"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [
+    RawToolOutcome(LocalExit(exit_code=9), b"Resp message, len = 1, data:\n 00\n", None, None, stderr=b""),
+    RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n", "timeout",
+                   Decimal("1"), stderr=b""),
+    RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n", None, None,
+                   output_failure="stdout read failed", stderr=b""),
+])
+async def test_action6_aperture_tool_and_response_failures_are_attached_but_non_blocking(raw):
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    transport = Action6ContractTransport(overrides={aperture: raw})
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts.count(aperture) == 1
+    assert scripts.count(("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                          "-c", "02", "01")) == 1
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    attached = result.outcome.settlement.evidence.data["calls"]
+    aperture_call = _attached_call(result, aperture)
+    assert len(attached) == len(scripts) - 1
+    assert aperture_call["status"] == "failed"
+    assert aperture_call["effect"] == "unknown"
+    assert aperture_call["result_document"]["call_info"]["local_exit"] == {"exit_code": raw.exit.exit_code}
+    assert aperture_call["stdout_hex"] == raw.output.hex()
+    if raw.exit.exit_code == 9:
+        assert aperture_call["error"]["details"]["reason"] == "exit_nonzero"
+    elif raw.error is not None:
+        assert aperture_call["error"]["code"] == "transport_timeout"
+    else:
+        assert aperture_call["error"]["details"]["reason"] == "output_incomplete"
+
+
+@pytest.mark.asyncio
+async def test_action6_aperture_tool_start_error_is_recorded_as_not_dispatched_and_does_not_retry():
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    transport = Action6ContractTransport(exceptions={aperture: ToolStartError("spawn denied")})
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts.count(aperture) == 1
+    assert scripts.count(("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                          "-c", "02", "01")) == 1
+    attached = _attached_call(result, aperture)
+    assert attached["status"] == "failed"
+    assert attached["effect"] == "no_effect"
+    assert attached["error"]["code"] == "tool_start_failed"
+    assert attached["result_document"]["settlement"]["basis"] == "not_dispatched"
+    assert attached["stdout_hex"] is None
+
+
+@pytest.mark.parametrize(("case", "raw", "payload", "basis", "evidence_type", "original_data"), [
+    ("returned", None, "00", SettlementBasis.OBSERVED, "control_returned", {}),
+    ("e3", None, "e3", SettlementBasis.OBSERVED, "control_returned", {}),
+    ("timeout_no_grace",
+     RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
+                    "timeout", None, stderr=b""),
+     "00", SettlementBasis.ASSUMED, "control_foreground_recovery", {}),
+    ("output_failure_no_grace",
+     RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
+                    "output_failed", None, stderr=b""),
+     "00", SettlementBasis.ASSUMED, "control_foreground_recovery", {}),
+    ("transport_with_grace",
+     RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
+                    "timeout", Decimal("0.75"), stderr=b""),
+     "00", SettlementBasis.ASSUMED, "control_foreground_recovery",
+     {"terminate_grace_s": Decimal("0.75")}),
+])
+@pytest.mark.asyncio
+async def test_action6_dispatch_gate_preserves_last_settlement_and_attaches_complete_call_history(
+        case, raw, payload, basis, evidence_type, original_data):
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    transport = Action6ContractTransport(aperture_payload=payload,
+        overrides={} if raw is None else {aperture: raw})
+    request = replace(_request(),
+        dispatch_check=lambda: "window_closed" if transport.aperture_seen else None)
+
+    result = await _action6_contract_driver(transport).control(request)
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts[-1] == aperture
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.error.code == "window_closed"
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is EffectState.NO_EFFECT
+    assert result.outcome.settlement.basis is basis
+    evidence = result.outcome.settlement.evidence
+    assert (evidence.type, evidence.version) == (evidence_type, 2)
+    attached = evidence.data["calls"]
+    assert len(attached) == len(scripts)
+    assert evidence.data == {**original_data, "calls": attached}
+    aperture_call = _attached_call(result, aperture)
+    assert aperture_call["command"] == list(aperture)
+    if raw is not None:
+        assert aperture_call["stdout_hex"] == raw.output.hex()
+        assert aperture_call["result_document"]["settlement"]["evidence"]["data"] == original_data
+
+
+@pytest.mark.parametrize("transport_error", ["timeout", "output_failed"])
+@pytest.mark.asyncio
+async def test_action6_terminal_start_transport_error_without_grace_keeps_all_setting_history(transport_error):
+    from camctl.devices.drivers.adb_cameras.commands import start_for
+
+    start = start_for(CameraModel.ACTION6, "camera_record")
+    raw = RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
+                         transport_error, None, stderr=b"")
+    transport = Action6ContractTransport(overrides={start: raw})
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts[-1] == start
+    assert scripts.count(start) == 1
+    assert result.outcome.error.code == f"transport_{transport_error}"
+    assert result.outcome.settlement.basis is SettlementBasis.ASSUMED
+    evidence = result.outcome.settlement.evidence
+    assert (evidence.type, evidence.version) == ("control_foreground_recovery", 2)
+    assert "terminate_grace_s" not in evidence.data
+    calls = evidence.data["calls"]
+    assert len(calls) == len(scripts) - 1
+    assert all(call["command"] != list(start) for call in calls)
+    assert [call["command"] for call in calls] == [list(script) for script in scripts[:-1]]
+
+
+@pytest.mark.parametrize("gate", ["cancel", "window", "deadline"])
+@pytest.mark.asyncio
+async def test_action6_tool_start_error_keeps_not_started_evidence_when_gate_blocks_following_calls(
+        monkeypatch, gate):
+    from types import SimpleNamespace
+    from camctl.devices.drivers.adb_cameras import driver as driver_module
+
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    scope = SimpleNamespace(interrupted=None)
+    now = [0]
+
+    def on_command(command):
+        if command == aperture:
+            if gate == "cancel":
+                scope.interrupted = object()
+            if gate == "deadline":
+                now[0] = 20_000_000_000
+
+    transport = Action6ContractTransport(
+        exceptions={aperture: ToolStartError("spawn denied")}, on_command=on_command)
+    if gate == "cancel":
+        monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
+    request = replace(_request(),
+        dispatch_check=lambda: "window_closed" if gate == "window" and transport.aperture_seen else None)
+
+    result = await _action6_contract_driver(transport, clock=lambda: now[0]).control(request)
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts[-1] == aperture
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    expected_error = {"cancel": "transport_cancelled", "window": "window_closed",
+                      "deadline": "start_preparation_timeout"}[gate]
+    assert result.outcome.error.code == expected_error
+    assert result.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    evidence = result.outcome.settlement.evidence
+    assert (evidence.type, evidence.version) == ("tool_not_started", 2)
+    attached = evidence.data["calls"]
+    assert len(attached) == len(scripts)
+    aperture_call = _attached_call(result, aperture)
+    assert aperture_call["status"] == "failed"
+    assert aperture_call["effect"] == "no_effect"
+    assert aperture_call["result_document"]["settlement"]["basis"] == "not_dispatched"
+
+
+@pytest.mark.asyncio
+async def test_action6_dispatch_prevention_before_any_call_keeps_v1_not_dispatched_evidence():
+    transport = Action6ContractTransport()
+    request = replace(_request(), dispatch_check=lambda: "window_closed")
+
+    result = await _action6_contract_driver(transport).control(request)
+
+    assert transport.calls == []
+    assert result.outcome.error.code == "window_closed"
+    assert result.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    evidence = result.outcome.settlement.evidence
+    assert (evidence.type, evidence.version, evidence.data) == ("dispatch_prevented", 1, {})
+
+
+@pytest.mark.asyncio
+async def test_action6_start_tool_start_error_returns_all_prior_setting_calls_without_retry():
+    from camctl.devices.drivers.adb_cameras.commands import start_for
+
+    start = start_for(CameraModel.ACTION6, "camera_record")
+    transport = Action6ContractTransport(exceptions={start: ToolStartError("spawn denied")})
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts.count(start) == 1
+    assert sum(command[-3:] == ("-c", "02", "01") for command in scripts) == 1
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.code == "tool_start_failed"
+    assert result.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    calls = result.outcome.settlement.evidence.data["calls"]
+    assert len(calls) == len(scripts) - 1
+    assert all(call["command"] != list(start) for call in calls)
+    assert all(call["status"] == "succeeded" for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_action6_unsettled_aperture_transport_exception_is_not_swallowed_or_followed_by_start():
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    transport = Action6ContractTransport(exceptions={aperture: RuntimeError("lost settlement")})
+
+    with pytest.raises(RuntimeError, match="lost settlement"):
+        await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts.count(aperture) == 1
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+
+
+@pytest.mark.asyncio
+async def test_action6_cancel_after_a_settled_setting_returns_its_call_history(monkeypatch):
+    from types import SimpleNamespace
+    from camctl.devices.drivers.adb_cameras import driver as driver_module
+
+    scope = SimpleNamespace(interrupted=None)
+    transport = Action6ContractTransport(
+        on_command=lambda command: setattr(scope, "interrupted", object())
+            if command[-3:-1] == ("-c", "0xe1") else None)
+    monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    video_mode = ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                  "-c", "0xe1", "01")
+    assert scripts == [video_mode]
+    assert result.outcome.error.code == "transport_cancelled"
+    assert result.outcome.observations == ()
+    assert _attached_call(result, video_mode)["stdout_hex"] == (
+        b"Resp message, len = 1, data:\n 00\n".hex())
+
+
+@pytest.mark.asyncio
+async def test_action6_aperture_result_survives_dispatch_loss_before_next_command():
+    transport = Action6ContractTransport(aperture_payload="00")
+    request = replace(_request(), dispatch_check=lambda: "window_closed" if transport.aperture_seen else None)
+
+    result = await _action6_contract_driver(transport).control(request)
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert transport.aperture_seen
+    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.error.code == "window_closed"
+    assert result.outcome.observations == ()
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    assert any(item["type"] == "setting_applied"
+               for item in _attached_call(result, aperture)["result_document"]["observations"])
+
+
+@pytest.mark.asyncio
+async def test_action6_aperture_result_survives_full_start_deadline_expiry():
+    now = [0]
+    transport = Action6ContractTransport(aperture_payload="00",
+        on_command=lambda command: now.__setitem__(0, 20_000_000_000)
+            if command[-3:-1] == ("-c", "0x26") else None)
+    request = replace(_request(), timeout_s=Decimal("20"))
+
+    result = await _action6_contract_driver(transport, clock=lambda: now[0]).control(request)
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert transport.aperture_seen
+    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.error.code == "start_preparation_timeout"
+    assert result.outcome.observations == ()
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    assert any(item["type"] == "setting_applied"
+               for item in _attached_call(result, aperture)["result_document"]["observations"])
+
+
+@pytest.mark.asyncio
+async def test_action6_aperture_result_survives_cancellation_after_settled_call(monkeypatch):
+    from types import SimpleNamespace
+    from camctl.devices.drivers.adb_cameras import driver as driver_module
+
+    scope = SimpleNamespace(interrupted=None)
+    transport = Action6ContractTransport(aperture_payload="00",
+        on_command=lambda command: setattr(scope, "interrupted", object())
+            if command[-3:-1] == ("-c", "0x26") else None)
+    monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert transport.aperture_seen
+    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.error.code == "transport_cancelled"
+    assert result.outcome.observations == ()
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    assert any(item["type"] == "setting_applied"
+               for item in _attached_call(result, aperture)["result_document"]["observations"])
+
+
+@pytest.mark.asyncio
+async def test_osmo_interruption_after_successful_setting_preserves_v1_observation_and_call_info(monkeypatch):
+    from types import SimpleNamespace
+    from camctl.devices.drivers.adb_cameras import driver as driver_module
+    from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
+
+    scope = SimpleNamespace(interrupted=None)
+    first_setting = camera_commands.OSMO_SESSION_SETUP[0]
+    transport = Action6ContractTransport(
+        on_command=lambda command: setattr(scope, "interrupted", object())
+            if command == first_setting else None)
+    monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
+    driver = AdbCameraDriver(osmo360ii_contract(), {
+        "cam-1": {"driver": "dji-osmo360-ii", "adb": {"serial": "serial-1"}}},
+        transport, terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
+
+    result = await driver.control(_request(CameraModel.OSMO360II))
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts == [first_setting]
+    assert result.outcome.error.code == "transport_cancelled"
+    assert result.outcome.observations[0].type == "setting_command_accepted"
+    assert result.outcome.call_info.local_exit_code == 0
+    assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
+    evidence = result.outcome.settlement.evidence
+    assert (evidence.type, evidence.version, evidence.data) == ("control_returned", 1, {})
+
+
+@pytest.mark.asyncio
+async def test_action6_non_aperture_setting_e3_still_blocks_start():
+    resolution = ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "18", "1003000000")
+    transport = Action6ContractTransport(overrides={
+        resolution: RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n e3\n",
+                                   None, None, stderr=b"")
+    })
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts[-1] == resolution
+    assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.details["response_payload"] == "e3"
+    assert _attached_call(result, resolution)["error"]["details"]["response_payload"] == "e3"
+
+
+@pytest.mark.asyncio
+async def test_action6_start_e3_is_not_retried():
+    start = ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01")
+    transport = Action6ContractTransport(overrides={
+        start: RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n e3\n",
+                              None, None, stderr=b"")
+    })
+
+    result = await _action6_contract_driver(transport).control(_request())
+
+    scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
+    assert scripts.count(start) == 1
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.details["response_payload"] == "e3"
+    aperture = ("dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
+                "-c", "0x26", "1801")
+    attached = _attached_call(result, aperture)
+    assert attached["status"] == "succeeded"
+    assert attached["result_document"]["observations"][0]["data"]["response_payload"] == "00"
+
+
+@pytest.mark.asyncio
+async def test_action6_stop_e3_remains_a_stop_failure():
+    from camctl.devices.drivers.adb_cameras.commands import stop_for
+
+    stop = stop_for(CameraModel.ACTION6, "camera_record")
+    transport = Action6ContractTransport(overrides={
+        stop: RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n e3\n",
+                             None, None, stderr=b"")
+    })
+    request = ControlRequest("stop_recording", DeviceBinding("cam-1", "dji-action6"), {},
+        AttemptTicket(2, "stop", "7", "stop/7", 9), Decimal("20"))
+
+    result = await _action6_contract_driver(transport).stop(request)
+
+    assert len(transport.calls) == 1
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.details["response_payload"] == "e3"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", list(CameraModel))
 async def test_control_applies_settings_before_one_actual_start(model):
@@ -208,7 +774,8 @@ async def test_control_applies_settings_before_one_actual_start(model):
     ({"mode": "manual", "iso": 800}, 12),
     ({"mode": "auto", "compensation_ev": 0}, 11),
 ])
-async def test_action6_record_omitted_aperture_reaches_one_start_without_adjusting_aperture(exposure, call_count):
+async def test_legacy_action6_effective_params_without_aperture_remain_encodable_by_generic_driver(
+        exposure, call_count):
     request = _request()
     params = {**request.params, "exposure": exposure}
     del params["aperture"]
@@ -235,7 +802,7 @@ async def test_action6_record_omitted_aperture_reaches_one_start_without_adjusti
 ])
 @pytest.mark.parametrize("aperture, payload", [("f2.8", "1801"), ("f4.0", "9001")])
 @pytest.mark.parametrize("response", [b"UNKNOWN", b"e3"])
-async def test_action6_record_unconfirmed_explicit_aperture_blocks_start(
+async def test_generic_camera_contract_keeps_unconfirmed_aperture_setting_blocking(
         exposure, aperture_call_number, aperture, payload, response):
     request = _request()
     request = replace(request, params={**request.params, "exposure": exposure, "aperture": aperture})
@@ -260,7 +827,8 @@ async def test_action6_record_unconfirmed_explicit_aperture_blocks_start(
     ({"mode": "manual", "iso": 800}, 11),
     ({"mode": "auto", "compensation_ev": 0}, 10),
 ])
-async def test_action6_record_omitted_aperture_and_bitrate_reaches_one_start(exposure, call_count):
+async def test_legacy_action6_effective_params_without_aperture_or_bitrate_remain_encodable_by_generic_driver(
+        exposure, call_count):
     request = _request()
     params = {**request.params, "exposure": exposure}
     del params["aperture"]
@@ -286,7 +854,8 @@ async def test_action6_record_omitted_aperture_and_bitrate_reaches_one_start(exp
     ({"mode": "auto", "compensation_ev": 0}, 10),
 ])
 @pytest.mark.parametrize("bitrate, value", [("standard", "1"), ("high", "2")])
-async def test_action6_record_unconfirmed_explicit_bitrate_blocks_start(exposure, bitrate_call_number, bitrate, value):
+async def test_generic_camera_contract_keeps_unconfirmed_simulate_setting_blocking(
+        exposure, bitrate_call_number, bitrate, value):
     request = _request()
     params = {**request.params, "exposure": exposure, "bitrate": bitrate}
     del params["aperture"]
@@ -515,6 +1084,35 @@ async def test_action6_timelapse_unknown_start_is_not_repeated_or_followed_by_st
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
     assert not result.observations
+
+
+@pytest.mark.asyncio
+async def test_formal_action6_timelapse_start_records_only_timelapse_sent():
+    transport = Action6ContractTransport()
+
+    result = await _action6_contract_driver(transport).control(_timelapse_request())
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    assert scripts[-1] == ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0",
+                           "-s", "2", "-c", "01", "01"]
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.outcome.effect is EffectState.CONFIRMED
+    assert [observation.type for observation in result.observations] == ["timelapse_sent"]
+
+
+@pytest.mark.asyncio
+async def test_formal_action6_timelapse_stop_uses_exact_command_and_requires_zero_ack():
+    transport = Action6ContractTransport()
+    request = ControlRequest("stop_timelapse", DeviceBinding("cam-1", CameraModel.ACTION6), {},
+        AttemptTicket(1, "stop", "7", "stop/3", 9), Decimal("20"))
+
+    result = await _action6_contract_driver(transport).stop(request)
+
+    scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
+    assert scripts == [["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0",
+                        "-s", "2", "-c", "01", "00"]]
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert [observation.type for observation in result.observations] == ["stop_confirmed"]
 
 
 AUTO_TEMPLATE_DRIVER_CASES = (

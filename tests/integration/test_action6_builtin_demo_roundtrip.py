@@ -22,6 +22,7 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.devices.tasks import StartReturn
+from camctl.operations.result_format import read_result_document
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl_fixtures import Deployment
 from test_camctl_c_module_roundtrip import _report_with_statuses
@@ -108,7 +109,13 @@ def action6_package(tmp_path_factory):
 def _calls(path):
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines()]
+    lines = path.read_text().splitlines(keepends=True)
+    # ADB calls append one JSON record while the polling loop reads this file.
+    # Ignore only a last record that has not reached its newline yet; a complete
+    # malformed record or any malformed earlier record remains a test failure.
+    if lines and not lines[-1].endswith(("\n", "\r")):
+        lines.pop()
+    return [json.loads(line) for line in lines]
 
 
 def _results(state_db, action_id, kind):
@@ -171,8 +178,10 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     capabilities = json.loads(described.stdout)
     assert [(device["device_id"], device["driver_id"]) for device in capabilities["devices"]] == [
         ("action6", "dji-action6")]
-    assert [action["type"] for action in capabilities["devices"][0]["actions"]] == ["camera_record"]
+    assert [action["type"] for action in capabilities["devices"][0]["actions"]] == [
+        "camera_record", "camera_timelapse"]
     parameter = capabilities["devices"][0]["actions"][0]["parameter_types"][0]
+    assert {"aperture", "bitrate"} <= set(parameter["schema"]["required"])
     assert parameter["video_size_estimate"] == {
         "bitrate_mbps": 130,
         "duration": {"method": "direct",
@@ -190,7 +199,7 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
           "--capabilities", str(capabilities_path), "--output", str(capture_plan)],
          cwd=deployment.root, env=environment)
     params = json.loads(capture_plan.read_text())["actions"][0]["params"]
-    assert "aperture" not in params and "bitrate" not in params
+    assert params["aperture"] == "f2.8" and params["bitrate"] == "high"
     assert params["duration_s"] == 10
     calls_path = deployment.root / "adb-calls.jsonl"
     demo = HostDemo(deployment, host_demo, launcher=str(package.camctl))
@@ -221,7 +230,7 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         assert execution["startup_margin_ms"] == 1000
         assert execution["file_completion_wait_ms"] == 5000
         assert execution["output_scope"] == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
-        assert "aperture" not in json.loads(rows[0][0]) and "bitrate" not in json.loads(rows[0][0])
+        assert json.loads(rows[0][0]) == params
         stop_results = _results(deployment.state_db, action_id, enum_for("operation_runs.kind").STOP)
         assert len(stop_results) == 1
         stop_event, stop_returned_at_us, stop_document = stop_results[0]
@@ -241,6 +250,31 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         start_document = json.loads(start_results[0][2])
         assert [item["type"] for item in start_document["observations"]] == ["recording_sent"]
         assert start_document["observations"][0]["data"]["response_payload"] == "00"
+        assert start_document["settlement"]["evidence"]["type"] == "control_returned"
+        assert start_document["settlement"]["evidence"]["version"] == 2
+        setting_calls = start_document["settlement"]["evidence"]["data"]["calls"]
+        aperture_call = next(call for call in setting_calls
+                             if call["command"][-3:-1] == ["-c", "0x26"])
+        assert aperture_call["command"][-1] == "1801"
+        assert aperture_call["effect"] == "unknown"
+        assert aperture_call["error"]["details"]["response_payload"] == "e3"
+        assert aperture_call["stdout_hex"] is not None
+        bitrate_call = next(call for call in setting_calls
+                            if call["command"] == ["simulate_device", "-s", "bitrate", "2"])
+        assert bitrate_call["status"] == "succeeded" and bitrate_call["error"] is None
+        bitrate_observation = bitrate_call["result_document"]["observations"]
+        assert [item["type"] for item in bitrate_observation] == ["setting_command_accepted"]
+        assert bitrate_observation[0]["data"]["response_payload"] is None
+        stored_start = query_state(deployment.state_db,
+            "SELECT t.status,t.effect_state,t.result_json,t.error_json FROM operation_attempts t"
+            " JOIN operation_runs r ON r.id=t.run_id WHERE r.action_id=? AND r.kind=?",
+            (action_id, int(enum_for("operation_runs.kind").START)))
+        assert len(stored_start) == 1
+        replayed_start = read_result_document(
+            stored_start[0][0], stored_start[0][1], json.loads(stored_start[0][2]),
+            None if stored_start[0][3] is None else json.loads(stored_start[0][3]))
+        assert replayed_start.settlement.evidence.data["calls"] == setting_calls
+        assert [item.type for item in replayed_start.observations] == ["recording_sent"]
         result_rows = _results(deployment.state_db, action_id, enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
         assert result_rows
         completed = []
@@ -267,7 +301,14 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         products = query_state(deployment.state_db,
             "SELECT f.locator_json,f.size_bytes,f.completion_evidence_json FROM outputs o JOIN device_files f ON f.id=o.device_file_id"
             " WHERE o.source_action_id=?", (action_id,))
-        assert [(json.loads(locator)["path"], size) for locator, size, _ in products] == [(_VIDEO_PATH, len(content))]
+        by_path = {json.loads(locator)["path"]: (size, evidence) for locator, size, evidence in products}
+        assert {path: size for path, (size, _) in by_path.items()} == {
+            _VIDEO_PATH: len(content), _PREVIEW_PATH: len(b"Action6 auxiliary preview")}
+        assert query_state(deployment.state_db,
+            "SELECT p.original_device_file_id FROM device_files p JOIN device_files o ON o.id=p.original_device_file_id"
+            " WHERE json_extract(p.locator_json,'$.path')=? AND json_extract(o.locator_json,'$.path')=?",
+            (_PREVIEW_PATH, _VIDEO_PATH))
+        products = [next(row for row in products if json.loads(row[0])["path"] == _VIDEO_PATH)]
         evidence = json.loads(products[0][2])
         assert set(evidence) == {"basis", "observation", "activity_id", "result_page_event_id", "stop_result_event_id"}
         assert type(evidence["basis"]) is int and evidence["basis"] == 3
@@ -292,13 +333,33 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         assert evidence["observation"] in [entry for observation in current_result["observations"]
             if observation["type"] == "result_files_listed" for entry in observation["data"]["entries"]]
         calls = _calls(calls_path)
+        assert sum(call["kind"] == "setting" for call in calls) == len(setting_calls)
+        dlog_index = next(index for index, call in enumerate(setting_calls)
+                          if call["command"][-3:] == ["-c", "42", "3d"])
+        aperture_index = next(index for index, call in enumerate(setting_calls)
+                              if call["command"][-3:-1] == ["-c", "0x26"])
+        bitrate_index = next(index for index, call in enumerate(setting_calls)
+                             if call["command"] == ["simulate_device", "-s", "bitrate", "2"])
+        assert dlog_index < aperture_index < bitrate_index
         assert sum(call["kind"] == "start" for call in calls) == 1
         assert sum(call["kind"] == "stop" for call in calls) == 1
-        assert not any(call.get("code") == "26" or "simulate_device" in call["script"] for call in calls)
+        aperture_commands = [call for call in calls if call.get("code") == "26"]
+        assert len(aperture_commands) == 1 and aperture_commands[0]["payload"] == "1801"
+        bitrate_commands = [call for call in calls if call["script"].startswith("simulate_device ")]
+        assert len(bitrate_commands) == 1
+        assert bitrate_commands[0]["command"] == ["simulate_device", "-s", "bitrate", "2"]
         directory_after_stop = [call for call in calls if call["kind"] == "file"
                                 and "find " in call["script"] and call["started_ns"] > stop_ns]
         assert directory_after_stop and directory_after_stop[0]["started_ns"] - stop_ns >= 5_000_000_000
         assert stop_returned_at_us > 0
+        # 同一个已受理请求重送必须读取原结果，不得再派发设置、START 或 STOP。
+        call_count_before_resend = len(calls)
+        start_count_before_resend = len(start_results)
+        demo.submit(capture_plan)
+        time.sleep(0.2)
+        assert len(_calls(calls_path)) == call_count_before_resend
+        assert len(_results(deployment.state_db, action_id,
+                            enum_for("operation_runs.kind").START)) == start_count_before_resend
         demo.claim()
         saved = deployment.import_reports_with_client(deployment.processing)
         assert saved["saved_report_ids"] == [report["report_id"]]

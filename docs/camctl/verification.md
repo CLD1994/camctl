@@ -1287,6 +1287,31 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 
 本地发行物与能力 JSON 保存于 `.local/deployments/20261019-osmo-timelapse-zero-margin/`。能力 JSON 包含 `hb0` 和 `osmo360ii`，哈苏沿用 host 正式源；公共 Schema 校验通过，SHA-256 为 `19cbe716bb5d7c0ab004e71efd0326b6a1da926353aab3ff502cc5d980ebadf8`。与上一份能力 JSON 比较，仅原生延时的参数类型说明发生变化，其他字段保持。目标备份和安装记录位于 `/home/cld/.camctl/diagnostics/20261019-osmo-timelapse-zero-margin/install-152528/`，本地副本位于 `.local/diagnostics/20261019-osmo-timelapse-zero-margin/tx2-install/`。
 
+## Action6 有限延时与文件能力的软件验证（2026-10-20 UTC）
+
+本轮完成 Action6 普通录像必填参数、原生有限延时、LRF 预览、跨页结果历史及精确设备文件删除的软件实现与门禁。实施范围见[Action6 计划任务 3](../superpowers/plans/2026-10-20-action6-capture-capabilities.md#任务-3文件删除恢复与正式软件链)。环境为 Linux x86_64 开发容器、CPython 3.11.16、SQLite 3.53.1。所有组件测试均按其指南串行运行；命令原文、工作目录、UTC 起止时间和退出码保存于 `.local/verification/action6-capture-20261020/task3/`。
+
+| 命令 | UTC 与退出码 | 结果 |
+| --- | --- | --- |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit -q` | 07:47:55–07:48:23，0 | 6092 passed、1 skipped；2 个现有 pytest 标记警告。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/devices -q` | 08:03:32–08:03:44，0 | 220 passed；包含共享读取器异常传播修复后的设备集成回归。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py -q` | 07:49:10–07:49:12，0 | 14 passed。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/capture -q` | 07:49:15–08:02:48，0 | 1923 passed；覆盖跨页历史主修复。共享读取器之后的小范围异常分类变更另以相邻行所述定向目标复验。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/devices/test_action6_results.py -q` | 08:03:28–08:03:29，0 | 27 passed；覆盖缺少历史回调、回调调用/迭代异常原样传播、完整消费有效历史及冲突判断。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/capture/test_result_scan_runtime.py apps/camctl/tests/integration/capture/test_result_scan_recovery.py apps/camctl/tests/integration/capture/test_result_consumer_saves.py apps/camctl/tests/integration/capture/test_result_page_history.py -q` | 08:04:26–08:05:26，0 | 98 passed；异常分类修复后的结果分页、保存、恢复及消费定向回归。 |
+| `uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/bootstrap/test_distribution.py apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py apps/camctl/tests/integration/bootstrap/test_action6_capture_completion.py apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py apps/camctl/tests/integration/bootstrap/test_adb_camera_products.py apps/camctl/tests/integration/bootstrap/test_timelapse_finish.py -q` | 08:05:39–08:08:50，0 | 169 passed；内部 READ 恢复分区使用保存的合法 `REQUIRED` 媒体检查决定，原恢复断言保持。 |
+| `apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_demo_roundtrip.py -q` | 08:25:52–08:26:25，0 | 1 passed；当前安装版普通录像链保留 1000 毫秒启动余量、STOP 后五秒等待及原片/取回断言。 |
+| `apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py tests/integration/test_device_capability_declarations.py -q` | 08:13:15–08:14:27，0 | 7 passed；安装 wheel 经 CLI、HTTP 和客户端表单/导出核对实际必填字段、延时参数与文件能力声明。 |
+| `apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_file_cleanup_roundtrip.py tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q` | 08:14:28–08:24:35，0 | 14 passed；文件清理和 OSMO 原生延时安装版回归在同一串行进程完成。 |
+| `node scripts/check-doc-links.mjs` | 08:29:09，0 | 4995 个文档本地文件链接通过；脚本不检查标题锚点，另人工核对本轮新增或更新行中的 37 个本地锚点均存在。 |
+| `git diff --check` | 08:29:11，0 | 无空白错误。 |
+
+跨页历史修复让正式 ADB 结果适配器在新增设备调用前校验同一 `AttemptTicket` 下已可靠保存的前页，并通过按页读取的回调只消费历史结果引用。共享读取器只在当前预览扫描可靠完成且未找到原片时读取历史；已验证历史中若存在此前观察到的匹配原片，则返回非最终化结果冲突。`history()` 实际调用或迭代发生的本地异常保持原异常传播；缺失回调仍明确报告 `history_unavailable`，不能折叠为空历史。
+
+首轮 bootstrap 曾以 2 failed、108 passed、59 errors 退出。Hasselblad bootstrap 夹具缺少必填 `executable` 且自定义登记遗漏已有驱动项；补全后，两项 OSMO 内部 READ 恢复夹具仍未建立媒体检查责任。最终组合改用正式仓储保存的 `REQUIRED` 决定和冻结目标，再由既有消费者建立媒体读取起点，保持恢复与进度断言，并由上表的 169 项组合通过。安装版 capability 初轮因测试重复使用已导出的只读草稿而失败；现由每种真实输出表单选项使用独立草稿并分别导出，最终联合门禁 7 项通过。普通录像首次当前源码复测还遇到并发读取 ADB 替身日志的未换行末尾片段；读取器只忽略未交接的最后片段，完整坏行仍报错，写端校验单次记录完整写入，最终安装版普通录像门禁通过。
+
+软件门禁不包含 ARM64 部署或真实 Action6/OSMO 设备执行。本轮没有连接相机，没有验证设备固件对 STOP、自然结束、光圈/码率实际设置效果或物理删除的行为；Action6 原生延时仍受已有固件问题与真机验证暂停约束。三十秒等待是任务合同采用的运行假设，不是设备实测保证。
+
 ## 部署交接与待核验项
 
 [软件验收映射](software-acceptance.md)逐条登记适用验收与跨模块场景的结论、证据和未核验前提；当前未完成的软件任务以[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)为准。[集成计划 I6 的历史验证记录](../superpowers/plans/2026-09-30-camctl-integration.md#i6-验证记录2026-10-08)与 [B7 发行物记录](../superpowers/plans/2026-09-30-camctl-bootstrap.md#b7-发行物与部署检查)保存当次命令及环境。发行物在源码目录之外构建、安装与运行的要求见[部署说明](implementation.md#构建安装与运行检查)。

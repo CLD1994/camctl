@@ -32,7 +32,7 @@ async function main() {
 
   // 独立预期来自源类型决策表，不从被测 JSON 布尔值推导。
   const initial = {
-    action6: false,
+    action6: true,
     osmo: true,
     "hb-host": true,
     "hb-device": false,

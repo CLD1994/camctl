@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.handlers import _begin_check_round
 from camctl.capture.result_pages import ResultPageSave
@@ -162,3 +163,39 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
         else:
             assert original is not None and original[0].identity == preview.paired_identity
     assert owned.connection.execute("SELECT COUNT(*) FROM device_files WHERE source_action_id IS NOT NULL").fetchone() == (0,)
+
+
+async def test_osmo_formal_result_adapter_conflicts_when_prior_osv_disappears(
+        owned, tmp_path, monkeypatch):
+    paths = [ROOT + f"/a/{index:03}.OSV" for index in range(31)]
+    original, preview = ROOT + "/z/Clip.OSV", ROOT + "/z/Clip.lrf"
+    driver, runtime, ticket, context = await _world(owned, tmp_path, [], monkeypatch)
+    filesystem = Filesystem([*paths, original, preview, ROOT + "/z/Z.tmp"])
+    monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
+    adapter = DriverResultListing(driver, BINDING, driver.contract.evidence,
+        capture_repository=runtime.capture, owned=owned)
+    output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
+
+    first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
+        output_scope=output_scope, completion_context=context)
+    first_save = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
+        validate_outcome(ticket, first.outcome, driver.contract.evidence), _SCHEDULED + 3),
+        new_operation_key(), owned)
+    assert first_save.kind is DbOutcomeKind.COMPLETED, first_save.error
+    assert first.next_cursor == DirectoryCursor(BINDING, (ROOT,), 0, original)
+    context["prior_completion"] = {"result_page_event_id": first_save.value.event_id,
+        "evidence": first.outcome.settlement.evidence.data["file_completion"]}
+
+    filesystem.paths = sorted([*paths, preview, ROOT + "/z/Z.tmp"])
+    second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
+        output_scope=output_scope, completion_context=context)
+
+    diagnostic = second.outcome.settlement.evidence.data["optional_preview_observations"][0]
+    page = next(value.data for value in second.outcome.observations
+        if value.type == "result_files_listed")
+    assert second.outcome.error.code == "osmo360ii_result_conflict"
+    assert second.outcome.settlement.evidence.version == 1
+    assert page["set_finalized"] is False and page["entries"] == []
+    assert diagnostic["state"] == "original_missing"
+    assert diagnostic["original_identity"] == original
+    assert diagnostic["osv_count"] == 0

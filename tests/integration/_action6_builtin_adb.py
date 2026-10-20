@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -19,6 +20,7 @@ import time
 REMOTE_DIRECTORY = "/mnt/media_rw/emulated/DCIM"
 NEW_VIDEO = REMOTE_DIRECTORY + "/DJI_001/DJI_20000101080811_0001_D.MP4"
 NEW_PREVIEW = REMOTE_DIRECTORY + "/DJI_001/DJI_20000101080811_0001_D.LRF"
+NEW_PHOTO = REMOTE_DIRECTORY + "/DJI_001/FRAME_0001.JPG"
 
 # 该测试只请求这一组普通录像设置；其他设置不被替身静默接受。
 SETTINGS = {
@@ -26,14 +28,51 @@ SETTINGS = {
     ("8e", "010100000101"), ("1e", "0100"),
     ("2c", "0634000000"), ("2e", "10"), ("42", "3d"),
     ("8e", "010109000101"), ("8e", "010108000100"),
+    ("26", "1801"),
 }
+
+
+def _clock_fields(prefix):
+    state = os.environ.get("CAMCTL_OSMO_TEST_CLOCK_FILE")
+    if not state:
+        return {}
+    from _osmo_builtin_clock import read_clock
+    reading = read_clock(Path(state))
+    return {f"{prefix}_clock_ns": reading["monotonic_ns"],
+            f"{prefix}_clock_utc_us": reading["utc_us"], f"{prefix}_epoch": reading["epoch"]}
+
+
+def _file_kind(script):
+    from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
+    tools = ShellFileTools()
+    paths = (NEW_VIDEO, NEW_PREVIEW, NEW_PHOTO,
+             REMOTE_DIRECTORY + "/DJI_001/DJI_OLD.MP4")
+    for path in paths:
+        for kind, candidate in (("metadata", tools.metadata_script(path)),
+                                ("digest", tools.digest_script(path)),
+                                ("query", tools.file_presence_script(path)),
+                                ("delete", tools.file_presence_script(path, delete=True))):
+            if script == candidate:
+                return kind
+        match = re.fullmatch(r"dd if=(.+) bs=65536 skip=(0|[1-9][0-9]*)", script)
+        if match and match.group(1) == shlex.quote(path):
+            return "read"
+    after = next((line[6:] for line in script.splitlines() if line.startswith("after=")), None)
+    batch = re.search(r'^    if \[ "\$count" -ge ([1-9][0-9]*) \]; then$', script, re.MULTILINE)
+    if after is not None and batch is not None:
+        parts = shlex.split(after)
+        if len(parts) == 1 and script == tools.directory_script(REMOTE_DIRECTORY, parts[0], int(batch[1])):
+            return "directory"
+    raise ValueError(f"文件脚本不属于正式文件工具: {script!r}")
 
 
 def _append(path, value):
     encoded = (json.dumps(value, ensure_ascii=False) + "\n").encode()
     descriptor = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
     try:
-        os.write(descriptor, encoded)
+        written = os.write(descriptor, encoded)
+        if written != len(encoded):
+            raise OSError(f"ADB 调用日志记录写入不完整: {written}/{len(encoded)} bytes")
     finally:
         os.close(descriptor)
 
@@ -49,16 +88,39 @@ def main():
     root = Path(os.environ["CAMCTL_ACTION6_ADB_ROOT"])
     calls = root.parent / "adb-calls.jsonl"
     began_ns = time.monotonic_ns()
-    record = {"script": script, "started_ns": began_ns, "serial": sys.argv[2]}
+    record = {"script": script, "started_ns": began_ns, "serial": sys.argv[2],
+              "pid": os.getpid(), "cli_pid": os.getppid(), **_clock_fields("started")}
     words = shlex.split(script)
+    if words and words[0] == "simulate_device":
+        if len(words) != 4 or words[:3] != ["simulate_device", "-s", "bitrate"] or words[3] not in {"1", "2"}:
+            raise ValueError(f"未声明的模拟设置调用: {words!r}")
+        record.update(kind="setting", command=words)
+        record["returned_ns"] = time.monotonic_ns()
+        record.update(**_clock_fields("returned"), exitcode=0)
+        _append(calls, record)
+        sys.stdout.write("name [bitrate]\nlink to server rlt 0\nregister to server successs\n")
+        return 0
     if words and words[0] == "dji_mb_ctrl":
+        if words[:words.index("-c") + 1] not in (
+                ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c"],
+                ["dji_mb_ctrl", "-S", "test", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c"]):
+            raise ValueError(f"不是 Action6 完整控制命令: {words!r}")
         index = words.index("-c")
         if index + 3 != len(words):
             raise ValueError("控制调用不是一组完整命令及负载")
         code = format(int(words[index + 1], 16), "x")
         payload = words[index + 2].lower()
         record.update(code=code, payload=payload)
-        if (code, payload) == ("2", "01"):
+        if os.environ.get("CAMCTL_ACTION6_TEST_CAPTURE") == "timelapse":
+            from camctl.devices.drivers.adb_cameras.commands import settings_from_effective_params, start_for, stop_for
+            params = json.loads(os.environ["CAMCTL_ACTION6_TEST_PARAMS"])
+            allowed = (*settings_from_effective_params("dji-action6", "camera_timelapse", params),
+                       start_for("dji-action6", "camera_timelapse"), stop_for("dji-action6", "camera_timelapse"))
+            if tuple(words) not in allowed:
+                raise ValueError(f"不是本次 Action6 的完整命令: {words!r}")
+        timelapse = os.environ.get("CAMCTL_ACTION6_TEST_CAPTURE") == "timelapse"
+        start_code = "1" if timelapse else "2"
+        if (code, payload) == (start_code, "01"):
             record["kind"] = "start"
             target = root / NEW_VIDEO.lstrip("/")
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -66,20 +128,27 @@ def main():
                 raise ValueError("START 被重发，会复用本次源文件路径")
             shutil.copyfile(root.parent / "sample.mp4", target)
             (root / NEW_PREVIEW.lstrip("/")).write_bytes(b"Action6 auxiliary preview")
-        elif (code, payload) == ("2", "00"):
+            if timelapse:
+                (root / NEW_PHOTO.lstrip("/")).write_bytes(b"Action6 independent JPEG original")
+        elif (code, payload) == (start_code, "00"):
             record["kind"] = "stop"
-        elif (code, payload) in SETTINGS:
+        elif (code, payload) in ({("e1", "02"), ("18", "1003000000"),
+                ("6c", "0400020a002c0100000000000000000000"), ("1e", "0100")} if timelapse else SETTINGS):
             record["kind"] = "setting"
         else:
             raise ValueError(f"未声明的控制调用: {words!r}")
         record["returned_ns"] = time.monotonic_ns()
+        record.update(**_clock_fields("returned"), exitcode=0)
         _append(calls, record)
-        sys.stdout.write("[dji_mb_ctrl] read global seq: 1\nResp message, len = 1, data:\n  00\n")
+        response = "e3" if (code, payload) == ("26", "1801") else "00"
+        sys.stdout.write(f"[dji_mb_ctrl] read global seq: 1\nResp message, len = 1, data:\n  {response}\n")
         return 0
 
+    _file_kind(script)
     local_script = script.replace("/mnt/media_rw/", str(root / "mnt/media_rw") + "/")
     result = subprocess.run(["bash", "-c", local_script], capture_output=True)
-    record.update(kind="file", returned_ns=time.monotonic_ns(), returncode=result.returncode)
+    record.update(kind="file", file_kind=_file_kind(script), returned_ns=time.monotonic_ns(),
+                  returncode=result.returncode, **_clock_fields("returned"))
     _append(calls, record)
     output = result.stdout
     # dd 读取的媒体字节保持原样；文本和 NUL 帧中的文件路径还原为设备路径。

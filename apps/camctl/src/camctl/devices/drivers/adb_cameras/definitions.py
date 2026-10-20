@@ -10,8 +10,9 @@ from camctl.devices.catalog import ActionCapability
 from .commands import (ACTION_APERTURE, ACTION_BITRATE, ACTION_EV, ACTION_FOV,
                        ACTION_ISO, ACTION_RESOLUTIONS, ACTION_STABILIZATION,
                        OSMO_BITRATE, CameraModel, FixedSettingRequest,
-                       ParameterSettingRequest, VideoModeFacts, OutputSelection,
+                       ParameterSettingRequest, VideoModeFacts,
                        fixed_setting_plan_for, fixed_setting_value)
+from .action6_formats import OutputSelection, output_requirements_description
 from .timelapse_parameters import (time_conditions, time_properties,
                                    timelapse_intervals_s)
 
@@ -84,6 +85,8 @@ def _request_text(kind: str, value) -> str:
         if value.color_profile:
             description += f"、{value.color_profile} 色彩模式"
         return description
+    if kind == "color_profile":
+        return f"{value} 色彩模式"
     raise ValueError(f"未知的固定设置事实：{kind}")
 
 
@@ -207,17 +210,13 @@ def _record_schema(model: CameraModel, parameter_type: str) -> dict:
                            "stabilization": _field({"enum": list(ACTION_STABILIZATION)}, "防抖模式",
                                                    "请求的稳定模式；候选值由设备能力列出。"),
                            "aperture": _field({"enum": list(ACTION_APERTURE)}, "光圈",
-                                              "可选，光圈值以 f 值表示；填写时请求对应设置，省略时不发送光圈调整并保留设备已有值。"),
+                                              "必填，光圈值以 f 值表示；请求对应设置。未知响应或调用失败会保存在附属调用结果中，但不阻断本次普通录像的后续设置和启动；不代表设备独立读回的实际光圈值。"),
                            "bitrate": _field({"enum": list(ACTION_BITRATE)}, "码率档位",
-                                             "可选；填写时请求对应码率档位，省略时不发送码率设置并保留设备已有值。"),
+                                             "必填；每次普通录像启动前发送对应 simulate_device -s bitrate 命令。工具、通道、退出和输出完整性检查通过时记录命令已接受，不代表实际码率独立读回。"),
                            "exposure": _exposure(ACTION_ISO, ACTION_EV, plan)})
     else:
         properties.update(bitrate=_osmo_bitrate_field(), exposure=_osmo_exposure(plan))
-    required = list(properties)
-    if model is CameraModel.ACTION6:
-        required.remove("aperture")
-        required.remove("bitrate")
-    return _object(properties, required)
+    return _object(properties)
 
 
 def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
@@ -232,7 +231,8 @@ def _timelapse_schema(model: CameraModel, parameter_type: str) -> dict:
     schema = _object({"type": {"const": parameter_type},
                       **time_properties(model.value),
                       "outputs": _field({"type": "string", "enum": outputs}, "输出类型",
-                                         "选择本任务请求的成片类型；实际产物仍按完成契约核实。"),
+                                         "选择本任务请求的成片类型；" + output_requirements_description()
+                                         + "。实际产物仍按完成契约核实。"),
                       "exposure": {"type": "object", "title": "曝光设置",
                           "description": "选择手动或自动曝光；各分支请求事实如下："
                               + _task_exposure_description(plan)
@@ -263,17 +263,20 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
     record_estimate = _video_estimate(model, "camera_record")
     timelapse_estimate = _video_estimate(model, "camera_timelapse")
     record_plan = fixed_setting_plan_for(model, "camera_record")
-    record_description = (
-        _plan_description(record_plan, "普通录像")
-        + "这些设置均是设备命令请求，当前任务不提供对应设置的独立读回，不能据此确认实际值。调用响应待设备核实。"
-    )
     if model is CameraModel.ACTION6:
-        record_description += "aperture 和 bitrate 均可选；显式提供时请求对应设置，省略时不发送该设置并保留设备已有值。"
+        record_description = (
+            _plan_description(record_plan, "普通录像")
+            + "普通录像按固定顺序发送设置命令；D-Log M 由 42 3d 命令请求。光圈和码率字段均必填。"
+            + "光圈命令失败或响应未确认时保留完整附属调用结果，并继续后续设置和启动；该结果不表示光圈已生效。"
+            + "码率命令完成且工具、通道、退出和输出完整性检查通过时，记录命令已接受，不表示实际码率独立读回。"
+        )
     else:
+        record_description = (
+            _plan_description(record_plan, "普通录像")
+            + "这些设置均是设备命令请求，当前任务不提供对应设置的独立读回，不能据此确认实际值。调用响应待设备核实。"
+        )
         record_description += "码率档位必填，每个动作开始前动态设置。"
     record_description += _video_estimate_description(record_estimate)
-    if model is CameraModel.ACTION6:
-        record_description += "该固定估算适用于所列分辨率和码率档位，省略码率时也使用同一参考值。"
     timelapse_plan = fixed_setting_plan_for(model, "camera_timelapse")
     timelapse_description = _plan_description(timelapse_plan, "原生延时")
     if model is CameraModel.OSMO360II:
@@ -282,6 +285,7 @@ def candidate_capabilities(driver_id: str) -> tuple[ActionCapability, ...]:
         timelapse_description += (
             f"间隔从该型号允许值中选择，最短为 {timelapse_intervals_s(model.value)[0]} 秒；"
             "采集时长从允许值中选择，且必须严格大于间隔；时间选择不改变曝光或输出。"
+            f"输出最低要求：{output_requirements_description()}。"
         )
     timelapse_description += (
         "当前任务不提供这些设置的独立读回，不能据此确认实际值。"

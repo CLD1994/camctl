@@ -158,7 +158,7 @@ def test_installed_declarations_match_checkout_and_protocol_resources(package, t
     assert _document(installed) == _document(_describe(package, config, checkout=True))
     document = _document(installed)
     assert {device["device_id"]: device["delete_supported"] for device in document["devices"]} == {
-        "action6": False, "osmo": True, "hb-host": True, "hb-device": False,
+        "action6": True, "osmo": True, "hb-host": True, "hb-device": False,
     }
     schema = json.loads((REPO / "protocol/schemas/capabilities.schema.json").read_text())
     registry = Registry().with_resources(

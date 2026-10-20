@@ -100,6 +100,7 @@ def test_adding_video_estimates_preserves_builtin_capture_readiness_and_metadata
     assert [(model, capability.parameter_type)
             for model, capability in capabilities if callable(capability.task_factory)] == [
         (CameraModel.ACTION6, "action6_record"),
+        (CameraModel.ACTION6, "action6_timelapse"),
         (CameraModel.OSMO360II, "osmo360ii_record"),
         (CameraModel.OSMO360II, "osmo360ii_timelapse")]
     for model, capability in capabilities:

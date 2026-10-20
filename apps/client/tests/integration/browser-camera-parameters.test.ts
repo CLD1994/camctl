@@ -26,7 +26,7 @@ afterEach(async () => {
   for (const close of clean.splice(0)) await close();
 });
 
-const capabilityText =
+const syntheticOptionalAction6CapabilitiesText =
   '{"devices":[{"device_id":"action6","driver_id":"dji-action6","actions":[{"type":"camera_record","parameter_types":[{"type":"action6_record","name":"普通录像参数","description":"软件参数编辑测试","preview_supported":false,"schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"properties":{"type":{"const":"action6_record"},"duration_s":{"type":"integer","minimum":1,"maximum":9223372036854775},"resolution":{"enum":["8k30","4k30"]},"fov":{"enum":["wide","natural_wide","standard"]},"stabilization":{"enum":["off","rocksteady"]},"aperture":{"enum":["f2.8","f4.0"]},"bitrate":{"enum":["standard","high"]},"exposure":{"oneOf":[{"type":"object","properties":{"mode":{"const":"manual"},"iso":{"enum":[100,800]}},"required":["mode","iso"],"additionalProperties":false},{"type":"object","properties":{"mode":{"const":"auto"},"compensation_ev":{"enum":[-0.7,0,0.7]}},"required":["mode","compensation_ev"],"additionalProperties":false}]}},"required":["type","duration_s","resolution","fov","stabilization","exposure"]}}]}]}]}';
 
 async function setup(
@@ -44,7 +44,7 @@ async function setup(
   const directory = mkdtempSync(join(tmpdir(), "camctl-camera-fields-"));
   writeFileSync(
     join(directory, "device-capabilities.json"),
-    exposure.capabilities ?? capabilityText,
+    exposure.capabilities ?? syntheticOptionalAction6CapabilitiesText,
   );
   const app = new Application(directory),
     files = new Files(app),
@@ -114,7 +114,7 @@ it("曝光缺省时先选择模式，浏览页面不自动填写任何选项", a
   expect(app.draft(draft.id)).toEqual(before);
 });
 
-it("普通录像独立参数与曝光级联回显并保持可选字段缺省", async () => {
+it("合成 Action6 样式夹具覆盖通用可选字段与曝光级联", async () => {
   const { app, page, draft } = await setup();
   for (const [field, values] of [
     ["resolution", ["8k30", "4k30"]],
@@ -441,6 +441,84 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
     // 取值仅用于建立可显示样例；真实后端仍须证明各任务参数符合完整规则。
     expect(() => app.validateContent(before.content)).not.toThrow();
   }
+}, 60000);
+
+it("能力源的 Action6 光圈和码率必填规则驱动表单与导出校验", async () => {
+  const capabilities = JSON.parse(clientTestCapabilitiesText()) as any;
+  const device = capabilities.devices.find(
+    (candidate: any) => candidate.driver_id === "dji-action6",
+  );
+  // 独立组件测试使用合成 Schema；根安装版集成将实际 describe 注入此用例。
+  if (!device) return;
+  const action = device.actions.find(
+    (candidate: any) => candidate.type === "camera_record",
+  );
+  const parameter = action?.parameter_types.find(
+    (candidate: any) => candidate.type === "action6_record",
+  );
+  if (!parameter) return;
+
+  const schema = parameter.schema;
+  expect(schema.required).toEqual(expect.arrayContaining(["aperture", "bitrate"]));
+  const params: Record<string, unknown> = { type: parameter.type };
+  for (const [name, field] of Object.entries(schema.properties) as [string, any][]) {
+    if (name === "type") continue;
+    if (Array.isArray(field.oneOf)) {
+      const branch = field.oneOf[0];
+      params[name] = Object.fromEntries(
+        Object.entries(branch.properties as Record<string, any>).map(
+          ([member, nested]) => [
+            member,
+            Object.hasOwn(nested, "const") ? nested.const : nested.enum[0],
+          ],
+        ),
+      );
+    } else if (Array.isArray(field.enum)) params[name] = field.enum[0];
+    else if (Object.hasOwn(field, "const")) params[name] = field.const;
+    else if (name === "duration_s") params[name] = 10;
+  }
+  delete params.aperture;
+  delete params.bitrate;
+  const draftText = JSON.stringify({
+    name: "能力源 Action6 必填规则",
+    actions: [{
+      name: parameter.name,
+      type: action.type,
+      device_id: device.device_id,
+      scheduled_at: "2026-10-11 12:00:00",
+      policy: { max_delay_ms: 0 },
+      params,
+    }],
+  });
+  const { app, page, draft } = await setup("10", false, {
+    capabilities: clientTestCapabilitiesText(),
+    draftText,
+  });
+
+  for (const name of ["aperture", "bitrate"]) {
+    const field = schema.properties[name];
+    const control = page.getByLabel(
+      `${typeof field.title === "string" ? field.title : name} (${name})`,
+      { exact: true },
+    );
+    await check(control).toBeVisible();
+    await check(page.locator(".field").filter({ has: control }).locator(".required"))
+      .toHaveText("必填");
+  }
+  const saved = app.draft(draft.id);
+  let failure: any;
+  try {
+    app.exportDraft(draft.id, saved.revision, saved.content);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure?.code).toBe("invalid_plan");
+  expect(failure?.issues.map((issue: any) => issue.path)).toEqual(
+    expect.arrayContaining([
+      "actions[0].params.aperture",
+      "actions[0].params.bitrate",
+    ]),
+  );
 }, 60000);
 
 it("能力源的仅模式曝光对象可切换并随动作保存必选码率", async () => {
@@ -1216,7 +1294,7 @@ it.each([{ omit: true }, { value: "{}" }])(
 );
 
 it("设备判别字段变更后保留旧模式资料，明确重新填写才使用kind", async () => {
-  const capabilities = JSON.parse(capabilityText);
+  const capabilities = JSON.parse(syntheticOptionalAction6CapabilitiesText);
   const second = structuredClone(capabilities.devices[0]);
   second.device_id = "action6-kind";
   const branches =
@@ -1300,7 +1378,7 @@ it("设备判别字段变更后保留旧模式资料，明确重新填写才使�
 });
 
 it("设备切换使用该设备的子选项且保留原曝光内容", async () => {
-  const capabilities = JSON.parse(capabilityText);
+  const capabilities = JSON.parse(syntheticOptionalAction6CapabilitiesText);
   const second = structuredClone(capabilities.devices[0]);
   second.device_id = "action6-secondary";
   second.actions[0].parameter_types[0].schema.properties.exposure.oneOf[0].properties.iso.enum =
@@ -1349,3 +1427,49 @@ it("设备切换使用该设备的子选项且保留原曝光内容", async () =
     (await readOptions(compensation)).map((option) => option.text),
   ).toEqual(expect.arrayContaining(["-1", "0", "1"]));
 });
+
+it("能力源的 Action6 延时参数、预览与三种输出经真实表单和导出", async () => {
+  for (const { device, action, parameter } of clientTestTasks().filter(
+    ({ parameter }) => parameter.type === "action6_timelapse",
+  )) {
+    expect(action.type).toBe("camera_timelapse");
+    expect(parameter.preview_supported).toBe(true);
+    const schema = parameter.schema as any;
+    expect(schema.required).toEqual(expect.arrayContaining([
+      "interval_s", "duration_s", "outputs", "exposure",
+    ]));
+    expect(schema.properties).not.toHaveProperty("aperture");
+    expect(schema.properties).not.toHaveProperty("bitrate");
+    const params: Record<string, unknown> = { type: parameter.type };
+    for (const [name, field] of Object.entries(schema.properties) as [string, any][]) {
+      if (name === "type") continue;
+      if (Array.isArray(field.oneOf)) {
+        params[name] = Object.fromEntries(Object.entries(
+          field.oneOf[0].properties as Record<string, any>,
+        ).map(([key, value]) => [key, Object.hasOwn(value, "const") ? value.const : value.enum[0]]));
+      } else if (Array.isArray(field.enum)) params[name] = field.enum[0];
+      else if (Object.hasOwn(field, "const")) params[name] = field.const;
+    }
+    const field = schema.properties.outputs;
+    for (const output of ["video", "video_raw", "video_jpeg"]) {
+      const { app, page, draft } = await setup("10", false, {
+        capabilities: clientTestCapabilitiesText(),
+        draftText: JSON.stringify({ name: "Action6延时表单", actions: [{
+          name: parameter.name, type: action.type, device_id: device.device_id,
+          scheduled_at: "2026-10-11 12:00:00", policy: { max_delay_ms: 0 }, params,
+        }] }),
+      });
+      const control = page.getByLabel(`${field.title ?? "outputs"} (outputs)`, { exact: true });
+      await check(control).toBeVisible();
+      const options = await readOptions(control);
+      const value = String(field.enum.indexOf(output));
+      expect(options.some(option => option.value === value)).toBe(true);
+      await choose(control, value);
+      await check.poll(() => (parseJson(app.draft(draft.id).content.text) as any)
+        .actions[0].params.outputs).toBe(output);
+      const saved = app.draft(draft.id);
+      const request = app.exportDraft(draft.id, saved.revision, saved.content);
+      expect((request.body as any).actions[0].params.outputs).toBe(output);
+    }
+  }
+}, 60000);

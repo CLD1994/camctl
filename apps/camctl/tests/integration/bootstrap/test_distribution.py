@@ -346,10 +346,9 @@ def test_installed_and_checkout_cli_have_same_camera_catalog(installed, model):
     assert document == json.loads(checkout.stdout)
     assert document["devices"][0]["device_id"] == "cam-1"
     assert document["devices"][0]["driver_id"] == model
-    assert document["devices"][0]["delete_supported"] is (model == "dji-osmo360-ii")
-    assert [action["type"] for action in document["devices"][0]["actions"]] == (
-        ["camera_record"] if model == "dji-action6" else
-        ["camera_record", "camera_timelapse"])
+    assert document["devices"][0]["delete_supported"] is True
+    assert [action["type"] for action in document["devices"][0]["actions"]] == [
+        "camera_record", "camera_timelapse"]
     with zipfile.ZipFile(installed.wheel) as archive:
         assert "camctl/devices/drivers/adb_cameras/registration.py" in archive.namelist()
         assert "camctl/devices/drivers/adb_cameras/driver.py" in archive.namelist()
@@ -461,8 +460,8 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
             assert expected["bitrate"] == "high"
         assert expected["exposure"] == expected_exposure_by_model[model]
     if stem == "action6-record":
-        expected.pop("aperture")
-        expected.pop("bitrate")
+        assert expected["aperture"] == "f2.8"
+        assert expected["bitrate"] == "high"
     deployment = Deployment(tmp_path, devices=False)
     spec = camera_spec(deployment, model, expected)
     initialized = installed.cli("init", "--config", str(deployment.config_path))

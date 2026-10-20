@@ -24,7 +24,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from camctl.capture.handlers import (
     CaptureRuntime,
@@ -251,10 +251,93 @@ class DriverResultListing:
 
     def __init__(
         self, driver: Any, binding: DeviceBinding, evidence: Any,
+        *, capture_repository: CaptureRepository | None = None,
+        owned: Any | None = None,
     ) -> None:
+        if (capture_repository is None) != (owned is None):
+            raise ValueError("结果历史读取必须同时取得原结果仓储和 owned 连接")
         self._driver = driver
         self._binding = binding
         self._evidence = evidence
+        self._capture_repository = capture_repository
+        self._owned = owned
+
+    def _saved_result_pages(self, ticket: AttemptTicket) -> Iterator[Any]:
+        """按原尝试逐页读取已可靠保存的历史，不缓存目录或页集合。"""
+        if self._capture_repository is None or self._owned is None:
+            raise ConsistencyError("结果历史读取缺少原结果仓储")
+        event_cursor = None
+        first = True
+        while True:
+            pages = self._capture_repository.read_result_pages(
+                ticket, event_cursor, 1, self._owned)
+            if not pages.items:
+                if first:
+                    return
+                raise ConsistencyError("结果页历史在可靠末引用之前中断")
+            if len(pages.items) != 1:
+                raise ConsistencyError("结果历史读取未遵守单页上限")
+            saved, = pages.items
+            yield saved
+            if pages.next_cursor is None:
+                return
+            event_cursor = pages.next_cursor
+            first = False
+
+    def _prior_result_entries(
+        self, ticket: AttemptTicket, cursor: DirectoryCursor | None,
+        output_scope: Mapping | None,
+    ) -> Callable[[], Iterator[Mapping[str, Any]]] | None:
+        """派发前验证同尝试的完整前页链，返回再次逐页读取新增条目的提供器。"""
+        if self._capture_repository is None:
+            return None
+        if cursor is None:
+            saved = next(self._saved_result_pages(ticket), None)
+            if saved is not None:
+                raise ConsistencyError("已有可靠结果页后不能重开原尝试首页")
+            return lambda: iter(())
+        directories = None if not isinstance(output_scope, Mapping) else output_scope.get("directories")
+        if (not isinstance(directories, (list, tuple)) or not directories
+                or any(not isinstance(directory, str) or not directory for directory in directories)
+                or cursor.binding != self._binding or cursor.directories != tuple(directories)):
+            raise ConsistencyError("后续结果页没有保持原绑定与完整输出范围")
+
+        expected_cursor = None
+        last_event_id = None
+        for saved in self._saved_result_pages(ticket):
+            page = saved.page
+            if saved.ref.ticket != ticket or saved.page.outcome.error is not None:
+                raise ConsistencyError("前页没有同尝试的无错误可靠实际结果")
+            if page.cursor != expected_cursor:
+                raise ConsistencyError("前页输入游标没有沿原结果页连续推进")
+            for page_cursor in (page.cursor, page.next_cursor):
+                if page_cursor is not None and (
+                        page_cursor.binding != self._binding
+                        or page_cursor.directories != tuple(directories)):
+                    raise ConsistencyError("前页改变原绑定或完整输出范围")
+            if page.set_finalized:
+                raise ConsistencyError("已最终化的结果页后不能继续读取")
+            expected_cursor = page.next_cursor
+            last_event_id = saved.ref.event_id
+        if last_event_id is None:
+            raise ConsistencyError("后续结果页缺少原尝试的可靠前页")
+        if expected_cursor != cursor:
+            raise ConsistencyError("本次游标与原可靠末页的后续游标不符")
+
+        def entries() -> Iterator[Mapping[str, Any]]:
+            observed_last_event_id = None
+            for saved in self._saved_result_pages(ticket):
+                if saved.page.outcome.error is not None:
+                    raise ConsistencyError("读取前页历史时发现原页调用错误")
+                observed_last_event_id = saved.ref.event_id
+                file_ids = {identity for identity, _ in saved.file_ids}
+                for entry in saved.page.entries:
+                    if entry.identity in file_ids:
+                        yield {"identity": entry.identity, "format_id": entry.format_id}
+            if observed_last_event_id != last_event_id:
+                raise ConsistencyError("可靠结果页历史末引用在读取期间发生变化")
+
+        return entries
 
     async def list_round(
         self, ticket: AttemptTicket, *, timeout_s: Decimal,
@@ -286,13 +369,15 @@ class DriverResultListing:
         params = {"activity_id": ticket.target_id}
         if cursor is not None:
             if cursor.binding != self._binding:
-                raise ValueError("结果游标与原设备绑定不符")
+                raise ConsistencyError("结果游标与原设备绑定不符")
             params["cursor"] = cursor.as_json()
         if output_scope is not None:
             params["output_scope"] = deepcopy(dict(output_scope))
         if completion_context is not None:
             params["completion_context"] = deepcopy(dict(completion_context))
-        request = ControlRequest("result", self._binding, params, ticket=ticket, timeout_s=timeout_s)
+        prior_result_entries = self._prior_result_entries(ticket, cursor, output_scope)
+        request = ControlRequest("result", self._binding, params, ticket=ticket,
+            timeout_s=timeout_s, prior_result_entries=prior_result_entries)
         result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
         if result.outcome is None:
             raise ValueError("结果列举缺少完整实际调用结果")
@@ -565,6 +650,7 @@ def session_capture_assembly(
             directory_port = port_for(entry, "directory")
         except CapabilityNotDeclaredError:
             directory_port = None
+        capture_repository = CaptureRepository()
         if results is not None:
             results_port: ResultFilesPort | None = results
         else:
@@ -576,7 +662,10 @@ def session_capture_assembly(
                 results_port = DriverResultListing(
                     result_port,
                     DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
-                    entry.evidence)
+                    entry.evidence,
+                    capture_repository=capture_repository,
+                    owned=owned,
+                )
         media = (
             _media_flow_with(
                 owned, entry, device_id, str(driver_id), tools, staging,
@@ -603,7 +692,7 @@ def session_capture_assembly(
             owned=owned,
             scheduling=SchedulingRepository(),
             operations=OperationRepository(),
-            capture=CaptureRepository(),
+            capture=capture_repository,
             timelapse=TimelapseRepository(),
             driver=control_port,
             results=results_port,

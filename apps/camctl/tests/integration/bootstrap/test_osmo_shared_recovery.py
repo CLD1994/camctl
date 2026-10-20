@@ -15,6 +15,7 @@ from camctl.outputs.obtain_flow import advance_obtain
 from camctl.capture.media_flow import run_recording_media
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.handlers import capture_handler, _stop_call, _begin_check_round
+from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
 from camctl.capture.result_pages import ResultPageSave
 from camctl.operations.validation import validate_outcome
@@ -77,11 +78,11 @@ class Channel:
         return RawToolOutcome(LocalExit(exit_code=7), None, None, None, stderr=b"source interrupted")
 
 
-async def _world(owned, tmp_path, monkeypatch, *, finite=False):
+async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING):
     monkeypatch.setattr(definitions_runtime, "_definitions", {})
     monkeypatch.setattr(drivers_runtime, "_entries", {})
     cfg = load_config({"paths": {name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
-        "devices": {"cam-1": {"kind": "camera", "driver": BINDING.driver_id,
+        "devices": {"cam-1": {"kind": "camera", "driver": binding.driver_id,
             "adb": {"serial": "serial-1"}, "recording": {"start_retry_interval_s": "0"},
             "result_check": {"max_attempts": 1, "retry_interval_s": "0"},
             "copy": {"retry_interval_s": "0"}}}}, ConfigDefaults())
@@ -89,11 +90,11 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False):
     _prepare_directories(tmp_path / "state.db", Path(cfg.paths.staging), Path(cfg.paths.ready), Path(cfg.paths.processing))
     register_builtin_camera_drivers(cfg)
     registry = drivers_runtime.current_registry()
-    entry = registry.entry(BINDING.driver_id)
+    entry = registry.entry(binding.driver_id)
     catalog = build_catalog(cfg, definitions_runtime.current_driver_definitions())
     kind = "camera_timelapse" if finite else "camera_record"
     body = _plan_body()
-    body["actions"][0].update(type=kind, params=_params(BINDING.driver_id, kind))
+    body["actions"][0].update(type=kind, params=_params(binding.driver_id, kind))
     await _accept_plan(owned, tmp_path, body, catalog)
     started = _start(owned, 1, now=_SCHEDULED)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
@@ -102,7 +103,7 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False):
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     channel = Channel()
     entry.driver.transport = channel
-    world = SimpleNamespace(owned=owned, cfg=cfg, registry=registry, entry=entry, channel=channel,
+    world = SimpleNamespace(owned=owned, cfg=cfg, registry=registry, entry=entry, channel=channel, binding=binding,
         kind=kind, activity_id=activity_id, wall=[_SCHEDULED], mono=[0])
     channel.current_result_ticket = lambda: world.owned.connection.execute(
         "SELECT t.run_id,t.attempt_no FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
@@ -114,10 +115,10 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False):
 def _capture(world, **kwargs):
     factory = session_capture_assembly(devices=kwargs.pop("devices", world.cfg.devices),
         drivers=kwargs.pop("drivers", world.registry), staging=Path(world.cfg.paths.staging),
-        wait_config=lambda action: CaptureWaitConfig(600000, 30000, 1000),
+        wait_config=lambda action: CaptureWaitConfig(action["execution_spec_json"]["target_duration_ms"], 30000, 1000),
         wall_us=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0],
         media_enabled=kwargs.pop("media_enabled", False), segment_size=4, **kwargs)
-    return factory(world.owned, BINDING.device_id)
+    return factory(world.owned, world.binding.device_id)
 
 
 def _reopen(world):
@@ -289,6 +290,20 @@ async def _pending_read(world, tmp_path, monkeypatch, *, internal):
     from camctl.capture.result_scans import SavedResultEntries
     # 外部源沿本次实际返回完成；内部源同时复用已保存结果页的正式恢复路径。
     if internal:
+        processing_id, = world.owned.connection.execute(
+            "SELECT id FROM recording_processing WHERE action_id=1").fetchone()
+        target_duration_ms = runtime.action(1)["execution_spec_json"]["target_duration_ms"]
+        before, = world.owned.connection.execute(
+            "SELECT check_decision FROM recording_processing WHERE id=?", (processing_id,)).fetchone()
+        assert before == int(enum_for("recording_processing.check_decision").UNDETERMINED)
+        required = runtime.capture.save_check_decision(CheckDecisionSave(
+            processing_id, CheckDecisionChoice.REQUIRED,
+            CheckBasis(CheckReason.INSUFFICIENT_TIMING, target_duration_ms), world.wall[0]),
+            new_operation_key(), world.owned)
+        assert required.kind is DbOutcomeKind.COMPLETED, required.error
+        after, = world.owned.connection.execute(
+            "SELECT check_decision FROM recording_processing WHERE id=?", (processing_id,)).fetchone()
+        assert after == int(enum_for("recording_processing.check_decision").REQUIRED)
         horizon = world.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         runtime = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)

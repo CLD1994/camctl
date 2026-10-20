@@ -7,6 +7,7 @@ import pytest
 
 from camctl.devices.drivers.adb_cameras.contracts import CameraCall
 from camctl.devices.evidence import DeviceObservation
+from camctl.devices.tasks import StartReturn
 from camctl.operations.models import EffectState
 from camctl.operations.process import LocalExit, RawToolOutcome
 
@@ -18,10 +19,11 @@ SIMULATION_LOG = (
 )
 
 
-def _interpreter(kind=CameraCall.START, operation="start_recording", activity_id="7"):
+def _interpreter(kind=CameraCall.START, operation="start_recording", activity_id="7",
+                 start_return_meaning=None):
     from camctl.devices.drivers.adb_cameras.responses import Action6DjiInterpreter
 
-    return Action6DjiInterpreter(kind, operation, activity_id)
+    return Action6DjiInterpreter(kind, operation, activity_id, start_return_meaning)
 
 
 def _raw(output=ACK):
@@ -138,9 +140,9 @@ def test_simultaneous_call_and_response_errors_keep_each_actual_input():
 
 @pytest.mark.parametrize("kind, operation", [
     (CameraCall.RESULT, "result"), (CameraCall.QUERY, "query"), (CameraCall.DELETE, "delete"),
-    (CameraCall.START, "start_timelapse"), (CameraCall.STOP, "stop_timelapse"),
-    (CameraCall.SETTING, "start_timelapse"), (CameraCall.SETTING, "stop_recording"),
-    (CameraCall.START, "stop_recording"), (CameraCall.STOP, "start_recording"),
+    (CameraCall.SETTING, "stop_recording"), (CameraCall.START, "stop_recording"),
+    (CameraCall.STOP, "start_recording"), (CameraCall.SETTING, "stop_timelapse"),
+    (CameraCall.START, "stop_timelapse"), (CameraCall.STOP, "start_timelapse"),
 ])
 def test_interpreter_rejects_unsupported_operation_or_phase(kind, operation):
     with pytest.raises(ValueError):
@@ -154,18 +156,26 @@ def test_interpreter_rejects_invalid_activity_identity(activity_id):
 
 
 @pytest.mark.parametrize("output, exit_code", [(SIMULATION_LOG, 0), (SIMULATION_LOG, 1), (b"", 0)])
-def test_simulation_property_and_service_logs_do_not_confirm_bitrate(output, exit_code):
-    from camctl.devices.drivers.adb_cameras.responses import Action6UnconfirmedSettingInterpreter
+def test_simulation_zero_exit_records_only_command_acceptance(output, exit_code):
+    from camctl.devices.drivers.adb_cameras.responses import Action6SimulationSettingInterpreter
 
-    result = Action6UnconfirmedSettingInterpreter().interpret(replace(_raw(output), exit=LocalExit(exit_code=exit_code)))
+    result = Action6SimulationSettingInterpreter("7").interpret(
+        replace(_raw(output), exit=LocalExit(exit_code=exit_code)))
 
-    assert result.effect is EffectState.UNKNOWN
-    assert result.observations == ()
-    assert result.error.code == "action6_setting_unconfirmed"
-    assert result.error.stage == "device_settings"
-    assert result.error.details["reason"] == "confirmation_unavailable"
-    assert result.error.details["stdout_hex"] == output.hex()
-    assert result.error.details["local_exit_code"] == exit_code
+    if exit_code == 0:
+        assert result.effect is EffectState.CONFIRMED
+        assert result.error is None
+        assert result.observations == (DeviceObservation("setting_command_accepted", 1, {
+            "activity_id": "7", "response_payload": None,
+            "confirmation_basis": "action6_simulate_device_exit/v1",
+        }),)
+    else:
+        assert result.effect is EffectState.UNKNOWN
+        assert result.observations == ()
+        assert result.error.code == "action6_response_unconfirmed"
+        assert result.error.stage == "device_settings"
+        assert result.error.details["reason"] == "exit_nonzero"
+        assert result.error.details["local_exit_code"] == exit_code
 
 
 def test_frozen_sent_contract_reports_acceptance_without_started_observation():
@@ -173,3 +183,60 @@ def test_frozen_sent_contract_reports_acceptance_without_started_observation():
     parser = Action6DjiInterpreter(CameraCall.START, "start_recording", "7", start_return_meaning=1)
     assert [item.type for item in parser.interpret(_raw()).observations] == ["recording_sent"]
     assert parser.interpret(_raw(b"Send message, data: 00\n")).observations == ()
+
+
+@pytest.mark.parametrize("kind,operation,observation", [
+    (CameraCall.SETTING, "start_timelapse", "setting_applied"),
+    (CameraCall.START, "start_timelapse", "timelapse_sent"),
+    (CameraCall.STOP, "stop_timelapse", "stop_confirmed"),
+])
+def test_action6_timelapse_accepts_only_complete_zero_response_for_its_phase(
+        kind, operation, observation):
+    parser = _interpreter(kind, operation, start_return_meaning=StartReturn.SENT)
+
+    result = parser.interpret(_raw())
+
+    assert result.error is None and result.effect is EffectState.CONFIRMED
+    assert [item.type for item in result.observations] == [observation]
+    assert result.observations[0].data == {
+        "activity_id": "7", "response_payload": "00",
+        "confirmation_basis": "action6_timelapse_ack/v1",
+    }
+
+
+@pytest.mark.parametrize("kind,operation", [
+    (CameraCall.SETTING, "start_timelapse"),
+    (CameraCall.START, "start_timelapse"),
+    (CameraCall.STOP, "stop_timelapse"),
+])
+@pytest.mark.parametrize("payload", ["e3", "ee", "df", "01"])
+def test_action6_timelapse_never_treats_nonzero_response_as_confirmation(kind, operation, payload):
+    parser = _interpreter(kind, operation, start_return_meaning=StartReturn.SENT)
+
+    result = parser.interpret(_raw(f"Resp message, len = 1, data:\n {payload}\n".encode()))
+
+    assert result.error is not None and result.effect is EffectState.UNKNOWN
+    assert result.observations == ()
+    assert result.error.details["reason"] == "response_payload_unconfirmed"
+    assert result.error.details["response_payload"] == payload
+
+
+@pytest.mark.parametrize("kind,operation", [
+    (CameraCall.SETTING, "start_timelapse"),
+    (CameraCall.START, "start_timelapse"),
+    (CameraCall.STOP, "stop_timelapse"),
+])
+@pytest.mark.parametrize("output,reason", [
+    (ACK + ACK, "response_multiple"),
+    (b"Resp message, len = 2, data:\n 00\n", "response_length_mismatch"),
+    (b"Resp message, len = 1, data:\n 0", "response_malformed"),
+])
+def test_action6_timelapse_malformed_or_multiple_response_does_not_confirm(
+        kind, operation, output, reason):
+    parser = _interpreter(kind, operation, start_return_meaning=StartReturn.SENT)
+
+    result = parser.interpret(_raw(output))
+
+    assert result.error is not None and result.effect is EffectState.UNKNOWN
+    assert result.observations == ()
+    assert result.error.details["reason"] == reason

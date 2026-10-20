@@ -142,10 +142,12 @@ async def test_reliable_empty_last_page_finalizes_only_with_completed_wait(monke
 
 @pytest.mark.asyncio
 async def test_auxiliary_files_are_not_registered_as_formal_video(monkeypatch):
-    driver, transport, _ = _driver(monkeypatch, [_raw(_frame(ROOT + "/new.LRF"))])
+    preview = ROOT + "/new.LRF"
+    driver, transport, _ = _driver(monkeypatch, [_raw(_frame(preview)), _raw(_frame(preview))])
     page = _page(await _list(driver, context=_context()))
     assert page["entries"] == [] and page["set_finalized"] is True
-    assert len(transport.specs) == 1
+    assert len(transport.specs) == 2
+    assert transport.specs[0].timeout_s > transport.specs[1].timeout_s
 
 
 @pytest.mark.asyncio

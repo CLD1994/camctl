@@ -7,13 +7,16 @@ from decimal import Decimal
 import shlex
 from types import SimpleNamespace
 
-from camctl.devices.adb_transport import invoke
+from camctl.devices.adb_transport import invoke, ManagedTransport
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, BindingStatus, check_binding
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
+from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
+    EvidenceValue, Settlement, SettlementBasis)
+from camctl.operations.process import RawToolOutcome, ToolStartError
+from camctl.operations.result_format import error_document, result_document
 from camctl.operations.validation import validate_outcome
 from camctl.operations.owned_calls import current_call_scope
 from .commands import settings_from_effective_params, start_for, stop_for
@@ -25,6 +28,19 @@ from .transport import shell_argv
 class _NeverStop:
     async def requested(self):
         await asyncio.Future()
+
+
+class _RawOutcomeCapture:
+    """记录同一次受管传输实际返回的原始结果，不创建第二次调用。"""
+
+    def __init__(self, transport: ManagedTransport, captured: list[RawToolOutcome]):
+        self.transport = transport
+        self.captured = captured
+
+    async def run(self, spec, stop):
+        raw = await self.transport.run(spec, stop)
+        self.captured.append(raw)
+        return raw
 
 
 class AdbCameraDriver:
@@ -62,7 +78,8 @@ class AdbCameraDriver:
             raise ValueError("相机调用必须携带本次有限正期限")
         return self._serial(request.binding)
 
-    async def _invoke(self, request, kind, serial, argv=None, batch=None, *, timeout_s=None):
+    async def _invoke(self, request, kind, serial, argv=None, batch=None, *, timeout_s=None,
+                      raw_capture: list[RawToolOutcome] | None = None):
         factory = self.contract.commands.get(kind)
         if not callable(factory):
             raise CapabilityNotDeclaredError(f"驱动未声明 {kind.value} 响应契约")
@@ -74,15 +91,58 @@ class AdbCameraDriver:
             raise ValueError("命令映射改变原绑定、操作、命令或证据登记")
         command = replace(command, timeout_s=request.timeout_s if timeout_s is None else timeout_s,
                           terminate_grace_s=self.terminate_grace_s)
-        return await invoke(command, request.ticket, self.transport)
+        transport = self.transport if raw_capture is None else _RawOutcomeCapture(self.transport, raw_capture)
+        return await invoke(command, request.ticket, transport)
 
-    def _prevented(self, request, reason, previous):
+    def _tool_start_failed(self, request, failure):
+        outcome = CallOutcome(status=AttemptStatus.FAILED,
+            error=ErrorValue("tool_start_failed", "transport", {"message": str(failure)}),
+            effect=EffectState.NO_EFFECT,
+            settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                EvidenceValue("tool_not_started", 1, {})))
+        validate_outcome(request.ticket, outcome, self.contract.evidence)
+        return outcome
+
+    def _call_record(self, command, outcome, raw):
+        return {
+            "command": list(command),
+            "status": outcome.status.value,
+            "effect": outcome.effect.value,
+            "error": error_document(outcome.error),
+            "result_document": result_document(outcome),
+            "stdout_hex": None if raw is None or raw.output is None else raw.output.hex(),
+        }
+
+    def _with_attached_calls(self, request, outcome, calls):
+        if not calls:
+            validate_outcome(request.ticket, outcome, self.contract.evidence)
+            return DeviceCallResult.from_outcome(outcome)
+        settlement = outcome.settlement
+        if settlement is None:
+            raise ValueError("已捕获光圈调用时，外层结果必须保留收场依据")
+        evidence = settlement.evidence
+        if evidence.version == 1 and evidence.type in {
+                "control_returned", "control_foreground_recovery", "tool_not_started"}:
+            type_, version = evidence.type, 2
+            data = dict(evidence.data)
+            data["calls"] = calls
+        else:
+            raise ValueError("Action6 设置调用历史无法附加到未登记的外层收场依据")
+        outcome = replace(outcome, settlement=Settlement(settlement.basis, EvidenceValue(type_, version, data)))
+        validate_outcome(request.ticket, outcome, self.contract.evidence)
+        return DeviceCallResult.from_outcome(outcome)
+
+    def _prevented(self, request, reason, previous, attached_calls=()):
         error = ErrorValue(reason, "dispatch")
         if previous is None:
             outcome = CallOutcome(status=AttemptStatus.FAILED, error=error, effect=EffectState.NO_EFFECT,
                 settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue("dispatch_prevented", 1, {})))
         else:
-            outcome = replace(previous, status=AttemptStatus.FAILED, error=error, effect=EffectState.NO_EFFECT)
+            outcome = replace(previous, status=AttemptStatus.FAILED, error=error, effect=EffectState.NO_EFFECT,
+                observations=() if attached_calls else previous.observations,
+                call_info=None if attached_calls else previous.call_info)
+        if attached_calls:
+            return self._with_attached_calls(request, outcome, attached_calls)
         validate_outcome(request.ticket, outcome, self.contract.evidence)
         return DeviceCallResult.from_outcome(outcome)
 
@@ -101,6 +161,7 @@ class AdbCameraDriver:
                       for command in (*self.contract.session_setup_commands, *settings)),
                     (CameraCall.START, start_for(self.contract.driver_id, action_type)))
         previous = None
+        attached_calls = []
         for kind, command in commands:
             session_key = (request.binding, serial, command)
             once = kind is CameraCall.SETTING and command in self.contract.session_once_commands
@@ -109,29 +170,54 @@ class AdbCameraDriver:
             argv = shell_argv(serial, shlex.join(command))
             reason = request.dispatch_check()
             if reason is not None:
-                return self._prevented(request, reason, previous)
+                return self._prevented(request, reason, previous, attached_calls)
             remaining = request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000)
             if remaining <= 0:
-                return self._prevented(request, "start_preparation_timeout", previous)
-            outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining)
+                return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
+            is_non_blocking_aperture = (kind is CameraCall.SETTING
+                and (request.operation, command) in self.contract.non_blocking_setting_commands)
+            record_setting_call = (kind is CameraCall.SETTING
+                and request.operation in self.contract.setting_call_history_operations)
+            raw_capture = [] if record_setting_call else None
+            try:
+                outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
+                                             raw_capture=raw_capture)
+            except ToolStartError as error:
+                if (request.operation not in self.contract.setting_call_history_operations
+                        or (not record_setting_call and kind is not CameraCall.START)):
+                    raise
+                outcome = self._tool_start_failed(request, error)
+            if record_setting_call:
+                raw = raw_capture[0] if raw_capture else None
+                attached_calls.append(self._call_record(command, outcome, raw))
             if kind is CameraCall.START:
-                return DeviceCallResult.from_outcome(outcome)
+                return self._with_attached_calls(request, outcome, attached_calls)
             previous = outcome
+            if is_non_blocking_aperture:
+                scope = current_call_scope()
+                if scope is not None and scope.interrupted is not None:
+                    interrupted = replace(previous, status=AttemptStatus.FAILED,
+                        effect=EffectState.NO_EFFECT,
+                        error=ErrorValue("transport_cancelled", "transport"),
+                        observations=() if attached_calls else previous.observations,
+                        call_info=None if attached_calls else previous.call_info)
+                    return self._with_attached_calls(request, interrupted, attached_calls)
+                continue
             if (outcome.status is not AttemptStatus.SUCCEEDED or outcome.error is not None
                     or outcome.effect is not EffectState.CONFIRMED):
                 failed = replace(outcome, status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
                     error=outcome.error or ErrorValue("camera_settings_unconfirmed", "device_settings"))
-                validate_outcome(request.ticket, failed, self.contract.evidence)
-                return DeviceCallResult.from_outcome(failed)
+                return self._with_attached_calls(request, failed, attached_calls)
             if once:
                 self._configured_settings.add(session_key)
             scope = current_call_scope()
             if scope is not None and scope.interrupted is not None:
                 # 当前设置实际已返回，但原等待取消后不派发下一设置或 START。
                 failed = replace(outcome, status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
-                    error=ErrorValue("transport_cancelled", "transport"))
-                validate_outcome(request.ticket, failed, self.contract.evidence)
-                return DeviceCallResult.from_outcome(failed)
+                    error=ErrorValue("transport_cancelled", "transport"),
+                    observations=() if attached_calls else outcome.observations,
+                    call_info=None if attached_calls else outcome.call_info)
+                return self._with_attached_calls(request, failed, attached_calls)
         raise AssertionError("相机启动组合没有实际启动步骤")
 
     async def stop(self, request):

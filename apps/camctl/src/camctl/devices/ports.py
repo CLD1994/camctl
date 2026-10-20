@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, OPERATIONS
@@ -89,6 +89,8 @@ class ControlRequest:
     dispatch_check: Callable[[], str | None] | None = None
     #: 普通录像原受理定义中的返回含义；省略保持旧 STARTED 合同。
     start_return_meaning: int | None = None
+    #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
+    prior_result_entries: Callable[[], Iterator[Mapping[str, Any]]] | None = None
 
 
 @dataclass(frozen=True)

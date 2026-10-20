@@ -75,8 +75,9 @@ class FileChannel(LocalAdbChannel):
 
 
 @pytest.fixture
-def world(tmp_path, monkeypatch):
+def world(tmp_path, monkeypatch, request):
     """仅预置已登记源；清理受理、意图、结果及交接全部执行生产事务。"""
+    binding = DeviceBinding("cam-1", getattr(request, "param", BINDING.driver_id))
     monkeypatch.setattr(definitions_runtime, "_definitions", {})
     monkeypatch.setattr(drivers_runtime, "_entries", {})
     register_capture_guards()
@@ -86,29 +87,33 @@ def world(tmp_path, monkeypatch):
         "paths": {"state_db": str(tmp_path / "state.db"), "log_file": str(tmp_path / "log"),
                   **{name: str(tmp_path / name) for name in ("staging", "ready", "processing")}},
         "devices": {
-            "cam-1": {"kind": "camera", "driver": BINDING.driver_id, "adb": {"serial": "serial-1"},
+            "cam-1": {"kind": "camera", "driver": binding.driver_id, "adb": {"serial": "serial-1"},
                       "cleanup": {"delete_retry_interval_s": "0", "query_retry_interval_s": "0"}},
             "action6": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "never-called"}},
+            "hb-device": {"kind": "camera", "driver": "hasselblad_cfv100c",
+                "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "never-called",
+                    "output_storage": "device"}},
         }}, ConfigDefaults())
     _, owned = _seed_environment(tmp_path)
     connection = owned.connection
     _seed_plan(connection, 1)
-    for action_id, device, driver_id in ((11, "cam-1", BINDING.driver_id),
-                                       (12, "hb", "hasselblad_cfv100c"), (13, "action6", "dji-action6")):
+    for action_id, device, driver_id in ((11, "cam-1", binding.driver_id),
+                                       (12, "hb", "hasselblad_cfv100c"), (13, "hb-device", "hasselblad_cfv100c")):
         _seed_action(connection, action_id, 1, action_type=2, device_id=device, status=3)
         connection.execute("UPDATE actions SET driver_id=? WHERE id=?", (driver_id, action_id))
     paths = {}
-    for output_id, name, action_id, binding in (
-        (701, "clip 'one'\n.OSV", 11, BINDING), (702, "clip 'one'\n.LRF", 11, BINDING),
-        (706, "action6.MP4", 13, DeviceBinding("action6", "dji-action6")),
+    for output_id, name, action_id, file_binding in (
+        (701, "clip 'one'\n.OSV", 11, binding), (702, "clip 'one'\n.LRF", 11, binding),
+        (706, "hb-original.3FR", 13, DeviceBinding("hb-device", "hasselblad_cfv100c")),
     ):
+        name = name.replace(".OSV", ".MP4") if file_binding.driver_id == "dji-action6" else name
         path = tmp_path / "device" / name
         path.parent.mkdir(exist_ok=True)
         path.write_bytes(b"source")
         paths[output_id] = path
         _seed_device_file(connection, output_id, action_id, size=6)
         connection.execute("UPDATE device_files SET identity_key=?,locator_json=?,original_name=? WHERE id=?",
-            (json.dumps([binding.device_id, binding.driver_id, str(path)]), json.dumps({"path": str(path)}), name, output_id))
+            (json.dumps([file_binding.device_id, file_binding.driver_id, str(path)]), json.dumps({"path": str(path)}), name, output_id))
         _seed_output(connection, output_id, action_id, output_id, size=6)
     connection.execute("UPDATE device_files SET role=3,original_device_file_id=701,pairing_evidence_json='{}' WHERE id=702")
     connection.execute("UPDATE outputs SET kind=3 WHERE id=702")
@@ -138,15 +143,17 @@ def world(tmp_path, monkeypatch):
     copy.parent.mkdir(parents=True)
     copy.write_bytes(b"delivered-copy")
     register_builtin_camera_drivers(cfg)
+    from camctl.devices.drivers.hasselblad.registration import register_builtin_hasselblad_driver
+    register_builtin_hasselblad_driver(cfg)
     registry = drivers_runtime.current_registry()
-    entry = registry.entry(BINDING.driver_id)
+    entry = registry.entry(binding.driver_id)
     channel = FileChannel()
     entry.driver.transport = channel
     work = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(batch_size=100, limit_per_run=100))
     context = SimpleNamespace(open_connection=lambda: open_existing(
         Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
     value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
-                            paths=paths, copy=copy, work=work, context=context)
+                            binding=binding, paths=paths, copy=copy, work=work, context=context)
     try:
         yield value
         assert not work.executor.unfinished_files()
@@ -163,16 +170,17 @@ def _factory(world, **kwargs):
 
 
 @pytest.mark.parametrize("operation", ["query", "delete"])
+@pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
 async def test_registered_osmo_recovery_is_consumed_by_formal_assembly(world, operation):
     runtime = _factory(world)(world.owned)
-    evidence = runtime.recovery_evidence_for(BINDING, operation)
+    evidence = runtime.recovery_evidence_for(world.binding, operation)
     assert evidence is not None
     template = evidence.contract("adb_foreground_recovery", 1)
     assert template.operation == operation and template.fields == frozenset()
     assert template.identity_field is None
     assert evidence.contract(operation + "_returned", 1) is world.entry.evidence.contract(operation + "_returned", 1)
     assert evidence.contract(operation + "_foreground_recovery", 1).fields == frozenset({"terminate_grace_s"})
-    assert runtime.recovery_evidence_for(BINDING, "digest") is None
+    assert runtime.recovery_evidence_for(world.binding, "digest") is None
     assert world.entry.declaration.file_query_supported and world.entry.declaration.delete_supported
     assert not world.entry.declaration.query_supported
 
@@ -190,7 +198,8 @@ async def test_formal_recovery_keeps_missing_or_invalid_registration_blocked(wor
             "adb_foreground_recovery", 1, operation, frozenset({"terminate_grace_s"})
             if missing == "body" else frozenset({"cleanup_item_id"}),
             identity_field=None if missing == "body" else "cleanup_item_id")))
-    world.registry = DriverRegistry((entry, world.registry.entry("dji-action6")))
+    world.registry = DriverRegistry((entry, world.registry.entry("dji-action6"),
+                                     world.registry.entry("hasselblad_cfv100c")))
     runtime = _factory(world)(world.owned)
     if missing in ("body", "identity"):
         with pytest.raises(ValueError, match="空正文"):
@@ -297,6 +306,7 @@ def _lost_intent(world, operation):
 
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
+@pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
 async def test_old_running_uses_registered_recovery_without_replaying_original_ticket(world, operation):
     item_id, ticket, horizon = _lost_intent(world, operation)
     fresh = world.context.open_connection()
@@ -340,6 +350,7 @@ async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_ind
 
 
 @pytest.mark.parametrize("verification", ["absent", "unknown"])
+@pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
 async def test_old_delete_recovery_uses_original_query_budget_for_absence_or_unknown(world, verification):
     item_id, ticket, horizon = _lost_intent(world, "delete")
     if verification == "absent":
