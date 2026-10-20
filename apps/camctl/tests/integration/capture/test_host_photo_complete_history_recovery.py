@@ -142,7 +142,13 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
             "type": "camera_take_photo",
             "device_id": "cam-1",
             "scheduled_at": _input_time(),
-            "params": {"type": "hasselblad_photo"},
+            "params": {
+                "type": "hasselblad_photo",
+                "capture_format": "raw",
+                "exposure": {"mode": "P", "iso": 100},
+                "white_balance": {"mode": "auto"},
+                "focus": {"mode": "MF"},
+            },
             "policy": {"max_delay_ms": 5000},
         }])
         scheduling = SchedulingRepository()

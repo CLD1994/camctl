@@ -27,7 +27,8 @@ async def test_device_photo_registers_pair_and_reclaims_host_copies(tmp_path):
             (3, len(_PREVIEW), 2, hashlib.sha256(_PREVIEW).hexdigest())]
         assert files[1][2] == files[0][0]
         assert [json.loads(f[6])["variant"] for f in files] == ["original", "thumbnail"]
-        assert all(json.loads(f[6])["original_name"] == "capture.3fr" for f in files)
+        assert all(json.loads(f[6])["camera_path"] == "/mnt/media/DCIM/B9996039.3FR" for f in files)
+        assert all(json.loads(f[6])["camera_name"] == "B9996039.3FR" for f in files)
         outputs = owned.connection.execute("SELECT id,device_file_id,intermediate_file_id FROM outputs ORDER BY id").fetchall()
         assert [(f[1], f[2]) for f in outputs] == [(files[0][0], None), (files[1][0], None)]
         assert owned.connection.execute("SELECT output_id,original_output_id FROM output_origins").fetchall() == [(outputs[1][0], outputs[0][0])]

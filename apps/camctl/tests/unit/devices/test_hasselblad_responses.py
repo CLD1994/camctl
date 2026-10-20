@@ -1,6 +1,10 @@
 """对 hb_cli 已核验输出样式进行纯解析测试。"""
 
+import inspect
+
 import pytest
+
+from camctl.devices.drivers.hasselblad.parameters import CaptureFormat
 
 
 _NON_LF_SEPARATORS = [
@@ -31,6 +35,22 @@ def _api():
 
     return (CapturedFile, CaptureResponse, CliParseError, UsbCamera,
             parse_capture, parse_devices, parse_serial)
+
+
+def _parse_capture(parser, output, capture_format, *, output_directory):
+    if "capture_format" not in inspect.signature(parser).parameters:
+        pytest.fail("parse_capture must require the H1 capture_format parameter")
+    return parser(output, capture_format=capture_format, output_directory=output_directory)
+
+
+def _parse_raw_capture(parser, output, *, output_directory):
+    return _parse_capture(parser, output, CaptureFormat.RAW, output_directory=output_directory)
+
+
+def test_parse_capture_requires_an_explicit_format_argument():
+    parameter = inspect.signature(_api()[4]).parameters["capture_format"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
 
 
 def test_parse_one_usb_device_from_verified_list_line():
@@ -91,25 +111,32 @@ def test_serial_rejects_missing_repeated_empty_or_non_utf8_value(output):
 def test_parse_capture_requires_raw_and_returns_paired_files_in_output_directory():
     CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
 
-    result = parse_capture(
+    result = _parse_raw_capture(
+        parse_capture,
         b"capture: OK\n"
         b"saved /workspace/capture_22544386.3FR (211222528 bytes)\n"
-        b"saved /workspace/capture_22544386.3FR.thumbnail.jpg (689251 bytes)\n",
+        b"saved /workspace/capture_22544386.3FR.thumbnail.jpg (689251 bytes)\n"
+        b"camera file: /mnt/media/DCIM/B9996039.3FR\n",
         output_directory="/workspace",
     )
 
-    assert result == CaptureResponse(
-        original=CapturedFile(
-            path="/workspace/capture_22544386.3FR",
-            original_name="capture_22544386.3FR",
-            size=211222528,
-        ),
-        preview=CapturedFile(
-            path="/workspace/capture_22544386.3FR.thumbnail.jpg",
-            original_name="capture_22544386.3FR.thumbnail.jpg",
-            size=689251,
-        ),
+    assert result.original == CapturedFile(
+        host_path="/workspace/capture_22544386.3FR",
+        host_name="capture_22544386.3FR",
+        size=211222528,
+        media_type="image/x-hasselblad-3fr",
     )
+    assert result.preview == CapturedFile(
+        host_path="/workspace/capture_22544386.3FR.thumbnail.jpg",
+        host_name="capture_22544386.3FR.thumbnail.jpg",
+        size=689251,
+        media_type="image/jpeg",
+    )
+    assert result.camera_locator.as_json() == {
+        "status": "path",
+        "camera_path": "/mnt/media/DCIM/B9996039.3FR",
+        "camera_name": "B9996039.3FR",
+    }
 
 
 @pytest.mark.parametrize("output, output_directory", [
@@ -134,21 +161,129 @@ def test_capture_rejects_untrusted_or_non_raw_file_results(output, output_direct
     CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
 
     with pytest.raises(CliParseError):
-        parse_capture(output, output_directory=output_directory)
+        _parse_raw_capture(parse_capture, output, output_directory=output_directory)
 
 
 def test_capture_accepts_spaces_in_direct_child_filenames():
     CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
 
-    result = parse_capture(
+    result = _parse_raw_capture(
+        parse_capture,
         b"capture: OK\n"
         b"saved /workspace/my photo.3FR (10 bytes)\n"
-        b"saved /workspace/my photo.3FR.thumbnail.jpg (2 bytes)\n",
+        b"saved /workspace/my photo.3FR.thumbnail.jpg (2 bytes)\n"
+        b"camera file: /mnt/media/B9996039.3FR\n",
         output_directory="/workspace",
     )
 
-    assert result.original.original_name == "my photo.3FR"
-    assert result.preview.original_name == "my photo.3FR.thumbnail.jpg"
+    assert result.original.host_name == "my photo.3FR"
+    assert result.preview.host_name == "my photo.3FR.thumbnail.jpg"
+
+
+def test_capture_response_assigns_jpeg_original_and_preview():
+    CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
+
+    result = _parse_capture(
+        parse_capture,
+        b"capture: OK\n"
+        b"saved /workspace/capture_host_17.JPG (10 bytes)\n"
+        b"saved /workspace/capture_host_17.JPG.thumbnail.jpg (2 bytes)\n"
+        b"camera file: /mnt/media/DCIM/B9996039.JPG\n",
+        capture_format=CaptureFormat.JPEG,
+        output_directory="/workspace",
+    )
+
+    assert result.original.host_name == "capture_host_17.JPG"
+    assert result.original.media_type == "image/jpeg"
+    assert result.preview.host_name == "capture_host_17.JPG.thumbnail.jpg"
+    assert result.preview.media_type == "image/jpeg"
+    assert result.camera_locator.camera_name == "B9996039.JPG"
+    assert result.camera_locator.camera_path == "/mnt/media/DCIM/B9996039.JPG"
+
+
+@pytest.mark.parametrize("output", [
+    b"capture: OK\ncapture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\ncamera file: /mnt/a.3FR\n",
+    b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR (10 bytes)\ncamera file: /mnt/a.3FR\n",
+    b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\ncamera file: /mnt/a.3FR\n",
+    b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR (10 bytes)\ncamera file: /mnt/a.3FR\n",
+    b"capture: OK\nsaved /workspace/a.JPG (10 bytes)\nsaved /workspace/a.JPG.thumbnail.jpg (2 bytes)\ncamera file: /mnt/a.JPG\n",
+    b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\ncamera file: /mnt/a.3FR\nsurprise\n",
+])
+def test_capture_response_requires_complete_unambiguous_records(output):
+    CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
+
+    with pytest.raises(CliParseError):
+        _parse_raw_capture(parse_capture, output, output_directory="/workspace")
+
+
+def test_camera_locator_distinguishes_explicit_missing_and_invalid():
+    CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
+
+    explicit = _parse_raw_capture(
+        parse_capture,
+        b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\ncapture: camera filename was not reported\n",
+        output_directory="/workspace",
+    )
+    assert explicit.camera_locator.status.value == "explicit_missing"
+    assert explicit.camera_locator.camera_path is None
+
+    with pytest.raises(CliParseError) as failure:
+        _parse_raw_capture(
+            parse_capture,
+            b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\n",
+            output_directory="/workspace",
+        )
+    assert failure.value.code == "unreported_camera_locator"
+
+    with pytest.raises(CliParseError) as invalid:
+        _parse_raw_capture(
+            parse_capture,
+            b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\ncamera file: /mnt/../B9996039.3FR\n",
+            output_directory="/workspace",
+        )
+    assert invalid.value.code == "malformed_camera_locator"
+
+
+@pytest.mark.parametrize("locator_rows", [
+    b"camera file: /mnt/a.3FR\ncamera file: /mnt/b.3FR\n",
+    b"camera file: /mnt/a.3FR\ncapture: camera filename was not reported\n",
+])
+def test_capture_response_rejects_duplicate_or_conflicting_camera_locators(locator_rows):
+    CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
+
+    with pytest.raises(CliParseError) as failure:
+        _parse_raw_capture(
+            parse_capture,
+            b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\nsaved /workspace/a.3FR.thumbnail.jpg (2 bytes)\n" + locator_rows,
+            output_directory="/workspace",
+        )
+    assert failure.value.code == "ambiguous_camera_locator"
+
+
+@pytest.mark.parametrize("path", [
+    "relative/B9996039.3FR",
+    "/",
+    "/mnt//B9996039.3FR",
+    "/mnt/./B9996039.3FR",
+    "/mnt/../B9996039.3FR",
+    "/mnt/B9996039.3FR/",
+    "/mnt/bad\x00name.3FR",
+    "/mnt/bad\nname.3FR",
+    "/mnt/bad\rname.3FR",
+    "/mnt/bad\u2028name.3FR",
+])
+def test_camera_file_path_requires_a_canonical_absolute_posix_filename(path):
+    CapturedFile, CaptureResponse, CliParseError, UsbCamera, parse_capture, parse_devices, parse_serial = _api()
+
+    output = (
+        "capture: OK\n"
+        "saved /workspace/a.3FR (10 bytes)\n"
+        "saved /workspace/a.3FR.thumbnail.jpg (2 bytes)\n"
+        f"camera file: {path}\n"
+    ).encode("utf-8")
+    with pytest.raises(CliParseError) as failure:
+        _parse_raw_capture(parse_capture, output, output_directory="/workspace")
+    assert failure.value.code == "malformed_camera_locator"
 
 
 @pytest.mark.parametrize("output", [
@@ -188,7 +323,7 @@ def test_parsers_reject_unverified_non_lf_line_separators(command, separator):
 
     with pytest.raises(CliParseError):
         if command == "capture":
-            parser(output, output_directory="/workspace")
+            _parse_raw_capture(parser, output, output_directory="/workspace")
         else:
             parser(output)
 
@@ -236,7 +371,7 @@ def test_parsers_reject_non_lf_separators_inside_rows_and_at_end(
 
     with pytest.raises(CliParseError):
         if command == "capture":
-            parser(output, output_directory="/workspace")
+            _parse_raw_capture(parser, output, output_directory="/workspace")
         else:
             parser(output)
 
@@ -288,6 +423,6 @@ def test_decimal_conversion_limit_is_wrapped_as_cli_parse_error(field):
 
     with pytest.raises(CliParseError):
         if field == "size":
-            parser(output, output_directory="/workspace")
+            _parse_raw_capture(parser, output, output_directory="/workspace")
         else:
             parser(output)

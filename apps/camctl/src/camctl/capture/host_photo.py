@@ -240,8 +240,13 @@ def _photo_artifacts(runtime, action_id: int, saved: SavedPhotoReturn):
     except (KeyError, ValueError, TypeError) as failure:
         raise ConsistencyError(
             f"已确认成功的主机单张原图或预览事实无效: {failure}") from failure
-    if (original.media_type != "image/x-hasselblad-3fr"
-            or preview.media_type != "image/jpeg"):
+    from camctl.devices.drivers.hasselblad.parameters import CAPTURE_FORMATS
+
+    allowed_media_pairs = {
+        (description.original_media_type, description.preview_media_type)
+        for description in CAPTURE_FORMATS.values()
+    }
+    if (original.media_type, preview.media_type) not in allowed_media_pairs:
         raise ConsistencyError("已确认成功的主机单张原图与预览媒体类型不符")
     return outcome, (original, preview)
 
@@ -330,14 +335,42 @@ def _drafts(files, artifacts: tuple[CapturedArtifact, CapturedArtifact]):
     )
 
 
-def _device_drafts(runtime, action_id, artifacts, occurred_at):
+def _capture_locator(outcome):
+    from camctl.devices.drivers.hasselblad.files import CameraFileLocator
+
+    observations = outcome.observations
+    if len(observations) != 1 or not isinstance(observations[0].data, Mapping):
+        raise ConsistencyError("相机正式源缺少唯一拍摄观察")
+    steps = observations[0].data.get("steps")
+    if not isinstance(steps, list):
+        raise ConsistencyError("相机正式源缺少拍摄步骤事实")
+    capture_steps = tuple(step for step in steps if isinstance(step, Mapping)
+                          and step.get("name") == "capture")
+    if len(capture_steps) != 1:
+        raise ConsistencyError("相机正式源缺少唯一 capture 步骤")
+    try:
+        return CameraFileLocator.from_json(capture_steps[0].get("camera_locator"))
+    except (TypeError, ValueError) as failure:
+        raise ConsistencyError(f"相机正式源的机内定位事实无效: {failure}") from failure
+
+
+def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     from camctl.capture.handlers import FileRegistration, ObservedFile, _binding, _register_observed
     from camctl.capture.results import FileKind
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+    from camctl.devices.drivers.hasselblad.files import (
+        CameraFileIdentity,
+        CameraLocatorStatus,
+        DownloadVariant,
+    )
 
     binding = _binding(runtime.action(action_id))
     original, preview = artifacts
-    identities = tuple(CameraFileIdentity(binding, original.original_name, variant, artifact.sha256)
+    locator = _capture_locator(outcome)
+    if locator.status is not CameraLocatorStatus.PATH:
+        raise ConsistencyError("相机正式源缺少可下载的机内文件名和完整路径")
+    identities = tuple(CameraFileIdentity(
+        binding, locator.camera_path, locator.camera_name, variant, artifact.sha256
+    )
                        for variant, artifact in zip(
                            (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
     entries = tuple(ObservedFile(
@@ -361,12 +394,12 @@ def _device_drafts(runtime, action_id, artifacts, occurred_at):
     )
 
 
-def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_at: int) -> None:
+def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_at: int, outcome) -> None:
     from camctl.persistence.repositories.capture import FinishCanceledCapture
 
     action = runtime.action(action_id)
     drafts = (_drafts(files, artifacts) if is_saved_host_photo(action)
-              else _device_drafts(runtime, action_id, artifacts, occurred_at))
+              else _device_drafts(runtime, action_id, artifacts, occurred_at, outcome))
     request_type = FinishCanceledCapture if action["cancel_requested"] else FinishCapture
     runtime.save_capture_completion(request_type(
         action_id=action_id, drafts=drafts, catalog_facts=OutputCatalogFacts(action_id, True),
@@ -474,4 +507,4 @@ async def advance_host_photo(runtime, action_id: int) -> None:
     # Hasselblad 的成功单张返回与已核实完整原图/预览共同证明本次活动结束；
     # 先用正式活动事务记录 END/RELEASE，再把动作和产物登记为终态。
     _conclude_activity(runtime, action_id)
-    _persist_outputs(runtime, action_id, files, artifacts, occurred_at)
+    _persist_outputs(runtime, action_id, files, artifacts, occurred_at, outcome)
