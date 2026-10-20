@@ -717,6 +717,7 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
     "OUTPUT_REGISTERED": (True, ["apps/camctl/tests/integration/capture/test_recording_finish.py"]),
     "READ_PERMISSION_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_read_associations.py"]),
     "COPY_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_copy_creation_slot.py"]),
+    "SEGMENT_FACTS": (False, ["apps/camctl/tests/integration/persistence/test_segment_storage.py"]),
     "DELIVERY_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_delivery.py"]),
     "CLEANUP_CHANGED": (False, ["apps/camctl/tests/integration/outputs/test_source_cleanup.py"]),
     "CANCEL_CHANGED": (False, ["apps/camctl/tests/integration/cancellation/test_effects.py"]),

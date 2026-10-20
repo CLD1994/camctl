@@ -29,7 +29,7 @@ CREATE TABLE actions (
     status INTEGER NOT NULL CHECK (status IN (1,2,3,4,5,6)),
     execution_started INTEGER NOT NULL CHECK (execution_started IN (0,1)),
     cancel_requested INTEGER NOT NULL CHECK (cancel_requested IN (0,1)),
-    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29)),
+    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30)),
     error_details_json TEXT CHECK (error_details_json IS NULL OR (json_valid(error_details_json) AND json_type(error_details_json) = 'object')),
     first_window_observed_at INTEGER,
     expiration_reason INTEGER CHECK (expiration_reason IS NULL OR expiration_reason IN (1,2)),
@@ -51,7 +51,7 @@ CREATE TABLE actions (
     CHECK ((status = 4 AND error_code IS NOT NULL AND error_details_json IS NOT NULL)
         OR (status <> 4 AND error_code IS NULL AND error_details_json IS NULL)),
     CHECK (status <> 4 OR (execution_started = 0 AND error_code IN (1,2,3,4))
-        OR (execution_started = 1 AND error_code IN (10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29))),
+        OR (execution_started = 1 AND error_code IN (10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30))),
     CHECK ((execution_spec_json IS NULL AND status = 4 AND execution_started = 0)
         OR (execution_spec_json IS NOT NULL AND NOT (status = 4 AND execution_started = 0))),
     CHECK ((type IN (1,2,3) AND execution_spec_json IS NOT NULL AND effective_params_json IS NOT NULL

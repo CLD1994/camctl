@@ -4,101 +4,55 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from camctl.contracts.values import MAX_OBJECT_ID
+from camctl.contracts.enums import enum_for
 from camctl.devices.segments import SegmentKey
 
 
-class EvidenceState(StrEnum):
-    """事实为真、已证伪或仍未知。"""
-
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    UNKNOWN = "unknown"
-
-
-class SegmentMemberRole(StrEnum):
-    ORIGINAL = "original"
-    PREVIEW = "preview"
-    OTHER = "other"
+def _text_enum(name, column):
+    """从唯一整数登记派生 P1 文本枚举，保留原 StrEnum 契约。"""
+    return StrEnum(
+        name, {member.name: member.name.lower() for member in enum_for(column)},
+        module=__name__,
+    )
 
 
-class OwnershipState(StrEnum):
-    OWNED = "owned"
-    NOT_OWNED = "not_owned"
-    UNKNOWN = "unknown"
+EvidenceState = _text_enum("EvidenceState", "segment_sets.facts_json.evidence")
 
 
-class FileCompletionState(StrEnum):
-    COMPLETE = "complete"
-    INCOMPLETE = "incomplete"
-    UNKNOWN = "unknown"
+SegmentMemberRole = _text_enum("SegmentMemberRole", "segment_members.role")
 
 
-class PreviewPairingState(StrEnum):
-    """预览与本次原片的配对核实结果。"""
-
-    NOT_APPLICABLE = "not_applicable"
-    PAIRED = "paired"
-    UNPAIRED = "unpaired"
-    UNKNOWN = "unknown"
+OwnershipState = _text_enum("OwnershipState", "segment_members.ownership")
 
 
-class SegmentAssessmentStatus(StrEnum):
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    UNCONFIRMED = "unconfirmed"
+FileCompletionState = _text_enum("FileCompletionState", "segment_members.completion")
 
 
-class SegmentAssessmentReason(StrEnum):
-    NONE = "none"
-    EXPLICIT_ERROR = "explicit_error"
-    STOP_UNCONFIRMED = "stop_unconfirmed"
-    FILE_WAIT_UNCONFIRMED = "file_wait_unconfirmed"
-    SCAN_UNCONFIRMED = "scan_unconfirmed"
-    ORDER_UNKNOWN = "order_unknown"
-    MEMBER_UNKNOWN = "member_unknown"
-    NO_NONZERO_ORIGINAL = "no_nonzero_original"
-    GAP = "gap"
-    COMPLETION_UNCONFIRMED = "completion_unconfirmed"
-    LOWER_BOUND_INSUFFICIENT = "lower_bound_insufficient"
-    PREVIEW_UNKNOWN = "preview_unknown"
+PreviewPairingState = _text_enum("PreviewPairingState", "segment_members.pairing_state")
 
 
-class CompletionBasis(StrEnum):
-    CONTROL = "control"
-    SEGMENT_LOWER_BOUND = "segment_lower_bound"
-    NONE = "none"
+SegmentAssessmentStatus = _text_enum("SegmentAssessmentStatus", "segment_sets.assessment_json.status")
 
 
-class OverrecordStatus(StrEnum):
-    CONFIRMED = "confirmed"
-    NOT_CONFIRMED = "not_confirmed"
-    UNKNOWN = "unknown"
+SegmentAssessmentReason = _text_enum("SegmentAssessmentReason", "segment_sets.assessment_json.reason")
 
 
-class DefaultScopeState(StrEnum):
-    UNKNOWN = "unknown"
-    EMPTY = "empty"
-    NONEMPTY = "nonempty"
+CompletionBasis = _text_enum("CompletionBasis", "segment_sets.assessment_json.basis")
 
 
-class DefaultScopeBasis(StrEnum):
-    UNKNOWN = "unknown"
-    ALL_QUALIFYING = "all_qualifying"
-    FIRST_N = "first_n"
-    CONTIGUOUS_PREFIX = "contiguous_prefix"
-    PREFIX_FIRST_N = "prefix_first_n"
-    EMPTY_PREFIX = "empty_prefix"
+OverrecordStatus = _text_enum("OverrecordStatus", "segment_sets.assessment_json.overrecord")
 
 
-class SegmentGapKind(StrEnum):
-    MISSING_POSITION = "missing_position"
-    ZERO_BYTE_NON_TAIL = "zero_byte_non_tail"
+DefaultScopeState = _text_enum("DefaultScopeState", "segment_sets.assessment_json.scope_state")
 
 
-class SegmentGapNeighborState(StrEnum):
-    KNOWN = "known"
-    ABSENT = "absent"
-    UNKNOWN = "unknown"
+DefaultScopeBasis = _text_enum("DefaultScopeBasis", "segment_sets.assessment_json.scope_basis")
+
+
+SegmentGapKind = _text_enum("SegmentGapKind", "segment_gaps.kind")
+
+
+SegmentGapNeighborState = _text_enum("SegmentGapNeighborState", "segment_gaps.neighbors_json.state")
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,7 +369,7 @@ class SegmentAssessment:
     default_scope: DefaultSegmentScope
     set_ref: SegmentSetRef
     target_duration_ms: int
-    gap_count: int
+    gap_count: int | None
     first_gap: SegmentGap | None
     empty_tail_count: int | None
     optional_preview_unknown: bool
@@ -455,17 +409,23 @@ class SegmentAssessment:
         if (type(self.target_duration_ms) is not int
                 or not 1 <= self.target_duration_ms <= MAX_OBJECT_ID):
             raise ValueError("目标时长必须是正安全整数毫秒")
-        if type(self.gap_count) is not int or self.gap_count < 0:
-            raise ValueError("缺口数量必须是非负整数")
+        if self.gap_count is not None and (type(self.gap_count) is not int or self.gap_count < 0):
+            raise ValueError("缺口数量必须是非负整数或未知")
         if self.first_gap is not None and not isinstance(self.first_gap, SegmentGap):
             raise ValueError("首个缺口必须是 SegmentGap 或未知")
-        if (self.gap_count == 0) != (self.first_gap is None):
+        if (self.gap_count in (None, 0)) != (self.first_gap is None):
             raise ValueError("缺口数量与首缺口摘要必须同时存在或缺省")
         if self.empty_tail_count is not None and (
                 type(self.empty_tail_count) is not int or self.empty_tail_count < 0):
             raise ValueError("空尾原片数必须是非负整数或未知")
         if type(self.optional_preview_unknown) is not bool:
             raise ValueError("可选预览核实状态必须是布尔值")
+        if self.gap_count is None and (
+                self.default_scope.state is not DefaultScopeState.UNKNOWN
+                or self.complete_segment_count is not None or self.lower_bound_ms is not None
+                or self.empty_tail_count is not None
+                or self.status is SegmentAssessmentStatus.SUCCEEDED):
+            raise ValueError("缺口分类未知不能声明可靠时长、空尾、范围或成功")
         if self.status is SegmentAssessmentStatus.SUCCEEDED:
             if self.reason is not SegmentAssessmentReason.NONE or self.basis is CompletionBasis.NONE:
                 raise ValueError("成功结果必须带已登记完成依据且不带失败原因")

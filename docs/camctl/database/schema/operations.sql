@@ -152,3 +152,93 @@ CREATE TABLE recording_processing (
     CHECK (repair_state <> 6 OR repair_error_json IS NOT NULL),
     CHECK (discard_state NOT IN (5,6) OR discard_error_json IS NOT NULL)
 ) STRICT;
+
+-- 分段成员及判断属于原拍摄动作；文件属性由独立文件事实持有。
+CREATE TABLE segment_sets (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    activity_id INTEGER NOT NULL REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    run_id INTEGER NOT NULL REFERENCES operation_runs(id) DEFERRABLE INITIALLY DEFERRED,
+    attempt_id INTEGER NOT NULL REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
+    final_page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    version INTEGER NOT NULL CHECK (version > 0),
+    target_duration_ms INTEGER NOT NULL CHECK (target_duration_ms > 0),
+    state INTEGER NOT NULL CHECK (state IN (1,2,3)),
+    member_count INTEGER CHECK (member_count IS NULL OR member_count >= 0),
+    facts_json TEXT CHECK (facts_json IS NULL OR (json_valid(facts_json) AND json_type(facts_json) = 'object')),
+    published_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    assessment_json TEXT CHECK (assessment_json IS NULL OR (json_valid(assessment_json) AND json_type(assessment_json) = 'object')),
+    CHECK (published_event_id IS NULL OR state = 3),
+    UNIQUE (action_id, version),
+    UNIQUE (attempt_id, version),
+    CHECK ((state = 1 AND member_count IS NULL AND facts_json IS NULL AND assessment_json IS NULL)
+        OR (state = 2 AND member_count IS NOT NULL AND facts_json IS NULL AND assessment_json IS NULL)
+        OR (state = 3 AND member_count IS NOT NULL AND facts_json IS NOT NULL AND assessment_json IS NOT NULL))
+) STRICT;
+CREATE UNIQUE INDEX segment_sets_published_action ON segment_sets(action_id) WHERE published_event_id IS NOT NULL;
+CREATE INDEX segment_sets_action ON segment_sets(action_id, version, id);
+
+CREATE TABLE segment_members (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    set_id INTEGER NOT NULL REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    file_id INTEGER NOT NULL REFERENCES device_files(id) DEFERRABLE INITIALLY DEFERRED,
+    page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    file_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    identity TEXT NOT NULL CHECK (length(identity) > 0),
+    directory_number INTEGER CHECK (directory_number IS NULL OR directory_number > 0),
+    segment_index INTEGER CHECK (segment_index IS NULL OR (segment_index >= 1 AND segment_index <= 999)),
+    role INTEGER NOT NULL CHECK (role IN (1,2,3)),
+    ownership INTEGER NOT NULL CHECK (ownership IN (1,2,3)),
+    completion INTEGER NOT NULL CHECK (completion IN (1,2,3)),
+    pairing_state INTEGER NOT NULL CHECK (pairing_state IN (1,2,3,4)),
+    pairing_identity TEXT CHECK (pairing_identity IS NULL OR length(pairing_identity) > 0),
+    UNIQUE (set_id, file_id),
+    UNIQUE (set_id, identity),
+    CHECK ((directory_number IS NULL) = (segment_index IS NULL)),
+    CHECK ((role = 2 AND pairing_state <> 1) OR (role <> 2 AND pairing_state = 1)),
+    CHECK ((pairing_state = 2) = (pairing_identity IS NOT NULL))
+) STRICT;
+CREATE INDEX segment_member_order ON segment_members(set_id, COALESCE(directory_number,0), COALESCE(segment_index,0), identity, id);
+CREATE INDEX segment_member_pairing ON segment_members(set_id, pairing_identity, role, id);
+CREATE INDEX segment_member_file ON segment_members(file_id, set_id, id);
+
+CREATE TABLE segment_gaps (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    set_id INTEGER NOT NULL REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    gap_no INTEGER NOT NULL CHECK (gap_no > 0),
+    start_directory INTEGER NOT NULL CHECK (start_directory > 0),
+    start_index INTEGER NOT NULL CHECK (start_index >= 1 AND start_index <= 999),
+    end_directory INTEGER NOT NULL CHECK (end_directory > 0),
+    end_index INTEGER NOT NULL CHECK (end_index >= 1 AND end_index <= 999),
+    kind INTEGER NOT NULL CHECK (kind IN (1,2)),
+    left_member_id INTEGER REFERENCES segment_members(id) DEFERRABLE INITIALLY DEFERRED,
+    right_member_id INTEGER REFERENCES segment_members(id) DEFERRABLE INITIALLY DEFERRED,
+    empty_member_id INTEGER REFERENCES segment_members(id) DEFERRABLE INITIALLY DEFERRED,
+    neighbors_json TEXT NOT NULL CHECK (json_valid(neighbors_json) AND json_type(neighbors_json) = 'object'),
+    UNIQUE (set_id, gap_no),
+    CHECK ((end_directory, end_index) >= (start_directory, start_index)),
+    CHECK ((kind = 1 AND empty_member_id IS NULL)
+        OR (kind = 2 AND empty_member_id IS NOT NULL AND start_directory = end_directory AND start_index = end_index))
+) STRICT;
+CREATE INDEX segment_gap_order ON segment_gaps(set_id, gap_no, id);
+
+CREATE TABLE segment_scope_members (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    set_id INTEGER NOT NULL REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    member_id INTEGER NOT NULL REFERENCES segment_members(id) DEFERRABLE INITIALLY DEFERRED,
+    output_id INTEGER UNIQUE REFERENCES outputs(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (set_id, ordinal),
+    UNIQUE (set_id, member_id)
+) STRICT;
+CREATE INDEX segment_scope_order ON segment_scope_members(set_id, ordinal, id);
+CREATE INDEX segment_scope_member ON segment_scope_members(member_id, set_id, id);
+
+CREATE INDEX segment_set_created ON segment_sets(action_id, created_event_id, id);
+CREATE INDEX segment_member_created ON segment_members(set_id, created_event_id, id);
+CREATE INDEX segment_gap_created ON segment_gaps(set_id, created_event_id, id);
+CREATE INDEX segment_scope_created ON segment_scope_members(set_id, created_event_id, id);

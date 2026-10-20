@@ -113,3 +113,15 @@ class ReadCoverage:
     def covers(self, table: str, column: str, identity: int) -> bool:
         """该身份的等值查询是否完整；不从当前行或其他范围推断。"""
         return ObjectId(identity) in self.ranges.get((table, column), ())
+
+
+@dataclass(frozen=True)
+class SegmentReadScope:
+    """仅限原冻结集合的分段事实复核，不授权设备操作。"""
+    ref: object
+    batch_size: int = 128
+
+    def __post_init__(self):
+        from camctl.capture.segment_models import SegmentSetRef
+        if not isinstance(self.ref, SegmentSetRef) or type(self.batch_size) is not int or not 1 <= self.batch_size <= 128:
+            raise ValueError('分段复核要求冻结集合和有限批次')

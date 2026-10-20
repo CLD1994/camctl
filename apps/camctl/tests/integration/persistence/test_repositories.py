@@ -35,6 +35,7 @@ _ALLOWED_TRANSACTION_OWNERS = {"HistoryRepository", "SqliteSnapshotStore"}
 # BEGIN IMMEDIATE。
 _READ_TRANSACTION_FUNCTIONS = {
     "module:read_motor_facts",
+    "module:_fixed_file",
     "MotorRepository.verify_operation",
     "CancellationRepository.verify_motor_operation",
     "HostCaptureRepository.verify_operation",

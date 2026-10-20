@@ -504,6 +504,54 @@
         "FAILED": 4,
         "UNCONFIRMED": 5
       }
+    },
+    "segment_gaps.kind": {
+      "contract": "segments.md",
+      "members": {
+        "MISSING_POSITION": 1,
+        "ZERO_BYTE_NON_TAIL": 2
+      }
+    },
+    "segment_members.pairing_state": {
+      "contract": "segments.md",
+      "members": {
+        "NOT_APPLICABLE": 1,
+        "PAIRED": 2,
+        "UNPAIRED": 3,
+        "UNKNOWN": 4
+      }
+    },
+    "segment_members.completion": {
+      "contract": "segments.md",
+      "members": {
+        "COMPLETE": 1,
+        "INCOMPLETE": 2,
+        "UNKNOWN": 3
+      }
+    },
+    "segment_members.ownership": {
+      "contract": "segments.md",
+      "members": {
+        "OWNED": 1,
+        "NOT_OWNED": 2,
+        "UNKNOWN": 3
+      }
+    },
+    "segment_members.role": {
+      "contract": "segments.md",
+      "members": {
+        "ORIGINAL": 1,
+        "PREVIEW": 2,
+        "OTHER": 3
+      }
+    },
+    "segment_sets.state": {
+      "contract": "segments.md",
+      "members": {
+        "COLLECTING": 1,
+        "MEMBERS_FIXED": 2,
+        "ASSESSED": 3
+      }
     }
   },
   "history_objects": {
@@ -614,6 +662,82 @@
         "THRESHOLD_REACHED": 2,
         "NO_USABLE_INPUT": 3,
         "CANCELED": 4
+      }
+    },
+    "segment_gaps.neighbors_json.state": {
+      "contract": "segments.md",
+      "members": {
+        "KNOWN": 1,
+        "ABSENT": 2,
+        "UNKNOWN": 3
+      }
+    },
+    "segment_sets.assessment_json.scope_basis": {
+      "contract": "segments.md",
+      "members": {
+        "UNKNOWN": 1,
+        "ALL_QUALIFYING": 2,
+        "FIRST_N": 3,
+        "CONTIGUOUS_PREFIX": 4,
+        "PREFIX_FIRST_N": 5,
+        "EMPTY_PREFIX": 6
+      }
+    },
+    "segment_sets.assessment_json.scope_state": {
+      "contract": "segments.md",
+      "members": {
+        "UNKNOWN": 1,
+        "EMPTY": 2,
+        "NONEMPTY": 3
+      }
+    },
+    "segment_sets.assessment_json.overrecord": {
+      "contract": "segments.md",
+      "members": {
+        "CONFIRMED": 1,
+        "NOT_CONFIRMED": 2,
+        "UNKNOWN": 3
+      }
+    },
+    "segment_sets.assessment_json.basis": {
+      "contract": "segments.md",
+      "members": {
+        "CONTROL": 1,
+        "SEGMENT_LOWER_BOUND": 2,
+        "NONE": 3
+      }
+    },
+    "segment_sets.assessment_json.reason": {
+      "contract": "segments.md",
+      "members": {
+        "NONE": 1,
+        "EXPLICIT_ERROR": 2,
+        "STOP_UNCONFIRMED": 3,
+        "FILE_WAIT_UNCONFIRMED": 4,
+        "SCAN_UNCONFIRMED": 5,
+        "ORDER_UNKNOWN": 6,
+        "MEMBER_UNKNOWN": 7,
+        "NO_NONZERO_ORIGINAL": 8,
+        "GAP": 9,
+        "COMPLETION_UNCONFIRMED": 10,
+        "LOWER_BOUND_INSUFFICIENT": 11,
+        "PREVIEW_UNKNOWN": 12
+      }
+    },
+    "segment_sets.assessment_json.status": {
+      "contract": "segments.md",
+      "members": {
+        "SUCCEEDED": 1,
+        "FAILED": 2,
+        "UNCONFIRMED": 3
+      }
+    },
+    "segment_sets.facts_json.evidence": {
+      "contract": "segments.md",
+      "members": {
+        "CONFIRMED": 1,
+        "REJECTED": 2,
+        "UNKNOWN": 3
       }
     }
   },

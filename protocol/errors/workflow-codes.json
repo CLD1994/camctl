@@ -1109,6 +1109,339 @@
         "additionalProperties": false
       },
       "action_error_id": 29
+    },
+    "capture_segment_gap": {
+      "stage": "execution",
+      "description": "录像存在缺段或非尾零字节原片。",
+      "details_schema": {
+        "allOf": [
+          {
+            "$ref": "workflow-codes.json#/$defs/segment_error_header"
+          },
+          {
+            "properties": {
+              "gap_count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        ]
+      },
+      "action_error_id": 30
+    },
+    "default_segment_scope_empty": {
+      "stage": "output_selection",
+      "description": "来源没有可默认交付的连续原片。",
+      "details_schema": {
+        "allOf": [
+          {
+            "$ref": "workflow-codes.json#/$defs/segment_error_header"
+          },
+          {
+            "properties": {
+              "default_scope": {
+                "properties": {
+                  "state": {
+                    "const": "empty"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "item_error_ids": {
+        "obtain_source_selections": 3
+      }
+    },
+    "default_segment_scope_unconfirmed": {
+      "stage": "output_selection",
+      "description": "来源默认原片范围尚无法确认。",
+      "details_schema": {
+        "allOf": [
+          {
+            "$ref": "workflow-codes.json#/$defs/segment_error_header"
+          },
+          {
+            "properties": {
+              "default_scope": {
+                "properties": {
+                  "state": {
+                    "const": "unknown"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "item_error_ids": {
+        "obtain_source_selections": 4
+      }
+    }
+  },
+  "$defs": {
+    "segment_error_header": {
+      "type": "object",
+      "properties": {
+        "source_action_instance_id": {
+          "$ref": "status-report.schema.json#/$defs/entity_id"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gap_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "default_scope": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "unknown",
+                "empty",
+                "nonempty"
+              ]
+            },
+            "member_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "status-report.schema.json#/$defs/entity_id"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "state",
+            "member_count"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "unknown"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "member_count": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "empty"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "member_count": {
+                    "const": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "nonempty"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "member_count": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "retained_original_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_gap": {
+          "$ref": "workflow-codes.json#/$defs/segment_gap"
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "$ref": "workflow-codes.json#/$defs/segment_gap"
+          }
+        },
+        "retained_output_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "source_action_instance_id",
+        "description",
+        "gap_count",
+        "default_scope",
+        "retained_original_count"
+      ],
+      "additionalProperties": false
+    },
+    "segment_key": {
+      "type": "object",
+      "properties": {
+        "directory_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 999
+        }
+      },
+      "required": [
+        "directory_number",
+        "index"
+      ],
+      "additionalProperties": false
+    },
+    "segment_neighbor": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "known",
+            "absent",
+            "unknown"
+          ]
+        },
+        "file_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_id": {
+          "$ref": "status-report.schema.json#/$defs/entity_id"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "known"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "file_identity"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "file_identity"
+                  ]
+                },
+                {
+                  "required": [
+                    "output_id"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "segment_gap": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "missing_position",
+            "zero_byte_non_tail"
+          ]
+        },
+        "start_key": {
+          "$ref": "workflow-codes.json#/$defs/segment_key"
+        },
+        "end_key": {
+          "$ref": "workflow-codes.json#/$defs/segment_key"
+        },
+        "left": {
+          "$ref": "workflow-codes.json#/$defs/segment_neighbor"
+        },
+        "right": {
+          "$ref": "workflow-codes.json#/$defs/segment_neighbor"
+        },
+        "empty_file_identity": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "start_key",
+        "end_key",
+        "left",
+        "right"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "zero_byte_non_tail"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "empty_file_identity"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "empty_file_identity"
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }

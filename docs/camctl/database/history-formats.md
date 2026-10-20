@@ -45,6 +45,8 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | `obtain_items` | 沿 `selection_id` 找到来源选择，再按上一行找到所属取回动作；关联交付独立恢复 |
 | `cleanup_items`、`cancel_items` | 各行的 `action_id`；被清理产物和被取消动作独立恢复 |
 | `cancel_delivery_items` | 沿 `cancel_item_id` 找到取消项，再取其 `action_id` |
+| `segment_sets` | `action_id` 指定的原拍摄动作 |
+| `segment_members`、`segment_gaps`、`segment_scope_members` | 沿 `set_id` 继承原拍摄动作；独立文件不复制进入动作 |
 | `device_activities`、`recording_processing` | 各行的 `action_id` |
 | `outputs` | `id` 指定的产物 |
 | `output_origins` | `output_id` 指定的引用方产物，不是 `original_output_id` 指定的原产物 |
@@ -159,6 +161,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 33 `EMERGENCY_RECORDED` | 1 共同补记最终应急事实 |
 | 34 `MOTOR_CHANGED` | 1 保存电机发送意图与动作开始；2 保存完整通知写入；3 保存明确通知写入失败；4 保存通道不可用与可靠未发送；5 保存可靠未发送与过期；7 保存恢复时发送结果不确定 |
 | 35 `RESULT_PAGE` | 1 保存本轮实际页返回、文件观察及页范围 |
+| 36 `SEGMENT_FACTS` | 1 建立原扫描的分段集合；2 保存有限原扫描成员；3 固定完整分段成员；4 保存第二遍缺口事实；5 固定两遍完整判断；6 保存有序默认原片成员；7 发布默认成员的实际产物关联；8 共同发布唯一正式分段集合 |
 <!-- 事件登记生成结束 -->
 
 同一事务可以组合多类事件。复杂集合按成员分批形成事件，最后一条记录集合固定事实，但整个固定操作只提交一次；这样既能逐事件读取，又不会公开半个集合。事件处理器验证该类型允许的表和状态变化，再应用前后值，不能提供一个允许调用者任意写表的通用补丁入口。

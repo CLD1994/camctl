@@ -26,7 +26,7 @@
 
 结构检查先读取[统一运行库版本条件](../docs/camctl/sqlite-runtime.json)，核对文档版本表、Python 实际链接的 SQLite 及必要能力。`--runtime-only` 只执行这部分检查，使用隔离的临时文件库验证 WAL/FULL、JSON、STRICT 及分段 BLOB 读写；`--write-runtime-doc` 从同一条件生成[版本表](../docs/camctl/sqlite-runtime.md#允许的版本)。脚本尚未接入生产入口，也不证明目标存储的并发或断电持久性。
 
-结构检查同时读取[全库整数编号定义](../docs/camctl/database/enum-registry.json)，核对有限值列的完整分类、实际 SQL 列值约束、公共错误映射及事件状态条件。`~/.venv/bin/python scripts/check-database-spec.py --write-enum-doc` 从同一来源生成[编号一览](../docs/camctl/database/enum-values.md)；默认模式检查该文档是否一致。SQL 列值检查与完整表的状态组合样本分别执行，JSON 内部分类只检查定义及归属；生产类型适配、JSON 业务校验和历史往返仍待实现。
+结构检查同时读取[全库整数编号定义](../docs/camctl/database/enum-registry.json)，核对有限值列的完整分类、实际 SQL 列值约束、公共错误映射及事件状态条件。`~/.venv/bin/python scripts/check-database-spec.py --write-enum-doc` 从同一来源生成[编号一览](../docs/camctl/database/enum-values.md)及分段公共错误 Schema 的枚举字面量；默认模式检查生成值是否一致。SQL 列值检查与完整表的状态组合样本分别执行，JSON 内部分类只检查定义及归属；生产类型适配、JSON 业务校验和历史往返仍待实现。
 
 ## 执行入口配置消费
 

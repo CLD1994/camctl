@@ -19,7 +19,7 @@ const schema = object({
     object({ table: string, op: { const: 'create' }, after: values }),
     object({ table: string, op: { const: 'update' }, columns: { ...strings, minItems: 1 }, before: values, after: values, required: strings, transitions: { type: 'object', additionalProperties: { ...strings, minItems: 1 } } })
   ] } }, guards: { ...strings, minItems: 1 }, evidence: strings }) } }) },
-  history_references: { type: 'object', additionalProperties: object({ target: { enum: ['creating_event','assigning_event','baseline_first_chunk','baseline_last_chunk','prior_complete_boundary','creating_transaction_end'] }, exception: string }, ['target']) },
+  history_references: { type: 'object', additionalProperties: object({ target: { enum: ['creating_event','assigning_event','prior_event','baseline_first_chunk','baseline_last_chunk','prior_complete_boundary','creating_transaction_end'] }, exception: string }, ['target']) },
   history_contract: string,
   derived_history: { type: 'object', additionalProperties: object({ method: { enum: ['first_own_event','last_own_event','own_event_count'] } }) },
   structural_history_references: { type: 'object', additionalProperties: object({ target: string, rule: string }) },
@@ -159,7 +159,7 @@ export function validateEventRegistration(registry, { tables, foreignKeys, enums
   // 结合实际外键及明确列名检查覆盖；具体引用含义仍由规则文件决定。
   const historyTargets = new Set(['history_events.id','history_events.change_seq','history_transactions.id','history_transactions.last_event_id','entity_snapshots.id']);
   const referenceTargets = {
-    creating_event: 'history_events.id', assigning_event: 'history_events.id',
+    creating_event: 'history_events.id', assigning_event: 'history_events.id', prior_event: 'history_events.id',
     baseline_first_chunk: 'history_events.id', baseline_last_chunk: 'history_events.id',
     creating_transaction_end: 'history_transactions.last_event_id', prior_complete_boundary: null,
   };
@@ -176,7 +176,7 @@ export function validateEventRegistration(registry, { tables, foreignKeys, enums
     assert([...registry.tables[table].immutable,...registry.tables[table].mutable].includes(col), `历史引用不是业务值：${full}`);
     assert.equal(foreignKeys[full] ?? null, referenceTargets[reference.target], `业务引用目标与 SQL 外键不一致：${full}`);
     if (reference.target === 'prior_complete_boundary') assert.equal(full, 'reports.frozen_event_id', '只有报告冻结引用允许初始化边界 0，并由业务校验核对边界');
-    const fixed = ['creating_event','creating_transaction_end','prior_complete_boundary'].includes(reference.target);
+    const fixed = ['creating_event','prior_event','creating_transaction_end','prior_complete_boundary'].includes(reference.target);
     assert(registry.tables[table][fixed ? 'immutable' : 'mutable'].includes(col), `历史引用的赋值规则与列分类不一致：${full}`);
   }
   for (const [full, rule] of Object.entries(registry.derived_history)) {

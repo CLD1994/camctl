@@ -3,7 +3,7 @@
 from contextlib import closing
 
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope
+from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope
 
 
 class SqlEventReads:
@@ -30,9 +30,10 @@ class SqlEventReads:
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
     def __init__(self, connection, scope, validated=()):
-        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope)):
+        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
+        self._validated = validated
         self._result_file_ids = frozenset()
         self._overlay = {}
         for accepted in validated:
@@ -45,9 +46,29 @@ class SqlEventReads:
                     prior = self._overlay.get(key, {})
                     self._overlay[key] = {**(prior or {}), **row.after.values}
 
+    def verify_segment_event(self, event, context):
+        from camctl.persistence.repositories.segments import verify_segment_event
+        from camctl.capture.segment_models import SegmentSetRef
+        from camctl.persistence.transaction import row_facts
+        if not self.connection.in_transaction:
+            raise ConsistencyError('分段守卫只能复核原写事务集合')
+        if isinstance(self.scope, SegmentReadScope):
+            ref = self.scope.ref
+        elif isinstance(self.scope, PlanReadScope):
+            ref = SegmentSetRef(**event.evidence['segment_request']['ref'])
+            action = row_facts(self.connection,'actions',ref.action_id)
+            if action is None or action['plan_id'] != self.scope.plan_id:
+                raise ConsistencyError('共同发布集合不属于原计划')
+        else:
+            raise ConsistencyError('分段守卫缺少原集合或原计划范围')
+        verify_segment_event(self.connection, ref, event, context,
+            prior_events=self._validated)
+
     def _check(self, table, column="id", identity=None):
         if not self.connection.in_transaction:
             raise ConsistencyError("当前事件事实端口必须在原写事务内使用")
+        if isinstance(self.scope, SegmentReadScope):
+            raise ConsistencyError('分段端口只提供原集合专属复核')
         if table not in self._RANGES or column not in self._RANGES[table]:
             raise ConsistencyError("当前事件事实查询超出内部允许范围")
         if identity is not None:

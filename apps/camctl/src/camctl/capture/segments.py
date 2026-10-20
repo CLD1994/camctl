@@ -394,7 +394,7 @@ def _scope(
     *,
     overrecord: OverrecordStatus,
     first_gap: SegmentGap | None,
-    gap_count: int,
+    gap_count: int | None,
 ) -> DefaultSegmentScope:
     ref = state.set_ref
     if (not _collection_complete(facts)
@@ -607,6 +607,9 @@ def finish_segment_assessment(
                       and state.first_original is not None
                       and state.first_original.key is not None
                       and state.first_original.key < facts.start_key)
+    if state.order_unknown or start_mismatch:
+        gap_count = None
+        first_gap = None
     structurally_known = (not state.order_unknown and not state.unknown_original
                           and not start_mismatch)
     complete_count = (
