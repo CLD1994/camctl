@@ -1,7 +1,7 @@
 """OSMO 360 II CAM 目录与文件名的有序分段解析。"""
 
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+import posixpath
 import re
 
 from camctl.devices.segments import SegmentKey
@@ -39,18 +39,18 @@ def parse_osmo_segment_name(path: str) -> OsmoSegmentName | None:
     只有文件扩展名按既有契约忽略大小写。
     """
     if (not isinstance(path, str) or not path.startswith("/")
-            or "\0" in path or str(PurePosixPath(path)) != path):
+            or "\0" in path or posixpath.normpath(path) != path):
         return None
     if any(part in {".", ".."} for part in path.split("/")):
         return None
-    parsed = PurePosixPath(path)
-    directory = _DIRECTORY.fullmatch(parsed.parent.name)
-    filename = _NAME.fullmatch(parsed.name)
+    directory_name = posixpath.basename(posixpath.dirname(path))
+    directory = _DIRECTORY.fullmatch(directory_name)
+    filename = _NAME.fullmatch(posixpath.basename(path))
     if directory is None or filename is None:
         return None
     try:
         directory_number = int(directory.group("number"))
-        if parsed.parent.name != f"CAM{directory_number:03d}":
+        if directory_name != f"CAM{directory_number:03d}":
             return None
         key = SegmentKey(directory_number, int(filename.group("index")))
     except (ValueError, OverflowError):
