@@ -533,6 +533,7 @@ def session_capture_assembly(
     pending_result_scans: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
     pending_host_photo_completions: dict[int, Any] | None = None,
+    start_entries=None,
     read_discovery_batch_size: int | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
@@ -561,6 +562,8 @@ def session_capture_assembly(
     从同一会话接收，受限工厂不因持有这些原事实装配媒体链。
     """
 
+    from camctl.devices.start_entry import StartEntryCoordinator
+    start_entries = StartEntryCoordinator() if start_entries is None else start_entries
     anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
     timelapse_deadlines: dict[int, int] = {}
@@ -610,7 +613,7 @@ def session_capture_assembly(
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
-            pending_start_results=pending_start_results,
+            pending_start_results=pending_start_results, start_entries=start_entries,
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
@@ -708,7 +711,7 @@ def session_capture_assembly(
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
-            pending_start_results=pending_start_results,
+            pending_start_results=pending_start_results, start_entries=start_entries,
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,

@@ -3884,7 +3884,9 @@
             "target_set",
             "cancel"
           ],
-          "evidence": []
+          "evidence": [
+            "photo_entry_request"
+          ]
         },
         "FAIL": {
           "reason": 4,

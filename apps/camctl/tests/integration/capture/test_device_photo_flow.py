@@ -160,9 +160,9 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
     finally:
         owned.connection.close()
 
-async def test_cancel_after_reliable_photo_retains_device_pair(tmp_path, monkeypatch):
+async def test_cancel_after_reliable_photo_is_rejected_and_retains_device_pair(tmp_path, monkeypatch):
     from camctl.capture import host_photo
-    from .test_host_photo_flow import _apply_cancel
+    from .test_host_photo_flow import _cancel_through_service
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device",cancel_action=True)
     original=host_photo.archive_capture_file
     canceled=False
@@ -171,12 +171,13 @@ async def test_cancel_after_reliable_photo_retains_device_pair(tmp_path, monkeyp
         await original(*args, **kwargs)
         if not canceled:
             canceled=True
-            _apply_cancel(owned,2,1)
+            result = await _cancel_through_service(owned, runtime)
+            assert result.items[0].status == 4
     monkeypatch.setattr(host_photo,"archive_capture_file",cancel_after_archive)
     try:
         await capture_handler("camera_take_photo")(1,runtime)
         assert len(driver.requests)==1
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(6,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
     finally:
         owned.connection.close()

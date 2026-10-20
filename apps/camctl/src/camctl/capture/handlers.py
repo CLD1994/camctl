@@ -25,6 +25,7 @@ import json
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.devices.start_entry import StartEntryCoordinator, EntryPhase, is_hasselblad_photo
 from camctl.capture.finite_cancel import finite_cancel_policy
 from camctl.persistence.repositories.finite_cancel import (
     FiniteCancelEndSave, read_finite_cancel_assessment, save_finite_cancel_end,
@@ -890,6 +891,7 @@ class CaptureRuntime(_FileObservationSaves):
     #: 同一 RESULTS 尝试的原页交接；保存未知时不读下一页。
     pending_result_scans: dict[tuple[int, int], PendingResultScan] = field(default_factory=dict)
     baseline_directory: DirectoryReader | None = None
+    start_entries: Any = field(default_factory=StartEntryCoordinator)
 
     @property
     def baseline_timeout_s(self):
@@ -968,13 +970,24 @@ class CaptureRuntime(_FileObservationSaves):
                     else AttemptConfig(max_attempts=1, timeout_s=_start_call_timeout(action))),
             occurred_at=self.wall_us(),
         )
-        outcome = self.scheduling.grant_start(
-            request, new_operation_key(), self.owned)
-        if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"启动授予事务未可靠完成: {outcome.error}")
+        permit = None
+        if is_hasselblad_photo(action):
+            permit = self.start_entries.prepare(self.owned.metadata.instance_id, action["id"])
+        try:
+            outcome = self.scheduling.grant_start(request, new_operation_key(), self.owned)
+            if outcome.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(f"启动授予事务未可靠完成: {outcome.error}")
+        except BaseException:
+            if permit is not None:
+                permit.phase = EntryPhase.UNKNOWN
+            raise
         result = outcome.value
         if result.outcome.value != "granted":
+            if permit is not None:
+                del self.start_entries.permits[(permit.database_id, permit.action_id)]
             return None, result.reason
+        if permit is not None:
+            permit.bind(self.owned.metadata.instance_id, result.ticket)
         return result.ticket, None
 
     def finish(self, ticket, outcome: CallOutcome, *,
@@ -1259,20 +1272,31 @@ class CaptureRuntime(_FileObservationSaves):
             self._save_call_result(identity, pending)
         else:
             action = self.action(self.action_id_of_ticket(ticket))
+            recovered = _recovered_call_outcome("local_control_recovery"
+                if ticket.operation == "control" and is_hasselblad_photo(action)
+                else "adb_foreground_recovery")
             finite_cancel = (finite_cancel_policy(action) and action["cancel_requested"]
                              and ticket.operation in ("stop", "control"))
             if finite_cancel:
                 pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket,
-                    validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                    validate_outcome(ticket, recovered, evidence), self.wall_us(),
                     run_finish=RunFinish(RunOutcome.FAILED if ticket.operation == "stop"
-                        else RunOutcome.UNCONFIRMED, _recovered_call_outcome().error)),
+                        else RunOutcome.UNCONFIRMED, recovered.error)),
                     None, returned_ns=self.monotonic_ns())
                 self.pending_start_results[identity] = pending
                 self._save_call_result(identity, pending)
                 self.last_recovery_diagnostic = None
                 return True
+            if ticket.operation == "control" and is_hasselblad_photo(action):
+                pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket,
+                    validate_outcome(ticket, recovered, evidence), self.wall_us(),
+                    retry_wait=retry_wait), None, returned_ns=self.monotonic_ns())
+                self.pending_start_results[identity] = pending
+                self._save_call_result(identity, pending)
+                self.last_recovery_diagnostic = None
+                return True
             receipt = self.operations.finish_attempt(
-                AttemptFinish(ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                AttemptFinish(ticket, validate_outcome(ticket, recovered, evidence), self.wall_us(),
                               retry_wait=retry_wait),
                 new_operation_key(), self.owned)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
@@ -1311,6 +1335,11 @@ class CaptureRuntime(_FileObservationSaves):
         if run is None:
             raise ConsistencyError("原恢复尝试缺少流程")
         owner_id = run["action_id"]
+        local = self.start_entries.get(self.owned.metadata.instance_id, owner_id)
+        if ticket.operation == "control" and local is not None and local.active:
+            self.record_recovery_diagnostic(RecoveryDiagnostic(
+                RecoveryBlockedReason.ACTIVE_LOCAL_CONTROL, ticket.run_id, ticket.attempt_id))
+            return None
         if (run["kind"] in (int(_RUN_KIND.STOP_RESIDUAL), int(_RUN_KIND.EMERGENCY_STOP))
                 or (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
                     and run["query_purpose"] == int(_QUERY_PURPOSE.RESIDUAL_STOP_CONFIRMATION))):
@@ -1546,13 +1575,27 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
-    result = await runtime.driver.control(ControlRequest(
-        operation=operation,
-        binding=_binding(action),
-        params=action["effective_params_json"],
-        ticket=ticket, timeout_s=_start_call_timeout(action),
-        dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
-    ))
+    permit = (runtime.start_entries.get(runtime.owned.metadata.instance_id, action["id"])
+              if is_hasselblad_photo(action) else None)
+    if is_hasselblad_photo(action):
+        if permit is None or permit.ticket != ticket:
+            raise ConsistencyError("原 START 缺少匹配的会话入口许可，不能调用驱动")
+        if permit.phase is EntryPhase.BLOCKED and runtime.action(action["id"])["cancel_requested"]:
+            return HandlerOutcome("not_granted", "canceled")
+        if permit.phase is not EntryPhase.READY:
+            raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")
+    try:
+        result = await runtime.driver.control(ControlRequest(
+            operation=operation,
+            binding=_binding(action),
+            params=action["effective_params_json"],
+            ticket=ticket, timeout_s=_start_call_timeout(action),
+            dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
+            start_entry=permit,
+        ))
+    finally:
+        if permit is not None:
+            permit.active = False
     outcome, confirmed = _operation_outcome(result, confirmed_observation)
     if result.outcome is not None:
         confirmed = outcome.effect is EffectState.CONFIRMED
@@ -4566,12 +4609,12 @@ def _uses_result_pages(runtime: CaptureRuntime) -> bool:
     return contract.operation == "result"
 
 
-def _recovered_call_outcome() -> CallOutcome:
+def _recovered_call_outcome(evidence_type="adb_foreground_recovery") -> CallOutcome:
     """旧前台已收场但整轮返回未保存；不生成退出或设备观察。"""
     return CallOutcome(status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
         error=ErrorValue("result_not_saved", "recovery"),
         settlement=Settlement(SettlementBasis.ASSUMED,
-                              EvidenceValue("adb_foreground_recovery", 1, {})))
+                              EvidenceValue(evidence_type, 1, {})))
 
 
 def _result_page_returned(saved) -> bool:

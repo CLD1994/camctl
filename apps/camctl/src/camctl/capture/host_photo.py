@@ -216,9 +216,10 @@ def _photo_artifacts(runtime, action_id: int, saved: SavedPhotoReturn):
         return outcome, None
     if outcome.effect is not EffectState.CONFIRMED:
         raise ConsistencyError("已保存的成功主机单张结果没有确认拍摄效果")
-    if len(outcome.observations) != 1:
+    photos = tuple(item for item in outcome.observations if item.type == "photo_taken")
+    if len(photos) != 1:
         raise ConsistencyError("已确认成功的主机单张结果必须恰有一份照片观察")
-    observation = outcome.observations[0]
+    observation = photos[0]
     activity_id = str(_activity_id(runtime, action_id))
     if observation.type != "photo_taken" or observation.version != 1:
         raise ConsistencyError("已确认成功的主机单张结果包含无效照片观察类型或版本")
@@ -310,6 +311,8 @@ def _failure_after_return(runtime, action_id: int, saved: SavedPhotoReturn,
         return True
     if outcome.effect is EffectState.NO_EFFECT and outcome.status.value == "failed":
         _failure(runtime, action_id, unconfirmed=False, occurred_at=saved.occurred_at)
+        from camctl.capture.handlers import _release_occupancy
+        _release_occupancy(runtime, action_id)
         return True
     _failure(runtime, action_id, unconfirmed=True, occurred_at=saved.occurred_at)
     return True
@@ -341,7 +344,7 @@ def _drafts(files, artifacts: tuple[CapturedArtifact, CapturedArtifact]):
 def _capture_locator(outcome):
     from camctl.devices.drivers.hasselblad.files import CameraFileLocator
 
-    observations = outcome.observations
+    observations = tuple(item for item in outcome.observations if item.type == "photo_taken")
     if len(observations) != 1 or not isinstance(observations[0].data, Mapping):
         raise ConsistencyError("相机正式源缺少唯一拍摄观察")
     steps = observations[0].data.get("steps")

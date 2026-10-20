@@ -440,6 +440,12 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     if member in ("attempt_id", "result_page_event_id"):
         if not is_json_integer(value) or value <= 0:
             _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
+    elif member == "photo_entry_request":
+        from camctl.cancellation.models import validate_photo_entry_request
+        try:
+            validate_photo_entry_request(value)
+        except (TypeError, ValueError, KeyError) as error:
+            _fail(f"事件 {event_id} 的入口取消申请非法: {error}")
     elif member == "cleanup_result_source":
         if (not isinstance(value, Mapping) or set(value) != {"item_id", "result_event_id"}
                 or any(not is_json_integer(identity) or identity <= 0 for identity in value.values())):

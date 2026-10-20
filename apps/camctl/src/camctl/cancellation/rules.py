@@ -178,7 +178,7 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 _TIME_LAPSE_TYPE = 3
 
 
-def load_eligibility_facts(connection, action_id: int, *, motor_permits=None) -> EligibilityFacts:
+def load_eligibility_facts(connection, action_id: int, *, motor_permits=None, start_entries=None, database_id=None) -> EligibilityFacts:
     """从已保存事实装配目标设备任务的取消资格输入。
 
     停止能力优先取首次建立活动时保存的 `device_activities.stop_
@@ -224,8 +224,17 @@ def load_eligibility_facts(connection, action_id: int, *, motor_permits=None) ->
         dispatch = DispatchPhase.UNVERIFIED
     else:
         start = load_start_facts(connection, action)
-        dispatch = (DispatchPhase.NOT_STARTED if start.not_started
-                    else _dispatch_phase(activity))
+        from camctl.devices.start_entry import is_hasselblad_photo, EntryPhase
+        local = None if start_entries is None else start_entries.get(database_id, action_id)
+        not_started = start.not_started
+        if is_hasselblad_photo(action) and local is not None:
+            if local.phase in (EntryPhase.UNKNOWN, EntryPhase.RESERVED):
+                raise ConsistencyError("START 授予或取消事务尚未核实")
+            if local.phase is EntryPhase.ENTERED:
+                not_started = False
+            elif local.phase is EntryPhase.READY:
+                not_started = True
+        dispatch = (DispatchPhase.NOT_STARTED if not_started else _dispatch_phase(activity))
     return EligibilityFacts(
         terminal=terminal,
         cancel_applied=applied,

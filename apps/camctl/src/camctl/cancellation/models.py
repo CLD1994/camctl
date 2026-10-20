@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Mapping
 
 from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.devices.start_entry import EntryBlock
 
 __all__ = [
     "ApplyCancelTarget",
@@ -191,12 +192,18 @@ class FixCancelTargets:
     action_id: int
     targets: FixedCancelSet
     occurred_at: int
+    entry_blocks: tuple[EntryBlock, ...] = ()
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
         if not isinstance(self.targets, FixedCancelSet):
             raise TypeError("固定取消目标必须使用 FixedCancelSet")
         UtcMicros(self.occurred_at)
+        if (not isinstance(self.entry_blocks, tuple)
+                or any(not isinstance(block, EntryBlock) for block in self.entry_blocks)):
+            raise TypeError("入口阻止集合必须是不可变的 EntryBlock 元组")
+        if len({block.action_id for block in self.entry_blocks}) != len(self.entry_blocks):
+            raise ValueError("入口阻止集合不能重复同一原源")
 
 
 class CancelStartDisposition(Enum):
@@ -465,3 +472,52 @@ class StopWaitCancelItems:
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
         UtcMicros(self.occurred_at)
+
+def validate_photo_entry_request(value):
+    """固定取消证据的有限结构；原源、票据及事件时刻另由业务守卫核对。"""
+    from collections.abc import Mapping
+    if not isinstance(value, Mapping) or set(value) != {'action_id','occurred_at','targets','blocks'}:
+        raise ValueError('入口取消申请成员不完整')
+    ObjectId(value['action_id'])
+    UtcMicros(value['occurred_at'])
+    for member in ('targets','blocks'):
+        if not isinstance(value[member], list) or not value[member]:
+            raise ValueError('入口取消申请必须有非空目标和阻止集合')
+    targets = {}
+    for target in value['targets']:
+        if not isinstance(target, Mapping) or set(target) != {'action_id','basis','effect'}:
+            raise ValueError('入口取消目标成员非法')
+        ObjectId(target['action_id'])
+        if (type(target['basis']) is not int or target['basis'] not in tuple(member.value for member in SelectionBasis)
+                or type(target['effect']) is not int or target['effect'] not in (CancellationEffect.NOT_APPLIED.value, CancellationEffect.NOT_REQUIRED.value)
+                or target['action_id'] in targets):
+            raise ValueError('入口取消目标依据、效果或身份非法')
+        targets[target['action_id']] = target
+    seen = set()
+    database = None
+    for block in value['blocks']:
+        if not isinstance(block, Mapping) or set(block) != {'database_id','action_id','ticket'}:
+            raise ValueError('入口阻止成员非法')
+        ObjectId(block['action_id'])
+        if (block['action_id'] in seen or block['action_id'] not in targets
+                or targets[block['action_id']]['basis'] not in (SelectionBasis.DIRECT.value, SelectionBasis.BOTH.value)
+                or targets[block['action_id']]['effect'] != CancellationEffect.NOT_APPLIED.value):
+            raise ValueError('入口阻止必须属于唯一直接源目标')
+        seen.add(block['action_id'])
+        if not isinstance(block['database_id'], str) or not block['database_id']:
+            raise ValueError('入口阻止缺少状态库身份')
+        if database is not None and database != block['database_id']:
+            raise ValueError('入口阻止不能混用状态库')
+        database = block['database_id']
+        ticket = block['ticket']
+        if ticket is None:
+            continue
+        if not isinstance(ticket, Mapping) or set(ticket) != {'attempt_id','operation','target_id','responsibility_key','run_id'}:
+            raise ValueError('入口阻止票据成员不完整')
+        ObjectId(ticket['attempt_id'])
+        ObjectId(ticket['run_id'])
+        if (ticket['operation'] != 'control' or ticket['responsibility_key'] != f"start/{block['action_id']}"
+                or not isinstance(ticket['target_id'], str) or not ticket['target_id'].isascii()
+                or not ticket['target_id'].isdigit() or str(int(ticket['target_id'])) != ticket['target_id']):
+            raise ValueError('入口阻止票据目标或责任不符')
+        ObjectId(int(ticket['target_id']))

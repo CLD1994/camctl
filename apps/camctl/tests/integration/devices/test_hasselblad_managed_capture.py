@@ -43,7 +43,7 @@ async def test_default_managed_driver_and_real_capture_file_port_confirm_one_pho
     assert result.outcome.error is None
     assert result.outcome.call_info is not None
     assert result.outcome.call_info.local_exit_code == 0
-    assert len(result.observations) == 1
+    assert {item.type for item in result.observations} == {"photo_taken", "hasselblad_start_entered"}
     photo = result.observations[0]
     assert photo.type == "photo_taken"
     assert photo.data["activity_id"] == _ACTIVITY_ID
@@ -81,7 +81,7 @@ async def test_serial_mismatch_stops_before_settings_capture_or_work_directory(t
 
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.outcome.error is not None
     assert result.outcome.error.details["step"] == "info"
     assert result.outcome.error.details["reason"] == "serial_mismatch"
@@ -106,7 +106,7 @@ async def test_nonzero_capture_retains_partial_raw_and_is_unknown_without_retry(
 
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.outcome.call_info is not None
     assert result.outcome.call_info.local_exit_code == 17
     assert result.outcome.error is not None
@@ -138,7 +138,7 @@ async def test_exit_zero_does_not_confirm_missing_or_wrong_length_file(
 
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.outcome.call_info is not None
     assert result.outcome.call_info.local_exit_code == 0
     assert result.outcome.error is not None

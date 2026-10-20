@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
+from camctl.devices.start_entry import is_hasselblad_photo, entry_from_rows, EntryPhase
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.transaction import event_envelope, row_facts, update_change
 
@@ -116,6 +117,13 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
         if not_started and dispatch == int(_DISPATCH.MAY_HAVE_DISPATCHED):
             dispatch = int(_DISPATCH.NOT_DISPATCHED if all_not_dispatched
                            else _DISPATCH.REJECTED_WITHOUT_EFFECT)
+    if is_hasselblad_photo(action) and used:
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (run["id"],)
+        )) as cursor:
+            ids = [row[0] for row in cursor.fetchall()]
+        attempts = [after("operation_attempts", row_facts(connection, "operation_attempts", identity)) for identity in ids]
+        not_started = entry_from_rows(action, activity, attempts) is EntryPhase.BLOCKED
     return StartFacts(activity, run, used, not_started and not pending_confirmation, dispatch)
 
 

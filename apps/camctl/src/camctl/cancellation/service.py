@@ -95,7 +95,9 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
         target_id, status, effect = row
         if status == 1:
             eligibility = decide_cancel_eligibility(
-                load_eligibility_facts(connection, target_id, motor_permits=runtime.motor_permits))
+                load_eligibility_facts(connection, target_id, motor_permits=runtime.motor_permits,
+                    start_entries=getattr(repository, "start_entries", None),
+                    database_id=owned.metadata.instance_id))
             if eligibility is CancelEligibility.REJECT_UNSUPPORTED:
                 _save_target(runtime,target_id,RecordCancelResult(
                     item_id,occurred,code='task_cancel_unsupported',

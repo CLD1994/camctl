@@ -458,10 +458,13 @@ class _ApplyCancelTargetCommand:
     保存成功；目标取消已生效时只保存本项效果，复用原责任。
     """
 
-    def __init__(self, command: ApplyCancelTarget, key: OperationKey, motor_permits=None) -> None:
+    def __init__(self, command: ApplyCancelTarget, key: OperationKey, motor_permits=None,
+                 *, fixed_item=None, result_events=(), prior_pre_start_ids=frozenset()) -> None:
         if not isinstance(command, ApplyCancelTarget):
             raise TypeError("取消生效申请必须使用 ApplyCancelTarget")
         self._motor_permits = motor_permits if motor_permits is not None else {}
+        self._fixed_item, self._result_events = fixed_item, result_events
+        self._prior_pre_start_ids = prior_pre_start_ids
         self._command = command
         self._key = key
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
@@ -480,6 +483,13 @@ class _ApplyCancelTargetCommand:
             raise ConsistencyError("取消发起者收场的成员不经普通生效")
         if item["status"] != _ITEM_PENDING:
             return self._already()
+        from camctl.devices.start_entry import is_hasselblad_photo
+        if is_hasselblad_photo(target):
+            if command.mode is CancelApplyMode.WITH_STOP:
+                raise ConsistencyError("Hasselblad START 不支持停止取消")
+            self._photo_coverage = include_photo_entry_rows(connection, target, self._state, self._owners)
+        else:
+            self._photo_coverage = ReadCoverage()
         mode = command.mode
         target_id = item["target_action_id"]
         action_rows: tuple = ()
@@ -496,10 +506,10 @@ class _ApplyCancelTargetCommand:
             if target["status"] not in (1, 2) or target["cancel_requested"]:
                 raise ConsistencyError("未启动取消要求目标仍有效且未取消")
             if target["type"] in (1, 2, 3):
-                start = load_start_facts(connection, target)
+                start = load_start_facts(connection, target, result_events=self._result_events)
                 if not start.not_started:
                     raise ConsistencyError("未启动取消缺少可靠未启动依据")
-                include_start_facts(start, self._state, self._owners)
+                include_start_facts(load_start_facts(connection, target), self._state, self._owners)
                 start_events = unstarted_events(
                     start, command.occurred_at,
                     run_status=int(enum_for("operation_runs.status").CANCELED), release=False)
@@ -639,10 +649,10 @@ class _ApplyCancelTargetCommand:
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CancelTargetsSaved(CancelTargetsDisposition.SAVED,
                                       (command.item_id,)),
-            read_coverage=ReadCoverage({("motor_notifications","action_id"):frozenset([target_id])}) if target["type"] == 8 else ReadCoverage())
+            read_coverage=ReadCoverage({("motor_notifications","action_id"):frozenset([target_id])}) if target["type"] == 8 else self._photo_coverage)
 
     def _load(self, connection):
-        item = row_facts(connection, "cancel_items", self._command.item_id)
+        item = self._fixed_item or row_facts(connection, "cancel_items", self._command.item_id)
         if item is None:
             raise ConsistencyError(f"取消成员不存在: {self._command.item_id}")
         self._state.setdefault("cancel_items", {})[item["id"]] = dict(item)
@@ -652,7 +662,7 @@ class _ApplyCancelTargetCommand:
         self._state["actions"] = {origin["id"]: dict(origin)}
         if origin["type"] != _CANCEL_ACTION_TYPE:
             raise ConsistencyError("取消生效要求取消动作")
-        if origin["target_selection_state"] != _TARGET_FIXED:
+        if origin["target_selection_state"] != _TARGET_FIXED and self._fixed_item is None:
             raise ConsistencyError("取消生效要求目标集合已固定")
         if origin["status"] != int(_ACTION_STATUS.RUNNING):
             raise TransactionError("取消生效要求取消动作执行中")
@@ -718,6 +728,7 @@ class _ApplyCancelTargetCommand:
         unfinished = {
             int(action_id) for action_id, status in rows
             if status not in _ACTION_TERMINAL}
+        unfinished.difference_update(self._prior_pre_start_ids)
         if not rows or unfinished != {target["id"]}:
             return None
         self._state.setdefault("plans", {})[plan["id"]] = plan
@@ -1002,8 +1013,9 @@ def _verify_motor_cancel_rows(connection, saved, item):
 class CancellationRepository:
     """取消目标固定与解析失败事务的 SQLite 仓储。"""
 
-    def __init__(self, *, motor_permits=None):
+    def __init__(self, *, motor_permits=None, start_entries=None):
         self.motor_permits = motor_permits if motor_permits is not None else {}
+        self.start_entries = start_entries
 
     def verify_motor_operation(self, command, key, owned):
         """使用新连接只读核实电机目标的原生效或原结果事务。"""
@@ -1098,8 +1110,16 @@ class CancellationRepository:
         self, command: FixCancelTargets, key: OperationKey,
         owned: OwnedConnection,
     ) -> DbOutcome[CancelTargetsSaved]:
-        receipt = commit_operation(
-            _FixCancelTargetsCommand(command, key), key, owned)
+        planner = (_FixPhotoEntriesCommand(command, key, self.start_entries, owned.metadata.instance_id)
+                   if command.entry_blocks else _FixCancelTargetsCommand(command, key))
+        receipt = commit_operation(planner, key, owned)
+        if command.entry_blocks and receipt.kind == "completed" and self.start_entries is not None:
+            from camctl.devices.start_entry import EntryPhase
+            for block in command.entry_blocks:
+                permit = self.start_entries.get(block.database_id, block.action_id)
+                if permit is not None and permit.ticket == block.ticket:
+                    permit.phase = EntryPhase.BLOCKED
+            self.start_entries.pending_cancels.pop(command.action_id, None)
         return _outcome_of(receipt)
 
     def fail_cancel_targets(
@@ -1738,6 +1758,9 @@ def _cancel_targets_guard(event, context) -> None:
                 direct.add(values.get("target_action_id"))
             else:
                 linked.add(values.get("target_action_id"))
+        request = event.evidence.get("photo_entry_request")
+        if request is not None:
+            _guard_photo_entry_request(event, context, request, created, action_id)
         links = context.state_rows.get("auto_preview_links", {})
         for obtain_id in linked:
             for source_id in direct:
@@ -1807,6 +1830,17 @@ def _guard_cancel_apply(event, context, items) -> None:
     target = context.state_rows.get("actions", {}).get(target_id)
     if target is None:
         raise EventValidationError("取消生效缺少目标原事实")
+    from camctl.devices.start_entry import is_hasselblad_photo, entry_from_rows, EntryPhase
+    if is_hasselblad_photo(target) and event.evidence.get("cancel_request", {}).get("mode") in ("pre_start", "with_stop"):
+        activities = context.complete_rows("device_activities", "action_id", target_id)
+        runs = context.complete_rows("operation_runs", "action_id", target_id)
+        start = [row for row in runs.values() if row["responsibility_key"] == f"start/{target_id}"]
+        attempts = []
+        for run in start:
+            attempts.extend(context.complete_rows("operation_attempts", "run_id", run["id"]).values())
+        phase = entry_from_rows(target, next(iter(activities.values()), None), attempts)
+        if event.evidence["cancel_request"]["mode"] == "with_stop" or phase is not EntryPhase.BLOCKED:
+            raise EventValidationError("Hasselblad 取消缺少原 START 可靠未进入依据")
     if target["type"] == 8:
         if "cancel_request" in event.evidence:
             raise EventValidationError("电机取消沿用 motor_request，不重复申请身份")
@@ -1973,3 +2007,138 @@ def register_cancellation_guards() -> None:
     """注册取消目标固定事件的正式业务守卫（装配期调用）。"""
     register_guard("cancel", _cancel_targets_guard)
     register_guard("withdrawal", _withdrawal_guard)
+
+
+def include_photo_entry_rows(connection, action, state, owners):
+    """为写入守卫提供原 START 的完整行范围，而非可猜测的资格布尔值。"""
+    ranges = {('device_activities', 'action_id'): frozenset([action['id']]),
+              ('operation_runs', 'action_id'): frozenset([action['id']])}
+    for table in ('device_activities', 'operation_runs'):
+        for identity, in connection.execute(f'SELECT id FROM {table} WHERE action_id=?', (action['id'],)):
+            row = row_facts(connection, table, identity)
+            state.setdefault(table, {})[identity] = row
+            owners[(table, identity)] = ('action', action['id'])
+            if table == 'operation_runs':
+                ranges.setdefault(('operation_attempts', 'run_id'), set()).add(identity)
+                for attempt_id, in connection.execute('SELECT id FROM operation_attempts WHERE run_id=?', (identity,)):
+                    state.setdefault('operation_attempts', {})[attempt_id] = row_facts(connection, 'operation_attempts', attempt_id)
+                    owners[('operation_attempts', attempt_id)] = ('action', action['id'])
+    return ReadCoverage({key: frozenset(value) for key, value in ranges.items()})
+
+
+class _FixPhotoEntriesCommand:
+    """只组合已封住入口的 Hasselblad 原结果、固定集合与源取消。"""
+
+    def __init__(self, command, key, coordinator, database_id):
+        self.command, self.key = command, key
+        self.coordinator, self.database_id = coordinator, database_id
+
+    def _request(self):
+        from dataclasses import asdict
+        return {'action_id': self.command.action_id, 'occurred_at': self.command.occurred_at,
+                'targets': [{'action_id': t.action_id, 'basis': t.basis.value,
+                    'effect': t.cancellation_effect.value} for t in self.command.targets.targets],
+                'blocks': [asdict(value) for value in self.command.entry_blocks]}
+
+    def plan(self, scope):
+        from camctl.devices.start_entry import EntryPhase, PREVENTED, is_hasselblad_photo
+        from camctl.devices.evidence import EvidenceRegistry
+        from camctl.operations.models import CallOutcome, AttemptStatus, EffectState, ErrorValue, Settlement, SettlementBasis, EvidenceValue
+        from camctl.operations.attempts import AttemptFinish
+        from camctl.operations.validation import validate_outcome
+        from camctl.persistence.repositories.capture import (
+            _CompositeScope, _FinishStartResultCommand, ActivityObservationSave, _merged_state_rows)
+        saved = saved_transaction_events(scope.connection, self.key)
+        if saved is not None:
+            fixed = [event for event in saved if event['type'] == _TARGETS_FIXED_EVENT]
+            if len(fixed) != 1 or not json_equal(fixed[0]['body']['evidence'].get('photo_entry_request'), self._request()):
+                raise TransactionError('原入口取消复合申请内容不同')
+            result = _FixCancelTargetsCommand(self.command, self.key)._reuse(scope.connection, fixed)
+            return result
+        plans = []
+        sub = _CompositeScope(scope, scope.max_event_id + 1)
+        for block in self.command.entry_blocks:
+            permit = None if self.coordinator is None else self.coordinator.get(block.database_id, block.action_id)
+            target = row_facts(scope.connection, 'actions', block.action_id)
+            if (block.database_id != self.database_id or permit is None
+                    or permit.phase is not EntryPhase.RESERVED or permit.ticket != block.ticket
+                    or not is_hasselblad_photo(target) or target['cancel_requested']
+                    or target['status'] not in (1,2)):
+                raise ConsistencyError('取消原 START 缺少匹配且已封住的未进入许可')
+            facts = load_start_facts(scope.connection, target)
+            if block.ticket is None:
+                if facts.attempts_used:
+                    raise ConsistencyError('无票据取消不能覆盖已有 START 意图')
+                continue
+            if (facts.run is None or facts.run['id'] != block.ticket.run_id
+                    or facts.run['activity_id'] != int(block.ticket.target_id)
+                    or facts.run['action_id'] != block.action_id
+                    or facts.attempts_used != block.ticket.attempt_id):
+                raise ConsistencyError('入口阻止票据与原 START 身份不符')
+            outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue('canceled', 'dispatch'), observations=(),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)))
+            finish = AttemptFinish(block.ticket, validate_outcome(block.ticket, outcome, EvidenceRegistry((PREVENTED,))),
+                                   self.command.occurred_at)
+            plans.append(_FinishStartResultCommand(finish,
+                ActivityObservationSave(block.action_id, self.command.occurred_at, dispatch_state=1),
+                None, None, None, self.key).plan(sub))
+        result_events = tuple(event for plan in plans for event in plan.events)
+        fixed = _FixCancelTargetsCommand(self.command, self.key).plan(sub)
+        fixed = replace(fixed, events=tuple(replace(event,
+            evidence={'photo_entry_request': self._request()}) for event in fixed.events))
+        plans.append(fixed)
+        created = {row.after.values['target_action_id']: {'id': row.row_id, **row.after.values}
+                   for event in fixed.events for row in event.rows if row.table == 'cancel_items'}
+        prior_pre_start_ids = set()
+        for block in self.command.entry_blocks:
+            item = created[block.action_id]
+            plans.append(_ApplyCancelTargetCommand(ApplyCancelTarget(item['id'], CancelApplyMode.PRE_START,
+                self.command.occurred_at), self.key, fixed_item=item,
+                result_events=result_events,
+                prior_pre_start_ids=frozenset(prior_pre_start_ids)).plan(sub))
+            if row_facts(scope.connection, "actions", block.action_id)["status"] == 1:
+                prior_pre_start_ids.add(block.action_id)
+        events = tuple(event for plan in plans for event in plan.events)
+        scope.allocate(len(events))
+        state, owners, ranges = {}, {}, {}
+        for plan in plans:
+            state = _merged_state_rows(state, plan.state_rows)
+            owners.update(plan.owners)
+            for key, values in plan.read_coverage.ranges.items():
+                ranges.setdefault(key,set()).update(values)
+        return CommandPlan(events=events, state_rows=state, owners=owners, result=fixed.result,
+                           read_coverage=ReadCoverage({key:frozenset(value) for key,value in ranges.items()}))
+
+
+def _guard_photo_entry_request(event, context, request, created, origin_id):
+    from camctl.devices.start_entry import is_hasselblad_photo, EntryPhase, entry_from_rows
+    if request['action_id'] != origin_id or request['occurred_at'] != event.occurred_at:
+        raise EventValidationError('入口取消申请的原发起者或首次时刻不符')
+    expected = [{'action_id': row.after.values['target_action_id'],
+                 'basis': row.after.values['selection_basis'],
+                 'effect': row.after.values['cancellation_effect']} for row in created]
+    if request['targets'] != expected:
+        raise EventValidationError('入口取消申请与固定成员不符')
+    for block in request['blocks']:
+        target_id = block['action_id']
+        target = context.state_rows.get('actions',{}).get(target_id)
+        if target is None or not is_hasselblad_photo(target):
+            raise EventValidationError('入口取消申请只允许原 Hasselblad 单张源')
+        activities = context.complete_rows('device_activities','action_id',target_id)
+        activity = next(iter(activities.values()),None)
+        runs = context.complete_rows('operation_runs','action_id',target_id)
+        starts = [run for run in runs.values() if run['responsibility_key'] == f'start/{target_id}']
+        attempts = []
+        for run in starts:
+            attempts.extend(context.complete_rows('operation_attempts','run_id',run['id']).values())
+        if entry_from_rows(target, activity, attempts) is not EntryPhase.BLOCKED:
+            raise EventValidationError('入口取消固定缺少前序可靠未进入结果')
+        ticket = block['ticket']
+        if ticket is None:
+            if attempts:
+                raise EventValidationError('无票据入口取消不能覆盖原意图')
+        elif (len(starts) != 1 or starts[0]['id'] != ticket['run_id']
+                or starts[0]['activity_id'] != int(ticket['target_id'])
+                or max((a['attempt_no'] for a in attempts),default=0) != ticket['attempt_id']):
+            raise EventValidationError('入口取消固定的原票据不符')

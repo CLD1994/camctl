@@ -49,6 +49,7 @@ from camctl.devices.drivers.registry import (
 )
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DeviceCallResult, DriverDeclaration
+from camctl.devices.start_entry import ENTERED, entered_observation
 from camctl.host_files.models import BoundDirectories, FilePurpose
 from camctl.host_files.capture_sources import prepare_capture_workspace, workspace_path
 from camctl.operations.models import (
@@ -104,6 +105,7 @@ _ORIGINAL = b"II*\x00hasselblad-raw"
 _PREVIEW = b"\xff\xd8preview\xff\xd9"
 _JPEG_ORIGINAL = b"\xff\xd8jpeg-original\xff\xd9"
 _RETURNED = EvidenceRegistry((
+    ENTERED,
     EvidenceContract("operation_returned", 1, "control", frozenset()),
     EvidenceContract("photo_taken", 1, "control",
         frozenset({"activity_id", "original", "preview", "steps"}),
@@ -164,6 +166,9 @@ class _PhotoDriver:
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         self.requests.append(request)
+        if request.start_entry is not None:
+            request.start_entry.enter(request.ticket)
+        entry = entered_observation(request.ticket)
         if self.before_dispatch is not None:
             result = self.before_dispatch(request)
             if asyncio.iscoroutine(result):
@@ -176,11 +181,11 @@ class _PhotoDriver:
                 effect=EffectState.NO_EFFECT,
                 settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
                     EvidenceValue("not_dispatched", 1, {})),
-                observations=(),
+                observations=(entry,),
             ))
         if self.response == "unknown":
             await self._write_workspace(request)
-            return DeviceCallResult(observations=(), error={
+            return DeviceCallResult(observations=(entry,), error={
                 "code": "transport_timeout", "message": "工具返回未知",
             })
         await self._write_workspace(request)
@@ -218,7 +223,7 @@ class _PhotoDriver:
                     "media_type": "image/jpeg",
                 },
                 "steps": steps,
-            }),), error=None)
+            }), entry), error=None)
 
     async def _write_workspace(self, request: ControlRequest) -> None:
         identity = request.ticket.target_id
@@ -352,10 +357,28 @@ def _apply_cancel(owned, cancel_action_id: int, action_id: int) -> None:
     assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
 
 
+async def _cancel_through_service(owned, runtime, cancel_action_id=2):
+    from camctl.bootstrap.flows import _resolve_and_fix
+    from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
+    from camctl.cancellation.settlement import TargetSettlement
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    repository = CancellationRepository(start_entries=runtime.start_entries)
+    started = repository.start_cancel_action(
+        StartCancelAction(cancel_action_id, _NOW), new_operation_key(), owned)
+    assert started.kind is DbOutcomeKind.COMPLETED, started.error
+    raw, = owned.connection.execute(
+        'SELECT input_fields_json FROM actions WHERE id=?', (cancel_action_id,)).fetchone()
+    ids = _resolve_and_fix(owned, repository, cancel_action_id, raw, runtime.wall_us)
+    return await apply_cancel(ApplyCancel(cancel_action_id, ids), CancellationRuntime(
+        owned, repository, TargetSettlement(owned, OutputsRepository(), repository,
+            lambda _: 'unknown', runtime.wall_us), runtime.wall_us))
+
+
 async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                  cancel_action: bool = False, legacy: bool = False,
                  wall: list[int] | None = None, results=None, evidence=None,
-                 driver_factory=None, storage="host", capture_format="raw"):
+                 driver_factory=None, storage="host", capture_format="raw",
+                 extra_actions=(), photo_group=None, photo_focus=None, start_first=True):
     cfg = _config(tmp_path, storage=storage)
     state_db = Path(cfg.paths.state_db)
     initialized = initialize_state(cfg, state_db)
@@ -376,6 +399,11 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
         ),
         "policy": {"max_delay_ms": 5000},
     }]
+    if photo_focus is not None:
+        actions[0]["params"]["focus"] = photo_focus
+    if photo_group is not None:
+        actions[0]["group"] = photo_group
+    actions.extend(extra_actions)
     if cancel_action:
         actions.append({"name": "取消单张", "type": "cancel_task",
                         "params": {"target": {"action_instance_id": "1"}}})
@@ -388,10 +416,10 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
         }), catalog, CommandMode.RUN, _NOW), new_operation_key(), owned)
     assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
     scheduled = SchedulingRepository()
-    for save, request in (
+    for save, request in ((
         (scheduled.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
         (scheduled.start_action, StartActionRequest(1, _NOW, _NOW)),
-    ):
+    ) if start_first else ()):
         receipt = save(request, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     clock = wall if wall is not None else [_NOW]
@@ -771,14 +799,14 @@ async def test_confirmed_start_with_malformed_photo_payload_keeps_consistency_er
         owned.connection.close()
 
 
-async def test_dispatch_no_effect_rechecks_cancellation_and_window(tmp_path):
-    # The cancellation branch uses the repository after START grant, so the
-    # fake stores its owned connection only for this transaction callback.
+async def test_entered_dispatch_preserves_rejected_cancel_and_window_failure(tmp_path):
+    # 取消服务在整次 START 已进入后执行；逐项拒绝后原拍摄继续。
     cfg, owned, _driver, _runtime, _clock = await _world(
         tmp_path / "cancel", cancel_action=True)
 
     async def cancel_callback(request):
-        _apply_cancel(owned, 2, 1)
+        result = await _cancel_through_service(owned, runtime)
+        assert result.items[0].status == 4
 
     canceled_driver = _PhotoDriver(Path(cfg.paths.staging), before_dispatch=cancel_callback)
     registry = DriverRegistry((_entry(canceled_driver),))
@@ -790,9 +818,8 @@ async def test_dispatch_no_effect_rechecks_cancellation_and_window(tmp_path):
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(canceled_driver.requests) == 1
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (6,)
-        assert not workspace_path(runtime.roots, str(
-            owned.connection.execute("SELECT id FROM device_activities WHERE action_id=1").fetchone()[0])).exists()
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert len(_saved_output_rows(owned)) == 2
     finally:
         owned.connection.close()
 
@@ -812,7 +839,7 @@ async def test_dispatch_no_effect_rechecks_cancellation_and_window(tmp_path):
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(expired_driver.requests) == 1
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (5,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=1").fetchone()
         assert not workspace_path(runtime.roots, str(activity_id)).exists()

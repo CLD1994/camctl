@@ -54,7 +54,9 @@ def test_hasselblad_assembled_start_grant_keeps_original_storage_and_deadline(tm
             ParsedInput("photo.json", {"request_id": "1", "created_at": "2025-06-15 15:06:40",
                 "name": "单张", "actions": [{"name": "拍摄", "type": "camera_take_photo",
                     "device_id": "cam-1", "scheduled_at": "2025-06-15 15:06:40",
-                    "params": {"type": "hasselblad_photo"}, "policy": {"max_delay_ms": 5000}}]}),
+                    "params": {"type": "hasselblad_photo", "capture_format": "raw",
+                        "exposure": {"mode": "P", "iso": 100},
+                        "white_balance": {"mode": "auto"}, "focus": {"mode": "MF"}}, "policy": {"max_delay_ms": 5000}}]}),
             build_catalog(config, DriverDefinitions({DRIVER_ID: driver_definition()})), CommandMode.RUN, now,
         ), new_operation_key(), owned)
         assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
@@ -148,5 +150,27 @@ async def test_hasselblad_assembly_keeps_local_host_recovery_without_result_port
         assert binding_only.roots == BoundDirectories(Path(config.paths.staging))
         assert isinstance(binding_only.host_capture, HostCaptureRepository)
         assert binding_only.host_photo_operation_verifier is not None
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_deps_shares_one_start_entry_coordinator_with_every_capture_and_cancel_factory(tmp_path,monkeypatch):
+    from camctl.bootstrap import flows
+    from .test_capture_call_session_state import _session_factories
+    from ..capture.test_recording_start_runtime import _result
+    actual=flows.cancel_flow
+    entries=[]
+    def observed(**kwargs):
+        entries.append(kwargs['start_entries'])
+        return actual(**kwargs)
+    monkeypatch.setattr(flows,'cancel_flow',observed)
+    owned,driver,wall,mono,ordinary,residual,restricted=await _session_factories(tmp_path,monkeypatch,_result(confirmed=True))
+    try:
+        shared=ordinary(owned,'cam-1').start_entries
+        assert residual(owned,'cam-1').start_entries is shared
+        assert restricted(owned,'cam-1').start_entries is shared
+        assert ordinary(owned,'missing').start_entries is shared
+        assert len(entries)==2 and all(value is shared for value in entries)
     finally:
         owned.connection.close()

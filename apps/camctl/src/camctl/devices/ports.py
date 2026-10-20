@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
+from camctl.devices.start_entry import StartEntryPermit
 from camctl.devices.evidence import DeviceObservation, OPERATIONS
 
 if TYPE_CHECKING:
@@ -58,6 +59,8 @@ class DriverDeclaration:
     directory_supported: bool = False
     #: 仅声明 READ 的本地主机收场恢复，不推断设备效果或独立活动结束。
     local_read_recovery_supported: bool = False
+    #: 仅结束旧本地 control 责任，不证明独立设备效果。
+    local_control_recovery_supported: bool = False
     #: 按文件身份查询存在性；独立于拍摄活动状态查询。
     file_query_supported: bool = False
 
@@ -87,6 +90,8 @@ class ControlRequest:
     timeout_s: Decimal | None = None
     #: 多步启动在新设备派发前调用；None 返回值表示仍有原业务资格。
     dispatch_check: Callable[[], str | None] | None = None
+    #: 原 START 的同步入口许可；不进入 JSON 或历史。
+    start_entry: StartEntryPermit | None = None
     #: 普通录像原受理定义中的返回含义；省略保持旧 STARTED 合同。
     start_return_meaning: int | None = None
     #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
