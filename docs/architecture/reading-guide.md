@@ -31,7 +31,7 @@
 6|客户端怎样知道结果，怎样合并多份报告并确认收到？|[状态报告](status-reports.md)、[字段契约](report-format.md)、[状态同步](status-sync.md)、[协议样例](client-protocol-examples.md)
 7|用户怎样取消任务和清理文件？|[取消计划与动作](task-cancellation.md)、[清理正式产物](output-cleanup.md)
 8|断电、时间异常或处理失败后，如何恢复并解释结果？|[共同原则与持久化](system-foundations.md)、[时间检查](clock-recovery.md)、[录像恢复](camera-recovery.md)、[报告发布与补投](report-publication.md)、[会话错误](session-errors.md)
-9|如何准备运行环境并验证完整流程？|[本地配置](configuration.md)、[初始化](initialization.md)、[部署联调样例](deployment-example.md)、[运行日志](logging.md)
+9|如何准备运行环境并验证完整流程？|[配置项参考](../camctl/configuration-reference.md)、[本地配置](configuration.md)、[初始化](initialization.md)、[部署联调样例](deployment-example.md)、[运行日志](logging.md)
 10|哪些能力属于后续扩展？|[拍摄能力与参数类型](camera-capabilities.md)、[MCU 接口预留](mcu-actions.md)；真实设备依据见[相机交接整理](../hardware/camera-control-handoff.md)
 
 各专题说明行为规则、条件分类和验收要求。首次阅读先掌握规则，完整评审再沿生产入口和消费者核对实现。内部执行细节由[camctl 实现专题](../camctl/README.md)定义，未完成项由[实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)及其模块计划跟踪。
