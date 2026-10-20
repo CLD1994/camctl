@@ -155,9 +155,12 @@ def _preview_needs_verification(member: SegmentMember) -> bool:
     """仅将可能成为有效预览但事实未定的 LRF 作为待核实输入。"""
     if member.ownership is OwnershipState.NOT_OWNED:
         return False
-    if member.completion is FileCompletionState.INCOMPLETE or member.size_bytes == 0:
+    if member.completion is FileCompletionState.INCOMPLETE:
         return False
     if member.pairing_state is PreviewPairingState.UNPAIRED:
+        return False
+    if (member.completion is FileCompletionState.COMPLETE
+            and member.size_bytes == 0):
         return False
     return (
         member.ownership is OwnershipState.UNKNOWN

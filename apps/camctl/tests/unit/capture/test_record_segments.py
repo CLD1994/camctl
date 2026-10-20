@@ -652,6 +652,33 @@ def test_unknown_optional_preview_blocks_success_without_changing_original_scope
     assert result.default_scope.last_cursor == originals[1].cursor
 
 
+@pytest.mark.parametrize("pairing_state", ["paired", "unknown"])
+def test_zero_byte_preview_with_unknown_completion_stays_unconfirmed(pairing_state):
+    api = _api()
+    originals = [_member(api, 1), _member(api, 2)]
+    preview = _member(
+        api, 1, role="preview", completion="unknown", size=0,
+        pairing_state=pairing_state,
+        pairing_identity=originals[0].identity if pairing_state == "paired" else None,
+    )
+
+    _, result = _assess(
+        api, [originals[0], preview, originals[1]],
+        facts=_facts(api, control="confirmed"),
+    )
+
+    assert result.status is api["SegmentAssessmentStatus"].UNCONFIRMED
+    assert result.reason.value == "preview_unknown"
+    assert result.optional_preview_unknown is True
+    assert result.complete_segment_count == 1
+    assert result.lower_bound_ms == 4_500
+    assert result.gap_count == 0
+    assert result.default_scope.state is api["DefaultScopeState"].NONEMPTY
+    assert result.default_scope.member_count == 2
+    assert result.default_scope.first_cursor == originals[0].cursor
+    assert result.default_scope.last_cursor == originals[1].cursor
+
+
 def test_unknown_preview_pairing_blocks_success_until_pairing_is_classified():
     api = _api()
     assert api["segment_models"].__dict__.get("PreviewPairingState") is not None, (
