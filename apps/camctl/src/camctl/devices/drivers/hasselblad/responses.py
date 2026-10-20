@@ -1,4 +1,4 @@
-"""对已核验的 hb_cli 标准输出进行严格、无副作用的解析。"""
+"""对 hb_cli 的独立双流进行严格、无副作用的响应解析。"""
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -196,11 +196,15 @@ def _camera_locator(
 
 def parse_capture(
     output: bytes,
+    stderr: bytes,
     *,
+    output_complete: bool,
     capture_format: CaptureFormat,
     output_directory: str,
 ) -> CaptureResponse:
     """按请求格式严格解析唯一的双文件响应和互斥机内定位。"""
+    if output_complete is not True or type(output) is not bytes or type(stderr) is not bytes:
+        raise CliParseError("capture 必须取得完整且独立的 stdout/stderr", code=CaptureParseErrorCode.INVALID_RESPONSE)
     if not isinstance(capture_format, CaptureFormat):
         raise CliParseError("capture_format 必须是已登记的格式", code=CaptureParseErrorCode.INVALID_RESPONSE)
     description = CAPTURE_FORMATS[capture_format]
@@ -219,10 +223,17 @@ def parse_capture(
                     code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR,
                 ) from error
         raise
-    camera_records = [
-        line for line in lines
-        if line.startswith("camera file") or line == _UNREPORTED_CAMERA_FILE_LINE
-    ]
+    stdout_records = [line for line in lines
+                      if line.startswith("camera file") or line == _UNREPORTED_CAMERA_FILE_LINE]
+    # 其他 stderr 字节只属于诊断；仅解码已有定位语法，不借诊断建立成功。
+    stderr_records = []
+    for record in stderr.split(b"\n"):
+        if record.startswith(b"camera file") or record == _UNREPORTED_CAMERA_FILE_LINE.encode():
+            decoded_record = _decode(record, "capture stderr")
+            if _NON_LF_LINE_SEPARATORS.intersection(decoded_record):
+                raise CliParseError("capture 机内定位包含控制字符", code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR)
+            stderr_records.append(decoded_record)
+    camera_records = [("stdout", line) for line in stdout_records] + [("stderr", line) for line in stderr_records]
     if len(camera_records) > 1:
         raise CliParseError(
             "capture 输出包含重复或冲突的机内定位", code=CaptureParseErrorCode.AMBIGUOUS_CAMERA_LOCATOR
@@ -272,12 +283,14 @@ def parse_capture(
         description.preview_media_type,
     )
 
-    if len(lines) == 3:
+    if not camera_records:
         raise CliParseError(
             "capture 成功响应未报告机内路径，也没有明确缺名提示",
             code=CaptureParseErrorCode.UNREPORTED_CAMERA_LOCATOR,
         )
-    locator_line = lines[3]
+    if len(lines) == 4 and (not stdout_records or lines[3] != stdout_records[0]):
+        raise CliParseError("capture stdout 包含无法解释的额外记录", code=CaptureParseErrorCode.INVALID_RESPONSE)
+    _channel, locator_line = camera_records[0]
     if locator_line == _UNREPORTED_CAMERA_FILE_LINE:
         locator = CameraFileLocator(CameraLocatorStatus.EXPLICIT_MISSING)
     elif locator_line.startswith("camera file"):

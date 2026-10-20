@@ -144,7 +144,7 @@ async def test_stop_return_is_resaved_with_original_key_without_second_device_ca
     try:
         runtime = await _started(owned)
         before_result = []
-        stopper = ReturnedCall(_outcome("stop", confirmed=True), returned=lambda: before_result.append(
+        stopper = ReturnedCall(_diagnosed_stop(runtime), returned=lambda: before_result.append(
             tuple(owned.connection.iterdump())))
         proxy = CallWriteFault(owned.connection, stopper, mode)
         runtime.owned = replace(owned, connection=proxy)
@@ -156,6 +156,8 @@ async def test_stop_return_is_resaved_with_original_key_without_second_device_ca
         _assert_actual_saved(owned, request.ticket, assumed=False, confirmed=True,
                              occurred_at=_RETURNED_AT)
         assert len(set(proxy.result_keys)) == 1
+        result_json, = owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=?", (request.ticket.run_id,)).fetchone()
+        assert json.loads(result_json)["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
         if mode in ("projection", "commit_before"):
             assert proxy.rolled_back_images == before_result
     finally:
@@ -166,7 +168,7 @@ async def test_stop_pending_actual_result_precedes_unknown_recovery_without_boun
     owned = _world(tmp_path)
     try:
         runtime = await _started(owned)
-        stopper = ReturnedCall(_outcome("stop", confirmed=True))
+        stopper = ReturnedCall(_diagnosed_stop(runtime))
         proxy = CallWriteFault(owned.connection, stopper, "persistent")
         runtime.owned = replace(owned, connection=proxy)
         runtime.stopper = stopper

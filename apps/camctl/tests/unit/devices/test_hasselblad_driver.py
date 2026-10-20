@@ -60,6 +60,8 @@ class FakeTransport:
             "list": LIST_OUTPUT,
             "info": INFO_OUTPUT,
             "set": b"",
+            "focus": b"",
+            "autofocus": b"",
             "capture": _capture_output(WORKSPACE, self.capture_format),
         }[command]
         return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
@@ -190,10 +192,14 @@ async def test_success_requires_matching_device_and_two_verified_host_files(host
         ("info",),
         ("set", "drive-mode", "single"),
         ("set", "capture-format", "raw"),
+        ("set", "exposure-mode", "P"),
+        ("set", "iso", "100"),
+        ("set", "wb-mode", "auto"),
+        ("set", "focus-mode", "MF"),
         ("capture", "--output", str(WORKSPACE)),
     ]
     assert all(call.argv[:3] == (EXECUTABLE, "--pid", "0x000a") for call in transport.calls)
-    assert [call.timeout_s for call in transport.calls] == [Decimal("180")] * 5
+    assert [call.timeout_s for call in transport.calls] == [Decimal("180")] * 9
     assert prepared == [(roots, ACTIVITY_ID)]
     assert verified == [
         (roots, ACTIVITY_ID, (
@@ -229,11 +235,11 @@ async def test_success_requires_matching_device_and_two_verified_host_files(host
     assert set(photo.data) == {"activity_id", "original", "preview", "steps"}
     assert set(photo.data["original"]) == {"original_name", "size_bytes", "sha256", "media_type"}
     assert set(photo.data["preview"]) == {"original_name", "size_bytes", "sha256", "media_type"}
-    assert len(photo.data["steps"]) == 5
+    assert len(photo.data["steps"]) == 9
     assert all("used_grace_s" not in step for step in photo.data["steps"])
     assert result.outcome.settlement.evidence.data == {}
     assert [step["name"] for step in photo.data["steps"]] == [
-        "list", "info", "drive_mode_single", "capture_format", "capture"
+        "list", "info", "drive_mode_single", "capture_format", "exposure_mode", "iso", "white_balance_mode", "focus_mode", "capture"
     ]
     assert validate_outcome(_request().ticket, result.outcome, EVIDENCE)
 
@@ -270,7 +276,7 @@ async def test_jpeg_format_keeps_original_and_preview_roles_distinct(host_files)
     b"(no Hasselblad USB devices found)\n",
     LIST_OUTPUT + LIST_OUTPUT,
 ])
-async def test_zero_or_multiple_matching_usb_devices_never_reach_info_or_capture(host_files, list_output):
+async def test_photo_driver_checks_identity_before_any_setting(host_files, list_output):
     roots, _prepared, _verified = host_files
     transport = FakeTransport(outcomes={1: RawToolOutcome(LocalExit(exit_code=0), list_output, None, None)})
 
@@ -324,11 +330,11 @@ async def test_setting_failure_is_recorded_and_blocks_capture(host_files, failed
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.outcome.call_info.local_exit_code == 2
     assert result.error["code"] == "device_error"
-    assert result.error["details"]["steps"][-1]["stderr_hex"] == "63616d65726120627573790a"
+    assert result.outcome.diagnostics.calls[-1].stderr.data == b"camera busy\n"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("completed_calls", range(5))
+@pytest.mark.parametrize("completed_calls", range(9))
 async def test_dispatch_check_blocks_each_next_command_without_retry(host_files, completed_calls):
     roots, prepared, _verified = host_files
     transport = FakeTransport()
@@ -392,7 +398,7 @@ async def test_owned_call_interruption_blocks_following_dispatch(host_files, mon
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("completed_calls", range(1, 5))
+@pytest.mark.parametrize("completed_calls", range(1, 9))
 async def test_owned_call_interruption_after_each_return_blocks_next_dispatch(
     host_files, monkeypatch, completed_calls
 ):
@@ -422,11 +428,11 @@ async def test_owned_call_interruption_after_each_return_blocks_next_dispatch(
 @pytest.mark.asyncio
 async def test_tool_start_error_before_capture_is_no_effect_and_keeps_prior_local_exit(host_files):
     roots, _prepared, _verified = host_files
-    transport = FakeTransport(outcomes={5: ToolStartError("spawn denied")})
+    transport = FakeTransport(outcomes={9: ToolStartError("spawn denied")})
 
     result = await _driver(transport, roots).control(_request())
 
-    assert len(transport.calls) == 5
+    assert len(transport.calls) == 9
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.outcome.call_info.local_exit_code == 0
@@ -454,12 +460,12 @@ async def test_tool_start_error_before_first_process_is_reliably_not_dispatched(
 @pytest.mark.asyncio
 async def test_exception_after_capture_dispatch_preserves_unsettled_attempt_without_retry(host_files):
     roots, prepared, verified = host_files
-    transport = FakeTransport(outcomes={5: RuntimeError("runner lost its result")})
+    transport = FakeTransport(outcomes={9: RuntimeError("runner lost its result")})
 
     with pytest.raises(RuntimeError, match="runner lost its result"):
         await _driver(transport, roots).control(_request())
 
-    assert len(transport.calls) == 5
+    assert len(transport.calls) == 9
     assert transport.calls[-1].argv[3] == "capture"
     assert prepared == [(roots, ACTIVITY_ID)]
     assert verified == []
@@ -468,22 +474,22 @@ async def test_exception_after_capture_dispatch_preserves_unsettled_attempt_with
 @pytest.mark.asyncio
 async def test_capture_timeout_keeps_workspace_and_does_not_emit_photo_taken(host_files):
     roots, prepared, verified = host_files
-    transport = FakeTransport(outcomes={5: RawToolOutcome(
+    transport = FakeTransport(outcomes={9: RawToolOutcome(
         LocalExit(signal=15), b"capture: OK\n", "timeout", Decimal("3"), stderr=b"timed out\n")
     })
 
     result = await _driver(transport, roots).control(_request())
 
-    assert len(transport.calls) == 5
+    assert len(transport.calls) == 9
     assert prepared == [(roots, ACTIVITY_ID)]
     assert verified == []
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.call_info.local_signal == 15
     assert result.outcome.observations == ()
     assert result.outcome.settlement.evidence.data == {"terminate_grace_s": Decimal("3")}
     assert result.error["details"]["steps"][-1]["used_grace_s"] == Decimal("3")
-    assert result.error["details"]["steps"][-1]["stderr_hex"] == "74696d6564206f75740a"
+    assert result.outcome.diagnostics.calls[-1].stderr.data == b"timed out\n"
 
 
 @pytest.mark.asyncio
@@ -492,7 +498,7 @@ async def test_capture_timeout_keeps_workspace_and_does_not_emit_photo_taken(hos
     (2, "info"),
     (3, "drive_mode_single"),
     (4, "capture_format"),
-    (5, "capture"),
+    (9, "capture"),
 ])
 async def test_step_records_only_its_actual_termination_grace(host_files, call_number, step_name):
     roots, _prepared, _verified = host_files
@@ -505,7 +511,7 @@ async def test_step_records_only_its_actual_termination_grace(host_files, call_n
 
     steps = result.error["details"]["steps"]
     assert [step["name"] for step in steps] == [
-        "list", "info", "drive_mode_single", "capture_format", "capture"
+        "list", "info", "drive_mode_single", "capture_format", "exposure_mode", "iso", "white_balance_mode", "focus_mode", "capture"
     ][:call_number]
     assert steps[-1]["name"] == step_name
     assert steps[-1]["used_grace_s"] == grace
@@ -516,14 +522,14 @@ async def test_step_records_only_its_actual_termination_grace(host_files, call_n
 @pytest.mark.asyncio
 async def test_tool_call_cancelled_uses_its_actual_local_outcome(host_files):
     roots, _prepared, verified = host_files
-    transport = FakeTransport(outcomes={5: ToolCallCancelled(RawToolOutcome(
+    transport = FakeTransport(outcomes={9: ToolCallCancelled(RawToolOutcome(
         LocalExit(signal=15), b"capture: OK\n", "cancelled", Decimal("3"), stderr=b"stopped\n")
     )})
 
     result = await _driver(transport, roots).control(_request())
 
-    assert len(transport.calls) == 5
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert len(transport.calls) == 9
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.call_info.local_signal == 15
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
@@ -536,14 +542,14 @@ async def test_tool_call_cancelled_uses_its_actual_local_outcome(host_files):
 @pytest.mark.asyncio
 async def test_unparseable_capture_response_is_unknown_even_after_local_exit_zero(host_files):
     roots, _prepared, verified = host_files
-    transport = FakeTransport(outcomes={5: RawToolOutcome(
+    transport = FakeTransport(outcomes={9: RawToolOutcome(
         LocalExit(exit_code=0), b"capture: OK\n", None, None, stderr=b""
     )})
 
     result = await _driver(transport, roots).control(_request())
 
     assert verified == []
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.call_info.local_exit_code == 0
     assert result.outcome.observations == ()
@@ -556,14 +562,14 @@ async def test_unreported_camera_locator_never_becomes_a_successful_capture(host
     output = _capture_output(WORKSPACE).replace(
         b"camera file: /mnt/media/DCIM/B9996039.3FR\n", b""
     )
-    transport = FakeTransport(outcomes={5: RawToolOutcome(
+    transport = FakeTransport(outcomes={9: RawToolOutcome(
         LocalExit(exit_code=0), output, None, None, stderr=b""
     )})
 
     result = await _driver(transport, roots).control(_request())
 
     assert verified == []
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.observations == ()
     assert result.error["details"]["reason"] == "capture_response_unconfirmed"
@@ -586,9 +592,9 @@ async def test_file_verification_failure_keeps_unknown_photo_workspace(host_file
 
     result = await _driver(transport, roots).control(_request())
 
-    assert len(transport.calls) == 5
+    assert len(transport.calls) == 9
     assert prepared == [(roots, ACTIVITY_ID)]
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.observations == ()
     assert result.error["details"]["step"] == "verify_files"
@@ -627,3 +633,117 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         directory_supported=False,
         local_read_recovery_supported=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_focus_success_then_capture_blocked_preserves_side_effect(host_files):
+    roots, _, verified = host_files
+    params = _photo_params()
+    params["focus"] = {"mode":"MF", "relative_move":5}
+    transport = FakeTransport()
+    request = _request(params=params, dispatch_check=lambda: "window_elapsed" if transport.calls and transport.calls[-1].argv[3]=="focus" else None)
+    result = await _driver(transport, roots).control(request)
+    assert transport.calls[-1].argv[3:] == ("focus","5")
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is EffectState.NO_EFFECT
+    assert result.error["details"]["steps"][-1]["lens_operation_returned"] is True
+    assert result.outcome.diagnostics.calls[-1].step_name == "focus"
+    assert verified == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+async def test_saved_capture_preserves_named_pair_and_locator(host_files, capture_format):
+    roots, _, _ = host_files
+    output = _capture_output(WORKSPACE, capture_format)
+    stdout, locator = output.rsplit(b"camera file:",1)
+    transport = FakeTransport(capture_format=capture_format)
+    async def run(spec, stop):
+        if spec.argv[3]=="capture":
+            transport.calls.append(spec)
+            return RawToolOutcome(LocalExit(exit_code=0),stdout,None,None,stderr=b"camera file:"+locator)
+        return await FakeTransport.run(transport,spec,stop)
+    transport.run = run
+    result = await _driver(transport, roots).control(_request(params=_photo_params(capture_format)))
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.observations[0].data["steps"][-1]["camera_locator"]["status"] == "path"
+    assert result.outcome.diagnostics.calls[-1].stdout.data == stdout
+    assert result.outcome.diagnostics.calls[-1].stderr.data == b"camera file:"+locator
+    assert all("stderr_hex" not in s for s in result.observations[0].data["steps"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shutter", [Decimal("0.000667"),Decimal("0.000333"),Decimal("0.00025")])
+async def test_photo_driver_uses_saved_values_in_structured_argv(host_files, shutter):
+    roots, _, _ = host_files
+    params = _photo_params()
+    params["exposure"] = {"mode":"S","iso":100,"shutter_s":shutter}
+    transport = FakeTransport()
+    result = await _driver(transport, roots).control(_request(params=params))
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert ("set","shutter",format(shutter,"f")) in _subcommands(transport)
+    assert transport.calls[-1].argv[3:] == ("capture","--output",str(WORKSPACE))
+    assert all(isinstance(call.argv, tuple) and call.argv[:3]==(EXECUTABLE,"--pid","0x000a") for call in transport.calls)
+
+
+@pytest.mark.asyncio
+async def test_photo_commands_share_one_monotonic_start_budget(host_files):
+    roots, _, _ = host_files
+    params = _photo_params()
+    params["focus"] = {"mode":"AF-S"}
+    now = [0]
+    transport = FakeTransport(after_call=lambda _: now.__setitem__(0, now[0]+7_000_000_000))
+    result = await _driver(transport, roots, clock=lambda:now[0]).control(_request(params=params))
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert [call.timeout_s for call in transport.calls] == [Decimal(180-7*n) for n in range(10)]
+    assert sum(call.argv[3]=="autofocus" for call in transport.calls) == 1
+    assert sum(call.argv[3]=="capture" for call in transport.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["nonzero","signal","timeout","cancelled","incomplete","stdout_missing","stderr_missing"])
+async def test_capture_failure_text_cannot_override_nonzero_exit_or_incomplete_output(host_files, kind):
+    roots, _, verified = host_files
+    raw = RawToolOutcome(LocalExit(exit_code=0),_capture_output(WORKSPACE),None,None,stderr=b"")
+    from dataclasses import replace
+    overrides = {
+        "nonzero":{"exit":LocalExit(exit_code=2)}, "signal":{"exit":LocalExit(signal=15)},
+        "timeout":{"error":"timeout"}, "cancelled":{"error":"cancelled"},
+        "incomplete":{"output_failure":"stderr: output_limit_exceeded"},
+        "stdout_missing":{"output":None}, "stderr_missing":{"stderr":None},
+    }
+    transport = FakeTransport(outcomes={9:replace(raw, **overrides[kind])})
+    result = await _driver(transport, roots).control(_request())
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is EffectState.UNKNOWN
+    assert not result.observations and not verified
+    diag = result.outcome.diagnostics.calls[-1]
+    if kind in ("incomplete","stdout_missing","stderr_missing"):
+        assert all(s.state.value in ("unconfirmed","unavailable") for s in (diag.stdout,diag.stderr))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", [False,True])
+async def test_attempt_status_is_independent_from_capture_effect(host_files, capture):
+    roots, _, _ = host_files
+    params = _photo_params()
+    params["focus"] = {"mode":"AF-S"}
+    # 同样的实际超时，发生在 autofocus 或 capture，照片效果分别为无/未知。
+    transport = FakeTransport(outcomes={10 if capture else 9:RawToolOutcome(LocalExit(signal=15),b"", "timeout",Decimal("3"),stderr=b"camera reply unknown\n")})
+    result = await _driver(transport, roots).control(_request(params=params))
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.effect is (EffectState.UNKNOWN if capture else EffectState.NO_EFFECT)
+    assert result.error["details"]["reason"] == "timeout"
+    assert result.outcome.diagnostics.calls[-1].stderr.data == b"camera reply unknown\n"
+
+
+@pytest.mark.asyncio
+async def test_photo_keeps_original_call_roots_after_registration_refresh(host_files):
+    roots, prepared, verified = host_files
+    transport = FakeTransport()
+    driver = _driver(transport, roots)
+    transport.after_call = lambda n: setattr(driver, "roots", BoundDirectories(Path("/later/staging"))) if n == 1 else None
+    result = await driver.control(_request())
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert prepared == [(roots, ACTIVITY_ID)]
+    assert verified[0][0] is roots

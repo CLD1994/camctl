@@ -40,7 +40,7 @@ def _api():
 def _parse_capture(parser, output, capture_format, *, output_directory):
     if "capture_format" not in inspect.signature(parser).parameters:
         pytest.fail("parse_capture must require the H1 capture_format parameter")
-    return parser(output, capture_format=capture_format, output_directory=output_directory)
+    return parser(output, b"", output_complete=True, capture_format=capture_format, output_directory=output_directory)
 
 
 def _parse_raw_capture(parser, output, *, output_directory):
@@ -426,3 +426,23 @@ def test_decimal_conversion_limit_is_wrapped_as_cli_parse_error(field):
             _parse_raw_capture(parser, output, output_directory="/workspace")
         else:
             parser(output)
+
+
+@pytest.mark.parametrize("capture_format", [CaptureFormat.RAW,CaptureFormat.JPEG])
+@pytest.mark.parametrize("location", ["stdout", "stderr", "duplicate", "conflict", "missing", "unavailable"])
+def test_capture_locator_is_unique_across_two_complete_streams(capture_format, location):
+    from camctl.devices.drivers.hasselblad.responses import parse_capture, CliParseError
+    extension = ".3FR" if capture_format is CaptureFormat.RAW else ".JPG"
+    output = f"capture: OK\nsaved /work/p{extension} (2 bytes)\nsaved /work/p{extension}.thumbnail.jpg (1 bytes)\n".encode()
+    locator = b"capture: camera filename was not reported\n"
+    stderr = b"\xffdiagnostic only\n"
+    if location in ("stdout","duplicate","conflict"): output += locator
+    if location in ("stderr","duplicate"): stderr += locator
+    if location == "conflict": stderr += f"camera file: /DCIM/q{extension}\n".encode()
+    if location == "unavailable": stderr = None
+    if location in ("stdout","stderr"):
+        response = parse_capture(output,stderr,output_complete=True,capture_format=capture_format,output_directory="/work")
+        assert response.camera_locator.status.value == "explicit_missing"
+    else:
+        with pytest.raises(CliParseError):
+            parse_capture(output,stderr,output_complete=location!="unavailable",capture_format=capture_format,output_directory="/work")

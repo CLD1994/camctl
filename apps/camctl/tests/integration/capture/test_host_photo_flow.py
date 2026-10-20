@@ -247,8 +247,10 @@ def _step_fact(name: str) -> dict[str, object]:
 class _ManagedCaptureTransport:
     """只替换子进程调用；驱动、capture 文件核验和数据库均用生产实现。"""
 
-    def __init__(self):
+    def __init__(self, capture_format="raw"):
         self.calls = []
+        self.outcomes = []
+        self.capture_format = capture_format
 
     async def run(self, spec, _stop):
         self.calls.append(spec)
@@ -261,18 +263,21 @@ class _ManagedCaptureTransport:
             output = b""
         elif command == "capture":
             workspace = Path(spec.argv[-1])
-            original = workspace / "capture_1.3FR"
-            preview = workspace / "capture_1.3FR.thumbnail.jpg"
-            original.write_bytes(_ORIGINAL)
+            original = workspace / ("capture_1.JPG" if self.capture_format == "jpeg" else "capture_1.3FR")
+            preview = workspace / f"{original.name}.thumbnail.jpg"
+            original_bytes = _JPEG_ORIGINAL if self.capture_format == "jpeg" else _ORIGINAL
+            original.write_bytes(original_bytes)
             preview.write_bytes(_PREVIEW)
             output = (
-                f"capture: OK\nsaved {original} ({len(_ORIGINAL)} bytes)\n"
+                f"capture: OK\nsaved {original} ({len(original_bytes)} bytes)\n"
                 f"saved {preview} ({len(_PREVIEW)} bytes)\n"
-                "camera file: /mnt/media/DCIM/B9996039.3FR\n"
+                f"camera file: /mnt/media/DCIM/{'B9996039.JPG' if self.capture_format == 'jpeg' else 'B9996039.3FR'}\n"
             ).encode()
         else:
             raise AssertionError(f"意外 Hasselblad 子命令: {command}")
-        return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+        raw = RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+        self.outcomes.append(raw)
+        return raw
 
 
 class _EmptyResults:
@@ -625,8 +630,10 @@ else:
     assert result.stdout.strip() == "noncompleted receipt rejected"
 
 
-async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_capture_handler(tmp_path):
-    transport = _ManagedCaptureTransport()
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+@pytest.mark.parametrize("storage", ["host", "device"])
+async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_capture_handler(tmp_path, capture_format, storage):
+    transport = _ManagedCaptureTransport(capture_format)
 
     def make_driver(config):
         return HasselbladDriver(
@@ -637,15 +644,15 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
         )
 
     cfg, owned, driver, runtime, _clock = await _world(
-        tmp_path, driver_factory=make_driver)
+        tmp_path, driver_factory=make_driver, capture_format=capture_format, storage=storage)
     try:
         await capture_handler("camera_take_photo")(1, runtime)
 
         assert isinstance(driver, HasselbladDriver)
         assert [call.argv[3] for call in transport.calls] == [
-            "list", "info", "set", "set", "capture",
+            "list", "info", "set", "set", "set", "set", "set", "set", "capture",
         ]
-        assert [call.timeout_s for call in transport.calls] == [Decimal("180")] * 5
+        assert [call.timeout_s for call in transport.calls] == [Decimal("180")] * 9
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
         result_json, = owned.connection.execute(
@@ -655,8 +662,12 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
         photo = json.loads(result_json)["observations"][0]
         steps = photo["data"]["steps"]
         assert [step["name"] for step in steps] == [
-            "list", "info", "drive_mode_single", "capture_format", "capture",
+            "list", "info", "drive_mode_single", "capture_format", "exposure_mode", "iso", "white_balance_mode", "focus_mode", "capture",
         ]
+        diagnostics = json.loads(result_json)["diagnostics"]
+        assert [call["stdout"]["hex"] for call in diagnostics["calls"]] == [raw.output.hex() for raw in transport.outcomes]
+        assert all(call["stderr"] == {"state":"complete", "hex":""} for call in diagnostics["calls"])
+        assert all("stderr_hex" not in step for step in steps)
         assert all(isinstance(step, dict) for step in steps)
         assert len(_saved_output_rows(owned)) == 2
         original_path, preview_path = (
@@ -668,7 +679,7 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
                  int(enum_for("intermediate_files.purpose").CAPTURE_PREVIEW)),
             ).fetchall()
         )
-        assert original_path.read_bytes() == _ORIGINAL
+        assert original_path.read_bytes() == (_JPEG_ORIGINAL if capture_format == "jpeg" else _ORIGINAL)
         assert preview_path.read_bytes() == _PREVIEW
     finally:
         owned.connection.close()

@@ -64,7 +64,7 @@ async def test_default_managed_driver_and_real_capture_file_port_confirm_one_pho
     assert (workspace / _PREVIEW_NAME).read_bytes() == _PREVIEW_BYTES
     assert _read_logged_argv(call_log) == _expected_argv(executable, workspace)
     assert [args[3] for args in _read_logged_argv(call_log)] == [
-        "list", "info", "set", "set", "capture"
+        "list", "info", "set", "set", "set", "set", "set", "set", "capture"
     ]
     assert all(args[1:3] == ["--pid", "0x000a"] for args in _read_logged_argv(call_log))
     assert not ({"images", "download", "stop"} & {args[3] for args in _read_logged_argv(call_log)})
@@ -104,7 +104,7 @@ async def test_nonzero_capture_retains_partial_raw_and_is_unknown_without_retry(
 
     result = await driver.control(request)
 
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.observations == ()
     assert result.outcome.call_info is not None
@@ -136,7 +136,7 @@ async def test_exit_zero_does_not_confirm_missing_or_wrong_length_file(
 
     result = await driver.control(request)
 
-    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.observations == ()
     assert result.outcome.call_info is not None
@@ -234,6 +234,10 @@ def _script_source(call_log: Path, *, scenario: str, observed_serial: str) -> st
         elif command == "set" and args in (
             ["--pid", "0x000a", "set", "drive-mode", "single"],
             ["--pid", "0x000a", "set", "capture-format", "raw"],
+            ["--pid", "0x000a", "set", "exposure-mode", "P"],
+            ["--pid", "0x000a", "set", "iso", "100"],
+            ["--pid", "0x000a", "set", "wb-mode", "auto"],
+            ["--pid", "0x000a", "set", "focus-mode", "MF"],
         ):
             pass
         elif command == "capture" and len(args) == 5 and args[:4] == [
@@ -285,5 +289,9 @@ def _expected_argv(executable: Path, workspace: Path) -> list[list[str]]:
         [str(executable), "--pid", "0x000a", "info"],
         [str(executable), "--pid", "0x000a", "set", "drive-mode", "single"],
         [str(executable), "--pid", "0x000a", "set", "capture-format", "raw"],
+        [str(executable), "--pid", "0x000a", "set", "exposure-mode", "P"],
+        [str(executable), "--pid", "0x000a", "set", "iso", "100"],
+        [str(executable), "--pid", "0x000a", "set", "wb-mode", "auto"],
+        [str(executable), "--pid", "0x000a", "set", "focus-mode", "MF"],
         [str(executable), "--pid", "0x000a", "capture", "--output", str(workspace)],
     ]

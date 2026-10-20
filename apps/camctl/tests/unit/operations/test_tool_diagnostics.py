@@ -90,3 +90,9 @@ def test_diagnostics_typed_invalid_states_and_limits_are_rejected():
     ):
         with pytest.raises(ValueError):
             validate_diagnostics(diagnostic)
+
+
+def test_diagnostics_rejects_half_confirmed_stream_pair():
+    from camctl.operations.tool_diagnostics import validate_diagnostics
+    with pytest.raises(ValueError):
+        validate_diagnostics(_diagnostics(stdout=None, stderr=b"read", state="complete"))

@@ -655,7 +655,7 @@ def test_diagnostics_redelivery_rejects_any_changed_original_context(environment
     call = diag.calls[0]
     if change == "byte": call = replace(call, stdout=replace(call.stdout, data=b"\x00\xfe\n"))
     elif change == "empty": call = replace(call, stderr=ToolStream(ToolStreamState.UNCONFIRMED, b""))
-    elif change == "state": call = replace(call, stdout=replace(call.stdout, state=ToolStreamState.COMPLETE))
+    elif change == "state": call = replace(call, stdout=replace(call.stdout, state=ToolStreamState.COMPLETE), stderr=ToolStream(ToolStreamState.COMPLETE, b""))
     elif change == "step": call = replace(call, step_name="other")
     else:
         diag = replace(diag, call_limit=3)

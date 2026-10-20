@@ -55,6 +55,9 @@ def validate_diagnostics(value: ToolDiagnostics) -> None:
                     raise ValueError("未取得流不得携带字节")
             elif type(stream.data) is not bytes or len(stream.data) > OUTPUT_LIMIT_BYTES:
                 raise ValueError("已取得流必须携带有界字节")
+        states = (call.stdout.state, call.stderr.state)
+        if ToolStreamState.COMPLETE in states and states != (ToolStreamState.COMPLETE,) * 2:
+            raise ValueError("没有完整双流依据时不能单独确认一条流完整")
 
 
 def encode_diagnostics(value: ToolDiagnostics) -> dict:
