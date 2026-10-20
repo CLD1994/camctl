@@ -122,10 +122,12 @@ async def _save_file_snapshot(path: Path, entity_id: int, entity_type: int) -> N
         await executor.close()
 
 
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
 @pytest.mark.asyncio
 async def test_real_accepted_host_photo_history_restores_complete_boundaries_and_forward_snapshot(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, capture_format,
 ):
+    original_bytes = b"\xff\xd8history-original\xff\xd9" if capture_format == "jpeg" else _ORIGINAL
     config = _config(tmp_path)
     database = Path(config.paths.state_db)
     initialized = initialize_state(config, database)
@@ -144,7 +146,7 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
             "scheduled_at": _input_time(),
             "params": {
                 "type": "hasselblad_photo",
-                "capture_format": "raw",
+                "capture_format": capture_format,
                 "exposure": {"mode": "P", "iso": 100},
                 "white_balance": {"mode": "auto"},
                 "focus": {"mode": "MF"},
@@ -177,8 +179,8 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
         complete_request = HostPhotoComplete(
             1,
             files.original.file_id,
-            len(_ORIGINAL),
-            hashlib.sha256(_ORIGINAL).hexdigest(),
+            len(original_bytes),
+            hashlib.sha256(original_bytes).hexdigest(),
             files.preview.file_id,
             len(_PREVIEW),
             hashlib.sha256(_PREVIEW).hexdigest(),
@@ -198,18 +200,20 @@ async def test_real_accepted_host_photo_history_restores_complete_boundaries_and
         preview_path = Path(config.paths.staging) / files.preview.relative_path
         original_path.parent.mkdir(parents=True, exist_ok=True)
         preview_path.parent.mkdir(parents=True, exist_ok=True)
-        original_path.write_bytes(_ORIGINAL)
+        original_path.write_bytes(original_bytes)
         preview_path.write_bytes(_PREVIEW)
         drafts = (
             OutputDraft(OutputKind.PREVIEW,
                 FileReference(intermediate_file_id=files.preview.file_id), True,
                 hashlib.sha256(_PREVIEW).hexdigest(),
                 original_batch_intermediate_file_id=files.original.file_id,
-                original_name="capture.jpg", media_type="image/jpeg"),
+                original_name="capture.jpg.thumbnail.jpg" if capture_format == "jpeg" else "capture.3fr.thumbnail.jpg",
+                media_type="image/jpeg"),
             OutputDraft(OutputKind.ORIGINAL,
                 FileReference(intermediate_file_id=files.original.file_id), True,
-                hashlib.sha256(_ORIGINAL).hexdigest(),
-                original_name="capture.3fr", media_type="image/x-hasselblad-3fr"),
+                hashlib.sha256(original_bytes).hexdigest(),
+                original_name="capture.jpg" if capture_format == "jpeg" else "capture.3fr",
+                media_type="image/jpeg" if capture_format == "jpeg" else "image/x-hasselblad-3fr"),
         )
         finished = CaptureRepository().finish_capture(FinishCapture(
             action_id=1,

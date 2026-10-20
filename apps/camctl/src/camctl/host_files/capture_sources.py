@@ -15,7 +15,10 @@ from typing import Any, Callable, Iterator, Mapping, TypeVar
 
 from camctl.contracts.values import parse_object_id
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
-from camctl.host_files.paths import resolve_file
+from camctl.host_files.paths import relative_file_path, resolve_file
+from camctl.host_files.photo_formats import (
+    CAPTURE_FORMATS, CaptureFormat, photo_file_extension, photo_media_type,
+)
 from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
 
 __all__ = [
@@ -28,7 +31,8 @@ __all__ = [
     "workspace_path",
 ]
 
-_MEDIA_TYPES = frozenset(("image/x-hasselblad-3fr", "image/jpeg"))
+_MEDIA_TYPES = frozenset(media for description in CAPTURE_FORMATS.values()
+                         for media in (description.original_media_type, description.preview_media_type))
 _ARTIFACT_FIELDS = frozenset(("original_name", "size_bytes", "sha256", "media_type"))
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BINARY = getattr(os, "O_BINARY", 0)
@@ -202,6 +206,9 @@ async def archive_capture_file(
     activity_id: str,
     artifact: CapturedArtifact,
     target: FileRef,
+    *,
+    purpose: FilePurpose,
+    capture_format: CaptureFormat,
 ) -> None:
     """按登记身份归档文件；匹配的既有目标可恢复，未知目标绝不覆盖。"""
     workspace = workspace_path(roots, activity_id)
@@ -209,19 +216,18 @@ async def archive_capture_file(
         raise CaptureFileError(
             "artifact_validation", detail=f"采集文件事实类型无效: {artifact!r}"
         )
-    expected_purpose = (
-        FilePurpose.CAPTURE_ORIGINAL
-        if artifact.media_type == "image/x-hasselblad-3fr"
-        else FilePurpose.CAPTURE_PREVIEW
-    )
-    if target.purpose is not expected_purpose:
-        raise CaptureFileError(
-            "target_role",
-            detail=(
-                f"媒体类型 {artifact.media_type!r} 与目标用途 "
-                f"{target.purpose!r} 不匹配"
-            ),
-        )
+    if target.purpose is not purpose:
+        raise CaptureFileError("target_role", detail="归档用途与原文件责任不一致")
+    try:
+        expected_media = photo_media_type(purpose, capture_format)
+        expected_path = relative_file_path(purpose, target.file_id,
+            photo_file_extension(purpose, capture_format))
+    except (TypeError, ValueError, KeyError) as failure:
+        raise CaptureFileError("target_role", detail="归档格式或用途无效", cause=failure) from failure
+    if artifact.media_type != expected_media:
+        raise CaptureFileError("target_media", detail="归档内容类型与保存格式及用途不符")
+    if target.relative_path != expected_path:
+        raise CaptureFileError("target_path", detail="归档路径与保存格式及用途不符")
     try:
         target_path = resolve_file(target, roots).path
     except ValueError as failure:
@@ -306,6 +312,7 @@ def _verify_capture_files(
     specs: tuple[CaptureFileSpec, ...],
 ) -> tuple[CapturedArtifact, ...]:
     artifacts: list[CapturedArtifact] = []
+    identities: set[tuple[int, int]] = set()
     with _workspace_directory(roots, path) as workspace_fd:
         for spec in specs:
             facts = _read_file_facts_at(
@@ -317,6 +324,11 @@ def _verify_capture_files(
                 expected_sha256=None,
                 file_kind="source",
             )
+            identity = (facts.device, facts.inode)
+            if identity in identities:
+                raise CaptureFileError("source_identity", path / spec.original_name,
+                    detail="原图与预览不能引用同一物理文件")
+            identities.add(identity)
             artifacts.append(
                 CapturedArtifact(
                     original_name=spec.original_name,

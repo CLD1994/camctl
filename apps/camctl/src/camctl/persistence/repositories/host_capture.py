@@ -6,13 +6,16 @@ import sqlite3
 from contextlib import closing
 from dataclasses import asdict, dataclass
 
+from camctl.acceptance.definitions import read_action_spec
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.capture.photo_format import saved_photo_format
+from camctl.host_files.photo_formats import photo_file_extension
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
-    PURPOSE_FIXED_EXTENSIONS,
+    HOST_PHOTO_PURPOSES,
     relative_file_path,
     validate_relative_file_path,
 )
@@ -39,11 +42,8 @@ _CREATE_REASON = reason_for_branch("INTERMEDIATE_FILE_CHANGED", "CREATE")
 _HOST_PHOTO_COMPLETE_REASON = reason_for_branch(
     "INTERMEDIATE_FILE_CHANGED", "HOST_PHOTO_COMPLETE"
 )
-_ROLES = tuple(
-    (_PURPOSE[purpose.name], extension)
-    for purpose, extension in PURPOSE_FIXED_EXTENSIONS.items()
-)
-_HOST_PURPOSES = frozenset(int(purpose) for purpose, _ in _ROLES)
+_ROLES = tuple(sorted((_PURPOSE[purpose.name] for purpose in HOST_PHOTO_PURPOSES), key=int))
+_HOST_PURPOSES = frozenset(int(purpose) for purpose in _ROLES)
 
 
 @dataclass(frozen=True)
@@ -59,9 +59,11 @@ class HostPhotoFiles:
     preview: PreparedHostFile
 
 
-def _files(rows):
+def _files(rows, action, *, allow_reclaimed=False):
+    capture_format = saved_photo_format(action)
     ordered = []
-    for purpose, extension in _ROLES:
+    for purpose in _ROLES:
+        extension = photo_file_extension(FilePurpose[purpose.name], capture_format)
         matched = [row for row in rows if row["purpose"] == int(purpose)]
         if len(matched) != 1:
             raise ConsistencyError("主机拍摄源必须恰有一份原图和一份预览责任")
@@ -77,13 +79,18 @@ def _files(rows):
             row["retention_state"] == int(_RETENTION.PROMOTED)
             and row["cleanup_state"] in (int(_CLEANUP.NOT_NEEDED), int(_CLEANUP.COMPLETED))
         )
+        if (allow_reclaimed and read_action_spec(action).get("output_storage") == "device"
+                and row["retention_state"] == int(_RETENTION.RELEASABLE)
+                and row["cleanup_state"] in {int(state) for state in _CLEANUP
+                                              if state is not _CLEANUP.NOT_NEEDED}):
+            valid_lifecycle = True
         if row["owner_delivery_id"] is not None or not valid_lifecycle:
             raise ConsistencyError("主机拍摄源的责任或保留状态矛盾")
         ordered.append(PreparedHostFile(row["id"], model, row["relative_path"]))
     return HostPhotoFiles(*ordered)
 
 
-def _load(connection, action_id):
+def _load(connection, action_id, *, allow_reclaimed=False):
     action = row_facts(connection, "actions", action_id)
     if action is None or action["type"] != int(_ACTION.CAMERA_TAKE_PHOTO):
         raise ConsistencyError("主机拍摄源要求已保存的单张拍摄动作")
@@ -94,7 +101,7 @@ def _load(connection, action_id):
         identities = cursor.fetchall()
     rows = [row_facts(connection, "intermediate_files", identity) for identity, in identities]
     if rows:
-        _files(rows)
+        _files(rows, action, allow_reclaimed=allow_reclaimed)
     return action, rows
 
 
@@ -149,12 +156,45 @@ def validate_host_photo_event(event, context):
             if facts.get("owner_action_id") != request.action_id:
                 raise ValueError("主机拍摄文件责任属于其他动作")
             rows.append(facts)
-        files = _files(rows)
+        files = _files(rows, action)
         if isinstance(request, HostPhotoComplete) and (
             files.original.file_id != request.original_file_id or files.preview.file_id != request.preview_file_id):
             raise ValueError("完整字节申请交换了原图和预览身份")
     except (ValueError, TypeError, KeyError) as error:
         raise EventValidationError(f"主机拍摄文件事件违反契约: {error}") from error
+
+
+def _require_registered_device_pair(connection, action, temporary_rows):
+    """原申请核实可跨合法回收；新写资格不消费此例外。"""
+    from camctl.persistence.repositories.capture import (
+        _device_photo_source_pair, _host_photo_registered_pair,
+    )
+
+    status = enum_for("actions.status")
+    if action["status"] not in (int(status.SUCCEEDED), int(status.FAILED),
+                                 int(status.CANCELED), int(status.EXPIRED)):
+        raise ConsistencyError("尚未终态的照片责任不能通过回收状态核实原申请")
+
+    def action_rows(table, column):
+        with closing(connection.execute(f"SELECT id FROM {table} WHERE {column}=? ORDER BY id LIMIT 3",
+                                        (action["id"],))) as cursor:
+            identities = cursor.fetchall()
+        return {identity: row_facts(connection, table, identity) for identity, in identities}
+
+    devices = action_rows("device_files", "source_action_id")
+    outputs = action_rows("outputs", "source_action_id")
+    origins = {}
+    for output_id in outputs:
+        with closing(connection.execute("SELECT output_id, original_output_id FROM output_origins WHERE output_id=?", (output_id,))) as cursor:
+            origins.update((output_id, {"output_id": output_id, "original_output_id": original_id})
+                           for output_id, original_id in cursor.fetchall())
+    try:
+        sources = _device_photo_source_pair(devices, {row["id"]: row for row in temporary_rows},
+            action["id"], action=action, terminal=True)
+        _host_photo_registered_pair(outputs, origins, action["id"], sources,
+                                    device=True, action=action)
+    except ValueError as error:
+        raise ConsistencyError("已回收照片责任缺少可靠的原设备双源及正式配对产物") from error
 
 
 class _HostPhotoCommand:
@@ -173,13 +213,14 @@ class _HostPhotoCommand:
                  "intermediate_files": {row["id"]: row for row in rows}}
         if isinstance(request, PrepareHostPhoto):
             if rows:
-                return CommandPlan((), {}, state, result=_files(rows), read_only=True)
+                return CommandPlan((), {}, state, result=_files(rows, action), read_only=True)
             if action["status"] not in (1, 2):
                 raise ConsistencyError("已结束动作不能新增拍摄文件责任")
             first_id = next_row_id(scope.connection, "intermediate_files")
             ObjectId(first_id + 1)
             changes = []
-            for offset, (purpose, extension) in enumerate(_ROLES):
+            for offset, purpose in enumerate(_ROLES):
+                extension = photo_file_extension(FilePurpose[purpose.name], saved_photo_format(action))
                 identity = first_id + offset
                 values = {
                     "owner_action_id": request.action_id, "owner_delivery_id": None,
@@ -189,10 +230,10 @@ class _HostPhotoCommand:
                     "size_bytes": None, "sha256": None, "last_error_json": None,
                 }
                 changes.append(row_change("intermediate_files", identity, values))
-            result = _files([{"id": change.row_id, **change.after.values} for change in changes])
+            result = _files([{"id": change.row_id, **change.after.values} for change in changes], action)
             reason = _CREATE_REASON
         else:
-            files = _files(rows)
+            files = _files(rows, action)
             if (files.original.file_id, files.preview.file_id) != (request.original_file_id, request.preview_file_id):
                 raise ConsistencyError("完整字节事实指向其他拍摄文件责任")
             changes = []
@@ -230,8 +271,10 @@ class _HostPhotoCommand:
                 or saved[0]["occurred_at"] != request.occurred_at
                 or not json_equal(saved[0]["body"]["evidence"], {"host_photo_request": asdict(request)})):
             raise TransactionError("原主机拍摄文件申请与重送输入不一致")
-        action, current_rows = _load(scope.connection, request.action_id)
-        files = _files(current_rows)
+        action, current_rows = _load(scope.connection, request.action_id, allow_reclaimed=True)
+        if any(row["retention_state"] == int(_RETENTION.RELEASABLE) for row in current_rows):
+            _require_registered_device_pair(scope.connection, action, current_rows)
+        files = _files(current_rows, action, allow_reclaimed=True)
         event = saved[0]
         changes = event["body"]["rows"]
         if len(changes) != 2 or {row["id"] for row in changes} != {files.original.file_id, files.preview.file_id}:

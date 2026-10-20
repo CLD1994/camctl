@@ -22,7 +22,7 @@ register_capture_guards()
 register_outputs_guards()
 
 
-def _photo_environment(tmp_path, *, legacy_v1=False, host_spec=True):
+def _photo_environment(tmp_path, *, legacy_v1=False, host_spec=True, capture_format="raw"):
     owned = _environment(
         tmp_path,
         format_version=1 if legacy_v1 else CURRENT_FORMAT_VERSION,
@@ -33,16 +33,19 @@ def _photo_environment(tmp_path, *, legacy_v1=False, host_spec=True):
         {"output_storage": "host", "start_call_timeout_s": 180}
         if host_spec else {}
     )
+    params = {"type": parameter_type, "capture_format": capture_format,
+              "exposure": {"mode": "P", "iso": 100},
+              "white_balance": {"mode": "auto"}, "focus": {"mode": "MF"}}
     owned.connection.execute("UPDATE actions SET type=1 WHERE id=1")
     owned.connection.execute(
         "UPDATE actions SET input_fields_json=?, effective_params_json=?,"
         " driver_id=?, max_delay_ms=1000, execution_spec_json=? WHERE id=1",
         (
             json.dumps({
-                "params": {"type": parameter_type},
+                "params": params,
                 "policy": {"max_delay_ms": 1000},
             }),
-            json.dumps({"type": parameter_type}),
+            json.dumps(params),
             "hasselblad_cfv100c" if host_spec else "legacy_camera",
             json.dumps(execution_spec),
         ),
@@ -373,4 +376,56 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
     finally:
         if verification is not None:
             verification.connection.close()
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format,extension", [("raw", "3fr"), ("jpeg", "jpg")])
+def test_photo_file_responsibilities_follow_saved_capture_format(tmp_path, capture_format, extension):
+    owned = _photo_environment(tmp_path, capture_format=capture_format)
+    try:
+        key = new_operation_key()
+        first = _prepare(owned, key)
+        assert first.original.relative_path == f"capture-originals/{first.original.file_id}.{extension}"
+        assert first.preview.relative_path == f"capture-previews/{first.preview.file_id}.jpg"
+        assert _prepare(owned, key) == first
+        assert _prepare(owned) == first
+        assert owned.connection.execute("SELECT COUNT(*) FROM intermediate_files").fetchone() == (2,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format,wrong_extension", [("raw", "jpg"), ("jpeg", "3fr")])
+def test_saved_photo_format_rejects_mismatched_responsibility_on_prepare_and_finish(tmp_path, capture_format, wrong_extension):
+    from camctl.persistence.repositories.host_capture import HostCaptureRepository
+    owned = _photo_environment(tmp_path, capture_format=capture_format)
+    try:
+        files = _prepare(owned)
+        _complete(owned, files)
+        owned.connection.execute("UPDATE intermediate_files SET relative_path=? WHERE id=?",
+            (f"capture-originals/{files.original.file_id}.{wrong_extension}", files.original.file_id))
+        owned.connection.commit()
+        before = _database_snapshot(owned.connection)
+        prepared = HostCaptureRepository().prepare_host_photo(1, _NOW, new_operation_key(), owned)
+        assert prepared.kind is DbOutcomeKind.ROLLED_BACK
+        finished = CaptureRepository().finish_capture(_finish(drafts=_drafts(files)), new_operation_key(), owned)
+        assert finished.kind is DbOutcomeKind.ROLLED_BACK
+        assert _database_snapshot(owned.connection) == before
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+def test_success_rejects_original_metadata_outside_saved_format(tmp_path, capture_format):
+    owned = _photo_environment(tmp_path, capture_format=capture_format)
+    try:
+        files = _prepare(owned)
+        _complete(owned, files)
+        preview, original = _drafts(files)
+        wrong_media = "image/jpeg" if capture_format == "raw" else "image/x-hasselblad-3fr"
+        original = replace(original, media_type=wrong_media)
+        result = CaptureRepository().finish_capture(_finish(drafts=(preview, original)), new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+    finally:
         owned.connection.close()

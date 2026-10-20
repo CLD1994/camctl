@@ -9,6 +9,8 @@ from enum import StrEnum
 from fractions import Fraction
 from types import MappingProxyType
 
+from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
+
 from camctl.acceptance.schema import BodySchemaError, validate_precise
 from camctl.contracts.json_values import JsonValue, is_json_integer
 
@@ -39,35 +41,6 @@ __all__ = [
     "parse_photo_settings",
     "photo_schema",
 ]
-
-
-class CaptureFormat(StrEnum):
-    RAW = "raw"
-    JPEG = "jpeg"
-
-
-@dataclass(frozen=True, slots=True)
-class CaptureFormatDescription:
-    value: CaptureFormat
-    title: str
-    original_extension: str
-    original_media_type: str
-    preview_extension: str
-    preview_media_type: str
-
-    @property
-    def command_value(self) -> str:
-        return self.value.value
-
-
-CAPTURE_FORMATS: Mapping[CaptureFormat, CaptureFormatDescription] = MappingProxyType({
-    CaptureFormat.RAW: CaptureFormatDescription(
-        CaptureFormat.RAW, "RAW（3FR）", ".3fr", "image/x-hasselblad-3fr", ".jpg", "image/jpeg",
-    ),
-    CaptureFormat.JPEG: CaptureFormatDescription(
-        CaptureFormat.JPEG, "JPEG", ".jpg", "image/jpeg", ".jpg", "image/jpeg",
-    ),
-})
 
 
 class ExposureMode(StrEnum):

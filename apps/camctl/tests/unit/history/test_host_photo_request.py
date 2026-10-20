@@ -132,3 +132,27 @@ def test_complete_requires_distinct_file_ids():
 def test_only_create_and_complete_reasons_are_supported(reason):
     with pytest.raises(HostPhotoRequestError):
         parse_host_photo_request(_prepare(), reason=reason)
+
+
+@pytest.mark.parametrize("extension", ["3fr", "jpg"])
+def test_prepare_event_structure_accepts_supported_original_format_without_action(extension):
+    from types import SimpleNamespace
+    from camctl.history.host_photo_request import validate_host_photo_event_structure
+    from camctl.contracts.enums import enum_for
+
+    purpose = enum_for("intermediate_files.purpose")
+    rows = []
+    for file_id, role, directory, suffix in (
+        (31, purpose.CAPTURE_ORIGINAL, "capture-originals", extension),
+        (32, purpose.CAPTURE_PREVIEW, "capture-previews", "jpg"),
+    ):
+        rows.append(SimpleNamespace(table="intermediate_files", row_id=file_id,
+            before=SimpleNamespace(exists=False),
+            after=SimpleNamespace(values={
+                "purpose": int(role), "owner_action_id": 7, "owner_delivery_id": None,
+                "relative_path": f"{directory}/{file_id}.{suffix}",
+                "retention_state": 1, "cleanup_state": 1,
+                "size_bytes": None, "sha256": None})))
+    event = SimpleNamespace(evidence={"host_photo_request": _prepare()},
+        occurred_at=0, reason=1, rows=rows)
+    validate_host_photo_event_structure(event, event_name="INTERMEDIATE_FILE_CHANGED", branch_name="CREATE")

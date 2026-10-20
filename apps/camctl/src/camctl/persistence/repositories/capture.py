@@ -86,10 +86,11 @@ from camctl.history.decoding import decode_event_row
 from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
+from camctl.capture.photo_format import saved_photo_format
+from camctl.host_files.photo_formats import photo_file_extension, photo_media_type
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
     HOST_PHOTO_PURPOSES,
-    PURPOSE_FIXED_EXTENSIONS,
     relative_file_path,
     validate_relative_file_path,
 )
@@ -447,6 +448,7 @@ class _HostPhotoPairError(ValueError):
 def _host_photo_source_pair(
     rows: Mapping[int, Mapping[str, Any]], action_id: int, *,
     host_spec: bool = False, terminal: bool = False, device_temporary: bool = False,
+    action: Mapping[str, Any],
 ) -> dict[int, Mapping[str, Any]] | None:
     """按已保存规格和来源责任读取唯一原图/预览对。"""
     photo_rows = [
@@ -474,7 +476,7 @@ def _host_photo_source_pair(
             model = FilePurpose[purpose.name]
             validate_relative_file_path(model, facts["id"], facts["relative_path"])
             expected_path = relative_file_path(
-                model, facts["id"], PURPOSE_FIXED_EXTENSIONS[model])
+                model, facts["id"], photo_file_extension(model, saved_photo_format(action)))
         except (KeyError, TypeError, ValueError) as error:
             raise _HostPhotoPairError("主机拍摄固定角色路径与文件身份不一致") from error
         if facts.get("relative_path") != expected_path:
@@ -513,12 +515,17 @@ def _host_photo_execution_spec(action: Mapping[str, Any]) -> bool:
     return spec.get("output_storage") == "host"
 
 
-def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, terminal=False):
+def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action, terminal=False):
     """设备单张的两源必须沿原动作及双文件捕获事实完整配对。"""
     temporary = _host_photo_source_pair(temporary_rows, action_id, host_spec=True,
-                                        terminal=terminal, device_temporary=True)
+                                        terminal=terminal, device_temporary=True, action=action)
     files = [row for row in device_rows.values() if row.get("source_action_id") == action_id]
+    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+    from camctl.devices.bindings import DeviceBinding
+
+    capture_format = saved_photo_format(action)
     by_kind = {}
+    identities = []
     for kind, captured in temporary.items():
         matches = [row for row in files if row.get("role") == _FILE_ROLE_FOR_KIND[kind]]
         if len(matches) != 1:
@@ -538,7 +545,26 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, termina
                 or not isinstance(completion, Mapping)
                 or completion.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE)):
             raise _HostPhotoPairError("相机源的归属、完成或固定摘要与捕获事实不一致")
+        purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name]
+        locator = source.get("locator_json")
+        try:
+            locator = parse_exact_json(locator) if isinstance(locator, str) else locator
+            identity = CameraFileIdentity.from_source(source["identity_key"], locator)
+            expected_variant = (DownloadVariant.ORIGINAL if purpose is FilePurpose.CAPTURE_ORIGINAL
+                                else DownloadVariant.THUMBNAIL)
+            if (identity.binding != DeviceBinding(action["device_id"], action["driver_id"])
+                    or identity.variant is not expected_variant
+                    or identity.sha256 != captured["sha256"]
+                    or not identity.camera_name.casefold().endswith(
+                        "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))
+                    or source.get("media_type") != photo_media_type(purpose, capture_format)):
+                raise ValueError("设备源身份或媒体类型与原照片责任不一致")
+        except (KeyError, TypeError, ValueError) as error:
+            raise _HostPhotoPairError("相机源定位与原绑定、用途及固定内容不一致") from error
+        identities.append(identity)
         by_kind[kind] = source
+    if len({(identity.camera_path, identity.camera_name) for identity in identities}) != 1:
+        raise _HostPhotoPairError("相机原图与预览必须指向同一机内照片")
     if len(files) != len(temporary):
         raise _HostPhotoPairError("相机单张设备源集合与捕获双文件不一致")
     original = by_kind[_KIND_CODES[OutputKind.ORIGINAL]]
@@ -569,7 +595,7 @@ def _device_photo_drafts(drafts, sources):
 
 
 def _host_photo_drafts(
-    drafts: tuple[OutputDraft, ...], sources: Mapping[int, Mapping[str, Any]]
+    drafts: tuple[OutputDraft, ...], sources: Mapping[int, Mapping[str, Any]], *, action
 ) -> dict[int, OutputDraft]:
     """要求成功申请的两份草稿与原责任身份、完整摘要和预览关联相同。"""
     if len(drafts) != 2:
@@ -581,12 +607,13 @@ def _host_photo_drafts(
     preview = by_kind[OutputKind.PREVIEW]
     for draft in (original, preview):
         source = sources[_KIND_CODES[draft.kind]]
+        purpose = FilePurpose[_HOST_PURPOSE_FOR_KIND[_KIND_CODES[draft.kind]].name]
         if (draft.file.device_file_id is not None
                 or draft.file.intermediate_file_id != source["id"]
                 or draft.file_complete is not True
                 or draft.sha256 != source["sha256"]
                 or not isinstance(draft.original_name, str) or not draft.original_name
-                or not isinstance(draft.media_type, str) or not draft.media_type):
+                or draft.media_type != photo_media_type(purpose, saved_photo_format(action))):
             raise _HostPhotoPairError("主机拍摄草稿的身份、字节摘要或元信息与来源不一致")
     original_id = sources[_KIND_CODES[OutputKind.ORIGINAL]]["id"]
     if (preview.original_batch_intermediate_file_id != original_id
@@ -601,7 +628,7 @@ def _host_photo_registered_pair(
     origins: Mapping[int, Mapping[str, Any]],
     action_id: int,
     sources: Mapping[int, Mapping[str, Any]],
-    *, device: bool = False,
+    *, device: bool = False, action,
 ) -> None:
     """检查保存或提案中的两份正式产物和唯一原图关联。"""
     action_outputs = {
@@ -628,8 +655,8 @@ def _host_photo_registered_pair(
                 or values.get(other_column) is not None
                 or not isinstance(values.get("original_name"), str)
                 or not values["original_name"]
-                or not isinstance(values.get("media_type"), str)
-                or not values["media_type"]):
+                or values.get("media_type") != photo_media_type(
+                    FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name], saved_photo_format(action))):
             raise _HostPhotoPairError("正式产物角色、文件身份或可读元信息与主机责任不一致")
     original_links = [values for values in origins.values()
                       if values.get("output_id") == original_id]
@@ -646,10 +673,12 @@ def _guard_host_photo_completion(
         "intermediate_files", "owner_action_id", action_id)
     if device_spec:
         device_rows = context.complete_rows("device_files", "source_action_id", action_id)
-        sources = _device_photo_source_pair(device_rows, source_rows, action_id, terminal=terminal)
+        sources = _device_photo_source_pair(device_rows, source_rows, action_id, terminal=terminal,
+            action=context.state_rows["actions"][action_id])
     else:
         sources = _host_photo_source_pair(
-            source_rows, action_id, host_spec=host_spec, terminal=terminal)
+            source_rows, action_id, host_spec=host_spec, terminal=terminal,
+            action=context.state_rows["actions"][action_id])
     if sources is None:
         return
     context.complete_rows("outputs", "source_action_id", action_id)
@@ -658,7 +687,8 @@ def _guard_host_photo_completion(
         raise EventValidationError("成功单张拍摄缺少同事务完整产物提案")
     outputs = transaction_rows.get("outputs", {})
     origins = transaction_rows.get("output_origins", {})
-    _host_photo_registered_pair(outputs, origins, action_id, sources, device=device_spec)
+    _host_photo_registered_pair(outputs, origins, action_id, sources, device=device_spec,
+        action=context.state_rows["actions"][action_id])
     action_outputs = [
         (identity, values)
         for identity, values in outputs.items()
@@ -823,6 +853,9 @@ def _output_file(values, context) -> None:
             _require_repair_success(context, source_id, values.get("intermediate_file_id"))
         else:
             _require_promotable_host_photo(facts, source, kind)
+            if values.get("media_type") != photo_media_type(
+                    FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name], saved_photo_format(source)):
+                raise EventValidationError("主机照片媒体类型与保存格式及用途不一致")
             if any(not isinstance(values.get(name), str) or not values[name]
                    for name in ("original_name", "media_type")):
                 raise EventValidationError("主机拍摄源登记缺少可靠可读元信息")
@@ -844,6 +877,9 @@ def _require_promotable_host_photo(facts, source, kind) -> None:
         raise EventValidationError("主机拍摄源缺少精确正大小或完整小写 SHA-256")
     try:
         validate_relative_file_path(purpose, facts["id"], facts["relative_path"])
+        if facts["relative_path"] != relative_file_path(purpose, facts["id"],
+                photo_file_extension(purpose, saved_photo_format(source))):
+            raise ValueError("提升路径与原保存格式不一致")
     except ValueError as error:
         raise EventValidationError("主机拍摄源路径与稳定身份不一致") from error
 
@@ -1137,16 +1173,16 @@ class FinishCaptureCommand:
                     and read_action_spec(action).get("output_storage") == "device"):
                 photo_sources = _device_photo_source_pair(
                     self._state.get("device_files", {}),
-                    self._state.get("intermediate_files", {}), command.action_id)
+                    self._state.get("intermediate_files", {}), command.action_id, action=action)
                 _device_photo_drafts(command.drafts, photo_sources)
             else:
                 photo_sources = _host_photo_source_pair(
                     self._state.get("intermediate_files", {}), command.action_id,
-                    host_spec=host_spec)
+                    host_spec=host_spec, action=action)
                 if photo_sources is not None:
                     if action["type"] != _ACTION_TYPE.CAMERA_TAKE_PHOTO:
                         raise TransactionError("主机拍摄文件责任只能由单张拍摄动作完成")
-                    _host_photo_drafts(command.drafts, photo_sources)
+                    _host_photo_drafts(command.drafts, photo_sources, action=action)
 
         first_output_id = _next_id(connection, "outputs")
         numbered = tuple((first_output_id + index, output) for index, output in enumerate(changes.outputs))
@@ -1332,18 +1368,18 @@ class FinishCaptureCommand:
             if device:
                 sources = _device_photo_source_pair(
                     self._state.get("device_files", {}), self._state.get("intermediate_files", {}),
-                    action_id, terminal=True)
+                    action_id, terminal=True, action=action)
                 _device_photo_drafts(self._command.drafts, sources)
             else:
                 sources = _host_photo_source_pair(
                     self._state.get("intermediate_files", {}), action_id,
-                    host_spec=host_spec, terminal=True)
+                    host_spec=host_spec, terminal=True, action=action)
                 if sources is None:
                     return
-                _host_photo_drafts(self._command.drafts, sources)
+                _host_photo_drafts(self._command.drafts, sources, action=action)
             _host_photo_registered_pair(
                 self._state.get("outputs", {}), self._state.get("output_origins", {}),
-                action_id, sources, device=device)
+                action_id, sources, device=device, action=action)
         except _HostPhotoPairError as error:
             raise ConsistencyError(
                 "已终态单张动作缺少可靠原图/预览配对，不能恢复为成功"

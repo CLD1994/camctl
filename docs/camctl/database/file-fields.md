@@ -64,6 +64,8 @@
 
 清理失败或未知时 `last_error_json` 必填；完成时清除当前错误。文件不存在只有在可靠查询结果成立时才能记为完成。`RELEASABLE` 必须同时选择一个清理阶段，不能保留 `NOT_NEEDED`。已清理文件的行、大小、摘要和所有权历史永久保留。`PROMOTED` 后正式清理文件，保留 `PROMOTED`，由正式产物的 `availability`、清理明细和文件的可靠清理结果保存实际删除事实，不把中间文件自动清理责任重新打开。
 
+相机正式源可靠登记后，主机拍摄副本可以按上述生命周期进入回收。核实已经提交的原准备或完整字节申请时，沿原操作键、原完整申请及原文件身份读取可靠历史；副本处于合法 `RELEASABLE` 清理状态或实际文件已经删除，不使原提交变为未知。该复用还须核对原动作终态、完整设备双源及已登记的正式原图／预览关系。新申请继续检查原写入资格，未可靠登记正式双产物的责任不能仅凭回收状态绕过资格。
+
 ## 中间文件的路径与用途目录
 
 例如，部署的 `paths.staging` 为 `/srv/camctl/staging`，文件 28 的 `relative_path` 为 `recording-inputs/28.mp4`，实际工作位置就是 `/srv/camctl/staging/recording-inputs/28.mp4`。数据库不再附加一层 `staging`，也不按 CLI 工作目录或配置文件所在目录解释这个值。
@@ -81,7 +83,7 @@
 | `CAPTURE_ORIGINAL` | `capture-originals/` | 单张拍摄的主机原图；启动前保存责任，归档完整后登记为正式原图 |
 | `CAPTURE_PREVIEW` | `capture-previews/` | 单张拍摄的主机配对预览；与原图责任共同保存，归档完整后登记为正式预览 |
 
-`relative_path` 固定为 `<用途子目录>/<intermediate_files.id>[.<ext>]`。文件 ID 使用无前导零的正整数十进制表示；旧四种用途 `DELIVERY_COPY`、`RECORDING_INPUT`、`PROCESSING_TEMP`、`REPAIR_OUTPUT` 的扩展名仍可省略，并由文件生产方按工具或类型契约确定，只含非空 ASCII 字母或数字。单张拍摄的 `CAPTURE_ORIGINAL` 固定使用 `3fr`，`CAPTURE_PREVIEW` 固定使用 `jpg`；路径生成和已保存路径校验共同使用 `camctl.host_files.paths.PURPOSE_FIXED_EXTENSIONS`，因此归档和恢复经 `resolve_file` 定位时也会拒绝错扩展名。整个文件名不超过 255 个 ASCII 字节。路径使用 `/` 分隔且恰好两段，不接受绝对路径、空段、`.`、`..`、反斜杠、NUL 或额外层级。目录须与 `purpose` 相符，文件名中的 ID 须与本行相同；不得直接拼入设备路径、用户名称或工具返回的任意路径。无法形成合格名称时，拒绝登记并保留具体错误，不先创建一个无法恢复定位的文件。
+`relative_path` 固定为 `<用途子目录>/<intermediate_files.id>[.<ext>]`。文件 ID 使用无前导零的正整数十进制表示；通用用途 `DELIVERY_COPY`、`RECORDING_INPUT`、`PROCESSING_TEMP`、`REPAIR_OUTPUT` 的扩展名可省略，并由文件生产方按工具或类型契约确定，只含非空 ASCII 字母或数字。单张拍摄在创建文件责任时，从原动作的 `capture_format` 和显式用途选择扩展名；原图与预览格式由 [Hasselblad 文件角色契约](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#rawjpeg-与产物角色)定义。代码中的格式描述只在 `camctl.host_files.photo_formats.CAPTURE_FORMATS` 维护，驱动参数入口转出同一对象。路径生成与结构校验从该定义派生各用途允许的扩展名；能够读取原动作的准备、完整字节、成功登记、提升及恢复仓储还须核对路径与当时保存格式相符。归档同时接收显式用途和原格式，验证目标责任、路径、媒体类型及实际内容，不能以 JPEG 媒体类型推断预览用途。整个文件名不超过 255 个 ASCII 字节。路径使用 `/` 分隔且恰好两段，不接受绝对路径、空段、`.`、`..`、反斜杠、NUL 或额外层级。目录须与 `purpose` 相符，文件名中的 ID 须与本行相同；不得直接拼入设备路径、用户名称或工具返回的任意路径。无法形成合格名称时，拒绝登记并保留具体错误，不先创建一个无法恢复定位的文件。
 
 用途、责任、路径与文件 ID 在创建后保持不变；重试及重拷复用原记录和位置，只有独立的新文件才分配新 ID。修复目标可以在 `derived` 中逐步形成，完整性、后续用途及正式产物资格由记录判定。提升为正式产物只新增产物关联并保存保留状态，不移动文件、不更改路径；失败或取消留下的修复目标按中间文件的保留和清理规则处理。
 

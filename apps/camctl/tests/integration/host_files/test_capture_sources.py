@@ -334,7 +334,7 @@ async def test_archive_moves_validated_source_to_its_registered_role(
     target = _target(roots)
     target_path = roots.staging / target.relative_path
 
-    await archive_capture_file(roots, "42", artifact, target)
+    await archive_capture_file(roots, "42", artifact, target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert source.exists() is False
     assert target_path.read_bytes() == _RAW
@@ -357,7 +357,7 @@ async def test_archive_refuses_to_overwrite_an_unknown_target(
     target_path.write_bytes(b"unknown existing file")
 
     with pytest.raises(CaptureFileError) as failure:
-        await archive_capture_file(roots, "42", artifact, target)
+        await archive_capture_file(roots, "42", artifact, target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert failure.value.stage == "target_conflict"
     assert source.read_bytes() == _RAW
@@ -379,8 +379,8 @@ async def test_archive_retry_reuses_the_matching_target_after_source_move(
     target = _target(roots)
     target_path = roots.staging / target.relative_path
 
-    await archive_capture_file(roots, "42", artifact, target)
-    await archive_capture_file(roots, "42", artifact, target)
+    await archive_capture_file(roots, "42", artifact, target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
+    await archive_capture_file(roots, "42", artifact, target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert source.exists() is False
     assert target_path.read_bytes() == _RAW
@@ -398,7 +398,7 @@ async def test_archive_refuses_when_both_source_and_target_are_missing(
     )
 
     with pytest.raises(CaptureFileError) as failure:
-        await archive_capture_file(roots, "42", artifact, _target(roots))
+        await archive_capture_file(roots, "42", artifact, _target(roots), purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert failure.value.stage == "source_and_target_missing"
 
@@ -418,7 +418,7 @@ async def test_archive_rechecks_source_content_before_moving(
     target_path = roots.staging / _target(roots).relative_path
 
     with pytest.raises(CaptureFileError):
-        await archive_capture_file(roots, "42", artifact, _target(roots))
+        await archive_capture_file(roots, "42", artifact, _target(roots), purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert source.exists()
     assert len(source.read_bytes()) == artifact.size_bytes
@@ -436,6 +436,52 @@ async def test_archive_requires_target_role_to_match_media_type(tmp_path: Path) 
     )
 
     with pytest.raises(CaptureFileError) as failure:
-        await archive_capture_file(roots, "42", artifact, _target(roots, original=False))
+        await archive_capture_file(roots, "42", artifact, _target(roots, original=False), purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="raw")
 
     assert failure.value.stage == "target_role"
+
+
+async def test_archive_uses_explicit_role_for_two_jpegs(tmp_path):
+    roots, workspace = await _prepared_workspace(tmp_path)
+    original_bytes = b"\xff\xd8original\xff\xd9"
+    preview_bytes = b"\xff\xd8preview\xff\xd9"
+    original = CapturedArtifact("capture.jpg", len(original_bytes), hashlib.sha256(original_bytes).hexdigest(), "image/jpeg")
+    preview = CapturedArtifact("capture.jpg.thumbnail.jpg", len(preview_bytes), hashlib.sha256(preview_bytes).hexdigest(), "image/jpeg")
+    (workspace / original.original_name).write_bytes(original_bytes)
+    (workspace / preview.original_name).write_bytes(preview_bytes)
+    original_target = FileRef(701, FilePurpose.CAPTURE_ORIGINAL, "capture-originals/701.jpg", roots.staging)
+    preview_target = _target(roots, original=False)
+    with pytest.raises(CaptureFileError) as wrong_role:
+        await archive_capture_file(roots, "42", original, preview_target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="jpeg")
+    assert wrong_role.value.stage == "target_role"
+    await archive_capture_file(roots, "42", original, original_target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="jpeg")
+    await archive_capture_file(roots, "42", preview, preview_target, purpose=FilePurpose.CAPTURE_PREVIEW, capture_format="jpeg")
+    assert (roots.staging / original_target.relative_path).read_bytes() == original_bytes
+    assert (roots.staging / preview_target.relative_path).read_bytes() == preview_bytes
+
+
+async def test_jpeg_archive_rejects_non_jpeg_content_without_removing_source(tmp_path):
+    roots, workspace = await _prepared_workspace(tmp_path)
+    invalid = b"II*\x00not-jpeg"
+    source = workspace / "capture.jpg"
+    source.write_bytes(invalid)
+    artifact = CapturedArtifact(source.name, len(invalid), hashlib.sha256(invalid).hexdigest(), "image/jpeg")
+    target = FileRef(701, FilePurpose.CAPTURE_ORIGINAL, "capture-originals/701.jpg", roots.staging)
+    with pytest.raises(CaptureFileError) as failure:
+        await archive_capture_file(roots, "42", artifact, target, purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format="jpeg")
+    assert failure.value.stage == "source_media"
+    assert source.read_bytes() == invalid
+    assert not (roots.staging / target.relative_path).exists()
+
+
+async def test_verify_rejects_two_names_for_the_same_physical_capture_file(tmp_path):
+    roots, workspace = await _prepared_workspace(tmp_path)
+    original = workspace / "capture.jpg"
+    original.write_bytes(_JPEG)
+    os.link(original, workspace / "capture.jpg.thumbnail.jpg")
+    specs = (CaptureFileSpec("capture.jpg", len(_JPEG), "image/jpeg"),
+             CaptureFileSpec("capture.jpg.thumbnail.jpg", len(_JPEG), "image/jpeg"))
+    with pytest.raises(CaptureFileError) as failure:
+        await verify_capture_files(roots, "42", specs)
+    assert failure.value.stage == "source_identity"
+    assert original.read_bytes() == _JPEG

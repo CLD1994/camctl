@@ -13,7 +13,9 @@ from camctl.host_files.capture_sources import (
     CapturedArtifact,
     archive_capture_file,
 )
-from camctl.host_files.models import FileRef
+from camctl.host_files.models import FileRef, FilePurpose
+from camctl.host_files.photo_formats import CAPTURE_FORMATS
+from camctl.capture.photo_format import saved_photo_format
 from camctl.operations.models import AttemptTicket, EffectState
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.result_format import read_result_document
@@ -240,14 +242,14 @@ def _photo_artifacts(runtime, action_id: int, saved: SavedPhotoReturn):
     except (KeyError, ValueError, TypeError) as failure:
         raise ConsistencyError(
             f"已确认成功的主机单张原图或预览事实无效: {failure}") from failure
-    from camctl.devices.drivers.hasselblad.parameters import CAPTURE_FORMATS
-
-    allowed_media_pairs = {
-        (description.original_media_type, description.preview_media_type)
-        for description in CAPTURE_FORMATS.values()
-    }
-    if (original.media_type, preview.media_type) not in allowed_media_pairs:
-        raise ConsistencyError("已确认成功的主机单张原图与预览媒体类型不符")
+    description = CAPTURE_FORMATS[saved_photo_format(runtime.action(action_id))]
+    if ((original.media_type, preview.media_type) !=
+            (description.original_media_type, description.preview_media_type)
+            or original.original_name == preview.original_name
+            or not original.original_name.casefold().endswith(description.original_extension)
+            or preview.original_name != original.original_name + ".thumbnail" + description.preview_extension):
+        raise ConsistencyError("已确认成功的单张原图与预览不符合保存格式或配对身份")
+    _capture_locator(outcome)
     return outcome, (original, preview)
 
 
@@ -255,7 +257,8 @@ def _file_ref(prepared, root) -> FileRef:
     return FileRef(prepared.file_id, prepared.purpose, prepared.relative_path, root)
 
 
-def _failure(runtime, action_id: int, *, unconfirmed: bool, occurred_at: int) -> None:
+def _failure(runtime, action_id: int, *, unconfirmed: bool, occurred_at: int,
+             reason: str = "device_failed") -> None:
     from camctl.capture.handlers import _settle_open_start, _unconfirmed_failure
     from camctl.capture.media import RecordingFailure
     from camctl.operations.attempts import RunOutcome
@@ -268,7 +271,7 @@ def _failure(runtime, action_id: int, *, unconfirmed: bool, occurred_at: int) ->
             error=ErrorValue("result_unconfirmed", "device"))
     else:
         failure = RecordingFailure("capture_failed", {
-            "activity_id": str(activity_id), "reason": "device_failed"})
+            "activity_id": str(activity_id), "reason": reason})
     runtime.save_capture_completion(FinishCapture(
         action_id, (), OutputCatalogFacts(action_id, True), occurred_at,
         failure=failure))
@@ -482,16 +485,28 @@ async def advance_host_photo(runtime, action_id: int) -> None:
         return
 
     original, preview = artifacts
+    from camctl.devices.drivers.hasselblad.files import CameraLocatorStatus
+    if (not is_saved_host_photo(action)
+            and _capture_locator(outcome).status is CameraLocatorStatus.EXPLICIT_MISSING):
+        # 合法的缺名响应不是状态库损坏；保留原观察和工作文件，按业务
+        # 结果不满足登记契约结束，不补造设备源或释放文件责任。
+        _conclude_activity(runtime, action_id)
+        _failure(runtime, action_id, unconfirmed=False, occurred_at=saved.occurred_at,
+                 reason="invalid_outputs")
+        return
+    capture_format = saved_photo_format(action)
     # 归档按固定顺序逐件幂等提交。原图成功而预览中断时，恢复会复用
     # 已匹配的原图目标，再完成预览，不重新访问相机。
     files = _prepare_files(runtime, action_id)
     await archive_capture_file(
         roots, saved.ticket.target_id, original,
         _file_ref(files.original, roots.staging),
+        purpose=FilePurpose.CAPTURE_ORIGINAL, capture_format=capture_format,
     )
     await archive_capture_file(
         roots, saved.ticket.target_id, preview,
         _file_ref(files.preview, roots.staging),
+        purpose=FilePurpose.CAPTURE_PREVIEW, capture_format=capture_format,
     )
     occurred_at = saved.occurred_at
     _save_complete(runtime, action_id, HostPhotoComplete(
