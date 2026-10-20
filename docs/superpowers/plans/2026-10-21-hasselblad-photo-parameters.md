@@ -149,6 +149,10 @@ camctl_pytest() {
 
 **输入与交付：** 消费 H1—H3 的参数、解析和文件角色接口；交付完整 `photo_taken` 内部结果及步骤事实，供原尝试保存和 H5 收场使用。
 
+**内部结果接缝：** 按[独立内部诊断契约](../../camctl/database/operation-fields.md#受管工具的内部诊断)扩展当前尝试结果：原始双流与结构化结果同事务保存，不能将整份输出放入观察或错误步骤来代替独立诊断。预计涉及 `operations/models.py`、`result_format.py`、`validation.py`、`devices/evidence.py`，以及原结果保存和事件守卫；可以增加专责诊断类型与纯编解码模块。命令槽与数量上限同源，历史只消费冻结值，公共协议保持所属业务表示。
+
+先为类型、可逆字节编码、每流上限、数量上限及双流空缺状态增加失败测试，再接入驱动。RAW／JPEG 分别覆盖 stdout 缺名、stderr 缺名、跨流重复／冲突及必要流失败；原始字节包含非法 UTF-8 或 NUL 时仍可作为诊断往返，不代表合法响应语法。增加真实 SQLite 的原结果、历史、同键重送及保存未知测试；改变诊断任一字节必须被原申请核实拒绝。编码失败保留原完整申请，不进入用替代结果覆盖原失败的路径，不重发设置、调焦或拍摄。
+
 - [ ] **步骤 1：增加参数到命令的测试。** `test_photo_setup_commands_follow_selected_branches` 覆盖 M／A／S／P 的适用字段、所有白平衡模式、MF 省略／正负移动及 AF-S。手动白平衡严格为 `wb-mode manual` 后 `wb <温度>,0`；自动分支没有额外色温设置。AF-S 设置后恰执行一次 autofocus；MF 省略移动时只设置模式。
 - [ ] **步骤 2：增加真实调用边界的测试。** `test_photo_driver_checks_identity_before_any_setting` 验证缺失、多台、序列号不符时零设置零拍摄；`test_photo_driver_uses_saved_values_in_structured_argv` 核对配置产品标识、原工作目录及三个短快门，确认原始精确值进入十进制 argv。
 - [ ] **步骤 3：增加预算和失败测试并确认失败。** `test_photo_commands_share_one_monotonic_start_budget` 使用可控时钟扣减 list、设置、调焦等耗时，断言后续命令使用剩余预算；`test_focus_success_then_capture_blocked_preserves_side_effect` 保存移动成功及照片 `NO_EFFECT`。`test_attempt_status_is_independent_from_capture_effect` 分别覆盖调焦结果未知但 capture 可靠未发、capture 超时且实际错误已取得、原调用结果完全缺失：前两项保存实际失败，后一项保存尝试未知；采集效果独立判断。运行驱动／命令单元和 `camctl_pytest apps/camctl/tests/integration/devices -q`。
