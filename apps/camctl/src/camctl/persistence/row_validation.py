@@ -1,7 +1,8 @@
 """用权威 SQLite 结构校验完整投影行，不保存业务事实。
 
-一次快照读取复用一个空内存结构。原始类型先核对，SQL 参数仅作
-精确适配；每行在保存点内校验并回滚，调用者的原始映像保持不变。
+一次快照读取复用一个校验结构；增长对象的唯一键使用磁盘文件。
+原始类型先核对，SQL 参数仅作精确适配；每行在保存点内校验并
+回滚，调用者的原始映像保持不变。
 独立对象的外键与同边界归属由历史读取者核对，不复制外部对象。
 """
 
@@ -45,7 +46,8 @@ def _schema_scripts() -> tuple[str, ...]:
 class ProjectionRowValidator:
     """在一个快照读取范围内复用空结构和已查询的表元数据。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, storage_path=None) -> None:
+        self._storage_path = storage_path
         self._connection: sqlite3.Connection | None = None
         self._columns: dict[str, tuple[tuple[str, str, bool], ...]] = {}
         self._indexes: dict[str, tuple[_UniqueIndex, ...]] = {}
@@ -54,10 +56,13 @@ class ProjectionRowValidator:
     def __enter__(self) -> ProjectionRowValidator:
         if self._connection is not None:
             raise ProjectionRowValidationError("完整行校验器不能重复进入读取范围")
-        connection = sqlite3.connect(":memory:", isolation_level=None)
+        connection = sqlite3.connect(str(self._storage_path) if self._storage_path is not None else ":memory:", isolation_level=None)
         try:
-            with closing(connection.execute("PRAGMA temp_store = MEMORY")):
+            with closing(connection.execute("PRAGMA temp_store = FILE" if self._storage_path is not None else "PRAGMA temp_store = MEMORY")):
                 pass
+            connection.execute("PRAGMA cache_size=-2048").close()
+            if self._storage_path is not None:
+                connection.execute("PRAGMA temp.cache_size=-2048").close()
             for script in _schema_scripts():
                 with closing(connection.executescript(script)):
                     pass

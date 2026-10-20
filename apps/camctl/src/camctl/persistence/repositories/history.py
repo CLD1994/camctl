@@ -9,10 +9,15 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from contextlib import closing, contextmanager
 from collections.abc import Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from camctl.history.bounded import SegmentHistoryHandle
+    from camctl.history.snapshot_stream import PreparedSnapshotSource
 
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.history_values import (
@@ -109,10 +114,18 @@ class HistoryRepository:
         self._instance_id: str | None = None
         # 不可变历史允许复用已核验的组；只保留固定 H 和上一页末组。
         self._validated_ranges: dict[int, TransactionRange] = {}
+        self._current_range: TransactionRange | None = None
 
     def _connect(self) -> sqlite3.Connection:
         owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
-        return owned.connection
+        try:
+            owned.connection.execute("PRAGMA cache_size=-2048").close()
+            owned.connection.execute("PRAGMA temp_store=FILE").close()
+            owned.connection.execute("PRAGMA temp.cache_size=-2048").close()
+            return owned.connection
+        except BaseException:
+            owned.connection.close()
+            raise
 
     def current_boundary(self) -> HistoryBoundary:
         with self._read_connection() as connection:
@@ -120,26 +133,48 @@ class HistoryRepository:
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
-        connection = self._connect()
+        try:
+            connection = self._connect()
+        except BaseException:
+            self._validated_ranges.clear()
+            self._current_range = None
+            raise
         try:
             with closing(connection.execute("BEGIN")):
                 pass
-            instance_id = _one(connection, "SELECT instance_id FROM database_metadata")[0]
-            if self._instance_id is None:
-                self._instance_id = instance_id
-            elif self._instance_id != instance_id:
-                raise ConsistencyError("历史读取的数据库实例身份发生变化")
+            self._bind_instance(connection, from_repository=True)
             yield connection
             with closing(connection.execute("COMMIT")):
                 pass
         except BaseException:
             self._validated_ranges.clear()
+            self._current_range = None
             raise
         finally:
             connection.close()
 
-    @staticmethod
-    def _boundary(connection: sqlite3.Connection) -> HistoryBoundary:
+    def _bind_instance(self, connection, *, from_repository=False):
+        instance_id = _one(connection, "SELECT instance_id FROM database_metadata")[0]
+        if self._instance_id is None:
+            if from_repository:
+                self._instance_id = instance_id
+            else:
+                # 外部一致视图不能自行声明仓储所属实例；先核对仓储路径。
+                with closing(self._connect()) as own:
+                    self._instance_id = _one(own, "SELECT instance_id FROM database_metadata")[0]
+        if self._instance_id != instance_id:
+            raise ConsistencyError("历史读取的数据库实例身份发生变化")
+
+    def _boundary(self, connection: sqlite3.Connection) -> HistoryBoundary:
+        try:
+            self._bind_instance(connection)
+            return self._boundary_within(connection)
+        except BaseException:
+            self._validated_ranges.clear()
+            self._current_range = None
+            raise
+
+    def _boundary_within(self, connection: sqlite3.Connection) -> HistoryBoundary:
         row = _one(connection,
             "SELECT id, last_event_id FROM history_transactions"
             " WHERE id = (SELECT MAX(id) FROM history_transactions)"
@@ -155,7 +190,9 @@ class HistoryRepository:
             raise ConsistencyError("当前历史边界无效") from error
         if latest != boundary.last_event_id:
             raise ConsistencyError("当前历史事务边界与末事件不一致")
-        _transaction_range(connection, boundary.txn_id)
+        checked = self._current_range
+        self._current_range = _transaction_range(connection, boundary.txn_id,
+            checked if checked is not None and checked.txn_id == boundary.txn_id else None)
         return boundary
 
     def read_events(
@@ -345,6 +382,92 @@ class HistoryRepository:
             rows = cursor.fetchall()
         return {int(row[0]): int(row[1]) for row in rows}
 
+    def open_segment_history(
+            self, action_id: int, boundary: HistoryBoundary, *,
+            strategy: str = "auto", batch_size: int = 128,
+    ) -> SegmentHistoryHandle:
+        """完整恢复后返回有界动作句柄；调用者必须关闭句柄。"""
+        from camctl.history.bounded import SegmentHistoryHandle, _limit
+        _limit(batch_size)
+        if strategy not in ("auto","initial","current","snapshot"):
+            raise ValueError("未知历史恢复路径")
+        with self._read_connection() as connection:
+            seed = self._object_seed(connection, "action", action_id, boundary,
+                                     event_batch_size=batch_size, primary_only=True,
+                                     include_snapshot=strategy != "initial",
+                                     allow_current_snapshot=strategy == "snapshot")
+        if strategy == "auto":
+            choice = seed.snapshot
+            strategy = ("snapshot" if choice is not None and
+                        (choice.boundary == boundary or
+                         seed.floor[1]-choice.position[1] < seed.head[1]-seed.floor[1])
+                        else "current")
+        handle = SegmentHistoryHandle(self, seed, batch_size)
+        try:
+            return handle.restore(strategy)
+        except (ReplayError,EventValidationError,ValueError,TypeError,KeyError) as error:
+            handle.close()
+            if isinstance(error,ConsistencyError):
+                raise
+            raise ConsistencyError("分段动作历史无法可靠恢复") from error
+        except BaseException:
+            handle.close()
+            raise
+
+    def restore_primary_at_h(self, entity, entity_id, boundary, *, event_batch_size=128):
+        """仅恢复对象主行；子表增长不会进入有限主行消费者。"""
+        rows = self._restore_limited_at_h(entity,entity_id,boundary,event_batch_size=event_batch_size)
+        table = load_enum_registry()["history_objects"][entity]["table"]
+        return rows.get((table,entity_id))
+
+    def _restore_limited_at_h(self, entity, entity_id, boundary, *, event_batch_size=128,
+                              include_file_refs=False):
+        """主行及至多一份内部处理/拷贝引用，均为固定容量。"""
+        with self._read_connection() as connection:
+            seed = self._object_seed(connection, entity, entity_id, boundary,
+                event_batch_size=event_batch_size, include_snapshot=False, primary_only=True)
+            rows = dict(seed.rows)
+            if include_file_refs:
+                with closing(connection.execute("SELECT id FROM recording_processing WHERE action_id=? LIMIT 2",(entity_id,))) as cursor:
+                    processing = cursor.fetchall()
+                if len(processing) > 1:
+                    raise ConsistencyError("动作内部处理引用不唯一")
+                for (processing_id,) in processing:
+                    rows[("recording_processing",processing_id)] = _table_row(connection,"recording_processing",processing_id)
+                    with closing(connection.execute("SELECT id FROM file_copies WHERE processing_id=? LIMIT 2",(processing_id,))) as cursor:
+                        copies = cursor.fetchall()
+                    if len(copies) > 1:
+                        raise ConsistencyError("处理拷贝引用不唯一")
+                    for (copy_id,) in copies:
+                        rows[("file_copies",copy_id)] = _table_row(connection,"file_copies",copy_id)
+            seed = replace(seed,rows=rows)
+        keys = frozenset(rows)
+        count, previous = seed.head[1], seed.current.last_event_id+1
+        while count > seed.floor[1]:
+            events = self._object_event_page(seed.ref,boundary,seed.current,previous,count,
+                forward=False,batch_size=event_batch_size,remaining=count-seed.floor[1])
+            for event in events:
+                for change in event.rows:
+                    key = (change.table,change.row_id)
+                    if key not in keys:
+                        continue
+                    if not change.before.exists:
+                        current = rows.pop(key,None)
+                        if current is None or not json_equal(
+                                {name:current[name] for name in business_columns(change.table)},
+                                dict(change.after.values)):
+                            raise ConsistencyError("主行创建依据不连续")
+                    else:
+                        if key not in rows:
+                            raise ConsistencyError("恢复缺少对象主行")
+                        rows[key] = reverse_row_values(rows[key],change,frozenset(rows[key]))
+                count -= 1
+                previous = event.event_id
+        restored = self._finish_rows(seed,rows)
+        if entity == "action" and ("actions",entity_id) in restored:
+            read_action_spec(restored[("actions",entity_id)])
+        return restored
+
     def restore_entity(
         self, entity: str, entity_id: int, boundary: HistoryBoundary,
         *, event_batch_size: int = 128,
@@ -394,19 +517,26 @@ class HistoryRepository:
         """在调用方一致视图内复制当前对象，供快照种子读取。
 
         历史恢复须使用 restore_entity，使事件应用不持有读取事务。
-        本入口只接受该视图的完整当前边界。
+        调用方须持有本仓储实例的读取事务；本入口只接受该视图的
+        完整当前边界，并核对外部连接属于该实例。
         """
-        seed = self._object_seed(
-            connection, entity, entity_id, boundary,
-            event_batch_size=event_batch_size, include_snapshot=False)
-        if boundary != seed.current:
-            raise ConsistencyError("一致视图复制只接受当前边界，历史恢复须释放每页读事务")
-        return self._finish_rows(seed, dict(seed.rows))
+        try:
+            seed = self._object_seed(
+                connection, entity, entity_id, boundary,
+                event_batch_size=event_batch_size, include_snapshot=False)
+            if boundary != seed.current:
+                raise ConsistencyError("一致视图复制只接受当前边界，历史恢复须释放每页读事务")
+            return self._finish_rows(seed, dict(seed.rows))
+        except BaseException:
+            self._validated_ranges.clear()
+            self._current_range = None
+            raise
 
     def _object_seed(
             self, connection: sqlite3.Connection, entity: str,
             entity_id: int, boundary: HistoryBoundary, *, event_batch_size: int,
-            include_snapshot: bool = True,
+            include_snapshot: bool = True, primary_only: bool = False,
+            allow_current_snapshot: bool = False,
     ) -> _ObjectSeed:
         from camctl.persistence.row_history import _anchor
 
@@ -421,10 +551,16 @@ class HistoryRepository:
                 or boundary.last_event_id > current_boundary.last_event_id):
             raise ConsistencyError("恢复目标边界晚于可靠当前边界")
         if boundary != INITIAL_BOUNDARY:
-            transaction = _transaction_range(connection, boundary.txn_id)
+            checked = self._current_range
+            transaction = _transaction_range(connection, boundary.txn_id,
+                checked if checked is not None and checked.txn_id == boundary.txn_id else None)
             if transaction.last_event_id != boundary.last_event_id:
                 raise ConsistencyError("恢复目标 H 不是该历史事务的完整结束位置")
-        seeded = self._seed_entity_rows(connection, spec, entity_id)
+        if (not primary_only and entity == "action" and _one(connection,
+                "SELECT 1 FROM segment_sets WHERE action_id=? LIMIT 1",(entity_id,))):
+            raise ConsistencyError("分段动作须使用有界历史句柄或有限主行入口")
+        seeded = ({(spec["table"], entity_id): _table_row(connection, spec["table"], entity_id)}
+                  if primary_only else self._seed_entity_rows(connection, spec, entity_id))
         primary_key = (spec["table"], entity_id)
         if primary_key not in seeded:
             raise ConsistencyError(
@@ -448,7 +584,7 @@ class HistoryRepository:
                 or (floor[1] == head[1]) != (floor[0] == head[0])):
             raise ConsistencyError("H 的目录位置与当前对象目录矛盾")
         snapshot = None
-        if include_snapshot and head[1] != floor[1] and floor[1] > 0:
+        if include_snapshot and (head[1] != floor[1] or allow_current_snapshot) and floor[1] > 0:
             candidate = _one(connection,
                 "SELECT id, boundary_event_id, change_count, format_version"
                 " FROM entity_snapshots WHERE entity_type = ? AND entity_id = ?"
@@ -512,6 +648,8 @@ class HistoryRepository:
                 f"SELECT 1 FROM {spec['table']} WHERE id = ?", (entity_id,))
             if present is None:
                 return None
+        if entity == "action":
+            return self._restore_limited_at_h(entity,entity_id,boundary,include_file_refs=True) or None
         rows = self.restore_entity(entity, entity_id, boundary)
         return rows or None
 
@@ -1080,10 +1218,10 @@ def _event_range(scope: ReadScope[int], boundary: HistoryBoundary) -> tuple[int,
 class SqliteSnapshotStore:
     """经数据库线程以快照优先级执行的快照维护窄仓储。
 
-    候选查询与依据读取是读操作，依据读取在同一读事务内取一致
-    边界 S 并恢复全部对象；保存是短写事务，插入完整快照后按写
-    事务最新计数更新维护进度。入队前超时翻译为维护停用信号，
-    其余数据库失败按状态库错误表达。
+    候选查询与依据读取是读操作，依据读取先固定共同边界 S；分段
+    对象释放该事务后经短读恢复到 S。保存是短写事务，插入完整
+    快照后按写事务最新计数更新维护进度。入队前超时翻译为维护
+    停用信号，其余数据库失败按状态库错误表达。
     """
 
     def __init__(self, path: Path, executor: DbExecutor, *,
@@ -1106,7 +1244,8 @@ class SqliteSnapshotStore:
         return await self._run(DbJobKind.READ, execute, "快照候选查询")
 
     async def load_entity_images(
-            self, refs: tuple[SnapshotRef, ...]) -> tuple[EntityImage, ...]:
+            self, refs: tuple[SnapshotRef, ...]
+    ) -> tuple[EntityImage | SegmentHistoryHandle, ...]:
         repository = HistoryRepository(self._path, config=self._config)
 
         def execute(owned):
@@ -1118,6 +1257,10 @@ class SqliteSnapshotStore:
                 images = []
                 for ref in refs:
                     name = _snapshot_entity_name(ref.entity_type)
+                    if name == "action" and _one(connection,
+                            "SELECT 1 FROM segment_sets WHERE action_id=? LIMIT 1",(ref.entity_id,)):
+                        images.append((ref,boundary))
+                        continue
                     rows = repository.restore_within(
                         connection, name, ref.entity_id, boundary)
                     counted = _one(
@@ -1144,10 +1287,26 @@ class SqliteSnapshotStore:
                 with closing(connection.execute("ROLLBACK")):
                     pass
                 raise
-        return await self._run(DbJobKind.READ, execute, "快照依据读取")
+        loaded = await self._run(DbJobKind.READ, execute, "快照依据读取")
+        images = []
+        try:
+            for image in loaded:
+                if isinstance(image, tuple):
+                    ref,boundary = image
+                    image = repository.open_segment_history(ref.entity_id,boundary)
+                images.append(image)
+            return tuple(images)
+        except BaseException as error:
+            for image in images:
+                if hasattr(image,"close"):
+                    image.close()
+            if isinstance(error, Exception):
+                raise SnapshotMaintenanceError(f"快照依据读取失败: {error}") from error
+            raise
 
     async def save_snapshots(
-            self, prepared: tuple[PreparedSnapshot, ...]) -> tuple[SavedProgress, ...]:
+            self, prepared: tuple[PreparedSnapshot | PreparedSnapshotSource, ...]
+    ) -> tuple[SavedProgress, ...]:
         def execute(owned):
             connection = owned.connection
             try:
@@ -1196,7 +1355,8 @@ def _snapshot_entity_name(entity_type: int) -> str:
 
 
 def _save_one_snapshot(
-        connection: sqlite3.Connection, item: PreparedSnapshot) -> SavedProgress:
+        connection: sqlite3.Connection,
+        item: PreparedSnapshot | PreparedSnapshotSource) -> SavedProgress:
     """在保存事务内写入一份快照并按最新计数更新维护进度。"""
     progress = _one(
         connection,
@@ -1246,7 +1406,8 @@ def _save_one_snapshot(
 
 
 def _verify_existing_content(
-        connection: sqlite3.Connection, snapshot_id: int, item: PreparedSnapshot) -> None:
+        connection: sqlite3.Connection, snapshot_id: int,
+        item: PreparedSnapshot | PreparedSnapshotSource) -> None:
     """逐块核对既有快照字节与本次内容一致后复用，不重复扣减。"""
     with connection.blobopen(
             "entity_snapshots", "content", snapshot_id) as blob:
