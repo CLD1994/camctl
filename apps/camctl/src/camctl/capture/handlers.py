@@ -151,6 +151,7 @@ from camctl.operations.attempts import (
     RunOutcome,
     StaleRunFinish,
 )
+from camctl.operations.tool_diagnostics import ResultEncodingError
 from camctl.operations.models import (
     AttemptStatus,
     AttemptTicket,
@@ -1080,6 +1081,10 @@ class CaptureRuntime(_FileObservationSaves):
                     self.pending_start_results[identity] = pending
                 receipt = self._write_call_result(pending)
                 error = receipt.error
+                if isinstance(error, ResultEncodingError):
+                    raise error
+            except ResultEncodingError as failure:
+                raise ConsistencyError("原结果编码失败，完整结果与字节仍持有") from failure
             except (DatabaseAccessError, ConsistencyError) as failure:
                 receipt = None
                 error = failure

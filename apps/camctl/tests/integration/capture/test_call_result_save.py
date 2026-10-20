@@ -318,3 +318,50 @@ async def test_start_return_is_held_before_first_action_read(tmp_path, operation
         assert runtime.pending_start_results == {}
     finally:
         owned.connection.close()
+
+
+def _diagnosed_stop(runtime):
+    from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState
+    value = ToolDiagnostics(2, (ToolCallOutput(1, "stop", ToolStream(ToolStreamState.COMPLETE, b"\x00\xff"), ToolStream(ToolStreamState.COMPLETE, b"")),))
+    runtime.evidence = runtime.evidence.with_contract(replace(runtime.evidence.contract("stop_returned", 1), max_diagnostic_calls=2))
+    return replace(_outcome("stop", confirmed=True), diagnostics=value)
+
+
+async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_path, monkeypatch):
+    from camctl.operations import result_format
+    from camctl.operations.tool_diagnostics import ResultEncodingError
+    owned = _world(tmp_path)
+    try:
+        runtime = await _started(owned)
+        actual = _diagnosed_stop(runtime)
+        stopper = ReturnedCall(actual)
+        runtime.stopper = stopper
+        runtime.wall_us = lambda: _RETURNED_AT
+        encode = result_format.encode_diagnostics
+        count = 0
+        def failing(value):
+            nonlocal count
+            count += 1
+            if count == 1:
+                raise ResultEncodingError("诊断编码注入失败")
+            return encode(value)
+        monkeypatch.setattr(result_format, "encode_diagnostics", failing)
+        with pytest.raises(ConsistencyError):
+            await _stop_call(runtime, runtime.action(12))
+        assert count == 1
+        pending, = runtime.pending_start_results.values()
+        ticket = pending.finish.ticket
+        original_key = pending.key
+        assert pending.finish.outcome.outcome is actual
+        assert pending.finish.occurred_at == _RETURNED_AT
+        assert actual.diagnostics.calls[0].stdout.data == b"\x00\xff"
+        runtime.wall_us = lambda: _RETURNED_AT + 99
+        assert runtime.recover_attempt(ticket)
+        assert not runtime.pending_start_results
+        assert len(stopper.calls) == 1
+        row = owned.connection.execute("SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id JOIN history_transactions t ON e.id BETWEEN t.first_event_id AND t.last_event_id WHERE a.run_id=?", (ticket.run_id,)).fetchone()
+        assert json.loads(row[0])["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
+        assert row[1] == _RETURNED_AT
+        assert row[2] == str(original_key)
+    finally:
+        owned.connection.close()

@@ -2,6 +2,7 @@
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
+from camctl.operations.tool_diagnostics import encode_diagnostics, decode_diagnostics
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import (CallOutcome, CallInfo, AttemptStatus, EffectState,
     ErrorValue, EvidenceValue, Settlement, SettlementBasis)
@@ -39,6 +40,8 @@ def result_document(outcome: CallOutcome) -> dict:
         if outcome.call_info.remote_exit_code is not None:
             call_info["remote_exit_code"] = outcome.call_info.remote_exit_code
         document["call_info"] = call_info
+    if outcome.diagnostics is not None:
+        document["diagnostics"] = encode_diagnostics(outcome.diagnostics)
     return document
 
 
@@ -64,7 +67,7 @@ def read_result_document(status: int, effect: int, result: Mapping, error: Mappi
     status_value = AttemptStatus(enum_for("operation_attempts.status")(status).name.lower())
     effect_value = EffectState(enum_for("operation_attempts.effect_state")(effect).name.lower())
     if (not isinstance(result, Mapping) or not {"format_version", "settlement", "observations"} <= set(result)
-            or set(result) - {"format_version", "settlement", "observations", "call_info"}
+            or set(result) - {"format_version", "settlement", "observations", "call_info", "diagnostics"}
             or type(result["format_version"]) is not int or result["format_version"] != 1):
         raise ValueError("实际结果版本或登记成员无效")
     raw_settlement = result["settlement"]
@@ -102,4 +105,5 @@ def read_result_document(status: int, effect: int, result: Mapping, error: Mappi
         call_info = CallInfo(local_exit_code=local.get("exit_code"), local_signal=local.get("signal"),
                              remote_exit_code=info.get("remote_exit_code"))
     return CallOutcome(status=status_value, effect=effect_value, error=error, settlement=settlement,
-                       observations=observations, call_info=call_info)
+                       observations=observations, call_info=call_info,
+                       diagnostics=decode_diagnostics(result["diagnostics"]) if "diagnostics" in result else None)

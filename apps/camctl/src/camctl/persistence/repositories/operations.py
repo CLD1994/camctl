@@ -1600,6 +1600,12 @@ def _attempt_result_guard(event, context) -> None:
             _fail("未派发依据只支持无效果")
         if effect == int(_EFFECT_STATE.CONFIRMED) and not observations:
             _fail("已确认效果必须有承载观察")
+        if "diagnostics" in result:
+            from camctl.operations.tool_diagnostics import decode_diagnostics
+            try:
+                decode_diagnostics(result["diagnostics"])
+            except (ValueError, TypeError) as error:
+                _fail(f"内部工具诊断格式无效: {error}")
         call_info = result.get("call_info")
         if call_info is not None and not isinstance(call_info, Mapping):
             _fail("调用信息必须是对象")
