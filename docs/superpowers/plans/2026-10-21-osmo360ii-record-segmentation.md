@@ -1,6 +1,6 @@
 # OSMO 360 II 分段录像执行计划
 
-> **执行者要求：** 逐项使用 `superpowers:executing-plans`，或在用户选择分工实施后使用 `superpowers:subagent-driven-development`。用 `- [ ]` 跟踪实际完成情况。开始实施前先阅读本计划与设计规格；本文件的建立不表示实施、部署或拍摄已经开始。
+> **执行者要求：** 逐项使用 `superpowers:executing-plans`，或在用户选择分工实施后使用 `superpowers:subagent-driven-development`。用 `- [ ]` 跟踪实际完成情况。开始实施前先阅读本计划与设计规格；本文件按任务记录实施结果与待完成工作；软件、部署和真机证据分别核对。
 
 **目标：** 让 OSMO 360 II 的正常及异常普通录像，都能按实际分段登记、保留、选择、取回和报告，并能在进程中断后继续处理。
 
@@ -16,7 +16,7 @@
 
 每个任务都说明“做什么”和“为什么”。先增加能暴露当前问题的测试，实际确认失败，再修改生产代码；通过本任务的最窄验证后审查差异并作阶段提交。首次失败应来自缺少目标行为，不能以环境缺依赖、拼错路径或漏注册守卫作为有效的失败证据。
 
-本文的 camctl 源码路径相对于 `apps/camctl/src/camctl/`；客户端小节的 `src/` 路径相对于 `apps/client/`，其他路径均以仓库根为起点。建议新增的文件和测试在本文建立时尚不存在；执行命令在相应文件建立后运行。当前任务状态均为待执行，没有程序测试、安装包或真机通过结论。
+本文的 camctl 源码路径相对于 `apps/camctl/src/camctl/`；客户端小节的 `src/` 路径相对于 `apps/client/`，其他路径均以仓库根为起点。建议新增的文件和测试在本文建立时尚不存在；执行命令在相应文件建立后运行。实际完成情况由各任务勾选及阶段证据记录；单项软件通过不表示安装包或真机通过。
 
 ## 全局约束
 
@@ -41,9 +41,9 @@
 | 终态事务已经提交但回执丢失，或报告生成期间文件状态继续变化 | 沿原申请核实，不重复登记；报告仅使用自身历史边界的事实 | P3、P6 |
 | 多段具有相同内容，媒体未全部到达，但报告已完整应用 | 文件按交付名和身份独立关联；ACK 资格按报告覆盖判断，不等待媒体到齐 | P6、P8 |
 
-## 当前代码为什么需要这些工作
+## 实施起点与工作范围
 
-当前 OSMO 普通录像在 `devices/drivers/adb_cameras/osmo360ii_capture.py` 的 `_task()` 声明精确一份 OSV，所以两段录像会在数量检查中失败。现有分页已经可以读到多份文件，逐文件身份、独立交付和 LRF 配对也已有基础；因此应继续使用这些机制。
+在实施基线 `61459de` 中，OSMO 普通录像在 `devices/drivers/adb_cameras/osmo360ii_capture.py` 的 `_task()` 声明精确一份 OSV，所以两段录像会在数量检查中失败。现有分页已经可以读到多份文件，逐文件身份、独立交付和 LRF 配对也已有基础；因此应继续使用这些机制。
 
 但只放开数量还不够。`capture/handlers.py` 的 `_advance_recording_outcome()` 异常路径会进入单原片媒体处理；`_record_media_source()` 只接受一份处理输入。分段结果必须在共同入口按自己的完成规则处理。
 
@@ -74,7 +74,7 @@ P7 可以在其输入格式确定后与 P4—P6 独立推进。P3 涉及公共�
 | 建议位置 | 输入与输出 | 必须保持的边界 |
 | --- | --- | --- |
 | `devices/drivers/adb_cameras/osmo360ii_segments.py` | `parse_osmo_segment_key(path: str) -> SegmentKey \| None` | `SegmentKey` 包含整数目录号和 index；只解析顺序，不确认归属 |
-| `capture/segment_models.py`、`capture/segments.py` | `default_segment_count(target_duration_ms: int) -> int`；`advance_segment_assessment(state: SegmentAccumulator, member: SegmentMember) -> SegmentAccumulator`；`finish_segment_assessment(state: SegmentAccumulator, completion: CompletionFacts) -> SegmentAssessment`；`iter_segment_gaps(members: Iterable[SegmentMember], *, last_nonzero_cursor: SegmentCursor \| None, start_key: SegmentKey \| None) -> Iterator[SegmentGap]` | 首遍形成有限摘要并固定最后非零原片位置；第二遍在同一冻结成员范围内逐项产生缺口，不将成员或全部缺口装入摘要 |
+| `capture/segment_models.py`、`capture/segments.py` | `default_segment_count(target_duration_ms: int) -> int`；`advance_segment_assessment(state: SegmentAccumulator, member: SegmentMember) -> SegmentAccumulator`；`finish_segment_assessment(state: SegmentAccumulator, completion: CompletionFacts) -> SegmentAssessment`；`iter_segment_gaps(members: Iterable[SegmentMember], *, last_nonzero_cursor: SegmentCursor \| None, last_owned_cursor: SegmentCursor \| None, start_key: SegmentKey \| None) -> Iterator[SegmentGap]` | 首遍固定可信起点并保存最后非零与最后已确认归属的独立游标；第二遍在同一冻结成员范围内逐项产生确定缺口，不将成员或全部缺口装入摘要 |
 | `persistence/repositories/segments.py` | `iter_segment_members(scope: PlanReadScope, ref: SegmentSetRef, cursor: SegmentCursor \| None, limit: int) -> Page[SegmentMember, SegmentCursor]` | 引用绑定原动作、扫描及可靠末页；游标按完整排序键继续，错误不返回“读完” |
 | 同一仓储及终态保存入口 | `save_segment_assessment(request: SegmentAssessmentSave, operation_key: str, owned: OwnedConnection) -> DbOutcome`；`finish_segmented_capture(request: FinishSegmentedCapture, operation_key: str, owned: OwnedConnection) -> DbOutcome` | 请求引用可靠集合及判断，返回有限回执；成员、产物和事件在事务内分批形成 |
 | 取回来源读取端口 | `read_default_segment_scope(scope: PlanReadScope, action_id: int) -> DefaultSegmentScope`；`iter_default_segment_originals(scope: PlanReadScope, action_id: int, cursor: SegmentCursor \| None, limit: int) -> Page[OriginalFamilyFacts, SegmentCursor]` | 范围区分未确认、已确定为空、已确定非空；明确 ID 使用独立精确查询 |
@@ -92,12 +92,12 @@ P1 的类型至少表达：实际文件身份、排序键或解析未知、原�
 
 **输入与交付：** 消费既有目标毫秒和任务声明，交付上表的类型、纯判定接口及 OSMO 普通录像／原生延时各自适用的处理声明。生产契约集中维护，不能由任意设备配置 ID 或文件后缀临时猜测处理模式。
 
-- [ ] **步骤 1：增加命名与边界测试。** `test_osmo_segment_sort_uses_numeric_cam_and_index_with_rollover` 核对 `CAM001/0999` 后接 `CAM002/0001`；不同 datetime 不改变排序。后缀大小写沿原配对契约处理，名称主干的大小写和不同目录不能合并。分别测试非法名称、index 超范围及冲突键，结果保持未知而非任选一个。
-- [ ] **步骤 2：增加精确计算测试并确认当前失败。** `test_default_segment_count_uses_exact_milliseconds` 的独立预期为 `9000→2`、`10000→3`、`12000→3`；加入既有最大合法目标，不建立预期段数规模的列表。验证命令见文末命令表，先只跑新增文件。
-- [ ] **步骤 3：增加判定状态测试。** 用下表逐项断言结果、依据、下界和范围；测试替身只提供实际文件事实，不将预期结果直接交给被测函数。
-- [ ] **步骤 4：实现建议接口。** 首遍逐成员处理，保留必要的前项、待定空原片的有限计数和最后非零原片位置；最后非零原片暂按可能的短尾段处理。可靠末页与顺序确定后，第二遍读取同一冻结成员，以最后非零位置分类尾部及非尾部空文件，使用可信起点及后继关系逐项生成缺口。长缺失区间没有实际文件身份，每份已观察的非尾零 OSV 保留自己的真实身份。首遍摘要中的缺口数量和首个缺口必须与第二遍记录一致。
-- [ ] **步骤 5：贯通任务声明的构建与校验。** 普通录像采用分段完成和范围规则，原生延时只采用适用的空尾分类；受理、保存和读取使用同一声明。参数的目标时长含义保持整次任务。
-- [ ] **步骤 6：运行最窄单测，审查并提交本阶段。** 单测中媒体拷贝、探测、设备及数据库协作者均不得被调用。
+- [x] **步骤 1：增加命名与边界测试。** `test_osmo_segment_sort_uses_numeric_cam_and_index_with_rollover` 核对 `CAM001/0999` 后接 `CAM002/0001`；不同 datetime 不改变排序。后缀大小写沿原配对契约处理，名称主干的大小写和不同目录不能合并。分别测试非法名称、index 超范围及冲突键，结果保持未知而非任选一个。
+- [x] **步骤 2：增加精确计算测试并确认当前失败。** `test_default_segment_count_uses_exact_milliseconds` 的独立预期为 `9000→2`、`10000→3`、`12000→3`；加入既有最大合法目标，不建立预期段数规模的列表。验证命令见文末命令表，先只跑新增文件。
+- [x] **步骤 3：增加判定状态测试。** 用下表逐项断言结果、依据、下界和范围；测试替身只提供实际文件事实，不将预期结果直接交给被测函数。
+- [x] **步骤 4：实现建议接口。** 首遍固定可信起点，逐成员处理并保留必要前项、待定空原片的有限计数，以及最后非零原片和最后已确认归属原片的两个独立位置；最后非零原片暂按可能的短尾段处理。可靠末页与顺序确定后，第二遍读取同一冻结成员，以最后非零位置分类空文件，以已确认归属的覆盖截止及可信起点逐项生成确定缺口。长缺失区间没有实际文件身份，每份已观察的非尾零 OSV 保留自己的真实身份。首遍摘要中的缺口数量和首个缺口必须与第二遍记录一致。
+- [x] **步骤 5：贯通任务声明的构建与校验。** 普通录像采用分段完成和范围规则，原生延时只采用适用的空尾分类；受理、保存和读取使用同一声明。参数的目标时长含义保持整次任务。
+- [x] **步骤 6：运行最窄单测，审查并提交本阶段。** 单测中媒体拷贝、探测、设备及数据库协作者均不得被调用。
 
 精确选段测试可以直接写成以下形式；这里的预期值来自规格示例，不调用另一份生产公式生成预期：
 
@@ -118,6 +118,8 @@ def test_default_segment_count_uses_exact_milliseconds(target_ms, expected):
 | 可靠确认首段缺失 | 空默认范围；有后续文件不等于没有正式产物 |
 | 起点或顺序无法确认 | 默认范围未确认；不从最早观察到的文件补造起点 |
 | 只有 LRF、只有空文件、非尾部零 OSV、零／缺失 LRF | 分别验证必要原片缺失、缺口及可选预览不合格，不能合并成一个分支 |
+
+**阶段证据：** 实现及修复提交 `e3e0ccf`、`fa6d5ba`、`2124b32` 已通过独立规格及质量复核，并合入协调提交 `97594b8`。协调工作区以 Python 3.11.16 完成全部 camctl 单元测试，6167 项通过、1 项跳过，保留 2 条既有 pytest 标记警告；acceptance 集成目录 268 项通过。两遍测试覆盖有键未知归属位置、可靠覆盖截止、可信起点、长零序列、邻接三态，以及来源结果、可靠前缀和预览未知的独立分类。本阶段只交付模型和任务声明，运行时登记、数据库、取回、报告、安装包及真机仍由后续任务验证。
 
 ## P2：落实数据、公共错误和历史归属契约
 
