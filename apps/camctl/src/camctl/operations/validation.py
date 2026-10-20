@@ -15,6 +15,7 @@ from camctl.devices.evidence import (
     EvidenceRegistry,
     validate_observation,
 )
+from camctl.operations.tool_diagnostics import DiagnosticsValidationError
 from camctl.operations.models import (
     RESULT_FORMAT_VERSION,
     AttemptStatus,
@@ -53,11 +54,11 @@ def validate_outcome(
         from camctl.operations.tool_diagnostics import validate_diagnostics
         try:
             validate_diagnostics(outcome.diagnostics)
-        except ValueError as error:
-            raise OutcomeValidationError(str(error)) from error
+        except Exception as error:
+            raise DiagnosticsValidationError("原工具诊断校验失败") from error
         if (settlement_contract.max_diagnostic_calls is None
                 or outcome.diagnostics.call_limit != settlement_contract.max_diagnostic_calls):
-            raise OutcomeValidationError("诊断数量上限与所属调用登记不符")
+            raise DiagnosticsValidationError("诊断数量上限与所属调用登记不符")
     observation_contracts = _validate_observations(ticket, outcome, evidence)
     _validate_effect_grounded(outcome)
     _validate_not_dispatched_consistency(outcome)

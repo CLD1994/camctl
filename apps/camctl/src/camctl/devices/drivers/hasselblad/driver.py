@@ -44,9 +44,10 @@ from camctl.operations.process import (
     ToolStartError,
     execute_tool,
 )
-from camctl.operations.validation import validate_outcome
 
-from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState
+from camctl.operations.tool_diagnostics import (
+    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState,
+)
 from .commands import PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
 from .definitions import DRIVER_DECLARATION, DRIVER_ID
@@ -354,11 +355,6 @@ class HasselbladDriver:
 
         def finish(status, effect, *, error=None, observation=None):
             # 原关联由票据确定；这里只保留实际取得的双流和步骤对应关系。
-            if len(calls) > len(commands) or any(
-                call.step_name != command.name.value or step["name"] != call.step_name
-                for call, command, step in zip(calls, commands, steps)
-            ) or len(calls) != len(steps):
-                raise ValueError("原工具诊断与实际命令前缀不符")
             basis = SettlementBasis.OBSERVED if last_raw is not None else SettlementBasis.NOT_DISPATCHED
             data = {} if last_raw is None or last_raw.used_grace_s is None else {
                 "terminate_grace_s": last_raw.used_grace_s}
@@ -370,8 +366,20 @@ class HasselbladDriver:
                 call_info=self._call_info(last_raw),
                 diagnostics=ToolDiagnostics(PHOTO_START_CALL_LIMIT, tuple(calls)),
             )
-            validate_outcome(request.ticket, outcome, self.evidence)
-            return DeviceCallResult.from_outcome(outcome)
+            # 两份名称目录随本次返回冻结，不在接手时读取驱动或重新规划。
+            planned_names = tuple(command.name.value for command in commands)
+            actual_names = tuple(step["name"] for step in steps)
+
+            def check_prefix(original):
+                diagnostic_calls = original.diagnostics.calls
+                if (len(diagnostic_calls) > len(planned_names)
+                        or len(diagnostic_calls) != len(actual_names)
+                        or any(call.step_name != planned or actual != call.step_name
+                               for call, planned, actual in zip(
+                                   diagnostic_calls, planned_names, actual_names))):
+                    raise ValueError("原工具诊断与实际命令前缀不符")
+
+            return DeviceCallResult.from_outcome(outcome, diagnostics_check=check_prefix)
 
         def failed(step, reason, *, effect=EffectState.NO_EFFECT, extra=None, stage="control", code="device_error"):
             details = {"step": step, "reason": reason, "steps": [dict(fact) for fact in steps]}

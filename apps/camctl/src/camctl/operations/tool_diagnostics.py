@@ -33,6 +33,10 @@ class ToolDiagnostics:
     calls: tuple[ToolCallOutput, ...]
 
 
+class DiagnosticsValidationError(ValueError):
+    """内部诊断不合法；不能使用一般无效设备结果替代原返回。"""
+
+
 class ResultEncodingError(ValueError):
     """原结果编码失败；原拥有者须保留 typed 结果与原始字节。"""
 

@@ -105,6 +105,8 @@ class DeviceCallResult:
     error: Mapping[str, Any] | None
     #: 受管调用的完整权威结果；观察和错误是兼容业务端口的同源视图。
     outcome: CallOutcome | None = None
+    #: 仅本次内部诊断构造约束；冻结上下文，原拥有者持有结果后才调用。
+    diagnostics_check: Callable[[CallOutcome], None] | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is not None:
@@ -120,9 +122,10 @@ class DeviceCallResult:
                 "details": dict(outcome.error.details)}
 
     @classmethod
-    def from_outcome(cls, outcome: CallOutcome) -> DeviceCallResult:
+    def from_outcome(cls, outcome: CallOutcome, *,
+                     diagnostics_check: Callable[[CallOutcome], None] | None = None) -> DeviceCallResult:
         """保留原效果、收场、错误详情和调用信息，不重新解释结果。"""
-        return cls(outcome.observations, cls._error_view(outcome), outcome)
+        return cls(outcome.observations, cls._error_view(outcome), outcome, diagnostics_check)
 
 
 @runtime_checkable

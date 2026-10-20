@@ -151,7 +151,9 @@ from camctl.operations.attempts import (
     RunOutcome,
     StaleRunFinish,
 )
-from camctl.operations.tool_diagnostics import ResultEncodingError
+from camctl.operations.tool_diagnostics import (
+    DiagnosticsValidationError, ResultEncodingError,
+)
 from camctl.operations.models import (
     AttemptStatus,
     AttemptTicket,
@@ -264,11 +266,29 @@ class StartConfirmationPreparation:
 
 
 @dataclass(frozen=True)
+class UnvalidatedCallOutcome:
+    """只持有原对象；不表示任何设备事实已经通过契约校验。"""
+
+    outcome: CallOutcome
+
+
+@dataclass(frozen=True)
+class UnvalidatedAttemptFinish:
+    """校验前冻结的原申请，不得传入仓储。"""
+
+    ticket: AttemptTicket
+    outcome: UnvalidatedCallOutcome
+    occurred_at: int
+    retry_wait: bool = False
+    run_finish: RunFinish | None = None
+
+
+@dataclass(frozen=True)
 class PendingCallResult:
     """原执行者持有的调用结果；保存核实不改变身份、事实或时钟。"""
 
     key: OperationKey
-    finish: AttemptFinish
+    finish: AttemptFinish | UnvalidatedAttemptFinish
     observation: ActivityObservationSave | None
     start_finish: StaleRunFinish | None = None
     action_finish: FinishCapture | FinishCanceledCapture | None = None
@@ -289,6 +309,11 @@ class PendingCallResult:
     residual_conclude: int | None = None
     query_conclude: int | None = None
     query_conclude_stop_keys: tuple[str, ...] = ()
+    diagnostics_check: Callable[[CallOutcome], None] | None = None
+
+    @property
+    def validated(self) -> bool:
+        return isinstance(self.finish, AttemptFinish)
 
 
 # 启动装配和既有调用方使用同一个公共责任集合。
@@ -968,14 +993,15 @@ class CaptureRuntime(_FileObservationSaves):
                capture_stop: bool = False,
                residual_conclude: int | None = None,
                query_conclude: int | None = None,
-               query_conclude_stop_keys: tuple[str, ...] = ()) -> None:
+               query_conclude_stop_keys: tuple[str, ...] = (),
+               diagnostics_check: Callable[[CallOutcome], None] | None = None) -> None:
         """先持有完整实际结果，再保存原尝试及其适用的伴随事实。
 
         保存重试等待使用调用返回时的单调读数；流程结束清除。
         """
-        attempt = AttemptFinish(
+        attempt = UnvalidatedAttemptFinish(
             ticket=ticket,
-            outcome=validate_outcome(ticket, outcome, self.evidence),
+            outcome=UnvalidatedCallOutcome(outcome),
             occurred_at=self.wall_us() if occurred_at is None else occurred_at,
             run_finish=None if end_run is None else RunFinish(
                 status=end_run, error=run_error),
@@ -991,12 +1017,39 @@ class CaptureRuntime(_FileObservationSaves):
             action_failure=action_failure, canceled_unstarted=canceled_unstarted,
             host_timer_stop=host_timer_stop, capture_stop=capture_stop,
             residual_conclude=residual_conclude, query_conclude=query_conclude,
-            query_conclude_stop_keys=query_conclude_stop_keys)
+            query_conclude_stop_keys=query_conclude_stop_keys,
+            diagnostics_check=diagnostics_check)
         self.pending_start_results[identity] = pending
         self._save_call_result(identity, pending)
 
+    def _validate_call_result(self, identity, pending: PendingCallResult) -> PendingCallResult:
+        """原申请已持有后只附加校验视图；诊断错误保留原申请。"""
+        if pending.validated:
+            return pending
+        original = pending.finish
+        try:
+            if pending.diagnostics_check is not None:
+                try:
+                    pending.diagnostics_check(original.outcome.outcome)
+                except Exception as failure:
+                    raise DiagnosticsValidationError("原诊断构造检查失败") from failure
+            validated = validate_outcome(original.ticket, original.outcome.outcome, self.evidence)
+        except DiagnosticsValidationError as failure:
+            raise ConsistencyError("原诊断校验失败，完整结果与字节仍持有") from failure
+        except OutcomeValidationError:
+            # 一般无效观察仍由既有业务分支拒绝，不保留可保存的原申请。
+            del self.pending_start_results[identity]
+            raise
+        pending = replace(pending, finish=AttemptFinish(
+            original.ticket, validated, original.occurred_at,
+            retry_wait=original.retry_wait, run_finish=original.run_finish))
+        self.pending_start_results[identity] = pending
+        return pending
+
     def _write_call_result(self, pending: PendingCallResult):
         """原请求的固定派生输入由各仓储在事务内核对可靠资格。"""
+        if not pending.validated:
+            raise ConsistencyError("未校验原结果不能提交仓储")
         ticket = pending.finish.ticket
         run = row_facts(self.owned.connection, "operation_runs", ticket.run_id)
         if run is None:
@@ -1052,17 +1105,19 @@ class CaptureRuntime(_FileObservationSaves):
         occurred_at: int, returned_ns: int,
         preparation: RecordingStartPreparation | StartConfirmationPreparation | None = None,
         result_listing: tuple[ObservedFile, ...] | SavedResultEntries | None = None,
+        diagnostics_check: Callable[[CallOutcome], None] | None = None,
     ) -> None:
         """在实际 await 返回后登记原结果，派生读取之前建立内存责任。"""
         identity = (ticket.run_id, ticket.attempt_id)
         if identity in self.pending_start_results:
             raise ConsistencyError("原调用结果仍待核实，不能替换实际结果")
         self.pending_start_results[identity] = PendingCallResult(
-            new_operation_key(), AttemptFinish(
-                ticket, validate_outcome(ticket, outcome, self.evidence), occurred_at),
+            new_operation_key(), UnvalidatedAttemptFinish(
+                ticket, UnvalidatedCallOutcome(outcome), occurred_at),
             None, returned_ns=returned_ns, preparation=preparation,
-            result_listing=result_listing,
+            result_listing=result_listing, diagnostics_check=diagnostics_check,
             result_disposition_ready=result_listing is None)
+        self._validate_call_result(identity, self.pending_start_results[identity])
 
     def save_held_result(self, ticket: AttemptTicket) -> None:
         """原执行者与恢复入口使用同一个已持有结果。"""
@@ -1074,6 +1129,8 @@ class CaptureRuntime(_FileObservationSaves):
 
     def _save_call_result(self, identity, pending: PendingCallResult) -> None:
         """最多重送一次原事务；可靠回滚与提交后错误使用同一身份。"""
+        # 校验不进入有限 DB 重送循环；本次失败不自动重复校验。
+        pending = self._validate_call_result(identity, pending)
         for _ in range(2):
             try:
                 if pending.preparation is not None:
@@ -1165,6 +1222,7 @@ class CaptureRuntime(_FileObservationSaves):
         identity = (ticket.run_id, ticket.attempt_id)
         pending = self.pending_start_results.get(identity)
         if pending is not None:
+            pending = self._validate_call_result(identity, pending)
             if not pending.result_disposition_ready:
                 pending = _settle_recovered_listing(self, pending)
                 self.pending_start_results[identity] = pending
@@ -1530,14 +1588,17 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         if result.error is not None:
             runtime.finish(
                 ticket, outcome, end_run=RunOutcome.FAILED,
+                diagnostics_check=result.diagnostics_check,
                 run_error=outcome.error, activity=observation,
                 occurred_at=returned_at, returned_ns=returned_ns)
         elif confirmed:
             runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                diagnostics_check=result.diagnostics_check,
                 activity=observation, occurred_at=returned_at, returned_ns=returned_ns,
                 confirmation_anchor_ns=anchor)
         else:
             runtime.finish(ticket, outcome, activity=observation,
+                diagnostics_check=result.diagnostics_check,
                 occurred_at=returned_at, returned_ns=returned_ns)
     except OutcomeValidationError:
         # 观察与收场依据不符合登记契约：该结果整体不可采纳，不落
@@ -1765,7 +1826,8 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
                 error=outcome.error, observations=outcome.observations, outcome=outcome)
             runtime.hold_call_result(
                 ticket, outcome, occurred_at=received_at, returned_ns=anchor_ns,
-                preparation=RecordingStartPreparation(self.dispatch, runtime.start_config.max_attempts))
+                preparation=RecordingStartPreparation(self.dispatch, runtime.start_config.max_attempts),
+                diagnostics_check=result.diagnostics_check)
             return self.dispatch
 
     driver = Driver()
@@ -2154,6 +2216,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
                         + action["execution_spec_json"].get("startup_margin_ms", 0)) * 1_000_000)
                 host_stop = HostTimerStopSave(elapsed)
             runtime.finish(ticket, call, end_run=RunOutcome.SUCCEEDED,
+                           diagnostics_check=response.diagnostics_check,
                            occurred_at=returned_at, returned_ns=returned_ns,
                            host_timer_stop=host_stop, capture_stop=True)
         else:
@@ -2161,6 +2224,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
             stop_error = (call.error or ErrorValue("recording_stop_failed", "device_stop", {
                 "activity_id": ticket.target_id, "operation_run_id": str(ticket.run_id)}))
             runtime.finish(ticket, call, retry_wait=not finite_cancel,
+                           diagnostics_check=response.diagnostics_check,
                            end_run=RunOutcome.FAILED if finite_cancel else None,
                            run_error=stop_error if finite_cancel else None,
                            occurred_at=returned_at, returned_ns=returned_ns)
