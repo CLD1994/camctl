@@ -3,11 +3,12 @@
 import asyncio
 import hashlib
 import json
+import os
+import subprocess
+import sys
+import time
 from decimal import Decimal
 from pathlib import Path
-import time
-import sys
-import os
 
 import pytest
 
@@ -236,28 +237,79 @@ async def test_real_managed_download_returns_fixed_bytes(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="目标部署使用 POSIX 可执行脚本")
 @pytest.mark.asyncio
 async def test_capture_artifacts_and_both_download_variants_have_identical_bytes(tmp_path):
-    from .test_hasselblad_managed_capture import _harness
+    from .test_hasselblad_managed_capture import _harness, _read_logged_argv
     from camctl.capture.files import file_identity_key
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
-    driver, request, roots, _executable, _log, workspace = _harness(tmp_path)
+    from camctl.devices.drivers.hasselblad.files import (
+        CameraFileIdentity,
+        CameraFileLocator,
+        CameraLocatorStatus,
+        DownloadVariant,
+    )
+    driver, request, roots, executable, call_log, workspace = _harness(tmp_path)
     capture = await driver.control(request)
     photo = capture.observations[0].data
-    for role, variant in (("original", DownloadVariant.ORIGINAL), ("preview", DownloadVariant.THUMBNAIL)):
+    capture_steps = [step for step in photo["steps"] if step["name"] == "capture"]
+    assert len(capture_steps) == 1
+    locator = CameraFileLocator.from_json(capture_steps[0]["camera_locator"])
+    assert locator.status is CameraLocatorStatus.PATH
+    assert locator.camera_path == "/mnt/media/DCIM/B9996039.3FR"
+    assert locator.camera_name == "B9996039.3FR"
+    assert photo["original"]["original_name"] == "fixture_capture.3FR"
+    assert photo["original"]["original_name"] != locator.camera_name
+    assert locator.camera_path != locator.camera_name
+    assert locator.camera_path != photo["original"]["original_name"]
+
+    for role, variant in (
+        ("original", DownloadVariant.ORIGINAL),
+        ("preview", DownloadVariant.THUMBNAIL),
+    ):
         artifact = photo[role]
+        captured_bytes = (workspace / artifact["original_name"]).read_bytes()
+        assert len(captured_bytes) == artifact["size_bytes"]
+        assert hashlib.sha256(captured_bytes).hexdigest() == artifact["sha256"]
         identity = CameraFileIdentity(
             request.binding,
-            "/mnt/media/DCIM/fixture_capture.3FR",
-            "fixture_capture.3FR",
+            locator.camera_path,
+            locator.camera_name,
             variant,
             artifact["sha256"],
         )
-        fixed = SourceFile(file_identity_key(request.binding.device_id, DRIVER_ID, identity.file_identity),
-                           identity.locator(), artifact["size_bytes"])
+        fixed = SourceFile(
+            file_identity_key(request.binding.device_id, DRIVER_ID, identity.file_identity),
+            identity.locator(),
+            artifact["size_bytes"],
+        )
         session = await driver.open_read(fixed, 0, TICKET, idle_timeout_s=Decimal("10"))
         downloaded = await asyncio.to_thread(session.read_chunk, artifact["size_bytes"])
         assert downloaded.eof
-        assert downloaded.data == (workspace / artifact["original_name"]).read_bytes()
+        assert downloaded.data == captured_bytes
+        assert hashlib.sha256(downloaded.data).hexdigest() == artifact["sha256"]
         assert (await session.wait_stopped()).stopped
+
+    downloads = [args for args in _read_logged_argv(call_log) if args[3] == "download"]
+    assert [args[4] for args in downloads] == ["original", "thumbnail"]
+    assert [args[5] for args in downloads] == ["B9996039.3FR", "B9996039.3FR"]
+    assert all(args[6] == "--output" and len(args) == 8 for args in downloads)
+
+    for invalid_name in ("fixture_capture.3FR", "/mnt/media/DCIM/B9996039.3FR"):
+        rejected_workspace = tmp_path / f"rejected-{invalid_name.rsplit('/', 1)[-1]}"
+        rejected_workspace.mkdir()
+        rejected = subprocess.run(
+            [
+                str(executable),
+                "--pid",
+                "0x000a",
+                "download",
+                "original",
+                invalid_name,
+                "--output",
+                str(rejected_workspace),
+            ],
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode == 1
+        assert not (rejected_workspace / "tool-download-file").exists()
     assert not (roots.staging / "read-downloads" / "31-1").exists()
 
 

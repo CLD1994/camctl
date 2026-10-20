@@ -217,6 +217,8 @@ def _script_source(call_log: Path, *, scenario: str, observed_serial: str) -> st
         SERIAL = {observed_serial!r}
         RAW = bytes.fromhex({_ORIGINAL_BYTES.hex()!r})
         PREVIEW = bytes.fromhex({_PREVIEW_BYTES.hex()!r})
+        CAMERA_FILE_PATH = "/mnt/media/DCIM/B9996039.3FR"
+        CAMERA_FILE_NAME = pathlib.PurePosixPath(CAMERA_FILE_PATH).name
         argv = sys.argv
         with LOG.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(argv, ensure_ascii=True) + "\\n")
@@ -255,11 +257,15 @@ def _script_source(call_log: Path, *, scenario: str, observed_serial: str) -> st
                 "capture: OK\\n"
                 f"saved {{original}} ({{len(RAW)}} bytes)\\n"
                 f"saved {{preview}} ({{preview_size}} bytes)\\n"
-                "camera file: /mnt/media/DCIM/B9996039.3FR\\n"
+                f"camera file: {{CAMERA_FILE_PATH}}\\n"
             )
         elif command == "download" and len(args) == 7 and args[3] in ("original", "thumbnail"):
-            if args[4] != {_ORIGINAL_NAME!r} or args[5] != "--output":
-                raise SystemExit("download must use the captured original name")
+            if (
+                args[4] != CAMERA_FILE_NAME
+                or args[4] in ({_ORIGINAL_NAME!r}, CAMERA_FILE_PATH)
+                or args[5] != "--output"
+            ):
+                raise SystemExit("download must use the camera-reported basename")
             work = pathlib.Path(args[6])
             (work / "tool-download-file").write_bytes(RAW if args[3] == "original" else PREVIEW)
             sys.stdout.write("download complete\\n")
