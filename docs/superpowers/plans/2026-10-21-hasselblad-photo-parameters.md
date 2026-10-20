@@ -155,13 +155,15 @@ camctl_pytest() {
 
 先为类型、可逆字节编码、每流上限、数量上限及双流空缺状态增加失败测试，再接入驱动。RAW／JPEG 分别覆盖 stdout 缺名、stderr 缺名、跨流重复／冲突及必要流失败；原始字节包含非法 UTF-8 或 NUL 时仍可作为诊断往返，不代表合法响应语法。增加真实 SQLite 的原结果、历史、同键重送及保存未知测试；改变诊断任一字节必须被原申请核实拒绝。编码失败保留原完整申请，不进入用替代结果覆盖原失败的路径，不重发设置、调焦或拍摄。
 
-- [ ] **步骤 1：增加参数到命令的测试。** `test_photo_setup_commands_follow_selected_branches` 覆盖 M／A／S／P 的适用字段、所有白平衡模式、MF 省略／正负移动及 AF-S。手动白平衡严格为 `wb-mode manual` 后 `wb <温度>,0`；自动分支没有额外色温设置。AF-S 设置后恰执行一次 autofocus；MF 省略移动时只设置模式。
-- [ ] **步骤 2：增加真实调用边界的测试。** `test_photo_driver_checks_identity_before_any_setting` 验证缺失、多台、序列号不符时零设置零拍摄；`test_photo_driver_uses_saved_values_in_structured_argv` 核对配置产品标识、原工作目录及三个短快门，确认原始精确值进入十进制 argv。
-- [ ] **步骤 3：增加预算和失败测试并确认失败。** `test_photo_commands_share_one_monotonic_start_budget` 使用可控时钟扣减 list、设置、调焦等耗时，断言后续命令使用剩余预算；`test_focus_success_then_capture_blocked_preserves_side_effect` 保存移动成功及照片 `NO_EFFECT`。`test_attempt_status_is_independent_from_capture_effect` 分别覆盖调焦结果未知但 capture 可靠未发、capture 超时且实际错误已取得、原调用结果完全缺失：前两项保存实际失败，后一项保存尝试未知；采集效果独立判断。运行驱动／命令单元和 `camctl_pytest apps/camctl/tests/integration/devices -q`。
-- [ ] **步骤 4：实现命令规划与执行。** `_request_config` 接受且验证完整保存参数。`control()` 沿现有受管工具入口依次执行 list、info、单张模式、格式、曝光、白平衡、对焦和一次 capture；每次派发前检查剩余预算、窗口及普通资格。上一条命令正常退出且为 0 才继续，所有 argv 使用结构化列表。
-- [ ] **步骤 5：分别构造尝试状态、采集效果与收场。** 实际失败在可靠收场后保存 `FAILED`，采集效果按 capture 事实独立选取 `NO_EFFECT`／`UNKNOWN`／`CONFIRMED`；原结果取得不到才保存 `UNKNOWN`。只有整次没有派发工具且已阻止迟到执行，才使用 `settlement.basis=not_dispatched`。步骤记录保留原错误、设置／镜头事实及未知效果；H5 消费这些事实。
-- [ ] **步骤 6：验证输出及下载。** `test_capture_failure_text_cannot_override_nonzero_exit_or_incomplete_output` 覆盖非零、信号、超时、中断及输出不完整；`test_saved_capture_preserves_named_pair_and_locator` 验证解析与双文件核验后的内部结果。下载测试验证 basename、读取种类、原绑定、长度及原摘要，多个候选或内容不符必须失败。重跑步骤 3 范围。
-- [ ] **步骤 7：审查并形成阶段提交。** 建议提交名为“按完整参数执行 Hasselblad 单次拍摄”；交接实际内部结果字段、失败分类、步骤证据及 START 入口可观察事实。
+- [x] **步骤 1：增加参数到命令的测试。** `test_photo_setup_commands_follow_selected_branches` 覆盖 M／A／S／P 的适用字段、所有白平衡模式、MF 省略／正负移动及 AF-S。手动白平衡严格为 `wb-mode manual` 后 `wb <温度>,0`；自动分支没有额外色温设置。AF-S 设置后恰执行一次 autofocus；MF 省略移动时只设置模式。
+- [x] **步骤 2：增加真实调用边界的测试。** `test_photo_driver_checks_identity_before_any_setting` 验证缺失、多台、序列号不符时零设置零拍摄；`test_photo_driver_uses_saved_values_in_structured_argv` 核对配置产品标识、原工作目录及三个短快门，确认原始精确值进入十进制 argv。
+- [x] **步骤 3：增加预算和失败测试并确认失败。** `test_photo_commands_share_one_monotonic_start_budget` 使用可控时钟扣减 list、设置、调焦等耗时，断言后续命令使用剩余预算；`test_focus_success_then_capture_blocked_preserves_side_effect` 保存移动成功及照片 `NO_EFFECT`。`test_attempt_status_is_independent_from_capture_effect` 分别覆盖调焦结果未知但 capture 可靠未发、capture 超时且实际错误已取得、原调用结果完全缺失：前两项保存实际失败，后一项保存尝试未知；采集效果独立判断。运行驱动／命令单元和 `camctl_pytest apps/camctl/tests/integration/devices -q`。
+- [x] **步骤 4：实现命令规划与执行。** `_request_config` 接受且验证完整保存参数。`control()` 沿现有受管工具入口依次执行 list、info、单张模式、格式、曝光、白平衡、对焦和一次 capture；每次派发前检查剩余预算、窗口及普通资格。上一条命令正常退出且为 0 才继续，所有 argv 使用结构化列表。
+- [x] **步骤 5：分别构造尝试状态、采集效果与收场。** 实际失败在可靠收场后保存 `FAILED`，采集效果按 capture 事实独立选取 `NO_EFFECT`／`UNKNOWN`／`CONFIRMED`；原结果取得不到才保存 `UNKNOWN`。只有整次没有派发工具且已阻止迟到执行，才使用 `settlement.basis=not_dispatched`。步骤记录保留原错误、设置／镜头事实及未知效果；H5 消费这些事实。
+- [x] **步骤 6：验证输出及下载。** `test_capture_failure_text_cannot_override_nonzero_exit_or_incomplete_output` 覆盖非零、信号、超时、中断及输出不完整；`test_saved_capture_preserves_named_pair_and_locator` 验证解析与双文件核验后的内部结果。下载测试验证 basename、读取种类、原绑定、长度及原摘要，多个候选或内容不符必须失败。重跑步骤 3 范围。
+- [x] **步骤 7：审查并形成阶段提交。** 建议提交名为“按完整参数执行 Hasselblad 单次拍摄”；交接实际内部结果字段、失败分类、步骤证据及 START 入口可观察事实。
+
+**阶段证据：** `dfd572c`、`e71f6f2` 及修复提交 `51404cc`、`d26c6aa` 已通过独立规格及质量审查；诊断校验前的原结果持有，以及诊断历史／公共报告组合两项复核均为 ADDRESSED，合入协调提交 `0981997`。协调工作区以 Python 3.11.16 完成全量单元 6422 项、devices 220 项、operations 209 项、拍摄保存与恢复直接组合 173 项、history 全目录 212 项及实际依赖检查 7 项，全部退出 0；保留 1 项单元跳过和 2 条既有 pytest 标记警告。原始双流与结构化结果沿原申请共同保存；原对象、事实时刻和操作键由框架持有后，再执行诊断类型、数量上限和命令前缀检查。START 入口／取消协调及活动收场继续由 H5 闭合；完整 capture 目录、发行物、ARM、真机、客户端导入及 ACK 不在本阶段通过范围。
 
 ## H5：闭合 START 取消边界及失败恢复
 
@@ -172,6 +174,8 @@ camctl_pytest() {
 **输入与交付：** 消费原尝试意图、执行协调事实及 H4 的实际结果；交付共同取消资格判断，以及保留原文件与尝试责任的失败／恢复路径。入口事实使用既有结果及协调机制表达；缺失证据保持未知，不要求每条工具命令单独持久化。
 
 自动预览是否取消，分别核对[直接目标范围与拍摄关联](../../architecture/task-cancellation.md#自动预览取回的取消关联)及[取消联动](../../architecture/preview-obtaining.md#取消联动)。拍摄被拒绝只阻止通过该拍摄扩大的联动范围，不撤销取回本身作为直接目标的取消资格。
+
+建议使用原结果中的独立结构化观察保存真实驱动入口；框架确认整次调用未进入且已阻止时使用不同依据，不能复用含义有歧义的工具未派发结果。对已可靠封住入口的单张来源，建议在固定取消集合的同一事务内保存适用的原 START 阻止结果、目标取消事实及成员应用，随后继续有限收场。这样可避免联动预览已经固定、来源取消尚未应用时，原阻止结果先被普通失败流程消费。该组合限于这些来源，其他目标仍按原流程处理。
 
 | 需要覆盖的状态 | 本项预期 |
 | --- | --- |
