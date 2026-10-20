@@ -116,12 +116,14 @@ camctl_pytest() {
 
 **输入与交付：** 消费 H1 的格式；交付命名双文件、严格的机内路径分类及可持久化 locator。主机源是否可登记由 H3 消费这些事实后决定。
 
-- [ ] **步骤 1：增加双格式及名称分离测试。** `test_capture_response_assigns_jpeg_original_and_preview` 验证两份 JPEG 分别归入角色且 `.thumbnail.jpg` 配对；`test_camera_locator_is_independent_from_host_filename` 使用不同的主机名、机内 basename 和完整路径，验证身份序列化往返后全部保持。
-- [ ] **步骤 2：增加响应分类测试。** `test_capture_response_requires_complete_unambiguous_records` 分别覆盖重复成功标记、重复／缺失 saved、同文件冒充两角色、格式不符、额外不可解释记录；`test_camera_locator_distinguishes_explicit_missing_and_invalid` 覆盖明确缺名、意外缺失、重复／冲突路径、路径与缺名提示同时出现，以及非法 POSIX 路径各分区。
-- [ ] **步骤 3：运行并确认失败。** 执行 `camctl_pytest apps/camctl/tests/unit/devices/test_hasselblad_responses.py apps/camctl/tests/unit/devices/test_hasselblad_file_identity.py -q`。
-- [ ] **步骤 4：实现明确的解析与身份模型。** 成功响应严格要求唯一成功标记和两条配对记录；机内路径独立于主机工作目录校验，拒绝空段、`.`、`..`、NUL、换行等非法身份。完整路径进入定位事实，机内 basename 供 `original`／`thumbnail` 下载。更新当前内部 identity／locator 的精确结构与往返校验。
-- [ ] **步骤 5：核对通过及消费者。** 重跑步骤 3；同步当前解析夹具到完整工具响应，确认没有消费者再用本地文件名补造机内名。进程退出结果仍由 H4 判断，解析成功文本不覆盖进程失败。
-- [ ] **步骤 6：审查并形成阶段提交。** 建议提交名为“明确 Hasselblad 双格式响应与机内文件定位”；向 H3、H4 交付实际解析签名及内部结果字段。
+- [x] **步骤 1：增加双格式及名称分离测试。** `test_capture_response_assigns_jpeg_original_and_preview` 验证两份 JPEG 分别归入角色且 `.thumbnail.jpg` 配对；`test_camera_locator_is_independent_from_host_filename` 使用不同的主机名、机内 basename 和完整路径，验证身份序列化往返后全部保持。
+- [x] **步骤 2：增加响应分类测试。** `test_capture_response_requires_complete_unambiguous_records` 分别覆盖重复成功标记、重复／缺失 saved、同文件冒充两角色、格式不符、额外不可解释记录；`test_camera_locator_distinguishes_explicit_missing_and_invalid` 覆盖明确缺名、意外缺失、重复／冲突路径、路径与缺名提示同时出现，以及非法 POSIX 路径各分区。
+- [x] **步骤 3：运行并确认失败。** 执行 `camctl_pytest apps/camctl/tests/unit/devices/test_hasselblad_responses.py apps/camctl/tests/unit/devices/test_hasselblad_file_identity.py -q`。
+- [x] **步骤 4：实现明确的解析与身份模型。** 成功响应严格要求唯一成功标记和两条配对记录；机内路径独立于主机工作目录校验，拒绝空段、`.`、`..`、NUL、换行等非法身份。完整路径进入定位事实，机内 basename 供 `original`／`thumbnail` 下载。更新当前内部 identity／locator 的精确结构与往返校验。
+- [x] **步骤 5：核对通过及消费者。** 重跑步骤 3；同步当前解析夹具到完整工具响应，确认没有消费者再用本地文件名补造机内名。进程退出结果仍由 H4 判断，解析成功文本不覆盖进程失败。
+- [x] **步骤 6：审查并形成阶段提交。** 建议提交名为“明确 Hasselblad 双格式响应与机内文件定位”；向 H3、H4 交付实际解析签名及内部结果字段。
+
+**阶段证据：** 实现提交 `32320bf`、修复提交 `9e10959` 已通过独立规格及质量复核，并合入协调提交 `3902f78`。协调工作区以 Python 3.11.16 完成 camctl 全部单元测试，6199 项通过、1 项跳过，保留 2 条既有 pytest 标记警告；devices 集成目录 220 项通过，主机源、设备源及完整历史恢复三个直接消费文件共 50 项通过。验证使用拍摄返回的真实 locator 构造两种下载身份，并核对 basename、独立字节及摘要。本阶段不包含完整 JPEG 文件责任或命令序列；明确缺名提示的双流接线由 H4 完成。此前中止的完整 capture 目录仍不属于通过证据，H3、H5、H8 继续核对各自更广门禁；安装包、ARM、真机及客户端导入另行验证。
 
 ## H3：贯通文件责任、归档、登记及恢复
 
