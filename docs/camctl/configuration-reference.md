@@ -112,7 +112,7 @@ level = "INFO"
 -|-|-
 `dji-action6`|DJI Action6；使用 `devices.<id>.adb.serial`|内建普通录像及原生有限延时摄影，延时参数类型为 `action6_timelapse`。
 `dji-osmo360-ii`|DJI OSMO 360 II；使用 `devices.<id>.adb.serial`|内建普通录像及原生延时摄影。
-`hasselblad_cfv100c`|Hasselblad CFV 100C；使用下面的 `hasselblad` 子表|内建单张 RAW（原始图像）拍摄，可选择主机或设备正式源。
+`hasselblad_cfv100c`|Hasselblad CFV 100C；使用下面的 `hasselblad` 子表|单张拍摄，可选择主机或设备正式源；格式、曝光、白平衡及对焦按[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)解释，实际部署能力以导出结果及验收记录为准。
 
 设备声明外层允许驱动扩展字段，并不保证未识别字段会产生作用；下面列出的已定义子表会校验结构及未知键。ADB serial 在加载器中仅在提供 `adb` 子表时检查，部署时仍须为两个 ADB 驱动填写该表。每个驱动能执行哪些动作，以相同配置导出的 `camctl describe` 为准；内建能力存在不表示具体设备和目标主机已经完成验收。
 
@@ -128,7 +128,7 @@ level = "INFO"
 `devices.<id>.recording.stop_timeout_s`|正秒数；`10`|一次停止控制调用的等待上限。
 `devices.<id>.recording.start_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次启动前的等待。
 `devices.<id>.recording.stop_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次停止前的等待。
-`devices.<id>.recording.repair_margin_s`|非负秒数；`10`|判断异常多录是否进入修复的余量。
+`devices.<id>.recording.repair_margin_s`|非负秒数；`10`|采用单原片媒体处理的任务判断多录修复的余量；OSMO 360 II 普通录像按[分段范围规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#默认交付范围)选择。
 `devices.<id>.query.max_attempts`|整数；`3` 次|每项设备状态查询责任的累计次数。
 `devices.<id>.query.retry_interval_s`|非负秒数；`3`|同一状态查询责任的再次查询间隔。
 `devices.<id>.query.timeout_s`|正秒数；`10`|一次设备状态查询调用的等待上限。

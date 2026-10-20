@@ -2,7 +2,7 @@
 
 `hb_cli` 用于在 Linux 下通过 USB 控制 Hasselblad CFV 100C。
 
-本工具单独提供的子命令不等同于 camctl 已接入的拍摄能力。当前 camctl 只通过 `camera_take_photo` 执行单张 RAW 拍摄；部署与现场结果见[ARM 演示记录](validation.md)，行为契约见[驱动设计](../../camctl/hasselblad-driver.md)。
+本工具单独提供的子命令不等同于 camctl 已接入的拍摄能力。camctl 通过 `camera_take_photo` 组织单张拍摄，目标格式、曝光、白平衡和对焦规则见[单张参数设计](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)，设备与正式源契约见[驱动设计](../../camctl/hasselblad-driver.md)。部署与现场结果从[ARM 演示入口](validation.md)及其引用记录核对，工具提供某条命令不表示相应组合已在 camctl 中验收。
 
 ## 目录结构
 

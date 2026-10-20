@@ -14,7 +14,7 @@
 
 第一版支持 `camera_take_photo`、`camera_record` 和 `camera_timelapse`，每台设备只导出其实际支持的能力。单张拍摄与延时摄影遵守[单张拍摄与延时摄影](camera-capture.md)，录像行为遵守[相机录像](camera-recording.md)及[异常恢复](camera-recovery.md)。实际设备的参数及命令由驱动定义；支持某个动作类别不表示所有相机都支持该类别。
 
-Hasselblad CFV 100C 的接入仅提供单张拍照能力，具体定义为驱动 `hasselblad_cfv100c` 下的 `camera_take_photo` / `hasselblad_photo`。参数 Schema 只要求 `params.type` 固定为 `hasselblad_photo`，拒绝任何其他参数字段；驱动固定执行单张 RAW，并声明支持原图配对预览。该参数类型的能力说明仍由驱动定义生成并通过 `camctl describe` 导出；设备身份与工具调用见[Hasselblad 驱动设计](../camctl/hasselblad-driver.md)，实际实施与验收范围见其引用的计划和验证记录。
+Hasselblad CFV 100C 的接入仅提供单张拍照能力，具体定义为驱动 `hasselblad_cfv100c` 下的 `camera_take_photo` / `hasselblad_photo`。参数包含明确的图片格式、曝光、白平衡及对焦设置，支持 RAW（3FR）和 JPEG，并声明支持原图配对预览；完整字段及允许域由[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义。该参数类型的能力说明仍由驱动定义生成并通过 `camctl describe` 导出；设备身份与工具调用见[Hasselblad 驱动设计](../camctl/hasselblad-driver.md)，实际实施与验收范围见其引用的计划和验证记录。
 
 | 层级 | 定义者与职责 |
 | --- | --- |

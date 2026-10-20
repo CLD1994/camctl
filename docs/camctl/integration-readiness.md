@@ -66,7 +66,7 @@ Janus 负责等待机制，项目只适配接纳规则、来源路由、结果�
 
 ## 设备证据与联调输入
 
-Hasselblad CFV 100C 按[单张拍照接入契约](hasselblad-driver.md)提供单张 RAW 拍摄。驱动、主机原图与配对预览登记、独立取回及结果报告已完成软件实现和 ARM 真实业务验证；实施进度见[专项计划](../superpowers/plans/2026-10-12-hasselblad-integration.md#实施状态)，实际环境、结果和证据边界见[ARM 验收记录](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。
+Hasselblad CFV 100C 在 2026-10-12 的 ARM 验收覆盖单张 RAW 拍摄、主机原图与配对预览登记、独立取回及结果报告；实施记录见[专项计划](../superpowers/plans/2026-10-12-hasselblad-integration.md#实施状态)，实际环境、结果和证据边界见[ARM 验收记录](verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)。[驱动设计](hasselblad-driver.md)所引用的 [RAW／JPEG 及显式参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义目标契约，其新增参数、JPEG 和相机源字节一致性须分别取得相应软件及设备证据，不能由该次 RAW 主机源验收推导通过。
 
 相机接入按[资料采集与 Action6 录像演示](../hardware/camera-demo-validation.md)取得原始响应及观察记录。Action6 普通录像演示已获[用户现场确认](verification.md#action6-普通录像演示的现场验收2026-10-11)；采集器和诊断脚本只提供设备资料，不代替正式业务链。双相机四条软件链的实际验证范围由[实施计划 T8](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t8-容器的四条跨组件演示链与设备采集交付)登记，Action6 原生延时摄影与 OSMO 360 II 完整真机调试，以及能力启用条件由[T9](../superpowers/plans/2026-10-10-camctl-real-camera-demo.md#t9-设备事实补齐与-arm-linux-完整验收)跟踪。
 

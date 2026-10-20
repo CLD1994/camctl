@@ -6,6 +6,8 @@
 
 本计划记录主机正式源模式的接入及验收。通过部署配置选择相机正式源、可靠登记后回收主机副本的实施见[相机正式源计划](2026-10-14-hasselblad-camera-source.md)，两种模式保留并共用拍摄链路。
 
+本计划的完成记录及现场证据覆盖单张 RAW 与主机正式源。RAW／JPEG、显式曝光、白平衡及对焦的[参数规格](../specs/2026-10-20-hasselblad-photo-parameters-design.md)定义新增目标，其软件和设备验收不包含在本计划的既有完成记录中。
+
 技术边界：Python 3.11；工具进程统一使用 `camctl.operations.process`；本地文件操作由 `host_files` 承担；SQL、内部编号和公共协议分别沿现有权威来源维护；软件测试按[组件测试指南](../../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)判断隔离范围并保留执行证据。
 
 ## 实施状态

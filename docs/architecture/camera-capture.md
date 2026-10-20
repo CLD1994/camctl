@@ -16,7 +16,7 @@
 
 ### Hasselblad CFV 100C 单张参数类型
 
-Hasselblad CFV 100C 接入的拍摄能力仅为单张拍照，使用驱动 `hasselblad_cfv100c`、参数类型 `hasselblad_photo` 和动作 `camera_take_photo`。该类型只要求参数对象中的 `type` 等于 `hasselblad_photo`，不开放其他参数字段；驱动固定执行单张 RAW，并沿用机身已有的曝光、白平衡和对焦设置。该类型声明支持与原图配对的预览。完整的工具身份、配置及调用契约见[Hasselblad 驱动设计](../camctl/hasselblad-driver.md)；能力说明仍由驱动定义生成。
+Hasselblad CFV 100C 接入的拍摄能力仅为单张拍照，使用驱动 `hasselblad_cfv100c`、参数类型 `hasselblad_photo` 和动作 `camera_take_photo`。用户明确选择 RAW（3FR）或 JPEG，以及曝光、白平衡和对焦设置；完整结构及允许域见[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)。该类型声明支持与原图配对的预览。工具身份、配置及调用契约见[Hasselblad 驱动设计](../camctl/hasselblad-driver.md)；能力说明仍由驱动定义生成，取消按整次 START 调用的边界判断。
 
 ## 延时摄影处理模块与驱动的职责
 
