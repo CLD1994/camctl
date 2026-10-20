@@ -184,7 +184,13 @@ def _harness(
     request = ControlRequest(
         operation="take_photo",
         binding=DeviceBinding(_DEVICE_ID, DRIVER_ID),
-        params={"type": PARAMETER_TYPE},
+        params={
+            "type": PARAMETER_TYPE,
+            "capture_format": "raw",
+            "exposure": {"mode": "P", "iso": 100},
+            "white_balance": {"mode": "auto"},
+            "focus": {"mode": "MF"},
+        },
         ticket=AttemptTicket(
             attempt_id=1,
             operation="control",
@@ -249,6 +255,7 @@ def _script_source(call_log: Path, *, scenario: str, observed_serial: str) -> st
                 "capture: OK\\n"
                 f"saved {{original}} ({{len(RAW)}} bytes)\\n"
                 f"saved {{preview}} ({{preview_size}} bytes)\\n"
+                "camera file: /mnt/media/DCIM/B9996039.3FR\\n"
             )
         elif command == "download" and len(args) == 7 and args[3] in ("original", "thumbnail"):
             if args[4] != {_ORIGINAL_NAME!r} or args[5] != "--output":

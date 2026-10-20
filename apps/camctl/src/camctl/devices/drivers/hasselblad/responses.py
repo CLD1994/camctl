@@ -1,13 +1,28 @@
 """对已核验的 hb_cli 标准输出进行严格、无副作用的解析。"""
 
 from dataclasses import dataclass
+from enum import StrEnum
 import re
 import unicodedata
 from pathlib import PurePosixPath
 
+from .files import CameraFileLocator, CameraLocatorStatus
+from .parameters import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
+
+
+class CaptureParseErrorCode(StrEnum):
+    INVALID_RESPONSE = "invalid_capture_response"
+    UNREPORTED_CAMERA_LOCATOR = "unreported_camera_locator"
+    MALFORMED_CAMERA_LOCATOR = "malformed_camera_locator"
+    AMBIGUOUS_CAMERA_LOCATOR = "ambiguous_camera_locator"
+
 
 class CliParseError(ValueError):
     """hb_cli 输出不符合已核验的响应格式。"""
+
+    def __init__(self, message: str, *, code: str = "invalid_response") -> None:
+        self.code = str(code)
+        super().__init__(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,15 +35,17 @@ class UsbCamera:
 
 @dataclass(frozen=True, slots=True)
 class CapturedFile:
-    path: str
-    original_name: str
+    host_path: str
+    host_name: str
     size: int
+    media_type: str
 
 
 @dataclass(frozen=True, slots=True)
 class CaptureResponse:
     original: CapturedFile
     preview: CapturedFile
+    camera_locator: CameraFileLocator
 
 
 _DEVICE_LINE = re.compile(
@@ -39,6 +56,8 @@ _INFO_LINE = re.compile(
     r"(?P<key>[^:\s][^:\r\n]*?)[ \t]+:[ \t]+(?P<value>\S[^\r\n]*)"
 )
 _SAVED_LINE = re.compile(r"saved (.+) \(([0-9]+) bytes\)")
+_CAMERA_FILE_LINE = re.compile(r"camera file: (.+)")
+_UNREPORTED_CAMERA_FILE_LINE = "capture: camera filename was not reported"
 _NON_LF_LINE_SEPARATORS = frozenset("\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
 
 
@@ -120,7 +139,14 @@ def _canonical_absolute_directory(value: str) -> PurePosixPath:
     return path
 
 
-def _captured_file(line: str, output_directory: PurePosixPath) -> CapturedFile:
+@dataclass(frozen=True, slots=True)
+class _SavedFile:
+    host_path: str
+    host_name: str
+    size: int
+
+
+def _captured_file(line: str, output_directory: PurePosixPath) -> _SavedFile:
     match = _SAVED_LINE.fullmatch(line)
     if match is None:
         raise CliParseError("capture 输出包含无法识别的文件行")
@@ -139,28 +165,127 @@ def _captured_file(line: str, output_directory: PurePosixPath) -> CapturedFile:
     size = _decimal_int(raw_size, "size")
     if size <= 0:
         raise CliParseError("capture 文件长度必须为正数")
-    return CapturedFile(path=raw_path, original_name=path.name, size=size)
+    return _SavedFile(host_path=raw_path, host_name=path.name, size=size)
 
 
-def parse_capture(output: bytes, *, output_directory: str) -> CaptureResponse:
-    """解析成功的 RAW 拍摄响应及其一对主机文件信息。"""
+def _camera_locator(
+    line: str, description: CaptureFormatDescription
+) -> CameraFileLocator:
+    match = _CAMERA_FILE_LINE.fullmatch(line)
+    if match is None:
+        raise CliParseError(
+            "capture 机内文件行格式无效", code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR
+        )
+    camera_path = match.group(1)
+    try:
+        locator = CameraFileLocator(
+            CameraLocatorStatus.PATH,
+            camera_path=camera_path,
+            camera_name=PurePosixPath(camera_path).name,
+        )
+    except (TypeError, ValueError) as error:
+        raise CliParseError(
+            "capture 机内文件路径不合法", code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR
+        ) from error
+    if not locator.camera_name.casefold().endswith(description.original_extension.casefold()):
+        raise CliParseError(
+            "capture 机内文件格式与请求格式不符", code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR
+        )
+    return locator
+
+
+def parse_capture(
+    output: bytes,
+    *,
+    capture_format: CaptureFormat,
+    output_directory: str,
+) -> CaptureResponse:
+    """按请求格式严格解析唯一的双文件响应和互斥机内定位。"""
+    if not isinstance(capture_format, CaptureFormat):
+        raise CliParseError("capture_format 必须是已登记的格式", code=CaptureParseErrorCode.INVALID_RESPONSE)
+    description = CAPTURE_FORMATS[capture_format]
     directory = _canonical_absolute_directory(output_directory)
-    lines = _lines(_decode(output, "capture"))
-    if len(lines) != 3 or lines[0] != "capture: OK":
-        raise CliParseError("capture 输出不是完整的成功响应")
+    decoded = _decode(output, "capture")
+    try:
+        lines = _lines(decoded)
+    except CliParseError as error:
+        marker = "camera file:"
+        if marker in decoded:
+            camera_row = decoded.split(marker, 1)[1].split("\n", 1)[0]
+            if any(unicodedata.category(character) in {"Cc", "Zl", "Zp"}
+                   for character in camera_row):
+                raise CliParseError(
+                    "capture 机内文件路径包含控制字符",
+                    code=CaptureParseErrorCode.MALFORMED_CAMERA_LOCATOR,
+                ) from error
+        raise
+    camera_records = [
+        line for line in lines
+        if line.startswith("camera file") or line == _UNREPORTED_CAMERA_FILE_LINE
+    ]
+    if len(camera_records) > 1:
+        raise CliParseError(
+            "capture 输出包含重复或冲突的机内定位", code=CaptureParseErrorCode.AMBIGUOUS_CAMERA_LOCATOR
+        )
+    if lines.count("capture: OK") != 1 or not lines or lines[0] != "capture: OK":
+        raise CliParseError(
+            "capture 输出必须以唯一的 capture: OK 开始", code=CaptureParseErrorCode.INVALID_RESPONSE
+        )
+    if len(lines) not in (3, 4):
+        if len(camera_records) == 1 and len(lines) > 4 and lines[3].startswith("camera file"):
+            _camera_locator(lines[3], description)
+        raise CliParseError(
+            "capture 输出必须包含两条 saved 记录和至多一条机内定位",
+            code=CaptureParseErrorCode.INVALID_RESPONSE,
+        )
 
     first = _captured_file(lines[1], directory)
     second = _captured_file(lines[2], directory)
-    if first == second:
-        raise CliParseError("capture 输出重复引用同一文件")
+    if first.host_path == second.host_path:
+        raise CliParseError(
+            "capture 输出重复引用同一主机文件", code=CaptureParseErrorCode.INVALID_RESPONSE
+        )
 
-    if first.original_name.endswith(".3FR"):
-        original, preview = first, second
-    elif second.original_name.endswith(".3FR"):
-        original, preview = second, first
+    candidates = []
+    for original, preview in ((first, second), (second, first)):
+        if (
+            original.host_name.casefold().endswith(description.original_extension.casefold())
+            and preview.host_name == f"{original.host_name}.thumbnail{description.preview_extension}"
+        ):
+            candidates.append((original, preview))
+    if len(candidates) != 1:
+        raise CliParseError(
+            "capture 输出的原图格式或预览配对与请求格式不符",
+            code=CaptureParseErrorCode.INVALID_RESPONSE,
+        )
+    original_saved, preview_saved = candidates[0]
+    original = CapturedFile(
+        original_saved.host_path,
+        original_saved.host_name,
+        original_saved.size,
+        description.original_media_type,
+    )
+    preview = CapturedFile(
+        preview_saved.host_path,
+        preview_saved.host_name,
+        preview_saved.size,
+        description.preview_media_type,
+    )
+
+    if len(lines) == 3:
+        raise CliParseError(
+            "capture 成功响应未报告机内路径，也没有明确缺名提示",
+            code=CaptureParseErrorCode.UNREPORTED_CAMERA_LOCATOR,
+        )
+    locator_line = lines[3]
+    if locator_line == _UNREPORTED_CAMERA_FILE_LINE:
+        locator = CameraFileLocator(CameraLocatorStatus.EXPLICIT_MISSING)
+    elif locator_line.startswith("camera file"):
+        locator = _camera_locator(
+            locator_line, description
+        )
     else:
-        raise CliParseError("capture 输出缺少 3FR RAW 原图")
-
-    if preview.original_name != f"{original.original_name}.thumbnail.jpg":
-        raise CliParseError("capture 预览名称未与 RAW 原图配对")
-    return CaptureResponse(original=original, preview=preview)
+        raise CliParseError(
+            "capture 输出包含无法解释的额外记录", code=CaptureParseErrorCode.INVALID_RESPONSE
+        )
+    return CaptureResponse(original=original, preview=preview, camera_locator=locator)

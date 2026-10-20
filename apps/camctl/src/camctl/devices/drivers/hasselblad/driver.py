@@ -48,7 +48,8 @@ from camctl.operations.process import (
 from camctl.operations.validation import validate_outcome
 
 from .configuration import CameraConfig, read_camera_config
-from .definitions import DRIVER_DECLARATION, DRIVER_ID, PARAMETER_TYPE
+from .definitions import DRIVER_DECLARATION, DRIVER_ID
+from .parameters import CAPTURE_FORMATS, PhotoSettings, parse_photo_settings
 from .responses import (
     CaptureResponse,
     CliParseError,
@@ -81,8 +82,6 @@ EVIDENCE = EvidenceRegistry((
 ))
 
 _VENDOR_ID = 0x2756
-_RAW_MEDIA_TYPE = "image/x-hasselblad-3fr"
-_PREVIEW_MEDIA_TYPE = "image/jpeg"
 _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
 READ_PREPARATION_TIMEOUT_S = Decimal("180")
 
@@ -207,7 +206,7 @@ class HasselbladDriver:
                 raw = await run("info", ("info",), stdout=True)
                 if parse_serial(raw.output) != config.serial:
                     raise CameraReadError("serial_mismatch", steps)
-                await run("download", ("download", identity.variant.value, identity.original_name,
+                await run("download", ("download", identity.variant.value, identity.camera_name,
                                        "--output", str(workspace.path)), stdout=False)
                 stream = await workspace.open_verified(source.size_bytes, identity.sha256, offset)
                 return ReadSession(source, offset, stream, idle_timeout_s)
@@ -229,7 +228,7 @@ class HasselbladDriver:
                 raise CameraReadError("preparation_failed", steps, causes=(error,)) from error
             raise
 
-    def _request_config(self, request: ControlRequest) -> tuple[str, CameraConfig]:
+    def _request_config(self, request: ControlRequest) -> tuple[str, CameraConfig, PhotoSettings]:
         if request.operation != "take_photo":
             raise ValueError("Hasselblad 驱动只接受 take_photo")
         ticket = request.ticket
@@ -239,8 +238,10 @@ class HasselbladDriver:
             raise ValueError("拍摄调用必须以活动身份为目标")
         parse_object_id(ticket.target_id)
         config = self._binding_config(request.binding)
-        if set(request.params) != {"type"} or request.params.get("type") != PARAMETER_TYPE:
-            raise ValueError("Hasselblad 单张参数必须恰为已登记照片类型")
+        try:
+            settings = parse_photo_settings(request.params)
+        except ValueError as error:
+            raise ValueError("Hasselblad 拍摄参数不符合完整照片参数类型") from error
         timeout = request.timeout_s
         if (
             isinstance(timeout, bool)
@@ -251,7 +252,7 @@ class HasselbladDriver:
             raise ValueError("拍摄调用必须携带有限正 Decimal 总期限")
         if not callable(request.dispatch_check):
             raise ValueError("多步拍摄需要框架的派发资格检查")
-        return ticket.target_id, config
+        return ticket.target_id, config, settings
 
     def _call_info(self, raw: RawToolOutcome | None) -> CallInfo | None:
         if raw is None or raw.exit is None:
@@ -466,7 +467,7 @@ class HasselbladDriver:
         return raw
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
-        activity_id, config = self._request_config(request)
+        activity_id, config, settings = self._request_config(request)
         roots = self.roots
         began_ns = self.monotonic_ns()
         if isinstance(began_ns, bool) or not isinstance(began_ns, int):
@@ -553,7 +554,8 @@ class HasselbladDriver:
 
         for setting, args in (
             ("drive_mode_single", ("set", "drive-mode", "single")),
-            ("capture_format_raw", ("set", "capture-format", "raw")),
+            ("capture_format", ("set", "capture-format",
+                                 CAPTURE_FORMATS[settings.capture_format].command_value)),
         ):
             result, raw = await run_checked(setting, args)
             if result is not None:
@@ -605,23 +607,31 @@ class HasselbladDriver:
                                 last_raw=last_raw, effect=EffectState.UNKNOWN)
         try:
             response: CaptureResponse = parse_capture(
-                raw.output, output_directory=str(workspace)
+                raw.output,
+                capture_format=settings.capture_format,
+                output_directory=str(workspace),
             )
         except CliParseError as failure:
             return self._failed(request, step="capture", reason="capture_response_unconfirmed",
                                 steps=steps, last_raw=last_raw, effect=EffectState.UNKNOWN,
-                                extra={"response_error": str(failure)})
+                                extra={"response_error": str(failure),
+                                       "response_code": failure.code})
         steps[-1]["files"] = [
-            {"original_name": response.original.original_name,
+            {"host_name": response.original.host_name,
              "size_bytes": response.original.size,
-             "media_type": _RAW_MEDIA_TYPE},
-            {"original_name": response.preview.original_name,
+             "media_type": response.original.media_type},
+            {"host_name": response.preview.host_name,
              "size_bytes": response.preview.size,
-             "media_type": _PREVIEW_MEDIA_TYPE},
+             "media_type": response.preview.media_type},
         ]
+        steps[-1]["camera_locator"] = response.camera_locator.as_json()
         specs = (
-            CaptureFileSpec(response.original.original_name, response.original.size, _RAW_MEDIA_TYPE),
-            CaptureFileSpec(response.preview.original_name, response.preview.size, _PREVIEW_MEDIA_TYPE),
+            CaptureFileSpec(
+                response.original.host_name, response.original.size, response.original.media_type
+            ),
+            CaptureFileSpec(
+                response.preview.host_name, response.preview.size, response.preview.media_type
+            ),
         )
         try:
             artifacts = await verify_capture_files(roots, activity_id, specs)

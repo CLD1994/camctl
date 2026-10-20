@@ -39,10 +39,11 @@ INFO_OUTPUT = b"serial : CFV100C-001\nfirmware : v4.1.0\n"
 
 
 class FakeTransport:
-    def __init__(self, *, outcomes=None, after_call=None):
+    def __init__(self, *, outcomes=None, after_call=None, capture_format="raw"):
         self.calls = []
         self.outcomes = outcomes or {}
         self.after_call = after_call
+        self.capture_format = capture_format
 
     async def run(self, spec, stop):
         self.calls.append(spec)
@@ -59,17 +60,21 @@ class FakeTransport:
             "list": LIST_OUTPUT,
             "info": INFO_OUTPUT,
             "set": b"",
-            "capture": _capture_output(WORKSPACE),
+            "capture": _capture_output(WORKSPACE, self.capture_format),
         }[command]
         return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
 
 
-def _capture_output(workspace):
+def _capture_output(workspace, capture_format="raw"):
     prefix = str(workspace)
+    original_name = "capture_22544386.JPG" if capture_format == "jpeg" else ORIGINAL_NAME
+    preview_name = f"{original_name}.thumbnail.jpg"
+    media_path = "/mnt/media/DCIM/B9996039.JPG" if capture_format == "jpeg" else "/mnt/media/DCIM/B9996039.3FR"
     return (
         f"capture: OK\n"
-        f"saved {prefix}/{ORIGINAL_NAME} ({ORIGINAL_SIZE} bytes)\n"
-        f"saved {prefix}/{PREVIEW_NAME} ({PREVIEW_SIZE} bytes)\n"
+        f"saved {prefix}/{original_name} ({ORIGINAL_SIZE} bytes)\n"
+        f"saved {prefix}/{preview_name} ({PREVIEW_SIZE} bytes)\n"
+        f"camera file: {media_path}\n"
     ).encode()
 
 
@@ -90,17 +95,29 @@ def _request(*, device_id="camera-1", params=None, timeout=Decimal("180"),
     return ControlRequest(
         "take_photo",
         DeviceBinding(device_id, DRIVER_ID),
-        {"type": PARAMETER_TYPE} if params is None else params,
+        _photo_params() if params is None else params,
         ticket=AttemptTicket(1, "control", ACTIVITY_ID, "capture/1", 9) if ticket is None else ticket,
         timeout_s=timeout,
         dispatch_check=dispatch_check,
     )
 
 
-def _artifacts():
+def _photo_params(capture_format="raw"):
+    return {
+        "type": PARAMETER_TYPE,
+        "capture_format": capture_format,
+        "exposure": {"mode": "P", "iso": 100},
+        "white_balance": {"mode": "auto"},
+        "focus": {"mode": "MF"},
+    }
+
+
+def _artifacts(specs):
     return (
-        CapturedArtifact(ORIGINAL_NAME, ORIGINAL_SIZE, ORIGINAL_SHA256, "image/x-hasselblad-3fr"),
-        CapturedArtifact(PREVIEW_NAME, PREVIEW_SIZE, PREVIEW_SHA256, "image/jpeg"),
+        CapturedArtifact(specs[0].original_name, specs[0].size_bytes,
+                         ORIGINAL_SHA256, specs[0].media_type),
+        CapturedArtifact(specs[1].original_name, specs[1].size_bytes,
+                         PREVIEW_SHA256, specs[1].media_type),
     )
 
 
@@ -118,7 +135,7 @@ def host_files(monkeypatch):
 
     async def verify(actual_roots, activity_id, specs):
         verified.append((actual_roots, activity_id, specs))
-        return _artifacts()
+        return _artifacts(specs)
 
     monkeypatch.setattr(driver_module, "prepare_capture_workspace", prepare)
     monkeypatch.setattr(driver_module, "verify_capture_files", verify)
@@ -142,7 +159,8 @@ def _subcommands(transport):
 @pytest.mark.parametrize("control_request, message", [
     (_request(ticket=AttemptTicket(1, "stop", ACTIVITY_ID, "capture/1", 9)), "已提交的 control"),
     (_request(timeout=Decimal("NaN")), "有限正 Decimal"),
-    (_request(params={"type": "other"}), "已登记照片类型"),
+    (_request(params={"type": "other"}), "完整照片参数类型"),
+    (_request(params={"type": PARAMETER_TYPE}), "完整照片参数类型"),
     (ControlRequest(
         "start_recording", DeviceBinding("camera-1", DRIVER_ID),
         {"type": PARAMETER_TYPE}, AttemptTicket(1, "control", ACTIVITY_ID, "capture/1", 9),
@@ -215,9 +233,36 @@ async def test_success_requires_matching_device_and_two_verified_host_files(host
     assert all("used_grace_s" not in step for step in photo.data["steps"])
     assert result.outcome.settlement.evidence.data == {}
     assert [step["name"] for step in photo.data["steps"]] == [
-        "list", "info", "drive_mode_single", "capture_format_raw", "capture"
+        "list", "info", "drive_mode_single", "capture_format", "capture"
     ]
     assert validate_outcome(_request().ticket, result.outcome, EVIDENCE)
+
+
+@pytest.mark.asyncio
+async def test_jpeg_format_keeps_original_and_preview_roles_distinct(host_files):
+    roots, _prepared, verified = host_files
+    transport = FakeTransport(capture_format="jpeg")
+
+    result = await _driver(transport, roots).control(
+        _request(params=_photo_params("jpeg"))
+    )
+
+    assert _subcommands(transport)[3] == ("set", "capture-format", "jpeg")
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    photo, = result.observations
+    assert photo.data["original"]["original_name"] == "capture_22544386.JPG"
+    assert photo.data["original"]["media_type"] == "image/jpeg"
+    assert photo.data["preview"]["original_name"] == "capture_22544386.JPG.thumbnail.jpg"
+    assert photo.data["preview"]["media_type"] == "image/jpeg"
+    assert verified[0][2] == (
+        CaptureFileSpec("capture_22544386.JPG", ORIGINAL_SIZE, "image/jpeg"),
+        CaptureFileSpec("capture_22544386.JPG.thumbnail.jpg", PREVIEW_SIZE, "image/jpeg"),
+    )
+    assert photo.data["steps"][-1]["camera_locator"] == {
+        "status": "path",
+        "camera_path": "/mnt/media/DCIM/B9996039.JPG",
+        "camera_name": "B9996039.JPG",
+    }
 
 
 @pytest.mark.asyncio
@@ -446,7 +491,7 @@ async def test_capture_timeout_keeps_workspace_and_does_not_emit_photo_taken(hos
     (1, "list"),
     (2, "info"),
     (3, "drive_mode_single"),
-    (4, "capture_format_raw"),
+    (4, "capture_format"),
     (5, "capture"),
 ])
 async def test_step_records_only_its_actual_termination_grace(host_files, call_number, step_name):
@@ -460,7 +505,7 @@ async def test_step_records_only_its_actual_termination_grace(host_files, call_n
 
     steps = result.error["details"]["steps"]
     assert [step["name"] for step in steps] == [
-        "list", "info", "drive_mode_single", "capture_format_raw", "capture"
+        "list", "info", "drive_mode_single", "capture_format", "capture"
     ][:call_number]
     assert steps[-1]["name"] == step_name
     assert steps[-1]["used_grace_s"] == grace
@@ -503,6 +548,27 @@ async def test_unparseable_capture_response_is_unknown_even_after_local_exit_zer
     assert result.outcome.call_info.local_exit_code == 0
     assert result.outcome.observations == ()
     assert result.error["details"]["reason"] == "capture_response_unconfirmed"
+
+
+@pytest.mark.asyncio
+async def test_unreported_camera_locator_never_becomes_a_successful_capture(host_files):
+    roots, _prepared, verified = host_files
+    output = _capture_output(WORKSPACE).replace(
+        b"camera file: /mnt/media/DCIM/B9996039.3FR\n", b""
+    )
+    transport = FakeTransport(outcomes={5: RawToolOutcome(
+        LocalExit(exit_code=0), output, None, None, stderr=b""
+    )})
+
+    result = await _driver(transport, roots).control(_request())
+
+    assert verified == []
+    assert result.outcome.status is AttemptStatus.UNKNOWN
+    assert result.outcome.effect is EffectState.UNKNOWN
+    assert result.outcome.observations == ()
+    assert result.error["details"]["reason"] == "capture_response_unconfirmed"
+    assert "未报告机内路径" in result.error["details"]["response_error"]
+    assert result.error["details"]["response_code"] == "unreported_camera_locator"
 
 
 @pytest.mark.asyncio

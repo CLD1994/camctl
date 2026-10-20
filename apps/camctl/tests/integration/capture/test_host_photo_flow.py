@@ -185,8 +185,13 @@ class _PhotoDriver:
         await self._write_workspace(request)
         steps = [
             _step_fact(name)
-            for name in ("list", "info", "drive_mode_single", "capture_format_raw", "capture")
+            for name in ("list", "info", "drive_mode_single", "capture_format", "capture")
         ]
+        steps[-1]["camera_locator"] = {
+            "status": "path",
+            "camera_path": "/mnt/media/DCIM/B9996039.3FR",
+            "camera_name": "B9996039.3FR",
+        }
         if self.response == "malformed_steps":
             steps = "not-a-step-list"
         return DeviceCallResult(observations=(DeviceObservation(
@@ -253,6 +258,7 @@ class _ManagedCaptureTransport:
             output = (
                 f"capture: OK\nsaved {original} ({len(_ORIGINAL)} bytes)\n"
                 f"saved {preview} ({len(_PREVIEW)} bytes)\n"
+                "camera file: /mnt/media/DCIM/B9996039.3FR\n"
             ).encode()
         else:
             raise AssertionError(f"意外 Hasselblad 子命令: {command}")
@@ -344,7 +350,15 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                        driver or _PhotoDriver(Path(cfg.paths.staging)))
     actions = [{
         "name": "单张 RAW", "type": "camera_take_photo", "device_id": "cam-1",
-        "scheduled_at": _input_time(), "params": {"type": "photo" if legacy else "hasselblad_photo"},
+        "scheduled_at": _input_time(), "params": (
+            {"type": "photo"} if legacy else {
+                "type": "hasselblad_photo",
+                "capture_format": "raw",
+                "exposure": {"mode": "P", "iso": 100},
+                "white_balance": {"mode": "auto"},
+                "focus": {"mode": "MF"},
+            }
+        ),
         "policy": {"max_delay_ms": 5000},
     }]
     if cancel_action:
@@ -389,7 +403,13 @@ def _accept_and_start_second_host_photo(cfg, owned):
             "request_id": "2", "created_at": _input_time(), "name": "第二张主机 RAW 拍摄",
             "actions": [{
                 "name": "第二张单张 RAW", "type": "camera_take_photo", "device_id": "cam-1",
-                "scheduled_at": _input_time(), "params": {"type": "hasselblad_photo"},
+                "scheduled_at": _input_time(), "params": {
+                    "type": "hasselblad_photo",
+                    "capture_format": "raw",
+                    "exposure": {"mode": "P", "iso": 100},
+                    "white_balance": {"mode": "auto"},
+                    "focus": {"mode": "MF"},
+                },
                 "policy": {"max_delay_ms": 5000},
             }],
         }),
@@ -625,7 +645,7 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
         photo = json.loads(result_json)["observations"][0]
         steps = photo["data"]["steps"]
         assert [step["name"] for step in steps] == [
-            "list", "info", "drive_mode_single", "capture_format_raw", "capture",
+            "list", "info", "drive_mode_single", "capture_format", "capture",
         ]
         assert all(isinstance(step, dict) for step in steps)
         assert len(_saved_output_rows(owned)) == 2

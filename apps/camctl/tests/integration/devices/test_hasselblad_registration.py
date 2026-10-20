@@ -75,7 +75,13 @@ def test_hasselblad_catalog_and_task_binding_resolve_each_device_source(
             device_id, "camera_take_photo", "hasselblad_photo"
         )
         assert parameter is not None and parameter.task_factory is not None
-        task = parameter.task_factory({"type": "hasselblad_photo"})
+        task = parameter.task_factory({
+            "type": "hasselblad_photo",
+            "capture_format": "raw",
+            "exposure": {"mode": "P", "iso": 100},
+            "white_balance": {"mode": "auto"},
+            "focus": {"mode": "MF"},
+        })
         assert task.output_storage is storage
 
     described = {

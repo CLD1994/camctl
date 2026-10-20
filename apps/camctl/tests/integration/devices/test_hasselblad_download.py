@@ -22,15 +22,19 @@ from camctl.operations.process import LocalExit, RawToolOutcome
 RAW = b"II*\x00fixed camera original content"
 PREVIEW = b"\xff\xd8fixed capture preview\xff\xd9"
 NAME = "capture_123.3FR"
+CAMERA_PATH = f"/mnt/media/DCIM/{NAME}"
 TICKET = AttemptTicket(1, "read", "22", "read/22", 31)
 
 
 def source(variant="original", *, content=None):
     content = (RAW if variant == "original" else PREVIEW) if content is None else content
     digest = hashlib.sha256(content).hexdigest()
-    opaque = json.dumps(["hb-download-v1", NAME, variant, digest], separators=(",", ":"))
+    opaque = json.dumps(
+        ["hb-download-v2", CAMERA_PATH, NAME, variant, digest], separators=(",", ":")
+    )
     return SourceFile(json.dumps(["camera-1", DRIVER_ID, opaque], separators=(",", ":")),
-                      {"original_name": NAME, "variant": variant, "sha256": digest}, len(content))
+                      {"camera_path": CAMERA_PATH, "camera_name": NAME,
+                       "variant": variant, "sha256": digest}, len(content))
 
 
 class DownloadTransport:
@@ -240,7 +244,13 @@ async def test_capture_artifacts_and_both_download_variants_have_identical_bytes
     photo = capture.observations[0].data
     for role, variant in (("original", DownloadVariant.ORIGINAL), ("preview", DownloadVariant.THUMBNAIL)):
         artifact = photo[role]
-        identity = CameraFileIdentity(request.binding, photo["original"]["original_name"], variant, artifact["sha256"])
+        identity = CameraFileIdentity(
+            request.binding,
+            "/mnt/media/DCIM/fixture_capture.3FR",
+            "fixture_capture.3FR",
+            variant,
+            artifact["sha256"],
+        )
         fixed = SourceFile(file_identity_key(request.binding.device_id, DRIVER_ID, identity.file_identity),
                            identity.locator(), artifact["size_bytes"])
         session = await driver.open_read(fixed, 0, TICKET, idle_timeout_s=Decimal("10"))
