@@ -17,17 +17,17 @@
 | 字段 | 默认值 | 含义 |
 | --- | --- | --- |
 | `paths.log_file` | `$HOME/.camctl/camctl.log` | 正在写入的日志文件 |
-| `session.log_level` | `WARNING` | 日志级别 |
-| `session.log_max_size` | `"10 MiB"` | 单文件轮换阈值，按文件字节数判断 |
-| `session.log_file_count` | `3` | 保留文件总数，包含正在写入的文件 |
-| `session.log_queue_capacity` | `1000` | 每个进程日志队列允许等待的最大记录条数 |
-| `session.log_queue_low_watermark` | `700` | 第一水位，达到后停止接纳 `DEBUG`，对 `INFO` 采样 |
-| `session.log_queue_high_watermark` | `800` | 第二水位，达到后停止接纳 `INFO`，剩余位置供警告和错误使用 |
-| `session.log_info_sample_probability` | `0.1` | 两个水位之间每条 `INFO` 独立被选中的概率，默认值表示 10% |
+| `log.level` | `WARNING` | 日志级别 |
+| `log.max_size` | `"10 MiB"` | 单文件轮换阈值，按文件字节数判断 |
+| `log.file_count` | `3` | 保留文件总数，包含正在写入的文件 |
+| `log.queue_capacity` | `1000` | 每个进程日志队列允许等待的最大记录条数 |
+| `log.queue_low_watermark` | `700` | 第一水位，达到后停止接纳 `DEBUG`，对 `INFO` 采样 |
+| `log.queue_high_watermark` | `800` | 第二水位，达到后停止接纳 `INFO`，剩余位置供警告和错误使用 |
+| `log.info_sample_probability` | `0.1` | 两个水位之间每条 `INFO` 独立被选中的概率，默认值表示 10% |
 
 轮换阈值遵守[容量配置的表示](configuration.md#容量配置的表示)，换算后须为大于等于 1 的整数个字节。文件总数须为大于等于 1 的整数；0、负数、布尔值及其他错误类型属于本地配置错误。配置文件可省略这些字段，按[默认值与覆盖规则](configuration.md#本地配置的加载与更新)处理。配置更新后，后续进程使用新值；日志策略属于会话配置，不作为动作执行预算固化。
 
-队列容量与两个水位均为正整数，按条数配置，不使用字节容量字符串；完整生效配置须满足 `0 < log_queue_low_watermark < log_queue_high_watermark < log_queue_capacity`。采样概率使用有限数值，合法范围为闭区间 `[0, 1]`：0 表示采样区间内全部省略 `INFO`，1 表示该区间内全部选中。布尔值、错误类型、非有限概率及不满足范围或组合关系的值均属于本地配置错误；不自动修正水位或随容量缩放。省略字段先补默认值，再校验整组配置。
+队列容量与两个水位均为正整数，按条数配置，不使用字节容量字符串；完整生效配置须满足 `0 < log.queue_low_watermark < log.queue_high_watermark < log.queue_capacity`。采样概率使用有限数值，合法范围为闭区间 `[0, 1]`：0 表示采样区间内全部省略 `INFO`，1 表示该区间内全部选中。布尔值、错误类型、非有限概率及不满足范围或组合关系的值均属于本地配置错误；不自动修正水位或随容量缩放。省略字段先补默认值，再校验整组配置。
 
 第一版的实际部署保证日志级别能够接纳 `ERROR` 及以上记录。
 

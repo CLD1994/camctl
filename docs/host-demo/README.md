@@ -18,3 +18,5 @@
 电机控制接入另见[主程序通知协议](../../protocol/host-notifications.md)、[电机动作](../architecture/motor-control.md)和[按消息类型注册回调](implementation.md#按消息类型注册回调)。主程序注册仅含 `int position` 参数的回调，host 负责消息解析和分发；软件接入与组合验证见[组件交付复验](verification.md#电机通知组件交付复验2026-10-08)和[真实组合复验](verification.md#电机通知真实组合复验2026-10-08)。真实电机运动及第三方主程序业务范围仍按[目标环境联调清单](../superpowers/plans/2026-10-11-camctl-target-integration-runbook.md)核验。
 
 默认部署使用运行账户的 `$HOME/.camctl`，主程序可通过[路径补齐接口](implementation.md#用户目录与路径补齐)取得绝对路径；演示程序省略路径参数时采用相同布局。
+
+Python CLI 的完整 TOML 字段、默认值、合法范围和自定义交接目录示例见[配置项参考](../camctl/configuration-reference.md)。其中的 C 配置对应表说明两端应如何使用同一组路径。

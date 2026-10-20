@@ -1,8 +1,8 @@
 # 本地配置与通信策略
 
-[返回设计总览](README.md) · [阅读路线](reading-guide.md)
+[返回设计总览](README.md) · [阅读路线](reading-guide.md) · [配置项参考](../camctl/configuration-reference.md)
 
-本页定义配置何时加载、默认值怎样覆盖，以及控制调用超时和通信重试策略。配置属于主机部署；执行计划只指定业务要求。首次部署可结合[部署样例](deployment-example.md)阅读。
+本页定义配置何时加载、默认值怎样覆盖，以及控制调用超时和通信重试策略。配置属于主机部署；执行计划只指定业务要求。查询当前支持的字段、类型、默认值、合法范围及 C 接入对应关系时，使用[配置项参考](../camctl/configuration-reference.md)；首次部署可结合[部署样例](deployment-example.md)阅读。
 
 **阅读提示：** 先读计划要求与通信配置的分工，再看加载、生效时间和默认值。用户要求与拍摄参数随动作保存；本地执行配置由每次运行加载，影响尚未完成工作的后续处理。
 
@@ -61,8 +61,8 @@
 例如，配置文件仅包含以下内容时，只有日志级别被覆盖，目录、调度及其他本地策略继续使用默认值：
 
 ```toml
-[session]
-log_level = "INFO"
+[log]
+level = "INFO"
 ```
 
 本地策略的默认值与覆盖规则由所属配置契约定义，运行时读取和校验须符合这些规则。拍摄能力说明则由 `camctl describe` 根据实际驱动定义和生效设备配置生成；它不另行维护通信策略默认值。设备目录 `devices` 默认为空：没有配置文件也能完成配置加载，但不会凭空绑定相机或 MCU。`describe` 可成功导出空设备目录；新计划引用未配置设备时，仅对应动作按设备不存在失败。显式声明设备时，其绑定及驱动配置仍须合法；具体设备的默认设置由其接入契约定义。已有动作保留受理时确定的设备身份、驱动选择和拍摄参数；执行前仍须能够可靠取得所需的本地运行配置。设备目录为空不删除历史、不重置结果，也不授权改用另一台设备。
@@ -239,7 +239,7 @@ SQLite 自动检查点使用本次会话的 `database.wal_autocheckpoint_pages`�
 
 ## 容量配置的表示
 
-本地配置中按字节计量的容量使用带单位的 TOML 字符串，字段名表达用途，例如 `copy.segment_size` 和 `session.log_max_size`。配置加载时统一解析为整数个字节，处理流程使用解析结果。默认值由各字段所属专题定义；本节统一定义容量的书写与校验规则。
+本地配置中按字节计量的容量使用带单位的 TOML 字符串，字段名表达用途，例如 `copy.segment_size` 和 `log.max_size`。配置加载时统一解析为整数个字节，处理流程使用解析结果。默认值由各字段所属专题定义；本节统一定义容量的书写与校验规则。
 
 | 单位 | 对应字节数 |
 | --- | --- |
@@ -416,10 +416,10 @@ SQLite 自动检查点使用本次会话的 `database.wal_autocheckpoint_pages`�
 | --- | --- |
 | `session.plan_poll_interval_ms` | 默认 500；控制新计划周期检查间隔 |
 | `session.wakeup_margin_ms` | 默认 50；非负整数，0 表示关闭提前唤醒；不提前执行业务动作 |
-| `paths.log_file`、`session.log_level`、`session.log_max_size`、`session.log_file_count` | 日志路径、级别及轮换配置；默认值和保留语义见[运行日志](logging.md#配置与默认值) |
+| `paths.log_file`、`log.level`、`log.max_size`、`log.file_count` | 日志路径、级别及轮换配置；默认值和保留语义见[运行日志](logging.md#配置与默认值) |
 | `devices` | 默认空设备目录；设备声明及驱动专属配置由部署覆盖 |
 | `devices.<id>.kind`、`driver` | 已声明设备的种类与驱动选择；具体默认设置由设备接入契约定义；第一版接入相机，MCU 遵守[接口预留边界](mcu-actions.md#第一版范围) |
-| `devices.<id>.connection.prepare_lead_s` | 驱动默认值，本地设备配置可覆盖，计划不可覆盖 |
+| `devices.<id>.connection.prepare_lead_s` | 连接预备量属于设备部署配置，计划不可覆盖；当前 CLI 的实际支持边界见[设备配置参考](../camctl/configuration-reference.md#设备身份与连接) |
 | `clock.min_plausible_date` | 默认 `2025-01-01` |
 | `clock.lower_bound_tolerance_s` | 默认 5 秒 |
 | `clock.recheck_delay_s` | 默认 5 秒 |
