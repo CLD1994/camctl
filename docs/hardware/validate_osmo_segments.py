@@ -440,15 +440,36 @@ def validate_manifest(raw: object) -> dict[str, Any]:
     return normalized
 
 
-def _source_locator_key(entry: dict[str, Any]) -> str | None:
-    """Return a normalized device path only when independent locator evidence exists."""
+def _assess_source_locator(entry: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Return a reliable normalized source file path and its unknown reasons."""
 
     device_path = entry.get("source_device_path")
     locator_basis = entry.get("source_locator_basis_ref")
-    if not _has_text(device_path) or not _has_text(locator_basis):
-        return None
-    normalized = posixpath.normpath(device_path.strip())
-    return normalized if normalized not in {"", "."} else None
+    reasons: list[str] = []
+    normalized: str | None = None
+    if not _has_text(device_path):
+        reasons.append("source_device_path_unavailable")
+    else:
+        raw_path = device_path.strip()
+        normalized = posixpath.normpath(raw_path)
+        final_component = raw_path.rsplit("/", 1)[-1]
+        if (
+            final_component in {"", ".", ".."}
+            or posixpath.basename(normalized) in {"", ".", ".."}
+        ):
+            reasons.append("source_device_path_not_file_locator")
+            normalized = None
+    if not _has_text(locator_basis):
+        reasons.append("missing_source_locator_basis")
+    if reasons:
+        return None, _unique(reasons)
+    return normalized, []
+
+
+def _source_locator_key(entry: dict[str, Any]) -> str | None:
+    """Return the normalized source path only when locator qualification succeeds."""
+
+    return _assess_source_locator(entry)[0]
 
 
 def _unique_file_ids(raw: object, available: set[str], field: str) -> list[str]:
@@ -506,36 +527,168 @@ def _resolve_copy_path(manifest_path: Path, raw_path: str) -> Path:
     return copy_path.resolve()
 
 
-def _drain_stderr(pipe: Any, path: Path, state: dict[str, Any]) -> None:
+class DiagnosticCaptureError(OSError):
+    """Raised when subprocess output cannot be saved as complete evidence."""
+
+    def __init__(
+        self, stream: str, errors: Sequence[str], exit_code: int | None
+    ) -> None:
+        self.stream = stream
+        self.capture_errors = tuple(errors)
+        self.exit_code = exit_code
+        details = "; ".join(self.capture_errors)
+        super().__init__(f"cannot reliably capture {stream}: {details}")
+
+
+def _new_capture_state() -> dict[str, Any]:
+    return {"size": 0, "errors": [], "lock": threading.Lock()}
+
+
+def _record_capture_error(
+    state: dict[str, Any], operation: str, error: BaseException
+) -> None:
+    with state["lock"]:
+        state["errors"].append(f"{operation}: {error}")
+
+
+def _capture_errors(state: dict[str, Any]) -> tuple[str, ...]:
+    with state["lock"]:
+        return tuple(state["errors"])
+
+
+def _kill_process(process: Any | None, state: dict[str, Any], operation: str) -> None:
+    if process is None:
+        return
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
+    except Exception as exc:
+        _record_capture_error(state, operation, exc)
+
+
+def _close_pipe(pipe: Any, state: dict[str, Any], operation: str) -> None:
+    try:
+        pipe.close()
+    except Exception as exc:
+        _record_capture_error(state, operation, exc)
+        try:
+            pipe.close()
+        except Exception as retry_exc:
+            _record_capture_error(state, f"retry {operation}", retry_exc)
+
+
+def _close_diagnostic_output(
+    output: Any, state: dict[str, Any], *, flush: bool
+) -> None:
+    if flush:
+        try:
+            output.flush()
+        except Exception as exc:
+            _record_capture_error(state, "flush diagnostic artifact", exc)
+    try:
+        output.close()
+    except Exception as exc:
+        _record_capture_error(state, "close diagnostic artifact", exc)
+        try:
+            output.close()
+        except Exception as retry_exc:
+            _record_capture_error(state, "retry close diagnostic artifact", retry_exc)
+
+
+def _drain_stderr(
+    pipe: Any,
+    path: Path,
+    state: dict[str, Any],
+    process: Any | None = None,
+) -> None:
     output = None
     try:
         try:
             output = path.open("wb")
-        except OSError as exc:
-            state["write_error"] = str(exc)
+        except Exception as exc:
+            _record_capture_error(state, "open diagnostic artifact", exc)
         while True:
-            chunk = pipe.read(64 * 1024)
+            try:
+                chunk = pipe.read(64 * 1024)
+            except Exception as exc:
+                _record_capture_error(state, "read subprocess stderr pipe", exc)
+                _kill_process(process, state, "terminate subprocess after stderr read failure")
+                break
             if not chunk:
+                break
+            if not isinstance(chunk, bytes):
+                error = OSError("stderr pipe returned a non-bytes chunk")
+                _record_capture_error(state, "read subprocess stderr pipe", error)
+                _kill_process(process, state, "terminate subprocess after invalid stderr chunk")
                 break
             state["size"] += len(chunk)
             if output is not None:
                 try:
-                    output.write(chunk)
-                except OSError as exc:
-                    state["write_error"] = str(exc)
-                    output.close()
+                    written = output.write(chunk)
+                    if written != len(chunk):
+                        raise OSError(f"short diagnostic write: {written}/{len(chunk)} bytes")
+                except Exception as exc:
+                    _record_capture_error(state, "write diagnostic artifact", exc)
+                    _close_diagnostic_output(output, state, flush=False)
                     output = None
+    except Exception as exc:
+        _record_capture_error(state, "drain subprocess stderr", exc)
+        _kill_process(process, state, "terminate subprocess after stderr drain failure")
     finally:
         if output is not None:
-            output.close()
-        pipe.close()
+            _close_diagnostic_output(output, state, flush=True)
+        _close_pipe(pipe, state, "close subprocess stderr pipe")
+
+
+def _join_stderr_drainer(
+    drainer: threading.Thread, process: Any, state: dict[str, Any]
+) -> None:
+    try:
+        drainer.join()
+    except Exception as exc:
+        _record_capture_error(state, "join stderr reader thread", exc)
+        _kill_process(process, state, "terminate subprocess after stderr reader join failure")
+        try:
+            drainer.join()
+        except Exception as retry_exc:
+            _record_capture_error(state, "retry join stderr reader thread", retry_exc)
+    if drainer.is_alive():
+        _record_capture_error(
+            state,
+            "join stderr reader thread",
+            RuntimeError("reader thread remains alive"),
+        )
+        _kill_process(process, state, "terminate subprocess after live stderr reader")
+        drainer.join()
+
+
+def _wait_process(process: Any, state: dict[str, Any]) -> int | None:
+    try:
+        return process.wait()
+    except Exception as exc:
+        _record_capture_error(state, "wait for subprocess", exc)
+        _kill_process(process, state, "terminate subprocess after wait failure")
+        try:
+            return process.wait()
+        except Exception as retry_exc:
+            _record_capture_error(state, "retry wait for subprocess", retry_exc)
+            return None
+
+
+def _raise_capture_error(
+    stream: str, state: dict[str, Any], exit_code: int | None
+) -> None:
+    errors = _capture_errors(state)
+    if errors:
+        raise DiagnosticCaptureError(stream, errors, exit_code)
 
 
 def _run_command(
     argv: Sequence[str], diagnostics: DiagnosticArtifacts
 ) -> dict[str, Any]:
     token, stderr_path = diagnostics.create()
-    stderr_state: dict[str, Any] = {"size": 0, "write_error": None}
+    stderr_state = _new_capture_state()
     try:
         process = subprocess.Popen(
             list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -554,17 +707,35 @@ def _run_command(
     assert process.stdout is not None and process.stderr is not None
     drainer = threading.Thread(
         target=_drain_stderr,
-        args=(process.stderr, stderr_path, stderr_state),
+        args=(process.stderr, stderr_path, stderr_state, process),
         name="osmo-media-stderr-drain",
-        daemon=True,
+        daemon=False,
     )
-    drainer.start()
-    stdout_bytes = process.stdout.read()
-    process.stdout.close()
-    exit_code = process.wait()
-    drainer.join()
-    if stderr_state["write_error"] is not None:
-        raise OSError(f"cannot stage subprocess stderr: {stderr_state['write_error']}")
+    try:
+        drainer.start()
+    except Exception as exc:
+        _record_capture_error(stderr_state, "start stderr reader thread", exc)
+        _kill_process(process, stderr_state, "terminate subprocess after reader start failure")
+        _close_pipe(process.stdout, stderr_state, "close subprocess stdout pipe")
+        _close_pipe(process.stderr, stderr_state, "close subprocess stderr pipe")
+        exit_code = _wait_process(process, stderr_state)
+        _raise_capture_error("subprocess output and stderr", stderr_state, exit_code)
+        raise AssertionError("capture errors must have been raised")
+
+    stdout_bytes: bytes | None = None
+    try:
+        stdout_bytes = process.stdout.read()
+        if not isinstance(stdout_bytes, bytes):
+            raise OSError("stdout pipe returned a non-bytes value")
+    except Exception as exc:
+        _record_capture_error(stderr_state, "read subprocess stdout pipe", exc)
+        _kill_process(process, stderr_state, "terminate subprocess after stdout read failure")
+    finally:
+        _close_pipe(process.stdout, stderr_state, "close subprocess stdout pipe")
+    exit_code = _wait_process(process, stderr_state)
+    _join_stderr_drainer(drainer, process, stderr_state)
+    _raise_capture_error("subprocess output and stderr", stderr_state, exit_code)
+    assert stdout_bytes is not None
     if stderr_state["size"] == 0:
         stderr_path.unlink(missing_ok=True)
         stderr_value: Any = ""
@@ -685,66 +856,121 @@ def _frame_coverage(
     previous: dict[int, Fraction] = {}
     max_gaps: dict[int, Fraction] = {}
     token, stderr_path = diagnostics.create()
-    stderr_state: dict[str, Any] = {"size": 0, "write_error": None}
+    stderr_state = _new_capture_state()
     parse_error: str | None = None
     exit_code: int | None = None
     try:
         process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError as exc:
-        stderr_path.write_text(str(exc), encoding="utf-8")
-        parse_error = None
-        exit_code = None
-        stderr_state["size"] = len(str(exc).encode("utf-8"))
+        message = str(exc).encode("utf-8")
+        try:
+            with stderr_path.open("wb") as output:
+                if output.write(message) != len(message):
+                    raise OSError("short write for ffprobe startup diagnostic")
+                output.flush()
+        except Exception as artifact_exc:
+            raise DiagnosticCaptureError(
+                "ffprobe startup stderr", [f"write launch diagnostic: {artifact_exc}"], None
+            ) from exc
+        stderr_state["size"] = len(message)
     else:
         assert process.stdout is not None and process.stderr is not None
         drainer = threading.Thread(
             target=_drain_stderr,
-            args=(process.stderr, stderr_path, stderr_state),
+            args=(process.stderr, stderr_path, stderr_state, process),
             name="osmo-frame-stderr-drain",
-            daemon=True,
-        )
-        drainer.start()
-        text_stream = io.TextIOWrapper(
-            process.stdout, encoding="utf-8", errors="replace", newline=""
+            daemon=False,
         )
         try:
-            for row in csv.reader(text_stream):
-                if len(row) < 2:
-                    continue
-                stream_index = _parse_index(row[0])
-                if stream_index not in coverage:
-                    continue
-                timestamp = _decimal_fraction(row[1])
-                record = coverage[stream_index]
-                if timestamp is None:
-                    record["missing_timestamp_count"] += 1
-                    continue
-                record["decoded_frame_timestamp_count"] += 1
-                if record["first_timestamp_seconds_exact"] is None:
-                    record["first_timestamp_seconds_exact"] = _fraction_text(timestamp)
-                record["last_timestamp_seconds_exact"] = _fraction_text(timestamp)
-                if stream_index in previous:
-                    gap = timestamp - previous[stream_index]
-                    if gap < 0:
-                        record["timestamps_monotonic"] = False
-                    else:
-                        max_gaps[stream_index] = max(
-                            max_gaps.get(stream_index, Fraction(0)), gap
-                        )
-                previous[stream_index] = timestamp
-        except csv.Error as exc:
-            parse_error = str(exc)
-            for record in coverage.values():
-                record["parse_error"] = parse_error
+            drainer.start()
+        except Exception as exc:
+            _record_capture_error(stderr_state, "start ffprobe stderr reader thread", exc)
+            _kill_process(process, stderr_state, "terminate ffprobe after reader start failure")
+            _close_pipe(process.stdout, stderr_state, "close ffprobe frame stdout pipe")
+            _close_pipe(process.stderr, stderr_state, "close ffprobe frame stderr pipe")
+            exit_code = _wait_process(process, stderr_state)
+            _raise_capture_error("ffprobe frame output and stderr", stderr_state, exit_code)
+            raise AssertionError("capture errors must have been raised")
+
+        text_stream: io.TextIOWrapper | None = None
+        processing_error: Exception | None = None
+        try:
+            text_stream = io.TextIOWrapper(
+                process.stdout, encoding="utf-8", errors="replace", newline=""
+            )
+            try:
+                for row in csv.reader(text_stream):
+                    if len(row) < 2:
+                        continue
+                    stream_index = _parse_index(row[0])
+                    if stream_index not in coverage:
+                        continue
+                    timestamp = _decimal_fraction(row[1])
+                    record = coverage[stream_index]
+                    if timestamp is None:
+                        record["missing_timestamp_count"] += 1
+                        continue
+                    record["decoded_frame_timestamp_count"] += 1
+                    if record["first_timestamp_seconds_exact"] is None:
+                        record["first_timestamp_seconds_exact"] = _fraction_text(timestamp)
+                    record["last_timestamp_seconds_exact"] = _fraction_text(timestamp)
+                    if stream_index in previous:
+                        gap = timestamp - previous[stream_index]
+                        if gap < 0:
+                            record["timestamps_monotonic"] = False
+                        else:
+                            max_gaps[stream_index] = max(
+                                max_gaps.get(stream_index, Fraction(0)), gap
+                            )
+                    previous[stream_index] = timestamp
+            except csv.Error as exc:
+                parse_error = str(exc)
+                for record in coverage.values():
+                    record["parse_error"] = parse_error
+                try:
+                    while text_stream.read(64 * 1024):
+                        pass
+                except Exception as read_exc:
+                    _record_capture_error(
+                        stderr_state, "read remaining ffprobe frame stdout", read_exc
+                    )
+                    _kill_process(
+                        process, stderr_state, "terminate ffprobe after frame stdout read failure"
+                    )
+            except Exception as exc:
+                processing_error = exc
+                _record_capture_error(stderr_state, "read ffprobe frame stdout", exc)
+                _kill_process(
+                    process, stderr_state, "terminate ffprobe after frame stdout read failure"
+                )
+        except Exception as exc:
+            processing_error = exc
+            _record_capture_error(stderr_state, "initialize ffprobe frame stdout reader", exc)
+            _kill_process(
+                process,
+                stderr_state,
+                "terminate ffprobe after frame stdout reader initialization failure",
+            )
         finally:
-            # CSV 损坏后仍读完 stdout，避免 ffprobe 阻塞或丢失退出状态。
-            while text_stream.read(64 * 1024):
-                pass
-            text_stream.close()
-            exit_code = process.wait()
-            drainer.join()
-        if stderr_state["write_error"] is not None:
-            raise OSError(f"cannot stage ffprobe frame stderr: {stderr_state['write_error']}")
+            if text_stream is None:
+                _close_pipe(
+                    process.stdout, stderr_state, "close ffprobe frame stdout pipe"
+                )
+            else:
+                try:
+                    text_stream.close()
+                except Exception as exc:
+                    _record_capture_error(stderr_state, "close ffprobe frame stdout pipe", exc)
+                    _close_pipe(
+                        process.stdout,
+                        stderr_state,
+                        "retry close ffprobe frame stdout pipe",
+                    )
+            exit_code = _wait_process(process, stderr_state)
+            _join_stderr_drainer(drainer, process, stderr_state)
+        _raise_capture_error("ffprobe frame output and stderr", stderr_state, exit_code)
+        if processing_error is not None:
+            raise processing_error
 
     for stream_index, record in coverage.items():
         record["probe_exit_code"] = exit_code
@@ -868,12 +1094,8 @@ def _inspect_file(
     elif not byte_identity_reasons:
         local_copy["byte_identity_status"] = "match"
 
-    locator_reasons: list[str] = []
-    if not _has_text(entry.get("source_device_path")):
-        locator_reasons.append("source_device_path_unavailable")
-    if not _has_text(entry.get("source_locator_basis_ref")):
-        locator_reasons.append("missing_source_locator_basis")
-    if not locator_reasons:
+    source_locator_key, locator_reasons = _assess_source_locator(entry)
+    if source_locator_key is not None:
         local_copy["source_locator_status"] = "known"
 
     local_copy["byte_identity_unknown_reasons"] = _unique(byte_identity_reasons)

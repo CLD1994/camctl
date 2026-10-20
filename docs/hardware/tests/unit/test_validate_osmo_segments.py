@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
+import threading
 from fractions import Fraction
 from pathlib import Path
 
@@ -47,6 +49,112 @@ def valid_manifest():
             }
         ],
     }
+
+
+class MemoryPipe(io.RawIOBase):
+    def __init__(self, content: bytes, fault: str | None = None):
+        super().__init__()
+        self.content = memoryview(content)
+        self.offset = 0
+        self.fault = fault
+        self.closed_for_test = False
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        if self.fault == "read":
+            raise OSError("simulated diagnostic pipe read failure")
+        if size is None or size < 0:
+            size = len(self.content) - self.offset
+        end = min(len(self.content), self.offset + size)
+        result = self.content[self.offset:end].tobytes()
+        self.offset = end
+        return result
+
+    def readinto(self, buffer):
+        if self.fault == "read":
+            raise OSError("simulated diagnostic pipe read failure")
+        size = min(len(buffer), len(self.content) - self.offset)
+        buffer[:size] = self.content[self.offset : self.offset + size]
+        self.offset += size
+        return size
+
+    def close(self):
+        self.closed_for_test = True
+        super().close()
+        if self.fault == "pipe_close":
+            raise OSError("simulated diagnostic pipe close failure")
+
+
+class MemoryDiagnosticOutput:
+    def __init__(self, fault: str | None = None):
+        self.fault = fault
+        self.content = bytearray()
+        self.closed_for_test = False
+
+    def write(self, data: bytes) -> int:
+        if self.fault == "write":
+            raise OSError("simulated diagnostic write failure")
+        self.content.extend(data)
+        return len(data)
+
+    def flush(self) -> None:
+        if self.fault == "flush":
+            raise OSError("simulated final diagnostic flush ENOSPC")
+
+    def close(self) -> None:
+        self.closed_for_test = True
+        self.flush()
+        if self.fault == "close":
+            raise OSError("simulated diagnostic close failure")
+
+
+class MemoryDiagnosticPath:
+    def __init__(self, fault: str | None, output: MemoryDiagnosticOutput):
+        self.fault = fault
+        self.output = output
+
+    def open(self, mode: str):
+        assert mode == "wb"
+        if self.fault == "open":
+            raise OSError("simulated diagnostic open failure")
+        return self.output
+
+    def unlink(self, missing_ok: bool = False) -> None:
+        assert missing_ok
+
+
+class MemoryDiagnostics:
+    def __init__(self, fault: str | None):
+        self.output = MemoryDiagnosticOutput(fault)
+        self.path = MemoryDiagnosticPath(fault, self.output)
+
+    def create(self):
+        return "memory-token", self.path
+
+    def marker(self, token: str):
+        return {"diagnostic": token}
+
+
+class MemoryProcess:
+    def __init__(self, *, stdout_fault: str | None = None, stderr_fault: str | None = None):
+        self.stdout = MemoryPipe(b"0,0.0\n0,0.1\n", fault=stdout_fault)
+        self.stderr = MemoryPipe(b"diagnostic\n", fault=stderr_fault)
+        self.returncode = 17
+        self.waited = False
+        self.killed = False
+
+    def poll(self):
+        return self.returncode if self.waited else None
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self):
+        self.waited = True
+        return self.returncode
 
 
 def test_100ms_tolerance_accepts_9900ms_against_10000ms():
@@ -380,6 +488,108 @@ def test_local_source_hash_cannot_make_a_missing_locator_reliable():
     entry["source_locator_basis_ref"] = None
 
     assert subject._source_locator_key(entry) is None
+
+
+@pytest.mark.parametrize(
+    ("source_device_path", "source_locator_basis_ref", "expected_locator"),
+    [
+        (".", "camera-readback.json#dot", None),
+        ("segment/..", "camera-readback.json#parent", None),
+        ("CAM001/segment/..", "camera-readback.json#directory", None),
+        ("DCIM/CAM001/segment-1.OSV", "camera-readback.json#valid", "DCIM/CAM001/segment-1.OSV"),
+        (None, "camera-readback.json#missing-path", None),
+        ("DCIM/CAM001/segment-1.OSV", None, None),
+    ],
+)
+def test_manifest_locator_qualification_matches_normalized_file_path(
+    source_device_path, source_locator_basis_ref, expected_locator
+):
+    subject = load_subject()
+    manifest = valid_manifest()
+    entry = manifest["files"][0]
+    entry["source_device_path"] = source_device_path
+    entry["source_locator_basis_ref"] = source_locator_basis_ref
+
+    validated = subject.validate_manifest(manifest)
+    locator, unknown_reasons = subject._assess_source_locator(entry)
+
+    assert subject._source_locator_key(entry) == expected_locator
+    assert locator == expected_locator
+    assert bool(unknown_reasons) is (expected_locator is None)
+    assert validated["files"][0]["source_device_path"] == source_device_path
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "fault"),
+    [
+        (entrypoint, fault)
+        for entrypoint in ("command", "frame")
+        for fault in (
+            "open",
+            "write",
+            "flush",
+            "close",
+            "read",
+            "pipe_close",
+            "stdout_read",
+            "stdout_close",
+        )
+    ]
+    + [("frame", "stdout_wrapper")],
+)
+def test_subprocess_capture_errors_are_reported_after_all_pipes_and_process_settle(
+    monkeypatch, entrypoint, fault
+):
+    subject = load_subject()
+    stdout_fault = {"stdout_read": "read", "stdout_close": "pipe_close"}.get(fault)
+    stderr_fault = fault if fault in {"read", "pipe_close"} else None
+    process = MemoryProcess(stdout_fault=stdout_fault, stderr_fault=stderr_fault)
+    diagnostics = MemoryDiagnostics(
+        fault if fault in {"open", "write", "flush", "close"} else None
+    )
+    spawned_threads = []
+    thread_errors = []
+    original_thread = subject.threading.Thread
+
+    class TrackingThread(original_thread):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            spawned_threads.append(self)
+
+    monkeypatch.setattr(subject.threading, "Thread", TrackingThread)
+    monkeypatch.setattr(
+        subject.threading,
+        "excepthook",
+        lambda args: thread_errors.append(args.exc_value),
+    )
+    monkeypatch.setattr(
+        subject.subprocess,
+        "Popen",
+        lambda *args, **kwargs: process,
+    )
+    if entrypoint == "frame" and fault == "stdout_wrapper":
+        def fail_text_stream(*args, **kwargs):
+            raise OSError("simulated frame stdout wrapper failure")
+
+        monkeypatch.setattr(subject.io, "TextIOWrapper", fail_text_stream)
+
+    with pytest.raises(subject.DiagnosticCaptureError) as captured:
+        if entrypoint == "command":
+            subject._run_command(["synthetic-tool"], diagnostics)
+        else:
+            subject._frame_coverage(Path("synthetic-media"), "ffprobe", {0}, diagnostics)
+
+    assert captured.value.exit_code == (
+        -9 if fault in {"read", "stdout_read", "stdout_wrapper"} else 17
+    )
+    assert captured.value.capture_errors
+    assert process.waited
+    assert process.stdout.closed_for_test
+    assert process.stderr.closed_for_test
+    assert all(not thread.is_alive() for thread in spawned_threads)
+    assert not thread_errors
+    if fault in {"read", "stdout_read", "stdout_wrapper"}:
+        assert process.killed
 
 
 def test_normal_manifest_can_preserve_unknown_collection_or_default_scope():

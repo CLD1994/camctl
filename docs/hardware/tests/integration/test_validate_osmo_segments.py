@@ -527,6 +527,104 @@ def test_missing_source_locator_keeps_matching_bytes_but_source_scope_unknown(
     assert report["scopes"]["all_retained"]["source_duration_status"] == "unknown"
 
 
+def test_non_file_locator_keeps_bytes_and_media_but_source_scope_unknown(
+    tmp_path: Path,
+):
+    first_media = make_media(tmp_path / "segment-a.mp4")
+    second_media = tmp_path / "segment-b.mp4"
+    shutil.copyfile(first_media, second_media)
+    first = file_entry(first_media, "segment-a", "output-a")
+    second = file_entry(second_media, "segment-b", "output-b")
+    first["source_device_path"] = "."
+    second["source_device_path"] = "segment/.."
+    manifest = manifest_for(
+        tmp_path,
+        [first, second],
+        target_duration_ms=2_000,
+        recording_class="abnormal",
+        default_scope_status="unknown",
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    assert report is not None
+    for file_result in report["files"]:
+        assert file_result["local_copy"]["byte_identity_status"] == "match"
+        assert file_result["local_copy"]["source_locator_status"] == "unknown"
+        assert file_result["local_copy"]["identity_status"] == "unknown"
+        assert "source_device_path_not_file_locator" in file_result["local_copy"][
+            "identity_unknown_reasons"
+        ]
+        assert file_result["media"]["status"] == "probed"
+    retained = report["scopes"]["all_retained"]
+    assert retained["local_copy_duration_comparison"]["status"] == "pass"
+    assert retained["source_copy_identity_status"] == "unknown"
+    assert retained["source_duration_status"] == "unknown"
+
+
+def test_diagnostic_close_failure_keeps_old_report_inputs_and_tempdir(tmp_path: Path):
+    media_path = make_media(tmp_path / "segment-a.mp4")
+    manifest_path = manifest_for(
+        tmp_path, [file_entry(media_path, "segment-a", "output-a")]
+    )
+    report_path = tmp_path / "report.json"
+    old_report = b"previous report bytes must remain untouched\n"
+    report_path.write_bytes(old_report)
+    original_manifest = manifest_path.read_bytes()
+    original_media = media_path.read_bytes()
+    temporary_root = tmp_path / "isolated-temp"
+    temporary_root.mkdir()
+    launcher = tmp_path / "run_with_diagnostic_close_failure.py"
+    launcher.write_text(
+        "from pathlib import Path\n"
+        "import runpy, sys\n"
+        "original_open = Path.open\n"
+        "class FailingClose:\n"
+        "    def __init__(self, wrapped): self.wrapped = wrapped\n"
+        "    def write(self, data): return self.wrapped.write(data)\n"
+        "    def flush(self): return self.wrapped.flush()\n"
+        "    def close(self):\n"
+        "        self.wrapped.close()\n"
+        "        raise OSError('simulated final buffered flush ENOSPC')\n"
+        "def injected_open(path, mode='r', *args, **kwargs):\n"
+        "    opened = original_open(path, mode, *args, **kwargs)\n"
+        "    if mode == 'wb' and path.suffix == '.stderr':\n"
+        "        return FailingClose(opened)\n"
+        "    return opened\n"
+        "Path.open = injected_open\n"
+        "script, *arguments = sys.argv[1:]\n"
+        "sys.argv = [script, *arguments]\n"
+        "runpy.run_path(script, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["TMPDIR"] = str(temporary_root)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(launcher),
+            str(SCRIPT_PATH),
+            "--manifest",
+            str(manifest_path),
+            "--output",
+            str(report_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+        timeout=30,
+    )
+
+    assert completed.returncode == 2
+    assert "simulated final buffered flush ENOSPC" in completed.stderr
+    assert report_path.read_bytes() == old_report
+    assert manifest_path.read_bytes() == original_manifest
+    assert media_path.read_bytes() == original_media
+    assert list(temporary_root.iterdir()) == []
+
+
 def test_frame_stream_and_large_stderr_are_consumed_without_truncation(tmp_path: Path):
     media_path = make_media(tmp_path / "segment-a.mp4")
     manifest = manifest_for(tmp_path, [file_entry(media_path, "segment-a", "output-a")])
