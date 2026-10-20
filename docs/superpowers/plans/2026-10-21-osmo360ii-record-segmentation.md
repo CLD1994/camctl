@@ -74,7 +74,7 @@ P7 可以在其输入格式确定后与 P4—P6 独立推进。P3 涉及公共�
 | 建议位置 | 输入与输出 | 必须保持的边界 |
 | --- | --- | --- |
 | `devices/drivers/adb_cameras/osmo360ii_segments.py` | `parse_osmo_segment_key(path: str) -> SegmentKey \| None` | `SegmentKey` 包含整数目录号和 index；只解析顺序，不确认归属 |
-| `capture/segment_models.py`、`capture/segments.py` | `default_segment_count(target_duration_ms: int) -> int`；`advance_segment_assessment(state: SegmentAccumulator, member: SegmentMember) -> SegmentAccumulator`；`finish_segment_assessment(state: SegmentAccumulator, completion: CompletionFacts) -> SegmentAssessment` | 逐个成员形成有限摘要；完整成员不进入摘要数组 |
+| `capture/segment_models.py`、`capture/segments.py` | `default_segment_count(target_duration_ms: int) -> int`；`advance_segment_assessment(state: SegmentAccumulator, member: SegmentMember) -> SegmentAccumulator`；`finish_segment_assessment(state: SegmentAccumulator, completion: CompletionFacts) -> SegmentAssessment`；`iter_segment_gaps(members: Iterable[SegmentMember], *, last_nonzero_cursor: SegmentCursor \| None, start_key: SegmentKey \| None) -> Iterator[SegmentGap]` | 首遍形成有限摘要并固定最后非零原片位置；第二遍在同一冻结成员范围内逐项产生缺口，不将成员或全部缺口装入摘要 |
 | `persistence/repositories/segments.py` | `iter_segment_members(scope: PlanReadScope, ref: SegmentSetRef, cursor: SegmentCursor \| None, limit: int) -> Page[SegmentMember, SegmentCursor]` | 引用绑定原动作、扫描及可靠末页；游标按完整排序键继续，错误不返回“读完” |
 | 同一仓储及终态保存入口 | `save_segment_assessment(request: SegmentAssessmentSave, operation_key: str, owned: OwnedConnection) -> DbOutcome`；`finish_segmented_capture(request: FinishSegmentedCapture, operation_key: str, owned: OwnedConnection) -> DbOutcome` | 请求引用可靠集合及判断，返回有限回执；成员、产物和事件在事务内分批形成 |
 | 取回来源读取端口 | `read_default_segment_scope(scope: PlanReadScope, action_id: int) -> DefaultSegmentScope`；`iter_default_segment_originals(scope: PlanReadScope, action_id: int, cursor: SegmentCursor \| None, limit: int) -> Page[OriginalFamilyFacts, SegmentCursor]` | 范围区分未确认、已确定为空、已确定非空；明确 ID 使用独立精确查询 |
@@ -95,7 +95,7 @@ P1 的类型至少表达：实际文件身份、排序键或解析未知、原�
 - [ ] **步骤 1：增加命名与边界测试。** `test_osmo_segment_sort_uses_numeric_cam_and_index_with_rollover` 核对 `CAM001/0999` 后接 `CAM002/0001`；不同 datetime 不改变排序。后缀大小写沿原配对契约处理，名称主干的大小写和不同目录不能合并。分别测试非法名称、index 超范围及冲突键，结果保持未知而非任选一个。
 - [ ] **步骤 2：增加精确计算测试并确认当前失败。** `test_default_segment_count_uses_exact_milliseconds` 的独立预期为 `9000→2`、`10000→3`、`12000→3`；加入既有最大合法目标，不建立预期段数规模的列表。验证命令见文末命令表，先只跑新增文件。
 - [ ] **步骤 3：增加判定状态测试。** 用下表逐项断言结果、依据、下界和范围；测试替身只提供实际文件事实，不将预期结果直接交给被测函数。
-- [ ] **步骤 4：实现建议接口。** 逐成员处理，保留必要的前项和有限计数；最后非零原片暂按可能的短尾段处理。空尾的归类必须等待可靠末页与顺序，缺口使用可信起点或后继关系，长缺口保存区间。
+- [ ] **步骤 4：实现建议接口。** 首遍逐成员处理，保留必要的前项、待定空原片的有限计数和最后非零原片位置；最后非零原片暂按可能的短尾段处理。可靠末页与顺序确定后，第二遍读取同一冻结成员，以最后非零位置分类尾部及非尾部空文件，使用可信起点及后继关系逐项生成缺口。长缺失区间没有实际文件身份，每份已观察的非尾零 OSV 保留自己的真实身份。首遍摘要中的缺口数量和首个缺口必须与第二遍记录一致。
 - [ ] **步骤 5：贯通任务声明的构建与校验。** 普通录像采用分段完成和范围规则，原生延时只采用适用的空尾分类；受理、保存和读取使用同一声明。参数的目标时长含义保持整次任务。
 - [ ] **步骤 6：运行最窄单测，审查并提交本阶段。** 单测中媒体拷贝、探测、设备及数据库协作者均不得被调用。
 
@@ -130,7 +130,7 @@ def test_default_segment_count_uses_exact_milliseconds(target_ms, expected):
 **输入与交付：** 消费 P1 类型，交付实际存储字段及索引、事件归属、有限读写请求、公共错误条目和跨任务字段映射。具体表名及内部编号由权威登记确定，不在多个消费者中另抄完整清单。
 
 - [ ] **步骤 1：增加结构和往返失败测试。** 覆盖默认范围三态、重复成员、排序键冲突、非法跨动作引用、缺口没有实际文件身份、预览指向错误原片，以及只有子表变化时的动作归属。
-- [ ] **步骤 2：定义并实现增长集合的保存与查询。** 保存有序成员、空尾观察、缺口区间、判断依据及默认范围成员关系；文件大小、摘要和清理状态仍由独立文件事实持有。按动作、完整排序键和成员身份设置可续读的索引。
+- [ ] **步骤 2：定义并实现增长集合的保存与查询。** 保存有序成员及可靠末页，再对该冻结集合做第二遍分页分类，逐批保存空尾观察、缺口区间、判断依据及默认范围成员关系。多份待定空 OSV 后再次出现非零原片时，必须完整记录此前每份非尾零原片；保存的缺口数量、首个缺口及成员归属与最终摘要相符后才允许终态提交。文件大小、摘要和清理状态仍由独立文件事实持有。按动作、完整排序键和成员身份设置可续读的索引。
 - [ ] **步骤 3：接入任务及保存校验。** 声明、结果引用、原扫描和原活动必须一致；有限摘要携带稳定集合引用与必要计数，不携带全部成员元组。下界的精确表示须能覆盖合法计数与目标比较，不以溢出值代替事实。
 - [ ] **步骤 4：登记公共错误及详情。** 分别表达缺段／非尾零原片、默认连续范围为空、默认范围未确认，以及既有无产物或结果未确认。详情能定位实际缺口区间、可靠邻接文件、默认范围及真实产物身份；无实际前邻或后邻时明确其不存在或未知，不补造引用。
 - [ ] **步骤 5：让错误说明同时可供人阅读。** 在公共错误契约允许的说明成员中提供由可靠事实生成的简明说明，使现有客户端可以显示来源及缺段事实；完整结构仍独立保留。不依赖客户端重新解析设备文件名或读取内部事件编号才能解释结果。
