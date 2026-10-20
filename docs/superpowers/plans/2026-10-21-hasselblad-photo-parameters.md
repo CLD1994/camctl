@@ -171,6 +171,8 @@ camctl_pytest() {
 
 **输入与交付：** 消费原尝试意图、执行协调事实及 H4 的实际结果；交付共同取消资格判断，以及保留原文件与尝试责任的失败／恢复路径。入口事实使用既有结果及协调机制表达；缺失证据保持未知，不要求每条工具命令单独持久化。
 
+自动预览是否取消，分别核对[直接目标范围与拍摄关联](../../architecture/task-cancellation.md#自动预览取回的取消关联)及[取消联动](../../architecture/preview-obtaining.md#取消联动)。拍摄被拒绝只阻止通过该拍摄扩大的联动范围，不撤销取回本身作为直接目标的取消资格。
+
 | 需要覆盖的状态 | 本项预期 |
 | --- | --- |
 | 可靠未进入 START，且能防止迟到调用 | 允许取消，原 START 不会进入 |
@@ -181,7 +183,7 @@ camctl_pytest() {
 | 原动作已终态或取消已经生效 | 消费原终态或原取消责任，关联项按公共规则处理 |
 
 - [ ] **步骤 1：增加资格矩阵及入口测试。** `test_photo_cancel_uses_whole_start_entry_not_capture_effect` 覆盖上表，分别在驱动入口前、入口后第一条 list 之前、调焦后及返回后登记前设置同步点。即使尚无工具调用，已经进入驱动也须拒绝取消。`test_photo_cancel_before_entry_prevents_late_start` 以实际执行协调制造竞争，验证只有可靠阻止入口后才允许取消；状态库或原提交不可靠时按公共恢复规则核实。
-- [ ] **步骤 2：增加各取消入口及预览测试。** `test_rejected_photo_cancel_does_not_mark_target_or_cancel_preview` 通过单动作、组、计划及原请求目标执行，断言逐项拒绝、原调用有资格时继续、自动预览意图保留；拒绝请求及时结束，不等原拍摄自然完成。窗口／预算到期时由原原因阻止后续拍摄。
+- [ ] **步骤 2：增加各取消入口及预览测试。** `test_photo_cancel_rejection_respects_preview_addressing` 通过单动作、组、计划及原请求目标执行，断言逐项拒绝且原调用有资格时继续；仅通过被拒绝拍摄联动的自动预览意图保留，计划及请求 ID 直接寻址的预览仍独立取消。同一预览同时被直接寻址和联动时去重处理，按直接目标规则执行。拒绝请求及时结束，不等原拍摄自然完成。窗口／预算到期时由原原因阻止后续拍摄。
 - [ ] **步骤 3：确认失败。** 执行 `camctl_pytest apps/camctl/tests/integration/cancellation -q`，再单独运行上述 bootstrap 及 capture 测试。失败证据应揭示入口事实被采集效果替代或关联项被错误修改。
 - [ ] **步骤 4：实现共同事实读取及守卫。** 在授予、实际调用和取消之间使用同一协调边界；可靠区分未进入、已进入及未知。正面的调用入口事实随原结果保留，结束后仍可判断；崩溃丢失结果时保持未知。取消读取、应用事务与写入守卫消费同一判定，核对 `load_start_facts`、`_settle_unstarted_attempt`、`_failure_after_return` 等消费者，保留其他相机任务原有语义。
 - [ ] **步骤 5：补齐收场及恢复回归。** `test_photo_setup_failure_settles_activity_without_claiming_camera_unchanged` 验证真实失败、占用及活动按收场依据处理；`test_photo_restart_after_relative_focus_never_replays_start` 分别在移动后结果缺失、完整结果保存后、完成回执未知时恢复，设置／focus／autofocus／capture 不重放。可靠结果继续登记；缺失结果保持未知并有限收场。最终动作错误映射为已登记的通用错误，不直接复制工具内部错误码；步骤细节只在内部历史。
