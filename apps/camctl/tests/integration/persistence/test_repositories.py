@@ -36,6 +36,12 @@ _READ_TRANSACTION_FUNCTIONS = {
     "module:read_motor_facts",
     "module:_fixed_file",
     "module:verify_segment_finish",
+    "module:read_segment_members",
+    "module:read_segment_output_candidates",
+    "module:segment_output_candidate",
+    "module:read_strict_result_file_input",
+    "module:verify_ownership_from_result_page",
+    "module:verify_result_file_pairing",
     "MotorRepository.verify_operation",
     "CancellationRepository.verify_motor_operation",
     "HostCaptureRepository.verify_operation",
@@ -178,3 +184,22 @@ def _owning_class(tree: ast.Module, func: ast.AST) -> str | None:
         if isinstance(scope, ast.ClassDef) and func in ast.walk(scope):
             return scope.name
     return None
+
+
+@pytest.mark.parametrize('owner', sorted(_READ_TRANSACTION_FUNCTIONS))
+@pytest.mark.parametrize('statement', ['BEGIN', 'ROLLBACK', 'BEGIN IMMEDIATE', 'COMMIT'])
+def test_read_transaction_allowance_rejects_write_lock(tmp_path, monkeypatch, owner, statement):
+    import sys
+    if owner.startswith('module:'):
+        source = f'def {owner.split(":", 1)[1]}():\n    connection.execute({statement!r})\n'
+    else:
+        cls, function = owner.split('.')
+        source = f'class {cls}:\n    def {function}(self):\n        connection.execute({statement!r})\n'
+    (tmp_path / 'repository.py').write_text(source, encoding='utf-8')
+    monkeypatch.setattr(sys.modules[__name__], '_REPOSITORIES', tmp_path)
+    audit = TestCommitPathAudit().test_repositories_commit_only_through_the_transaction_kernel
+    if statement in ('BEGIN', 'ROLLBACK', 'COMMIT'):
+        audit()
+    else:
+        with pytest.raises(AssertionError):
+            audit()

@@ -35,6 +35,26 @@
 
 严格成员保存、读取及候选共同核固定文件的完成与配对事实；未取得证明的裸 COMPLETE 文件仍保持未知，名称没有 CAM 顺序键不妨碍可靠完整主干配对。原键复用同时核实际成员、原完整输入及固定引用，读取错误不作为缺键。实际正常／异常收场、默认范围、完整报告生产和安装版分段联合链继续由 P4—P6、P8 完成，不能把本节记为这些阶段已经通过。ARM 部署、真机拍摄及现场媒体验收待用户另行安排。
 
+## 显式取回源检查身份与共享内核组合
+
+按 OSMO 计划继续 P5 身份底座。主线候选为 `747b754`，环境沿用 Python 3.11.16、SQLite 3.53.1；实现与两次守卫修复已经独立评审，事务入口合成另经限定复核。原页、来源、准入和分段的读取范围、实际前序、封口及完成检查保留，新取回读口从同一实际写连接独立绑定。
+
+| 验证范围 | 实际结果及日志 |
+| --- | --- |
+| 主线完整 unit | 6926 passed、1 skipped、2 条既有 warning，退出 0；`ua2-combined-unit.log`。 |
+| 主线完整 operations | 314 passed，退出 0；`ua2-combined-operations.log`。 |
+| 主线 persistence 初轮 | 1 failed、599 passed、4 deselected，退出 1；`ua2-combined-persistence.log`。四个增长专项已有独立证据，本轮明确排除。 |
+| 事务路径审计修正后完整文件 | 51 passed，退出 0；`ua2-read-audit-final.log`。补登记六个实际只读核实函数，并逐函数验证拒绝 BEGIN IMMEDIATE；未重跑整个 persistence，不将两次结果合记为完整目录通过。 |
+| 主线清理原键及保存恢复 | 73 passed，退出 0；`ua2-combined-cleanup.log`。 |
+| 五类既有 run 创建者及历史恢复 | 5 passed，退出 0；`ua2-combined-history.log`。涵盖普通 Begin、调度 START、内部／交付 READ、绑定失败的必要责任和应急补记。 |
+| 数据库及事件登记 | 37 张表、3611 项结构断言；36 类事件、125 个分支、365 列，退出 0。 |
+
+上述主线日志及带实际 UTC、命令、HEAD、导入路径、摘要和退出码的 JSON 在 `.local/verification/osmo-resume-20261022/`。初轮 persistence 唯一失败是审计未登记已交付的只读入口，没有业务保存失败；全部失败及修正日志保留。审计按原规则允许登记函数以 BEGIN、COMMIT 或 ROLLBACK 管理只读视图，拒绝 BEGIN IMMEDIATE、仓储的 `.commit()` 方法调用及直接连接数据库。
+
+原身份工作树另有真实 RUNNING 前票与虚构上下文的有效反例；修复从实际 SQL 读取原意图、结果 delta 和完整事务。随后“流程增加次数但没有自己的新票”的 16 例中，初轮 10 failed、6 passed；补齐两入口检查后，身份文件 105 passed。旧树完整 outputs 的 35 项合成来源／媒体读取契约失败继续保留，未据旧归档相同而记为通过。
+
+本阶段只交付身份、配置分区、预算和直接操作 API，不证明实际 QUERY、文件可用性、来源解析、取回资格或调度完成。P4 共同处理器、P5 后续生产链、P6 后端完整报告和 P8 仍未完成；ARM、真机及现场媒体操作待用户安排。
+
 ## Hasselblad 完整参数的安装版联合续验（2026-10-21 UTC）
 
 按[完整参数计划 H7—H9](../superpowers/plans/2026-10-21-hasselblad-photo-parameters.md#h7更新完整样例及安装资源消费者)，在 `39b01db` 候选上验证当前安装链。环境为 Linux x86_64／WSL2、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0 和 pnpm 12.3.4。客户端从原 `package-lock.json` 安装，仓库外候选的 279 个受控文件与当前输入逐一相同；类型、构建和完整测试结果见[客户端续验记录](../client/verification.md#hasselblad-命名选项与安装版参数验收2026-10-21-utc)。
