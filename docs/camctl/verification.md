@@ -18,7 +18,11 @@
 | 受影响的能力、时间参数和 C host 根回归 | 四份完整模块共 19 passed，148.33 秒，退出 0，包含参数模块的再次消费。 |
 | C host 完整测试 | 单元 12／12、集成 22／22，通过独立构建目录执行，均退出 0。 |
 | 清理来源契约修正后的完整测试文件 | 8 passed，16.10 秒，退出 0；补查成员批次、唯一末固定事件、原完整申请及目标固定顺序。 |
-| 协议、事件、报告依赖、数据库规格及资源 | 均退出 0；27 项包资源已同步并核对。其他组件集成目录仍须按指南逐目录完成。 |
+| 完整 camctl 组件集成目录 | 按组件指南 16 个目录分别启动 pytest。14 个目录共 5256 passed，全部退出 0；bootstrap、outputs 的本次完整结果见下文。 |
+| 完整 outputs | 2435 passed、35 failed、2 skipped，退出 1；35 个失败用例 ID 及各自首个错误与 2026-10-19 的归档逐项相同。 |
+| 协议、事件、报告依赖、数据库规格及资源 | 均退出 0；27 项包资源已同步并核对。 |
+
+14 个通过的目录分别为 acceptance 338、cancellation 396、capture 1990、contracts 442、devices 220、history 339、host_files 120、logging_runtime 112、motor 12、operations 209、persistence 315、reporting 433、scheduling 136、session 194。初轮目录候选为 81b0a5e；contracts 修正后和后三个完整目录在 fb1f0a1 上运行，两候选的生产源码及资源一致。acceptance、cancellation、capture 的首轮启动器漏建临时父目录，形成 setup 错误；原日志保留，修正后按目录完整重跑并取得表中结果。contracts 首轮两项为结构检查器误把可重建派生库当作普通业务 SQLite、误把本地 URI 解析当作网络客户端；限定检查范围并加入仍拒绝其他业务 SQLite 与网络客户端的反例后，完整目录 442 项通过。outputs 的 35 项失败与当前录像来源、修复媒体独立读取责任有关，仍保留失败；不能用旧归档相同这一事实认定通过。
 
 安装链中的 12 个正常场景覆盖 RAW／JPEG × host／device × 三个精确短快门；六个故障场景覆盖两种正式源的 START 结果保存后重启、完整提交后回执丢失，以及结果缺失和原报告重建。测试实际经过网页预设重开／导出、安装 wheel、C host、CLI、SQLite、完整历史、原图／预览各两次独立取回、`Files.upload` 和累计 ACK。相机只在 `hb_cli` 进程边界使用受契约约束的替身。
 
@@ -27,6 +31,8 @@ bootstrap 的两项清理来源失败来自旧断言：现行契约要求成员�
 全部命令、起止 UTC、候选／差异摘要、日志、退出码与 JUnit 保存在 `.superpowers/sdd/2026-10-21-hasselblad-photo-parameters/resume-20261022/`。安装链的 1568 份业务证据已归档到 `.local/verification/hasselblad-photo-20261022/installed.tar.gz`，逐件核对长度与 SHA-256；归档 SHA-256 为 `f4efb43d493d73c1e3e24d9812dc066984a36a6901b88deb7b0160d04b931181`。目录名沿用本次本地日期，执行时间以各收据的 UTC 为准。
 
 本轮由当前 Agent 自审，未使用子代理，不提供新增独立评审者结论。本项仅证明软件与安装版联合链；ARM 部署、真实机身／镜头参数、JPEG 设备源字节一致性及现场客户端／ACK 仍按 H9 另行取证，没有新增真实相机操作。
+
+本地另从已验同源候选构建 wheel、锁定依赖清单及 C host 源码包，逐件比对 wheel 内 264 份源码、27 份权威资源和源码包内 69 份受控文件，结果保存在 .local/deployments/20261022-hasselblad-parameters/。只读 ARM SSH 探测连接超时，未执行远端命令；这些本地材料不代表已完成部署或 H9 设备验收。
 
 ## OSMO 360 II 新固件真机复验（2026-10-20 UTC）
 
