@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from contextlib import ExitStack
 from enum import Enum
-from typing import Mapping, Protocol
+from typing import TYPE_CHECKING, Mapping, Protocol
+
+if TYPE_CHECKING:
+    from camctl.history.bounded import SegmentHistoryHandle
+    from camctl.history.snapshot_stream import PreparedSnapshotSource
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import parse_exact_json
@@ -49,6 +54,11 @@ class SnapshotMaintenanceError(Exception):
     候选或进度缺失、计数矛盾、保存失败、提交结果未知及编码输入
     不合法都属于本类；不把损坏解释为没有候选或空快照。
     """
+
+    def __init__(self, message, *, operation_key=None, result=None):
+        super().__init__(message)
+        self.operation_key = operation_key
+        self.result = result
 
 
 class SnapshotEnqueueTimeout(Exception):
@@ -152,12 +162,18 @@ def _encoded_lines(seed: EntityImage):
         yield encode_json_value({"table": row.table, "row": dict(row.values)})
 
 
-def prepare_snapshot(seed: EntityImage) -> PreparedSnapshot:
+def prepare_snapshot(
+        seed: EntityImage | SegmentHistoryHandle,
+) -> PreparedSnapshot | PreparedSnapshotSource:
     """在事务外把一份种子编码为分块的快照内容。
 
     不把整个对象拼接成一个字符串：逐行编码并按固定字节块切分，
     块边界与行边界无关；每行以 LF 结尾。
     """
+    from camctl.history.bounded import SegmentHistoryHandle
+    if isinstance(seed, SegmentHistoryHandle):
+        from camctl.history.snapshot_stream import prepare_segment_snapshot
+        return prepare_segment_snapshot(seed)
     chunks: list[bytes] = []
     buffer = bytearray()
     for line in _encoded_lines(seed):
@@ -257,12 +273,13 @@ class SnapshotStore(Protocol):
         ...
 
     async def load_entity_images(
-            self, refs: tuple[SnapshotRef, ...]) -> tuple[EntityImage, ...]:
-        """在同一读取视图内取得各对象的状态、S 与 S 处计数。"""
+            self, refs: tuple[SnapshotRef, ...]
+    ) -> tuple[EntityImage | SegmentHistoryHandle, ...]:
+        """固定共同S，交付有限对象映像或须关闭的分段历史句柄。"""
         ...
 
     async def save_snapshots(
-            self, prepared: tuple[PreparedSnapshot, ...]
+            self, prepared: tuple[PreparedSnapshot | PreparedSnapshotSource, ...]
     ) -> tuple[SavedProgress, ...]:
         """短写事务保存快照并更新维护进度，返回各对象剩余次数。"""
         ...
@@ -310,6 +327,47 @@ class MaintenanceResult:
     batches: int = 0
 
 
+def _close_resources(resources):
+    with ExitStack() as cleanup:
+        for resource in resources:
+            close=getattr(resource,'close',None)
+            if close is not None:
+                cleanup.callback(close)
+
+
+async def _await_actual_result(future):
+    """首次取消之后仍跟踪原结果；重复取消不丢弃实际资源责任。"""
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            continue
+    return future.result()
+
+
+def _prepare_images_in_worker(images):
+    prepared=[]
+    try:
+        for image in images:
+            prepared.append(prepare_snapshot(image))
+        return prepared
+    except BaseException:
+        _close_resources(prepared)
+        raise
+
+
+async def _prepare_images(images):
+    if all(isinstance(image,EntityImage) for image in images):
+        return _prepare_images_in_worker(images)
+    task=asyncio.create_task(asyncio.to_thread(_prepare_images_in_worker,images))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        prepared=await _await_actual_result(task)
+        _close_resources(prepared)
+        raise
+
+
 async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
     """按窄仓储端口分批推进快照维护。
 
@@ -345,16 +403,20 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.DISABLED,
                 saved=tuple(saved), batches=batches)
-        prepared = tuple(prepare_snapshot(image) for image in images)
-        if prepared:
-            try:
-                batch_saved = await context.store.save_snapshots(prepared)
-            except SnapshotEnqueueTimeout:
-                context.state.disable()
-                return MaintenanceResult(
-                    outcome=MaintenanceOutcome.DISABLED,
-                    saved=tuple(saved), batches=batches)
-            saved.extend(batch_saved)
+        prepared = []
+        try:
+            prepared = await _prepare_images(images)
+            if prepared:
+                try:
+                    batch_saved = await context.store.save_snapshots(tuple(prepared))
+                except SnapshotEnqueueTimeout:
+                    context.state.disable()
+                    return MaintenanceResult(
+                        outcome=MaintenanceOutcome.DISABLED,
+                        saved=tuple(saved), batches=batches)
+                saved.extend(batch_saved)
+        finally:
+            _close_resources((*prepared,*images))
         batches += 1
         await asyncio.sleep(0)
         if len(candidates) < context.batch_size:

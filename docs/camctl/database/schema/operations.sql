@@ -242,3 +242,10 @@ CREATE INDEX segment_set_created ON segment_sets(action_id, created_event_id, id
 CREATE INDEX segment_member_created ON segment_members(set_id, created_event_id, id);
 CREATE INDEX segment_gap_created ON segment_gaps(set_id, created_event_id, id);
 CREATE INDEX segment_scope_created ON segment_scope_members(set_id, created_event_id, id);
+
+-- 同边界历史候选沿固定父行按物理身份续读。
+CREATE INDEX segment_set_history_ids ON segment_sets(action_id, id);
+CREATE INDEX segment_member_history_ids ON segment_members(set_id, id);
+CREATE INDEX segment_gap_history_ids ON segment_gaps(set_id, id);
+CREATE INDEX segment_scope_history_ids ON segment_scope_members(set_id, id);
+CREATE INDEX operation_attempt_history_ids ON operation_attempts(run_id, id);
