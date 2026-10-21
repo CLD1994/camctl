@@ -349,27 +349,27 @@ def _install_fault(root: Path, fault: str):
         from camctl.persistence.repositories.capture import CaptureRepository
         real = CaptureRepository.finish_start_result
 
-        def finish(self, request, observation, key, owned, *, start_finish=None,
+        def finish_start_result(self, finish, observation, key, owned, *, start_finish=None,
                    action_finish=None, expiration=None):
             target = _target(root, owned.connection)
-            matches = target is not None and request.ticket.responsibility_key == f"start/{target['action_id']}"
+            matches = target is not None and finish.ticket.responsibility_key == f"start/{target['action_id']}"
             if matches:
-                assert request.ticket.operation == "control"
-                assert request.ticket.run_id == target["run_id"]
-                assert request.ticket.target_id == str(target["activity_id"])
-                value = {"ticket": asdict(request.ticket), "operation_key": str(key), "target": target,
-                         "finish": _plain(request), "observation": _plain(observation),
+                assert finish.ticket.operation == "control"
+                assert finish.ticket.run_id == target["run_id"]
+                assert finish.ticket.target_id == str(target["activity_id"])
+                value = {"ticket": asdict(finish.ticket), "operation_key": str(key), "target": target,
+                         "finish": _plain(finish), "observation": _plain(observation),
                          "start_finish": _plain(start_finish), "action_finish": _plain(action_finish),
                          "expiration": _plain(expiration), "in_transaction": owned.connection.in_transaction}
                 if fault == "before-start-result":
                     _barrier(root, fault, value)
-            result = real(self, request, observation, key, owned, start_finish=start_finish,
+            result = real(self, finish, observation, key, owned, start_finish=start_finish,
                           action_finish=action_finish, expiration=expiration)
             if matches and fault == "after-start-result" and result.kind is DbOutcomeKind.COMPLETED:
                 assert not owned.connection.in_transaction
                 attempt = owned.connection.execute(
                     "SELECT result_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                    (request.ticket.run_id, request.ticket.attempt_id)).fetchone()
+                    (finish.ticket.run_id, finish.ticket.attempt_id)).fetchone()
                 saved = owned.connection.execute(
                     "SELECT t.id,t.last_event_id,t.operation_key FROM history_transactions t "
                     "JOIN history_events e ON e.transaction_id=t.id WHERE e.id=?", (attempt[0],)).fetchone()
@@ -379,7 +379,7 @@ def _install_fault(root: Path, fault: str):
                     "boundary": {key: boundary[key] for key in ("txn_id", "last_event_id")},
                     "in_transaction": owned.connection.in_transaction})
             return result
-        CaptureRepository.finish_start_result = finish
+        CaptureRepository.finish_start_result = finish_start_result
 
         if fault == "before-start-result":
             from camctl.capture.handlers import CaptureRuntime
