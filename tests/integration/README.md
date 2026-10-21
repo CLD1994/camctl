@@ -85,6 +85,10 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 
 正常用例还按实际下载 request_id 定位原 START、双文件完成和产物登记各自的完整事务 H，核版本化结果、同 activity 的照片与 entered 观察、实际步骤和诊断双流。安装入口的私有历史观察模式通过真实 HistoryRepository 恢复登记 owner 的完整关联行；晚期取回、原请求重送及 ACK 后，新安装子进程再读同三个 H 并逐项比较 before/after。晚于该 H 创建的实体保持不存在。窄反例验证中间事件不能冒充 H，缺失观察、错误 activity、角色和摘要会被拒绝。
 
+五个恢复用例在同一安装链使用测试专用入口包装真实仓储。两个 START 已提交用例通过明确门闩终止真实旧执行组，由新 host 重送原请求；两个完整照片事务回执丢失用例保留真实 COMMIT，并由不同的只读连接真实核实原 request/key/H；一个 START 结果未保存用例仅观察实际 HOST_LOCAL_SETTLED 和固定恢复 horizon，核对 UNKNOWN、未知占用与工作文件保留。各世界只执行一次 capture，成功恢复后原图与预览各经两份独立新请求取回，设置和对焦不重放。门闩、原事务、进程组收场、实际字节与 argv 分别保存，测试不注入恢复依据。
+
+报告重建用例在真实 publish intent 保存后，以原冻结 H 恢复成功照片及两个独立 output owner，再暂停发布。父进程领取既有 ready 文件、将空 ready 目录替换成普通文件，并明确释放门闩；真实目录列出失败由生产流程保存到原报告。移出失败 staging 文件后，新安装进程沿原 H 重建相同 report_id、文件名和 bytes/size/SHA。原报告真实保存 PUBLISHED 后的观察门闩供 C 领取，随后明确释放；两处门闩不改变发布返回、覆盖范围或水位。原冻结 H 与 INTENT/PUBLISH 管理事件的完整事务/key 分别保存。
+
 运行前准备仓库外的准确客户端候选副本（包括根 protocol 和当前 `tests/integration/client_driver.ts`），按客户端锁文件安装依赖并实际执行普通 build，设置 `CAMCTL_HB_TEST_CLIENT_ROOT` 指向该副本根。Node 24 和 Chromium、Python 3.11、uv 离线缓存、CMake 和 C 编译器是前置。运行数据与 wheel 安装使用仓库外 pytest 临时目录，结束后再归档证据：
 
 ```bash
