@@ -493,6 +493,7 @@
         "activity_id",
         "copy_id",
         "cleanup_item_id",
+        "obtain_item_id",
         "session_key"
       ],
       "mutable": [

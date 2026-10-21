@@ -49,7 +49,7 @@ from camctl.operations.models import (
     SettlementBasis,
     ValidatedOutcome,
 )
-from camctl.operations.result_format import result_document, error_document as _error_json
+from camctl.operations.result_format import result_document, read_result_document, error_document as _error_json
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
@@ -203,6 +203,31 @@ def _load_flow_context(
             raise ConsistencyError("查询确认引用的原流程记录不存在")
         state.setdefault("operation_runs", {})[loaded["id"]] = loaded
         return
+    if kind is OperationKind.CHECK_FILE_EXISTS and target.obtain_item_id is not None:
+        def required(table, identity):
+            try:
+                ObjectId(identity)
+            except ValueError as error:
+                raise ConsistencyError(f"obtain CHECK 的 {table} 身份无效") from error
+            facts = _load_row(connection, table, identity)
+            if facts is None:
+                raise ConsistencyError(f"obtain CHECK 关联记录不存在: {table}#{identity}")
+            state.setdefault(table, {})[identity] = facts
+            return facts
+
+        item = required("obtain_items", target.obtain_item_id)
+        selection = required("obtain_source_selections", item["selection_id"])
+        dependency = required("action_dependencies", selection["dependency_id"])
+        required("actions", dependency["action_id"])
+        required("actions", dependency["depends_on_action_id"])
+        output = required("outputs", item["requested_output_id"])
+        device, local = output["device_file_id"], output["intermediate_file_id"]
+        if (device is None) == (local is None):
+            raise ConsistencyError("obtain CHECK 产物必须恰有一种实际文件载体")
+        required("device_files" if device is not None else "intermediate_files",
+                 device if device is not None else local)
+        _obtain_check_is_host(state, target.obtain_item_id, action_id)
+        return
     if kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
         cleanup = _load_row(connection, "cleanup_items", target.cleanup_item_id)
         if cleanup is None:
@@ -221,6 +246,53 @@ def _fixed_reference(state, table: str, identity: int) -> Mapping[str, Any]:
     if facts is None or not json_equal(facts.get("id", identity), identity):
         raise ConsistencyError(f"固定关联缺少 {table}#{identity} 的事实")
     return facts
+
+
+def _obtain_check_is_host(state, item_id: int, action_id: int) -> bool:
+    """仅核固定归属和唯一载体；未选择的显式 item 也沿 requested output 核对。"""
+    item = _fixed_reference(state, "obtain_items", item_id)
+    selection = _fixed_reference(state, "obtain_source_selections", item.get("selection_id"))
+    dependency = _fixed_reference(state, "action_dependencies", selection.get("dependency_id"))
+    action = _fixed_reference(state, "actions", dependency.get("action_id"))
+    if (not json_equal(dependency.get("action_id"), action_id)
+            or action.get("type") != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
+        raise ConsistencyError("obtain CHECK 不属于原获取动作")
+    output = _fixed_reference(state, "outputs", item.get("requested_output_id"))
+    if not json_equal(output.get("source_action_id"), dependency.get("depends_on_action_id")):
+        raise ConsistencyError("obtain CHECK 的请求产物不属于原来源依赖")
+    if item.get("output_id") is not None and not json_equal(item["output_id"], item["requested_output_id"]):
+        raise ConsistencyError("obtain CHECK 的已选产物与原请求身份不符")
+    device, local = output.get("device_file_id"), output.get("intermediate_file_id")
+    if (device is None) == (local is None):
+        raise ConsistencyError("obtain CHECK 产物必须恰有一种实际文件载体")
+    carrier = _fixed_reference(state, "device_files" if device is not None else "intermediate_files",
+                               device if device is not None else local)
+    source_column = "source_action_id" if device is not None else "owner_action_id"
+    if not json_equal(carrier.get(source_column), output.get("source_action_id")):
+        raise ConsistencyError("obtain CHECK 的实际载体与原产物来源不符")
+    return local is not None
+
+
+def _verify_obtain_config(run, state) -> None:
+    if run.get("obtain_item_id") is None:
+        return
+    host = _obtain_check_is_host(state, run["obtain_item_id"], run["action_id"])
+    timeout, interval = run.get("timeout_s_json"), run.get("retry_interval_s_json")
+    if (host and (timeout is not None or interval is not None)
+            or not host and (timeout is None or interval is None)):
+        raise ConsistencyError("obtain CHECK 的配置必须符合真实主机或设备载体分区")
+
+
+def _verify_complete_obtain_result(attempt) -> None:
+    if (attempt is None or attempt.get("status") == int(_ATTEMPT_STATUS.RUNNING)
+            or attempt.get("result_event_id") is None or attempt.get("result_json") is None):
+        raise ConsistencyError("obtain CHECK 后续意图缺少上一票的完整可靠结果")
+    try:
+        ObjectId(attempt["result_event_id"])
+        read_result_document(attempt["status"], attempt["effect_state"],
+                             attempt["result_json"], attempt["error_json"])
+    except (KeyError, ValueError, TypeError) as error:
+        raise ConsistencyError("obtain CHECK 上一票的实际结果不可解释") from error
 
 
 def _copy_source(copy) -> tuple[str, int]:
@@ -295,7 +367,7 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
             raise ValueError("查询用途必须是整数编号")
         purpose = QueryPurpose[_QUERY_PURPOSE(purpose_code).name] if purpose_code is not None else None
         target = AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"],
-                               cleanup_item_id=run["cleanup_item_id"])
+                               cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"])
         expected = operation_responsibility_key(kind, run["action_id"], target, purpose)
         delivery_id, session_key = run["delivery_id"], run["session_key"]
     except (KeyError, ValueError) as error:
@@ -345,6 +417,8 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
         if len(matches) != 1 or not json_equal(matches[0], run.get("id")):
             raise ConsistencyError("拷贝必须关联其唯一原读取流程")
         _fixed_reference(state, "operation_runs", matches[0])
+    elif target.obtain_item_id is not None:
+        _obtain_check_is_host(state, target.obtain_item_id, action_id)
     elif target.cleanup_item_id is not None:
         cleanup = _fixed_reference(state, "cleanup_items", target.cleanup_item_id)
         if not json_equal(cleanup.get("action_id"), action_id):
@@ -356,6 +430,7 @@ def _intent_identity(intent: AttemptIntent) -> dict[str, Any]:
             "query_purpose": int(_QUERY_PURPOSE[intent.query_purpose.name]) if intent.query_purpose is not None else None,
             "responsibility_key": responsibility_key(intent), "activity_id": intent.target.activity_id,
             "copy_id": intent.target.copy_id, "cleanup_item_id": intent.target.cleanup_item_id,
+            "obtain_item_id": intent.target.obtain_item_id,
             "delivery_id": None, "session_key": None}
 
 
@@ -363,7 +438,7 @@ def _verify_run_intent(run: Mapping[str, Any], intent: AttemptIntent) -> None:
     """输入必须逐列指向原责任；交付归属由实际拷贝父对象核对。"""
     expected = _intent_identity(intent)
     for name in ("action_id", "kind", "query_purpose", "responsibility_key",
-                 "activity_id", "copy_id", "cleanup_item_id", "session_key"):
+                 "activity_id", "copy_id", "cleanup_item_id", "obtain_item_id", "session_key"):
         if name not in run or not json_equal(run[name], expected[name]):
             raise ConsistencyError(f"流程固定字段 {name} 与意图不符")
 
@@ -377,7 +452,7 @@ def _find_responsibility(connection, intent: AttemptIntent) -> int | None:
     elif kind is OperationKind.READ_FILE:
         columns = ("copy_id",)
     elif kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
-        columns = ("cleanup_item_id",)
+        columns = ("obtain_item_id",) if intent.target.obtain_item_id is not None else ("cleanup_item_id",)
     elif kind is OperationKind.CHECK_CAPTURE_RESULTS:
         columns = ("activity_id",)
     elif kind is OperationKind.STOP_RESIDUAL:
@@ -456,6 +531,8 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
+                               "retry_interval_s_json": intent.config.retry_interval_s}, self._state)
         if intent.kind is OperationKind.START:
             activity = self._state["device_activities"][intent.target.activity_id]
             if capture_scope_blocked(connection, action["device_id"], action["id"],
@@ -486,11 +563,13 @@ class BeginAttemptCommand:
                     return self._read_exhausted(scope, run_facts)
                 return self._rejected("budget_exhausted")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
-                # 主机清理不应用超时或定时重试；允许下轮领取新票据的
+                # 主机清理和取回源检查不应用超时或定时重试；允许下轮领取新票据的
                 # 前提是上一张 ticket 已有完整、可核实的结果事实。
                 immediate_cleanup_retry = (
                     intent.kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS)
-                    and run_facts["cleanup_item_id"] is not None
+                    and (run_facts["cleanup_item_id"] is not None
+                         or (intent.target.obtain_item_id is not None
+                             and _obtain_check_is_host(self._state, intent.target.obtain_item_id, intent.action_id)))
                     and intent.config.timeout_s is None
                     and run_facts["timeout_s_json"] is None
                     and intent.config.retry_interval_s is None
@@ -498,15 +577,19 @@ class BeginAttemptCommand:
                 if not immediate_cleanup_retry:
                     raise TransactionError("后续尝试要求先建立重试等待")
                 with closing(connection.execute(
-                    "SELECT status,result_json,result_event_id FROM operation_attempts"
+                    "SELECT id,status,result_json,result_event_id FROM operation_attempts"
                     " WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
                     (run_facts["id"],))) as cursor:
                     previous = cursor.fetchone()
                 if (previous is None
-                        or previous[0] == int(_ATTEMPT_STATUS.RUNNING)
-                        or previous[1] is None or previous[2] is None):
+                        or previous[1] == int(_ATTEMPT_STATUS.RUNNING)
+                        or previous[2] is None or previous[3] is None):
                     raise TransactionError(
-                        "无重试间隔的清理后续尝试要求原尝试已有可靠结果")
+                        "无重试间隔的后续尝试要求原尝试已有可靠结果")
+                if intent.target.obtain_item_id is not None:
+                    original = _load_row(connection, "operation_attempts", previous[0])
+                    _verify_complete_obtain_result(original)
+                    self._state.setdefault("operation_attempts", {})[original["id"]] = original
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
             if intent.kind is OperationKind.READ_FILE:
@@ -561,6 +644,7 @@ class BeginAttemptCommand:
                     "activity_id": intent.target.activity_id,
                     "copy_id": intent.target.copy_id,
                     "cleanup_item_id": intent.target.cleanup_item_id,
+                    "obtain_item_id": intent.target.obtain_item_id,
                     "session_key": None,
                     "status": int(_RUN_STATUS.ACTIVE),
                     "attempts_used": 1,
@@ -671,6 +755,7 @@ class BeginAttemptCommand:
     ) -> None:
         _verify_run_intent(run_facts, intent)
         _verify_run_identity(run_facts, self._state)
+        _verify_obtain_config(run_facts, self._state)
         with closing(connection.execute(
             "SELECT MAX(attempt_no) FROM operation_attempts WHERE run_id = ?",
             (run_facts["id"],),
@@ -685,7 +770,7 @@ class BeginAttemptCommand:
         if self._intent.kind is OperationKind.READ_FILE and saved[-1]["type"] == _OPERATION_CONFIGURED_EVENT:
             return self._reuse_read_exhausted(connection, saved)
         started = [event for event in saved if event["type"] == _ATTEMPT_STARTED_EVENT]
-        if not started:
+        if len(started) != 1 or len(saved) != 1:
             raise TransactionError("操作身份已用于其他阶段，不能作为意图重送")
         attempt_values = None
         for row in _event_rows(started[0], "operation_attempts"):
@@ -694,6 +779,14 @@ class BeginAttemptCommand:
         if attempt_values is None:
             raise TransactionError("已保存意图缺少尝试事实")
         intent = self._intent
+        expected_config = {"max_attempts_used": intent.config.max_attempts,
+                           "timeout_s_json": intent.config.timeout_s,
+                           "retry_interval_s_json": intent.config.retry_interval_s,
+                           "copy_round": intent.copy_round}
+        if (started[0]["occurred_at"] != intent.occurred_at
+                or any(name not in attempt_values or not json_equal(attempt_values[name], value)
+                       for name, value in expected_config.items())):
+            raise TransactionError("原意图键的配置、轮次或时刻与重送输入不符")
         run_id = int(attempt_values["run_id"])
         current = _load_row(connection, "operation_runs", run_id)
         if current is None:
@@ -772,7 +865,7 @@ def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt
     if run["kind"] == int(_RUN_KIND.READ_FILE):
         target = str(run["copy_id"])
     elif run["kind"] in (int(_RUN_KIND.DELETE_FILE), int(_RUN_KIND.CHECK_FILE_EXISTS)):
-        target = str(run["cleanup_item_id"])
+        target = str(run["obtain_item_id"] if run["obtain_item_id"] is not None else run["cleanup_item_id"])
     elif (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
           and run["query_purpose"] == int(_QUERY_PURPOSE.BEFORE_EXECUTION)):
         target = None
@@ -838,6 +931,7 @@ class FinishAttemptCommand:
                 activity_id=run_facts.get("activity_id"),
                 copy_id=run_facts.get("copy_id"),
                 cleanup_item_id=run_facts.get("cleanup_item_id"),
+                obtain_item_id=run_facts.get("obtain_item_id"),
             ),
             (
                 QueryPurpose[
@@ -1011,7 +1105,7 @@ class FinishAttemptCommand:
                 raise TransactionError("原流程处置的阶段、行身份或字段不符")
         self._state["operation_runs"] = {run["id"]: run}
         _load_flow_context(connection, OperationKind[_kind_name(run["kind"])], run["action_id"],
-            AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"]),
+            AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"]),
             QueryPurpose[decode_member("operation_runs.query_purpose", run["query_purpose"]).name]
             if run["query_purpose"] is not None else None, self._state)
         _verify_run_identity(run, self._state)
@@ -1099,6 +1193,7 @@ class _FinishStaleRunsCommand:
                     activity_id=run_facts.get("activity_id"),
                     copy_id=run_facts.get("copy_id"),
                     cleanup_item_id=run_facts.get("cleanup_item_id"),
+                    obtain_item_id=run_facts.get("obtain_item_id"),
                 ),
                 (
                     QueryPurpose[
@@ -1290,7 +1385,7 @@ class _ReadResumeCommand:
             connection, OperationKind[_kind_name(run["kind"])], run["action_id"],
             AttemptTarget(
                 activity_id=run["activity_id"], copy_id=run["copy_id"],
-                cleanup_item_id=run["cleanup_item_id"],
+                cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"],
             ),
             QueryPurpose[decode_member(
                 "operation_runs.query_purpose", run["query_purpose"]).name]
@@ -1456,6 +1551,10 @@ def _query_configuration_guard(event, context) -> None:
                     or facts.get("retry_interval_s_json") is None
                 ):
                     _fail("查询与结果核实流程必须保存完整的超时与间隔配置")
+            try:
+                _verify_obtain_config(facts, context.association_rows)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
             _check_config_numbers(facts, f"operation_runs#{row.row_id}")
         elif row.table == "operation_attempts":
             _check_config_numbers(
@@ -1530,6 +1629,22 @@ def _attempt_intent_guard(event, context) -> None:
     elif attempt_no != 1:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
+    if run_after.get("obtain_item_id") is not None:
+        for attempt in attempts:
+            if any(not json_equal(attempt.after.values.get(column), run_after.get(column))
+                   for column in ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")):
+                _fail("obtain CHECK 意图与流程的实际采用配置不符")
+        if run_row.before.exists and _obtain_check_is_host(
+                context.association_rows, run_after["obtain_item_id"], run_after["action_id"]):
+            previous = [facts for facts in context.state_rows.get("operation_attempts", {}).values()
+                        if facts.get("run_id") == run_row.row_id
+                        and facts.get("attempt_no") == attempt_no - 1]
+            if len(previous) != 1:
+                _fail("obtain CHECK 后续意图缺少唯一上一票")
+            try:
+                _verify_complete_obtain_result(previous[0])
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
     if kind == int(_RUN_KIND.START):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
         action = _guard_facts(context, "actions", run_after.get("action_id"))

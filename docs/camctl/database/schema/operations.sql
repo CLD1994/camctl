@@ -9,6 +9,7 @@ CREATE TABLE operation_runs (
     activity_id INTEGER REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
     copy_id INTEGER REFERENCES file_copies(id) DEFERRABLE INITIALLY DEFERRED,
     cleanup_item_id INTEGER REFERENCES cleanup_items(id) DEFERRABLE INITIALLY DEFERRED,
+    obtain_item_id INTEGER REFERENCES obtain_items(id) DEFERRABLE INITIALLY DEFERRED,
     session_key TEXT CHECK (session_key IS NULL OR (length(session_key) = 32 AND session_key NOT GLOB '*[^0-9a-f]*')),
     status INTEGER NOT NULL CHECK (status BETWEEN 1 AND 7),
     attempts_used INTEGER NOT NULL CHECK (attempts_used >= 0),
@@ -18,11 +19,17 @@ CREATE TABLE operation_runs (
     retry_wait_required INTEGER NOT NULL CHECK (retry_wait_required IN (0,1)),
     error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
     CHECK ((kind = 6 AND query_purpose IS NOT NULL) OR (kind <> 6 AND query_purpose IS NULL)),
-    CHECK ((kind IN (1,2,7,8,9) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL)
-        OR (kind = 6 AND query_purpose = 1 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NULL)
-        OR (kind = 6 AND query_purpose IN (2,3,4,5) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL)
-        OR (kind = 3 AND activity_id IS NULL AND copy_id IS NOT NULL AND cleanup_item_id IS NULL)
-        OR (kind IN (4,5) AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NOT NULL)),
+    CHECK ((kind IN (1,2,7,8,9) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+        OR (kind = 6 AND query_purpose = 1 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+        OR (kind = 6 AND query_purpose IN (2,3,4,5) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+        OR (kind = 3 AND activity_id IS NULL AND copy_id IS NOT NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+        OR (kind = 4 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NOT NULL AND obtain_item_id IS NULL)
+        OR (kind = 5 AND activity_id IS NULL AND copy_id IS NULL
+            AND ((cleanup_item_id IS NOT NULL AND obtain_item_id IS NULL)
+                OR (cleanup_item_id IS NULL AND obtain_item_id IS NOT NULL)))),
+    CHECK (kind <> 4 OR responsibility_key = 'delete/' || cleanup_item_id),
+    CHECK (kind <> 5 OR responsibility_key = CASE WHEN obtain_item_id IS NULL
+        THEN 'exists/' || cleanup_item_id ELSE 'obtain-exists/' || obtain_item_id END),
     CHECK (kind <> 6 OR responsibility_key = CASE query_purpose
         WHEN 1 THEN 'query/preflight/' || action_id
         WHEN 2 THEN 'query/start/' || action_id || '/' || activity_id
@@ -50,6 +57,7 @@ CREATE INDEX operations_action ON operation_runs(action_id, id);
 CREATE INDEX operations_delivery ON operation_runs(delivery_id, id) WHERE delivery_id IS NOT NULL;
 CREATE INDEX operations_activity ON operation_runs(activity_id, kind, id) WHERE activity_id IS NOT NULL;
 CREATE UNIQUE INDEX one_read_flow ON operation_runs(copy_id) WHERE kind = 3;
+CREATE UNIQUE INDEX one_obtain_check_flow ON operation_runs(obtain_item_id, kind) WHERE kind = 5 AND obtain_item_id IS NOT NULL;
 CREATE UNIQUE INDEX one_cleanup_flow ON operation_runs(cleanup_item_id, kind) WHERE kind IN (4,5);
 
 CREATE TABLE operation_attempts (

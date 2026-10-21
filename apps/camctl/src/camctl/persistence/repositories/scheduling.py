@@ -1001,7 +1001,7 @@ class GrantStartCommand:
         action_id = self._request.action_id
         return {"action_id": action_id, "delivery_id": None, "kind": int(_RUN_KIND.START),
                 "query_purpose": None, "responsibility_key": f"start/{action_id}",
-                "activity_id": activity_id, "copy_id": None, "cleanup_item_id": None, "session_key": None}
+                "activity_id": activity_id, "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None}
 
     def _verify_start_run(self, run: dict, activity_id: int) -> dict[str, Any]:
         identity = self._start_run_identity(activity_id)

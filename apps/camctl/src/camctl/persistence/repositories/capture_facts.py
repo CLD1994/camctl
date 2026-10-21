@@ -191,7 +191,7 @@ def _verify_start_scope_run(run, state):
         if activity["action_id"] != run["action_id"]:
             raise ConsistencyError("原应急补记与目标活动所属动作不符")
         return
-    if run["activity_id"] is not None or (run["copy_id"] is None and run["cleanup_item_id"] is None):
+    if run["activity_id"] is not None or (run["copy_id"] is None and run["cleanup_item_id"] is None and run["obtain_item_id"] is None):
         _verify_run_identity(run, state)
         return
     from camctl.operations.attempts import OperationKind, QueryPurpose, AttemptTarget, operation_responsibility_key
@@ -199,7 +199,7 @@ def _verify_start_scope_run(run, state):
         kind = OperationKind[_KIND(run["kind"]).name]
         purpose = None if run["query_purpose"] is None else QueryPurpose[_PURPOSE(run["query_purpose"]).name]
         expected = operation_responsibility_key(kind, run["action_id"], AttemptTarget(
-            activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"]), purpose)
+            activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"]), purpose)
     except (KeyError, ValueError) as error:
         raise ConsistencyError("原操作固定身份组合无效") from error
     if run["responsibility_key"] != expected:

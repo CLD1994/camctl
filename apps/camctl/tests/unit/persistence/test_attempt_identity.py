@@ -57,7 +57,7 @@ def identity_case(request, monkeypatch):
     spec.loader.exec_module(module)
     run = {"id": 21, "action_id": 7, "kind": code, "query_purpose": purpose_code,
            "responsibility_key": key, "delivery_id": None, "activity_id": None,
-           "copy_id": None, "cleanup_item_id": None, "session_key": None,
+           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None,
            "status": 2, "attempts_used": 1, "max_attempts_used": 3,
            "timeout_s_json": None, "retry_interval_s_json": None,
            "retry_wait_required": 0, "error_json": None}

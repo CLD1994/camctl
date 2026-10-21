@@ -107,13 +107,13 @@ def test_intent_rejects_invalid_action_identity(action_id):
         _intent(action_id=action_id)
 
 
-@pytest.mark.parametrize("field", ["activity_id", "copy_id", "cleanup_item_id"])
+@pytest.mark.parametrize("field", ["activity_id", "copy_id", "cleanup_item_id", "obtain_item_id"])
 @pytest.mark.parametrize("identity", [1, 9223372036854775807, ObjectId(7)])
 def test_target_preserves_legal_identity(field, identity):
     assert getattr(AttemptTarget(**{field: identity}), field) == identity
 
 
-@pytest.mark.parametrize("field", ["activity_id", "copy_id", "cleanup_item_id"])
+@pytest.mark.parametrize("field", ["activity_id", "copy_id", "cleanup_item_id", "obtain_item_id"])
 @pytest.mark.parametrize("identity", [False, True, 1.0, "1", 0, -1, 9223372036854775808])
 def test_target_rejects_invalid_identity(field, identity):
     with pytest.raises(AttemptConfigError):

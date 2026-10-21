@@ -1931,7 +1931,7 @@ class _GrantFileCommand:
                 "responsibility_key": f"read/{copy_id}",
                 "activity_id": None,
                 "copy_id": copy_id,
-                "cleanup_item_id": None,
+                "cleanup_item_id": None, "obtain_item_id": None,
                 "session_key": None,
                 "status": int(_RUN_STATUS.PENDING),
                 "attempts_used": 0,
@@ -2160,7 +2160,7 @@ class _GrantFileCommand:
         expected = {"action_id": command.action_id, "delivery_id": delivery_id,
                     "kind": int(_RUN_KIND.READ_FILE), "copy_id": copy["id"],
                     "responsibility_key": key, "activity_id": None,
-                    "cleanup_item_id": None, "query_purpose": None, "session_key": None}
+                    "cleanup_item_id": None, "obtain_item_id": None, "query_purpose": None, "session_key": None}
         if any(run[name] != value for name, value in expected.items()):
             raise ConsistencyError("原读取流程的类型、目标或归属不一致")
         return FileQualification(
@@ -7636,8 +7636,9 @@ class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
             _ProgressCleanupCommand(
                 ProgressCleanupItem(intent.target.cleanup_item_id, intent.occurred_at),
                 self._key)._verify_and_reuse(scope, saved[1:], item)
-        # 同键委托通用意图命令原键核实：额外归属事件不影响其只读复用。
-        begin = BeginAttemptCommand(intent, self._key).plan(scope)
+        # 完整清理组已逐项核实；通用意图只核其中唯一的原意图片段。
+        # 不能让它重新读取整个复合组并将归属事件当作意图外的异组。
+        begin = BeginAttemptCommand(intent, self._key)._reuse(scope.connection, saved[:1])
         merged = _merge_cleanup_binding_plans([
             CommandPlan(events=(), owners=self._owners, state_rows=self._state,
                         result=begin.result),

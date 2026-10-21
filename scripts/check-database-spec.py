@@ -449,6 +449,30 @@ def main() -> None:
     verify(list(db.execute('PRAGMA foreign_key_check')) == [], '全部表样本及共同建档引用在提交时有效')
     verify(all(db.execute(f'SELECT count(*) FROM {name}').fetchone()[0] for name in tables), '全部表都有结构样本')
 
+    # CHECK 的两种 owner 共享操作种类，但外键、规范键与唯一身份独立。
+    with case(db):
+        obtain = dict(id=300, action_id=3, kind=5, responsibility_key='obtain-exists/1',
+                      obtain_item_id=1, status=2, attempts_used=0, max_attempts_used=3,
+                      retry_wait_required=0)
+        insert(db, 'operation_runs', **obtain)
+        verify(db.execute('SELECT cleanup_item_id,obtain_item_id FROM operation_runs WHERE id=300').fetchone()
+               == (None, 1), 'obtain CHECK 只保存 obtain owner')
+        for column, value in [('cleanup_item_id', 1), ('obtain_item_id', None),
+                              ('kind', 4), ('responsibility_key', 'exists/1'), ('copy_id', 1)]:
+            rejects(db, f'UPDATE operation_runs SET {column}=? WHERE id=300', (value,))
+        duplicate = {**obtain, 'id':301}
+        rejects(db, f'INSERT INTO operation_runs ({",".join(duplicate)}) VALUES ({",".join("?" for _ in duplicate)})',
+                tuple(duplicate.values()))
+        insert(db, 'operation_runs', **{**obtain, 'id':302, 'obtain_item_id':None,
+                                     'cleanup_item_id':1, 'responsibility_key':'exists/1'})
+        verify(db.execute('SELECT COUNT(*) FROM operation_runs WHERE kind=5').fetchone()[0] == 2,
+               '同数值 cleanup 与 obtain CHECK 不共用责任')
+        with case(db):
+            insert(db, 'operation_runs', **{**obtain, 'id':303, 'obtain_item_id':99999,
+                                         'responsibility_key':'obtain-exists/99999'})
+            verify(any(row[0]=='operation_runs' for row in db.execute('PRAGMA foreign_key_check')),
+                   '缺少 obtain owner 的延迟外键不能通过最终引用核验')
+
     # 查询责任的用途、固定目标与规范键共同决定身份；这些样本只验证 SQL 约束。
     verify('query_purpose' in {r[1] for r in db.execute('PRAGMA table_info(operation_runs)')},
            '操作流程必须保存查询用途，执行前检查不能强行引用活动')

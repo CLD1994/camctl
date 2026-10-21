@@ -45,3 +45,28 @@ def test_responsibility_key_rejects_mixed_targets(kind, target):
 def test_responsibility_key_rejects_invalid_identity(kind, action_id, target, purpose):
     with pytest.raises(AttemptConfigError):
         attempts.operation_responsibility_key(kind, action_id, target, purpose)
+
+
+@pytest.mark.parametrize("identity", [1, 29, 9223372036854775807])
+def test_obtain_check_keeps_distinct_owner_key_and_ticket(identity):
+    target = AttemptTarget(obtain_item_id=identity)
+    assert attempts.operation_responsibility_key(OperationKind.CHECK_FILE_EXISTS, 7, target, None) == f"obtain-exists/{identity}"
+    intent = attempts.AttemptIntent("query", 7, OperationKind.CHECK_FILE_EXISTS, target, None,
+                                    attempts.AttemptConfig(3), 11)
+    assert attempts.ticket_target_id(intent) == str(identity)
+    assert attempts.operation_responsibility_key(OperationKind.CHECK_FILE_EXISTS, 7,
+                                                AttemptTarget(cleanup_item_id=identity), None) == f"exists/{identity}"
+
+
+@pytest.mark.parametrize("other", ["cleanup_item_id", "activity_id", "copy_id"])
+def test_obtain_check_rejects_another_filled_owner(other):
+    with pytest.raises(AttemptConfigError):
+        attempts.operation_responsibility_key(OperationKind.CHECK_FILE_EXISTS, 7,
+            AttemptTarget(obtain_item_id=29, **{other:29}), None)
+
+
+@pytest.mark.parametrize("kind", [kind for kind in OperationKind if kind is not OperationKind.CHECK_FILE_EXISTS])
+def test_only_file_check_accepts_obtain_owner(kind):
+    with pytest.raises(AttemptConfigError):
+        attempts.operation_responsibility_key(kind, 7, AttemptTarget(obtain_item_id=29),
+            QueryPurpose.BEFORE_EXECUTION if kind is OperationKind.QUERY_ACTIVITY else None)

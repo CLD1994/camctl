@@ -65,7 +65,7 @@ def _read_rows(internal=False):
         row_change("operation_runs", 41, {
             "action_id": 11 if internal else 31, "delivery_id": delivery_id, "kind": 3,
             "query_purpose": None, "responsibility_key": "read/51", "activity_id": None,
-            "copy_id": 51, "cleanup_item_id": None, "session_key": None,
+            "copy_id": 51, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None,
             "status": 1, "attempts_used": 0, "max_attempts_used": 3,
             "timeout_s_json": Decimal("5"), "retry_interval_s_json": Decimal("1"),
             "retry_wait_required": 0, "error_json": None,

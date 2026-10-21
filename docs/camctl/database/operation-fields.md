@@ -14,13 +14,16 @@
 | `STOP` | `stop/<action_id>` | `activity_id`；正常、取消和恢复共用 |
 | `READ_FILE` | `read/<copy_id>` | `copy_id` |
 | `DELETE_FILE` | `delete/<cleanup_item_id>` | `cleanup_item_id` |
-| `CHECK_FILE_EXISTS` | `exists/<cleanup_item_id>` | `cleanup_item_id` |
+| `CHECK_FILE_EXISTS`（清理） | `exists/<cleanup_item_id>` | `cleanup_item_id` |
+| `CHECK_FILE_EXISTS`（显式取回源检查） | `obtain-exists/<obtain_item_id>` | `obtain_item_id` |
 | `QUERY_ACTIVITY` | 按[活动查询的责任范围](#活动查询的责任范围)唯一确定 | 执行前检查指向 `action_id` 保存的设备绑定；其余用途必填目标 `activity_id` |
 | `CHECK_CAPTURE_RESULTS` | `results/<activity_id>` | `activity_id` |
 | `STOP_RESIDUAL` | `followup/<action_id>/<activity_id>` | 原历史 `activity_id`；动作是新的触发者 |
 | `EMERGENCY_STOP` | `emergency/<session_key>/<activity_id>` | `activity_id` 和 `session_key` |
 
-`activity_id`、`copy_id`、`cleanup_item_id` 按表中责任填写，互不混用。执行前状态检查的三个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，另外两列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，仅应急流程使用；它区分同一会话的唯一限额，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+`activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，仅应急流程使用；它区分同一会话的唯一限额，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+
+显式取回源检查的固定归属沿 `obtain_items.selection_id → obtain_source_selections.dependency_id → action_dependencies.action_id` 核对原获取动作；以 `requested_output_id` 定位产物，再以唯一 `device_file_id` 或 `intermediate_file_id` 载体确定设备或主机配置。未选择条目的 `output_id` 可以为空。这项身份核对不判定产物可用性、文件存在性或取回资格。主机 CHECK 的流程和每次尝试保存空 timeout/interval；开放原责任的后续票据还要求上一票已有完整结果与结果事件，沿用累计次数。设备 CHECK 保存正 timeout 和非负 interval，间隔为零仍要求已有重试等待责任。原键重送核对原 owner、采用配置和时刻，返回原票据及历史；终态或预算耗尽不建立新尝试。
 
 普通流程的 `attempts_used` 从 0 开始，每登记一次新的尝试增加 1，无尝试时为 0，否则必须等于该流程已有尝试的最大 `attempt_no`。应急流程按[最终补记](#应急停止的最终补记)一次保存实际次数及配置，未尝试时允许保留未知配置。`max_attempts_used` 保存最后一次实际资格判断使用的上限，`timeout_s_json`、`retry_interval_s_json` 保存其实际超时和重试间隔，有值时都是精确 JSON 数字文本。主机文件操作没有应用层调用时限，超时列为空；不适用定时重试时，间隔列为空。普通流程的配置空值表示不适用；应急零尝试记录还允许用空值表达未能可靠取得的配置，含义按[补记字段组合](#应急记录的结构约束与事务校验)区分。不能把零当成无限超时。超时为有限正秒数，间隔为有限非负秒数；使用数字文本避免把允许的小数秒截断成整数微秒。读取时按精确数值适配，不能把字符串直接输出到公共秒数字段。
 
@@ -78,7 +81,7 @@
 | `STOP_CONFIRMATION` | 核实原普通停止流程的结果 | `query/stop/<action_id>/<activity_id>` | 必填，指向该动作的活动。必须能找到同一动作、同一活动的 `STOP` 流程；正常、取消及恢复使用同一查询流程。 |
 | `RESIDUAL_STOP_CONFIRMATION` | 核实本次后续收场是否停止了历史残留活动 | `query/residual/<action_id>/<activity_id>` | 必填，指向待收场的历史活动。必须能找到相同触发动作、相同目标活动的 `STOP_RESIDUAL` 流程；触发动作与活动所属动作分别保留。 |
 
-只有 `kind = 6 QUERY_ACTIVITY` 必须填写 `query_purpose`，其他操作该字段必须为空。查询流程的 `delivery_id`、`copy_id`、`cleanup_item_id` 和 `session_key` 均为空。启动核实、活动核实及普通停止核实的 `action_id` 必须等于目标活动的 `action_id`；残留收场核实则使用原收场流程的触发动作。
+只有 `kind = 6 QUERY_ACTIVITY` 必须填写 `query_purpose`，其他操作该字段必须为空。查询流程的 `delivery_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 和 `session_key` 均为空。启动核实、活动核实及普通停止核实的 `action_id` 必须等于目标活动的 `action_id`；残留收场核实则使用原收场流程的触发动作。
 
 表中的责任键是确定的字符串格式，ID 使用无前导零十进制表示。SQL 检查键值与用途、动作和活动字段是否一致，再用全库唯一约束拒绝重复责任。已经结束的流程仍保留原键；更换调用入口、重启或提高上限都不能为同一责任创建第二条记录。结果核实同样检查 `results/<activity_id>`，每条活动至多有一个结果核实流程。
 

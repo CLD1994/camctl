@@ -46,7 +46,7 @@ def repository(monkeypatch):
     action = {"id": 1, "device_id": "cam-1"}
     run = {"id": 7, "action_id": 1, "delivery_id": None, "kind": 6,
            "query_purpose": 1, "responsibility_key": "query/preflight/1", "activity_id": None,
-           "copy_id": None, "cleanup_item_id": None, "session_key": None, "status": 3,
+           "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None, "status": 3,
            "attempts_used": 0, "max_attempts_used": 2, "timeout_s_json": Decimal("5"),
            "retry_interval_s_json": Decimal("1"), "retry_wait_required": 0, "error_json": None}
     monkeypatch.setattr(module, "row_facts", create_autospec(module.row_facts,

@@ -164,12 +164,14 @@ class AttemptTarget:
     activity_id: int | None = None
     copy_id: int | None = None
     cleanup_item_id: int | None = None
+    obtain_item_id: int | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
             ("activity_id", self.activity_id),
             ("copy_id", self.copy_id),
             ("cleanup_item_id", self.cleanup_item_id),
+            ("obtain_item_id", self.obtain_item_id),
         ):
             if value is not None:
                 _positive_int(value, name)
@@ -261,8 +263,11 @@ def operation_responsibility_key(
         if query_purpose is not None:
             raise AttemptConfigError("只有查询责任填写用途")
         required = _KIND_TARGET_COLUMNS[kind]
+    if kind is OperationKind.CHECK_FILE_EXISTS and target.obtain_item_id is not None:
+        required = frozenset({"obtain_item_id"})
     values = {"activity_id": target.activity_id, "copy_id": target.copy_id,
-              "cleanup_item_id": target.cleanup_item_id, "query_purpose": query_purpose}
+              "cleanup_item_id": target.cleanup_item_id, "obtain_item_id": target.obtain_item_id,
+              "query_purpose": query_purpose}
     filled = {name for name, value in values.items() if value is not None}
     if filled != set(required):
         raise AttemptConfigError(f"{kind.value} 要求恰好填写 {sorted(required)}，实际填写 {sorted(filled)}")
@@ -276,6 +281,8 @@ def operation_responsibility_key(
         return f"followup/{action_id}/{target.activity_id}"
     if kind is OperationKind.READ_FILE:
         return f"read/{target.copy_id}"
+    if target.obtain_item_id is not None:
+        return f"obtain-exists/{target.obtain_item_id}"
     return f"{kind.value}/{target.cleanup_item_id}"
 
 
@@ -289,6 +296,8 @@ def ticket_target_id(intent: AttemptIntent) -> str | None:
         return str(intent.target.activity_id)
     if intent.target.copy_id is not None:
         return str(intent.target.copy_id)
+    if intent.target.obtain_item_id is not None:
+        return str(intent.target.obtain_item_id)
     assert intent.target.cleanup_item_id is not None
     return str(intent.target.cleanup_item_id)
 
