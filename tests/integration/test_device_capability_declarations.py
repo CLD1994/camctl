@@ -189,11 +189,15 @@ def test_installed_source_change_keeps_accepted_execution_definition(package, tm
     directory = tmp_path / "source-change"
     config = _config(package, directory)
     package.cli("init", "--config", str(config))
+    photo_params = json.loads(
+        (REPO / "docs/camctl/examples/camera-demo/hasselblad-photo.json")
+        .read_text(encoding="utf-8")
+    )["actions"][0]["params"]
     now = datetime.now(timezone.utc)
     plan = {"request_id": "81001", "name": "源模式固化", "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             "actions": [{"name": "capture", "type": "camera_take_photo", "device_id": "hb-host",
                          "scheduled_at": (now + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"),
-                         "policy": {"max_delay_ms": 30000}, "params": {"type": "hasselblad_photo"}}]}
+                         "policy": {"max_delay_ms": 30000}, "params": photo_params}]}
     request = directory / "request.json"
     request.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf8")
     package.cli("submit", str(request), "--config", str(config))

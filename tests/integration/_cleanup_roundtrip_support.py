@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -35,6 +36,11 @@ LRF = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF"
 SERIAL = "r6-osmo-serial"
 RAW = b"II*\x00small integration fixture"
 PREVIEW = b"\xff\xd8small preview fixture\xff\xd9"
+
+
+def _hasselblad_photo_sample_params():
+    sample = REPO / "docs/camctl/examples/camera-demo/hasselblad-photo.json"
+    return json.loads(sample.read_text(encoding="utf-8"))["actions"][0]["params"]
 
 
 def sha(data):
@@ -416,16 +422,17 @@ max_query_attempts={max_q}
 
     def prepare_hasselblad(self):
         self.stop()
+        photo_params = _hasselblad_photo_sample_params()
         for mode in ("host", "device"):
             tool = self.tools / f"hb-{mode}"
-            tool.write_text("#!" + str(self.package.python) + "\n" + _hb_tool(mode))
+            tool.write_text("#!" + str(self.package.python) + "\n" + _hb_tool(mode, photo_params))
             tool.chmod(0o755)
             self.config_extra += f'''\n[devices.hb-{mode}]\nkind="camera"\ndriver="hasselblad_cfv100c"\n[devices.hb-{mode}.hasselblad]\nexecutable="{tool}"\nserial="R6-HB-{mode}"\nproduct_id=10\noutput_storage="{mode}"\n'''
         self.write_config()
         self.install_capabilities()
         self.start()
         plan, receipt = self.export("capture-hb", [self.action("capture-hb-" + mode, "camera_take_photo",
-                  {"type": "hasselblad_photo"}, "hb-" + mode) for mode in ("host", "device")])
+                  deepcopy(photo_params), "hb-" + mode) for mode in ("host", "device")])
         self.host.submit(plan)
         self.wait_action(receipt["request_id"], "SUCCEEDED")
         self.register_sources()
@@ -630,18 +637,41 @@ max_query_attempts={max_q}
         return imported
 
 
-def _hb_tool(mode):
+def _hb_tool(mode, photo_params=None):
+    if photo_params is None:
+        photo_params = _hasselblad_photo_sample_params()
+    from camctl.devices.drivers.hasselblad.parameters import PHOTO_COMMANDS as C, PHOTO_FIELDS
+
+    set_values = {
+        C.DRIVE_MODE_FIELD.value: C.DRIVE_MODE_SINGLE.value,
+        C.CAPTURE_FORMAT_FIELD.value: photo_params["capture_format"],
+        C.EXPOSURE_MODE_FIELD.value: photo_params["exposure"]["mode"],
+        PHOTO_FIELDS["iso"].command_field: str(photo_params["exposure"]["iso"]),
+        C.WHITE_BALANCE_MODE_FIELD.value: photo_params["white_balance"]["mode"],
+        C.FOCUS_MODE_FIELD.value: photo_params["focus"]["mode"],
+    }
     return f'''import sys,json,pathlib,os,time
 args=sys.argv[1:]
 log=pathlib.Path(__file__).with_suffix(".jsonl")
+settings_state=pathlib.Path(__file__).with_suffix(".settings")
+set_values={set_values!r}
 with log.open("a") as stream: stream.write(json.dumps({{"argv":sys.argv,"pid":os.getpid(),"ppid":os.getppid(),"pgid":os.getpgrp(),"utc_ns":time.time_ns()}})+"\\n")
 if args==["--pid","0x000a","list"]: print("vid=0x2756 pid=0x000a  bus=  1 addr= 23")
 elif args==["--pid","0x000a","info"]: print("serial : R6-HB-{mode}\\nfirmware : v4.1.0")
-elif args in (["--pid","0x000a","set","drive-mode","single"],["--pid","0x000a","set","capture-format","raw"]): pass
+elif len(args)==5 and args[:3]==["--pid","0x000a","set"]:
+ field,value=args[3:]
+ if set_values.get(field)!=value: raise ValueError("unexpected Hasselblad set field or value")
+ settings=json.loads(settings_state.read_text()) if settings_state.is_file() else {{}}
+ settings[field]=value
+ settings_state.write_text(json.dumps(settings))
 elif len(args)==5 and args[:4]==["--pid","0x000a","capture","--output"]:
  work=pathlib.Path(args[4]); assert work.is_absolute()
- original=work/"fixture_capture.3FR"; preview=work/"fixture_capture.3FR.thumbnail.jpg"
+ if not settings_state.is_file(): raise ValueError("capture settings were not set")
+ settings=json.loads(settings_state.read_text())
+ if settings!=set_values: raise ValueError("capture settings do not match the RAW sample")
+ original=work/"host-copy.3FR"; preview=work/"host-copy.3FR.thumbnail.jpg"
  original.write_bytes({RAW!r}); preview.write_bytes({PREVIEW!r})
- print("capture: OK"); print(f"saved {{original}} ({{original.stat().st_size}} bytes)"); print(f"saved {{preview}} ({{preview.stat().st_size}} bytes)")
+ camera_path="/CAMERA/DCIM/100HASSELBL/camera-copy.3FR"
+ print("capture: OK"); print(f"saved {{original}} ({{original.stat().st_size}} bytes)"); print(f"saved {{preview}} ({{preview.stat().st_size}} bytes)"); print("camera file: " + camera_path)
 else: raise ValueError("unexpected hb_cli argv")
 '''

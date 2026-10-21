@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
 from _cleanup_roundtrip_support import (
-    RAW, PREVIEW, World, cleanup_package, json_write, process_identity, records, rows, sha, wait,
+    RAW, PREVIEW, World, _hb_tool, cleanup_package, json_write, process_identity, records, rows, sha, wait,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
+
+
+def test_cleanup_hasselblad_tool_rejects_unrecognized_setting(tmp_path):
+    tool = tmp_path / "hb_cli"
+    tool.write_text("#!" + sys.executable + "\n" + _hb_tool("contract"), encoding="utf-8")
+    tool.chmod(0o700)
+
+    refused = subprocess.run(
+        [str(tool), "--pid", "0x000a", "set", "unrecognized-setting", "1"],
+        capture_output=True, text=True,
+    )
+
+    assert refused.returncode != 0, "清理替身意外接受了未声明的相机参数"
 
 
 def test_exact_outputs_and_non_cascade(tmp_path, host_demo, cleanup_package, monkeypatch):
@@ -36,7 +51,9 @@ def test_cleanup_device_delete_unsupported_with_host_files(
         ids = [device["id"], original["id"], preview["id"]]
         device_before = rows(world.db, "SELECT * FROM device_files ORDER BY id")
         tool_calls = {mode: records(world.tools / f"hb-{mode}.jsonl") for mode in ("host", "device")}
-        assert all(len(calls) == 5 for calls in tool_calls.values())
+        for calls in tool_calls.values():
+            capture_calls = [call for call in calls if call["argv"][3] == "capture"]
+            assert len(capture_calls) == 1
         for key, content in (("hb-original", RAW), ("hb-preview", PREVIEW)):
             assert world.path(key).read_bytes() == content
             assert rows(world.db, "SELECT size_bytes,sha256 FROM intermediate_files WHERE id=?",
