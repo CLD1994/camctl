@@ -1,4 +1,10 @@
 import { isCameraAction } from "../shared/actions";
+import {
+  rejectSegmentError,
+  segmentReferences,
+  compareSegmentFacts,
+  type SegmentDetails,
+} from "../shared/segment-report-errors";
 import type { ValidateFunction } from "ajv";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -117,7 +123,18 @@ function failureIdentity(item: ObtainFailure): string {
     typeof requested === "string" ? requested : null,
   ]);
 }
+function consistentSegmentFacts(indexes: Index[]) {
+  const seen = new Map<string, SegmentDetails>();
+  for (const index of indexes)
+    for (const { value: action } of index.actions.values())
+      for (const { details } of segmentReferences(action)) {
+        const previous = seen.get(details.source_action_instance_id);
+        if (previous) compareSegmentFacts(previous, details);
+        else seen.set(details.source_action_instance_id, details);
+      }
+}
 function associations(index: Index) {
+  consistentSegmentFacts([index]);
   const names = new Map<
     string,
     Map<string, { parent: string; value: ReportAction }>
@@ -232,6 +249,26 @@ function associations(index: Index) {
   }
   for (const owner of index.actions.values()) {
     const action = owner.value;
+    for (const { details } of segmentReferences(action)) {
+      const source = index.actions.get(
+        details.source_action_instance_id,
+      )?.value;
+      if (source)
+        requireFact(
+          source.type === "camera_record",
+          "分段错误来源必须是录像动作",
+        );
+      for (const id of details.retained_output_ids) {
+        const output = index.outputs.get(id)?.value;
+        if (output)
+          requireFact(
+            output.kind === "original" &&
+              output.source_action_instance_id ===
+                details.source_action_instance_id,
+            "分段保留产物必须属于同一来源的原片",
+          );
+      }
+    }
     const admission =
       action.status === "failed" && action.error?.stage === "admission";
     if (
@@ -438,6 +475,8 @@ function failureLinks(
 function ownFacts(report: StatusReport) {
   requireFact(report.from_wm <= report.to_wm, "报告水位顺序不合法");
   const index = indexReport(report);
+  for (const diagnostic of report.plan_file_diagnostics ?? [])
+    diagnostic.errors.forEach(rejectSegmentError);
   for (const plan of report.plans ?? []) {
     requireFact(
       isName(plan.name) && isTimestamp(plan.created_at),
@@ -1010,6 +1049,7 @@ export function validateReportAgainstHistory(
   validateReport(incoming);
   const old = indexReport(current);
   const next = indexReport(incoming);
+  consistentSegmentFacts([old, next]);
   const boundary: "earlier" | "same" | "later" =
     incoming.to_wm < current.to_wm
       ? "earlier"
