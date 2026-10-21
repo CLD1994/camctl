@@ -1,7 +1,7 @@
 """取回来源固定与逐来源选择的持久化事务。
 
 SOURCE_RESOLVED 在取得执行资格后一次固定取回或范围清理的跨计划
-来源成员（或可靠失败），取回成员在同一事件共同初始化 PENDING 选择；
+来源成员（或可靠失败），取回成员在同一事务共同初始化 PENDING 选择；
 TARGETS_FIXED 将一个来源的完整选择（含合法空选择与逐项失败）与
 FIXED 状态同一事务保存。已固定的来源与选择不因重送、重启或新文
 件出现而重选或扩大；此前已可靠确认存在的产物记录缺失按状态库
@@ -296,13 +296,22 @@ class ResolveSources:
     occurred_at: int
 
 
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        if not isinstance(self.spec, SourceSpec):
+            raise TypeError("来源解析申请必须使用 SourceSpec")
+        timestamp = UtcMicros(self.occurred_at)
+        if not -MAX_OBJECT_ID - 1 <= timestamp <= MAX_OBJECT_ID:
+            raise ValueError("来源解析时刻超出 SQLite 整数微秒范围")
+
+
 @dataclass(frozen=True)
 class ResolveSourcesOutcome:
-    """来源解析的已提交结果。"""
+    """来源解析的有限回执；成员与选择身份从持久关系分页读取。"""
 
     fixed: bool
-    member_action_ids: tuple[int, ...] = ()
-    selection_ids: tuple[int, ...] = ()
+    member_count: int = 0
+    selection_count: int = 0
     source_plan_id: int | None = None
     error_code: int | None = None
     error_details: dict[str, Any] | None = None
@@ -432,144 +441,22 @@ class _StartObtainCommand:
     """取回动作开始执行的事务命令（ACTION_STARTED.START）。
 
     只保存开始事实；来源解析、选择固定与读取推进由后续事务依次
-    推进。受理时已固定的同计划来源在开始事件中为每条既有依赖初
+    推进。受理时已固定的同计划来源在开始事务中为每条既有依赖初
     始化一条 PENDING 选择（守卫强制一一对应）；执行期解析的来源
     没有既有依赖，选择由来源固定事务创建。到时取回动作开始时不
     占用设备活动，与拍摄动作的启动互不影响；父计划首次开始与开
     始事实同事务保存。
     """
 
-    def __init__(self, command: StartObtainAction, key: OperationKey) -> None:
+    def __init__(self, command: StartObtainAction, key: OperationKey, read_batch_size=DEFAULT_BATCH_SIZE) -> None:
         if not isinstance(command, StartObtainAction):
             raise TypeError("取回开始申请必须使用 StartObtainAction")
         self._command = command
         self._key = key
-        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
-        # 报告关联解析沿登记路由读取各表事实；开始事务可能为既有
-        # 依赖创建来源选择行，预置空映射。
-        self._state: dict[str, dict[int, dict[str, Any]]] = {
-            "obtain_source_selections": {},
-        }
-
-    def plan(self, scope) -> CommandPlan:
-        connection = scope.connection
-        saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._reuse(saved, connection)
-        command = self._command
-        action = row_facts(connection, "actions", command.action_id)
-        if action is None:
-            raise ConsistencyError(f"取回动作不存在: {command.action_id}")
-        self._state["actions"] = {command.action_id: dict(action)}
-        if action["type"] != _OBTAIN_TYPE:
-            raise ConsistencyError(
-                f"开始事务只适用于取回动作: {command.action_id}"
-                f" type={action['type']!r}")
-        if action["status"] in _ACTION_TERMINAL:
-            return CommandPlan(
-                events=(), owners=self._owners, state_rows=self._state,
-                read_only=True,
-                result=ObtainStartResult(
-                    disposition=ObtainStartDisposition.ALREADY))
-        if action["cancel_requested"]:
-            return CommandPlan(
-                events=(), owners=self._owners, state_rows=self._state,
-                read_only=True,
-                result=ObtainStartResult(
-                    disposition=ObtainStartDisposition.REJECTED,
-                    reason="canceled"),
-            )
-        if action["status"] != int(_ACTION_STATUS.PENDING) \
-                or action["execution_started"] != 0:
-            raise TransactionError(
-                f"取回动作不在待执行状态: {command.action_id}"
-                f" status={action['status']!r}"
-                f" execution_started={action['execution_started']!r}")
-        dependencies = self._load_dependencies(connection)
-        if dependencies and action["source_resolution_state"] != int(
-                _RESOLUTION_STATE.FIXED):
-            raise ConsistencyError(
-                "既有来源依赖只允许受理时已固定的来源")
-        plan = row_facts(connection, "plans", action["plan_id"])
-        if plan is None:
-            raise ConsistencyError(f"计划不存在: {action['plan_id']}")
-        self._state.setdefault("plans", {})[plan["id"]] = plan
-        self._owners[("actions", command.action_id)] = (
-            "action", command.action_id)
-        rows = [_update(
-            "actions", command.action_id,
-            {"status": int(_ACTION_STATUS.PENDING),
-             "execution_started": 0},
-            {"status": int(_ACTION_STATUS.RUNNING),
-             "execution_started": 1})]
-        selection_id = next_row_id(connection, "obtain_source_selections")
-        for dependency_id in dependencies:
-            rows.append(_row(
-                "obtain_source_selections", selection_id,
-                {
-                    "dependency_id": dependency_id,
-                    "status": int(_SELECTION_STATUS.PENDING),
-                    "error_code": None,
-                    "error_details_json": None,
-                }))
-            self._owners[("obtain_source_selections", selection_id)] = (
-                "action", command.action_id)
-            selection_id += 1
-        allocation = scope.allocate(2 if plan["status"] == 1 else 1)
-        events = [_envelope(
-            allocation.first_event_id, allocation.txn_id,
-            _ACTION_STARTED_EVENT, 1, tuple(rows),
-            command.occurred_at)]
-        if plan["status"] == 1:
-            self._owners[("plans", plan["id"])] = ("plan", plan["id"])
-            events.append(_envelope(
-                allocation.last_event_id, allocation.txn_id,
-                _PLAN_STATUS_EVENT, 1,
-                (_update("plans", plan["id"],
-                 {"status": 1}, {"status": 2}),),
-                command.occurred_at))
-        return CommandPlan(
-            events=tuple(events), owners=self._owners, state_rows=self._state,
-            result=ObtainStartResult())
-
-    def _load_dependencies(self, connection) -> tuple[int, ...]:
-        """受理时已保存的同计划来源依赖；执行期解析来源没有依赖。"""
-        with closing(connection.execute(
-            "SELECT id FROM action_dependencies WHERE action_id = ?"
-            " ORDER BY id", (self._command.action_id,),
-        )) as cursor:
-            rows = cursor.fetchall()
-        identities = tuple(int(row[0]) for row in rows)
-        for identity in identities:
-            dependency = row_facts(connection, "action_dependencies", identity)
-            if dependency is None:
-                raise ConsistencyError(f"来源依赖记录缺失: {identity}")
-            self._state.setdefault(
-                "action_dependencies", {})[identity] = dependency
-        return identities
-
-    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
-        """原键重送：核实原开始分支与输入后恢复首次响应。"""
-        command = self._command
-        kinds = [(event["type"], event["reason"]) for event in saved]
-        if kinds not in (
-                [(_ACTION_STARTED_EVENT, 1)],
-                [(_ACTION_STARTED_EVENT, 1), (_PLAN_STATUS_EVENT, 1)]):
-            raise TransactionError(
-                "操作身份已用于其他事务，不能作为取回开始重送")
-        if saved[0]["occurred_at"] != command.occurred_at:
-            raise TransactionError("取回开始的事实时刻与原事务不同")
-        row = saved[0]["body"]["rows"][0]
-        if row["table"] != "actions" or row["id"] != command.action_id:
-            raise TransactionError("原取回开始属于其他动作")
-        facts = row_facts(connection, "actions", command.action_id)
-        if facts is None or facts["status"] != int(_ACTION_STATUS.RUNNING) \
-                or facts["execution_started"] != 1:
-            raise TransactionError("原取回开始的可靠记录与输入不符")
-        return CommandPlan(
-            events=(), owners=self._owners, state_rows=self._state,
-            read_only=True,
-            result=ObtainStartResult())
+        self._read_batch_size = positive_limit(read_batch_size)
+    def plan(self, scope):
+        from .source_transactions import plan_source
+        return plan_source(scope, self._command, self._key, self._read_batch_size, start=True)
 
 
 class _StartCleanupCommand:
@@ -679,272 +566,14 @@ class _ResolveSourcesCommand:
     """执行期来源解析的完整事务命令。"""
 
     def __init__(self, command: ResolveSources, key: OperationKey, read_batch_size=DEFAULT_BATCH_SIZE) -> None:
+        if not isinstance(command, ResolveSources):
+            raise TypeError("来源解析申请必须使用 ResolveSources")
         self._command = command
         self._key = key
         self._read_batch_size = positive_limit(read_batch_size)
-        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
-        # 报告关联解析沿登记路由读取各表事实，预置空映射。
-        self._state: dict[str, dict[int, dict[str, Any]]] = {
-            "actions": {},
-            "action_dependencies": {},
-            "obtain_source_selections": {},
-            "plans": {},
-        }
-
-    def plan(self, scope) -> CommandPlan:
-        connection = scope.connection
-        saved = saved_transaction_events(connection, self._key)
-        if saved is not None:
-            return self._reuse(saved)
-        command = self._command
-        action = row_facts(connection, "actions", command.action_id)
-        if action is None:
-            raise TransactionError(f"产物动作不存在: {command.action_id}")
-        if action["type"] not in (_OBTAIN_TYPE, _DELETE_ACTION_TYPE):
-            raise TransactionError(f"来源解析只适用于取回或范围清理动作: {command.action_id}")
-        state = action["source_resolution_state"]
-        if state == int(_RESOLUTION_STATE.FIXED):
-            # 已固定集合不重新解析或扩大：按已保存事实返回。
-            return CommandPlan(
-                events=(),
-                owners=self._owners,
-                state_rows=self._state,
-                result=self._saved_outcome(connection),
-                read_only=True,
-            )
-        if state == int(_RESOLUTION_STATE.FAILED):
-            return CommandPlan(
-                events=(),
-                owners=self._owners,
-                state_rows=self._state,
-                result=ResolveSourcesOutcome(
-                    fixed=False,
-                    error_code=action["error_code"],
-                    error_details=_decoded(action["error_details_json"]),
-                ),
-                read_only=True,
-            )
-        if state != int(_RESOLUTION_STATE.PENDING):
-            raise TransactionError(
-                f"来源解析状态不可解释: {command.action_id} {state!r}"
-            )
-        if action["status"] != int(_ACTION_STATUS.RUNNING) or not action["execution_started"]:
-            raise TransactionError("执行期来源解析要求产物动作处于执行中")
-        self._state["actions"] = {command.action_id: action}
-
-        resolution = resolve_source(
-            command.spec, SqliteSourceLookup(connection, command.action_id)
-        )
-        if resolution.state == ResolutionState.FAILED:
-            error_code, details = resolution.action_error(command.spec)
-            before = {
-                "source_resolution_state": action["source_resolution_state"],
-                "status": action["status"],
-                "error_code": action["error_code"],
-                "error_details_json": action["error_details_json"],
-            }
-            after = {
-                "source_resolution_state": int(_RESOLUTION_STATE.FAILED),
-                "status": int(_ACTION_STATUS.FAILED),
-                "error_code": error_code,
-                "error_details_json": details,
-            }
-            self._owners[("actions", command.action_id)] = (
-                "action", command.action_id,
-            )
-            templates = [(
-                _SOURCE_RESOLVED_EVENT, _FAIL_REASON,
-                (_update("actions", command.action_id, before, after),),
-            )]
-            # 解析失败也是动作终态：兄弟齐终态时计划同事务完成，与
-            # 取回完成登记的规则同一不变量，否则单动作计划的解析
-            # 失败会让计划停留在执行中而没有推进入口。
-            action_plan = row_facts(connection, "plans", action["plan_id"])
-            assert action_plan is not None
-            self._state["plans"] = {action_plan["id"]: action_plan}
-            siblings = self._load_siblings(connection, action)
-            if plan_complete(siblings, command.action_id) \
-                    and action_plan["status"] in (1, 2):
-                self._owners[("plans", action_plan["id"])] = (
-                    "plan", action_plan["id"],
-                )
-                templates.append((
-                    _PLAN_STATUS_EVENT, 2,
-                    (_update("plans", action_plan["id"],
-                             {"status": action_plan["status"]},
-                             {"status": _PLAN_COMPLETE}),),
-                ))
-            allocation = scope.allocate(len(templates))
-            events = tuple(
-                _envelope(
-                    allocation.first_event_id + index, allocation.txn_id,
-                    event_type, event_reason, rows, command.occurred_at,
-                )
-                for index, (event_type, event_reason, rows)
-                in enumerate(templates)
-            )
-            return CommandPlan(
-                events=events,
-                owners=self._owners,
-                state_rows=self._state,
-                result=ResolveSourcesOutcome(
-                    fixed=False, error_code=error_code, error_details=details
-                ),
-                plan_read_scope=PlanReadScope(action["plan_id"], self._read_batch_size),
-            )
-
-        rows = []
-        member_state = dict(self._state["actions"])
-        for member_id in resolution.member_action_ids:
-            member = row_facts(connection, "actions", member_id)
-            if member is None:
-                raise ConsistencyError(f"来源成员动作不存在: {member_id}")
-            member_state[member_id] = member
-        self._state["actions"] = member_state
-        before = {
-            "source_resolution_state": action["source_resolution_state"],
-            "resolved_source_plan_id": action["resolved_source_plan_id"],
-        }
-        after = {
-            "source_resolution_state": int(_RESOLUTION_STATE.FIXED),
-            "resolved_source_plan_id": resolution.source_plan_id,
-        }
-        rows.append(_update("actions", command.action_id, before, after))
-        self._owners[("actions", command.action_id)] = ("action", command.action_id)
-
-        dependency_id = next_row_id(connection, "action_dependencies")
-        selection_id = (next_row_id(connection, "obtain_source_selections")
-                        if action["type"] == _OBTAIN_TYPE else None)
-        selection_ids: list[int] = []
-        for member_id in resolution.member_action_ids:
-            rows.append(
-                _row(
-                    "action_dependencies",
-                    dependency_id,
-                    {
-                        "action_id": command.action_id,
-                        "depends_on_action_id": member_id,
-                    },
-                )
-            )
-            self._owners[("action_dependencies", dependency_id)] = (
-                "action", command.action_id,
-            )
-            if selection_id is not None:
-                rows.append(_row("obtain_source_selections", selection_id, {
-                    "dependency_id": dependency_id,
-                    "status": int(_SELECTION_STATUS.PENDING),
-                    "error_code": None, "error_details_json": None,
-                }))
-                self._owners[("obtain_source_selections", selection_id)] = (
-                    "action", command.action_id,
-                )
-                selection_ids.append(selection_id)
-                selection_id += 1
-            dependency_id += 1
-        allocation = scope.allocate(1)
-        event = _envelope(
-            allocation.first_event_id,
-            allocation.txn_id,
-            _SOURCE_RESOLVED_EVENT,
-            _FIX_REASON,
-            tuple(rows),
-            command.occurred_at,
-        )
-        return CommandPlan(
-            events=(event,),
-            owners=self._owners,
-            state_rows=self._state,
-            result=ResolveSourcesOutcome(
-                fixed=True,
-                member_action_ids=resolution.member_action_ids,
-                selection_ids=tuple(selection_ids),
-                source_plan_id=resolution.source_plan_id,
-            ),
-        )
-
-    def _load_siblings(self, connection, action) -> dict[int, dict[str, Any]]:
-        siblings = _completion_siblings(connection, action)
-        self._state["actions"].update(siblings)
-        return siblings
-
-    def _saved_outcome(self, connection) -> ResolveSourcesOutcome:
-        members = tuple(
-            int(row[0])
-            for row in connection.execute(
-                "SELECT depends_on_action_id FROM action_dependencies"
-                " WHERE action_id = ? ORDER BY id",
-                (self._command.action_id,),
-            )
-        )
-        selections = tuple(
-            int(row[0])
-            for row in connection.execute(
-                "SELECT s.id FROM obtain_source_selections s"
-                " JOIN action_dependencies d ON d.id = s.dependency_id"
-                " WHERE d.action_id = ? ORDER BY s.id",
-                (self._command.action_id,),
-            )
-        )
-        action = row_facts(connection, "actions", self._command.action_id)
-        assert action is not None
-        return ResolveSourcesOutcome(
-            fixed=True,
-            member_action_ids=members,
-            selection_ids=selections,
-            source_plan_id=action["resolved_source_plan_id"],
-        )
-
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
-        resolved = [
-            event
-            for event in saved
-            if event["type"] == _SOURCE_RESOLVED_EVENT
-        ]
-        if not resolved:
-            raise TransactionError("操作身份已用于其他阶段，不能作为来源解析重送")
-        body = resolved[0]["body"]
-        if resolved[0]["reason"] == _FAIL_REASON:
-            for row in body.get("rows", []):
-                if row["table"] == "actions" and row["after"]["exists"]:
-                    values = row["after"]["values"]
-                    return CommandPlan(
-                        events=(),
-                        owners=self._owners,
-                        state_rows=self._state,
-                        result=ResolveSourcesOutcome(
-                            fixed=False,
-                            error_code=values.get("error_code"),
-                            error_details=_decoded(values.get("error_details_json")),
-                        ),
-                        read_only=True,
-                    )
-            raise TransactionError("来源解析失败事件缺少动作行")
-        members: list[int] = []
-        selections: list[int] = []
-        source_plan_id: int | None = None
-        for row in body.get("rows", []):
-            if not row["after"]["exists"]:
-                continue
-            values = row["after"]["values"]
-            if row["table"] == "action_dependencies":
-                members.append(int(values["depends_on_action_id"]))
-            elif row["table"] == "obtain_source_selections":
-                selections.append(int(row["id"]))
-            elif row["table"] == "actions":
-                source_plan_id = values.get("resolved_source_plan_id")
-        return CommandPlan(
-            events=(),
-            owners=self._owners,
-            state_rows=self._state,
-            result=ResolveSourcesOutcome(
-                fixed=True,
-                member_action_ids=tuple(members),
-                selection_ids=tuple(selections),
-                source_plan_id=source_plan_id,
-            ),
-            read_only=True,
-        )
+    def plan(self, scope):
+        from .source_transactions import plan_source
+        return plan_source(scope, self._command, self._key, self._read_batch_size)
 
 
 class _FixSelectionCommand:
@@ -5605,7 +5234,7 @@ class OutputsRepository:
     def start_obtain_action(
         self, command: StartObtainAction, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[ObtainStartResult]:
-        receipt = commit_operation(_StartObtainCommand(command, key), key, owned)
+        receipt = commit_operation(_StartObtainCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
     def start_cleanup_action(
@@ -5943,61 +5572,16 @@ def _selection_initialization_guard(event, context) -> None:
     取回开始（ACTION_STARTED）为受理时已固定的来源初始化选择。
     取消生效的取回不再普通初始化（由行规格 before 核对）。
     """
-    created = [
-        row
-        for row in event.rows
-        if row.table == "obtain_source_selections" and not row.before.exists
-    ]
-    owner_id = next((row.row_id for row in event.rows
-                     if row.table == "actions" and row.before.exists), None)
-    if owner_id is not None and _guard_facts(context, "actions", owner_id).get("type") == _DELETE_ACTION_TYPE:
-        if created:
-            raise EventValidationError("只有取回动作可以初始化来源选择")
+    from .source_transactions import required_stream, verify_source_guard
+    reads = context.current_reads
+    if reads is not None and required_stream(reads.connection, event) is not None:
+        verify_source_guard(event, context)
         return
     if event.event_type == _SOURCE_RESOLVED_EVENT and event.reason == _FIX_REASON:
-        dependencies = [
-            row
-            for row in event.rows
-            if row.table == "action_dependencies" and not row.before.exists
-        ]
-        dependency_ids = {row.row_id for row in dependencies}
-        if len(created) != len(dependency_ids):
-            raise EventValidationError(
-                f"来源固定必须为每个依赖恰好创建一条选择: 依赖 {sorted(dependency_ids)}"
-                f" 选择 {len(created)} 条"
-            )
-    elif event.event_type == _ACTION_STARTED_EVENT:
-        owner_id = None
-        for row in event.rows:
-            if row.table == "actions" and row.before.exists:
-                owner_id = row.row_id
-        if owner_id is None:
-            return
-        existing = {
-            row_id
-            for row_id, values in context.state_rows.get(
-                "action_dependencies", {}
-            ).items()
-            if values.get("action_id") == owner_id
-        }
-        created_dependencies = {
-            row.after.values["dependency_id"] for row in created
-        }
-        if len(created) != len(existing) or created_dependencies != existing:
-            raise EventValidationError(
-                f"动作开始必须为每个固定来源初始化恰好一条选择:"
-                f" 依赖 {sorted(existing)} 选择 {sorted(created_dependencies)}"
-            )
-    else:
-        if created:
-            raise EventValidationError("只有来源固定或动作开始能初始化选择")
-        return
-    for row in created:
-        after = row.after.values
-        if after.get("status") != int(_SELECTION_STATUS.PENDING):
-            raise EventValidationError("初始化的选择必须是 PENDING")
-        if after.get("error_code") is not None or after.get("error_details_json") is not None:
-            raise EventValidationError("初始化的选择不携带来源错误")
+        raise EventValidationError("执行期来源固定缺少原申请读取范围")
+    created = [r for r in event.rows if r.table == "obtain_source_selections"]
+    if created:
+        raise EventValidationError("取回初始化缺少可靠原申请")
 
 
 def _current_selection_snapshot(context, selection_id: int) -> tuple[int, SelectionSnapshot]:

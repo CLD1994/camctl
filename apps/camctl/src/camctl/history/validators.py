@@ -437,7 +437,13 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     成员白名单来自分支登记；此处只核对已出现成员的取值类型。
     布尔不是整数编号；驱动依据必须是结构化对象，成员顺序无关。
     """
-    if member == 'segment_finish_request':
+    if member in ('source_resolution_request','obtain_initialization_request'):
+        from camctl.outputs.sources import validate_source_transaction_header
+        try:
+            validate_source_transaction_header(value,member)
+        except (ValueError,TypeError,KeyError) as error:
+            _fail(f'事件 {event_id} 的来源事务原申请非法: {error}')
+    elif member == 'segment_finish_request':
         from camctl.capture.segment_finish import validate_finish_header
         try:
             validate_finish_header(value)

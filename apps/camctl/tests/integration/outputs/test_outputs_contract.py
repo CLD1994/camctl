@@ -308,12 +308,13 @@ def _grant_delivery(owned, staging, obtain_action: int, photo_action: int,
             occurred_at=occurred),
         new_operation_key(), owned)
     assert resolution.kind is DbOutcomeKind.COMPLETED, resolution.error
-    assert resolution.value.fixed and resolution.value.selection_ids, resolution.value
-    selection_id = resolution.value.selection_ids[0]
+    assert resolution.value.fixed and resolution.value.selection_count == 1, resolution.value
+    selection_id = owned.connection.execute(
+            "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=?", (obtain_action,)).fetchone()[0]
     snapshot = select_outputs(
         SourceResolution(
             state=ResolutionState.FIXED,
-            member_action_ids=resolution.value.member_action_ids,
+            member_action_ids=(photo_action,),
             source_plan_id=resolution.value.source_plan_id,
         ),
         load_selection_facts(owned.connection, photo_action),
@@ -420,6 +421,23 @@ def _cleanup_output(pair) -> None:
     assert step.phase == "succeeded" and step.detail == "DELETED", step
 
 
+def _reuse_original_source(pair):
+    """真实 selection/delivery/cleanup 后仍按原 H 核实来源组。"""
+    owned = pair["owned"]
+    from camctl.contracts.values import OperationKey
+    for action_id in (pair["first_action"],pair["second_action"]):
+        raw = owned.connection.execute(
+            "SELECT t.operation_key,e.occurred_at FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id "
+            "WHERE e.event_type=3 AND json_extract(e.body_json,'$.evidence.source_resolution_request.action_id')=? ORDER BY e.id LIMIT 1", (action_id,)).fetchone()
+        assert raw is not None
+        before = tuple(owned.connection.iterdump())
+        result = OutputsRepository().resolve_sources(
+            ResolveSources(action_id,SourceSpec(action_instance_id=pair["photo_action"]),raw[1]),OperationKey(raw[0]),owned)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert result.value.fixed and result.value.member_count == result.value.selection_count == 1
+        assert tuple(owned.connection.iterdump()) == before
+
+
 class TestOutputLifecyclesAreIndependent:
 
     def test_output_lifecycles_are_independent(self, prepared_pair):
@@ -441,12 +459,16 @@ class TestOutputLifecyclesAreIndependent:
         assert resent.value.delivery_id == first.delivery_id
         assert _value(owned, "SELECT COUNT(*) FROM deliveries") == (2,)
 
+        _reuse_original_source(pair)
+
         # 源产物清理：两个交付的读取依赖均已随 PREPARED 解除。
         _cleanup_output(pair)
         availability = _value(
             owned, "SELECT availability, cleanup_status FROM outputs WHERE id=?",
             pair["output_id"])
         assert availability[0] != 1, availability
+
+        _reuse_original_source(pair)
 
         # 计划要求断言：源已清理，原 delivery 仍可继续发布。
         delivery_can_continue = True
@@ -463,6 +485,7 @@ class TestOutputLifecyclesAreIndependent:
                 FinishObtain(action_id, _now_us()), new_operation_key(), owned)
             assert finish.kind is DbOutcomeKind.COMPLETED, finish.error
             assert finish.value.action_status == 3, finish.value
+        _reuse_original_source(pair)
 
 
 class TestCleanedOutputBlocksNewObtain:
@@ -508,11 +531,12 @@ class TestCleanedOutputBlocksNewObtain:
                 occurred_at=occurred),
             new_operation_key(), owned)
         assert resolution.kind is DbOutcomeKind.COMPLETED, resolution.error
-        selection_id = resolution.value.selection_ids[0]
+        selection_id = owned.connection.execute(
+            "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=?", (third_action,)).fetchone()[0]
         snapshot = select_outputs(
             SourceResolution(
                 state=ResolutionState.FIXED,
-                member_action_ids=resolution.value.member_action_ids,
+                member_action_ids=(pair["photo_action"],),
                 source_plan_id=resolution.value.source_plan_id,
             ),
             load_selection_facts(owned.connection, pair["photo_action"]),

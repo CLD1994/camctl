@@ -954,12 +954,12 @@
     },
     "source_members": {
       "contract": "plans-actions.md#来源解析与目标集合",
-      "rule": "合法来源责任在受理时可以直接创建为 FIXED，完整依赖成员与动作创建共同提交；执行时只从 PENDING 一次固定完整成员或可靠失败。FIXED 必填真实来源计划，依赖均指向该计划的拍摄动作并属于 action_id，空集合仍固定。执行中的取回共同初始化选择；受理时已固定则首次执行初始化。受理失败或不采用来源的动作不创建依赖；查询错误拒绝保存。",
+      "rule": "合法来源责任在受理时直接创建为 FIXED，ADMISSION_MEMBERS 只消费本完整事务前序实际新建且 F 前不存在的 FIXED owner，并完整匹配原输入的真实计划成员。执行时从原 PENDING owner、原输入和同连接可靠事实独立产生完整规范流：有限成员批次后唯一末 FIXED，或真实失败与适用计划完成；每批与完整组均核身份、时刻、原键、计数、取消和原资格。FIXED 保存真实来源计划，空集合仍固定；范围清理不建取回选择。查询错误拒绝保存；有限与有界入口使用相同语言。",
       "scope": "transaction"
     },
     "selection_initialization": {
       "contract": "waiting.md#来源等待的记录与转换",
-      "rule": "取回开始且来源已 FIXED 时，或 RUNNING 的取回来源从 PENDING 变为 FIXED 时，每个 dependency_id 恰好创建一条 PENDING 选择，错误为空；其他动作不建取回选择。来源为空时创建零条；取消已生效不得继续普通初始化或选择。",
+      "rule": "原 FIXED 来源的待开始取回按所有既有 dependency_id 初始化唯一无错误 PENDING 选择，再保存唯一 owner START 和适用 plan START；原 PENDING 来源仅可靠零依赖且零选择才能零初始化开始，来源仍为 PENDING。执行中来源固定按成员批共同建立依赖和选择，最后唯一 FIXED；其他动作不建取回选择。原事实独立产生完整规范流，内核同 scope 逐事件核实并封口；缺头、少项、多项、错身份、改组、缺末尾或追加均整笔拒绝。取消生效不得普通初始化。",
       "scope": "transaction"
     },
     "source_selection": {
@@ -3613,7 +3613,9 @@
             "source_members",
             "selection_initialization"
           ],
-          "evidence": []
+          "evidence": [
+            "source_resolution_request"
+          ]
         },
         "FAIL": {
           "reason": 2,
@@ -3671,7 +3673,9 @@
             "source_members",
             "action_finish"
           ],
-          "evidence": []
+          "evidence": [
+            "source_resolution_request"
+          ]
         },
         "ADMISSION_MEMBERS": {
           "reason": 3,
@@ -4042,7 +4046,9 @@
             "selection_initialization",
             "processing"
           ],
-          "evidence": []
+          "evidence": [
+            "obtain_initialization_request"
+          ]
         }
       }
     },
@@ -4511,7 +4517,10 @@
             "report_impact",
             "plan_aggregate"
           ],
-          "evidence": []
+          "evidence": [
+            "source_resolution_request",
+            "obtain_initialization_request"
+          ]
         },
         "COMPLETE": {
           "reason": 2,
@@ -4552,7 +4561,10 @@
             "report_impact",
             "plan_aggregate"
           ],
-          "evidence": []
+          "evidence": [
+            "source_resolution_request",
+            "obtain_initialization_request"
+          ]
         }
       }
     },

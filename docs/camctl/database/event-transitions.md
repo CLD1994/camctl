@@ -74,6 +74,24 @@
 
 如果同一保存请求已经完成，程序复用原有记录并返回原结果，不重复创建记录或事件。字段值没有实际改变时，也不能把相同值再次写成新事实。一个事件中，同一条数据库记录只能出现一次；涉及多个字段的修改必须放在一起校验。
 
+
+## 来源固定与取回开始的完整事件流
+
+执行期来源解析从动作保存的原 `params.source` 解释六种寻址。写事务先核对未取消、执行标记和来源 `PENDING`，查询真实计划、成员筛选和完整计数，再一次分配全部行 ID 和事件范围 F—L。`SOURCE_RESOLVED.FIX` 先按动作 ID 顺序分批建立 dependency；obtain 同批为每个 dependency 建立一条无错误的 `PENDING` selection，范围 delete 不建立 selection。最后一条事件只把原 owner 的来源改为 `FIXED` 并保存真实来源计划。合法零成员仅有这条末事件。可靠解析失败使用 `SOURCE_RESOLVED.FAIL` 保存真实错误；满足聚合条件时，以计划完成事件结束同组事务。
+
+取回开始使用独立申请。原来源已 `FIXED` 时，按既有 dependency ID 分批初始化全部 selection，然后保存唯一 owner `ACTION_STARTED.START`，适用的计划首次开始为同组末事件。原来源仍 `PENDING` 时，只有可靠零 dependency 且零 selection 才能开始；该组不改变来源解析状态。其他动作的开始保持自己的合同，不得夹带取回依赖或选择。
+
+| 有限申请 | 固定内容 |
+| --- | --- |
+| `source_resolution_request` | `version`、原 `action_id`、`occurred_at`、`operation_key`、`batch_size`、`member_count`、原 `source`、真实 `source_plan_id`、`first_dependency_id`、`first_selection_id`、`complete_plan`、`first_event_id`、`last_event_id` |
+| `obtain_initialization_request` | `version`、原 `action_id`、`occurred_at`、`operation_key`、`batch_size`、`member_count`、`first_selection_id`、`start_plan`、`first_event_id`、`last_event_id` |
+
+开始申请中的 `member_count` 表示既有 dependency 总数。两种申请版本均为 1，每批为 1—64 项；来源固定每项最多两行，因此每条事件最多 128 行。每条同组事件重复同一有限申请。没有分配对应行时，首 ID 使用 1；这不表示创建了一行。头部的计数、身份和分支不提供执行资格，内核从同一连接的 F 前原事实重新产生规范事件并逐条比较。有界上下文只携带当前成员页和原 owner／plan，固定关联最多补入当前页共同创建的 dependency。事实字典及固定关联也须符合真实当前页，不能用未来 `FIXED` 或调用方的布尔凭据证明资格。内核单独持有封口进度；末事件缺失、中途改分支、跨来源串用、末尾追加或空的完成回调均不能提交前缀。
+
+`SOURCE_RESOLVED.ADMISSION_MEMBERS` 属于原受理合同，不要求执行期申请。它只接受同一实际受理事务前序创建、F 前不存在且来源已 `FIXED` 的 owner；成员必须完整匹配该 owner 原输入的本计划拍摄来源。有限入口读取内核已接受的前序事件，有界入口读取同连接已写入的实际前序；未来提案和字典中的一份 `FIXED` 行均不构成证明。已有 owner 不得通过该分支追加成员。
+
+原键核实按原完整事务分页读取，使用原 F 前 H 恢复 owner、plan 和聚合资格，并核全部规范事件、原输入、时刻和 ID。没有独立创建列的 dependency／selection 沿所属动作的对象目录定位真实创建事件，限定到原 H；不按当前最大 ID 重新分配，不把后来交付、清理或兄弟变化当成原资格。新保存和原键核实都只驻留有限头部、当前成员／事件页及逐行恢复结果；回执只返回计数、真实来源计划和适用错误。所有事件、投影、目录及进度在同一事务提交或回滚。
+
 ## 事件分支怎样约束状态变化
 
 JSON 文件中的每个分支通过 `rows` 说明它可以在哪些表中创建或更新记录。对于更新记录，`before` 和 `after` 列出该记录在修改前、修改后必须满足的字段条件。例如，动作开始分支要求旧状态为“待执行”，新状态为“执行中”。规则中的条件用于判断一条完整记录是否合法，实际事件正文则保存此次变化的具体旧值和新值。

@@ -249,6 +249,10 @@ class FailingConnection:
         self._connection = connection
         self._fail_prefix = fail_prefix
 
+    @property
+    def in_transaction(self):
+        return self._connection.in_transaction
+
     def execute(self, sql, parameters=()):
         if sql.startswith(self._fail_prefix):
             raise sqlite3.OperationalError(f"injected failure at: {sql[:40]}")
