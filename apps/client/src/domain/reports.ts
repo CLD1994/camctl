@@ -131,7 +131,7 @@ function consistentSegmentFacts(indexes: Index[]) {
         knowledge.add(details);
 }
 /** 只提取分段校验知识；不会回放或修改报告状态。 */
-export function accumulateSegmentFacts(
+function accumulateSegmentFacts(
   knowledge: SegmentFactKnowledge,
   report: StatusReport,
 ): void {
@@ -140,12 +140,36 @@ export function accumulateSegmentFacts(
       for (const { details } of segmentReferences(action))
         knowledge.add(details);
 }
-function segmentAssociations(index: Index, details: SegmentDetails): void {
-  const source = index.actions.get(details.source_action_instance_id)?.value;
+interface SegmentEntityView {
+  sources: Map<string, ReportAction["type"]>;
+  outputs: Map<string, Pick<Output, "kind" | "source_action_instance_id">>;
+}
+/** 只保留分段引用所需身份；每份原文的观察独立参加核对。 */
+function segmentEntities(index: Index): SegmentEntityView {
+  return {
+    sources: new Map(
+      [...index.actions].map(([id, { value }]) => [id, value.type]),
+    ),
+    outputs: new Map(
+      [...index.outputs].map(([id, { value }]) => [
+        id,
+        {
+          kind: value.kind,
+          source_action_instance_id: value.source_action_instance_id,
+        },
+      ]),
+    ),
+  };
+}
+function segmentAssociations(
+  entities: SegmentEntityView,
+  details: SegmentDetails,
+): void {
+  const source = entities.sources.get(details.source_action_instance_id);
   if (source)
-    requireFact(source.type === "camera_record", "分段错误来源必须是录像动作");
+    requireFact(source === "camera_record", "分段错误来源必须是录像动作");
   for (const id of details.retained_output_ids) {
-    const output = index.outputs.get(id)?.value;
+    const output = entities.outputs.get(id);
     if (output)
       requireFact(
         output.kind === "original" &&
@@ -155,19 +179,25 @@ function segmentAssociations(index: Index, details: SegmentDetails): void {
       );
   }
 }
-/** 历史详情与当前已知实体交叉核对；缺席引用仍保持未知。 */
-export function validateSegmentKnowledge(
-  knowledge: SegmentFactKnowledge,
-  ...reports: StatusReport[]
-): void {
-  for (const report of reports) {
-    const index = indexReport(report);
-    for (const details of knowledge.details())
-      segmentAssociations(index, details);
+/** 分段 F 与每份报告的最小 E；不合并实体状态，也不覆盖此前的身份观察。 */
+export class SegmentReportKnowledge {
+  private readonly facts = new SegmentFactKnowledge();
+  private readonly entities: SegmentEntityView[] = [];
+
+  add(report: StatusReport): void {
+    accumulateSegmentFacts(this.facts, report);
+    this.entities.push(segmentEntities(indexReport(report)));
+  }
+
+  validate(): void {
+    for (const details of this.facts.details())
+      for (const entities of this.entities)
+        segmentAssociations(entities, details);
   }
 }
 function associations(index: Index) {
   consistentSegmentFacts([index]);
+  const entities = segmentEntities(index);
   const names = new Map<
     string,
     Map<string, { parent: string; value: ReportAction }>
@@ -283,7 +313,7 @@ function associations(index: Index) {
   for (const owner of index.actions.values()) {
     const action = owner.value;
     for (const { details } of segmentReferences(action))
-      segmentAssociations(index, details);
+      segmentAssociations(entities, details);
     const admission =
       action.status === "failed" && action.error?.stage === "admission";
     if (

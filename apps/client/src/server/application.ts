@@ -8,7 +8,6 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DataError, Store } from "./database";
-import { SegmentFactKnowledge } from "../shared/segment-report-errors";
 import {
   AppError,
   errorMessage,
@@ -52,8 +51,7 @@ import {
   reportDecision,
   selectSyncReport,
   validateReportAgainstHistory,
-  accumulateSegmentFacts,
-  validateSegmentKnowledge,
+  SegmentReportKnowledge,
 } from "../domain/reports";
 import { formatProtocolTime, type UtcText } from "../domain/protocol-time";
 
@@ -755,16 +753,13 @@ export class Application {
       }
       const decision = reportDecision(coverage, report.from_wm, report.to_wm);
       const current = this.snapshot();
-      // 展示投影可合法省略可选引用；成功原文（含 covered）仍保留此前取得的知识。
-      const segmentKnowledge = new SegmentFactKnowledge();
+      // 展示投影可合法省略可选引用；成功原文（含 covered）仍保留分段详情及其引用的实体身份观察。
+      const segmentKnowledge = new SegmentReportKnowledge();
       try {
         for (const saved of this.store.acceptedReportSources())
-          accumulateSegmentFacts(
-            segmentKnowledge,
-            parseReport(saved.file_name, saved.bytes),
-          );
-        accumulateSegmentFacts(segmentKnowledge, current);
-        validateSegmentKnowledge(segmentKnowledge, current);
+          segmentKnowledge.add(parseReport(saved.file_name, saved.bytes));
+        segmentKnowledge.add(current);
+        segmentKnowledge.validate();
       } catch (error) {
         if (error instanceof DataError) throw error;
         throw new DataError(
@@ -781,8 +776,8 @@ export class Application {
           if (saved && saved.inputIdentity !== value.inputIdentity)
             throw new Error("电机动作原始参数的数学值或类型改变");
         }
-        accumulateSegmentFacts(segmentKnowledge, report);
-        validateSegmentKnowledge(segmentKnowledge, current, report);
+        segmentKnowledge.add(report);
+        segmentKnowledge.validate();
         validateReportAgainstHistory(current, report);
         if (decision !== "gap") merged = mergeReport(current, report);
       } catch (error) {
