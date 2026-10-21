@@ -242,6 +242,61 @@ def _rows(db: Path, sql: str, params=()):
         return [dict(row) for row in connection.execute(sql, params)]
 
 
+def _history_observer():
+    spec = importlib.util.spec_from_file_location(
+        "h8b_history_observer", REPO / "tests/integration/_hasselblad_photo_entry.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_hasselblad_history_observer_rejects_middle_event_as_boundary():
+    observer = _history_observer()
+    with sqlite3.connect(":memory:") as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executescript("CREATE TABLE history_transactions(id,operation_key,first_event_id,last_event_id);"
+                                 "INSERT INTO history_transactions VALUES(8,'original-key',20,22);")
+        observer._require_boundary(connection, {"txn_id": 8, "last_event_id": 22})
+        with pytest.raises(AssertionError, match="完整事务"):
+            observer._require_boundary(connection, {"txn_id": 8, "last_event_id": 20})
+
+
+@pytest.mark.parametrize("damage", ("missing-photo", "missing-entered", "wrong-activity", "wrong-role", "wrong-sha"))
+def test_hasselblad_history_observer_rejects_incomplete_start(damage):
+    observer = _history_observer()
+    original = {"original_name": "host-copy.jpg", "size_bytes": 1,
+                "sha256": hashlib.sha256(b"a").hexdigest(), "media_type": "image/jpeg"}
+    preview = {**original, "original_name": "host-copy.jpg.thumbnail.jpg"}
+    stdout = b"fixture"
+    steps = [{"name": "capture", "local_exit_code": 0, "local_signal": None,
+              "transport_error": None, "output_failure": None, "signal_failures": [],
+              "stdout_size_bytes": len(stdout), "stdout_sha256": hashlib.sha256(stdout).hexdigest()}]
+    raw = {"format_version": 1, "settlement": {"basis": "observed", "evidence": {
+        "type": "operation_returned", "version": 1, "data": {}}}, "observations": [
+        {"type": "photo_taken", "version": 1, "data": {"activity_id": "41", "original": original.copy(),
+         "preview": preview.copy(), "steps": steps}},
+        {"type": "hasselblad_start_entered", "version": 1, "data": {"activity_id": "41"}}],
+        "diagnostics": {"version": 1, "call_limit": 14, "calls": [{"step_index": 1,
+            "step_name": "capture", "stdout": {"state": "complete", "hex": stdout.hex()},
+            "stderr": {"state": "complete", "hex": ""}}]}}
+    expected = {"steps": ["capture"], "artifacts": {"original": original, "preview": preview}}
+    attempt = {"status": 2, "effect_state": 3, "error_json": None, "attempt_no": 1}
+    target = {"run_id": 17, "activity_id": 41, "responsibility_key": "start/29"}
+    observer._assert_start_result(attempt, json.dumps(raw), target, expected)
+    if damage == "missing-photo":
+        raw["observations"].pop(0)
+    elif damage == "missing-entered":
+        raw["observations"].pop(1)
+    elif damage == "wrong-activity":
+        raw["observations"][1]["data"]["activity_id"] = "42"
+    elif damage == "wrong-role":
+        raw["observations"][0]["data"]["original"] = preview
+    else:
+        raw["observations"][0]["data"]["original"]["sha256"] = "0" * 64
+    with pytest.raises((AssertionError, ValueError)):
+        observer._assert_start_result(attempt, json.dumps(raw), target, expected)
+
+
 class PhotoWorld:
     def __init__(self, root: Path, installed: InstalledCamctl, case: PhotoCase, host_demo: str):
         assert not root.resolve().is_relative_to(REPO)
@@ -365,6 +420,35 @@ class PhotoWorld:
         return _client(self.package, "upload-files", str(self.store), str(manifest),
                        output=self.root / f"{label}-receipt.json")
 
+    def observe_history(self, label, previous=None):
+        extension = ".3fr" if self.case.capture_format == "raw" else ".jpg"
+        name = "host-copy" + extension
+        aliases = {"drive-mode": "drive_mode_single", "capture-format": "capture_format",
+                   "exposure-mode": "exposure_mode", "iso": "iso", "aperture": "aperture",
+                   "shutter": "shutter", "wb-mode": "white_balance_mode", "wb": "white_balance",
+                   "focus-mode": "focus_mode"}
+        expected = {"params_text": self.case.params_text, "source": self.case.source,
+                    "steps": ["list", "info", *[aliases[item[1]] if item[0] == "set" else item[0]
+                                                  for item in self.case.settings_argv], "capture"],
+                    "camera_name": "camera-copy" + extension,
+                    "camera_path": "/CAMERA/DCIM/100HASSELBL/camera-copy" + extension,
+                    "artifacts": {}}
+        for role, content, original_name, media in (
+            ("original", self.original_bytes, name, "image/x-hasselblad-3fr" if self.case.capture_format == "raw" else "image/jpeg"),
+            ("preview", self.preview_bytes, name + ".thumbnail.jpg", "image/jpeg"),
+        ):
+            expected["artifacts"][role] = {"original_name": original_name, "size_bytes": len(content),
+                                           "sha256": hashlib.sha256(content).hexdigest(), "media_type": media}
+        input_path = self.root / "history-expected.json"
+        input_path.write_text(json.dumps(expected))
+        output = self.root / f"photo-history-{label}.json"
+        command = [self.package.python, self.root / "_hasselblad_photo_entry.py", "--h8b-history",
+                   self.deployment.state_db, self.photo_plan, input_path, output]
+        if previous is not None:
+            command.append(previous)
+        self.package.run(command)
+        return output
+
     def assert_precision_and_sources(self, report_path, capture):
         expected = json.loads(self.case.params_text, parse_float=Decimal)
         for field in ("source_draft_text", "reopened_draft_text", "applied_draft_text", "request_text"):
@@ -379,6 +463,7 @@ class PhotoWorld:
         assert json.loads(row["input_fields_json"], parse_float=Decimal)["params"] == expected
         assert json.loads(row["effective_params_json"], parse_float=Decimal) == expected
         assert json.loads(row["execution_spec_json"])["output_storage"] == self.case.source
+        assert json.loads(row["execution_spec_json"])["start_call_timeout_s"] == 180
         report_text = report_path.read_text()
         report = json.loads(report_text)
         report_id = report["report_id"]
@@ -429,6 +514,7 @@ class PhotoWorld:
             assert [row["id"] for row in files] == [row["intermediate_file_id"] for row in sources]
             assert files[0]["relative_path"] != files[1]["relative_path"]
         self.frozen_execution_spec = row["execution_spec_json"]
+        self.history_before = self.observe_history("before")
 
     def assert_upload_and_ack(self, deliveries):
         archive = self.root / "claimed"
@@ -501,6 +587,7 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
         world.host.submit(world.export_photo())
         report_path, report, capture = world.report("capture")
         assert "result" not in capture
+        assert not {"steps", "diagnostics", "observations", "call_info"} & capture.keys()
         assert json.loads(case.params_text, parse_float=Decimal) == capture["input_params"] == capture["effective_params"]
         outputs = {output["kind"]: output for output in capture["outputs"]}
         assert set(outputs) == {"original", "preview"}
@@ -577,6 +664,11 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
             assert outputs["original"]["media_type"] == outputs["preview"]["media_type"] == "image/jpeg"
             assert outputs["original"]["checksum"] == outputs["preview"]["checksum"]
         world.assert_upload_and_ack(deliveries)
+        history_after = world.observe_history("after", world.history_before)
+        before = json.loads(world.history_before.read_text(), parse_float=Decimal)
+        after = json.loads(history_after.read_text(), parse_float=Decimal)
+        assert before["facts"] == after["facts"]
+        assert before["provenance"]["pid"] != after["provenance"]["pid"]
         provenance = [json.loads(line) for line in world.provenance.read_text().splitlines()]
         assert {row["kind"] for row in provenance} == {"camctl", "hb_cli"}
         for row in provenance:

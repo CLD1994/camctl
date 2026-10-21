@@ -5,9 +5,245 @@ import json
 import os
 from pathlib import Path
 import sys
+import hashlib
+import sqlite3
 from datetime import datetime, timezone
 
 import camctl
+
+
+def _require_boundary(connection, boundary):
+    row = connection.execute("SELECT * FROM history_transactions WHERE id=?", (boundary["txn_id"],)).fetchone()
+    assert row is not None and row["last_event_id"] == boundary["last_event_id"], "H 必须是完整事务结束位置"
+    return dict(row)
+
+
+def _event_boundary(connection, event_id):
+    event = connection.execute("SELECT transaction_id FROM history_events WHERE id=?", (event_id,)).fetchone()
+    assert event is not None, ("缺少原事件", event_id)
+    row = dict(connection.execute("SELECT * FROM history_transactions WHERE id=?", (event[0],)).fetchone())
+    assert row["first_event_id"] <= event_id <= row["last_event_id"]
+    boundary = {"txn_id": row["id"], "last_event_id": row["last_event_id"]}
+    _require_boundary(connection, boundary)
+    return {**boundary, "operation_key": row["operation_key"], "first_event_id": row["first_event_id"]}
+
+
+def _assert_start_result(attempt, raw, target, expected):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.operations.result_format import read_result_document
+    from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
+    from camctl.operations.validation import validate_outcome
+    from camctl.devices.drivers.hasselblad.driver import EVIDENCE
+    result = parse_exact_json(raw)
+    outcome = read_result_document(attempt["status"], attempt["effect_state"], result,
+                                   None if attempt["error_json"] is None else parse_exact_json(attempt["error_json"]))
+    ticket = AttemptTicket(attempt["attempt_no"], "control", str(target["activity_id"]),
+                           target["responsibility_key"], target["run_id"])
+    validate_outcome(ticket, outcome, EVIDENCE)
+    assert outcome.status is AttemptStatus.SUCCEEDED and outcome.effect is EffectState.CONFIRMED
+    assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
+    for observation in result["observations"]:
+        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
+    photo = result["observations"][0]["data"]
+    for role in ("original", "preview"):
+        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
+    steps = photo["steps"]
+    assert [step["name"] for step in steps] == expected["steps"]
+    assert expected["steps"].count("capture") == 1
+    calls = result["diagnostics"]["calls"]
+    assert len(calls) == len(steps)
+    streams = []
+    for index, (step, call) in enumerate(zip(steps, calls, strict=True), 1):
+        assert call["step_index"] == index and call["step_name"] == step["name"]
+        assert step["local_exit_code"] == 0 and step["local_signal"] is None
+        assert step["transport_error"] is None and step["output_failure"] is None and step["signal_failures"] == []
+        if step["name"] in ("focus", "autofocus"):
+            assert step["lens_operation_returned"] is True
+        if step["name"] == "capture" and "camera_name" in expected:
+            assert step["files"] == [{"host_name": expected["artifacts"][role]["original_name"],
+                                      "size_bytes": expected["artifacts"][role]["size_bytes"],
+                                      "media_type": expected["artifacts"][role]["media_type"]}
+                                     for role in ("original", "preview")]
+            assert step["camera_locator"] == {"status": "path", "camera_name": expected["camera_name"],
+                                               "camera_path": expected["camera_path"]}
+        facts = {}
+        for name in ("stdout", "stderr"):
+            stream = call[name]
+            assert stream["state"] == "complete"
+            data = bytes.fromhex(stream["hex"])
+            facts[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            if name == "stdout":
+                assert len(data) == step["stdout_size_bytes"] and facts[name]["sha256"] == step["stdout_sha256"]
+            else:
+                # 真实 step 只登记 stdout 摘要；本成功工具样例的 stderr 独立预期为空。
+                assert data == b""
+        streams.append({"step_index": index, "step_name": step["name"], **facts})
+    return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
+                       "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
+            "photo": photo, "streams": streams}
+
+
+def _history_facts(database, request, expected, original=None):
+    from camctl.contracts.enums import enum_for, load_registry
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.persistence.repositories.history import HistoryRepository
+    from camctl.history.host_photo_request import parse_host_photo_request
+    public = parse_exact_json(Path(request).read_text())
+    assert len(public["actions"]) == 1 and public["actions"][0]["type"] == "camera_take_photo"
+    assert public["actions"][0]["params"] == parse_exact_json(expected["params_text"])
+    connection = sqlite3.connect(f"file:{Path(database).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    def one(sql, params=()):
+        rows = connection.execute(sql, params).fetchall()
+        assert len(rows) == 1, (sql, len(rows))
+        return dict(rows[0])
+    try:
+        action = one("SELECT a.* FROM actions a JOIN plans p ON p.id=a.plan_id WHERE p.request_id=? AND a.name=?",
+                     (int(public["request_id"]), public["actions"][0]["name"]))
+        plan = one("SELECT * FROM plans WHERE id=?", (action["plan_id"],))
+        assert action["type"] == int(enum_for("actions.type").CAMERA_TAKE_PHOTO)
+        assert action["device_id"] == public["actions"][0]["device_id"]
+        assert action["driver_id"] == "hasselblad_cfv100c"
+        run = one("SELECT * FROM operation_runs WHERE action_id=? AND kind=?",
+                  (action["id"], int(enum_for("operation_runs.kind").START)))
+        attempt = one("SELECT * FROM operation_attempts WHERE run_id=?", (run["id"],))
+        activity = one("SELECT * FROM device_activities WHERE id=?", (run["activity_id"],))
+        assert activity["action_id"] == action["id"] and run["responsibility_key"] == f"start/{action['id']}"
+        target = {"request_id": str(plan["request_id"]), "plan_id": plan["id"], "action_id": action["id"],
+                  "run_id": run["id"], "attempt_id": attempt["id"], "activity_id": activity["id"],
+                  "responsibility_key": run["responsibility_key"], "result_event_id": attempt["result_event_id"]}
+        start = _assert_start_result(attempt, attempt["result_json"], target, expected)
+        files = [dict(row) for row in connection.execute(
+            "SELECT * FROM intermediate_files WHERE owner_action_id=? AND purpose IN (?,?) ORDER BY purpose",
+            (action["id"], int(enum_for("intermediate_files.purpose").CAPTURE_ORIGINAL),
+             int(enum_for("intermediate_files.purpose").CAPTURE_PREVIEW)))]
+        outputs = [dict(row) for row in connection.execute(
+            "SELECT * FROM outputs WHERE source_action_id=? ORDER BY kind", (action["id"],))]
+        assert len(files) == len(outputs) == 2
+        complete = []
+        for event in connection.execute("SELECT id,body_json FROM history_events WHERE json_extract(body_json,'$.evidence.host_photo_request.action_id')=?", (action["id"],)):
+            raw = parse_exact_json(event["body_json"])["evidence"]["host_photo_request"]
+            if "original_file_id" not in raw:
+                continue
+            saved = parse_host_photo_request(raw, reason=2)
+            assert saved.original_file_id == files[0]["id"] and saved.preview_file_id == files[1]["id"]
+            for role in ("original", "preview"):
+                assert getattr(saved, role + "_size_bytes") == expected["artifacts"][role]["size_bytes"]
+                assert getattr(saved, role + "_sha256") == expected["artifacts"][role]["sha256"]
+            complete.append((event["id"], raw))
+        assert len(complete) == 1
+        derived = {"start_result": _event_boundary(connection, attempt["result_event_id"]),
+                   "files_complete": _event_boundary(connection, complete[0][0]),
+                   "outputs_registered": _event_boundary(connection, outputs[0]["created_event_id"])}
+        assert _event_boundary(connection, outputs[1]["created_event_id"]) == derived["outputs_registered"]
+        derived["start_result"]["event_ids"] = [attempt["result_event_id"]]
+        derived["files_complete"]["event_ids"] = [complete[0][0]]
+        derived["outputs_registered"]["event_ids"] = [row["created_event_id"] for row in outputs]
+        entities = [{"entity": "plan", "id": plan["id"], "table": "plans", "created_event_id": plan["created_event_id"]},
+                    {"entity": "action", "id": action["id"], "table": "actions", "created_event_id": action["created_event_id"]}]
+        for entity, table, values in (("intermediate_file", "intermediate_files", files), ("output", "outputs", outputs)):
+            entities.extend({"entity": entity, "table": table, "id": row["id"], "created_event_id": row["created_event_id"]} for row in values)
+        device_files = [dict(row) for row in connection.execute("SELECT * FROM device_files WHERE source_action_id=? ORDER BY role", (action["id"],))]
+        entities.extend({"entity": "device_file", "table": "device_files", "id": row["id"], "created_event_id": row["created_event_id"]} for row in device_files)
+        for entity in entities:
+            assert load_registry()["history_objects"][entity["entity"]]["table"] == entity["table"]
+            entity["created_boundary"] = _event_boundary(connection, entity["created_event_id"])
+        if original is not None:
+            assert target == original["identity"] and entities == original["entities"]
+            assert derived == original["boundaries"] and start == original["start"]
+            boundaries = original["boundaries"]
+        else:
+            boundaries = derived
+        restored = {}
+        for phase, boundary in boundaries.items():
+            _require_boundary(connection, boundary)
+            repository = HistoryRepository(Path(database))
+            h = HistoryBoundary(boundary["txn_id"], boundary["last_event_id"])
+            image = {}
+            for entity in entities:
+                rows = repository.restore_entity(entity["entity"], entity["id"], h)
+                present = entity["created_boundary"]["last_event_id"] <= h.last_event_id
+                assert ((entity["table"], entity["id"]) in rows) is present
+                if not present:
+                    assert rows == {}, (phase, entity)
+                image[f"{entity['entity']}/{entity['id']}"] = [
+                    {"table": table, "id": row_id, "values": values}
+                    for (table, row_id), values in sorted(rows.items())]
+            action_rows = {(row["table"], row["id"]): row["values"] for row in image[f"action/{action['id']}"]}
+            historical = action_rows[("actions", action["id"])]
+            assert historical["input_fields_json"]["params"] == parse_exact_json(expected["params_text"])
+            assert historical["effective_params_json"] == parse_exact_json(expected["params_text"])
+            assert historical["execution_spec_json"] == {"output_storage": expected["source"], "start_call_timeout_s": 180}
+            for table, row in (("operation_runs", run), ("operation_attempts", attempt), ("device_activities", activity)):
+                assert (table, row["id"]) in action_rows
+            saved_attempt = action_rows[("operation_attempts", attempt["id"])]
+            historical_run = action_rows[("operation_runs", run["id"])]
+            for field in ("action_id", "activity_id", "responsibility_key", "kind"):
+                assert historical_run[field] == run[field]
+            assert saved_attempt["run_id"] == run["id"] and saved_attempt["attempt_no"] == attempt["attempt_no"]
+            assert action_rows[("device_activities", activity["id"])]["action_id"] == action["id"]
+            assert saved_attempt["result_json"] == parse_exact_json(attempt["result_json"])
+            assert saved_attempt["result_event_id"] == attempt["result_event_id"]
+            for index, role in enumerate(("original", "preview")):
+                file_rows = image[f"intermediate_file/{files[index]['id']}"]
+                completed = h.last_event_id >= boundaries["files_complete"]["last_event_id"]
+                assert file_rows or not completed, "完成事务 H 缺少原捕获文件"
+                if file_rows:
+                    file = next(row["values"] for row in file_rows if row["table"] == "intermediate_files")
+                    assert file["owner_action_id"] == action["id"] and file["purpose"] == files[index]["purpose"]
+                    assert file["relative_path"] == files[index]["relative_path"]
+                    assert file["size_bytes"] == (expected["artifacts"][role]["size_bytes"] if completed else None)
+                    assert file["sha256"] == (expected["artifacts"][role]["sha256"] if completed else None)
+                output_rows = image[f"output/{outputs[index]['id']}"]
+                if not output_rows:
+                    continue
+                output = next(row["values"] for row in output_rows if row["table"] == "outputs")
+                assert output["source_action_id"] == action["id"] and output["kind"] == int(enum_for("outputs.kind")[role.upper()])
+                assert output["media_type"] == expected["artifacts"][role]["media_type"]
+                assert output["original_name"] == expected["artifacts"][role]["original_name"]
+                if expected["source"] == "host":
+                    assert output["intermediate_file_id"] == files[index]["id"] and output["device_file_id"] is None
+                else:
+                    assert len(device_files) == 2 and output["device_file_id"] == device_files[index]["id"] and output["intermediate_file_id"] is None
+                    device = next(row["values"] for row in image[f"device_file/{device_files[index]['id']}"] if row["table"] == "device_files")
+                    locator = device["locator_json"]
+                    assert locator == {"camera_path": expected["camera_path"], "camera_name": expected["camera_name"],
+                                       "variant": "original" if index == 0 else "thumbnail", "sha256": expected["artifacts"][role]["sha256"]}
+                    assert device["size_bytes"] == expected["artifacts"][role]["size_bytes"]
+                    assert device["sha256"] == expected["artifacts"][role]["sha256"]
+                    assert device["original_name"] == expected["artifacts"][role]["original_name"]
+                    assert device["media_type"] == expected["artifacts"][role]["media_type"]
+                    assert device["role"] == int(enum_for("device_files.role")[role.upper()])
+                    assert device["original_device_file_id"] == (None if index == 0 else device_files[0]["id"])
+                if index:
+                    origin, = [row["values"] for row in output_rows if row["table"] == "output_origins"]
+                    assert (origin["output_id"], origin["original_output_id"]) == (outputs[1]["id"], outputs[0]["id"])
+            restored[phase] = image
+        return {"identity": target, "boundaries": boundaries, "entities": entities,
+                "start": start, "complete_request": complete[0][1], "snapshots": restored}
+    finally:
+        connection.close()
+
+
+def _history_command(arguments):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import encode_json_value
+    database, request, expected_path, output, *previous = arguments
+    expected = parse_exact_json(Path(expected_path).read_text())
+    old = parse_exact_json(Path(previous[0]).read_text())["facts"] if previous else None
+    facts = _history_facts(database, request, expected, old)
+    def canonical(value):
+        if isinstance(value, dict):
+            return {key: canonical(value[key]) for key in sorted(value)}
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        return value
+    Path(output).write_text(encode_json_value(canonical({"facts": facts, "provenance": {
+        "python": sys.executable, "camctl": camctl.__file__, "pid": os.getpid(),
+        "utc": datetime.now(timezone.utc).isoformat(), "database": str(database)}})))
+    return 0
 
 
 def main() -> int:
@@ -15,6 +251,8 @@ def main() -> int:
     python = Path(os.environ["CAMCTL_HB_TEST_INSTALLED_PYTHON"])
     assert sys.executable == str(python), (sys.executable, python)
     assert Path(camctl.__file__).is_relative_to(python.parent.parent)
+    if sys.argv[1:2] == ["--h8b-history"]:
+        return _history_command(sys.argv[2:])
     with (root / "processes.jsonl").open("a") as stream:
         stream.write(json.dumps({
             "kind": "camctl", "argv": sys.argv, "python": sys.executable,
