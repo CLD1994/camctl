@@ -329,6 +329,10 @@ class _FaultConnection:
             raise sqlite3.OperationalError("受控事务失败")
         return self.connection.execute(sql, parameters)
 
+    @property
+    def in_transaction(self):
+        return self.connection.in_transaction
+
     def close(self):
         self.connection.close()
 
