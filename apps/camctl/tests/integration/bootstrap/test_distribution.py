@@ -32,6 +32,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
+from camctl.devices.drivers.hasselblad.parameters import PHOTO_COMMANDS as _PHOTO_COMMANDS, PHOTO_FIELDS
 
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 REPO_ROOT = PROJECT_DIR.parents[1]
@@ -44,6 +46,11 @@ _DIRECT_DEPENDENCIES = ("concurrent-log-handler", "janus", "jsonschema")
 
 #: 模拟不满足统一运行条件的 SQLite 版本（低于主线最低版本）。
 _NONCOMPLIANT_SQLITE = (3, 40, 0)
+
+_HASSELBLAD_PHOTO_SAMPLE_PARAMS = json.loads(
+    (REPO_ROOT / "docs/camctl/examples/camera-demo/hasselblad-photo.json")
+    .read_text(encoding="utf-8")
+)["actions"][0]["params"]
 
 
 def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -197,20 +204,84 @@ def _production_cli(installed: _Installed, *args: str) -> subprocess.CompletedPr
 
 
 _HASSELBLAD_ORIGINAL_BYTES = b"II*\x00small integration fixture"
+_HASSELBLAD_JPEG_ORIGINAL_BYTES = b"\xff\xd8small jpeg original fixture\xff\xd9"
 _HASSELBLAD_PREVIEW_BYTES = b"\xff\xd8small preview fixture\xff\xd9"
+
+
+def _hasselblad_capture_fixture(capture_format: str) -> dict[str, object]:
+    selected = CaptureFormat(capture_format)
+    description = CAPTURE_FORMATS[selected]
+    original_bytes = (
+        _HASSELBLAD_ORIGINAL_BYTES
+        if selected is CaptureFormat.RAW else _HASSELBLAD_JPEG_ORIGINAL_BYTES
+    )
+    original_name = f"host-copy{description.original_extension}"
+    camera_name = f"camera-copy{description.original_extension}"
+    return {
+        "original_bytes": original_bytes,
+        "preview_bytes": _HASSELBLAD_PREVIEW_BYTES,
+        "original_name": original_name,
+        "preview_name": f"{original_name}.thumbnail{description.preview_extension}",
+        "camera_name": camera_name,
+        "camera_path": f"/CAMERA/DCIM/100HASSELBL/{camera_name}",
+        "original_media_type": description.original_media_type,
+        "preview_media_type": description.preview_media_type,
+    }
+
+
+def _assert_hasselblad_capture_trajectory(call_log: Path, capture_format: str) -> list[list[str]]:
+    calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+    setting_calls = [argv[3:] for argv in calls
+                     if len(argv) > 3 and argv[3] == "set"]
+    assert setting_calls == [
+        ["set", "drive-mode", "single"],
+        ["set", "capture-format", capture_format],
+        ["set", "exposure-mode", "P"],
+        ["set", "iso", "100"],
+        ["set", "wb-mode", "auto"],
+        ["set", "focus-mode", "MF"],
+    ]
+    capture_calls = [argv for argv in calls
+                     if len(argv) > 3 and argv[3] == "capture"]
+    assert len(capture_calls) == 1
+    assert capture_calls[0][1:5] == ["--pid", "0x000a", "capture", "--output"]
+    return calls
 
 
 def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
     """受 hb_cli 实际 argv/文本响应契约约束的最小可执行替身。"""
+    set_values = {
+        _PHOTO_COMMANDS.DRIVE_MODE_FIELD.value: {_PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value},
+        _PHOTO_COMMANDS.CAPTURE_FORMAT_FIELD.value: {
+            description.command_value for description in CAPTURE_FORMATS.values()
+        },
+        _PHOTO_COMMANDS.EXPOSURE_MODE_FIELD.value: {
+            _HASSELBLAD_PHOTO_SAMPLE_PARAMS["exposure"]["mode"]
+        },
+        PHOTO_FIELDS["iso"].command_field: {
+            str(_HASSELBLAD_PHOTO_SAMPLE_PARAMS["exposure"]["iso"])
+        },
+        _PHOTO_COMMANDS.WHITE_BALANCE_MODE_FIELD.value: {
+            _HASSELBLAD_PHOTO_SAMPLE_PARAMS["white_balance"]["mode"]
+        },
+        _PHOTO_COMMANDS.FOCUS_MODE_FIELD.value: {
+            _HASSELBLAD_PHOTO_SAMPLE_PARAMS["focus"]["mode"]
+        },
+    }
     return "#!" + sys.executable + "\n" + textwrap.dedent(
         f"""\
         import json
         import pathlib
         import sys
+        from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
 
         CALL_LOG = pathlib.Path({str(call_log)!r})
+        SETTINGS_STATE = pathlib.Path(__file__).with_suffix(".settings.json")
+        CAPTURE_STATE = pathlib.Path(__file__).with_suffix(".capture.json")
+        SET_VALUES = {set_values!r}
         SERIAL = {serial!r}
         RAW = bytes.fromhex({_HASSELBLAD_ORIGINAL_BYTES.hex()!r})
+        JPEG = bytes.fromhex({_HASSELBLAD_JPEG_ORIGINAL_BYTES.hex()!r})
         PREVIEW = bytes.fromhex({_HASSELBLAD_PREVIEW_BYTES.hex()!r})
         argv = sys.argv
         with CALL_LOG.open("a", encoding="utf-8") as stream:
@@ -223,34 +294,80 @@ def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
             sys.stdout.write("vid=0x2756 pid=0x000a  bus=  1 addr= 23\\n")
         elif args == ["--pid", "0x000a", "info"]:
             sys.stdout.write(f"serial : {{SERIAL}}\\nfirmware : v4.1.0\\n")
-        elif args in (
-            ["--pid", "0x000a", "set", "drive-mode", "single"],
-            ["--pid", "0x000a", "set", "capture-format", "raw"],
-        ):
-            pass
+        elif len(args) == 5 and args[:3] == ["--pid", "0x000a", "set"]:
+            field, value = args[3:]
+            if field not in SET_VALUES or value not in SET_VALUES[field]:
+                raise SystemExit("unexpected hb_cli set field or value")
+            settings = json.loads(SETTINGS_STATE.read_text()) if SETTINGS_STATE.is_file() else {{}}
+            settings[field] = value
+            SETTINGS_STATE.write_text(json.dumps(settings))
         elif len(args) == 5 and args[:4] == [
             "--pid", "0x000a", "capture", "--output"
         ]:
             work = pathlib.Path(args[4])
             if not work.is_absolute():
                 raise SystemExit("capture output directory must be absolute")
-            original = work / "fixture_capture.3FR"
-            preview = work / "fixture_capture.3FR.thumbnail.jpg"
-            original.write_bytes(RAW)
+            if not SETTINGS_STATE.is_file():
+                raise SystemExit("capture settings were not set")
+            settings = json.loads(SETTINGS_STATE.read_text())
+            if set(settings) != set(SET_VALUES):
+                raise SystemExit("capture requires all Hasselblad sample settings")
+            capture_format = CaptureFormat(settings["capture-format"])
+            description = CAPTURE_FORMATS[capture_format]
+            original_bytes = RAW if capture_format is CaptureFormat.RAW else JPEG
+            original = work / f"host-copy{{description.original_extension}}"
+            camera_name = f"camera-copy{{description.original_extension}}"
+            preview = work / f"{{original.name}}.thumbnail{{description.preview_extension}}"
+            original.write_bytes(original_bytes)
             preview.write_bytes(PREVIEW)
+            camera_path = f"/CAMERA/DCIM/100HASSELBL/{{camera_name}}"
+            CAPTURE_STATE.write_text(json.dumps({{
+                "capture_format": capture_format.value, "camera_name": camera_name,
+            }}))
             sys.stdout.write(
                 "capture: OK\\n"
-                f"saved {{original}} ({{len(RAW)}} bytes)\\n"
+                f"saved {{original}} ({{len(original_bytes)}} bytes)\\n"
                 f"saved {{preview}} ({{len(PREVIEW)}} bytes)\\n"
+                f"camera file: {{camera_path}}\\n"
             )
-        elif len(args) == 7 and args[2] == "download" and args[4] == "fixture_capture.3FR" and args[5] == "--output":
+        elif len(args) == 7 and args[:3] == ["--pid", "0x000a", "download"] and args[5] == "--output":
             if args[3] not in ("original", "thumbnail"):
                 raise SystemExit("unexpected download variant")
+            if not CAPTURE_STATE.is_file():
+                raise SystemExit("download has no prior camera file")
+            captured = json.loads(CAPTURE_STATE.read_text())
+            if args[4] != captured["camera_name"]:
+                raise SystemExit("download must use the original camera basename")
+            capture_format = CaptureFormat(captured["capture_format"])
+            original_bytes = RAW if capture_format is CaptureFormat.RAW else JPEG
+            payload = original_bytes if args[3] == "original" else PREVIEW
             work = pathlib.Path(args[6])
-            (work / "download.bin").write_bytes(RAW if args[3] == "original" else PREVIEW)
+            (work / "download.bin").write_bytes(payload)
         else:
             raise SystemExit("unexpected hb_cli argument vector")
         """
+    )
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("unrecognized-setting", "1"),
+    ("exposure-mode", "P-invalid"),
+    ("iso", "100.0"),
+    ("focus-mode", "AF-S"),
+])
+def test_hasselblad_tool_source_rejects_settings_outside_sample(tmp_path, field, value):
+    call_log = tmp_path / "hb-cli-argv.jsonl"
+    tool = tmp_path / "hb_cli"
+    tool.write_text(_hasselblad_tool_source(call_log, "TEST-HASSELBLAD-SERIAL"), encoding="utf-8")
+    tool.chmod(0o700)
+
+    refused = subprocess.run(
+        [str(tool), "--pid", "0x000a", "set", field, value],
+        capture_output=True, text=True,
+    )
+
+    assert refused.returncode != 0, (
+        f"受约束替身意外接受了样例范围外的 set 命令 {field}={value!r}"
     )
 
 
@@ -583,6 +700,12 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
                         for parameter in action["parameter_types"]
                         if parameter["type"] == "hasselblad_photo"]
     assert len(photo_parameters) == 1
+    photo_schema = photo_parameters[0]["schema"]
+    assert photo_schema["required"] == [
+        "type", "capture_format", "exposure", "white_balance", "focus",
+    ]
+    assert photo_schema["additionalProperties"] is False
+    assert set(photo_schema["properties"]) == set(photo_schema["required"])
 
     generator = _demo_generator(installed)
     capability_path = tmp_path / "capabilities.json"
@@ -597,7 +720,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
     action = plan["actions"][0]
     assert action["type"] == "camera_take_photo"
     assert action["device_id"] == "hb0"
-    assert action["params"] == {"type": "hasselblad_photo"}
+    assert action["params"] == _HASSELBLAD_PHOTO_SAMPLE_PARAMS
     assert action["policy"] == {"max_delay_ms": 30000}
     assert 1 <= int(plan["request_id"]) <= 9223372036854775807
     assert plan["request_id"] != "1"
@@ -615,7 +738,7 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
         rows = connection.execute(
             "SELECT effective_params_json,execution_spec_json FROM actions").fetchall()
     assert len(rows) == 1
-    assert json.loads(rows[0][0]) == {"type": "hasselblad_photo"}
+    assert json.loads(rows[0][0]) == _HASSELBLAD_PHOTO_SAMPLE_PARAMS
     assert json.loads(rows[0][1]) == {
         "output_storage": "host", "start_call_timeout_s": 180,
     }
@@ -643,10 +766,39 @@ def test_installed_hasselblad_sample_uses_actual_unique_capability(installed, tm
         assert refused.returncode != 0
         assert not refused_plan.exists()
 
+    installed_sample = Path(_probe(
+        installed,
+        "from importlib.resources import files; import sys; "
+        "sys.stdout.write(str(files('camctl').joinpath('_resources', 'examples', "
+        "'camera-demo', 'hasselblad-photo.json')))"))
+    original_sample = installed_sample.read_bytes()
+    try:
+        sample_document = json.loads(original_sample)
+        assert sample_document["actions"][0]["params"] == _HASSELBLAD_PHOTO_SAMPLE_PARAMS
+        for field in photo_schema["required"]:
+            incomplete = deepcopy(sample_document)
+            del incomplete["actions"][0]["params"][field]
+            installed_sample.write_text(
+                json.dumps(incomplete, ensure_ascii=False), encoding="utf-8")
+            refused_plan = tmp_path / f"hasselblad-photo-missing-{field}.json"
+            refused = subprocess.run(
+                [str(installed.python), str(generator), "hasselblad-photo",
+                 "--capabilities", str(capability_path), "--device-id", "hb0",
+                 "--output", str(refused_plan)],
+                cwd=installed.deploy, env=_clean_environment(), capture_output=True,
+                text=True, timeout=30)
+            assert refused.returncode != 0, f"缺少 {field} 的样例意外成功"
+            assert not refused_plan.exists(), f"缺少 {field} 的样例生成了计划"
+            assert ("缺少参数类型" if field == "type" else field) in refused.stderr
+    finally:
+        installed_sample.write_bytes(original_sample)
+
 
 @pytest.mark.skipif(os.name == "nt", reason="受管工具替身使用 POSIX 可执行脚本")
-def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_path):
-    """安装版 CLI 完成主机拍摄、原图/预览交付及保留源再次取回。"""
+@pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
+def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
+        installed, tmp_path, capture_format):
+    """安装版 CLI 完成两种主机格式拍摄、原图/预览交付及离线重复取回。"""
     resource_names = (
         "examples/camera-demo/hasselblad-config.toml",
         "examples/camera-demo/hasselblad-photo.json",
@@ -659,6 +811,8 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
         "sys.stdout.write(json.dumps(sorted(available_resources())))")))
     assert set(resource_names) <= available
 
+    expected_capture = _hasselblad_capture_fixture(capture_format)
+    assert expected_capture["original_name"] != expected_capture["camera_name"]
     config_path = installed.deploy / "hasselblad-full-chain.toml"
     _probe(
         installed,
@@ -707,16 +861,31 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     capability_path.write_text(described.stdout, encoding="utf-8")
     generated_plan_path = tmp_path / "hasselblad-photo-generated.json"
     generation_started = datetime.now(timezone.utc)
-    generated = _run([
-        str(installed.python), str(generator), "hasselblad-photo",
-        "--capabilities", str(capability_path), "--device-id", "hb0",
-        "--delay-s", "1", "--output", str(generated_plan_path),
-    ], cwd=installed.deploy, env=_clean_environment())
+    installed_sample = Path(_probe(
+        installed,
+        "from importlib.resources import files; import sys; "
+        "sys.stdout.write(str(files('camctl').joinpath('_resources', 'examples', "
+        "'camera-demo', 'hasselblad-photo.json')))"))
+    original_sample = installed_sample.read_bytes()
+    try:
+        sample_document = json.loads(original_sample)
+        sample_document["actions"][0]["params"]["capture_format"] = capture_format
+        installed_sample.write_text(
+            json.dumps(sample_document, ensure_ascii=False), encoding="utf-8")
+        generated = _run([
+            str(installed.python), str(generator), "hasselblad-photo",
+            "--capabilities", str(capability_path), "--device-id", "hb0",
+            "--delay-s", "1", "--output", str(generated_plan_path),
+        ], cwd=installed.deploy, env=_clean_environment())
+    finally:
+        installed_sample.write_bytes(original_sample)
     plan = json.loads(generated_plan_path.read_text(encoding="utf-8"))
     photo_action = plan["actions"][0]
     assert photo_action["type"] == "camera_take_photo"
     assert photo_action["device_id"] == "hb0"
-    assert photo_action["params"] == {"type": "hasselblad_photo"}
+    expected_params = deepcopy(_HASSELBLAD_PHOTO_SAMPLE_PARAMS)
+    expected_params["capture_format"] = capture_format
+    assert photo_action["params"] == expected_params
     assert plan["request_id"] != "1"
     scheduled_at = datetime.strptime(
         photo_action["scheduled_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -759,7 +928,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
             " ORDER BY input_index").fetchall()
     assert format_version == 2
     assert len(rows) == 3
-    assert json.loads(rows[0][1]) == {"type": "hasselblad_photo"}
+    assert json.loads(rows[0][1]) == expected_params
     assert json.loads(rows[0][2]) == {
         "output_storage": "host", "start_call_timeout_s": 180,
     }
@@ -781,13 +950,14 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     assert set(public_outputs) == {"original", "preview"}
     original_public = public_outputs["original"]
     preview_public = public_outputs["preview"]
+    assert original_public["output_id"] != preview_public["output_id"]
     assert preview_public["preview_of_output_id"] == original_public["output_id"]
 
     expected_files = {
-        "fixture_capture.3FR": (
-            _HASSELBLAD_ORIGINAL_BYTES, "image/x-hasselblad-3fr", "original"),
-        "fixture_capture.3FR.thumbnail.jpg": (
-            _HASSELBLAD_PREVIEW_BYTES, "image/jpeg", "preview"),
+        expected_capture["original_name"]: (
+            expected_capture["original_bytes"], expected_capture["original_media_type"], "original"),
+        expected_capture["preview_name"]: (
+            expected_capture["preview_bytes"], expected_capture["preview_media_type"], "preview"),
     }
     staging = data_root / "staging"
     with closing(sqlite3.connect(state_db)) as connection:
@@ -885,7 +1055,10 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     for name, snapshot in source_snapshots.items():
         assert (staging / snapshot[2]).read_bytes() == expected_files[name][0]
 
-    # 使用生产样例生成器从已发布报告取得的 action_instance_id 再次取原图。
+    calls_after_capture = _assert_hasselblad_capture_trajectory(call_log, capture_format)
+    fake_executable.unlink()
+
+    # 使用生产样例生成器按原拍摄身份再次取原图和预览。
     second_plan_path = tmp_path / "hasselblad-obtain-original-again.json"
     _run([
         str(installed.python), str(generator), "obtain",
@@ -900,6 +1073,15 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     assert second_action_instance_source == photo_id
     assert second_action["type"] == "obtain_action_outputs"
     assert second_action["params"] == {"source": {"action_instance_id": photo_id}}
+    preview_template = json.loads(_probe(
+        installed,
+        "import sys; from camctl.resources import resource_bytes; "
+        f"sys.stdout.write(resource_bytes({resource_names[3]!r}).decode('utf-8'))"))
+    preview_again = deepcopy(preview_template["actions"][0])
+    preview_again["name"] = "obtain-preview-again"
+    preview_again["scheduled_at"] = second_action["scheduled_at"]
+    preview_again["params"]["source"] = {"action_instance_id": photo_id}
+    second_plan["actions"].append(preview_again)
     second_plan_path.write_text(
         json.dumps(second_plan, ensure_ascii=False), encoding="utf-8")
     second_submit = _production_cli(
@@ -912,53 +1094,66 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(installed, tmp_
     assert second_run.returncode == 0, (
         f"再次 obtain run 阶段失败: stdout={second_run.stdout!r}; "
         f"stderr={second_run.stderr!r}")
-    _, second_report = _report_containing_actions(ready, {"obtain-original-again"})
+    _, second_report = _report_containing_actions(
+        ready, {"obtain-original-again", "obtain-preview-again"})
     second_actions = {action["name"]: action for action in _actions_in_report(second_report)}
-    final_obtain = second_actions["obtain-original-again"]
-    assert final_obtain["status"] == "succeeded", final_obtain
-    assert len(final_obtain["deliveries"]) == 1
-    second_public_delivery = final_obtain["deliveries"][0]
-    assert second_public_delivery["output_id"] == original_public["output_id"]
-    assert second_public_delivery["source_action_instance_id"] == photo_id
+    for action_name in ("obtain-original-again", "obtain-preview-again"):
+        final_obtain = second_actions[action_name]
+        assert final_obtain["status"] == "succeeded", final_obtain
+        assert len(final_obtain["deliveries"]) == 1
+        assert final_obtain["deliveries"][0]["source_action_instance_id"] == photo_id
     with closing(sqlite3.connect(state_db)) as connection:
-        second_delivery_row = connection.execute(
+        second_delivery_rows = connection.execute(
             "SELECT d.id,d.output_id,d.file_name,c.target_file_id,t.size_bytes,t.sha256"
             " FROM deliveries AS d JOIN file_copies AS c ON c.delivery_id=d.id"
             " JOIN intermediate_files AS t ON t.id=c.target_file_id"
-            " WHERE d.action_id=?", (int(final_obtain["action_instance_id"]),),
-        ).fetchone()
+            " WHERE d.action_id IN (?,?) ORDER BY d.output_id",
+            tuple(int(second_actions[name]["action_instance_id"])
+                  for name in ("obtain-original-again", "obtain-preview-again")),
+        ).fetchall()
         retained_source_rows = connection.execute(
             "SELECT o.id,o.original_name,o.media_type,i.id,i.relative_path,i.size_bytes,i.sha256"
             " FROM outputs AS o JOIN intermediate_files AS i"
             " ON i.id=o.intermediate_file_id WHERE o.source_action_id=? ORDER BY o.id",
             (int(photo_id),),
         ).fetchall()
-    assert second_delivery_row is not None
-    (second_delivery_id, second_output_id, second_file_name, second_target_id,
-     second_size, second_sha) = second_delivery_row
-    original_id = original_public["output_id"]
-    original_snapshot = first_delivery_snapshot[original_id]
-    assert second_output_id == int(original_id)
-    assert second_delivery_id != original_snapshot["delivery_id"]
-    assert second_file_name != original_snapshot["file_name"]
-    assert second_target_id != original_snapshot["target_file_id"]
-    assert second_public_delivery["delivery_id"] == str(second_delivery_id)
-    assert second_public_delivery["file_name"] == second_file_name
-    assert second_public_delivery["status"] == "published"
-    assert second_public_delivery["size"] == len(_HASSELBLAD_ORIGINAL_BYTES)
-    assert second_public_delivery["sha256"] == hashlib.sha256(
-        _HASSELBLAD_ORIGINAL_BYTES).hexdigest()
-    assert second_size == len(_HASSELBLAD_ORIGINAL_BYTES)
-    assert second_sha == hashlib.sha256(_HASSELBLAD_ORIGINAL_BYTES).hexdigest()
-    assert (ready / second_file_name).read_bytes() == _HASSELBLAD_ORIGINAL_BYTES
+    assert len(second_delivery_rows) == 2
+    second_delivery_by_output = {str(row[1]): row for row in second_delivery_rows}
+    assert set(second_delivery_by_output) == set(first_delivery_snapshot)
+    second_delivery_ids = set()
+    second_target_ids = set()
+    for source_name, (expected_bytes, _expected_media_type, kind) in expected_files.items():
+        output_id = str(source_by_name[source_name][0])
+        (delivery_id, second_output_id, file_name, target_id,
+         size_bytes, sha256) = second_delivery_by_output[output_id]
+        first_delivery = first_delivery_snapshot[output_id]
+        public_delivery = second_actions[
+            "obtain-original-again" if kind == "original" else "obtain-preview-again"
+        ]["deliveries"][0]
+        expected_sha256 = hashlib.sha256(expected_bytes).hexdigest()
+        assert second_output_id == int(output_id)
+        assert delivery_id != first_delivery["delivery_id"]
+        assert delivery_id not in second_delivery_ids
+        assert target_id != first_delivery["target_file_id"]
+        assert target_id not in second_target_ids
+        assert file_name != first_delivery["file_name"]
+        assert size_bytes == len(expected_bytes)
+        assert sha256 == expected_sha256
+        assert public_delivery["delivery_id"] == str(delivery_id)
+        assert public_delivery["output_id"] == output_id
+        assert public_delivery["file_name"] == file_name
+        assert public_delivery["status"] == "published"
+        assert public_delivery["size"] == len(expected_bytes)
+        assert public_delivery["sha256"] == expected_sha256
+        assert (ready / file_name).read_bytes() == expected_bytes
+        second_delivery_ids.add(delivery_id)
+        second_target_ids.add(target_id)
+    assert len(second_delivery_ids) == 2
+    assert len(second_target_ids) == 2
     assert retained_source_rows == source_rows
     for name, snapshot in source_snapshots.items():
         assert (staging / snapshot[2]).read_bytes() == expected_files[name][0]
-
-    logged_calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
-    capture_calls = [argv for argv in logged_calls if len(argv) > 3 and argv[3] == "capture"]
-    assert len(capture_calls) == 1
-    assert capture_calls[0][1:5] == ["--pid", "0x000a", "capture", "--output"]
+    assert _assert_hasselblad_capture_trajectory(call_log, capture_format) == calls_after_capture
 
 
 @pytest.mark.parametrize("stem,driver_id,device_id", [

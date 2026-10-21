@@ -75,6 +75,9 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
     assert {"examples/camera-demo/action6-record.json", "examples/camera-demo/action6-timelapse.json",
             "examples/camera-demo/osmo360ii-record.json", "examples/camera-demo/osmo360ii-timelapse.json",
             "examples/camera-demo/obtain.json", "examples/camera-demo/report-ack.json",
+            "examples/camera-demo/hasselblad-config.toml",
+            "examples/camera-demo/hasselblad-photo.json",
+            "examples/camera-demo/obtain-preview.json",
             "examples/camera-demo/config.toml", "examples/camera-demo/osmo360ii-config.toml",
             "examples/camera-demo/prepare-plan.py"} <= installed_digests.keys()
     expected_digests = {}

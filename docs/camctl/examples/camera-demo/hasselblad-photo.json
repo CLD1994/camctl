@@ -9,7 +9,18 @@
       "device_id": "hb0",
       "scheduled_at": "2026-01-01 00:00:10",
       "params": {
-        "type": "hasselblad_photo"
+        "type": "hasselblad_photo",
+        "capture_format": "raw",
+        "exposure": {
+          "mode": "P",
+          "iso": 100
+        },
+        "white_balance": {
+          "mode": "auto"
+        },
+        "focus": {
+          "mode": "MF"
+        }
       },
       "policy": {
         "max_delay_ms": 30000

@@ -1,4 +1,4 @@
-"""从安装包样例和实际能力说明生成一份可递交的独立计划。"""
+"""按实际能力校验安装包样例，原样生成完整参数的独立计划；不补默认值。"""
 
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -47,12 +47,16 @@ def main(argv=None):
                 raise ValueError("拍摄计划不接收取回源身份")
             if args.device_id is not None:
                 action["device_id"] = args.device_id
+            sample_params = action.get("params")
+            if not isinstance(sample_params, dict) or not isinstance(sample_params.get("type"), str):
+                raise ValueError("拍摄样例缺少参数类型")
             capabilities = parse_exact_json(args.capabilities.read_text(encoding="utf-8"))
             validate_document("protocol/capabilities.schema.json", capabilities)
             parameters = [parameter for device in capabilities["devices"]
                           if device["device_id"] == action["device_id"]
                           for declared in device["actions"] if declared["type"] == action["type"]
-                          for parameter in declared["parameter_types"] if parameter["type"] == action["params"]["type"]]
+                          for parameter in declared["parameter_types"]
+                          if parameter["type"] == sample_params["type"]]
             if len(parameters) != 1:
                 raise ValueError("实际能力说明没有唯一的完整拍摄参数类型")
             validate_precise(parameters[0]["schema"], action["params"])

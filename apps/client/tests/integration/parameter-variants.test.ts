@@ -1926,7 +1926,14 @@ it("时间关联规则不扩散到普通录像和 Hasselblad 单张参数", asyn
           },
           {
             type: "camera_take_photo",
-            parameter_types: [parameter("hasselblad_photo")],
+            parameter_types: [
+              parameter("hasselblad_photo", {
+                capture_format: { type: "string" },
+                exposure: { type: "object" },
+                white_balance: { type: "object" },
+                focus: { type: "object" },
+              }),
+            ],
           },
         ],
       },
@@ -1944,7 +1951,9 @@ it("时间关联规则不扩散到普通录像和 Hasselblad 单张参数", asyn
     });
   }
   const photo = {
-    text: content('{"type":"hasselblad_photo"}').text.replace(
+    text: content(
+      '{"type":"hasselblad_photo","capture_format":"raw","exposure":{"mode":"P","iso":100},"white_balance":{"mode":"auto"},"focus":{"mode":"MF"}}',
+    ).text.replace(
       '"type":"camera_record"',
       '"type":"camera_take_photo"',
     ),

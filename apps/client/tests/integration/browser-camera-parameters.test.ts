@@ -339,23 +339,12 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
     const fields = Object.entries(properties).filter(
       ([name]) => name !== "type",
     );
+    const required = new Set(
+      (parameter.schema.required ?? []) as string[],
+    );
     const params: Record<string, unknown> = { type: parameter.type };
     for (const [name, schema] of fields) {
-      if (Array.isArray(schema.oneOf)) {
-        const branch = schema.oneOf[0];
-        params[name] = Object.fromEntries(
-          Object.entries(
-            branch.properties as Record<string, Record<string, unknown>>,
-          ).map(([key, field]) => [
-            key,
-            Object.hasOwn(field, "const")
-              ? field.const
-              : (field.enum as unknown[])[0],
-          ]),
-        );
-      } else if (Array.isArray(schema.enum)) params[name] = schema.enum[0];
-      else if (Object.hasOwn(schema, "const")) params[name] = schema.const;
-      else if (name === "duration_s") params[name] = 10;
+      if (required.has(name)) params[name] = schemaSample(schema, name);
     }
     const { app, page, draft } = await setup("10", false, {
       capabilities: clientTestCapabilitiesText(),
@@ -381,7 +370,8 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
         }),
       ).toBeVisible();
     for (const [name, schema] of fields) {
-      if (Array.isArray(schema.oneOf)) {
+      const branch = objectOneOfBranch(schema);
+      if (branch) {
         const object = page
           .locator(".object-branch-field")
           .filter({ has: page.locator("h5").getByText(name, { exact: true }) });
@@ -391,7 +381,7 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
           ).toBeVisible();
         // 逐个核对实际存在的字段，判别字段本身也是需要展示说明的普通事实。
         for (const [member, field] of Object.entries(
-          schema.oneOf[0].properties as Record<string, Record<string, unknown>>,
+          branch.properties as Record<string, Record<string, unknown>>,
         )) {
           const control = page.getByLabel(
             `${typeof field.title === "string" ? field.title : member} (${member})`,
@@ -443,6 +433,59 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
     expect(() => app.validateContent(before.content)).not.toThrow();
   }
 }, 60000);
+
+function objectOneOfBranch(schema: Record<string, any>) {
+  if (!Array.isArray(schema.oneOf)) return undefined;
+  return schema.oneOf.find(
+    (branch: Record<string, any>) =>
+      branch !== null &&
+      typeof branch === "object" &&
+      branch.properties !== null &&
+      typeof branch.properties === "object",
+  );
+}
+
+function schemaSample(schema: Record<string, any>, path: string): unknown {
+  if (Object.hasOwn(schema, "const")) return schema.const;
+  if (Array.isArray(schema.enum)) {
+    if (schema.enum.length === 0) throw new Error(`${path} 的 enum 没有可用值`);
+    return schema.enum[0];
+  }
+  if (Array.isArray(schema.oneOf)) {
+    if (schema.oneOf.length === 0)
+      throw new Error(`${path} 的 oneOf 没有可用分支`);
+    return schemaSample(schema.oneOf[0], path);
+  }
+  if (schema.type === "object" || schema.properties) {
+    const properties = schema.properties as
+      | Record<string, Record<string, any>>
+      | undefined;
+    const required = (schema.required ?? []) as string[];
+    return Object.fromEntries(
+      required.map((name) => {
+        const field = properties?.[name];
+        if (!field) throw new Error(`${path}.${name} 缺少 Schema 定义`);
+        return [name, schemaSample(field, `${path}.${name}`)];
+      }),
+    );
+  }
+  if (schema.type === "integer" && typeof schema.minimum === "number") {
+    let value = Math.ceil(schema.minimum);
+    if (
+      typeof schema.exclusiveMinimum === "number" &&
+      value <= schema.exclusiveMinimum
+    )
+      value = Math.floor(schema.exclusiveMinimum) + 1;
+    if (
+      (typeof schema.maximum === "number" && value > schema.maximum) ||
+      (typeof schema.exclusiveMaximum === "number" &&
+        value >= schema.exclusiveMaximum)
+    )
+      throw new Error(`${path} 没有可用的整数 Schema 样例`);
+    return value;
+  }
+  throw new Error(`${path} 无法从 Schema 构造可验证样例`);
+}
 
 it("能力源的 Action6 光圈和码率必填规则驱动表单与导出校验", async () => {
   const capabilities = JSON.parse(clientTestCapabilitiesText()) as any;
