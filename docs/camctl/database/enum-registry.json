@@ -546,7 +546,7 @@
       }
     },
     "result_page_files.family_role": {
-      "contract": "segments.md",
+      "contract": "operations-devices.md#结果页文件身份索引",
       "members": {
         "ORIGINAL": 1,
         "PREVIEW": 2

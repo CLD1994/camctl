@@ -671,7 +671,7 @@
 
 ### `result_page_files.family_role`
 
-[行为说明](segments.md)
+[行为说明](operations-devices.md#结果页文件身份索引)
 
 | 编号 | 成员 |
 | --- | --- |

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -19,7 +20,7 @@ from camctl.persistence.repositories.capture import CaptureRepository, file_disc
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.result_pages import SaveResultPageCommand
 from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan,
-    commit_operation, event_envelope, next_row_id, row_facts)
+    commit_operation, event_envelope, next_row_id, row_change, row_facts)
 from camctl.history.reads import ResultPageWriteScope
 from camctl.capture.files import FileObservationSave, file_identity_key
 from camctl.contracts.values import ConsistencyError
@@ -753,3 +754,567 @@ async def test_create_only_prefix_cannot_complete_without_page(owned, tmp_path, 
         "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
         (str(operation_key),),
     ).fetchone() == (0,)
+
+
+def _bounded_from_finite(plan, *, transaction_rows=None, complete=None):
+    """用真实 finite plan 事件及实际 CREATE 前缀构造 Bounded 入口。"""
+    from camctl.persistence.transaction import _apply_rows
+
+    state = deepcopy(plan.state_rows)
+    create_type = load_event_registry()["events"]["DEVICE_FILE_OBSERVED"]["id"]
+    for event in plan.events:
+        if event.event_type == create_type:
+            state.get("device_files", {}).pop(event.rows[0].row_id, None)
+    previous = None
+
+    def context(event, transaction):
+        nonlocal previous
+        if previous is not None:
+            _apply_rows(state, (previous,))
+        previous = event
+        return EventContext(
+            transaction, plan.owners, deepcopy(state),
+            transaction_rows=deepcopy(plan.state_rows if transaction_rows is None else transaction_rows),
+            read_coverage=plan.read_coverage, baseline_reads=plan.baseline_reads,
+        )
+
+    return BoundedCommandPlan(
+        iter(plan.events), context, plan.result,
+        complete or (lambda connection: None),
+        result_page_write_scope=plan.result_page_write_scope,
+    )
+
+
+def _alter_page_context(state, scope, case):
+    attempt = state["operation_attempts"][scope.attempt_id]
+    run = state["operation_runs"][scope.run_id]
+    action = state["actions"][scope.action_id]
+    activity = state["device_activities"][scope.activity_id]
+    if case == "attempt_status":
+        attempt["status"] = next(
+            int(value) for value in enum_for("operation_attempts.status")
+            if int(value) != attempt["status"])
+    elif case == "attempt_run_id":
+        attempt["run_id"] += 100_000
+    elif case == "attempt_no":
+        attempt["attempt_no"] += 1
+    elif case == "attempt_page_refs":
+        attempt["result_last_page_event_id"] = 100_000_000
+    elif case == "run_id":
+        run["id"] += 100_000
+    elif case == "run_kind":
+        run["kind"] = next(
+            int(value) for value in enum_for("operation_runs.kind")
+            if int(value) != run["kind"])
+    elif case == "run_action":
+        run["action_id"] += 100_000
+    elif case == "run_activity":
+        run["activity_id"] += 100_000
+    elif case == "run_responsibility":
+        run["responsibility_key"] += "/caller-copy"
+    elif case == "activity_action":
+        activity["action_id"] += 100_000
+    elif case == "activity_mode":
+        activity["ownership_mode"] = int(
+            enum_for("device_activities.ownership_mode").TASK_SCOPE)
+    elif case == "baseline_state":
+        activity["baseline_state"] = int(
+            enum_for("device_activities.baseline_state").COLLECTING)
+    elif case == "baseline_range":
+        activity["baseline_first_event_id"] = activity["baseline_last_event_id"] + 1
+    elif case == "output_scope":
+        activity["output_scope_json"] = {"directories": ["/caller-copy"]}
+    elif case == "action_device":
+        action["device_id"] += "/caller-copy"
+    elif case == "action_driver":
+        action["driver_id"] += "/caller-copy"
+    else:
+        raise AssertionError(case)
+
+
+@pytest.mark.parametrize("caller_fact", [
+    "attempt_status", "attempt_run_id", "attempt_no", "attempt_page_refs",
+    "run_id", "run_kind", "run_action", "run_activity", "run_responsibility",
+    "activity_action", "activity_mode", "baseline_state", "baseline_range",
+    "output_scope", "action_device", "action_driver",
+])
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.asyncio
+async def test_fix1_i1_mismatched_caller_state_is_rejected_as_consistency_control(
+        owned, tmp_path, caller_fact, bounded):
+    root = "/mnt/media_rw/emulated/DCIM"
+    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
+    identity = f"{root}/a-new.OSV"
+    await _save_out_of_page_file(runtime, ticket, owned, identity)
+    request = _request(runtime, ticket, _actual(
+        ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
+    key = new_operation_key()
+
+    class CallerState:
+        def plan(self, scope):
+            plan = SaveResultPageCommand(request, key).plan(scope)
+            _alter_page_context(plan.state_rows, plan.result_page_write_scope, caller_fact)
+            return _bounded_from_finite(plan) if bounded else plan
+
+    receipt = commit_operation(CallerState(), key, owned)
+    assert receipt.kind == "rolled_back"
+    assert receipt.error is not None
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)
+    ).fetchone() == (0,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM result_page_files").fetchone() == (0,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (1,)
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.asyncio
+async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
+        owned, tmp_path, bounded):
+    root = "/mnt/media_rw/emulated/DCIM"
+    old_identity = f"{root}/z-old.OSV"
+    new_identity = f"{root}/a-new.OSV"
+    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
+    old_file_id = await _save_out_of_page_file(runtime, ticket, owned, old_identity)
+    request = _request(runtime, ticket, _actual(ticket, entries=[
+        _osmo_entry(new_identity, size=1), _osmo_entry(old_identity, size=1),
+    ], finalized=True))
+    key = new_operation_key()
+
+    class CallerTaskScope:
+        def plan(self, scope):
+            from camctl.persistence.repositories import result_pages as rp
+
+            plan = SaveResultPageCommand(request, key).plan(scope)
+            original_state = deepcopy(plan.state_rows)
+            state = deepcopy(plan.state_rows)
+            activity_id = plan.result_page_write_scope.activity_id
+            state["device_activities"][activity_id]["ownership_mode"] = int(
+                enum_for("device_activities.ownership_mode").TASK_SCOPE)
+            state["device_files"][old_file_id] = row_facts(
+                scope.connection, "device_files", old_file_id)
+            events = list(plan.events)
+            append_index = next(i for i, event in enumerate(events)
+                if (event.event_type, event.reason) == (rp._TYPE, rp._APPEND))
+            index_index = append_index + 1
+            append = events[append_index]
+            evidence = deepcopy(dict(append.evidence))
+            raw = deepcopy(evidence["result_page"])
+            raw["file_ids"].append([old_identity, old_file_id])
+            evidence["result_page"] = raw
+            events[append_index] = replace(append, evidence=evidence)
+
+            index = events[index_index]
+            relation_id = index.rows[-1].row_id + 1
+            values = rp._relation_values(
+                created_event_id=index.event_id,
+                action_id=plan.result_page_write_scope.action_id,
+                run_id=ticket.run_id,
+                attempt_id=plan.result_page_write_scope.attempt_id,
+                page_event_id=append.event_id,
+                file_id=old_file_id,
+                identity=old_identity,
+            )
+            events[index_index] = replace(index, rows=(
+                *index.rows, row_change("result_page_files", relation_id, values)))
+            owners = dict(plan.owners)
+            owners[("result_page_files", relation_id)] = (
+                "action", plan.result_page_write_scope.action_id)
+            changed = replace(plan, events=tuple(events), state_rows=state, owners=owners)
+            return (_bounded_from_finite(changed, transaction_rows=original_state)
+                    if bounded else changed)
+
+    receipt = commit_operation(CallerTaskScope(), key, owned)
+    assert receipt.kind == "rolled_back"
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)
+    ).fetchone() == (0,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (1,)
+    assert owned.connection.execute("SELECT COUNT(*) FROM result_page_files").fetchone() == (0,)
+    assert owned.connection.execute(
+        "SELECT result_first_page_event_id,result_last_page_event_id FROM operation_attempts "
+        "WHERE run_id=?", (ticket.run_id,),
+    ).fetchone() == (None, None)
+
+
+async def _save_three_pages(runtime, ticket, owned, *, outside_identity):
+    outside_file_id = await _save_out_of_page_file(
+        runtime, ticket, owned, outside_identity)
+    root = "/mnt/media_rw/emulated/DCIM/CAM"
+    binding = DeviceBinding("cam-1", "dji-action6")
+    previous_cursor = None
+    receipts = []
+    for page_no, name in enumerate(("a.OSV", "b.OSV", "c.OSV"), start=1):
+        identity = f"{root}/{name}"
+        next_cursor = (None if page_no == 3 else DirectoryCursor(
+            binding, ("/mnt/media_rw/emulated/DCIM", "/mnt/media_rw/sd/DCIM"),
+            0, identity))
+        request = _request(runtime, ticket, _actual(
+            ticket, entries=[_osmo_entry(identity, size=0)],
+            cursor=previous_cursor, next_cursor=next_cursor,
+            finalized=page_no == 3), page_no=page_no, cursor=previous_cursor)
+        receipt = runtime.capture.save_result_page(
+            request, new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        receipts.append(receipt.value)
+        previous_cursor = next_cursor
+    return tuple(receipts), outside_file_id
+
+
+def _damage_page_group(owned, page_event_id, corruption, *, outside_file_id,
+                       outside_identity, other_page_event_id):
+    from camctl.persistence.repositories import result_pages as rp
+
+    relation = owned.connection.execute(
+        "SELECT id,created_event_id,action_id,run_id,attempt_id,file_id,identity,"
+        "family_directory,family_stem,family_role FROM result_page_files "
+        "WHERE page_event_id=? ORDER BY id LIMIT 1", (page_event_id,),
+    ).fetchone()
+    assert relation is not None
+    relation_id, index_event_id, action_id, run_id, attempt_id, file_id, identity, *_ = relation
+    if corruption == "missing_relation":
+        owned.connection.execute(
+            "DELETE FROM result_page_files WHERE id=?", (relation_id,))
+    elif corruption == "extra_relation":
+        relation_id = next_row_id(owned.connection, "result_page_files")
+        values = rp._relation_values(
+            created_event_id=index_event_id, action_id=action_id, run_id=run_id,
+            attempt_id=attempt_id, page_event_id=page_event_id,
+            file_id=outside_file_id, identity=outside_identity)
+        names = ("created_event_id", "action_id", "run_id", "attempt_id",
+                 "page_event_id", "file_id", "identity", "family_directory",
+                 "family_stem", "family_role")
+        owned.connection.execute(
+            "INSERT INTO result_page_files(id," + ",".join(names) + ") VALUES(" +
+            ",".join("?" for _ in range(len(names) + 1)) + ")",
+            (relation_id, *(values[name] for name in names)))
+    elif corruption == "same_count_replacement":
+        values = rp._relation_values(
+            created_event_id=index_event_id, action_id=action_id, run_id=run_id,
+            attempt_id=attempt_id, page_event_id=page_event_id,
+            file_id=outside_file_id, identity=outside_identity)
+        owned.connection.execute(
+            "UPDATE result_page_files SET file_id=?,identity=?,family_directory=?,"
+            "family_stem=?,family_role=? WHERE id=?",
+            (values["file_id"], values["identity"], values["family_directory"],
+             values["family_stem"], values["family_role"], relation_id))
+    elif corruption in ("wrong_created_event", "wrong_page_event", "wrong_family"):
+        column, value = {
+            "wrong_created_event": ("created_event_id", page_event_id),
+            "wrong_page_event": ("page_event_id", other_page_event_id),
+            "wrong_family": ("family_stem", "caller-substituted"),
+        }[corruption]
+        owned.connection.execute(
+            f"UPDATE result_page_files SET {column}=? WHERE id=?", (value, relation_id))
+    elif corruption in ("wrong_owner", "missing_index"):
+        stored = owned.connection.execute(
+            "SELECT body_json FROM history_events WHERE id=?", (index_event_id,)
+        ).fetchone()
+        body = json.loads(stored[0])
+        if corruption == "missing_index":
+            body["reason"] = load_event_registry()["events"]["RESULT_PAGE"]["branches"]["APPEND"]["reason"]
+        else:
+            body["rows"][0]["after"]["values"]["action_id"] += 100_000
+        owned.connection.execute(
+            "UPDATE history_events SET body_json=? WHERE id=?",
+            (json.dumps(body, separators=(",", ":")), index_event_id))
+    else:
+        raise AssertionError(corruption)
+
+
+@pytest.mark.parametrize("batch", [1, 2, 128])
+@pytest.mark.parametrize("page_index", [0, 1, 2])
+@pytest.mark.parametrize("corruption", [
+    "missing_relation", "missing_index", "extra_relation",
+    "same_count_replacement", "wrong_created_event", "wrong_page_event",
+    "wrong_owner", "wrong_family",
+])
+@pytest.mark.asyncio
+async def test_fix1_i2_read_pages_validates_each_selected_and_lookahead_group(
+        owned, tmp_path, batch, page_index, corruption):
+    root = "/mnt/media_rw/emulated/DCIM/CAM"
+    outside_identity = f"{root}/outside-page.LRF"
+    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    refs, outside_file_id = await _save_three_pages(
+        runtime, ticket, owned, outside_identity=outside_identity)
+    target = refs[page_index]
+    _damage_page_group(
+        owned, target.event_id, corruption, outside_file_id=outside_file_id,
+        outside_identity=outside_identity,
+        other_page_event_id=refs[(page_index + 1) % len(refs)].event_id)
+    before = owned.connection.execute(
+        "SELECT COUNT(*),MAX(id) FROM result_page_files").fetchone()
+    cursor = None
+    if batch == 1 and page_index == 2:
+        cursor = refs[1].event_id
+    with pytest.raises(ConsistencyError):
+        runtime.capture.read_result_pages(ticket, cursor, batch, owned)
+    assert owned.connection.execute(
+        "SELECT COUNT(*),MAX(id) FROM result_page_files").fetchone() == before
+
+
+@pytest.mark.asyncio
+async def test_fix1_i3_fresh_original_key_recomputes_difference_from_f_before(
+        owned, tmp_path):
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+    root = "/mnt/media_rw/emulated/DCIM"
+    first_identity, omitted_identity = f"{root}/a.OSV", f"{root}/b.OSV"
+    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    first_file_id = await _save_out_of_page_file(
+        runtime, ticket, owned, first_identity)
+    omitted_file_id = await _save_out_of_page_file(
+        runtime, ticket, owned, omitted_identity)
+    request = _request(runtime, ticket, _actual(ticket, entries=[
+        _osmo_entry(first_identity, size=1), _osmo_entry(omitted_identity, size=1),
+    ], finalized=True))
+    key = new_operation_key()
+    saved = runtime.capture.save_result_page(request, key, owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    append_id = saved.value.event_id
+    index_id = owned.connection.execute(
+        "SELECT created_event_id FROM result_page_files WHERE page_event_id=? "
+        "AND file_id=?", (append_id, omitted_file_id),
+    ).fetchone()[0]
+    append_body = json.loads(owned.connection.execute(
+        "SELECT body_json FROM history_events WHERE id=?", (append_id,),
+    ).fetchone()[0])
+    append_body["evidence"]["result_page"]["file_ids"] = [
+        item for item in append_body["evidence"]["result_page"]["file_ids"]
+        if item[0] != omitted_identity]
+    index_body = json.loads(owned.connection.execute(
+        "SELECT body_json FROM history_events WHERE id=?", (index_id,),
+    ).fetchone()[0])
+    index_body["rows"] = [
+        item for item in index_body["rows"]
+        if item["after"]["values"]["file_id"] != omitted_file_id]
+    owned.connection.execute(
+        "UPDATE history_events SET body_json=? WHERE id=?",
+        (json.dumps(append_body, separators=(",", ":")), append_id))
+    owned.connection.execute(
+        "UPDATE history_events SET body_json=? WHERE id=?",
+        (json.dumps(index_body, separators=(",", ":")), index_id))
+    owned.connection.execute(
+        "DELETE FROM result_page_files WHERE page_event_id=? AND file_id=?",
+        (append_id, omitted_file_id))
+
+    path = Path(owned.connection.execute(
+        "PRAGMA database_list").fetchone()[2])
+    owned.connection.close()
+    reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        before = reopened.connection.execute(
+            "SELECT (SELECT MAX(id) FROM history_transactions),"
+            "(SELECT MAX(id) FROM history_events),"
+            "(SELECT MAX(id) FROM device_files),"
+            "(SELECT MAX(id) FROM result_page_files),"
+            "(SELECT COUNT(*) FROM result_page_files),"
+            "(SELECT result_first_page_event_id FROM operation_attempts WHERE run_id=?)",
+            (ticket.run_id,),
+        ).fetchone()
+        replay = runtime.capture.save_result_page(request, key, reopened)
+        after = reopened.connection.execute(
+            "SELECT (SELECT MAX(id) FROM history_transactions),"
+            "(SELECT MAX(id) FROM history_events),"
+            "(SELECT MAX(id) FROM device_files),"
+            "(SELECT MAX(id) FROM result_page_files),"
+            "(SELECT COUNT(*) FROM result_page_files),"
+            "(SELECT result_first_page_event_id FROM operation_attempts WHERE run_id=?)",
+            (ticket.run_id,),
+        ).fetchone()
+        assert replay.kind is DbOutcomeKind.ROLLED_BACK
+        assert replay.error is not None
+        assert str(replay.error) == "APPEND的file_ids没有精确覆盖原差集身份及实际文件ID"
+        assert before == after
+        assert reopened.connection.execute(
+            "SELECT COUNT(*) FROM result_page_files WHERE page_event_id=?",
+            (append_id,),
+        ).fetchone() == (1,)
+        assert {first_file_id, omitted_file_id} == {
+            row[0] for row in reopened.connection.execute(
+                "SELECT id FROM device_files ORDER BY id")}
+    finally:
+        reopened.connection.close()
+
+
+def _rewrite_page_group_members(owned, append_id, file_ids):
+    from camctl.persistence.repositories import result_pages as rp
+
+    relations = owned.connection.execute(
+        "SELECT id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity "
+        "FROM result_page_files WHERE page_event_id=? ORDER BY id", (append_id,),
+    ).fetchall()
+    assert relations
+    index_id = relations[0][1]
+    index_body = json.loads(owned.connection.execute(
+        "SELECT body_json FROM history_events WHERE id=?", (index_id,),
+    ).fetchone()[0])
+    append_body = json.loads(owned.connection.execute(
+        "SELECT body_json FROM history_events WHERE id=?", (append_id,),
+    ).fetchone()[0])
+    append_body["evidence"]["result_page"]["file_ids"] = [list(item) for item in file_ids]
+    prior_max = owned.connection.execute(
+        "SELECT COALESCE(MAX(id),0) FROM result_page_files").fetchone()[0]
+    relation_ids = [row[0] for row in relations]
+    relation_ids.extend(range(prior_max + 1, prior_max + 1 + len(file_ids) - len(relation_ids)))
+    owner_action_id, run_id, attempt_id = relations[0][2:5]
+    names = ("created_event_id", "action_id", "run_id", "attempt_id", "page_event_id",
+             "file_id", "identity", "family_directory", "family_stem", "family_role")
+    rewritten_rows = []
+    owned.connection.execute("DELETE FROM result_page_files WHERE page_event_id=?", (append_id,))
+    for relation_id, (identity, file_id) in zip(relation_ids, file_ids):
+        values = rp._relation_values(
+            created_event_id=index_id, action_id=owner_action_id, run_id=run_id,
+            attempt_id=attempt_id, page_event_id=append_id,
+            file_id=file_id, identity=identity)
+        owned.connection.execute(
+            "INSERT INTO result_page_files(id," + ",".join(names) + ") VALUES(" +
+            ",".join("?" for _ in range(len(names) + 1)) + ")",
+            (relation_id, *(values[name] for name in names)))
+        rewritten_rows.append({
+            "table": "result_page_files", "id": relation_id,
+            "before": {"exists": False, "values": {}},
+            "after": {"exists": True, "values": values},
+        })
+    index_body["rows"] = rewritten_rows
+    owned.connection.execute(
+        "UPDATE history_events SET body_json=? WHERE id=?",
+        (json.dumps(append_body, separators=(",", ":")), append_id))
+    owned.connection.execute(
+        "UPDATE history_events SET body_json=? WHERE id=?",
+        (json.dumps(index_body, separators=(",", ":")), index_id))
+
+
+def _replay_checkpoint(connection, run_id):
+    return connection.execute(
+        "SELECT (SELECT MAX(id) FROM history_transactions),"
+        "(SELECT MAX(id) FROM history_events),"
+        "(SELECT MAX(id) FROM device_files),"
+        "(SELECT MAX(id) FROM result_page_files),"
+        "(SELECT COUNT(*) FROM result_page_files),"
+        "(SELECT result_first_page_event_id FROM operation_attempts WHERE run_id=?),"
+        "(SELECT result_last_page_event_id FROM operation_attempts WHERE run_id=?)",
+        (run_id, run_id),
+    ).fetchone()
+
+
+@pytest.mark.parametrize("corruption", [
+    "extra_baseline", "same_count_baseline_replacement", "create_id", "create_time",
+])
+@pytest.mark.asyncio
+async def test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption(
+        owned, tmp_path, corruption):
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+    root = "/mnt/media_rw/emulated/DCIM"
+    old_identity = f"{root}/a-old.OSV"
+    runtime, ticket, _ = await _baseline_world(
+        owned, tmp_path, ("a-old.OSV",) if corruption in (
+            "extra_baseline", "same_count_baseline_replacement") else ())
+    old_file_id = None
+    if corruption in ("extra_baseline", "same_count_baseline_replacement"):
+        old_file_id = await _save_out_of_page_file(
+            runtime, ticket, owned, old_identity)
+    if corruption == "extra_baseline":
+        new_identity = f"{root}/b-new.OSV"
+        entries = [_osmo_entry(old_identity, size=0), _osmo_entry(new_identity, size=1)]
+    elif corruption == "same_count_baseline_replacement":
+        first_new, second_new = f"{root}/b-new.OSV", f"{root}/c-new.OSV"
+        await _save_out_of_page_file(runtime, ticket, owned, first_new)
+        second_id = await _save_out_of_page_file(runtime, ticket, owned, second_new)
+        entries = [
+            _osmo_entry(old_identity, size=0),
+            _osmo_entry(first_new, size=1),
+            _osmo_entry(second_new, size=2),
+        ]
+    else:
+        new_identity = f"{root}/a-new.OSV"
+        entries = [_osmo_entry(new_identity, size=1)]
+    request = _request(runtime, ticket, _actual(ticket, entries=entries, finalized=True))
+    key = new_operation_key()
+    saved = runtime.capture.save_result_page(request, key, owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    append_id = saved.value.event_id
+
+    if corruption == "extra_baseline":
+        new_id = dict(owned.connection.execute(
+            "SELECT identity,file_id FROM result_page_files WHERE page_event_id=?",
+            (append_id,)).fetchall())[new_identity]
+        _rewrite_page_group_members(
+            owned, append_id, ((new_identity, new_id), (old_identity, old_file_id)))
+    elif corruption == "same_count_baseline_replacement":
+        _rewrite_page_group_members(owned, append_id, (
+            (old_identity, old_file_id), (second_new, second_id)))
+    else:
+        transaction_id = owned.connection.execute(
+            "SELECT transaction_id FROM history_events WHERE id=?", (append_id,),
+        ).fetchone()[0]
+        registry = load_event_registry()["events"]["DEVICE_FILE_OBSERVED"]
+        create_id = owned.connection.execute(
+            "SELECT id FROM history_events WHERE transaction_id=? AND event_type=? "
+            "AND json_extract(body_json,'$.reason')=?",
+            (transaction_id, registry["id"], registry["branches"]["CREATE"]["reason"]),
+        ).fetchone()[0]
+        if corruption == "create_id":
+            create_body = json.loads(owned.connection.execute(
+                "SELECT body_json FROM history_events WHERE id=?", (create_id,),
+            ).fetchone()[0])
+            create_body["rows"][0]["id"] += 100_000
+            owned.connection.execute(
+                "UPDATE history_events SET body_json=? WHERE id=?",
+                (json.dumps(create_body, separators=(",", ":")), create_id))
+        else:
+            owned.connection.execute(
+                "UPDATE history_events SET occurred_at=occurred_at+1 WHERE id=?",
+                (create_id,))
+
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    owned.connection.close()
+    reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        before = _replay_checkpoint(reopened.connection, ticket.run_id)
+        replay = runtime.capture.save_result_page(request, key, reopened)
+        after = _replay_checkpoint(reopened.connection, ticket.run_id)
+        assert replay.kind is DbOutcomeKind.ROLLED_BACK
+        assert replay.error is not None
+        if corruption in ("extra_baseline", "same_count_baseline_replacement"):
+            assert str(replay.error) == "APPEND的file_ids没有精确覆盖原差集身份及实际文件ID"
+        assert before == after
+    finally:
+        reopened.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_fix1_i3_original_key_replay_uses_f_before_after_later_page(
+        owned, tmp_path):
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+    runtime, ticket, _ = await _baseline_world(
+        owned, tmp_path, tuple(f"{index:03d}.OSV" for index in range(129)))
+    root = "/mnt/media_rw/emulated/DCIM"
+    binding = DeviceBinding("cam-1", "dji-action6")
+    next_cursor = DirectoryCursor(binding,
+        (root, "/mnt/media_rw/sd/DCIM"), 0, f"{root}/129.OSV")
+    first_request = _request(runtime, ticket, _actual(ticket,
+        entries=[_osmo_entry(f"{root}/128.OSV", size=0),
+                 _osmo_entry(f"{root}/129.OSV", size=1)], next_cursor=next_cursor))
+    first_key = new_operation_key()
+    first = runtime.capture.save_result_page(first_request, first_key, owned)
+    assert first.kind is DbOutcomeKind.COMPLETED, first.error
+    second_request = _request(runtime, ticket, _actual(ticket,
+        entries=[_osmo_entry(f"{root}/130.OSV", size=2)], cursor=next_cursor,
+        finalized=True), page_no=2, cursor=next_cursor)
+    second = runtime.capture.save_result_page(second_request, new_operation_key(), owned)
+    assert second.kind is DbOutcomeKind.COMPLETED, second.error
+
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    owned.connection.close()
+    reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        before = _replay_checkpoint(reopened.connection, ticket.run_id)
+        replay = runtime.capture.save_result_page(first_request, first_key, reopened)
+        after = _replay_checkpoint(reopened.connection, ticket.run_id)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert replay.value == first.value
+        assert before == after
+    finally:
+        reopened.connection.close()
