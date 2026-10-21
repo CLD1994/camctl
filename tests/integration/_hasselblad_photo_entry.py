@@ -325,6 +325,24 @@ def _target(root: Path, connection):
             "run_kind": kind, "device_id": device_id, "driver_id": driver_id}
 
 
+def _report_management_fact(connection, report_id, branch, event_id=None):
+    from camctl.history.events import load_event_registry
+    event = load_event_registry()["events"]["REPORT_CHANGED"]
+    rows = connection.execute(
+        "SELECT e.id,e.body_json,t.id,t.operation_key,t.first_event_id,t.last_event_id "
+        "FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id, "
+        "json_each(e.body_json,'$.rows') changed "
+        "WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=? AND json_extract(changed.value,'$.table')='reports' "
+        "AND json_extract(changed.value,'$.id')=? "
+        "AND (? IS NULL OR e.id=?) ORDER BY e.id DESC LIMIT 1",
+        (event["id"], event["branches"][branch]["reason"], report_id, event_id, event_id)).fetchall()
+    assert len(rows) == 1
+    identity, body, txn_id, key, first, last = rows[0]
+    assert first <= identity <= last
+    return {"event_id": identity, "event_body": json.loads(body), "operation_key": key,
+            "first_event_id": first, "boundary": {"txn_id": txn_id, "last_event_id": last}}
+
+
 def _install_fault(root: Path, fault: str):
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     if fault in ("after-start-result", "before-start-result"):
@@ -426,6 +444,55 @@ def _install_fault(root: Path, fault: str):
             return result
         HostCaptureRepository.save_host_photo_complete = save
         HostCaptureRepository.verify_operation = verify
+    elif fault == "report-before-publish":
+        from camctl.persistence.repositories.history import HistoryRepository
+        from camctl.reporting.publication import DbPublicationSession
+        real = DbPublicationSession.record_intent
+
+        def intent(self, report_id):
+            result = real(self, report_id)
+            if result.kind is not DbOutcomeKind.COMPLETED or (root / f"{fault}.once").exists():
+                return result
+            assert not self._owned.connection.in_transaction
+            path = self._owned.connection.execute("PRAGMA database_list").fetchone()[2]
+            target = _target(root, self._owned.connection)
+            if target is None:
+                return result
+            history = HistoryRepository(Path(path))
+            frozen = history.frozen_registration(report_id)
+            restored = history.restore_entity("action", target["action_id"], frozen.boundary)
+            action = restored.get(("actions", target["action_id"]))
+            from camctl.contracts.enums import enum_for
+            output_ids = [row[0] for row in self._owned.connection.execute(
+                "SELECT id FROM outputs WHERE source_action_id=? ORDER BY kind", (target["action_id"],))]
+            outputs = [history.restore_entity("output", identity, frozen.boundary).get(("outputs", identity))
+                       for identity in output_ids]
+            outputs = [row for row in outputs if row is not None and row["source_action_id"] == target["action_id"]]
+            if action and action["status"] == int(enum_for("actions.status").SUCCEEDED) and len(outputs) == 2:
+                _barrier(root, fault, {"report_id": report_id, "target": target, "boundary": asdict(frozen.boundary),
+                                      "from_wm": frozen.from_wm, "to_wm": frozen.to_wm,
+                                      "management": _report_management_fact(self._owned.connection, report_id, "INTENT"),
+                                      "in_transaction": self._owned.connection.in_transaction})
+            return result
+        real_save_publication = DbPublicationSession.save_publication
+
+        def published(self, report_id, file_result):
+            result = real_save_publication(self, report_id, file_result)
+            checkpoint = root / "report-before-publish.json"
+            if result.kind is DbOutcomeKind.COMPLETED and checkpoint.is_file():
+                original = json.loads(checkpoint.read_text())
+                if report_id == original["report_id"]:
+                    assert not self._owned.connection.in_transaction
+                    _barrier(root, "report-rebuilt-published", {
+                        "report_id": report_id, "returned_receipt": result.kind.value,
+                        "target": _target(root, self._owned.connection),
+                        "file_result": _plain(file_result), "publication": _plain(result.value),
+                        "management": _report_management_fact(self._owned.connection, report_id, "PUBLISH", result.value.published_event_id),
+                        "in_transaction": self._owned.connection.in_transaction,
+                    })
+            return result
+        DbPublicationSession.record_intent = intent
+        DbPublicationSession.save_publication = published
     else:
         raise ValueError(f"未知 H8b 故障选择: {fault}")
 

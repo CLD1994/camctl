@@ -729,8 +729,19 @@ def _fault_marker(world, name):
             return json.loads(path.read_text())
         # 同步点未装配时，正常完成直接证伪断点，而不是等超时冒充命中。
         actions = _rows(world.deployment.state_db, "SELECT status FROM actions WHERE name='capture'")
-        if actions and _rows(world.deployment.state_db, "SELECT id FROM outputs"):
+        if name in ("after-start-result", "before-start-result", "complete-commit", "complete-verifier") and actions and _rows(world.deployment.state_db, "SELECT id FROM outputs"):
             raise AssertionError(f"未命中 {name}，照片已正常完成；{world.root}")
+        if name == "report-before-publish":
+            for directory in (world.deployment.ready, world.deployment.processing):
+                for report in directory.glob("status-report-*.json"):
+                    try:
+                        value = json.loads(report.read_text())
+                    except FileNotFoundError:
+                        continue
+                    if any(action["name"] == "capture" and action["status"] == "succeeded"
+                           and len(action.get("outputs", [])) == 2
+                           for plan in value["plans"] for action in plan["actions"]):
+                        raise AssertionError(f"未命中 {name}，成功双产物报告已经发布；{world.root}")
         return None
     return wait_for(found, 90, f"真实安装进程故障门闩 {name}; {world.root}")
 
@@ -992,5 +1003,93 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
         assert sorted(path.read_bytes() for path in files) == sorted((world.original_bytes, world.preview_bytes))
         assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []
         assert _rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],)) == []
+    finally:
+        world.close()
+
+
+def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, installed_camctl, host_demo, monkeypatch):
+    case = PhotoCase('jpeg', 'device', '0.000667', focus_override=('MF', None))
+    world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+    monkeypatch.chdir(tmp_path)
+    try:
+        codes = _fault_codes(world)
+        _begin_fault(world, 'report-before-publish')
+        marker = _fault_marker(world, 'report-before-publish')
+        target = _capture_target(world)
+        assert marker['target'] == target
+        report_id = marker['report_id']
+        row, = _rows(world.deployment.state_db, 'SELECT * FROM reports WHERE id=?', (report_id,))
+        frozen, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (marker['boundary']['txn_id'],))
+        assert frozen['last_event_id'] == marker['boundary']['last_event_id']
+        assert marker['in_transaction'] is False
+        management = marker['management']
+        event, = _rows(world.deployment.state_db, 'SELECT * FROM history_events WHERE id=?', (management['event_id'],))
+        transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (event['transaction_id'],))
+        assert transaction['operation_key'] == management['operation_key']
+        assert transaction['first_event_id'] == management['first_event_id']
+        assert (transaction['id'], transaction['last_event_id']) == (management['boundary']['txn_id'], management['boundary']['last_event_id'])
+        assert json.loads(event['body_json']) == management['event_body']
+        changed, = management['event_body']['rows']
+        assert changed['table'] == 'reports' and changed['id'] == report_id
+        assert (row['from_wm'],row['to_wm'],row['frozen_event_id']) == (marker['from_wm'],marker['to_wm'],marker['boundary']['last_event_id'])
+        original, = (world.deployment.staging / 'reports').glob(f'status-report-{report_id}-*.json')
+        original_bytes = original.read_bytes(); original_name = original.name
+        assert row['size_bytes'] == len(original_bytes) and row['sha256'] == hashlib.sha256(original_bytes).hexdigest()
+        capture, = [action for plan in json.loads(original_bytes, parse_float=Decimal)['plans'] for action in plan['actions'] if action['action_instance_id']==str(target['action_id'])]
+        assert capture['status'] == 'succeeded' and len(capture['outputs']) == 2
+        calls = world.argv()
+        world.claim()
+        assert list(world.deployment.ready.iterdir()) == []
+        world.deployment.ready.rmdir()
+        world.deployment.ready.write_bytes(b'H8b deterministic ready directory fault')
+        (world.root / 'report-before-publish.release').touch()
+        failed = wait_for(lambda: next((r for r in _rows(world.deployment.state_db,
+                  'SELECT * FROM reports WHERE id=?',(report_id,)) if r['status']==codes['report_failed']),None),
+                  60, '真实目录发布失败已可靠保存')
+        assert failed['sha256'] == row['sha256'] and failed['size_bytes'] == row['size_bytes']
+        assert failed['last_error_json'] is not None
+        actual_error = json.loads(failed['last_error_json'])['error']
+        assert all(value in actual_error for value in ('withdraw_failed', 'list_failed', 'NotADirectoryError', str(world.deployment.ready)))
+        _stop_fault_host(world, marker)
+        assert world.argv() == calls
+        world.deployment.ready.unlink(); world.deployment.ready.mkdir()
+        saved = world.root / 'failed-report-evidence'; saved.mkdir()
+        shutil.move(original,saved/original_name)
+        assert not list((world.deployment.staging/'reports').glob(f'status-report-{report_id}-*.json'))
+        _restart_fault_host(world)
+        rebuilt = _fault_marker(world, 'report-rebuilt-published')
+        assert rebuilt['report_id'] == report_id and rebuilt['pid'] != marker['pid']
+        assert rebuilt['in_transaction'] is False and rebuilt['returned_receipt'] == 'completed'
+        assert rebuilt['publication']['report_id'] == report_id
+        assert rebuilt['publication']['published_event_id'] == rebuilt['management']['event_id']
+        new = world.deployment.ready / original_name
+        assert new.read_bytes() == original_bytes
+        current, = _rows(world.deployment.state_db,'SELECT * FROM reports WHERE id=?',(report_id,))
+        publication_event, = _rows(world.deployment.state_db, 'SELECT * FROM history_events WHERE id=?', (rebuilt['management']['event_id'],))
+        publication_transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (publication_event['transaction_id'],))
+        assert current['last_published_event_id'] == publication_event['id']
+        assert json.loads(publication_event['body_json']) == rebuilt['management']['event_body']
+        assert publication_transaction['operation_key'] == rebuilt['management']['operation_key']
+        assert publication_transaction['first_event_id'] == rebuilt['management']['first_event_id']
+        assert (publication_transaction['id'], publication_transaction['last_event_id']) == (rebuilt['management']['boundary']['txn_id'], rebuilt['management']['boundary']['last_event_id'])
+        (world.root / 'publication-states.json').write_text(json.dumps({
+            'recorded_utc':datetime.now(timezone.utc).isoformat(), 'original_before_fault':row,
+            'failed_before_stop':failed, 'published_before_claim':current, 'frozen_transaction':frozen,
+            'intent_transaction':transaction, 'publication_transaction':publication_transaction,
+            'file_name':original_name, 'size':len(original_bytes), 'sha256':hashlib.sha256(original_bytes).hexdigest(),
+        }))
+        for key in ('frozen_event_id','from_wm','to_wm','size_bytes','sha256'):
+            assert current[key] == row[key]
+        assert current['publication_count'] == 1 and current['status'] == codes['report_published']
+        world.claim()
+        delivered = world.deployment.processing / original_name
+        assert delivered.read_bytes() == original_bytes
+        (world.root / 'report-rebuilt-published.release').touch()
+        assert world.argv() == calls
+        world.assert_precision_and_sources(delivered,capture)
+        _no_private_details(capture, world)
+        _fault_pair(world,capture)
+        assert delivered.read_bytes() == original_bytes
+        assert (saved/original_name).read_bytes() == original_bytes
     finally:
         world.close()
