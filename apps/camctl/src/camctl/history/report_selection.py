@@ -115,13 +115,19 @@ class ReportEntitySelection:
         branches, parameters = [], []
         for path in self._paths(target):
             source = path[0]
+            target_alias = f'e{len(path)-1}'
+            # 所有入口独立核验 source→target→root，不依赖先读父对象。
+            while path[-1].parent is not None:
+                path.append(self._entities[path[-1].parent])
             joins = [f'LEFT JOIN {source.table} e0 ON e0.{source.identity}=c.entity_id']
             for index, parent in enumerate(path[1:], 1):
                 child = path[index - 1]
                 joins.append(f'LEFT JOIN {parent.table} e{index} ON e{index}.{parent.identity}=e{index-1}.{child.foreign_key}')
-            root = f'e{len(path)-1}'
-            parent_id = f'{root}.{target.foreign_key}' if target.parent else 'NULL'
-            branches.append(f'SELECT {root}.{target.identity}, {parent_id}'
+            missing = ' OR '.join(f'e{index}.{spec.identity} IS NULL' for index, spec in enumerate(path))
+            # NULL 排在合法整数 ID 前；任意晚 ID 损坏也不能被 LIMIT 隐藏。
+            identity = f'CASE WHEN {missing} THEN NULL ELSE {target_alias}.{target.identity} END'
+            parent_id = f'{target_alias}.{target.foreign_key}' if target.parent else 'NULL'
+            branches.append(f'SELECT {identity}, {parent_id}'
                             ' FROM report_entity_changes c INDEXED BY report_changes_by_sequence '
                             + ' '.join(joins) + ' WHERE ' + self._window_sql())
             parameters.extend(self._window(source))

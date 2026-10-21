@@ -51,6 +51,9 @@ async def test_old_h_excludes_new_targets_and_their_ancestors(finished_photo):
     await _submit(owned, path, '1')
     before = _boundary(owned.connection)
     await _submit(owned, path, '2')
+    # H 后目录中仍有第二计划的目标；其损坏不能回填或污染旧 H。
+    owned.connection.execute('PRAGMA foreign_keys=OFF')
+    owned.connection.execute('DELETE FROM plans WHERE id=2')
     request = ReportScopeRequest(before, 0, _to_wm(owned.connection), 1)
     with HistoryRepository(path / 'state.db').open_report_selection(request) as selection:
         assert _read(selection, 'plan') == [1]
@@ -130,6 +133,113 @@ async def test_delivery_target_only_fills_obtain_ancestors_not_source_entities(t
         if cache_budget == 1:
             assert selection._cache['plan'] is None
             assert selection._cache['action'] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cache_budget', [4096, 0])
+@pytest.mark.parametrize('entity,table,row_id,parent', [
+    ('action', 'plans', 1, 1),
+    ('output', 'actions', 1, 1), ('output', 'plans', 1, 1),
+    ('delivery', 'actions', 2, 2), ('delivery', 'plans', 2, 2),
+    ('plan', 'plans', 1, None), ('plan', 'actions', 2, None),
+    ('action', 'actions', 1, 1), ('output', 'outputs', 2, 1),
+    ('delivery', 'deliveries', 2, 2),
+    ('diagnostic', 'plan_file_diagnostics', 2, None),
+])
+async def test_independent_entry_rejects_missing_target_or_any_required_owner(
+    two_item_world, tmp_path, monkeypatch, cache_budget, entity, table, row_id, parent,
+):
+    from camctl.history import report_selection
+    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', cache_budget)
+    world = two_item_world
+    for item in world.item_ids:
+        _grant_item(world, item)
+    await _submit_diagnostic(world.owned, tmp_path, 'one')
+    await _submit_diagnostic(world.owned, tmp_path, 'two')
+    request = ReportScopeRequest(_boundary(world.owned.connection), 0, _to_wm(world.owned.connection), 1)
+    world.owned.connection.execute('PRAGMA foreign_keys=OFF')
+    world.owned.connection.execute(f'DELETE FROM {table} WHERE id=?', (row_id,))
+    probe = _QueryProbe(world.history, monkeypatch)
+    with world.history.open_report_selection(request) as selection:
+        # 每个入口都是第一次读取；不依赖先读根对象，也不交付部分 Page。
+        with pytest.raises(ConsistencyError):
+            selection.read_page(entity, parent_id=parent)
+        assert selection._cache == {}
+        with pytest.raises(ConsistencyError):
+            selection.read_page(entity, parent_id=parent)
+    import gc
+    import sqlite3
+    gc.collect()
+    assert all(reference() is None for reference in probe.candidates)
+    for connection in probe.connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute('SELECT 1')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cache_budget', [4096, 0])
+async def test_all_five_targets_keep_pages_parent_filter_and_legal_empty(
+    two_item_world, tmp_path, monkeypatch, cache_budget,
+):
+    from camctl.history import report_selection
+    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', cache_budget)
+    world = two_item_world
+    for item in world.item_ids:
+        _grant_item(world, item)
+    await _submit_diagnostic(world.owned, tmp_path, 'one')
+    await _submit_diagnostic(world.owned, tmp_path, 'two')
+    request = ReportScopeRequest(_boundary(world.owned.connection), 0, _to_wm(world.owned.connection), 1)
+    cases = [('plan', [(None, [1, 2])]), ('action', [(1, [1]), (2, [2]), (999, [])]),
+             ('output', [(1, [1, 2]), (2, []), (999, [])]),
+             ('delivery', [(1, []), (2, [1, 2]), (999, [])]), ('diagnostic', [(None, [1, 2])])]
+    for entity, parents in cases:
+        with world.history.open_report_selection(request) as selection:
+            for parent, expected in parents:
+                assert _read(selection, entity, parent) == expected
+            assert (selection._cache[entity] is None) == (cache_budget == 0)
+        # 无窗口候选时，即使 caller 的父 ID 不存在也仍是合法空页。
+        with world.history.open_report_selection(replace(request, from_wm=request.to_wm)) as selection:
+            assert _read(selection, entity, 999 if parents[0][0] is not None else None) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('table', ['actions', 'plans'])
+async def test_late_corruption_is_visible_before_candidate_limit(finished_photo, monkeypatch, table):
+    from camctl.history import report_selection
+    monkeypatch.setattr(report_selection, '_CACHE_LIMIT', 1)
+    owned, path = finished_photo
+    _submit_many(owned, 8, 1)
+    await _finish_many(owned, 8)
+    _submit_many(owned, 2, 2)
+    await _finish_many(owned, 3, action_id=9)
+    request = ReportScopeRequest(_boundary(owned.connection), 0, _to_wm(owned.connection), 1)
+    owned.connection.execute('PRAGMA foreign_keys=OFF')
+    owned.connection.execute(f'DELETE FROM {table} WHERE id=?', (9 if table == 'actions' else 2,))
+    repository = HistoryRepository(path / 'state.db')
+    for entity, parent in [('action', 1), ('output', 1)]:
+        with repository.open_report_selection(request) as selection:
+            # 正常候选已超过 LIMIT=2，损坏 ID 更晚；第一页也必须先失败。
+            with pytest.raises(ConsistencyError):
+                selection.read_page(entity, parent_id=parent)
+            assert selection._cache == {}
+
+
+@pytest.mark.asyncio
+async def test_delivery_window_does_not_validate_unselected_source_reference_chain(two_item_world):
+    world = two_item_world
+    _grant_item(world, world.item_ids[0])
+    from_wm = _to_wm(world.owned.connection)
+    _grant_item(world, world.item_ids[1])
+    request = ReportScopeRequest(_boundary(world.owned.connection), from_wm, _to_wm(world.owned.connection), 1)
+    world.owned.connection.execute('PRAGMA foreign_keys=OFF')
+    world.owned.connection.execute('DELETE FROM outputs WHERE id=2')
+    world.owned.connection.execute('DELETE FROM actions WHERE id=1')
+    world.owned.connection.execute('DELETE FROM plans WHERE id=1')
+    with world.history.open_report_selection(request) as selection:
+        assert _read(selection, 'delivery', 2) == [2]
+        assert _read(selection, 'plan') == [2]
+        assert _read(selection, 'action', 2) == [2]
+        assert _read(selection, 'output', 1) == []
 
 
 def _submit_many(owned, count, request_id):
@@ -226,19 +336,21 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
             cursor = page.next_cursor
         assert actual == list(range(4, 4204))
         assert _read(selection, 'action', 3) == [4204, 4205, 4206]
-        candidate_sql = [sql for sql in probe.sql if sql.startswith('SELECT e')]
+        candidate_sql = [sql for sql in probe.sql if 'FROM report_entity_changes c INDEXED BY report_changes_by_sequence' in sql]
         assert len(candidate_sql) == 2  # 固定窗口的 plan/action 各一次，跨父对象不重查。
         page_sql = [sql for sql in probe.sql if sql.startswith('SELECT r')]
         assert all(' IN (' not in sql for sql in page_sql)
         assert max(vm_pages) < preflight_steps // 8
         with repository._read_connection() as connection:
             plans = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + page_sql[0]))
+            candidate_plan = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + candidate_sql[1]))
         assert any('actions_plan_members' in row for row in plans)
         assert any('report_changes_by_entity' in row for row in plans)
         assert not any('TEMP B-TREE FOR ORDER BY' in row for row in plans)
         print({'preflight_vm_steps': preflight_steps, 'page_vm_min': min(vm_pages),
                'page_vm_max': max(vm_pages), 'pages': len(vm_pages) + 1,
-               'candidate_queries': len(candidate_sql), 'unrelated_outputs': 128, 'query_plan': plans})
+               'candidate_queries': len(candidate_sql), 'unrelated_outputs': 128,
+               'query_plan': plans, 'candidate_query_plan': candidate_plan})
     gc.collect()
     assert all(reference() is None for reference in probe.candidates)
     import sqlite3
@@ -265,25 +377,27 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
     assert probe.steps < preflight_steps // 8
 
 
-async def _finish_many(owned, count):
+async def _finish_many(owned, count, *, action_id=1):
     import time
     from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
     from camctl.capture.results import FileKind
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-    from .test_report_scope import _runtime
+    from .test_report_scope import _ActivityDriver, _runtime
     from ..capture.test_capture_contract import ResultsDouble, _entry
     now = int(time.time() * 1_000_000)
-    started = SchedulingRepository().start_action(StartActionRequest(1, now, now), new_operation_key(), owned)
+    started = SchedulingRepository().start_action(StartActionRequest(action_id, now, now), new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     from camctl.persistence.repositories.scheduling import StartOutcome
-    assert started.value.outcome is StartOutcome.STARTED, (started.value, tuple(owned.connection.execute('SELECT type,status,error_code,input_fields_json FROM actions WHERE id=1').fetchone()))
+    assert started.value.outcome is StartOutcome.STARTED, started.value
+    activity_id = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()[0]
     runtime = _runtime(owned)
-    runtime.results = ResultsDouble({1: tuple(_entry(f'photo-{index}', kind=FileKind.PHOTO) for index in range(count))})
+    runtime.driver = _ActivityDriver(activity_target=str(activity_id))
+    runtime.results = ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))})
     dispatched = await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
     assert all(not isinstance(outcome, BaseException) for _, outcome in dispatched), dispatched
-    assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()[0] == count, tuple(owned.connection.execute('SELECT status,error_code,error_details_json FROM actions WHERE id=1').fetchone())
+    assert owned.connection.execute('SELECT COUNT(*) FROM outputs WHERE source_action_id=?', (action_id,)).fetchone()[0] == count
 
 
 @pytest.mark.asyncio
