@@ -139,6 +139,26 @@ class BoundedCommandPlan:
     complete: Callable[[sqlite3.Connection], None]
 
 
+def _bind_event_reads(context,event,transaction,segment_guard_state,connection):
+    """内核独占分段进度；上下文缺失/替换读取端口不能丢弃已验证F。"""
+    from camctl.persistence.event_reads import SqlEventReads
+    reads=context.current_reads
+    if reads is None:
+        if segment_guard_state or 'segment_finish_request' in event.evidence:
+            raise TransactionError('分段完成事件缺少原事务的可靠读取端口')
+        return None
+    if type(reads) is not SqlEventReads or reads.connection is not connection:
+        raise TransactionError('事件读取端口必须由原事务同一连接的可靠SQL实现提供')
+    SqlEventReads.bind_segment_finish_state(reads,segment_guard_state,transaction)
+    return reads
+
+
+def _seal_event_reads(reads,validated):
+    if reads is not None:
+        from camctl.persistence.event_reads import SqlEventReads
+        SqlEventReads.seal_segment_finish(reads,validated)
+
+
 def _write_bounded_plan(plan, scope, operation_key):
     connection = scope.connection
     allocation = scope.allocation
@@ -150,12 +170,14 @@ def _write_bounded_plan(plan, scope, operation_key):
         (allocation.txn_id,str(operation_key),allocation.first_event_id,allocation.last_event_id))
     sequence = _scalar(connection,"SELECT MAX(change_seq) FROM history_events")
     expected = allocation.first_event_id
+    segment_guard_state = {}
     for proposed in plan.events:
         if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
             raise TransactionError("实际有界事件与预分配完整范围不符")
         if len(proposed.rows) > 128:
             raise TransactionError("有界事件超过128行")
         context = plan.context(proposed, transaction)
+        reads = _bind_event_reads(context, proposed, transaction, segment_guard_state, connection)
         targets = event_report_targets(proposed, context.state_rows)
         if targets:
             sequence += 1
@@ -163,9 +185,7 @@ def _write_bounded_plan(plan, scope, operation_key):
             ObjectId(sequence)
         event = replace(proposed,change_seq=sequence if targets else None)
         validated = validate_event(event,context)
-        if context.current_reads is not None:
-            seal=getattr(context.current_reads,'seal_segment_finish',None)
-            if seal is not None:seal(validated)
+        _seal_event_reads(reads, validated)
         refs = set(validated.row_owners.values())
         before_counts = {}
         for ref in refs:
@@ -621,6 +641,7 @@ def commit_operation(
         if sum(value is not None for value in scopes) > 1:
             raise TransactionError("同一命令不能混用不同事实读取范围")
         read_scope = next((value for value in scopes if value is not None), None)
+        segment_guard_state = {}
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,
@@ -632,7 +653,10 @@ def commit_operation(
                 current_reads=(None if read_scope is None else
                                SqlEventReads(connection, read_scope, validated, sequenced)),
             )
-            validated.append(validate_event(event, context))
+            reads = _bind_event_reads(context, event, transaction_range, segment_guard_state, connection)
+            accepted = validate_event(event, context)
+            _seal_event_reads(reads, accepted)
+            validated.append(accepted)
             _apply_rows(validation_state, (event,))
 
         touched = {

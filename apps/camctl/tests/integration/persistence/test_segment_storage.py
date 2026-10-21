@@ -400,7 +400,7 @@ async def _assessed_world(tmp_path,scope_state):
     return owned,runtime,repo,ref,members
 
 
-def _completion_command(ref,members,at,key,*,mode='valid',drafts=None):
+def _completion_command(ref,members,at,key,*,mode='valid',drafts=None,batch_size=128):
     from camctl.outputs.catalog import OutputDraft,OutputKind,FileReference,OutputCatalogFacts
     from camctl.persistence.repositories.capture import FinishCapture,FinishCaptureCommand,_CompositeScope
     from camctl.persistence.repositories.segments import segment_event,segment_scope_publication_rows,segment_activation_rows
@@ -425,8 +425,9 @@ def _completion_command(ref,members,at,key,*,mode='valid',drafts=None):
             from camctl.capture.segment_finish import FinishSegmentRecording
             setrow=SegmentRepository().read_set(ref,scope)
             finite=FinishSegmentRecording(ref,setrow['activity_id'],setrow['run_id'],at,actual_request.failure)
-            original=_FinishCommand(finite,key,128).plan(_CompositeScope(scope,scope.max_event_id+1))
+            original=_FinishCommand(finite,key,batch_size).plan(_CompositeScope(scope,scope.max_event_id+1))
             header=next(iter(original.events)).evidence
+            actual_request=replace(actual_request,drafts=tuple(sorted(actual_request.drafts,key=lambda draft:0 if draft.kind is OutputKind.ORIGINAL else 1)))
             plan=FinishCaptureCommand(actual_request,key).plan(sub)
             plan=replace(plan,events=(replace(plan.events[0],evidence=header),*plan.events[1:]))
             if mode in ('omit_origin','wrong_origin'):
@@ -458,8 +459,10 @@ def _completion_command(ref,members,at,key,*,mode='valid',drafts=None):
                 outputs={draft.file.device_file_id:identity for draft,identity in zip(actual_request.drafts,plan.result.output_ids)}
                 expected=tuple(outputs[row_facts(scope.connection,'segment_members',row['member_id'])['file_id']] for row in rows)
                 bindings=tuple((row['id'],expected[i if mode!='wrong_identity' else len(rows)-i-1]) for i,row in enumerate(rows))
-                changes=segment_scope_publication_rows(ref,bindings,scope)
-                events.append(segment_event(ref,'PUBLISH',changes,next_event,events[0].transaction_id,at,request_input=bindings));next_event+=1
+                for offset in range(0,len(bindings),batch_size):
+                    page=bindings[offset:offset+batch_size]
+                    changes=segment_scope_publication_rows(ref,page,scope)
+                    events.append(segment_event(ref,'PUBLISH',changes,next_event,events[0].transaction_id,at,request_input=page));next_event+=1
                 for row in rows:
                     owners['segment_scope_members',row['id']]=('action',ref.action_id)
                     state['segment_scope_members'][row['id']]=row
@@ -467,6 +470,21 @@ def _completion_command(ref,members,at,key,*,mode='valid',drafts=None):
             setrow=SegmentRepository().read_set(ref,scope);state['segment_sets'][setrow['id']]=setrow
             owners['segment_sets',setrow['id']]=('action',ref.action_id)
             events.append(segment_event(ref,'ACTIVATE',changes,next_event,events[0].transaction_id,at,request_input=None))
+            # 有限入口与有界完成使用同一规范阶段；所有事件按最终顺序重新编号。
+            from camctl.history.events import load_event_registry
+            registry=load_event_registry()['events']
+            def phase(event):
+                if event.event_type==registry['ACTION_FINISHED']['id']:return 0
+                if event.event_type==registry['OUTPUT_REGISTERED']['id']:return 1 if event.reason==1 else 2
+                if event.event_type==registry['SEGMENT_FACTS']['id']:return 3 if event.reason==7 else 6
+                if event.event_type==registry['OPERATION_CONFIGURED']['id']:return 4
+                return 5
+            events.sort(key=phase)
+            first=scope.max_event_id+1
+            events=[replace(event,event_id=first+index) for index,event in enumerate(events)]
+            marker=events[-1]
+            from camctl.persistence.transaction import update_change
+            events[-1]=replace(marker,rows=(update_change('segment_sets',setrow['id'],{'published_event_id':None},{'published_event_id':marker.event_id}),))
             if mode=='omit_marker':events.pop()
             scope.allocate(len(events))
             return replace(plan,events=tuple(events),owners=owners,state_rows=state)

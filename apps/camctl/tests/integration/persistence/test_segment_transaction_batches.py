@@ -516,7 +516,8 @@ async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_pat
     assert records[2]['verify_peak']<records[1]['verify_peak']+400_000
 
 @pytest.mark.asyncio
-async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_path,monkeypatch):
+@pytest.mark.parametrize('omit_progress',[False,True,'missing_reads','unreliable_reads'])
+async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_path,monkeypatch,omit_progress):
     from camctl.persistence.transaction import update_change,event_envelope
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
@@ -530,13 +531,22 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
                     row=scope.connection.execute('SELECT id,original_name FROM outputs ORDER BY id LIMIT 1').fetchone()
                     event=event_envelope(event.event_id,event.transaction_id,20,4,(update_change('outputs',row[0],{'original_name':row[1]},{'original_name':'changed.osv'}),),request.occurred_at)
                 yield event
-        return replace(result,events=events(),complete=lambda _:None)
+        def context(event,transaction):
+            current=result.context(event,transaction)
+            if omit_progress is True:current.current_reads._segment_guard_state=None
+            if event.event_id==transaction.last_event_id:
+                if omit_progress=='missing_reads':current=replace(current,current_reads=None)
+                elif omit_progress=='unreliable_reads':
+                    from types import SimpleNamespace
+                    current=replace(current,current_reads=SimpleNamespace(seal_segment_finish=lambda _:None))
+            return current
+        return replace(result,events=events(),context=context,complete=lambda _:None)
     monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
     try:
-        before=_fingerprint(owned.connection)
+        before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
-        assert _fingerprint(owned.connection)==before
+        assert _complete_persisted_state(owned)==before
     finally:owned.connection.close()
 
 
@@ -969,3 +979,182 @@ async def test_unknown_actual_stop_cannot_create_an_end_or_control_duration(tmp_
         assert saved.kind.value=='rolled_back'
         assert owned.connection.execute('SELECT activity_state,control_elapsed_ns FROM device_activities WHERE action_id=?',(action_id,)).fetchone()==(2,None)
     finally:owned.connection.close()
+
+
+def _complete_persisted_state(owned):
+    """小型反例比较全部业务/历史/目录/水位行，不以数量代替内容。"""
+    tables=tuple(row[0] for row in owned.connection.execute(
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"))
+    return {table:tuple(owned.connection.execute(f'SELECT * FROM {table} ORDER BY rowid')) for table in tables}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode',['valid','name','time','id','batch','direct'])
+async def test_accepted_completion_matches_original_full_request(tmp_path,monkeypatch,mode):
+    from .test_segment_storage import _completion_command
+    from camctl.persistence.transaction import row_change
+    if mode=='direct':
+        owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
+        row=repo.read_set(ref,owned)
+        request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
+    else:
+        owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=5)
+    original=transactions._FinishCommand.plan
+    def altered_plan(command,scope):
+        result=original(command,scope)
+        def events():
+            pending=None
+            for event in result.events:
+                if event.event_type==20:
+                    row=event.rows[0]
+                    if mode=='name':event=replace(event,rows=(row_change('outputs',row.row_id,{**row.after.values,'original_name':'changed.osv'}),*event.rows[1:]))
+                    elif mode=='time':event=replace(event,occurred_at=event.occurred_at+1)
+                    elif mode=='id':event=replace(event,rows=(replace(row,row_id=row.row_id+100),*event.rows[1:]))
+                if mode=='batch' and event.event_type==transactions.storage._EVENT['id'] and event.reason==transactions.storage._EVENT['branches']['PUBLISH']['reason']:
+                    if pending is None:
+                        pending=event
+                        continue
+                    if pending is not False:
+                        def repartition(base,rows):
+                            bindings=tuple((r.row_id,r.after.values['output_id']) for r in rows)
+                            return replace(base,rows=tuple(rows),evidence={'segment_request':{'ref':transactions.document(ref),'input':transactions.storage._request_document(bindings)}})
+                        yield repartition(pending,(pending.rows[0],))
+                        event=repartition(event,(pending.rows[1],*event.rows))
+                        pending=False
+                yield event
+        return replace(result,events=events(),complete=lambda _:None)
+    try:
+        key=new_operation_key()
+        before=_complete_persisted_state(owned)
+        if mode=='direct':receipt=commit_operation(_completion_command(ref,members,request.occurred_at,key),key,owned)
+        else:
+            if mode!='valid':monkeypatch.setattr(transactions._FinishCommand,'plan',altered_plan)
+            receipt=transactions.finish_segment_recording(request,key,owned,batch_size=2)
+        if mode in ('valid','direct'):
+            assert receipt.kind=='completed',receipt.error
+            result=transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=1)
+            assert result is not None
+            assert result.output_count==(2 if mode=='direct' else 5)
+            assert transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=128)==result
+        else:
+            assert receipt.kind=='rolled_back',receipt.error
+            assert _complete_persisted_state(owned)==before
+    finally:owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry',['bounded','finite'])
+@pytest.mark.parametrize('stage,field',[
+    ('F','evidence'),('original','clock'),('original','after'),
+    ('preview','name'),('preview','origin_id'),('publish','order'),
+    ('run','time'),('run','before'),('plan','clock'),('L','time')])
+async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatch,entry,stage,field):
+    from .test_segment_storage import _preview_world,_candidate_drafts,_completion_command
+    from camctl.persistence.transaction import row_change
+    owned,runtime,repo,ref,members,_,_=await _preview_world(tmp_path,original_sizes=(10,)*3,paired_index=1,page_size=1)
+    _finish_attempt(owned,ref,runtime)
+    row=repo.read_set(ref,owned)
+    request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
+    changed=False
+    def mutate(event):
+        nonlocal changed
+        types=transactions.load_event_registry()['events']
+        current=('F' if event.event_type==types['ACTION_FINISHED']['id'] else
+            ('original' if event.reason==1 else 'preview') if event.event_type==types['OUTPUT_REGISTERED']['id'] else
+            ('publish' if event.reason==7 else 'L') if event.event_type==types['SEGMENT_FACTS']['id'] else
+            'run' if event.event_type==types['OPERATION_CONFIGURED']['id'] else 'plan')
+        if changed or current!=stage:return event
+        changed=True
+        if field=='clock':return replace(event,clock_status=1)
+        if field=='time':return replace(event,occurred_at=event.occurred_at+1)
+        if field=='evidence':return replace(event,evidence={**event.evidence,'other':True})
+        if field=='order':
+            rows=tuple(reversed(event.rows))
+            bindings=tuple((row.row_id,row.after.values['output_id']) for row in rows)
+            return replace(event,rows=rows,evidence={'segment_request':{'ref':transactions.document(ref),'input':transactions.storage._request_document(bindings)}})
+        if field=='origin_id':return replace(event,rows=(event.rows[0],replace(event.rows[1],row_id=event.rows[1].row_id+100)))
+        row=event.rows[0]
+        if field=='before':return replace(event,rows=(replace(row,before=replace(row.before,values={**row.before.values,'retry_wait_required':1})),))
+        values={**row.after.values,**({'original_name':'other.LRF'} if field=='name' else {'availability':2})}
+        return replace(event,rows=(row_change(row.table,row.row_id,values),*event.rows[1:]))
+    try:
+        key=new_operation_key();before=_complete_persisted_state(owned)
+        if entry=='bounded':
+            original=transactions._FinishCommand.plan
+            def plan(command,scope):
+                saved=original(command,scope)
+                return replace(saved,events=(mutate(event) for event in saved.events),complete=lambda _:None)
+            monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+            receipt=transactions.finish_segment_recording(request,key,owned,batch_size=2)
+        else:
+            command=_completion_command(ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=2)
+            class Altered:
+                def plan(self,scope):
+                    saved=command.plan(scope)
+                    return replace(saved,events=tuple(mutate(event) for event in saved.events))
+            receipt=commit_operation(Altered(),key,owned)
+        assert changed,(stage,field,receipt.error)
+        assert receipt.kind=='rolled_back',receipt.error
+        assert _complete_persisted_state(owned)==before
+    finally:owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry',['bounded','finite'])
+@pytest.mark.parametrize('batch',[1,2,128])
+async def test_both_entries_use_one_canonical_order_and_original_batch(tmp_path,entry,batch):
+    from .test_segment_storage import _preview_world,_candidate_drafts,_completion_command
+    owned,runtime,repo,ref,members,_,_=await _preview_world(tmp_path,original_sizes=(10,)*5,paired_index=1,page_size=1)
+    _finish_attempt(owned,ref,runtime)
+    row=repo.read_set(ref,owned)
+    request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
+    try:
+        key=new_operation_key()
+        if entry=='bounded':saved=transactions.finish_segment_recording(request,key,owned,batch_size=batch)
+        else:saved=commit_operation(_completion_command(ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=batch),key,owned)
+        assert saved.kind=='completed',saved.error
+        # 手算的阶段次序：5原片、1预览、5条范围、原RESULTS与最后计划共同收场。
+        types=transactions.load_event_registry()['events']
+        actual=tuple(owned.connection.execute('SELECT event_type,json_extract(body_json,\'$.reason\'),json_array_length(body_json,\'$.rows\') FROM history_events WHERE transaction_id=? ORDER BY id',(saved.boundary.txn_id,)))
+        expected=[(types['ACTION_FINISHED']['id'],1,1)]+[(types['OUTPUT_REGISTERED']['id'],1,1)]*5+[(types['OUTPUT_REGISTERED']['id'],3,2)]
+        expected.extend((types['SEGMENT_FACTS']['id'],7,min(batch,5-offset)) for offset in range(0,5,batch))
+        expected.extend([(types['OPERATION_CONFIGURED']['id'],3,1),(types['PLAN_STATUS_CHANGED']['id'],2,1),(types['SEGMENT_FACTS']['id'],8,1)])
+        assert actual==tuple(expected)
+        result=transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=1)
+        before=_complete_persisted_state(owned)
+        repeated=transactions.finish_segment_recording(request,key,owned,batch_size=128 if batch==1 else 1)
+        assert repeated.kind=='completed' and repeated.result==result,repeated.error
+        assert _complete_persisted_state(owned)==before
+    finally:owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry',['bounded','finite'])
+async def test_context_cannot_replace_original_transaction_connection(tmp_path,monkeypatch,entry):
+    from .test_segment_storage import _completion_command
+    from camctl.persistence.event_reads import SqlEventReads
+    owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.UNKNOWN)
+    _finish_attempt(owned,ref,runtime)
+    row=repo.read_set(ref,owned)
+    request=_request_for(ref,row,runtime.wall_us(),repo.read_assessment(ref,owned),2)
+    path=owned.connection.execute('PRAGMA database_list').fetchone()[2]
+    observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
+    observer.connection.execute('BEGIN')
+    observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+    original=SqlEventReads.__init__
+    replaced=False
+    def initialize(reads,*args,**kwargs):
+        nonlocal replaced
+        original(reads,*args,**kwargs)
+        if not replaced:
+            replaced=True
+            reads.connection=observer.connection
+    monkeypatch.setattr(SqlEventReads,'__init__',initialize)
+    try:
+        before=_complete_persisted_state(owned);key=new_operation_key()
+        if entry=='bounded':saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
+        else:saved=commit_operation(_completion_command(ref,members,request.occurred_at,key),key,owned)
+        assert replaced
+        assert saved.kind=='rolled_back',saved.error
+        assert _complete_persisted_state(owned)==before
+    finally:observer.connection.close();owned.connection.close()

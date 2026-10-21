@@ -552,6 +552,77 @@ def _event_state(db,event,ref,proposal):
     return state,owners,ReadCoverage(coverage)
 
 
+def _canonical_events(request,transaction,header,reader,qualification):
+    """原冻结事实的唯一事件协议；每阶段只驻留当前候选/范围页。
+
+    reader 的前序产物端口只承认实际已验证事件；恢复时使用原完整组。
+    此生成器同时约束生产、必经 seal 和原键核实，不从实际待验证行生成预期。
+    """
+    db=reader.connection
+    action,run,setrow,assessment=_identity(request,db)
+    _verify_qualification_header(header,qualification)
+    status,error,details=_failure(request,assessment,header['original_count'],setrow,db,before_event_id=transaction.first_event_id)
+    if status!=header['action_status']:raise ConsistencyError('规范终态与原冻结判断不同')
+    types=load_event_registry()['events']
+    identity=transaction.first_event_id
+    def envelope(name,reason,rows,evidence=None):
+        return event_envelope(identity,transaction.txn_id,types[name]['id'],reason,tuple(rows),request.occurred_at,evidence)
+    before={'status':qualification['action_status']};after={'status':status}
+    if status==4:
+        before.update(error_code=None,error_details_json=None)
+        after.update(error_code=error,error_details_json=details)
+    yield envelope('ACTION_FINISHED',1 if status==3 else 2,(update_change('actions',request.ref.action_id,before,after),),{'segment_finish_request':header})
+    identity+=1
+    def created(file_id,kind):
+        resolver=getattr(reader,'segment_created_output',None)
+        if resolver is not None:return resolver(transaction,request.ref.action_id,file_id,kind)
+        return _created_output(db,transaction,request.ref.action_id,file_id,kind)
+    output_id=header['first_output_id'];origin_id=header['first_origin_id']
+    originals=previews=0
+    for wanted in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
+        for candidate in _candidates(request,reader,header['batch_size']):
+            if candidate.kind is not wanted:continue
+            member=row_facts(db,'segment_members',candidate.member_id)
+            file=storage._fixed_file(db,candidate.file_id,member['file_event_id'])
+            from .capture import _unchecked_media
+            values=dict(source_action_id=request.ref.action_id,kind=int(enum_for('outputs.kind')[wanted.name]),device_file_id=candidate.file_id,intermediate_file_id=None,
+                original_name=file['original_name'],media_type=file['media_type'],availability=1,cleanup_status=1,cleanup_error_json=None,media_json=_unchecked_media(),error_json=None)
+            rows=(row_change('outputs',output_id,values),)
+            if wanted is OutputKind.PREVIEW:
+                original=created(candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
+                rows+=(row_change('output_origins',origin_id,dict(output_id=output_id,original_output_id=original)),)
+                origin_id+=1;previews+=1
+            else:originals+=1
+            yield envelope('OUTPUT_REGISTERED',values['kind'],rows)
+            identity+=1;output_id+=1
+    count=0
+    for page in _scopes(request,reader,header['batch_size']):
+        if not page:continue
+        bindings=[];rows=[]
+        for row in page:
+            member=row_facts(db,'segment_members',row['member_id'])
+            output=created(member['file_id'],int(enum_for('outputs.kind').ORIGINAL))
+            bindings.append((row['id'],output))
+            rows.append(update_change('segment_scope_members',row['id'],{'output_id':None},{'output_id':output}))
+            count+=1
+        evidence={'segment_request':{'ref':document(request.ref),'input':storage._request_document(tuple(bindings))}}
+        yield envelope('SEGMENT_FACTS',storage._EVENT['branches']['PUBLISH']['reason'],rows,evidence)
+        identity+=1
+    if (originals,previews,count)!=(header['original_count'],header['preview_count'],header['scope_count']):
+        raise ConsistencyError('规范事件阶段没有耗尽原完整候选及范围计数')
+    if qualification['finish_run']:
+        evidence={'stale_run_request':{'kind':'stale_run_finish','responsibility_keys':[run['responsibility_key']],'status':3,'error':None}}
+        yield envelope('OPERATION_CONFIGURED',3,(_run_finish_row(request,qualification),),evidence)
+        identity+=1
+    if qualification['complete_plan']:
+        yield envelope('PLAN_STATUS_CHANGED',2,(update_change('plans',action['plan_id'],{'status':qualification['plan_status']},{'status':3}),))
+        identity+=1
+    if identity!=transaction.last_event_id:raise ConsistencyError('规范事件阶段与原完整L不同')
+    yield envelope('SEGMENT_FACTS',storage._EVENT['branches']['ACTIVATE']['reason'],
+        (update_change('segment_sets',setrow['id'],{'published_event_id':None},{'published_event_id':identity}),),
+        {'segment_request':{'ref':document(request.ref),'input':None}})
+
+
 class _FinishCommand:
     def __init__(self,request,key,batch):self.request,self.key,self.batch=request,key,batch
 
@@ -592,58 +663,18 @@ class _FinishCommand:
         header={'request':request_document(request),'output_count':output_count,'original_count':originals,'preview_count':previews,'scope_count':scope_count,
             'first_output_id':first_output,'first_origin_id':first_origin,'action_status':status,'plan_status':result.plan_status,'batch_size':self.batch,
             'finish_run':finish_run,'complete_plan':complete_plan}
-        events=load_event_registry()['events']
         marker=storage.segment_event(request.ref,'ACTIVATE',storage.segment_activation_rows(request.ref,allocation.last_event_id,scope),allocation.last_event_id,allocation.txn_id,request.occurred_at,request_input=None)
         def proposal(identity):
             if identity!=marker.event_id:raise ConsistencyError('原提案只有唯一最终marker可查证')
             return marker
-        guard_state={}
         def context(event,transaction):
             state,owners,coverage=_event_state(db,event,request.ref,proposal)
             # 固定提案事实只含marker身份，不含未来业务资格。
             final={**state,'segment_sets':{setrow['id']:{**setrow,'published_event_id':marker.event_id}}}
-            reads=SqlEventReads(db,PlanReadScope(plan['id'],self.batch),proposal_event=proposal,segment_ref=request.ref,segment_guard_state=guard_state)
+            reads=SqlEventReads(db,PlanReadScope(plan['id'],self.batch),proposal_event=proposal,segment_ref=request.ref)
             return EventContext(transaction,owners,state,final,coverage,current_reads=reads)
         def generate():
-            identity=allocation.first_event_id
-            before={'status':action['status']};after={'status':status}
-            if status==4:
-                before.update(error_code=action['error_code'],error_details_json=action['error_details_json'])
-                after.update(error_code=error,error_details_json=details)
-            yield event_envelope(identity,allocation.txn_id,events['ACTION_FINISHED']['id'],1 if status==3 else 2,(update_change('actions',action['id'],before,after),),request.occurred_at,{'segment_finish_request':header});identity+=1
-            output_id=first_output;origin_id=first_origin
-            for wanted in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
-                for candidate in _candidates(request,scope,self.batch):
-                    if candidate.kind is not wanted:continue
-                    member=row_facts(db,'segment_members',candidate.member_id)
-                    file=storage._fixed_file(db,candidate.file_id,member['file_event_id'])
-                    values=dict(source_action_id=request.ref.action_id,kind=int(enum_for('outputs.kind')[wanted.name]),device_file_id=candidate.file_id,intermediate_file_id=None,
-                        original_name=file['original_name'],media_type=file['media_type'],availability=1,cleanup_status=1,cleanup_error_json=None,
-                        media_json={'status':'unchecked'},error_json=None)
-                    from .capture import _unchecked_media
-                    values['media_json']=_unchecked_media()
-                    rows=(row_change('outputs',output_id,values),)
-                    if wanted is OutputKind.PREVIEW:
-                        original=_created_output(db,TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id),request.ref.action_id,candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
-                        rows+=(row_change('output_origins',origin_id,dict(output_id=output_id,original_output_id=original)),);origin_id+=1
-                    yield event_envelope(identity,allocation.txn_id,events['OUTPUT_REGISTERED']['id'],values['kind'],rows,request.occurred_at)
-                    identity+=1;output_id+=1
-            for page in _scopes(request,scope,self.batch):
-                if not page:continue
-                bindings=[]
-                for row in page:
-                    member=row_facts(db,'segment_members',row['member_id'])
-                    output=_created_output(db,TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id),request.ref.action_id,member['file_id'],int(enum_for('outputs.kind').ORIGINAL))
-                    bindings.append((row['id'],output))
-                bindings=tuple(bindings)
-                yield storage.segment_event(request.ref,'PUBLISH',storage.segment_scope_publication_rows(request.ref,bindings,scope),identity,allocation.txn_id,request.occurred_at,request_input=bindings);identity+=1
-            if finish_run:
-                rows=(_run_finish_row(request,qualification),)
-                evidence={'stale_run_request':{'kind':'stale_run_finish','responsibility_keys':[run['responsibility_key']],'status':3,'error':None}}
-                yield event_envelope(identity,allocation.txn_id,events['OPERATION_CONFIGURED']['id'],3,rows,request.occurred_at,evidence);identity+=1
-            if complete_plan:
-                yield event_envelope(identity,allocation.txn_id,events['PLAN_STATUS_CHANGED']['id'],2,(update_change('plans',plan['id'],{'status':plan['status']},{'status':3}),),request.occurred_at);identity+=1
-            yield marker
+            yield from _canonical_events(request,TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id),header,scope,qualification)
         def complete(db):
             from camctl.history.decoding import decode_event_row
             raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(marker.event_id,))
@@ -715,73 +746,11 @@ def _verify_events(request,key,tx,header,reader,batch_size,first_page):
             yield from page.items
             if page.next_cursor is None:return
             position=page.next_cursor
-    events=iter(stream())
-    types=load_event_registry()['events']
-    expected_id=tx.first_event_id
-    def take(name,reason,evidence):
-        nonlocal expected_id
-        event=next(events,None)
-        if (event is None or event.event_id!=expected_id or event.event_type!=types[name]['id'] or event.reason!=reason
-                or event.occurred_at!=request.occurred_at or event.clock_status!=2 or not json_equal(event.evidence,evidence)):
-            raise ConsistencyError('原完成组事件身份、顺序、时刻、分支或申请不同')
-        expected_id+=1
-        return event
-    def rows_equal(event,expected):
-        if event.rows!=tuple(expected):raise ConsistencyError('原完成组逐事件行与冻结完整申请不同')
-    status,error,details=_failure(request,assessment,header['original_count'],setrow,db,before_event_id=tx.first_event_id)
-    if status!=header['action_status']:raise ConsistencyError('原结果与原冻结判断不同')
-    first=take('ACTION_FINISHED',1 if status==3 else 2,{'segment_finish_request':header})
-    if len(first.rows)!=1 or first.rows[0].table!='actions' or first.rows[0].row_id!=request.ref.action_id:
-        raise ConsistencyError('原完成组来源身份不同')
-    change=first.rows[0]
-    expected_before={'status':2};expected_after={'status':status}
-    if status==4:
-        # actions结构保证执行中没有动作错误；原完整行不可夹入另一份旧错误。
-        expected_before.update(error_code=None,error_details_json=None)
-        expected_after.update(error_code=error,error_details_json=details)
-    if change!=update_change('actions',request.ref.action_id,expected_before,expected_after):
-        raise ConsistencyError('原完成组动作终态的完整前后行不同')
-    output_id=header['first_output_id'];origin_id=header['first_origin_id']
-    originals=previews=0
-    for wanted in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
-        for candidate in _candidates(request,reader,header['batch_size']):
-            if candidate.kind is not wanted:continue
-            member=row_facts(db,'segment_members',candidate.member_id)
-            file=storage._fixed_file(db,candidate.file_id,member['file_event_id'])
-            from .capture import _unchecked_media
-            values=dict(source_action_id=request.ref.action_id,kind=int(enum_for('outputs.kind')[wanted.name]),device_file_id=candidate.file_id,intermediate_file_id=None,
-                original_name=file['original_name'],media_type=file['media_type'],availability=1,cleanup_status=1,cleanup_error_json=None,media_json=_unchecked_media(),error_json=None)
-            rows=[row_change('outputs',output_id,values)]
-            if wanted is OutputKind.PREVIEW:
-                original=_created_output(db,tx,request.ref.action_id,candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
-                rows.append(row_change('output_origins',origin_id,dict(output_id=output_id,original_output_id=original)))
-                origin_id+=1;previews+=1
-            else:originals+=1
-            rows_equal(take('OUTPUT_REGISTERED',values['kind'],{}),rows)
-            if _created_output(db,tx,request.ref.action_id,candidate.file_id,values['kind'])!=output_id:
-                raise ConsistencyError('原完整组产物身份范围不同')
-            output_id+=1
-    count=0
-    for page in _scopes(request,reader,header['batch_size']):
-        if not page:continue
-        bindings=[];rows=[]
-        for row in page:
-            member=row_facts(db,'segment_members',row['member_id'])
-            identity=_created_output(db,tx,request.ref.action_id,member['file_id'],int(enum_for('outputs.kind').ORIGINAL))
-            bindings.append((row['id'],identity));rows.append(update_change('segment_scope_members',row['id'],{'output_id':None},{'output_id':identity}));count+=1
-        evidence={'segment_request':{'ref':document(request.ref),'input':storage._request_document(tuple(bindings))}}
-        rows_equal(take('SEGMENT_FACTS',storage._EVENT['branches']['PUBLISH']['reason'],evidence),rows)
-    if (originals,previews,count)!=(header['original_count'],header['preview_count'],header['scope_count']):
-        raise ConsistencyError('原完成组计数与冻结完整候选或范围不同')
-    if header['finish_run']:
-        evidence={'stale_run_request':{'kind':'stale_run_finish','responsibility_keys':[run['responsibility_key']],'status':3,'error':None}}
-        event=take('OPERATION_CONFIGURED',3,evidence)
-        _verify_run_finish_event(event,request,run['responsibility_key'],qualification)
-    if header['complete_plan']:
-        event=take('PLAN_STATUS_CHANGED',2,{})
-        rows_equal(event,(update_change('plans',action['plan_id'],{'status':qualification['plan_status']},{'status':3}),))
-    marker=take('SEGMENT_FACTS',storage._EVENT['branches']['ACTIVATE']['reason'],{'segment_request':{'ref':document(request.ref),'input':None}})
-    rows_equal(marker,(update_change('segment_sets',setrow['id'],{'published_event_id':None},{'published_event_id':tx.last_event_id}),))
-    if expected_id!=tx.last_event_id+1 or next(events,None) is not None:
-        raise ConsistencyError('原完成组存在额外事件或缺失最终事件')
-    return SegmentFinishResult(request.ref,status,header['plan_status'],HistoryBoundary(tx.txn_id,tx.last_event_id),originals+previews,originals,previews,count)
+    for actual,expected in zip_longest(stream(),_canonical_events(request,tx,header,reader,qualification)):
+        if actual is None or expected is None or replace(actual,change_seq=None)!=expected:
+            raise ConsistencyError('原完成组完整事件与冻结完整申请不同')
+        if expected.event_type==load_event_registry()['events']['OUTPUT_REGISTERED']['id']:
+            row=expected.rows[0];values=row.after.values
+            if _created_output(db,tx,request.ref.action_id,values['device_file_id'],values['kind'])!=row.row_id:
+                raise ConsistencyError('原完整组产物不变身份映射与原范围不同')
+    return SegmentFinishResult(request.ref,header['action_status'],header['plan_status'],HistoryBoundary(tx.txn_id,tx.last_event_id),header['output_count'],header['original_count'],header['preview_count'],header['scope_count'])
