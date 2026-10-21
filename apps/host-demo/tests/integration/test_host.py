@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 import select
+import errno
 import shlex
 import shutil
 import signal
@@ -87,17 +88,91 @@ class HostIntegration(unittest.TestCase):
     def plan(self, name, mode='false'):
         p=self.root/name; p.write_text(mode); return p
 
+    def test_submit_waits_for_input_processing_but_not_run_completion(self):
+        (self.root/'hold-run').touch(); (self.root/'hold-submit').touch()
+        plan = self.plan('计划.json')
+        self.start()
+        self.assertEqual(self.command('start-submit '+str(plan)), 'started 0')
+        self.until(lambda: any(e['command'] == 'submit' for e in self.events()))
+        self.assertEqual(self.command('submit-result 0'), 'pending')
+        self.assertEqual(self.command('coexist'), 'coexists')
+        (self.root/'hold-submit').unlink()
+        self.until(lambda: self.command('submit-result 0') == 'submit 0 errno=0')
+        plan.unlink()
+        self.assertTrue((self.root/'hold-run').exists())
+
+    def test_submit_waits_for_process_exit_after_success_message(self):
+        (self.root/'hold-submit-exit').touch()
+        self.start()
+        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
+        self.until(lambda: (self.root/'submit-result-written').exists())
+        self.assertEqual(self.command('submit-result 0'), 'pending')
+        (self.root/'hold-submit-exit').unlink()
+        self.until(lambda: self.command('submit-result 0') == 'submit 0 errno=0')
+
+    def test_submit_returns_failure_for_session_error(self):
+        self.start()
+        self.assertEqual(self.command('submit '+str(self.plan('A', 'error'))), 'submit -1')
+
+    def test_submit_returns_failure_for_unknown_result(self):
+        self.start()
+        self.assertEqual(self.command('submit '+str(self.plan('A', 'empty'))), 'submit -1')
+
+    def test_submit_returns_last_start_error_after_retry_exhaustion(self):
+        self.start(program=self.root/'missing', retries=1)
+        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
+        self.until(lambda: self.command('submit-result 0') == f'submit -1 errno={errno.ENOENT}')
+
+    def test_clock_failure_releases_queued_submit_waiters(self):
+        (self.root/'hold-submit').touch()
+        self.start()
+        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
+        self.until(lambda: any(e['command'] == 'submit' for e in self.events()))
+        self.assertEqual(self.command('start-submit '+str(self.plan('B'))), 'started 1')
+        self.until(lambda: 'call=3 submit accepted' in self.logs())
+        self.assertEqual(self.command('break-clock'), 'clock-failed')
+        for index in [0, 1]:
+            self.until(lambda: self.command(f'submit-result {index}') == f'submit -1 errno={errno.EIO}')
+
+    def test_poll_failure_releases_waiter_and_keeps_claim(self):
+        (self.root/'hold-submit').touch()
+        self.start()
+        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
+        self.until(lambda: any(e['command'] == 'submit' for e in self.events()))
+        self.assertEqual(self.command('break-poll'), 'poll-failed')
+        self.until(lambda: self.command('submit-result 0') == f'submit -1 errno={errno.EIO}')
+        self.assertEqual(self.command('submit '+str(self.plan('B'))), 'submit -1')
+        (self.ready/'file').write_text('data')
+        self.assertEqual(self.command('claim'), 'claimed')
+        self.assertTrue((self.processing/'file').exists())
+
+    def test_submit_defers_cancellation_until_queue_reference_is_released(self):
+        (self.root/'hold-submit').touch()
+        self.start()
+        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
+        self.until(lambda: any(e['command'] == 'submit' for e in self.events()))
+        self.assertEqual(self.command('cancel-submit 0'), 'cancel-requested')
+        self.assertEqual(self.command('submit-result 0'), 'pending')
+        (self.root/'hold-submit').unlink()
+        self.assertEqual(self.command('join-submit 0'), 'canceled')
+        self.assertEqual(self.command('submit '+str(self.plan('B'))), 'submit 0')
+
     def test_concurrent_fifo_capacity_and_host_coexistence(self):
         (self.root/'hold-run').touch(); (self.root/'hold-submit').touch()
         a=self.plan('中文 A.json'); b=self.plan('B.json'); c=self.plan('C.json')
         self.start()
-        self.assertEqual(self.command('submit '+str(a)), 'submit 0')
+        self.assertEqual(self.command('start-submit '+str(a)), 'started 0')
         self.until(lambda: len(self.events())==2)
-        self.assertEqual(self.command('submit '+str(b)), 'submit 0')
+        self.assertEqual(self.command('start-submit '+str(b)), 'started 1')
+        self.until(lambda: 'call=3 submit accepted' in self.logs())
         self.assertEqual(self.command('submit '+str(c)), 'submit -1')
+        self.assertEqual(self.command('submit-result 0'), 'pending')
+        self.assertEqual(self.command('submit-result 1'), 'pending')
         self.assertEqual(self.command('coexist'), 'coexists')
         (self.root/'hold-submit').unlink()
         self.until(lambda: len(self.events())==3)
+        for index in [0, 1]:
+            self.until(lambda: self.command(f'submit-result {index}') == 'submit 0 errno=0')
         self.assertEqual([e['plan'] for e in self.events() if e['command']=='submit'], [str(a),str(b)])
         self.assertEqual(self.command('reinit'), 'rejected')
 
@@ -144,7 +219,7 @@ class HostIntegration(unittest.TestCase):
         (self.root/'run-mode').write_text('error'); self.start()
         self.until(lambda: 'result=error' in self.logs())
         a=self.plan('A','empty'); b=self.plan('B','false')
-        self.assertEqual(self.command('submit '+str(a)), 'submit 0')
+        self.assertEqual(self.command('submit '+str(a)), 'submit -1')
         self.assertEqual(self.command('submit '+str(b)), 'submit 0')
         self.until(lambda: len(self.events())==3)
         self.assertEqual([e['command'] for e in self.events()], ['run','submit','submit'])
@@ -245,7 +320,7 @@ class HostIntegration(unittest.TestCase):
         self.until(lambda: 'command=run' in self.logs() and 'result=success' in self.logs())
         self.assertEqual(self.command('ignore-children'), 'children-ignored')
         plan=self.plan('A')
-        self.assertEqual(self.command('submit '+str(plan)), 'submit 0')
+        self.assertEqual(self.command('submit '+str(plan)), 'submit -1')
         self.until(lambda: 'command=submit not_started errno=22' in self.logs())
         self.assertEqual([e['command'] for e in self.events()], ['run'])
 

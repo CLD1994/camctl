@@ -14,7 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from _wsl_host_demo import HostDemo, wait_for
+from _wsl_host_demo import HostDemo, query_state, wait_for
+from camctl_fixtures import Deployment
 
 _COMPONENT = Path(__file__).resolve().parents[2] / "apps/host-demo"
 _ENTRY = "from camctl.cli import main; raise SystemExit(main())"
@@ -81,7 +82,7 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
         "request_id": "1", "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         "name": "独立接入检查", "actions": [{
             "name": "检查报告", "type": "report_status",
-            "scheduled_at": (now + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S"),
+            "scheduled_at": (now + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"),
             "params": {"scope": "full"}}]}, ensure_ascii=False))
 
     def completed_report():
@@ -100,10 +101,37 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
     try:
         demo.start(env=environment, use_default_paths=not custom_paths)
         demo.submit(plan)
+        # 成功返回时已持久化，动作仍待执行；删除原输入后重启也从状态库恢复。
+        assert query_state(runtime / "state.db", "SELECT status FROM actions") == [(1,)]
+        plan.unlink()
+        demo.stop()
+        demo.start(env=environment, use_default_paths=not custom_paths)
         published, content = wait_for(completed_report, 30, "接入示例的报告动作未完成")
         demo.claim()
         claimed = processing / published.name
         assert claimed.exists(), f"CLI 发布到 {published.parent}，接入示例却领取 {ready}"
         assert claimed.read_bytes() == content
+    finally:
+        demo.stop()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="C 模块在部署侧 Linux 环境验证")
+def test_submit_saved_rejection_allows_removing_input(tmp_path: Path, host_demo: str):
+    deployment = Deployment(tmp_path, devices=False)
+    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    plan = tmp_path / "rejected.json"
+    plan.write_text(json.dumps({"request_id": "2"}))
+    demo = HostDemo(deployment, host_demo)
+    try:
+        demo.start()
+        demo.submit(plan)
+        # 业务拒绝不等于提交会话失败；成功返回前诊断已经持久化。
+        diagnostics = query_state(deployment.state_db,
+                                  "SELECT errors_json FROM plan_file_diagnostics")
+        assert len(diagnostics) == 1
+        assert json.loads(diagnostics[0][0])[0]["code"] == "plan_body_rejected"
+        assert query_state(deployment.state_db, "SELECT COUNT(*) FROM plans") == [(0,)]
+        plan.unlink()
     finally:
         demo.stop()

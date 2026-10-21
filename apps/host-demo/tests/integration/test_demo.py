@@ -31,7 +31,7 @@ class DemoIntegration(unittest.TestCase):
                 proc.stdin.write(line+'\n'); proc.stdin.flush(); return response()
             try:
                 self.assertIn('初始化',response())
-                self.assertIn('已接收',command('submit '+str(plan)))
+                self.assertIn('可删除',command('submit '+str(plan)))
                 (ready/'report').write_bytes(b'original bytes')
                 self.assertIn('领取调用已返回',command('claim'))
                 self.assertEqual((processing/'report').read_bytes(),b'original bytes')

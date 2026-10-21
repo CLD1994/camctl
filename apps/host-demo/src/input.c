@@ -2,7 +2,8 @@
 #include "config.h"
 #include <errno.h>
 #include <string.h>
-int host_inputs_push(host_inputs *q, const char *path, uint64_t id) {
+int host_inputs_push(host_inputs *q, const char *path, uint64_t id,
+                     struct host_submission *submission) {
     int e = host_path_validate(path);
     if (e)
         return e;
@@ -11,6 +12,7 @@ int host_inputs_push(host_inputs *q, const char *path, uint64_t id) {
     host_input *item = &q->items[(q->head + q->count) % q->capacity];
     strcpy(item->path, path);
     item->id = id;
+    item->submission = submission;
     q->count++;
     return 0;
 }

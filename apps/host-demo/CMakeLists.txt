@@ -125,7 +125,7 @@ if(HOST_BUILD_TESTS)
   add_executable(host_driver tests/integration/host_driver.c)
   target_include_directories(host_driver PRIVATE src)
   target_link_libraries(host_driver PRIVATE camctl_host)
-  set_property(TARGET host_driver APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=write,--wrap=unlink,--wrap=clock_gettime,--wrap=kill,--wrap=host_group_scan_batch,--wrap=host_result_parse,--wrap=posix_spawn")
+  set_property(TARGET host_driver APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=write,--wrap=unlink,--wrap=clock_gettime,--wrap=poll,--wrap=kill,--wrap=host_group_scan_batch,--wrap=host_result_parse,--wrap=posix_spawn")
   add_test(NAME integration_host COMMAND ${HOST_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_host.py
     $<TARGET_FILE:host_driver> ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/controlled_cli.py)
   set_tests_properties(integration_host PROPERTIES LABELS integration TIMEOUT 90)

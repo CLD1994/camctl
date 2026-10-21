@@ -130,11 +130,14 @@ class GroupSession:
                 "params": {"scope": "full"},
             }]},
         })
-        assert self.command(f"submit {path}") == "submit 0"
         if wait:
+            assert self.command(f"submit {path}") == "submit 0"
             self.until(lambda: "command=submit" in self.logs() and
                        "result=success" in self.logs() and "needs_run=1" in self.logs(),
                        "真实 submit 建立待启动要求")
+        else:
+            # 主程序的控制线程继续管理测试门闩，独立调用线程阻塞等待 submit。
+            assert self.command(f"start-submit {path}") == "started 0"
         return path
 
     def exit_first(self):
@@ -309,3 +312,5 @@ def test_original_group_does_not_kill_parallel_submit_or_other_groups(session_fa
     session.command("resume-scan")
     session.until(lambda: len(session.calls("run")) == 2, "原组收场后放行")
     (session.root / "hold-submit").unlink()
+    session.until(lambda: session.command("submit-result 0") == "submit 0 errno=0",
+                  "并行 submit 在输入处理完成后返回")
