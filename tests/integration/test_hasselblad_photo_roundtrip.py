@@ -1,6 +1,6 @@
 """Hasselblad 安装能力、真实网页及文件上传的跨组件接缝。
 
-相机拍摄链在后续用例消费同一组入口；本文件的网页与上传定向
+网页、正常拍摄与恢复用例消费同一组安装入口；定向网页与上传
 用例分别证明实际预设重开/下载和真实 Files.upload，不连接设备。
 """
 from __future__ import annotations
@@ -183,6 +183,7 @@ class PhotoCase:
     capture_format: str
     source: str
     shutter: str
+    focus_override: tuple[str, int | None] | None = None
 
     @property
     def name(self):
@@ -197,6 +198,9 @@ class PhotoCase:
             "0.000333": ('{"mode":"auto"}', '{"mode":"AF-S"}'),
             "0.00025": ('{"mode":"daylight"}', '{"mode":"MF"}'),
         }[self.shutter]
+        if self.focus_override is not None:
+            assert self.focus_override in (("MF", 5), ("MF", None))
+            focus = '{"mode":"MF"' + (',"relative_move":5' if self.focus_override[1] == 5 else '') + '}'
         return ('{"type":"hasselblad_photo","capture_format":' + json.dumps(self.capture_format)
                 + ',"exposure":{' + exposure + ',"shutter_s":' + self.shutter + '},'
                 + '"white_balance":' + wb + ',"focus":' + focus + '}')
@@ -217,6 +221,13 @@ class PhotoCase:
             commands.extend((("set", "wb-mode", "auto"), ("set", "focus-mode", "AF-S"), ("autofocus",)))
         else:
             commands.extend((("set", "wb-mode", "daylight"), ("set", "focus-mode", "MF")))
+        if self.focus_override is not None:
+            assert self.focus_override in (("MF", 5), ("MF", None))
+            commands = [item for item in commands if item[:2] != ("set", "focus-mode")
+                        and item[0] not in ("focus", "autofocus")]
+            commands.append(("set", "focus-mode", "MF"))
+            if self.focus_override[1] == 5:
+                commands.append(("focus", "5"))
         return tuple(commands)
 
 
@@ -382,7 +393,7 @@ class PhotoWorld:
                           output=self.root / f"{name}-browser.json")
         return target, receipt
 
-    def report(self, name: str):
+    def report(self, name: str, *, status="succeeded"):
         def found():
             for directory in (self.deployment.ready, self.deployment.processing):
                 for path in directory.glob("status-report-*.json"):
@@ -394,10 +405,10 @@ class PhotoWorld:
                     for plan in report["plans"]:
                         for action in plan["actions"]:
                             if action["name"] == name and action["status"] in ("succeeded", "failed"):
-                                assert action["status"] == "succeeded", action
+                                assert action["status"] == status, action
                                 return path, report, action
             return None
-        return wait_for(found, 90, f"{self.case.name}/{name} 的成功报告; {self.root}")
+        return wait_for(found, 90, f"{self.case.name}/{name} 的 {status} 报告; {self.root}")
 
     def claim(self):
         self.host.claim()
@@ -680,5 +691,306 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
         environments = json.loads((world.root / "environment-provenance.json").read_text())
         for field in ("test_environment", "installed_environment", "host_start_environment"):
             assert environments[field]["value"] in (None, "")
+    finally:
+        world.close()
+
+
+def _capture_target(world):
+    request_id = int(json.loads(world.photo_plan.read_text())["request_id"])
+    rows = _rows(world.deployment.state_db,
+        "SELECT p.id AS plan_id,a.id AS action_id,a.device_id,a.driver_id,r.id AS run_id,"
+        "r.kind AS run_kind,r.activity_id,r.responsibility_key FROM plans p "
+        "JOIN actions a ON a.plan_id=p.id JOIN operation_runs r ON r.action_id=a.id "
+        "WHERE p.request_id=? AND a.name=? AND r.responsibility_key='start/'||a.id",
+        (request_id, "capture"))
+    target, = rows
+    target["request_id"] = str(request_id)
+    assert target["device_id"] == "hb-host" and target["driver_id"] == "hasselblad_cfv100c"
+    return target
+
+
+def _attempt(world, target):
+    row, = _rows(world.deployment.state_db,
+        "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (target["run_id"],))
+    return row
+
+
+def _begin_fault(world, fault):
+    world.package.environment["CAMCTL_HB_TEST_FAULT"] = fault
+    plan = world.export_photo()
+    world.start()
+    world.host.submit(plan)
+
+
+def _fault_marker(world, name):
+    def found():
+        path = world.root / f"{name}.json"
+        if path.is_file():
+            return json.loads(path.read_text())
+        # 同步点未装配时，正常完成直接证伪断点，而不是等超时冒充命中。
+        actions = _rows(world.deployment.state_db, "SELECT status FROM actions WHERE name='capture'")
+        if actions and _rows(world.deployment.state_db, "SELECT id FROM outputs"):
+            raise AssertionError(f"未命中 {name}，照片已正常完成；{world.root}")
+        return None
+    return wait_for(found, 90, f"真实安装进程故障门闩 {name}; {world.root}")
+
+
+def _stop_fault_host(world, marker):
+    world.host.stop()
+    live = []
+    for path in Path('/proc').iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            fields = (path / 'stat').read_text().rsplit(')', 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if int(fields[2]) == marker['pgid'] and fields[0] != 'Z':
+            live.append({'pid': int(path.name), 'state': fields[0]})
+    (world.root / 'old-group-after-stop.json').write_text(json.dumps({
+        'original_pid': marker['pid'], 'original_pgid': marker['pgid'], 'live_members': live,
+    }))
+    assert live == []
+
+
+def _restart_fault_host(world):
+    world.host = HostDemo(world.deployment, world.host._demo_path, str(world.launcher))
+    world.start()
+    world.host.submit(world.photo_plan)
+
+
+def _fault_pair(world, capture):
+    outputs = {row['kind']: row for row in capture['outputs']}
+    assert set(outputs) == {'original', 'preview'}
+    assert outputs['original']['output_id'] != outputs['preview']['output_id']
+    assert outputs['preview']['preview_of_output_id'] == outputs['original']['output_id']
+    calls = world.argv()
+    capture_call, = [row for row in calls if row[3] == 'capture']
+    work = Path(capture_call[-1])
+    if world.case.source == 'host':
+        world.tool.rename(world.tool.with_suffix('.offline'))
+    else:
+        wait_for(lambda: not any(work.glob('host-copy*')), 30, '生产回收 capture 双工作副本')
+    deliveries = []
+    for index, role in enumerate(('original', 'preview', 'original', 'preview'), 1):
+        name = f'fault-obtain-{index}-{role}'
+        plan, _ = world.export_plan(name, {
+            'type': 'obtain_action_outputs',
+            'scheduled_at': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+            'params': {'source': {'action_instance_id': capture['action_instance_id']},
+                       'filter': 'default' if role == 'original' else 'preview', 'purpose': 'manual'},
+        })
+        world.host.submit(plan)
+        _, _, obtain = world.report(name)
+        delivery, = obtain['deliveries']
+        assert delivery['output_id'] == outputs[role]['output_id']
+        assert delivery['source_action_instance_id'] == capture['action_instance_id']
+        assert delivery['delivery_id'] not in [item['delivery_id'] for item in deliveries]
+        assert delivery['file_name'] not in [item['file_name'] for item in deliveries]
+        world.claim()
+        content = (world.deployment.processing / delivery['file_name']).read_bytes()
+        assert content == (world.original_bytes if role == 'original' else world.preview_bytes)
+        assert delivery['size'] == len(content) and delivery['sha256'] == hashlib.sha256(content).hexdigest()
+        deliveries.append(delivery)
+        (world.deployment.processing / delivery['file_name']).unlink()
+        if world.case.source == 'device':
+            download = [row for row in world.argv() if row[3] == 'download'][-1]
+            assert download[4:6] == ['original' if role == 'original' else 'thumbnail',
+                                      'camera-copy' + ('.3fr' if world.case.capture_format == 'raw' else '.jpg')]
+            wait_for(lambda: not Path(download[-1]).exists(), 30, '真实 READ 独占工作目录已回收')
+    replay_commands = ('set', 'focus', 'autofocus', 'capture')
+    assert [row for row in world.argv() if row[3] in replay_commands] == [row for row in calls if row[3] in replay_commands]
+    if world.case.source == 'host':
+        assert world.argv() == calls
+    else:
+        downloads = [row for row in world.argv() if row[3] == 'download']
+        assert len(downloads) == len({row[-1] for row in downloads}) == 4
+    return outputs
+
+
+@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '0.000667'), PhotoCase('raw', 'device', '0.000333')), ids=lambda c:c.name)
+def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+    world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+    monkeypatch.chdir(tmp_path)
+    try:
+        _begin_fault(world, 'after-start-result')
+        marker = _fault_marker(world, 'after-start-result')
+        target = _capture_target(world)
+        assert marker['target'] == target
+        before = _attempt(world, target)
+        codes = _fault_codes(world)
+        assert target['run_kind'] == codes['start_kind']
+        assert (before['status'], before['effect_state']) == (codes['attempt_succeeded'], codes['effect_confirmed'])
+        assert marker['ticket'] == {'attempt_id':before['attempt_no'], 'operation':'control',
+                                    'target_id':str(target['activity_id']), 'responsibility_key':target['responsibility_key'],
+                                    'run_id':target['run_id']}
+        assert before['result_event_id'] is not None and before['result_json'] is not None
+        result = json.loads(before['result_json'])
+        assert [row['type'] for row in result['observations']] == ['photo_taken', 'hasselblad_start_entered']
+        assert all(row['version'] == 1 and row['data']['activity_id'] == str(target['activity_id'])
+                   for row in result['observations'])
+        event, = _rows(world.deployment.state_db, 'SELECT * FROM history_events WHERE id=?', (before['result_event_id'],))
+        transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (event['transaction_id'],))
+        assert transaction['operation_key'] == marker['operation_key']
+        assert marker['result_event_id'] == before['result_event_id']
+        assert marker['boundary'] == {'txn_id': transaction['id'], 'last_event_id': transaction['last_event_id']}
+        assert marker['in_transaction'] is False
+        assert _rows(world.deployment.state_db, "SELECT id FROM history_events WHERE json_extract(body_json,'$.evidence.host_photo_request.original_file_id') IS NOT NULL") == []
+        assert transaction['first_event_id'] <= event['id'] <= transaction['last_event_id']
+        assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []
+        calls = world.argv()
+        capture_call, = [row for row in calls if row[3] == 'capture']
+        work = Path(capture_call[-1]); actual = sorted(path for path in work.iterdir() if path.is_file())
+        assert len(actual) == 2
+        assert sorted(path.read_bytes() for path in actual) == sorted((world.original_bytes, world.preview_bytes))
+        (world.root / 'before-kill-start.json').write_text(json.dumps({'target':target, 'attempt':before, 'transaction':transaction}))
+        _stop_fault_host(world, marker)
+        _restart_fault_host(world)
+        report_path, _, capture = world.report('capture')
+        assert _capture_target(world) == target and _attempt(world, target) == before
+        assert _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (transaction['id'],)) == [transaction]
+        assert world.argv() == calls
+        world.assert_precision_and_sources(report_path, capture)
+        _fault_pair(world, capture)
+        assert [row for row in world.argv() if row[3] in ('set','focus','autofocus','capture')] == [row for row in calls if row[3] in ('set','focus','autofocus','capture')]
+    finally:
+        world.close()
+
+
+@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '0.000667'), PhotoCase('jpeg', 'device', '0.000333')), ids=lambda c:c.name)
+def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+    world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+    monkeypatch.chdir(tmp_path)
+    try:
+        _begin_fault(world, 'complete-receipt-loss')
+        report_path, _, capture = world.report('capture')
+        saved = _fault_marker(world, 'complete-commit')
+        verified = _fault_marker(world, 'complete-verifier')
+        assert saved['request'] == verified['request']
+        assert saved['operation_key'] == verified['operation_key']
+        assert saved['boundary'] == verified['boundary']
+        assert saved['in_transaction'] is False and saved['returned_receipt'] == 'unknown'
+        assert verified['returned_receipt'] == 'completed' and verified['query_only'] == 1
+        assert verified['write_connection'] == saved['write_connection'] != verified['verifier_connection']
+        target = _capture_target(world)
+        assert saved['target'] == target
+        transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE operation_key=?', (saved['operation_key'],))
+        assert (transaction['id'], transaction['last_event_id']) == (saved['boundary']['txn_id'], saved['boundary']['last_event_id'])
+        files = _rows(world.deployment.state_db, 'SELECT * FROM intermediate_files WHERE owner_action_id=? ORDER BY purpose', (target['action_id'],))
+        assert len(files) == 2
+        for file, prefix in zip(files, ('original','preview'), strict=True):
+            assert file['id'] == saved['request'][prefix+'_file_id']
+            assert file['size_bytes'] == saved['request'][prefix+'_size_bytes']
+            assert file['sha256'] == saved['request'][prefix+'_sha256']
+        assert len(_rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],))) == 2
+        assert len(_rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],))) == 1
+        world.assert_precision_and_sources(report_path, capture)
+        before = _attempt(world, target); calls = world.argv()
+        _stop_fault_host(world, saved)
+        _restart_fault_host(world)
+        _, _, repeated = world.report('capture')
+        assert repeated['outputs'] == capture['outputs']
+        assert _attempt(world, target) == before and world.argv() == calls
+        _fault_pair(world, capture)
+    finally:
+        world.close()
+
+
+def _fault_codes(world):
+    code = (
+        "import json; from camctl.contracts.enums import enum_for; "
+        "from camctl.contracts.workflow_errors import registered_error; "
+        "fields={'attempt_succeeded':('operation_attempts.status','SUCCEEDED'),"
+        "'effect_confirmed':('operation_attempts.effect_state','CONFIRMED'),'attempt_running':('operation_attempts.status','RUNNING'),"
+        "'attempt_unknown':('operation_attempts.status','UNKNOWN'),"
+        "'effect_unknown':('operation_attempts.effect_state','UNKNOWN'),"
+        "'run_unconfirmed':('operation_runs.status','UNCONFIRMED'),"
+        "'activity_unknown':('device_activities.activity_state','UNKNOWN'),"
+        "'occupancy_held':('device_activities.occupancy_state','HELD'),"
+        "'start_kind':('operation_runs.kind','START'),"
+        "'report_failed':('reports.status','FAILED'),'report_published':('reports.status','PUBLISHED')}; "
+        "values={key:int(enum_for(field)[member]) for key,(field,member) in fields.items()}; "
+        "values['capture_error']=registered_error('capture_result_unconfirmed')['action_error_id']; "
+        "print(json.dumps(values))"
+    )
+    return json.loads(world.package.run([world.package.python, '-c', code]).stdout)
+
+
+def _no_private_details(action, world):
+    def keys(value):
+        if isinstance(value, dict):
+            return set(value) | set().union(*(keys(x) for x in value.values()))
+        if isinstance(value, list):
+            return set().union(*(keys(x) for x in value))
+        return set()
+    assert not keys(action) & {'diagnostics','steps','stdout','stderr','executable','local_exit_code','transport_error'}
+    assert str(world.root) not in json.dumps(action, default=str)
+
+
+def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch):
+    case = PhotoCase('jpeg', 'host', '0.00025', focus_override=('MF', 5))
+    world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+    monkeypatch.chdir(tmp_path)
+    try:
+        codes = _fault_codes(world)
+        _begin_fault(world, 'before-start-result')
+        marker = _fault_marker(world, 'before-start-result')
+        target = _capture_target(world)
+        assert marker['target'] == target and target['run_kind'] == codes['start_kind']
+        before = _attempt(world, target)
+        assert marker['in_transaction'] is False
+        assert marker['ticket'] == {'attempt_id':before['attempt_no'], 'operation':'control',
+                                    'target_id':str(target['activity_id']), 'responsibility_key':target['responsibility_key'],
+                                    'run_id':target['run_id']}
+        assert before['status'] == codes['attempt_running']
+        assert before['result_event_id'] is None and before['result_json'] is None
+        assert before['intent_event_id'] is not None
+        calls = world.argv(); capture_call, = [row for row in calls if row[3] == 'capture']
+        work = Path(capture_call[-1]); files = sorted(path for path in work.iterdir() if path.is_file())
+        assert len(files) == 2
+        assert sorted(p.read_bytes() for p in files) == sorted((world.original_bytes, world.preview_bytes))
+        assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []
+        (world.root / 'before-missing-result-kill.json').write_text(json.dumps({'target':target,'attempt':before}))
+        _stop_fault_host(world, marker)
+        _restart_fault_host(world)
+        _, _, capture = world.report('capture', status='failed')
+        after = _attempt(world, target)
+        assert _capture_target(world) == target
+        assert after['id'] == before['id'] and after['intent_event_id'] == before['intent_event_id']
+        assert (after['status'], after['effect_state']) == (codes['attempt_unknown'], codes['effect_unknown'])
+        assert after['result_event_id'] is not None
+        assert (world.root / 'start-recovery-observed.json').is_file(), '缺少真实 recover_attempt 观察，不能据结果推造恢复依据'
+        recovery = _fault_marker(world, 'start-recovery-observed')
+        assert recovery['target'] == target and recovery['ticket'] == marker['ticket']
+        assert recovery['intent_event_id'] == before['intent_event_id']
+        assert recovery['boundary'] == 'HOST_LOCAL_SETTLED'
+        assert recovery['horizon'] is not None and before['intent_event_id'] <= recovery['horizon'] <= recovery['max_event_before']
+        assert recovery['local_entry_active'] is False and recovery['returned'] is True and recovery['diagnostic'] is None
+        assert recovery['attempt_status_before'] == codes['attempt_running']
+        result = json.loads(after['result_json'])
+        assert result['settlement'] == {'basis':'assumed','evidence':{'type':'local_control_recovery','version':1,'data':{}}}
+        assert result['observations'] == []
+        assert 'diagnostics' not in result and 'call_info' not in result
+        run, = _rows(world.deployment.state_db, 'SELECT * FROM operation_runs WHERE id=?', (target['run_id'],))
+        assert run['status'] == codes['run_unconfirmed']
+        action, = _rows(world.deployment.state_db, 'SELECT * FROM actions WHERE id=?', (target['action_id'],))
+        assert action['error_code'] == codes['capture_error']
+        expected_error = {'code':'capture_result_unconfirmed','stage':'execution',
+                          'details':{'activity_id':str(target['activity_id']),'reason':'outputs_unknown'}}
+        assert capture['error'] == expected_error
+        assert 'result' not in capture and not capture.get('outputs')
+        activity, = _rows(world.deployment.state_db, 'SELECT * FROM device_activities WHERE id=?', (target['activity_id'],))
+        assert activity['started_at'] is None
+        assert (activity['activity_state'],activity['occupancy_state']) == (codes['activity_unknown'],codes['occupancy_held'])
+        execution = {'status':'end_unconfirmed'}
+        if activity['last_error_json'] is not None:
+            execution['error'] = json.loads(activity['last_error_json'])
+        assert capture['device_execution'] == execution
+        _no_private_details(capture, world)
+        assert world.argv() == calls
+        assert all(path.is_file() for path in files)
+        assert sorted(path.read_bytes() for path in files) == sorted((world.original_bytes, world.preview_bytes))
+        assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []
+        assert _rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],)) == []
     finally:
         world.close()

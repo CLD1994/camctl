@@ -1,10 +1,14 @@
 """复制到仓库外的安装 CLI 入口；只记录来源并装配本测试的确定断点。"""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import asdict, fields, is_dataclass
+from enum import Enum
 import json
 import os
 from pathlib import Path
 import sys
+import time
 import hashlib
 import sqlite3
 from datetime import datetime, timezone
@@ -246,6 +250,186 @@ def _history_command(arguments):
     return 0
 
 
+def _plain(value):
+    if is_dataclass(value):
+        return {field.name: _plain(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return sorted(_plain(item) for item in value)
+    if isinstance(value, (tuple, list)):
+        return [_plain(item) for item in value]
+    if isinstance(value, bytes):
+        return {"hex": value.hex()}
+    return value
+
+
+def _write(root: Path, name: str, value: dict):
+    temporary = root / f".{name}.{os.getpid()}.tmp"
+    with temporary.open("x") as stream:
+        from camctl.persistence.transaction import encode_json_value
+        stream.write(encode_json_value(_plain({"pid": os.getpid(), "pgid": os.getpgrp(), "utc": datetime.now(timezone.utc).isoformat(), **value})))
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(root / f"{name}.json")
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _once(root: Path, name: str) -> bool:
+    try:
+        descriptor = os.open(root / f"{name}.once", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    os.close(descriptor)
+    return True
+
+
+def _barrier(root: Path, name: str, value: dict):
+    if not _once(root, name):
+        return
+    _write(root, name, value)
+    # 门闩由父进程明确释放，或由真实 host 终止整个执行组。
+    deadline = time.monotonic() + 180
+    while not (root / f"{name}.release").exists():
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"测试门闩未释放: {name}")
+        time.sleep(0.01)
+
+
+def _target(root: Path, connection):
+    from camctl.contracts.enums import enum_for
+    public = root / "photo-request.json"
+    if not public.is_file():
+        return None
+    request_id = int(json.loads(public.read_text())["request_id"])
+    rows = connection.execute(
+        "SELECT p.id,a.id,a.device_id,a.driver_id,r.id,r.kind,r.activity_id,r.responsibility_key "
+        "FROM plans p JOIN actions a ON a.plan_id=p.id JOIN operation_runs r ON r.action_id=a.id "
+        "WHERE p.request_id=? AND a.name=? AND a.type=? AND r.kind=?",
+        (request_id, "capture", int(enum_for("actions.type").CAMERA_TAKE_PHOTO), int(enum_for("operation_runs.kind").START)),
+    ).fetchall()
+    if not rows:
+        return None
+    assert len(rows) == 1, rows
+    plan_id, action_id, device_id, driver_id, run_id, kind, activity_id, responsibility_key = rows[0]
+    assert device_id == "hb-host" and driver_id == "hasselblad_cfv100c"
+    assert responsibility_key == f"start/{action_id}" and activity_id is not None
+    return {"request_id": str(request_id), "plan_id": plan_id, "action_id": action_id,
+            "run_id": run_id, "activity_id": activity_id, "responsibility_key": responsibility_key,
+            "run_kind": kind, "device_id": device_id, "driver_id": driver_id}
+
+
+def _install_fault(root: Path, fault: str):
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    if fault in ("after-start-result", "before-start-result"):
+        from camctl.persistence.repositories.capture import CaptureRepository
+        real = CaptureRepository.finish_start_result
+
+        def finish(self, request, observation, key, owned, *, start_finish=None,
+                   action_finish=None, expiration=None):
+            target = _target(root, owned.connection)
+            matches = target is not None and request.ticket.responsibility_key == f"start/{target['action_id']}"
+            if matches:
+                assert request.ticket.operation == "control"
+                assert request.ticket.run_id == target["run_id"]
+                assert request.ticket.target_id == str(target["activity_id"])
+                value = {"ticket": asdict(request.ticket), "operation_key": str(key), "target": target,
+                         "finish": _plain(request), "observation": _plain(observation),
+                         "start_finish": _plain(start_finish), "action_finish": _plain(action_finish),
+                         "expiration": _plain(expiration), "in_transaction": owned.connection.in_transaction}
+                if fault == "before-start-result":
+                    _barrier(root, fault, value)
+            result = real(self, request, observation, key, owned, start_finish=start_finish,
+                          action_finish=action_finish, expiration=expiration)
+            if matches and fault == "after-start-result" and result.kind is DbOutcomeKind.COMPLETED:
+                assert not owned.connection.in_transaction
+                attempt = owned.connection.execute(
+                    "SELECT result_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                    (request.ticket.run_id, request.ticket.attempt_id)).fetchone()
+                saved = owned.connection.execute(
+                    "SELECT t.id,t.last_event_id,t.operation_key FROM history_transactions t "
+                    "JOIN history_events e ON e.transaction_id=t.id WHERE e.id=?", (attempt[0],)).fetchone()
+                assert saved is not None and saved[2] == str(key)
+                boundary = {"txn_id": saved[0], "last_event_id": saved[1]}
+                _barrier(root, fault, {**value, "result_event_id": attempt[0],
+                    "boundary": {key: boundary[key] for key in ("txn_id", "last_event_id")},
+                    "in_transaction": owned.connection.in_transaction})
+            return result
+        CaptureRepository.finish_start_result = finish
+
+        if fault == "before-start-result":
+            from camctl.capture.handlers import CaptureRuntime
+            real_recovery = CaptureRuntime.recover_attempt
+
+            def recover(runtime, ticket, *, retry_wait=False):
+                target = _target(root, runtime.owned.connection)
+                matches = target is not None and ticket.operation == "control" and ticket.run_id == target["run_id"]
+                observed = None
+                if matches and not (root / "start-recovery-observed.json").exists():
+                    attempt = runtime.owned.connection.execute(
+                        "SELECT intent_event_id,status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                        (ticket.run_id, ticket.attempt_id)).fetchone()
+                    maximum = runtime.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+                    local = runtime.start_entries.get(runtime.owned.metadata.instance_id, target["action_id"])
+                    observed = {"target":target,"ticket":asdict(ticket),
+                        "boundary":runtime.recovery_boundary.name,"horizon":runtime.recovery_max_event_id,
+                        "intent_event_id":attempt[0],"attempt_status_before":attempt[1],
+                        "max_event_before":maximum,"local_entry_active":local is not None and local.active}
+                result = real_recovery(runtime, ticket, retry_wait=retry_wait)
+                if observed is not None:
+                    diagnostic = runtime.last_recovery_diagnostic
+                    _write(root, "start-recovery-observed", {**observed,"returned":result,
+                        "diagnostic":None if diagnostic is None else diagnostic.reason.name})
+                return result
+            CaptureRuntime.recover_attempt = recover
+
+    elif fault == "complete-receipt-loss":
+        from camctl.persistence.repositories.host_capture import HostCaptureRepository
+        real_save = HostCaptureRepository.save_host_photo_complete
+        real_verify = HostCaptureRepository.verify_operation
+        write_connections = {}
+
+        def save(self, request, key, owned):
+            result = real_save(self, request, key, owned)
+            target = _target(root, owned.connection)
+            if (target is not None and request.action_id == target["action_id"]
+                    and result.kind is DbOutcomeKind.COMPLETED and _once(root, "complete-commit")):
+                assert not owned.connection.in_transaction
+                write_connections[str(key)] = owned.connection
+                _write(root, "complete-commit", {
+                    "request": asdict(request), "operation_key": str(key), "target": target,
+                    "boundary": asdict(result.boundary), "in_transaction": owned.connection.in_transaction,
+                    "write_connection": id(owned.connection), "returned_receipt": "unknown",
+                })
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("H8b 完整 COMMIT 回执丢失一次"))
+            return result
+
+        def verify(self, request, key, owned):
+            query_only, = owned.connection.execute("PRAGMA query_only").fetchone()
+            if str(key) not in write_connections:
+                return real_verify(self, request, key, owned)
+            original = write_connections[str(key)]
+            assert owned.connection is not original and query_only == 1
+            result = real_verify(self, request, key, owned)
+            _write(root, "complete-verifier", {
+                "request": asdict(request), "operation_key": str(key),
+                "boundary": asdict(result.boundary) if result.boundary else None,
+                "write_connection": id(original), "verifier_connection": id(owned.connection),
+                "query_only": query_only, "returned_receipt": result.kind.value,
+            })
+            return result
+        HostCaptureRepository.save_host_photo_complete = save
+        HostCaptureRepository.verify_operation = verify
+    else:
+        raise ValueError(f"未知 H8b 故障选择: {fault}")
+
+
 def main() -> int:
     root = Path(os.environ["CAMCTL_HB_TEST_ROOT"])
     python = Path(os.environ["CAMCTL_HB_TEST_INSTALLED_PYTHON"])
@@ -264,6 +448,9 @@ def main() -> int:
             },
             "utc": datetime.now(timezone.utc).isoformat(),
         }) + "\n")
+    fault = os.environ.get("CAMCTL_HB_TEST_FAULT")
+    if fault:
+        _install_fault(root, fault)
     from camctl.cli import main as cli_main
     return cli_main(sys.argv[1:])
 
