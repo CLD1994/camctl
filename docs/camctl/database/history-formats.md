@@ -143,7 +143,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 14 `BASELINE_CHUNK` | 1 保存基准内容批次；2 固定非空基准的实际范围；3 固定零批空基准并清空旧范围 |
 | 15 `CAPTURE_WAIT_CHANGED` | 1 安排适用拍摄等待；2 未完成等待实际采用新配置；3 保存等待完成 |
 | 16 `RESULT_SET_CONFIRMED` | 1 保存结果集合核实结论；2 保存结果集合核实结论；3 保存结果集合核实结论；4 开始结果集合核实；5 保存本次文件集合确定事实 |
-| 17 `DEVICE_FILE_OBSERVED` | 1 登记真实设备文件；2 确认文件归属及用途配对；3 保存文件形成状态及完成依据；4 保存摘要能力与实际摘要；5 保存实际存在性观察 |
+| 17 `DEVICE_FILE_OBSERVED` | 1 登记真实设备文件；2 确认文件归属及用途配对；3 保存文件形成状态及完成依据；4 保存摘要能力与实际摘要；5 保存实际存在性观察；6 从原结果页差集确认文件归属及用途 |
 | 18 `RECORDING_DECIDED` | 1 固定原片检查决定；2 固定修复决定；3 首次关联可靠原片 |
 | 19 `RECORDING_PROCESSED` | 1 保存检查阶段及媒体结果；2 保存修复阶段及结果；3 保存取消后文件处理进度 |
 | 20 `OUTPUT_REGISTERED` | 1 登记正式产物及来源；2 登记正式产物及来源；3 登记正式产物及来源；4 更新可靠产物观察及派生状态 |
@@ -286,6 +286,10 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 `DEVICE_FILE_OBSERVED.COMPLETE` 的 `evidence.completion_request` 恰好保存 `locator`、`original_name`、`media_type` 三个成员，各自为原可选输入或 JSON `null`。省略元信息与显式提供相同现有值具有相同投影效果，但属于不同申请；原键核实比较这份输入记录，不从变化列反推。文件的完成依据、状态、大小、错误及原时刻仍按原完整事件核对。该输入不进入公开报告。
 
 旧事件没有 `completion_request` 时继续按其原格式读取和回放，不能从后来的投影补造原输入。新写入保存该记录，可靠重送保持同值；不执行文件读取或等待来补齐历史。
+
+`DEVICE_FILE_OBSERVED.OWNERSHIP_FROM_RESULT_PAGE` 的 `evidence` 恰好包含 `ownership_from_result_page_request`，其成员为 `page` 与 `file_id`。`page` 保存完整原引用：`ticket` 恰为 `run_id/attempt_id/operation/target_id/responsibility_key`，另有 `page_no/event_id/next_cursor`；游标保存规范 DirectoryCursor 对象或 JSON `null`。票据中的 `attempt_id` 是原 `attempt_no`，物理尝试行由原 run 和 attempt_no 派生。事件时刻保持原申请 `occurred_at`。原页须属于更早完整事务；归属证据的 `result_page_event_id` 引用该页 APPEND，不是 INDEX 事件。这个 JSON 内引用由独立业务守卫核实，不增加 SQL 外键。
+
+该归属事务恰有一条事件，只更新 `source_action_id/ownership_evidence_json/role`，独立文件 owner 保存历史；不与前序事件修改的部分组状态混用。原键核实完整申请、事实时刻及该三列的原前后值，并通过同 H 恢复原文件来源、用途及 NULL 配对。可靠原保存尚未结束时不得把缺键作为未保存；读失败不返回缺键。
 
 ## 正向、逆向与快照格式
 

@@ -26,6 +26,7 @@ __all__ = [
     "ObservationDisposition",
     "ObservationOutcome",
     "OwnershipSave",
+    "OwnershipFromResultPageSave",
     "file_identity_key",
 ]
 
@@ -123,6 +124,38 @@ class FileObservationSave:
 
 
 @dataclass(frozen=True)
+class OwnershipFromResultPageSave:
+    """从可靠原页差集独立确定来源及 OSV/LRF 用途，不确定配对。"""
+
+    page: "ResultPageRef"
+    file_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        from camctl.capture.result_pages import ResultPageRef
+        from camctl.devices.directory import DirectoryCursor
+        from camctl.operations.models import AttemptTicket
+
+        if not isinstance(self.page, ResultPageRef):
+            raise TypeError("原页归属要求 ResultPageRef")
+        ticket = self.page.ticket
+        if not isinstance(ticket, AttemptTicket):
+            raise TypeError("原页归属要求原 AttemptTicket")
+        for value in (self.file_id, self.page.page_no, self.page.event_id,
+                      ticket.run_id, ticket.attempt_id):
+            ObjectId(value)
+        if (ticket.operation != "result" or not isinstance(ticket.target_id, str)
+                or not ticket.target_id.isascii() or not ticket.target_id.isdecimal()
+                or str(ObjectId(int(ticket.target_id))) != ticket.target_id
+                or ticket.responsibility_key != f"results/{ticket.target_id}"):
+            raise ValueError("原页归属要求原 RESULTS 活动票据")
+        if (self.page.next_cursor is not None
+                and not isinstance(self.page.next_cursor, DirectoryCursor)):
+            raise TypeError("原页归属游标必须保持 DirectoryCursor 或空")
+        _timestamp(self.occurred_at)
+
+
+@dataclass(frozen=True)
 class OwnershipSave:
     """一次归属确认的保存输入（DEVICE_FILE_OBSERVED.OWNERSHIP）。
 
@@ -144,6 +177,8 @@ class OwnershipSave:
         ObjectId(self.file_id)
         ObjectId(self.source_action_id)
         _member(_OWNERSHIP_METHOD, "归属证据方法", self.method)
+        if self.method == int(_OWNERSHIP_METHOD.RESULT_PAGE_DIFFERENCE):
+            raise ValueError("原页差集归属必须使用 OwnershipFromResultPageSave")
         role = _member(_FILE_ROLE, "文件用途", self.role)
         if role not in (_ORIGINAL, _PREVIEW):
             raise ValueError(f"归属确认的用途必须是原片或预览: {self.role!r}")

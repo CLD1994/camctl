@@ -39,6 +39,7 @@ from camctl.capture.files import (
     ObservationDisposition,
     ObservationOutcome,
     OwnershipSave,
+    OwnershipFromResultPageSave,
     file_identity_key,
 )
 from camctl.capture.media_facts import saved_osv_input_issues, require_repair_media_proof
@@ -1076,6 +1077,8 @@ def register_capture_guards() -> None:
     register_baseline_guard()
     from .result_pages import register_result_page_guard
     register_result_page_guard()
+    from .result_file_ownership import register_ownership_from_result_page_guard
+    register_ownership_from_result_page_guard()
 
 
 class FinishCaptureCommand:
@@ -2757,6 +2760,25 @@ class CaptureRepository:
         if receipt.kind == "rolled_back":
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def save_ownership_from_result_page(
+        self, request: OwnershipFromResultPageSave, key: OperationKey, owned: OwnedConnection,
+    ) -> DbOutcome[ObservationOutcome]:
+        from .result_file_ownership import _FileOwnershipFromResultPageCommand
+        receipt = commit_operation(_FileOwnershipFromResultPageCommand(request, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def verify_ownership_from_result_page(
+        self, request: OwnershipFromResultPageSave, key: OperationKey, reader,
+        *, execution_finished: bool = True,
+    ) -> ObservationOutcome | None:
+        from .result_file_ownership import verify_ownership_from_result_page
+        return verify_ownership_from_result_page(
+            request, key, reader, execution_finished=execution_finished)
 
     def save_file_completion(
         self, command: FileCompletionSave, key: OperationKey, owned: OwnedConnection
@@ -6457,6 +6479,8 @@ def _device_file_row_guard(event, row, context) -> None:
         if role not in (int(_FILE_ROLE.ORIGINAL), int(_FILE_ROLE.PREVIEW)):
             raise EventValidationError(f"归属确认的用途必须是原片或预览: {role!r}")
         evidence = after.get("ownership_evidence_json")
+        if isinstance(evidence, dict) and evidence.get("method") == int(_OWNERSHIP_METHOD.RESULT_PAGE_DIFFERENCE):
+            raise EventValidationError("原页差集归属只能使用独立原页分支")
         if not isinstance(evidence, dict) or evidence.get("method") not in (
                 int(member) for member in _OWNERSHIP_METHOD):
             raise EventValidationError("归属证据缺少登记的方法编号")

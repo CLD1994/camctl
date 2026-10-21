@@ -699,6 +699,7 @@
 | 1 | `TASK_SCOPE` |
 | 2 | `BASELINE_DIFFERENCE` |
 | 3 | `DRIVER_TASK_ASSOCIATION` |
+| 4 | `RESULT_PAGE_DIFFERENCE` |
 
 ### `device_files.completion_evidence_json.basis`
 

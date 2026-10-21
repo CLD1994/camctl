@@ -629,7 +629,8 @@
       "members": {
         "TASK_SCOPE": 1,
         "BASELINE_DIFFERENCE": 2,
-        "DRIVER_TASK_ASSOCIATION": 3
+        "DRIVER_TASK_ASSOCIATION": 3,
+        "RESULT_PAGE_DIFFERENCE": 4
       }
     },
     "device_files.completion_evidence_json.basis": {

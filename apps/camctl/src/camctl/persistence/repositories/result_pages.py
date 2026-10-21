@@ -1211,10 +1211,27 @@ def _restore_page_row(connection, *, boundary, current_boundary, transaction,
     return {**current, **restored}
 
 
-def _replay_page_context(connection, event, original, transaction):
+def _replay_page_context(connection, event, original, transaction, *, current_boundary=None):
     """恢复原页F前有限资格行及最多128个本页身份对应文件行。"""
     boundary = _page_before_boundary(connection, transaction)
-    current_boundary = _latest_history_boundary(connection)
+    if current_boundary is None:
+        current_boundary = _latest_history_boundary(connection)
+    else:
+        # 仅供独立单事件消费者在 Bounded 预插本组 header 后使用。
+        # 投影仍须恰为 C；任何已写前缀、其他范围或调用者指定的旧 C 均拒绝。
+        with closing(connection.execute(
+                "SELECT id,first_event_id,last_event_id FROM history_transactions"
+                " ORDER BY id DESC LIMIT 1")) as cursor:
+            pending = cursor.fetchone()
+        with closing(connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
+            last_event_id = cursor.fetchone()[0]
+        if (pending != (current_boundary.txn_id + 1,
+                        current_boundary.last_event_id + 1,
+                        current_boundary.last_event_id + 1)
+                or last_event_id != current_boundary.last_event_id
+                or read_transaction_range(connection, current_boundary.txn_id).last_event_id
+                    != current_boundary.last_event_id):
+            raise ConsistencyError("指定的页恢复C不是未写单事件组的真实F前完整边界")
     raw = original[1]
     attempt_id = event.evidence["attempt_id"]
     current_attempt = row_facts(connection, "operation_attempts", attempt_id)

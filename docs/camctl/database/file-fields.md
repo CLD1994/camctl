@@ -6,7 +6,9 @@
 
 ## 设备文件
 
-`device_files.id` 是内部文件身份。`observer_action_id` 是最初承担文件观察责任的拍摄动作，借该动作的固定 `device_id`、`driver_id` 取得原设备绑定；观察者创建后不改变。`source_action_id` 与 `ownership_evidence_json` 在归属未确认时同时为空，确认后同时填写。证据对象使用 `method`（`TASK_SCOPE` 表示任务独立范围，`BASELINE_DIFFERENCE` 表示固定基准差集，`DRIVER_TASK_ASSOCIATION` 表示驱动任务关联）和 `observation`（驱动结构化依据），差集另填 `activity_id`；不能把观察者自动当成可靠来源。
+`device_files.id` 是内部文件身份。`observer_action_id` 是最初承担文件观察责任的拍摄动作，借该动作的固定 `device_id`、`driver_id` 取得原设备绑定；观察者创建后不改变。`source_action_id` 与 `ownership_evidence_json` 在归属未确认时同时为空，确认后同时填写。证据对象使用 `method`：`TASK_SCOPE` 表示任务独立范围，`BASELINE_DIFFERENCE` 表示固定基准差集，`DRIVER_TASK_ASSOCIATION` 表示驱动任务关联。这三种方法保存 `observation`（驱动结构化依据），差集另填 `activity_id`；不能把观察者自动当成可靠来源。
+
+`RESULT_PAGE_DIFFERENCE` 仅由 `DEVICE_FILE_OBSERVED.OWNERSHIP_FROM_RESULT_PAGE` 保存，证据恰为 `{method, result_page_event_id}`。后者引用已保存的原 `RESULT_PAGE.APPEND`，其完整 INDEX 关系、原基准差集、动作、活动、实际尝试及固定绑定须独立核实。原动作须声明 OSMO 分段或空尾分类策略；按原观察一致的格式与后缀将 OSV 保存为 ORIGINAL、LRF 保存为 PREVIEW，不要求文件大小、形成状态或配对已知。该分支仅从未知首次固定来源、归属证据及用途，配对两列保持 NULL，不登记产物。既有 OWNERSHIP 分支不接受此方法，其 PREVIEW 仍须同时保存 DRIVER_PAIRING 与同源原片。
 
 同一设备文件的拍摄来源只允许从未知变为可靠确认，确认后不清空或改指另一个动作。后来的观察与固定身份或来源矛盾时，按文件错误保留原依据并处理，不转移原文件的来源。该规则与永久保留的文件身份共同支持[按历史边界查找文件](../historical-state-query.md#按历史边界分批查找关联文件)。
 

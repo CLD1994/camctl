@@ -87,9 +87,7 @@
         "is_valid"
       ],
       "mutable": [],
-      "derived": [
-        "id"
-      ],
+      "derived": ["id"],
       "write_once": [],
       "owner": {
         "entity": "action",
@@ -888,7 +886,9 @@
         "family_role"
       ],
       "mutable": [],
-      "derived": ["id"],
+      "derived": [
+        "id"
+      ],
       "write_once": [],
       "owner": {
         "entity": "action",
@@ -1272,6 +1272,18 @@
       "contract": "segments.md",
       "rule": "分段引用必须属于原扫描和动作；有限批次、固定成员、两遍判断及范围成员分别校验，正式 output 关联只在终态事务发布。",
       "scope": "transaction"
+    },
+    "ownership_from_result_page": {
+      "contract": "file-fields.md#设备文件",
+      "rule": "从同源原RESULT_PAGE.APPEND及完整INDEX关系独立核原差集、尝试、绑定和OSV/LRF用途；仅首次固定来源与用途，不保存配对。",
+      "scope": {
+        "rows": [
+          {
+            "table": "device_files",
+            "op": "update"
+          }
+        ]
+      }
     }
   },
   "state_models": {
@@ -2156,7 +2168,8 @@
           "from": 1,
           "to": 2,
           "by": [
-            "DEVICE_FILE_OBSERVED.OWNERSHIP"
+            "DEVICE_FILE_OBSERVED.OWNERSHIP",
+            "DEVICE_FILE_OBSERVED.OWNERSHIP_FROM_RESULT_PAGE"
           ],
           "id": "transition_1"
         },
@@ -2164,7 +2177,8 @@
           "from": 1,
           "to": 3,
           "by": [
-            "DEVICE_FILE_OBSERVED.OWNERSHIP"
+            "DEVICE_FILE_OBSERVED.OWNERSHIP",
+            "DEVICE_FILE_OBSERVED.OWNERSHIP_FROM_RESULT_PAGE"
           ],
           "id": "transition_2"
         }
@@ -5936,6 +5950,59 @@
             "cleanup_aggregate"
           ],
           "evidence": []
+        },
+        "OWNERSHIP_FROM_RESULT_PAGE": {
+          "reason": 6,
+          "title": "从原结果页差集确认文件归属及用途",
+          "rows": [
+            {
+              "table": "device_files",
+              "op": "update",
+              "columns": [
+                "source_action_id",
+                "ownership_evidence_json",
+                "role"
+              ],
+              "before": {
+                "source_action_id": [
+                  null
+                ],
+                "ownership_evidence_json": [
+                  null
+                ],
+                "role": [
+                  1
+                ]
+              },
+              "after": {
+                "role": [
+                  2,
+                  3
+                ]
+              },
+              "required": [
+                "source_action_id",
+                "ownership_evidence_json",
+                "role"
+              ],
+              "transitions": {
+                "role": [
+                  "transition_1",
+                  "transition_2"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "ownership_from_result_page"
+          ],
+          "evidence": [
+            "ownership_from_result_page_request"
+          ]
         }
       }
     },
