@@ -870,11 +870,11 @@ def _aggregate_role_world(tmp_path, start):
     return owned, request
 
 
-def _run_aggregate_role_command(owned, request, monkeypatch, *, start, finite):
+def _run_aggregate_role_command(owned, request, monkeypatch, *, start, finite, batch_size=1):
     command = outputs._StartObtainCommand if start else outputs._ResolveSourcesCommand
     original = command.plan
     monkeypatch.setattr(command,"plan",lambda self,scope:_rewrite_plan(original(self,scope),"clear_progress",finite))
-    repository = outputs.OutputsRepository(1)
+    repository = outputs.OutputsRepository(batch_size)
     return repository.start_obtain_action(request,new_operation_key(),owned) if start else repository.resolve_sources(request,new_operation_key(),owned)
 
 
@@ -1035,6 +1035,331 @@ def test_plan_aggregate_keeps_real_accepted_prefix_fields(tmp_path,monkeypatch,f
         monkeypatch.setattr(streams,"_verify_context",inspect)
         result = _run_aggregate_role_command(owned,request,monkeypatch,start=True,finite=finite)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+@pytest.mark.parametrize("finite", [False, True])
+@pytest.mark.parametrize("variant", ["same", "columns", "limit", "later_page"])
+@pytest.mark.parametrize("end_first", ["a", "b"])
+def test_source_aggregate_overlap_rejects_before_sql_without_clearing_owner(tmp_path, monkeypatch, start, finite, variant, end_first):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned, request = _aggregate_role_world(tmp_path, start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            target = (7 if variant == "later_page" else 5) if start else 5
+            sql = []
+            db.set_trace_callback(sql.append)
+            try:
+                a = reads.iter_members("actions", "plan_id", 3)
+                c = reads.iter_members("actions", "plan_id", 3)
+                b = reads.iter_members("actions", "plan_id", 3,
+                    columns=reads.SOURCE_COLUMNS if variant == "columns" else None,
+                    limit=1 if variant == "limit" else None)
+                assert sql == []
+                # 未开始的退出不得获得或撤销页权限。
+                unused = reads.iter_members("actions", "plan_id", 3)
+                unused.close()
+                if not start or target == 7:
+                    with pytest.raises(ConsistencyError):
+                        reads.optional("actions", target)
+                page = next(a)
+                while target not in dict(page):
+                    page = next(a)
+                if variant == "later_page" and not start:
+                    page = next(a)
+                    target = page[0][0]
+                before = len(sql)
+                with pytest.raises(ConsistencyError):
+                    next(b)
+                assert len(sql) == before
+                assert reads.required("actions", target)["plan_id"] == 3
+                if end_first == "a":
+                    a.close()
+                    b.close()
+                else:
+                    b.close()
+                    assert reads.required("actions", target)["plan_id"] == 3
+                    a.close()
+                with pytest.raises(RuntimeError):
+                    b.throw(RuntimeError("late rejected iterator"))
+                if not start or target == 7:
+                    with pytest.raises(ConsistencyError):
+                        reads.optional("actions", target)
+                else:
+                    assert reads.required("actions", target)["plan_id"] == 3
+                # 尚未推进的 C 在 A 之前已创建；A 结束后仍可正常开始。
+                page = next(c)
+                while 7 not in dict(page):
+                    page = next(c)
+                a.close()
+                assert reads.required("actions", 7)["plan_id"] == 3
+                c.close()
+                with pytest.raises(ConsistencyError):
+                    reads.optional("actions", 7)
+            finally:
+                db.set_trace_callback(None)
+        monkeypatch.setattr(streams, "_verify_context", inspect)
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+@pytest.mark.parametrize("finite", [False, True])
+@pytest.mark.parametrize("new_page", ["none", "active", "ended"])
+@pytest.mark.parametrize("old_exit", ["next", "close", "throw"])
+def test_source_aggregate_real_rebind_invalidates_old_iterator_only(tmp_path, monkeypatch, start, finite, new_page, old_exit):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned, request = _aggregate_role_world(tmp_path, start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            target = 6 if start else 5
+            a = reads.iter_members("actions", "plan_id", 3)
+            page = next(a)
+            while target not in dict(page):
+                page = next(a)
+            # 使用真实绑定协作者：相同规范事件/事务值也必须产生不同绑定身份。
+            streams._bind_read_roles(db, reads, q, event, context.transaction)
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions", target)
+            b = reads.iter_members("actions", "plan_id", 3)
+            if new_page != "none":
+                page = next(b)
+                while target not in dict(page):
+                    page = next(b)
+                if new_page == "ended":
+                    b.close()
+            sql = []
+            db.set_trace_callback(sql.append)
+            try:
+                if old_exit == "next":
+                    with pytest.raises(ConsistencyError):
+                        next(a)
+                elif old_exit == "throw":
+                    with pytest.raises(RuntimeError):
+                        a.throw(RuntimeError("old binding"))
+                else:
+                    a.close()
+                assert sql == []
+            finally:
+                db.set_trace_callback(None)
+            if new_page == "active":
+                assert reads.required("actions", target)["plan_id"] == 3
+            else:
+                with pytest.raises(ConsistencyError):
+                    reads.optional("actions", target)
+            b.close()
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions", target)
+        monkeypatch.setattr(streams, "_verify_context", inspect)
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+@pytest.mark.parametrize("finite", [False, True])
+def test_source_aggregate_pages_have_exact_current_ids_and_keep_point_roles(tmp_path, monkeypatch, start, finite):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    from camctl.persistence.event_reads import SqlEventReads
+    from camctl.history.reads import ProductReadScope
+    owned, request = _aggregate_role_world(tmp_path, start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            a = reads.iter_members("actions", "plan_id", 3)
+            assert [key for key, _ in next(a)] == [5, 6]
+            assert reads.required("actions", 6)["plan_id"] == 3
+            # 原点角色在活动聚合中照常工作；非法 query 仍按原资格拒绝。
+            assert list(reads.iter_members("plans", "id", 3))[0][0][0] == 3
+            if start:
+                assert list(reads.iter_members("action_dependencies", "id", 1))[0][0][0] == 1
+            for table, column, identity in (("actions", "plan_id", 1), ("actions", "id", 7), ("plans", "plan_id", 3)):
+                with pytest.raises(ConsistencyError):
+                    next(reads.iter_members(table, column, identity))
+            with pytest.raises(ConsistencyError):
+                streams.bind_aggregate_page(reads, "actions", "plan_id", 3, after=0, limit=2)
+            assert reads.required("actions", 6)["plan_id"] == 3
+            # 不同 reads 独立；ProductReadScope 的正常迭代不受 source busy 限制。
+            product = SqlEventReads(db, ProductReadScope(8, 1, _NOW, 2))
+            p = product.iter_members("actions", "plan_id", 3)
+            r = product.iter_members("actions", "plan_id", 3)
+            assert next(p) and next(r)
+            p.close()
+            r.close()
+            other = SqlEventReads(db, reads.scope)
+            other._kernel_transaction = context.transaction
+            streams._bind_read_roles(db, other, q, event, context.transaction)
+            b = other.iter_members("actions", "plan_id", 3)
+            assert next(b)
+            b.close()
+            assert reads.required("actions", 6)["plan_id"] == 3
+            assert [key for key, _ in next(a)] == [7, 8]
+            # init 的当前规范源 5/6 保留点角色；source 上页的 6 则失效。
+            if start:
+                assert reads.required("actions", 6)["plan_id"] == 3
+            else:
+                with pytest.raises(ConsistencyError):
+                    reads.optional("actions", 6)
+            sql = []
+            db.set_trace_callback(sql.append)
+            try:
+                if not start:
+                    assert [key for key, _ in next(a)] == [9]
+                    with pytest.raises(ConsistencyError):
+                        reads.optional("actions", 7)
+                with pytest.raises(StopIteration):
+                    next(a)
+            finally:
+                db.set_trace_callback(None)
+            assert sum(statement.startswith("SELECT id FROM actions WHERE plan_id=") for statement in sql) == 1
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions", 7)
+            # 恰好整页后的可靠空、末尾小页都已退出，可以立即重新开始。
+            c = reads.iter_members("actions", "plan_id", 3)
+            assert next(c)
+            c.close()
+        monkeypatch.setattr(streams, "_verify_context", inspect)
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite, batch_size=2)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+@pytest.mark.parametrize("old_exit", ["next", "close", "throw"])
+def test_source_aggregate_bounded_real_context_rebind_revokes_old_iterator(tmp_path, monkeypatch, start, old_exit):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned, request = _aggregate_role_world(tmp_path, start)
+    make_context = streams._context
+    verify = streams._verify_context
+    shared = []
+    old = []
+    checked = []
+    try:
+        def reuse(*args):
+            actual = make_context(*args)
+            if not shared:
+                shared.append(actual.current_reads)
+            return replace(actual, current_reads=shared[0])
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if not old:
+                a = reads.iter_members("actions", "plan_id", 3)
+                assert next(a)
+                dormant = reads.iter_members("actions", "plan_id", 3)
+                old.extend((a, dormant))
+                return
+            if checked:
+                return
+            checked.append(event.event_id)
+            b = reads.iter_members("actions", "plan_id", 3)
+            page = next(b)
+            while 7 not in dict(page):
+                page = next(b)
+            sql = []
+            db.set_trace_callback(sql.append)
+            try:
+                with pytest.raises(ConsistencyError):
+                    next(old[1])
+                if old_exit == "next":
+                    with pytest.raises(ConsistencyError):
+                        next(old[0])
+                elif old_exit == "throw":
+                    with pytest.raises(RuntimeError):
+                        old[0].throw(RuntimeError("prior actual event"))
+                else:
+                    old[0].close()
+                assert sql == []
+            finally:
+                db.set_trace_callback(None)
+            assert reads.required("actions", 7)["plan_id"] == 3
+            b.close()
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions", 7)
+        monkeypatch.setattr(streams, "_context", reuse)
+        monkeypatch.setattr(streams, "_verify_context", inspect)
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=False)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert checked
+    finally:
+        for iterator in old:
+            iterator.close()
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+@pytest.mark.parametrize("finite", [False, True])
+@pytest.mark.parametrize("failure", ["query_sql", "projection"])
+def test_source_aggregate_first_page_failure_releases_reservation(tmp_path, monkeypatch, start, finite, failure):
+    import sqlite3
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned, request = _aggregate_role_world(tmp_path, start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            a = reads.iter_members("actions", "plan_id", 3,
+                columns=("id",) if failure == "projection" else None)
+            if failure == "query_sql":
+                db.set_authorizer(lambda action, table, *rest: sqlite3.SQLITE_DENY
+                    if action == sqlite3.SQLITE_READ and table == "actions" else sqlite3.SQLITE_OK)
+            try:
+                with pytest.raises(sqlite3.DatabaseError if failure == "query_sql" else ConsistencyError):
+                    next(a)
+            finally:
+                db.set_authorizer(None)
+                a.close()
+            b = reads.iter_members("actions", "plan_id", 3)
+            page = next(b)
+            target = 6 if start else 5
+            while target not in dict(page):
+                page = next(b)
+            dormant = reads.iter_members("actions", "plan_id", 3)
+            with pytest.raises(RuntimeError):
+                dormant.throw(RuntimeError("never started"))
+            dormant.close()
+            assert reads.required("actions", target)["plan_id"] == 3
+            b.close()
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions", target)
+        monkeypatch.setattr(streams, "_verify_context", inspect)
+        result = _run_aggregate_role_command(owned, request, monkeypatch, start=start, finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert checked
     finally:
         owned.connection.close()

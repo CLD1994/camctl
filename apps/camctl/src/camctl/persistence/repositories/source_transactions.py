@@ -501,27 +501,81 @@ class _SourceReadRoles:
     points: frozenset
 
 
-@dataclass(frozen=True)
-class _SourceAggregatePage:
+@dataclass(frozen=True, eq=False)
+class _SourceReadBinding:
+    connection: object
     proof: _SourceProof
-    identities: frozenset
 
 
-def bind_aggregate_page(reads, table, column, identity, *, after, limit):
-    """仅由真实主计划查询产生当前页角色，不接收调用方的 ID 列表。"""
+@dataclass(eq=False)
+class _SourceAggregatePage:
+    binding: _SourceReadBinding
+    query: tuple
+    identities: frozenset = frozenset()
+
+
+def _aggregate_query(reads, table, column, identity, after, limit):
     ObjectId(identity)
     if not reads.connection.in_transaction or (table, column, identity) != ('actions', 'plan_id', reads.scope.plan_id):
         raise ConsistencyError('来源聚合页必须查询原主计划动作')
     source_read_role(reads, table, column, identity)
     if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= reads.scope.batch_size:
         raise ConsistencyError('来源聚合页游标或限额不合法')
+    return table, column, identity, after, limit
+
+
+def bind_aggregate_page(reads, table, column, identity, *, after, limit, page=None):
+    """只为当前唯一页按真实主计划 SQL 取得有限身份。"""
+    query = _aggregate_query(reads, table, column, identity, after, limit)
+    if (not isinstance(page, _SourceAggregatePage)
+            or reads._source_aggregate_page is not page
+            or page.binding is not reads._source_binding or page.query != query):
+        raise ConsistencyError('来源聚合查询没有当前唯一页的所有权')
     # source/init 规范流不创建 action，也不改其 plan_id；未写前序只覆盖当前字段。
     with closing(reads.connection.execute(
             'SELECT id FROM actions WHERE plan_id=? AND id>? ORDER BY id LIMIT ?',
             (identity, after, limit))) as cursor:
         identities = tuple(row[0] for row in cursor.fetchmany(limit))
-    reads._source_aggregate_page = _SourceAggregatePage(reads._source_roles.proof, frozenset(identities))
+    page.identities = frozenset(identities)
     return identities
+
+
+def aggregate_pages(reads, table, column, identity, *, columns, limit):
+    # 创建 iterator 时只保存绑定身份；查询、占页和授权均推迟到 next。
+    binding = getattr(reads, '_source_binding', None)
+    return _aggregate_pages(reads, binding, table, column, identity, columns, limit)
+
+
+def _aggregate_pages(reads, binding, table, column, identity, columns, limit):
+    size = reads.scope.batch_size if limit is None else limit
+    after = 0
+    while True:
+        query = _aggregate_query(reads, table, column, identity, after, size)
+        if binding is None or binding is not reads._source_binding:
+            raise ConsistencyError('来源聚合迭代器的原内核绑定已失效')
+        if reads._source_aggregate_page is not None:
+            raise ConsistencyError('当前来源内核绑定已有活跃聚合页')
+        page = _SourceAggregatePage(binding, query)
+        reads._source_aggregate_page = page
+        try:
+            ids = bind_aggregate_page(reads, table, column, identity, after=after, limit=size, page=page)
+            if not ids:
+                return
+            batch = []
+            for key in ids:
+                facts = reads.optional(table, key, columns)
+                if facts is not None:
+                    batch.append((key, facts))
+            yield tuple(batch)
+        finally:
+            # 重绑或迟到退出只能撤自己的页；不能清新页，也不恢复旧快照。
+            if reads._source_aggregate_page is page:
+                reads._source_aggregate_page = None
+        if binding is not reads._source_binding:
+            raise ConsistencyError('来源聚合迭代器的原内核绑定已失效')
+        after = ids[-1]
+        if len(ids) < size:
+            return
 
 
 def _bind_read_roles(db, reads, q, event, transaction):
@@ -541,13 +595,16 @@ def _bind_read_roles(db, reads, q, event, transaction):
     proof = _SourceProof(reads.scope, transaction, event)
     reads._source_stream = proof
     reads._source_roles = _SourceReadRoles(proof, frozenset(points))
+    reads._source_binding = _SourceReadBinding(db, proof)
     reads._source_aggregate_page = None
 
 
 def source_read_role(reads, table, column, identity):
     roles = getattr(reads, '_source_roles', None)
     proof = getattr(reads, '_source_stream', None)
-    if (not isinstance(roles, _SourceReadRoles) or roles.proof != proof
+    binding = getattr(reads, '_source_binding', None)
+    if (not isinstance(binding, _SourceReadBinding) or binding.connection is not reads.connection
+            or binding.proof != proof or not isinstance(roles, _SourceReadRoles) or roles.proof != proof
             or proof.scope != reads.scope or proof.transaction != getattr(reads, '_kernel_transaction', None)):
         raise ConsistencyError('来源事实端口没有内核原申请/当前规范页角色')
     if table == 'actions' and column == 'plan_id' and identity == reads.scope.plan_id:
@@ -556,7 +613,7 @@ def source_read_role(reads, table, column, identity):
         return
     aggregate = getattr(reads, '_source_aggregate_page', None)
     if (table == 'actions' and column == 'id' and isinstance(aggregate, _SourceAggregatePage)
-            and aggregate.proof == proof and identity in aggregate.identities):
+            and aggregate.binding is binding and identity in aggregate.identities):
         return
     raise ConsistencyError('来源点查询不属于原 owner/计划/当前规范页角色')
 

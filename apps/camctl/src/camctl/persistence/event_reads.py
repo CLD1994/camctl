@@ -358,30 +358,16 @@ class SqlEventReads:
         return result
 
     def iter_members(self, table, column, identity, *, columns=None, limit=None):
+        if isinstance(self.scope, SourceResolutionReadScope) and (table, column, identity) == ('actions', 'plan_id', self.scope.plan_id):
+            from camctl.persistence.repositories.source_transactions import aggregate_pages
+            return aggregate_pages(self, table, column, identity, columns=columns, limit=limit)
+        return self._iter_members(table, column, identity, columns=columns, limit=limit)
+
+    def _iter_members(self, table, column, identity, *, columns=None, limit=None):
         self._check(table, column, identity)
         size = self.scope.batch_size if limit is None else limit
         if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= self.scope.batch_size:
             raise ConsistencyError("事实读取限额超出可信范围")
-        if isinstance(self.scope, SourceResolutionReadScope) and (table, column, identity) == ('actions', 'plan_id', self.scope.plan_id):
-            from camctl.persistence.repositories.source_transactions import bind_aggregate_page
-            after = 0
-            while True:
-                previous_aggregate = self._source_aggregate_page
-                try:
-                    ids = bind_aggregate_page(self, table, column, identity, after=after, limit=size)
-                    if not ids:
-                        return
-                    batch = []
-                    for key in ids:
-                        facts = self.optional(table, key, columns)
-                        if facts is not None:
-                            batch.append((key, facts))
-                    yield tuple(batch)
-                finally:
-                    self._source_aggregate_page = previous_aggregate
-                after = ids[-1]
-                if len(ids) < size:
-                    return
         changed = tuple(key[1] for key in self._overlay if key[0] == table)
         plan_owners = {}
         if isinstance(self.scope, PlanReadScope):
