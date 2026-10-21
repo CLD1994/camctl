@@ -158,6 +158,8 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
                       *, validated=(), planned_events=(), bounded=False):
     """分别绑定分段、来源和结果页进度，返回有效上下文及读取端口。"""
     from camctl.persistence.event_reads import SqlEventReads
+    from camctl.persistence.repositories.obtain_check_reads import bind as bind_obtain_check
+    context = bind_obtain_check(context, event, transaction, connection)
     reads=context.current_reads
     if result_page_write_scope is not None:
         if reads is not None:

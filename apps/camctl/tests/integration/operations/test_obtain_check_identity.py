@@ -544,3 +544,177 @@ def test_new_configuration_updates_only_new_attempt_and_old_key_keeps_adopted_in
         assert HistoryRepository(path).restore_entity('action', 2, boundary) == frozen
     finally:
         owned.connection.close()
+
+
+class _UnfinishedFollowup:
+    """真实前票仍运行，只在申请上下文中填写虚构的结束结果。"""
+    def __init__(self, original_key, bounded):
+        self.original_key, self.bounded = original_key, bounded
+
+    def plan(self, scope):
+        from copy import deepcopy
+        from camctl.history.events import business_columns
+        from camctl.history.validators import EventContext
+        from camctl.operations.result_format import result_document, error_document
+        from camctl.persistence.repositories.operations import BeginAttemptCommand
+        from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan,
+            event_envelope, row_change, row_facts, update_change)
+        base = BeginAttemptCommand(_intent(), self.original_key).plan(scope)
+        ticket = base.result.ticket
+        run = row_facts(scope.connection, 'operation_runs', ticket.run_id)
+        original = row_facts(scope.connection, 'operation_attempts', 1)
+        assert original['status'] == 1 and original['result_event_id'] is None
+        allocation = scope.allocate(1)
+        incoming = {name: original[name] for name in business_columns('operation_attempts')}
+        incoming.update(attempt_no=2, intent_event_id=allocation.first_event_id)
+        columns = ('status', 'attempts_used', 'max_attempts_used', 'timeout_s_json',
+                   'retry_interval_s_json', 'retry_wait_required')
+        before = {name: run[name] for name in columns}
+        event = event_envelope(allocation.first_event_id, allocation.txn_id, 11, 1,
+            (row_change('operation_attempts', 2, incoming),
+             update_change('operation_runs', run['id'], before, {**before, 'attempts_used': 2})),
+            _NOW + 2)
+        state = deepcopy(base.state_rows)
+        outcome = _finish_value(ticket).outcome.outcome
+        state['operation_attempts'] = {1: {**original, 'status': 3,
+            'effect_state': 1, 'result_event_id': original['intent_event_id'],
+            'result_json': result_document(outcome), 'error_json': error_document(outcome.error)}}
+        owners = {('operation_runs', run['id']): ('action', 2),
+                  ('operation_attempts', 2): ('action', 2)}
+        if self.bounded:
+            return BoundedCommandPlan(iter((event,)),
+                lambda current, transaction: EventContext(transaction, owners, deepcopy(state)),
+                None, lambda connection: None)
+        return CommandPlan((event,), owners, state)
+
+
+@pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
+def test_actual_running_previous_ticket_cannot_borrow_context_completion(tmp_path, bounded):
+    from camctl.persistence.transaction import commit_operation
+    _, owned = _environment(tmp_path)
+    try:
+        original_key = new_operation_key()
+        first = OperationRepository().begin_attempt(_intent(), original_key, owned)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        receipt = _unchanged(owned, lambda: commit_operation(
+            _UnfinishedFollowup(original_key, bounded), new_operation_key(), owned))
+        assert receipt.kind == 'rolled_back', receipt.error
+        assert owned.connection.execute('SELECT attempts_used FROM operation_runs').fetchone() == (1,)
+    finally:
+        owned.connection.close()
+
+
+def _capture_plan(owned, intent, key):
+    from camctl.persistence.repositories.operations import BeginAttemptCommand
+    from camctl.persistence.transaction import TransactionScope
+    connection = owned.connection
+    connection.execute('BEGIN')
+    try:
+        txn = connection.execute('SELECT COALESCE(MAX(id),0) FROM history_transactions').fetchone()[0]
+        last = connection.execute('SELECT COALESCE(MAX(id),0) FROM history_events').fetchone()[0]
+        return BeginAttemptCommand(intent, key).plan(TransactionScope(connection, txn, last))
+    finally:
+        connection.rollback()
+
+
+class _CapturedProposal:
+    def __init__(self, saved, bounded, *, forged_port=None):
+        self.saved, self.bounded, self.forged_port = saved, bounded, forged_port
+
+    def plan(self, scope):
+        from copy import deepcopy
+        from camctl.history.validators import EventContext
+        from camctl.persistence.transaction import BoundedCommandPlan
+        allocation = scope.allocate(len(self.saved.events))
+        assert allocation.first_event_id == self.saved.events[0].event_id
+        if not self.bounded:
+            assert self.forged_port is None
+            return self.saved
+        return BoundedCommandPlan(iter(self.saved.events),
+            lambda event, transaction: EventContext(transaction, self.saved.owners,
+                deepcopy(self.saved.state_rows), obtain_check_reads=self.forged_port),
+            self.saved.result, lambda connection: None)
+
+
+@pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
+@pytest.mark.parametrize('damage', ['intent_reference', 'missing_event', 'other_attempt',
+    'body_mismatch', 'incomplete_range', 'read_error'])
+def test_followup_guard_reads_actual_previous_result_event(tmp_path, bounded, damage):
+    import json, sqlite3
+    from ..operations.test_result_reuse import _FaultConnection
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import commit_operation
+    _, owned = _environment(tmp_path)
+    try:
+        repository = OperationRepository()
+        first = repository.begin_attempt(_intent(), new_operation_key(), owned)
+        assert _finish(owned, first.value.ticket).kind is DbOutcomeKind.COMPLETED
+        key = new_operation_key()
+        plan = _capture_plan(owned, _intent(occurred_at=_NOW + 2), key)
+        connection = owned.connection
+        event_id = connection.execute('SELECT result_event_id FROM operation_attempts').fetchone()[0]
+        if damage == 'intent_reference':
+            connection.execute('UPDATE operation_attempts SET result_event_id=intent_event_id')
+        elif damage == 'missing_event':
+            connection.execute('UPDATE operation_attempts SET result_event_id=999999')
+        elif damage in ('other_attempt', 'body_mismatch'):
+            raw = parse_exact_json(connection.execute('SELECT body_json FROM history_events WHERE id=?',
+                (event_id,)).fetchone()[0])
+            row = next(row for row in raw['rows'] if row['table'] == 'operation_attempts')
+            if damage == 'other_attempt': row['id'] = 999
+            else: row['after']['values']['result_json']['observations'] = [{'type':'unexpected','version':1,'data':{}}]
+            connection.execute('UPDATE history_events SET body_json=? WHERE id=?', (json.dumps(raw), event_id))
+        elif damage == 'incomplete_range':
+            connection.execute('UPDATE history_transactions SET last_event_id=last_event_id+1'
+                               ' WHERE id=(SELECT transaction_id FROM history_events WHERE id=?)', (event_id,))
+        connection.commit()
+        class ReadError(_FaultConnection):
+            def execute(self, sql, parameters=()):
+                if sql.startswith('SELECT id,transaction_id,event_type,event_version,'):
+                    raise sqlite3.OperationalError('actual result read failed')
+                return self._connection.execute(sql, parameters)
+        target = replace(owned, connection=ReadError(connection, 'unused')) if damage == 'read_error' else owned
+        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, target))
+        assert receipt.kind == 'rolled_back', receipt.error
+        if damage == 'read_error': assert isinstance(receipt.error, sqlite3.OperationalError)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
+def test_actual_device_carrier_cannot_borrow_host_context(tmp_path, bounded):
+    from copy import deepcopy
+    from camctl.persistence.transaction import commit_operation, row_facts
+    _, owned = _environment(tmp_path, host=False)
+    try:
+        # 合法 host 文件仅供虚构上下文引用；实际 requested output 仍由 device 承载。
+        _seed_output(owned.connection, 2, 1, 2, availability=5)
+        owned.connection.commit()
+        key = new_operation_key()
+        plan = _capture_plan(owned, _intent(host=False), key)
+        event, = plan.events
+        state = deepcopy(plan.state_rows)
+        host = row_facts(owned.connection, 'outputs', 2)['intermediate_file_id']
+        state['outputs'][1].update(device_file_id=None, intermediate_file_id=host)
+        state.setdefault('intermediate_files', {})[host] = row_facts(owned.connection, 'intermediate_files', host)
+        event = replace(event, rows=tuple(replace(row, after=replace(row.after,
+            values={**row.after.values, 'timeout_s_json':None, 'retry_interval_s_json':None}))
+            for row in event.rows))
+        plan = replace(plan, events=(event,), state_rows=state)
+        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, owned))
+        assert receipt.kind == 'rolled_back', receipt.error
+    finally:
+        owned.connection.close()
+
+
+def test_bounded_obtain_check_rejects_caller_supplied_read_port(tmp_path):
+    from camctl.persistence.transaction import commit_operation
+    _, owned = _environment(tmp_path)
+    try:
+        key = new_operation_key()
+        plan = _capture_plan(owned, _intent(), key)
+        receipt = _unchanged(owned, lambda: commit_operation(
+            _CapturedProposal(plan, True, forged_port=object()), key, owned))
+        assert receipt.kind == 'rolled_back', receipt.error
+    finally:
+        owned.connection.close()

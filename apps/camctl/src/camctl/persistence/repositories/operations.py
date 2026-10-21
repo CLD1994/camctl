@@ -586,10 +586,10 @@ class BeginAttemptCommand:
                         or previous[2] is None or previous[3] is None):
                     raise TransactionError(
                         "无重试间隔的后续尝试要求原尝试已有可靠结果")
-                if intent.target.obtain_item_id is not None:
-                    original = _load_row(connection, "operation_attempts", previous[0])
-                    _verify_complete_obtain_result(original)
-                    self._state.setdefault("operation_attempts", {})[original["id"]] = original
+            if intent.target.obtain_item_id is not None:
+                from .obtain_check_reads import previous_result
+                original = previous_result(connection, run_facts, scope.max_event_id + 1)
+                self._state.setdefault("operation_attempts", {})[original["id"]] = original
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
             if intent.kind is OperationKind.READ_FILE:
@@ -1505,6 +1505,14 @@ def _outcome_of(receipt) -> DbOutcome:
 
 
 def _operation_identity_guard(event, context) -> None:
+    if context.obtain_check_reads is not None:
+        from .obtain_check_reads import _ObtainCheckReads
+        if type(context.obtain_check_reads) is not _ObtainCheckReads:
+            _fail('取回 CHECK 缺少内核绑定的实际读取端口')
+        try:
+            context.obtain_check_reads.verify(event, context.transaction)
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
     relations = context.association_rows
     if context.transaction_rows is None:
         # 独立校验也必须包含当前创建行；不预取未来事件或改写事件前状态。
@@ -1630,6 +1638,8 @@ def _attempt_intent_guard(event, context) -> None:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
     if run_after.get("obtain_item_id") is not None:
+        if context.obtain_check_reads is None:
+            _fail('取回 CHECK 意图缺少原内核的实际读取端口')
         for attempt in attempts:
             if any(not json_equal(attempt.after.values.get(column), run_after.get(column))
                    for column in ("max_attempts_used", "timeout_s_json", "retry_interval_s_json")):
