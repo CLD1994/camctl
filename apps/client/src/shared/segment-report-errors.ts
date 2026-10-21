@@ -56,11 +56,8 @@ export interface SegmentIssue {
   details: SegmentDetails;
 }
 
-/** 同一来源已固定的业务事实可跨错误码比较，说明文字和可选引用缺省不构成冲突。 */
-export function compareSegmentFacts(
-  a: SegmentDetails,
-  b: SegmentDetails,
-): void {
+/** 基本事实保留原始键对象，从其父容器读取精确数字。 */
+function compareSegmentBaseFacts(a: SegmentDetails, b: SegmentDetails): void {
   const number = (parent: object, key: string, value: number | null) =>
     exactJsonValueIdentity(value, true, { parent, key });
   const ids = (values: string[]) => JSON.stringify([...values].sort());
@@ -104,16 +101,44 @@ export function compareSegmentFacts(
       ),
     "同来源冻结缺口事实矛盾",
   );
-  for (let i = 0; i < a.gaps.length; i++)
-    for (const side of ["left", "right"] as const) {
-      const left = a.gaps[i][side].output_id,
-        right = b.gaps[i][side].output_id;
-      requireFact(
-        left === undefined || right === undefined || left === right,
-        "同来源可靠邻接产物身份矛盾",
-      );
-    }
 }
+
+/** 可选引用缺省不删除知识；每个缺口的左右两侧分别累计，不改写原报告。 */
+export class SegmentFactKnowledge {
+  private readonly sources = new Map<
+    string,
+    {
+      basis: SegmentDetails;
+      neighbors: Array<{ left?: string; right?: string }>;
+    }
+  >();
+
+  add(details: SegmentDetails): void {
+    const source = details.source_action_instance_id;
+    let known = this.sources.get(source);
+    if (known) compareSegmentBaseFacts(known.basis, details);
+    else {
+      known = { basis: details, neighbors: details.gaps.map(() => ({})) };
+      this.sources.set(source, known);
+    }
+    for (let i = 0; i < details.gaps.length; i++)
+      for (const side of ["left", "right"] as const) {
+        const id = details.gaps[i][side].output_id;
+        if (id === undefined) continue;
+        const previous = known.neighbors[i][side];
+        requireFact(
+          previous === undefined || previous === id,
+          "同来源可靠邻接产物身份矛盾",
+        );
+        known.neighbors[i][side] = id;
+      }
+  }
+
+  *details(): Iterable<SegmentDetails> {
+    for (const { basis } of this.sources.values()) yield basis;
+  }
+}
+
 const requireFact = (condition: unknown, message: string): void => {
   if (!condition) throw new Error(`分段报告：${message}`);
 };

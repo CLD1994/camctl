@@ -2,7 +2,7 @@ import { isCameraAction } from "../shared/actions";
 import {
   rejectSegmentError,
   segmentReferences,
-  compareSegmentFacts,
+  SegmentFactKnowledge,
   type SegmentDetails,
 } from "../shared/segment-report-errors";
 import type { ValidateFunction } from "ajv";
@@ -124,14 +124,47 @@ function failureIdentity(item: ObtainFailure): string {
   ]);
 }
 function consistentSegmentFacts(indexes: Index[]) {
-  const seen = new Map<string, SegmentDetails>();
+  const knowledge = new SegmentFactKnowledge();
   for (const index of indexes)
     for (const { value: action } of index.actions.values())
-      for (const { details } of segmentReferences(action)) {
-        const previous = seen.get(details.source_action_instance_id);
-        if (previous) compareSegmentFacts(previous, details);
-        else seen.set(details.source_action_instance_id, details);
-      }
+      for (const { details } of segmentReferences(action))
+        knowledge.add(details);
+}
+/** 只提取分段校验知识；不会回放或修改报告状态。 */
+export function accumulateSegmentFacts(
+  knowledge: SegmentFactKnowledge,
+  report: StatusReport,
+): void {
+  for (const plan of report.plans ?? [])
+    for (const action of plan.actions ?? [])
+      for (const { details } of segmentReferences(action))
+        knowledge.add(details);
+}
+function segmentAssociations(index: Index, details: SegmentDetails): void {
+  const source = index.actions.get(details.source_action_instance_id)?.value;
+  if (source)
+    requireFact(source.type === "camera_record", "分段错误来源必须是录像动作");
+  for (const id of details.retained_output_ids) {
+    const output = index.outputs.get(id)?.value;
+    if (output)
+      requireFact(
+        output.kind === "original" &&
+          output.source_action_instance_id ===
+            details.source_action_instance_id,
+        "分段保留产物必须属于同一来源的原片",
+      );
+  }
+}
+/** 历史详情与当前已知实体交叉核对；缺席引用仍保持未知。 */
+export function validateSegmentKnowledge(
+  knowledge: SegmentFactKnowledge,
+  ...reports: StatusReport[]
+): void {
+  for (const report of reports) {
+    const index = indexReport(report);
+    for (const details of knowledge.details())
+      segmentAssociations(index, details);
+  }
 }
 function associations(index: Index) {
   consistentSegmentFacts([index]);
@@ -249,26 +282,8 @@ function associations(index: Index) {
   }
   for (const owner of index.actions.values()) {
     const action = owner.value;
-    for (const { details } of segmentReferences(action)) {
-      const source = index.actions.get(
-        details.source_action_instance_id,
-      )?.value;
-      if (source)
-        requireFact(
-          source.type === "camera_record",
-          "分段错误来源必须是录像动作",
-        );
-      for (const id of details.retained_output_ids) {
-        const output = index.outputs.get(id)?.value;
-        if (output)
-          requireFact(
-            output.kind === "original" &&
-              output.source_action_instance_id ===
-                details.source_action_instance_id,
-            "分段保留产物必须属于同一来源的原片",
-          );
-      }
-    }
+    for (const { details } of segmentReferences(action))
+      segmentAssociations(index, details);
     const admission =
       action.status === "failed" && action.error?.stage === "admission";
     if (
