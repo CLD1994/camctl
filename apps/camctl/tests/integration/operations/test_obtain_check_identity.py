@@ -718,3 +718,49 @@ def test_bounded_obtain_check_rejects_caller_supplied_read_port(tmp_path):
         assert receipt.kind == 'rolled_back', receipt.error
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize('bounded', [False, True], ids=['finite', 'actual-bounded'])
+@pytest.mark.parametrize('existing', [False, True], ids=['first', 'followup'])
+@pytest.mark.parametrize('shape', ['missing', 'mixed_before', 'mixed_after', 'duplicate'])
+def test_every_obtain_intent_run_requires_exactly_one_own_new_attempt(tmp_path, bounded, existing, shape):
+    from copy import deepcopy
+    from camctl.persistence.transaction import commit_operation
+    _, owned = _environment(tmp_path)
+    try:
+        repository = OperationRepository()
+        if existing:
+            first = repository.begin_attempt(_intent(), new_operation_key(), owned)
+            assert first.kind is DbOutcomeKind.COMPLETED, first.error
+            assert _finish(owned, first.value.ticket).kind is DbOutcomeKind.COMPLETED
+        cleanup_intent = replace(_intent(), target=AttemptTarget(cleanup_item_id=1))
+        if shape.startswith('mixed'):
+            owned.connection.execute('INSERT INTO cleanup_items '
+                '(id,action_id,requested_output_id,status,restriction_state) VALUES (1,2,1,1,1)')
+            owned.connection.commit()
+            cleanup = repository.begin_attempt(cleanup_intent, new_operation_key(), owned)
+            assert cleanup.kind is DbOutcomeKind.COMPLETED, cleanup.error
+            assert _finish(owned, cleanup.value.ticket).kind is DbOutcomeKind.COMPLETED
+        key = new_operation_key()
+        plan = _capture_plan(owned, _intent(occurred_at=_NOW + 2), key)
+        event, = plan.events
+        attempt, run = event.rows
+        if shape == 'duplicate':
+            event = replace(event, rows=(*event.rows, replace(attempt, row_id=attempt.row_id + 1)))
+        elif shape == 'missing':
+            event = replace(event, rows=(run,))
+        else:
+            other = _capture_plan(owned, replace(cleanup_intent, occurred_at=_NOW + 2), key)
+            other_event, = other.events
+            assert event.event_id == other_event.event_id
+            state = deepcopy(other.state_rows)
+            for table, rows in plan.state_rows.items():
+                state.setdefault(table, {}).update(deepcopy(rows))
+            rows = (run, *other_event.rows) if shape == 'mixed_before' else (*other_event.rows, run)
+            event = replace(event, rows=rows)
+            plan = replace(plan, owners={**other.owners, **plan.owners}, state_rows=state)
+        plan = replace(plan, events=(event,))
+        receipt = _unchanged(owned, lambda: commit_operation(_CapturedProposal(plan, bounded), key, owned))
+        assert receipt.kind == 'rolled_back', receipt.error
+    finally:
+        owned.connection.close()

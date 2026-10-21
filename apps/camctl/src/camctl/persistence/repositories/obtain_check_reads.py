@@ -84,6 +84,7 @@ class _ObtainCheckReads:
         if (replace(event, change_seq=self.event.change_seq) != self.event or transaction != self.transaction
                 or not self.connection.in_transaction):
             raise ConsistencyError('取回 CHECK 读取端口不属于当前实际事务和事件')
+        is_intent = validate_event_structure(event)[0] == 'ATTEMPT_STARTED'
         immutable = load_event_registry()['tables']['operation_runs']['immutable']
         for run_id in self.run_ids:
             actual = row_facts(self.connection, 'operation_runs', run_id)
@@ -108,7 +109,7 @@ class _ObtainCheckReads:
             host = _chain(self.connection, after)
             attempts = [row for row in event.rows if row.table == 'operation_attempts'
                         and not row.before.exists and row.after.values.get('run_id') == run_id]
-            if not attempts:
+            if not attempts and not is_intent:
                 continue
             if len(attempts) != 1:
                 raise ConsistencyError('一次取回 CHECK 意图只能增加紧邻的一票')
