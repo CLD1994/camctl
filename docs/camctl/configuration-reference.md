@@ -82,6 +82,14 @@ level = "INFO"
 
 数据库参数的设计要求见[数据库执行](persistence-runtime.md)与[历史存储](history-storage.md)；上表单独注明当前 CLI 的实际接入边界。历史读取与快照规则见[历史查询](historical-state-query.md)和[快照维护](history-snapshots.md)。文件处理规则见[分段拷贝](../architecture/file-copy.md)、[正式产物清理](../architecture/output-cleanup.md)和[中间文件清理](../architecture/file-handoff.md#中间文件清理的运行预算)。
 
+## 来源检查次数
+
+字段|类型与默认值|合法范围与作用
+-|-|-
+`obtain.max_source_check_attempts`|整数；`3` 次|至少 1；来源检查的全局尝试上限，包含第一次。设备子表不能覆盖此上限。
+
+此值从本次启动加载的 `ConfigSnapshot.obtain` 读取；其内置默认值只在配置加载器的 `ConfigDefaults` 中定义。本字段目前只完成配置读取与校验，尚未接入来源查询调度或某次 operation attempt，因此不代表具体查询已使用该次数预算。
+
 ## 时钟与 ADB 客户端
 
 字段|类型与默认值|合法范围与实际作用
@@ -152,12 +160,16 @@ level = "INFO"
 `devices.<id>.copy.max_recopies`|整数；`1` 次|至少 0；摘要不一致后的额外整片重拷次数，0 表示不重拷。
 `devices.<id>.copy.read_idle_timeout_s`|正秒数；`10`|连续没有新文件数据的等待上限；不限制整片总传输时间。
 `devices.<id>.copy.retry_interval_s`|非负秒数；`3`|再次读取前的等待间隔。
+`devices.<id>.obtain.source_check_timeout_s`|正秒数；`10`|设备来源检查的单次调用时限；只能设置在对应设备子表中。
+`devices.<id>.obtain.source_check_retry_interval_s`|非负秒数；`3`|设备来源检查再次尝试前的间隔；0 保留为不额外等待。
 `devices.<id>.cleanup.delete_timeout_s`|正秒数；`10`|一次设备文件删除调用的等待上限。
 `devices.<id>.cleanup.query_timeout_s`|正秒数；`10`|一次设备文件存在性查询调用的等待上限。
 `devices.<id>.cleanup.delete_retry_interval_s`|非负秒数；`3`|确认可以再次删除后，重发删除前的等待。
 `devices.<id>.cleanup.query_retry_interval_s`|非负秒数；`3`|文件存在性查询失败后，再次查询前的等待。
 
 设备文件清理的次数来自全局 `cleanup.max_delete_attempts`、`cleanup.max_query_attempts`；每台设备的 `cleanup` 子表提供时限和间隔。当前内建 Action6、OSMO 驱动提供设备文件删除与存在性查询；Hasselblad 未提供这两个驱动端口。主机正式源的查询与清理由本地文件流程处理，不采用设备调用时限。完整规则见[文件拷贝](../architecture/file-copy.md)与[设备文件删除和查询](../architecture/configuration.md#设备文件删除与查询的计时)。
+
+来源检查的设备秒数从同一配置加载器的 `ConfigDefaults` 取得默认值，并沿设备执行子表的统一秒数校验规则规范为精确 `Decimal`。显式 `None`、非有限值、无效数值或不符合正数／非负范围的值都会作为配置错误拒绝。当前只加载和校验这些值，尚未接入来源查询执行；因此不能据此推断某次设备调用的实际超时或重试行为。
 
 ### Hasselblad 专属字段
 

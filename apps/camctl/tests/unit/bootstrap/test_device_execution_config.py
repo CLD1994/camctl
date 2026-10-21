@@ -77,3 +77,67 @@ def test_execution_section_requires_table_even_when_explicitly_null(section):
         load_config({"devices": {"camera-1": {
             "kind": "camera", "driver": "adb", section: None,
         }}}, ConfigDefaults())
+
+
+def test_obtain_defaults_are_materialized_for_each_declared_device():
+    config = load_config({"devices": {
+        "camera-1": {"kind": "camera", "driver": "adb"},
+        "camera-2": {"kind": "camera", "driver": "adb", "obtain": {}},
+    }}, ConfigDefaults())
+
+    assert config.devices["camera-1"]["obtain"] == {
+        "source_check_timeout_s": Decimal("10"),
+        "source_check_retry_interval_s": Decimal("3"),
+    }
+    assert config.devices["camera-2"]["obtain"] == config.devices["camera-1"]["obtain"]
+
+
+def test_obtain_device_defaults_come_from_config_defaults():
+    config = load_config({"devices": {"camera-1": {
+        "kind": "camera", "driver": "adb",
+    }}}, ConfigDefaults(
+        source_check_timeout_s="6.25",
+        source_check_retry_interval_s="0",
+    ))
+
+    assert config.devices["camera-1"]["obtain"] == {
+        "source_check_timeout_s": Decimal("6.25"),
+        "source_check_retry_interval_s": Decimal("0"),
+    }
+
+
+@pytest.mark.parametrize("field,raw,expected", [
+    ("source_check_timeout_s", "0.125", Decimal("0.125")),
+    ("source_check_timeout_s", Decimal("2.5"), Decimal("2.5")),
+    ("source_check_timeout_s", 10, Decimal("10")),
+    ("source_check_retry_interval_s", "0", Decimal("0")),
+    ("source_check_retry_interval_s", Decimal("2.5"), Decimal("2.5")),
+    ("source_check_retry_interval_s", 3, Decimal("3")),
+])
+def test_obtain_device_seconds_preserve_exact_legal_values(field, raw, expected):
+    assert _load("obtain", field, raw) == expected
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, None, "NaN", "Infinity", "not-seconds", 1.25])
+def test_obtain_device_timeout_rejects_zero_and_invalid_seconds(bad):
+    with pytest.raises(ConfigError, match="source_check_timeout_s"):
+        _load("obtain", "source_check_timeout_s", bad)
+
+
+@pytest.mark.parametrize("bad", [-1, True, None, "NaN", "Infinity", "not-seconds", 1.25])
+def test_obtain_device_retry_interval_rejects_negative_and_invalid_seconds(bad):
+    with pytest.raises(ConfigError, match="source_check_retry_interval_s"):
+        _load("obtain", "source_check_retry_interval_s", bad)
+
+
+@pytest.mark.parametrize("field", ["max_source_check_attempts", "unknown"])
+def test_obtain_device_rejects_unknown_fields_including_global_attempt_limit(field):
+    with pytest.raises(ConfigError, match="未知字段"):
+        _load("obtain", field, 3)
+
+
+def test_obtain_device_section_must_be_a_table():
+    with pytest.raises(ConfigError, match="obtain"):
+        load_config({"devices": {"camera-1": {
+            "kind": "camera", "driver": "adb", "obtain": None,
+        }}}, ConfigDefaults())
