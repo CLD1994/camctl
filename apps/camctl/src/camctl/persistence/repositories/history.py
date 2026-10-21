@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from camctl.history.bounded import SegmentHistoryHandle
+    from camctl.history.report_selection import ReportEntitySelection
     from camctl.history.snapshot_stream import PreparedSnapshotSource
 
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
@@ -320,6 +321,22 @@ class HistoryRepository:
                 boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
         finally:
             connection.close()
+
+    def open_report_selection(self, request: ReportScopeRequest) -> ReportEntitySelection:
+        """打开固定 H/窗口的有界逐层实体选择会话。"""
+        from camctl.history.report_selection import ReportEntitySelection
+        if not isinstance(request, ReportScopeRequest):
+            raise ConsistencyError('报告选择必须提供固定范围请求')
+        with self._read_connection() as connection:
+            current = self._boundary(connection)
+            boundary = request.boundary
+            if boundary.txn_id > current.txn_id or boundary.last_event_id > current.last_event_id:
+                raise ConsistencyError('报告选择 H 晚于可靠当前边界')
+            if boundary != INITIAL_BOUNDARY:
+                transaction = _transaction_range(connection, boundary.txn_id)
+                if transaction.last_event_id != boundary.last_event_id:
+                    raise ConsistencyError('报告选择 H 不是完整已提交边界')
+        return ReportEntitySelection(self, request, self._instance_id)
 
     def select_report_scope(self, request: ReportScopeRequest) -> ReportScope:
         """选择一份报告在固定窗口内的全部入选对象并补齐父对象。

@@ -25,6 +25,7 @@ __all__ = [
     "PlanSubtree",
     "ReportScope",
     "ReportScopeRequest",
+    "ReportEntityCursor",
     "build_report_scope",
     "report_target_types",
     "FileHistoryKind",
@@ -69,6 +70,33 @@ class ReportScopeRequest:
             raise ConsistencyError(f"entity_batch_size 必须是正整数: {self.entity_batch_size}")
         if self.to_wm < self.from_wm:
             raise ConsistencyError("覆盖水位窗口的终点早于起点")
+
+
+@dataclass(frozen=True)
+class ReportEntityCursor:
+    """逐层选择继续位置；父角色由实体登记及 parent_id 共同绑定。"""
+    instance_id: str
+    boundary: HistoryBoundary
+    from_wm: int
+    to_wm: int
+    entity: str
+    parent_id: int | None
+    after_id: int
+
+    def __post_init__(self):
+        if not isinstance(self.instance_id, str) or not self.instance_id or not isinstance(self.entity, str) or not self.entity:
+            raise ConsistencyError('报告游标缺少实例或实体身份')
+        ReportScopeRequest(self.boundary, self.from_wm, self.to_wm, 1)
+        if self.parent_id is not None:
+            ObjectId(self.parent_id)
+        if type(self.after_id) is not int or self.after_id < 0:
+            raise ConsistencyError('报告游标末 ID 必须为非负整数')
+        if self.after_id:
+            ObjectId(self.after_id)
+
+    @property
+    def identity(self):
+        return (self.instance_id, self.boundary, self.from_wm, self.to_wm, self.entity, self.parent_id)
 
 
 @dataclass(frozen=True)
