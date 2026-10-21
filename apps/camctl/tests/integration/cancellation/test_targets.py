@@ -297,7 +297,7 @@ class TestCancelTargetsGuard:
     def _state(owned):
         from camctl.persistence.transaction import row_facts
 
-        tables = ("actions", "cancel_items", "auto_preview_links")
+        tables = ("actions", "plans", "cancel_items", "auto_preview_links")
         return {
             table: {row[0]: row_facts(owned.connection, table, row[0])
                     for row in owned.connection.execute(
@@ -343,9 +343,17 @@ class TestCancelTargetsGuard:
     def _validate(self, owned, event, state, owners):
         from camctl.contracts.history_values import TransactionRange
         from camctl.history.validators import EventContext, validate_event
+        from camctl.history.reads import ReadCoverage
 
         validate_event(event, EventContext(
-            TransactionRange(2, 2, 2), owners, state))
+            TransactionRange(2, 2, 2), owners, state,
+            read_coverage=ReadCoverage({
+                ("actions", "id"): frozenset(state["actions"]),
+                ("actions", "plan_id"): frozenset(state["plans"]),
+                ("plans", "id"): frozenset(state["plans"]),
+                ("auto_preview_links", "source_action_id"): frozenset(state["actions"]),
+                ("auto_preview_links", "obtain_action_id"): frozenset(state["actions"]),
+            })))
 
     def test_linked_member_requires_valid_auto_link(self, pipeline):
         owned = pipeline

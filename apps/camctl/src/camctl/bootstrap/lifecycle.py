@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from camctl.devices.start_entry import StartEntryCoordinator
+
 import os
 import stat
 from dataclasses import dataclass, field, replace
@@ -71,6 +73,7 @@ class RuntimeDeps:
     #: CLI 拥有的单向通知写端；装配只借用，CLI 在全部退出路径关闭。
     host_notifications: Any = None
     motor_permits: dict = field(default_factory=dict)
+    start_entries: Any = field(default_factory=StartEntryCoordinator)
     closed: bool = field(default=False)
     #: 装配前提未成立时保留机器结果，不启动报告协作者。
     startup_error: SessionOutcome | None = None
@@ -755,7 +758,7 @@ def _report_assembly(
             on_failure=_trigger_failure_log,
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
-        "cancel": cancel_flow(ready=ready, processing=processing,
+        "cancel": cancel_flow(ready=ready, processing=processing, start_entries=deps.start_entries,
                               motor_permits=deps.motor_permits,
                               work_files=deps.work_files,
                               resume_media_results=deps.work_files.resume_media_results,
@@ -766,6 +769,7 @@ def _report_assembly(
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
         "scheduling": capture_flow(session_capture_assembly(
+            start_entries=deps.start_entries,
             devices=deps.config.devices,
             drivers=drivers,
             staging=staging,
@@ -795,6 +799,7 @@ def _report_assembly(
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
         "residual": residual_flow(session_capture_assembly(
+            start_entries=deps.start_entries,
             devices=deps.config.devices,
             drivers=drivers,
             staging=staging,
@@ -967,6 +972,7 @@ async def execute_command(
             flows=flows,
             restricted_flows={
                 "cancel": cancel_flow(
+                    start_entries=deps.start_entries,
                     ready=ready, processing=processing, unscheduled_only=True,
                     motor_permits=deps.motor_permits, work_files=deps.work_files,
                     resume_media_results=deps.work_files.resume_media_results,
@@ -975,6 +981,7 @@ async def execute_command(
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(
+                        start_entries=deps.start_entries,
                         devices=deps.config.devices,
                         drivers=current_registry(),
                         staging=staging,

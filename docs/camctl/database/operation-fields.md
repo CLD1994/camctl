@@ -418,6 +418,10 @@ Hasselblad 复合 START 的 `effect_state` 描述本次照片采集，设置和�
 
 Hasselblad 下载属于本地前台读取。原读取无法继续且驱动明确支持本地读取恢复时，使用 `settlement.basis = assumed`、`settlement.evidence.type = local_read_recovery`、`version = 1`、`data = {}` 保存原尝试的未知结果。恢复同样要求旧本地执行已经停止，且原读取意图不晚于本次启动固定的历史边界；普通重新启动或发现下载目录均不能单独满足该条件。已保存的实际读取结果保持原证据，不能由恢复记录覆盖。
 
+Hasselblad 单张实际进入驱动 `control` 时生成 `hasselblad_start_entered/v1` 观察，正文只含原 `activity_id`，随原调用结果保存。即使首条工具命令尚未执行，该观察也表示整次调用已进入；`NO_EFFECT` 仅描述照片采集效果。框架可靠封住整次未进入调用时，沿原票据使用 `start_call_prevented/v1` 空正文、`not_dispatched` 和空观察保存阻止结果；没有原意图时不创建尝试。缺少这两种独立入口依据时保持入口未知，通用 `dispatch_prevented`、工具步骤或诊断均不能补造未进入事实。
+
+Hasselblad 单张的原 `control` 尝试只有在驱动声明本地控制恢复能力、提供 `local_control_recovery/v1` 空正文契约，且旧本地执行已按上述启动边界停止时，才可沿原票据保存 `UNKNOWN` 结果。原调用意图必须位于本次启动固定的历史边界以内；本会话仍在执行原调用时不能使用该恢复。恢复使用 `settlement.basis = assumed`、`settlement.evidence.type = local_control_recovery`、`version = 1`、`data = {}`，保留原尝试身份，不补填退出信息或入口观察。该依据只说明旧本地控制责任停止，不能证明整次调用未进入、相机效果、设备活动结束或占用释放，也不允许重放 START、设置、调焦或拍摄。缺少声明、契约、启动边界或固定历史边界时，原尝试继续等待核实。
+
 历史事件包含 `result_json` 的完整前后值，快照包含其完整结构；尝试结果及适用业务派生事实共同提交。三种历史恢复路径按原类型及版本还原，不加载当前配置重算依据、不查询设备、不执行收场。内部证据不因保存而自动成为公共报告字段；报告继续按其既定范围生成。
 
 ### 第一版 ADB 未完成调用的恢复记录

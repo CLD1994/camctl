@@ -39,6 +39,7 @@ DRIVER_DECLARATION = DriverDeclaration(
     delete_supported=False,
     directory_supported=False,
     local_read_recovery_supported=True,
+    local_control_recovery_supported=True,
 )
 
 

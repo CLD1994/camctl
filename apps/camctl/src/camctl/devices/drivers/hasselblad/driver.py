@@ -16,6 +16,7 @@ from camctl.devices.evidence import (
     EvidenceRegistry,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
+from camctl.devices.start_entry import ENTERED, PREVENTED, entered_observation
 from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
 from camctl.host_files.downloads import DownloadWorkspace
 from camctl.host_files.capture_sources import (
@@ -80,9 +81,10 @@ _DISPATCH_PREVENTED = EvidenceContract(
     max_diagnostic_calls=PHOTO_START_CALL_LIMIT
 )
 EVIDENCE = EvidenceRegistry((
-    _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED,
+    _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
+    EvidenceContract("local_control_recovery", 1, "control", frozenset()),
 ))
 
 _VENDOR_ID = 0x2756
@@ -343,7 +345,10 @@ class HasselbladDriver:
         return raw
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
+        if request.start_entry is not None:
+            request.start_entry.enter(request.ticket)
         activity_id, config, settings = self._request_config(request)
+        entry = entered_observation(request.ticket)
         roots = self.roots
         commands = photo_start_commands(settings)
         began_ns = self.monotonic_ns()
@@ -362,7 +367,7 @@ class HasselbladDriver:
                 status=status, error=error, effect=effect,
                 settlement=Settlement(basis, EvidenceValue(
                     "operation_returned" if last_raw is not None else "dispatch_prevented", 1, data)),
-                observations=() if observation is None else (observation,),
+                observations=(entry,) if observation is None else (observation, entry),
                 call_info=self._call_info(last_raw),
                 diagnostics=ToolDiagnostics(PHOTO_START_CALL_LIMIT, tuple(calls)),
             )

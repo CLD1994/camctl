@@ -255,7 +255,7 @@ async def test_jpeg_format_keeps_original_and_preview_roles_distinct(host_files)
 
     assert _subcommands(transport)[3] == ("set", "capture-format", "jpeg")
     assert result.outcome.status is AttemptStatus.SUCCEEDED
-    photo, = result.observations
+    photo, = (item for item in result.observations if item.type == "photo_taken")
     assert photo.data["original"]["original_name"] == "capture_22544386.JPG"
     assert photo.data["original"]["media_type"] == "image/jpeg"
     assert photo.data["preview"]["original_name"] == "capture_22544386.JPG.thumbnail.jpg"
@@ -285,7 +285,7 @@ async def test_photo_driver_checks_identity_before_any_setting(host_files, list_
     assert len(transport.calls) == 1
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["code"] == "device_error"
     assert result.error["details"]["step"] == "list"
     assert result.error["details"]["reason"] in {"no_matching_device", "multiple_matching_devices"}
@@ -421,7 +421,7 @@ async def test_owned_call_interruption_after_each_return_blocks_next_dispatch(
     assert result.outcome.error.code == "transport_cancelled"
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.call_info.local_exit_code == 0
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert verified == []
 
 
@@ -436,7 +436,7 @@ async def test_tool_start_error_before_capture_is_no_effect_and_keeps_prior_loca
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.outcome.call_info.local_exit_code == 0
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["details"]["reason"] == "tool_start_failed"
 
 
@@ -452,7 +452,7 @@ async def test_tool_start_error_before_first_process_is_reliably_not_dispatched(
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
     assert result.outcome.call_info is None
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["code"] == "device_error"
     assert result.error["details"]["reason"] == "tool_start_failed"
 
@@ -486,7 +486,7 @@ async def test_capture_timeout_keeps_workspace_and_does_not_emit_photo_taken(hos
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.call_info.local_signal == 15
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.outcome.settlement.evidence.data == {"terminate_grace_s": Decimal("3")}
     assert result.error["details"]["steps"][-1]["used_grace_s"] == Decimal("3")
     assert result.outcome.diagnostics.calls[-1].stderr.data == b"timed out\n"
@@ -535,7 +535,7 @@ async def test_tool_call_cancelled_uses_its_actual_local_outcome(host_files):
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert result.outcome.settlement.evidence.data == {"terminate_grace_s": Decimal("3")}
     assert result.error["details"]["steps"][-1]["used_grace_s"] == Decimal("3")
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert verified == []
 
 
@@ -552,7 +552,7 @@ async def test_unparseable_capture_response_is_unknown_even_after_local_exit_zer
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
     assert result.outcome.call_info.local_exit_code == 0
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["details"]["reason"] == "capture_response_unconfirmed"
 
 
@@ -571,7 +571,7 @@ async def test_unreported_camera_locator_never_becomes_a_successful_capture(host
     assert verified == []
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["details"]["reason"] == "capture_response_unconfirmed"
     assert "未报告机内路径" in result.error["details"]["response_error"]
     assert result.error["details"]["response_code"] == "unreported_camera_locator"
@@ -596,7 +596,7 @@ async def test_file_verification_failure_keeps_unknown_photo_workspace(host_file
     assert prepared == [(roots, ACTIVITY_ID)]
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert result.outcome.observations == ()
+    assert tuple(o.type for o in result.outcome.observations) == ("hasselblad_start_entered",)
     assert result.error["details"]["step"] == "verify_files"
     assert result.error["details"]["reason"] == "source_open"
 
@@ -632,6 +632,7 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         delete_supported=False,
         directory_supported=False,
         local_read_recovery_supported=True,
+        local_control_recovery_supported=True,
     )
 
 
@@ -716,7 +717,8 @@ async def test_capture_failure_text_cannot_override_nonzero_exit_or_incomplete_o
     result = await _driver(transport, roots).control(_request())
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.UNKNOWN
-    assert not result.observations and not verified
+    assert tuple(o.type for o in result.observations) == ("hasselblad_start_entered",)
+    assert not verified
     diag = result.outcome.diagnostics.calls[-1]
     if kind in ("incomplete","stdout_missing","stderr_missing"):
         assert all(s.state.value in ("unconfirmed","unavailable") for s in (diag.stdout,diag.stderr))

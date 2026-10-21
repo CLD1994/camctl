@@ -49,6 +49,7 @@ class RecoveryBlockedReason(Enum):
     EVIDENCE_UNAVAILABLE = "evidence_unavailable"
     INTENT_OUTSIDE_HORIZON = "intent_outside_horizon"
     ACTIVE_LOCAL_READ = "active_local_read"
+    ACTIVE_LOCAL_CONTROL = "active_local_control"
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,9 @@ def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
     """
     if entry is None:
         return None
-    if operation in getattr(entry.declaration, "local_file_recovery_operations", ()):
+    if operation == "control" and getattr(entry.declaration, "local_control_recovery_supported", False):
+        evidence_type = "local_control_recovery"
+    elif operation in getattr(entry.declaration, "local_file_recovery_operations", ()):
         evidence_type = "local_file_recovery"
     elif operation == "read" and getattr(entry.declaration, "local_read_recovery_supported", False):
         evidence_type = "local_read_recovery"

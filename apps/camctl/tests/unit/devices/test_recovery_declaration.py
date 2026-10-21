@@ -59,4 +59,4 @@ def test_local_read_recovery_uses_its_own_empty_contract():
     assert recovered is not None, "本地 READ 恢复应保留原驱动独立登记"
     assert recovered.contract("local_read_recovery", 1).operation == "read"
     assert recovered.contract("read_returned", 1).operation == "read"
-    assert recovery_registry(driver, "control") is None
+    assert recovery_registry(driver, "control").contract("local_control_recovery", 1).operation == "control"

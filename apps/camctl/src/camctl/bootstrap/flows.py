@@ -436,6 +436,7 @@ def _withdrawal_position(owned: Any, ready: Path, processing: Path):
 def cancel_flow(
     *, ready: Path, processing: Path, unscheduled_only: bool = False,
     motor_permits: dict | None = None,
+    start_entries=None,
     work_files: Any = None,
     resume_media_results=None,
     resume_file_observations=None,
@@ -458,6 +459,7 @@ def cancel_flow(
 
     executor = work_files.executor if work_files is not None else FileTaskExecutor(Supervisor())
     pending_withdrawals = work_files.pending_withdrawals if work_files is not None else {}
+    pending_origin_settlements = {}
 
     async def flow(context: Any) -> None:
         from camctl.cancellation.models import (
@@ -482,9 +484,16 @@ def cancel_flow(
 
         owned = context.open_connection()
         try:
+            if any(identity[0] != owned.metadata.instance_id for identity in pending_origin_settlements):
+                raise StateDbFailure("原取消收场申请属于另一状态库")
             await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
                                             resume_capture_completions=resume_capture_completions)
-            repository = CancellationRepository(motor_permits=motor_permits)
+            repository = CancellationRepository(motor_permits=motor_permits, start_entries=start_entries)
+            if start_entries is not None:
+                for request, key in tuple(start_entries.pending_cancels.values()):
+                    resumed = repository.fix_cancel_targets(request, key, owned)
+                    if resumed.kind is not DbOutcomeKind.COMPLETED:
+                        raise StateDbFailure(f"原入口取消复合申请仍未完成: {resumed.error}")
             occurred = context.clock.utc_micros
             withdrawal_context = WithdrawalContext(owned, OutputsRepository(), ready,
                 processing, occurred, executor, pending_withdrawals)
@@ -501,6 +510,23 @@ def cancel_flow(
                 except ConsistencyError as error:
                     raise StateDbFailure(str(error)) from error
 
+            settlement = TargetSettlement(
+                owned=owned, outputs=OutputsRepository(), cancellations=repository,
+                withdrawal_positions=_withdrawal_position(owned, ready, processing),
+                occurred_at=occurred, work_files=work_files,
+                withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
+                cleanup_pending=cleanup_pending,
+                pending_origin_settlements=pending_origin_settlements)
+            cancellation_runtime = CancellationRuntime(
+                owned=owned, repository=repository, settlement=settlement,
+                occurred_at=occurred, motor_permits=motor_permits,
+                open_connection=context.open_connection,
+                pending_origin_settlements=pending_origin_settlements)
+            from camctl.cancellation.service import OriginSettle, settle_origin_cancel
+            for _, origin_id in tuple(pending_origin_settlements):
+                resumed = await settle_origin_cancel(OriginSettle(origin_id), cancellation_runtime)
+                if resumed.kind is not DbOutcomeKind.COMPLETED:
+                    raise StateDbFailure(f"原取消收场申请仍未完成: {resumed.error}")
             now_us = None if unscheduled_only else occurred()
             for action_id, status, spec_json in _due_cancel_actions(owned, now_us):
                 item_ids = _fixed_cancel_items(owned, action_id)
@@ -521,21 +547,8 @@ def cancel_flow(
                         owned, repository, action_id, spec_json, occurred, motor_permits)
                     if item_ids is None:
                         continue
-                settlement = TargetSettlement(
-                    owned=owned, outputs=OutputsRepository(),
-                    cancellations=repository,
-                    withdrawal_positions=_withdrawal_position(
-                        owned, ready, processing),
-                    occurred_at=occurred, work_files=work_files,
-                    withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
-                    cleanup_pending=cleanup_pending)
                 progress = await apply_cancel(
-                    ApplyCancel(origin_action_id=action_id, item_ids=item_ids),
-                    CancellationRuntime(
-                        owned=owned, repository=repository,
-                        settlement=settlement, occurred_at=occurred,
-                        motor_permits=motor_permits,
-                        open_connection=context.open_connection))
+                    ApplyCancel(origin_action_id=action_id, item_ids=item_ids), cancellation_runtime)
                 if summarize_cancel(progress).status is CancellationStatus.RUNNING:
                     # 收场未完成：保持执行中，等待后续会话推进。
                     continue
@@ -569,7 +582,7 @@ def _resolve_and_fix(
     from camctl.cancellation.rules import (
         decide_cancel_eligibility,
         load_eligibility_facts,
-        may_apply_cancel,
+        may_link_auto_preview,
     )
     from camctl.cancellation.targets import (
         missing_target_error,
@@ -592,6 +605,7 @@ def _resolve_and_fix(
             owned, repository, action_id,
             missing_target_error(target), occurred)
         return None
+    from camctl.persistence.transaction import row_facts
     connection = owned.connection
     with closing(connection.execute(
             "SELECT id FROM actions WHERE status IN (3, 4, 5, 6)")) as cursor:
@@ -600,8 +614,10 @@ def _resolve_and_fix(
         TargetFacts(
             action_id=identity,
             terminal=identity in terminal,
-            may_cancel=may_apply_cancel(decide_cancel_eligibility(
-                load_eligibility_facts(connection, identity, motor_permits=motor_permits))))
+            may_cancel=may_link_auto_preview(row_facts(connection, "actions", identity), decide_cancel_eligibility(
+                load_eligibility_facts(connection, identity, motor_permits=motor_permits,
+                    start_entries=getattr(repository, "start_entries", None),
+                    database_id=owned.metadata.instance_id))))
         for identity in resolution.action_ids)
     fixed = prepare_cancel_set(action_id, ResolvedTargets(
         direct=direct,
@@ -611,9 +627,26 @@ def _resolve_and_fix(
     if isinstance(fixed, CancelTargetError):
         _fail_cancel_targets(owned, repository, action_id, fixed, occurred)
         return None
-    saved = repository.fix_cancel_targets(
-        FixCancelTargets(action_id, fixed, occurred()),
-        new_operation_key(), owned)
+    from camctl.devices.start_entry import EntryBlock, is_hasselblad_photo
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+    entries = getattr(repository, "start_entries", None)
+    blocks = []
+    if entries is not None:
+        for target in fixed.targets:
+            original = row_facts(connection, "actions", target.action_id)
+            if (not is_hasselblad_photo(original) or original["status"] in (3,4,5,6)
+                    or original["cancel_requested"]):
+                continue
+            facts = load_start_facts(connection, original)
+            permit = entries.reserve(owned.metadata.instance_id, target.action_id,
+                                     no_intent=facts.attempts_used == 0)
+            if permit is not None:
+                blocks.append(EntryBlock(permit.database_id, permit.action_id, permit.ticket))
+    request = FixCancelTargets(action_id, fixed, occurred(), tuple(blocks))
+    key = new_operation_key()
+    if blocks:
+        entries.pending_cancels[action_id] = (request, key)
+    saved = repository.fix_cancel_targets(request, key, owned)
     if saved.kind is not DbOutcomeKind.COMPLETED:
         raise StateDbFailure(
             f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}")
