@@ -48,34 +48,48 @@ def _stop(kind="record_stop", prior=None):
         "file_completion_wait_ms": 30000, "prior_completion": prior}
 
 
+def _tool_result(output, *, exit_code=0, stderr=b""):
+    return RawToolOutcome(LocalExit(exit_code=exit_code), output, None, None, stderr=stderr)
+
+
 class Filesystem:
-    def __init__(self, paths, *, sizes=None, metadata_error=None, pairing_error=False):
+    def __init__(self, paths, *, sizes=None, metadata_error=None):
         self.paths = sorted(paths)
         self.sizes = sizes or {}
         self.metadata_error = metadata_error
-        self.pairing_error = pairing_error
         self.directory_calls = []
+        self.metadata_calls = []
 
     async def read_directory(self, request, *, stop):
+        assert request.binding == BINDING and request.directories == (ROOT,)
+        assert request.timeout_s > 0
         self.directory_calls.append(request)
-        if self.pairing_error and len(self.directory_calls) > 1:
-            return DirectoryRead(None, ErrorValue("adb_directory_failed", "device_file_access"), None)
         after = request.cursor.after_path if request.cursor is not None else None
         values = [path for path in self.paths if after is None or path > after]
         selected = values[:request.batch]
         cursor = (DirectoryCursor(BINDING, request.directories, 0, selected[-1])
                   if len(values) > len(selected) else None)
-        return DirectoryRead(None, None, Page(tuple(FileIdentity(BINDING, path) for path in selected), cursor))
+        marker = b"MORE" if cursor is not None else b"END"
+        output = b"\0".join((b"CAMCTL-DIRECTORY/1", *(path.encode() for path in selected), marker, b""))
+        return DirectoryRead(_tool_result(output), None,
+            Page(tuple(FileIdentity(BINDING, path) for path in selected), cursor))
 
     async def metadata(self, identity, *, timeout_s, stop):
+        assert identity.binding == BINDING and timeout_s > 0
+        self.metadata_calls.append(identity)
         if identity.path == self.metadata_error:
-            return FileAccessRead(None, None, ErrorValue("adb_metadata_failed", "device_file_access"))
-        return FileAccessRead(None, self.sizes.get(identity.path, 10), None)
+            raw = _tool_result(b"", exit_code=1, stderr=b"metadata failed")
+            return FileAccessRead(raw, None, ErrorValue("adb_metadata_failed", "device_file_access",
+                {"reason": "call_failed", "transport_error": None, "output_failure": None,
+                 "local_exit_code": 1, "stderr": "metadata failed"}))
+        size = self.sizes.get(identity.path, 10)
+        return FileAccessRead(_tool_result(f"{size}\n".encode()), size, None)
 
 
-async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40")):
+async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40"), scope=None):
     from camctl.devices.drivers.adb_cameras.osmo360ii_results import list_osmo360ii_results
-    params = {"activity_id": "7", "output_scope": {"directories": [ROOT]}, "cursor": cursor}
+    params = {"activity_id": "7", "output_scope": {"directories": [ROOT]} if scope is None else scope,
+        "cursor": cursor}
     if context is not None:
         params["completion_context"] = context
     driver = SimpleNamespace(_filesystem=lambda binding: fs, monotonic_ns=lambda: 0 if clock is None else clock[0])
@@ -91,7 +105,7 @@ def _preview(result):
 
 
 @pytest.mark.asyncio
-async def test_natural_completion_registers_osv_and_exact_mixed_case_preview_without_wait(monkeypatch):
+async def test_natural_completion_returns_raw_osv_and_lrf_entries_without_pairing(monkeypatch):
     async def forbidden_sleep(seconds):
         pytest.fail("自然完成上下文不得再次等待")
     monkeypatch.setattr(asyncio, "sleep", forbidden_sleep)
@@ -99,57 +113,69 @@ async def test_natural_completion_registers_osv_and_exact_mixed_case_preview_wit
     page = _page(result)
     assert result.error is None and page["set_finalized"] is True
     assert [(entry["identity"], entry["kind"], entry["format_id"], entry["paired_identity"])
-        for entry in page["entries"]] == [(OSV, "video", "osv", None), (LRF, "video", "lrf", OSV)]
+        for entry in page["entries"]] == [(OSV, "video", "osv", None), (LRF, "video", "lrf", None)]
     assert all(entry["complete"] and entry["media_type"] is None for entry in page["entries"])
     assert page["completion_evidence"] is None
     assert result.outcome.settlement.evidence.data["file_completion"] is None
 
 
 @pytest.mark.asyncio
-async def test_pairing_scans_across_pages_without_retaining_complete_directory():
+async def test_pages_do_not_rescan_dcim_or_pair_files_from_different_pages():
     fs = Filesystem([LRF, OSV, ROOT + "/folder/zzz.tmp"])
     first = await _list(fs, context=_natural(), batch=1)
     assert [entry["identity"] for entry in _page(first)["entries"]] == [OSV]
-    assert _preview(first)[0]["state"] == "not_observed_on_page"
     result = await _list(fs, context=_natural(), batch=1, cursor=_page(first)["next_cursor"])
-    assert [(entry["identity"], entry["paired_identity"]) for entry in _page(result)["entries"]] == [(LRF, OSV)]
-    assert len(fs.directory_calls) >= 4
+    assert [(entry["identity"], entry["paired_identity"]) for entry in _page(result)["entries"]] == [(LRF, None)]
+    assert len(fs.directory_calls) == 2
     assert all(call.batch == 1 for call in fs.directory_calls)
     assert _page(result)["set_finalized"] is False
 
 
 @pytest.mark.asyncio
-async def test_missing_completion_preserves_original_without_claiming_file_or_set_complete():
+async def test_raw_page_preserves_all_observed_lrf_identities_including_zero_and_ambiguous_names():
+    duplicate = ROOT + "/folder/Clip.LRF"
+    orphan = ROOT + "/folder/Orphan.lrf"
+    other_original = ROOT + "/folder/Other.OSV"
+    fs = Filesystem([OSV, LRF, duplicate, orphan, other_original], sizes={LRF: 0})
+
+    result = await _list(fs, context=_natural(), batch=16)
+
+    page = _page(result)
+    entries = {entry["identity"]: entry for entry in page["entries"]}
+    assert set(entries) == {OSV, LRF, duplicate, orphan, other_original}
+    assert entries[LRF]["size_bytes"] == 0 and entries[LRF]["complete"] is True
+    assert all(entries[path]["format_id"] == "lrf" for path in (LRF, duplicate, orphan))
+    assert all(entries[path]["paired_identity"] is None for path in entries)
+    assert len(fs.directory_calls) == 1
+    assert sorted(item.path for item in fs.metadata_calls) == sorted(entries)
+    assert _preview(result) == []
+
+
+@pytest.mark.asyncio
+async def test_metadata_failure_preserves_every_file_identity_from_the_directory_page():
+    other_original = ROOT + "/folder/Other.OSV"
+    fs = Filesystem([OSV, LRF, other_original], metadata_error=LRF)
+
+    result = await _list(fs, context=_natural(), batch=16)
+
+    assert result.error is not None and result.error["code"] == "adb_metadata_failed"
+    page = _page(result)
+    entries = {entry["identity"]: entry for entry in page["entries"]}
+    assert set(entries) == {OSV, LRF, other_original}
+    assert entries[OSV]["size_bytes"] == 10 and entries[OSV]["complete"] is True
+    assert entries[LRF]["size_bytes"] is None and entries[LRF]["complete"] is False
+    assert entries[other_original]["size_bytes"] is None and entries[other_original]["complete"] is False
+    assert page["set_finalized"] is False
+    assert [item.path for item in fs.metadata_calls] == [OSV, LRF]
+
+
+@pytest.mark.asyncio
+async def test_missing_completion_preserves_raw_files_without_claiming_completion():
     result = await _list(Filesystem([OSV, LRF]))
     page = _page(result)
     assert page["set_finalized"] is False
-    assert [(entry["identity"], entry["complete"]) for entry in page["entries"]] == [(OSV, False)]
-    assert _preview(result)[0]["state"] == "completion_unknown"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("paths,sizes,error,state", [
-    ([OSV], {}, None, "missing"),
-    ([OSV, LRF], {LRF: 0}, None, "zero_size"),
-    ([OSV, LRF], {}, LRF, "metadata_failed"),
-    ([OSV, LRF, ROOT + "/folder/Clip.LRF"], {}, None, "ambiguous"),
-    ([OSV, LRF, ROOT + "/folder/Clip.osv"], {}, None, "ambiguous"),
-    ([OSV, ROOT + "/other/Clip.LRF"], {}, None, "missing"),
-    ([OSV, ROOT + "/folder/clip.LRF"], {}, None, "missing"),
-])
-async def test_optional_preview_failures_preserve_valid_original(paths, sizes, error, state):
-    result = await _list(Filesystem(paths, sizes=sizes, metadata_error=error), context=_natural())
-    assert result.error is None and _page(result)["set_finalized"] is True
-    assert all(entry["format_id"] == "osv" for entry in _page(result)["entries"])
-    assert _preview(result)[0]["state"] == state
-
-
-@pytest.mark.asyncio
-async def test_optional_pairing_read_failure_does_not_erase_original():
-    result = await _list(Filesystem([OSV, LRF], pairing_error=True), context=_natural())
-    assert result.error is None and _page(result)["set_finalized"] is True
-    assert _page(result)["entries"][0]["complete"] is True
-    assert _preview(result)[0]["state"] == "scan_failed"
+    assert [(entry["identity"], entry["complete"], entry["paired_identity"])
+        for entry in page["entries"]] == [(OSV, False, None), (LRF, False, None)]
 
 
 @pytest.mark.asyncio
@@ -192,22 +218,32 @@ async def test_short_deadline_does_not_list_before_required_stop_wait():
 
 
 @pytest.mark.asyncio
-async def test_diagnostic_call_retention_is_bounded_even_for_many_pairing_pages():
+async def test_one_page_does_not_scan_unrelated_later_directory_entries():
     paths = [OSV, LRF] + [ROOT + f"/zzz/{index:04}.tmp" for index in range(200)]
-    result = await _list(Filesystem(paths), context=_natural(), batch=1,
+    fs = Filesystem(paths)
+    result = await _list(fs, context=_natural(), batch=1,
         cursor=DirectoryCursor(BINDING, (ROOT,), 0, OSV).as_json())
     data = result.outcome.settlement.evidence.data
-    assert len(data["calls"]) == 128 and data["call_count"] > 200
+    assert len(_page(result)["entries"]) == 1
+    assert data["call_count"] == len(data["calls"]) == 2
+    assert len(fs.directory_calls) == 1
+    assert len(fs.metadata_calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_preview_retains_actual_candidate_identities_with_bounded_samples():
-    other = ROOT + "/folder/Clip.LRF"
-    result = await _list(Filesystem([OSV, LRF, other]), context=_natural())
-    observation = _preview(result)[0]
-    assert observation["state"] == "ambiguous"
-    assert observation["observed_preview_identities"] == [other, LRF]
-    assert observation["scan_complete"] is True
+async def test_page_size_bounds_metadata_and_result_entries_as_directory_grows():
+    paths = [ROOT + f"/folder/segment-{index:03}.OSV" for index in range(100)]
+    fs = Filesystem(paths)
+
+    result = await _list(fs, context=_natural(), batch=128)
+
+    assert result.error is None
+    assert len(_page(result)["entries"]) == 32
+    assert _page(result)["next_cursor"] is not None
+    assert len(fs.directory_calls) == 1 and fs.directory_calls[0].batch == 32
+    assert len(fs.metadata_calls) == 32
+    data = result.outcome.settlement.evidence.data
+    assert data["call_count"] == len(data["calls"]) == 33
 
 
 @pytest.mark.asyncio
@@ -220,25 +256,36 @@ async def test_completion_context_for_other_activity_is_rejected_before_director
 
 
 @pytest.mark.asyncio
-async def test_orphan_lrf_is_observed_without_becoming_original_or_registered_preview():
+async def test_invalid_output_scope_is_rejected_before_directory_access():
+    fs = Filesystem([OSV])
+    with pytest.raises(ValueError):
+        await _list(fs, scope={"directories": [ROOT + "/other"]})
+    assert fs.directory_calls == []
+
+
+@pytest.mark.asyncio
+async def test_orphan_lrf_is_returned_as_an_unclassified_raw_file():
     result = await _list(Filesystem([LRF]), context=_natural())
-    assert _page(result)["entries"] == [] and _page(result)["set_finalized"] is True
-    assert _preview(result)[0]["preview_identity"] == LRF
-    assert _preview(result)[0]["state"] == "missing_pair"
-    assert _preview(result)[0]["osv_count"] == 0 and _preview(result)[0]["lrf_count"] == 1
+    assert _page(result)["set_finalized"] is True
+    assert [(entry["identity"], entry["format_id"], entry["size_bytes"],
+        entry["complete"], entry["paired_identity"]) for entry in _page(result)["entries"]] == [
+            (LRF, "lrf", 10, True, None)]
 
 
 @pytest.mark.asyncio
 async def test_main_directory_failure_preserves_unknown_set():
     class FailedFilesystem(Filesystem):
         async def read_directory(self, request, *, stop):
-            return DirectoryRead(None, ErrorValue("adb_directory_failed", "device_file_access"), None)
+            raw = _tool_result(b"", exit_code=1, stderr=b"directory failed")
+            return DirectoryRead(raw, ErrorValue("adb_directory_failed", "device_file_access",
+                {"reason": "call_failed", "transport_error": None, "output_failure": None,
+                 "local_exit_code": 1, "stderr": "directory failed"}), None)
     result = await _list(FailedFilesystem([]), context=_natural())
     assert result.error is not None and result.observations == ()
 
 
 @pytest.mark.asyncio
-async def test_real_driver_filesystem_and_evidence_registry_accept_paired_result_page():
+async def test_real_driver_filesystem_and_result_parser_accept_raw_osmo_page():
     from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
     from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
     from camctl.capture.result_inputs import page_from_outcome
@@ -248,9 +295,11 @@ async def test_real_driver_filesystem_and_evidence_registry_accept_paired_result
 
     class Transport:
         def __init__(self):
-            self.outputs = [frame(OSV, LRF), b"10\n", frame(OSV, LRF), b"4\n"]
+            self.outputs = [frame(OSV, LRF), b"10\n", b"4\n"]
+            self.specs = []
 
         async def run(self, spec, stop):
+            self.specs.append(spec)
             assert spec.argv[:5] == ("adb", "-s", "serial-1", "shell", "-T")
             return RawToolOutcome(LocalExit(exit_code=0), self.outputs.pop(0), None, None, stderr=b"")
 
@@ -261,26 +310,28 @@ async def test_real_driver_filesystem_and_evidence_registry_accept_paired_result
         "completion_context": _natural()}, TICKET, Decimal("10"))
     result = await driver.list_results(request, 32)
     assert result.outcome.status is AttemptStatus.SUCCEEDED and transport.outputs == []
+    assert len(transport.specs) == 3
     page = page_from_outcome(TICKET, result.outcome, binding=BINDING)
     assert page.set_finalized is True and page.scan_complete is True
-    assert [(entry.identity, entry.paired_identity) for entry in page.entries] == [(OSV, None), (LRF, OSV)]
+    assert [(entry.identity, entry.paired_identity) for entry in page.entries] == [(OSV, None), (LRF, None)]
     assert [entry.kind.value for entry in page.entries] == ["video", "video"]
 
 
 @pytest.mark.asyncio
-async def test_reliable_second_scan_proving_original_disappeared_preserves_explicit_conflict():
-    class DisappearingFilesystem(Filesystem):
+async def test_page_keeps_directory_identities_observed_before_metadata_changes_the_directory():
+    added = ROOT + "/folder/New.OSV"
+    class ChangingFilesystem(Filesystem):
         async def metadata(self, identity, *, timeout_s, stop):
             actual = await super().metadata(identity, timeout_s=timeout_s, stop=stop)
-            self.paths = [LRF]
+            self.paths = sorted([OSV, LRF, added])
             return actual
 
-    result = await _list(DisappearingFilesystem([OSV, LRF]), context=_natural())
-    assert result.error is not None and result.error["code"] == "osmo360ii_result_conflict"
-    assert result.outcome.status is AttemptStatus.FAILED and _page(result)["set_finalized"] is False
-    assert _page(result)["entries"][0]["identity"] == OSV
-    assert _page(result)["entries"][0]["size_bytes"] == 10
-    assert _preview(result)[0]["state"] == "original_missing"
+    fs = ChangingFilesystem([OSV, LRF])
+    result = await _list(fs, context=_natural())
+    assert result.error is None
+    assert {entry["identity"] for entry in _page(result)["entries"]} == {OSV, LRF}
+    assert len(fs.directory_calls) == 1
+    assert [item.path for item in fs.metadata_calls] == [OSV, LRF]
 
 
 @pytest.mark.asyncio
@@ -308,23 +359,33 @@ async def test_cursor_from_other_binding_is_rejected_before_wait(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_second_scan_cannot_replace_raw_page_preview_with_different_case_path():
-    other = ROOT + "/folder/Clip.LRF"
-    class ChangingFilesystem(Filesystem):
+async def test_budget_exhaustion_preserves_page_identities_and_unknown_metadata():
+    clock = [0]
+    other_original = ROOT + "/folder/Other.OSV"
+    class ExhaustingFilesystem(Filesystem):
         async def metadata(self, identity, *, timeout_s, stop):
-            actual = await super().metadata(identity, timeout_s=timeout_s, stop=stop)
-            if identity.path == OSV:
-                self.paths = sorted([OSV, other])
-            return actual
-    result = await _list(ChangingFilesystem([OSV, LRF]), context=_natural())
-    assert result.error is None
-    assert [entry["identity"] for entry in _page(result)["entries"]] == [OSV]
-    assert _preview(result)[0]["state"] == "preview_missing"
-    assert _preview(result)[0]["observed_preview_identities"] == [other]
+            result = await super().metadata(identity, timeout_s=timeout_s, stop=stop)
+            clock[0] = 500_000_000
+            return result
+
+    fs = ExhaustingFilesystem([OSV, LRF, other_original])
+    result = await _list(fs, context=_natural(), clock=clock, timeout=Decimal("0.5"))
+
+    assert result.error is not None
+    assert result.error["code"] == "adb_metadata_failed"
+    assert result.error["details"]["reason"] == "call_unavailable"
+    entries = {entry["identity"]: entry for entry in _page(result)["entries"]}
+    assert set(entries) == {OSV, LRF, other_original}
+    assert entries[OSV]["complete"] is True and entries[OSV]["size_bytes"] == 10
+    assert all(not entries[path]["complete"] and entries[path]["size_bytes"] is None
+        for path in (LRF, other_original))
+    assert _page(result)["set_finalized"] is False
+    assert [item.path for item in fs.metadata_calls] == [OSV]
+    assert len(fs.directory_calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_all_necessary_original_metadata_precedes_optional_preview_metadata():
+async def test_raw_page_reads_each_result_metadata_once_in_directory_page_order():
     other = ROOT + "/folder/Other.OSV"
     class OrderedFilesystem(Filesystem):
         def __init__(self):
@@ -335,7 +396,7 @@ async def test_all_necessary_original_metadata_precedes_optional_preview_metadat
             return await super().metadata(identity, timeout_s=timeout_s, stop=stop)
     fs = OrderedFilesystem()
     result = await _list(fs, context=_natural())
-    assert result.error is None and fs.metadata_paths == [OSV, other, LRF]
+    assert result.error is None and fs.metadata_paths == [OSV, LRF, other]
     assert [entry["identity"] for entry in _page(result)["entries"]] == [OSV, LRF, other]
 
 

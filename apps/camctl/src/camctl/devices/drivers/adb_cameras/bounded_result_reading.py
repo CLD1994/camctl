@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 from pathlib import PurePosixPath
 
 from camctl.devices.capture_completion import validate_completion_context, is_stop_context
@@ -30,6 +31,13 @@ class ResultFormat:
     format_id: str
 
 
+class PreviewReadMode(Enum):
+    """结果读取器如何处理页内预览文件。"""
+
+    PAIR_FROM_SCOPE = "pair_from_scope"
+    RAW_PAGE_FILES = "raw_page_files"
+
+
 @dataclass(frozen=True)
 class ResultProfile:
     """由驱动格式声明构成的有限读取行为。"""
@@ -42,6 +50,7 @@ class ResultProfile:
     preview_count_field: str
     completion_error_code: str
     conflict_error_code: str
+    preview_read_mode: PreviewReadMode = PreviewReadMode.PAIR_FROM_SCOPE
 
 
 def _stem(path):
@@ -232,7 +241,7 @@ class _BoundedRead:
 
 
 async def list_declared_results(driver, request, batch, profile):
-    """按主页面结果声明读取必要原片，第二次分页扫描只补充 LRF 配对身份。"""
+    """按结果声明读取一页；驱动选择页内原始观察或原有配对读取策略。"""
     if request.params.get("activity_id") != request.ticket.target_id:
         raise ValueError("结果请求改变原活动")
     scope = request.params.get("output_scope")
@@ -263,6 +272,30 @@ async def list_declared_results(driver, request, batch, profile):
         "set_finalized": False, "completion_evidence": None}
 
     by_suffix = {item.suffix.casefold(): item for item in profile.formats}
+    if profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES:
+        page_formats = {**by_suffix, profile.preview_format.suffix.casefold(): profile.preview_format}
+        raw_files = tuple(
+            (identity, file_format)
+            for identity in listing.page.items
+            if (file_format := page_formats.get(PurePosixPath(identity.path).suffix.casefold())) is not None
+        )
+        page_entries = [
+            _entry(identity, None, False, file_format)
+            for identity, file_format in raw_files
+        ]
+        page["entries"] = page_entries
+        for index, (identity, file_format) in enumerate(raw_files):
+            if not read.available():
+                error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": "call_unavailable"})
+                return read.reply(error, page)
+            metadata = await filesystem.metadata(identity, timeout_s=read.remaining(), stop=_NeverStop())
+            read.remember(metadata.outcome, "metadata")
+            if metadata.error is not None:
+                return read.reply(metadata.error, page)
+            page_entries[index] = _entry(identity, metadata.value, complete, file_format)
+        page["set_finalized"] = complete and listing.page.next_cursor is None
+        return read.reply(page=page)
+
     preview_inputs, originals, original_observations = [], [], {}
     for identity in listing.page.items:
         suffix = PurePosixPath(identity.path).suffix.casefold()

@@ -1,6 +1,6 @@
-"""OSMO 格式声明接入共用的分页与可选 LRF 配对读取。"""
+"""OSMO 格式声明接入共用的原始文件分页读取。"""
 
-from .bounded_result_reading import ResultFormat, ResultProfile, list_declared_results
+from .bounded_result_reading import PreviewReadMode, ResultFormat, ResultProfile, list_declared_results
 
 
 _OSMO_RESULT_PROFILE = ResultProfile(
@@ -11,9 +11,10 @@ _OSMO_RESULT_PROFILE = ResultProfile(
     original_count_field="osv_count",
     preview_count_field="lrf_count",
     completion_error_code="osmo360ii_file_completion_unconfirmed",
-    conflict_error_code="osmo360ii_result_conflict")
+    conflict_error_code="osmo360ii_result_conflict",
+    preview_read_mode=PreviewReadMode.RAW_PAGE_FILES)
 
 
 async def list_osmo360ii_results(driver, request, batch):
-    """OSMO 保留当前 v1 结果证据和格式诊断名称。"""
+    """OSMO 每次返回主目录一页内实际观察到的 OSV/LRF 原始文件。"""
     return await list_declared_results(driver, request, batch, _OSMO_RESULT_PROFILE)
