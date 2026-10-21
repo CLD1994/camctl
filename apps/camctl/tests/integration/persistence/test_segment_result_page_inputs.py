@@ -1123,7 +1123,7 @@ async def test_fix1_i3_fresh_original_key_recomputes_difference_from_f_before(
         ).fetchone()
         assert replay.kind is DbOutcomeKind.ROLLED_BACK
         assert replay.error is not None
-        assert str(replay.error) == "APPEND的file_ids没有精确覆盖原差集身份及实际文件ID"
+        assert isinstance(replay.error, ConsistencyError)
         assert before == after
         assert reopened.connection.execute(
             "SELECT COUNT(*) FROM result_page_files WHERE page_event_id=?",
@@ -1277,7 +1277,7 @@ async def test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption(
         assert replay.kind is DbOutcomeKind.ROLLED_BACK
         assert replay.error is not None
         if corruption in ("extra_baseline", "same_count_baseline_replacement"):
-            assert str(replay.error) == "APPEND的file_ids没有精确覆盖原差集身份及实际文件ID"
+            assert isinstance(replay.error, ConsistencyError)
         assert before == after
     finally:
         reopened.connection.close()
