@@ -440,7 +440,7 @@ async def test_event_guards_reject_partial_device_pair(tmp_path, entry):
                 before=SimpleNamespace(exists=False), after=SimpleNamespace(values=original),
             )
         with pytest.raises(EventValidationError, match="原图.*预览|两份"):
-            guard(SimpleNamespace(rows=(row,), event_type=None), Context())
+            guard(SimpleNamespace(rows=(row,), event_type=None, evidence={}), Context())
     finally:
         owned.connection.close()
 

@@ -291,7 +291,7 @@ def test_recording_success_guard_requires_independent_scoped_reader():
     from camctl.history.events import RowChange, RowImage
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.capture import _action_finish_guard
-    event = SimpleNamespace(rows=(RowChange("actions", 1, RowImage(True, {"status": 2}),
+    event = SimpleNamespace(evidence={}, rows=(RowChange("actions", 1, RowImage(True, {"status": 2}),
         RowImage(True, {"status": 3})),))
     context = SimpleNamespace(current_reads=None,
         state_rows={"actions": {1: {"id": 1, "type": 2, "cancel_requested": 0}}})

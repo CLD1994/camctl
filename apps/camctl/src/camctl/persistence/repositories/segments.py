@@ -297,7 +297,12 @@ def _fixed_file(db,file_id,file_event_id):
         latest=_one(db,'SELECT MAX(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id<=?',(file_type,file_id,transaction.last_event_id))[0]
         if latest!=file_event_id:
             raise ConsistencyError('固定文件引用不是原完整事务内该文件的最后事实')
-        head=_one(db,'SELECT id,last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1')
+        # 独立文件的当前值由自身最后事件固定。使用该事件的完整
+        # 事务作为C，避免为每份文件反复核实无关的增长完成事务。
+        head=_one(db,'SELECT t.id,t.last_event_id FROM history_events e '
+            'JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?',
+            (current['last_event_id'],))
+        if head is None:raise ConsistencyError('文件当前状态缺少自己的可靠最后事件')
         frozen=read_row_values_at_boundary(db,owner=('device_file',file_id),table='device_files',row_id=file_id,
             columns=business_columns('device_files'),current_values=current,
             boundary=HistoryBoundary(transaction.txn_id,transaction.last_event_id),
@@ -651,6 +656,9 @@ def _verify_final_activation(ref,setrow,event,context):
 
 def _verify_publication(db,ref,event,context,prior):
     """只承认本完成事务中已验证事件，不以当前终态代替同组证明。"""
+    if getattr(context.current_reads,'proposal_event',None) is not None:
+        from .segment_transactions import verify_publication
+        return verify_publication(db,ref,event,context)
     def events():
         return (accepted.envelope for accepted in prior)
     setrow=_set(db,ref,fixed=True)
@@ -659,6 +667,10 @@ def _verify_publication(db,ref,event,context,prior):
     if _one(db,'SELECT 1 FROM segment_sets WHERE action_id=? AND published_event_id IS NOT NULL',(ref.action_id,)):
         raise ConsistencyError('原动作已有唯一正式分段集合')
     assessment=assessment_from_document(setrow['assessment_json'])
+    from camctl.capture.segment_finish import FinishSegmentRecording
+    from .segment_transactions import verify_completion_proof
+    class ProofReader:connection=db
+    verify_completion_proof(FinishSegmentRecording(ref,setrow['activity_id'],setrow['run_id'],event.occurred_at),ProofReader)
     _verify_final_activation(ref,setrow,event,context)
     if event.reason==_EVENT['branches']['PUBLISH']['reason'] and assessment.default_scope.state is not DefaultScopeState.NONEMPTY:
         raise ConsistencyError('未知或空范围不能发布默认成员关联')
@@ -744,6 +756,33 @@ def _verify_publication(db,ref,event,context,prior):
         if page.next_cursor is None:break
         cursor=page.next_cursor
     if count!=expected:raise ConsistencyError('正式默认范围数量与原判断不一致')
+    # 有限直接提案也必须完整履行原申请；不能把新仓储的complete回调当守卫。
+    from .segment_transactions import _header_request,_failure,_verify_scope_members,_completion_qualification,_verify_qualification_header
+    accepted=next(item for item in events() if item.event_type==load_event_registry()['events']['ACTION_FINISHED']['id']
+        and any(row.table=='actions' and row.row_id==ref.action_id for row in item.rows))
+    header=accepted.evidence.get('segment_finish_request')
+    request=_header_request(header)
+    _verify_qualification_header(header,_completion_qualification(db,request))
+    _verify_assessment(db,setrow,facts_from_document(setrow['facts_json']),assessment)
+    _verify_scope_members(request,assessment,Reader)
+    status,error,details=_failure(request,assessment,original_count,setrow,db,before_event_id=context.transaction.first_event_id)
+    if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):
+        raise ConsistencyError('直接完成组来源结果与原有限实际失败不同')
+    registry=load_event_registry()['events']
+    if header['finish_run']:
+        run=row_facts(db,'operation_runs',request.run_id)
+        expected_row=update_change('operation_runs',run['id'],{name:run[name] for name in ('status','retry_wait_required','error_json')},
+            {'status':3,'retry_wait_required':0,'error_json':None})
+        evidence={'stale_run_request':{'kind':'stale_run_finish','responsibility_keys':[run['responsibility_key']],'status':3,'error':None}}
+        if not any(item.event_type==registry['OPERATION_CONFIGURED']['id'] and item.reason==3 and item.rows==(expected_row,)
+                and item.occurred_at==request.occurred_at and json_equal(item.evidence,evidence) for item in events()):
+            raise ConsistencyError('直接完成组没有共同结束原RESULTS责任')
+    if header['complete_plan']:
+        plan=row_facts(db,'plans',action['plan_id'])
+        expected_row=update_change('plans',plan['id'],{'status':plan['status']},{'status':3})
+        if not any(item.event_type==registry['PLAN_STATUS_CHANGED']['id'] and item.reason==2 and item.rows==(expected_row,)
+                and item.occurred_at==request.occurred_at for item in events()):
+            raise ConsistencyError('直接完成组没有共同结束适用父计划')
 
 
 def segment_scope_publication_rows(ref,bindings,owned):

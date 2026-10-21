@@ -131,3 +131,19 @@ def test_storage_header_rejects_unverified_neighbor_output_identity():
     raw=SegmentErrorHeader(7,1,DefaultScopeState.NONEMPTY,2,4,_gap()).details('capture_segment_gap')
     raw['first_gap']['left']['output_id']='999'
     with pytest.raises(ValueError):validate_segment_error_header('capture_segment_gap',raw)
+
+
+@pytest.mark.parametrize('expanded', [None, 'scope_outputs', 'neighbor_output'])
+def test_finish_request_uses_the_finite_gap_header(expanded):
+    from camctl.capture.media import RecordingFailure
+    from camctl.capture.segment_finish import FinishSegmentRecording
+    from camctl.capture.segment_models import SegmentSetRef
+    raw=SegmentErrorHeader(7,1,DefaultScopeState.NONEMPTY,2,4,_gap()).details('capture_segment_gap')
+    if expanded=='scope_outputs':raw['default_scope']['output_ids']=['1','2']
+    elif expanded=='neighbor_output':raw['first_gap']['left']['output_id']='999'
+    def request():
+        return FinishSegmentRecording(SegmentSetRef(7,3,28,1),4,5,100,RecordingFailure('capture_segment_gap',raw))
+    if expanded is None:
+        assert request().failure.details==raw
+    else:
+        with pytest.raises(ValueError):request()

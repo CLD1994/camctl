@@ -17,6 +17,7 @@ from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.reads import PlanReadScope
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -670,7 +671,7 @@ class _StartSyncCommand:
             result=SyncSaved(disposition=SyncDisposition.SAVED,
                              sync_id=sync_id))
 
-    def _plan_change_event(self, allocation, plan, next_status: int):
+    def _plan_change_event(self, allocation, plan, next_status: int, *, event_id=None):
         """计划状态变化事件：执行中（START）或全部终态（COMPLETE）。"""
         reason = 2 if next_status == _PLAN_COMPLETE else 1
         self._owners[("plans", plan["id"])] = ("plan", plan["id"])
@@ -678,8 +679,8 @@ class _StartSyncCommand:
             "plans", plan["id"],
             {"status": plan["status"]}, {"status": next_status})
         return _envelope(
-            allocation.first_event_id + 1, allocation.txn_id,
-            _PLAN_STATUS_EVENT, reason, (update,), self._occurred_at)
+            allocation.first_event_id + 1 if event_id is None else event_id,
+            allocation.txn_id, _PLAN_STATUS_EVENT, reason, (update,), self._occurred_at)
 
     def _action_started_event(self, allocation):
         self._owners[("actions", self._action_id)] = (
@@ -702,18 +703,25 @@ class _StartSyncCommand:
             {"status": 2, "error_code": None, "error_details_json": None},
             {"status": 4, "error_code": registered_error(code)["action_error_id"],
              "error_details_json": details})
+        completes_plan = next_plan_status == _PLAN_COMPLETE
         event = _envelope(
-            allocation.last_event_id, allocation.txn_id,
-            _ACTION_FINISHED_EVENT_ID, 2, (fail,), self._occurred_at)
-        # 本动作在该事务内直接终态；计划随之首次开始或完成。
+            allocation.first_event_id + 1 if completes_plan else allocation.last_event_id,
+            allocation.txn_id, _ACTION_FINISHED_EVENT_ID, 2, (fail,), self._occurred_at)
+        # 计划完成只消费已验证的动作终态；首次开始保留原先顺序。
         events = [start]
-        if next_plan_status is not None:
+        if completes_plan:
+            events.append(event)
             events.append(self._plan_change_event(
-                allocation, plan, next_plan_status))
-        events.append(event)
+                allocation, plan, next_plan_status, event_id=allocation.last_event_id))
+        else:
+            if next_plan_status is not None:
+                events.append(self._plan_change_event(
+                    allocation, plan, next_plan_status))
+            events.append(event)
         return CommandPlan(
             events=tuple(events), owners=self._owners,
             state_rows=self._state,
+            plan_read_scope=PlanReadScope(plan["id"], 128),
             result=SyncSaved(disposition=SyncDisposition.FAILED,
                              sync_id=None))
 

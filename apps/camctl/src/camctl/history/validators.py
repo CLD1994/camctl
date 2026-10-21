@@ -437,7 +437,13 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     成员白名单来自分支登记；此处只核对已出现成员的取值类型。
     布尔不是整数编号；驱动依据必须是结构化对象，成员顺序无关。
     """
-    if member in ("attempt_id", "result_page_event_id"):
+    if member == 'segment_finish_request':
+        from camctl.capture.segment_finish import validate_finish_header
+        try:
+            validate_finish_header(value)
+        except (ValueError, TypeError, KeyError) as error:
+            _fail(f'事件 {event_id} 的分段完成原申请非法: {error}')
+    elif member in ("attempt_id", "result_page_event_id"):
         if not is_json_integer(value) or value <= 0:
             _fail(f"事件 {event_id} 的 evidence.{member} 必须是正整数")
     elif member == "cleanup_result_source":

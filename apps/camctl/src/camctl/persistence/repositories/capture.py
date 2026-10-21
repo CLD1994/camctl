@@ -714,6 +714,15 @@ def _action_finish_guard(event, context) -> None:
     for row in event.rows:
         if row.table == "actions" and row.before.exists:
             after = row.after.values
+            if after.get('status') in (3,4):
+                facts=_guard_facts(context,'actions',row.row_id)
+                from camctl.devices.tasks import CaptureResultPolicy
+                segmented=(facts.get('type')==_ACTION_TYPE.CAMERA_RECORD and
+                    facts.get('execution_spec_json',{}).get('result_policy')==CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value)
+                if segmented or 'segment_finish_request' in event.evidence:
+                    if context.current_reads is None:
+                        raise EventValidationError('分段终态缺少原保存事实读取端口')
+                    context.current_reads.verify_segment_finish_event(event,context,row.row_id)
             if after.get("status") == _ACTION_SUCCEEDED:
                 facts = _guard_facts(context, "actions", row.row_id)
                 facts.update(row.before.values)
@@ -2376,10 +2385,10 @@ class CaptureRepository:
             except ValueError as error:
                 raise ConsistencyError("原主机停止观察的控制时长无效") from error
             action = row_facts(owned.connection, "actions", action_id)
-            if action["type"] == 2:
+            if action["type"] == 2 and set(observation) == {"stop_result_event_id"}:
                 return None
             expected_members = ({"stop_result_event_id", "control_elapsed_ns"}
-                if action["execution_spec_json"]["end_control"] == 2 else {"stop_result_event_id"})
+                if action["type"] == 2 or action["execution_spec_json"]["end_control"] == 2 else {"stop_result_event_id"})
             if (set(observation) != expected_members
                     or original["id"] != activity["id"] or occurred_at != row[0]
                     or not json_equal(elapsed, activity["control_elapsed_ns"])):
@@ -2563,6 +2572,17 @@ class CaptureRepository:
         if receipt.kind == "rolled_back":
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def finish_segment_recording(self, request, key, owned, *, batch_size=128):
+        """原固定分段集合的有界完整收场；结果只含引用、计数和边界。"""
+        from .segment_transactions import finish_segment_recording
+        receipt = finish_segment_recording(request,key,owned,batch_size=batch_size)
+        return DbOutcome(DbOutcomeKind(receipt.kind),value=receipt.result,error=receipt.error)
+
+    def verify_segment_finish(self, request, key, owned, *, execution_finished, batch_size=128):
+        """只在执行层确认原保存已结束后核实原完整组。"""
+        from .segment_transactions import verify_segment_finish
+        return verify_segment_finish(request,key,owned,execution_finished=execution_finished,batch_size=batch_size)
 
     def canceled_recording_results(
         self, owned: OwnedConnection, action_id: int | None = None,
@@ -3757,6 +3777,16 @@ def _merged_state_rows(*states) -> dict[str, dict[int, dict[str, Any]]]:
     return merged
 
 
+def _merged_plan_scope(plans):
+    scope=None
+    for plan in plans:
+        if plan.plan_read_scope is None:continue
+        if scope is not None and scope!=plan.plan_read_scope:
+            raise TransactionError('复合事务的原计划读取范围不同')
+        scope=plan.plan_read_scope
+    return scope
+
+
 class _CompositeScope:
     """复合命令的子范围：共享连接与边界，事件段按调用顺序切分。"""
 
@@ -3861,7 +3891,6 @@ class _CaptureStopCommand:
         if (not self._confirms(run, action, activity, finish.outcome.outcome)
                 or (action["type"] == 3 and action["execution_spec_json"]["end_control"]
                     != (1 if self._stop is None else 2))
-                or (action["type"] == 2 and self._stop is not None)
                 or finish.run_finish is None or finish.run_finish.status is not RunOutcome.SUCCEEDED):
             raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
         if self._stop is None and (activity["dispatch_state"] in (1, 4)
@@ -3889,7 +3918,7 @@ class _CaptureStopCommand:
             owners={**result.owners, ("device_activities", activity["id"]): ("action", action["id"])},
             state_rows=_merged_state_rows(result.state_rows, {
                 "device_activities": {activity["id"]: activity}, "actions": {action["id"]: action}}),
-            result=result.result)
+            result=result.result, plan_read_scope=PlanReadScope(action['plan_id'],128))
 
     def _reuse(self, scope, saved):
         cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
@@ -4236,7 +4265,7 @@ class _FinishStartResultCommand:
             events=events,
             owners={member: owner for plan in plans for member, owner in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            result=finish.result)
+            result=finish.result,plan_read_scope=_merged_plan_scope(plans))
 
     def _reuse(self, scope, saved):
         # 原结果段始终在前；后续活动和 START 段按明确责任分开核对。
@@ -4328,7 +4357,7 @@ class _CloseStartCommand:
             events=tuple(event for plan in plans for event in plan.events),
             owners={member: owner for plan in plans for member, owner in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            read_only=saved is not None, result=None)
+            read_only=saved is not None, result=None,plan_read_scope=_merged_plan_scope(plans))
 
 
 class _FinishBindingFailureCommand:
@@ -4434,7 +4463,7 @@ class _FinishBindingFailureCommand:
             events=events,
             owners={owner: target for plan in plans for owner, target in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            read_coverage=ReadCoverage(ranges), result=capture_plan.result)
+            read_coverage=ReadCoverage(ranges), result=capture_plan.result,plan_read_scope=_merged_plan_scope(plans))
 
     def _read_business_plans(self, scope, action):
         """原读取实际结果可靠后，绑定失败共同结束内部处理与机会。"""
@@ -4830,7 +4859,7 @@ class _FinishResidualBindingFailureCommand:
         return CommandPlan(
             events=events, owners={row: owner for plan in plans for row, owner in plan.owners.items()},
             state_rows=_merged_state_rows(*(plan.state_rows for plan in plans)),
-            result=plans[0].result if request.action_id is not None else None)
+            result=plans[0].result if request.action_id is not None else None,plan_read_scope=_merged_plan_scope(plans))
 
     def _reuse(self, scope, saved, owner):
         request = self._request
@@ -6920,6 +6949,21 @@ def _activity_guard(event, context) -> None:
             continue
         before_state = row.before.values.get("activity_state")
         after_state = row.after.values.get("activity_state")
+        if 'control_elapsed_ns' in row.after.values:
+            observation=event.evidence.get('observation',{})
+            result_id=observation.get('stop_result_event_id')
+            if (row.before.values.get('control_elapsed_ns') is not None or after_state!=3
+                    or before_state==3 or context.current_reads is None
+                    or not is_json_integer(result_id)
+                    or not context.transaction.first_event_id<=result_id<event.event_id):
+                raise EventValidationError('连续控制时长必须随原STOP首次结束共同保存，不能后补')
+            original=context.current_reads.transaction_event(result_id,context.transaction)
+            attempts=context.state_rows.get('operation_attempts',{})
+            if (original.event_type!=_ATTEMPT_RESULT_EVENT or original.occurred_at!=event.occurred_at
+                    or not any(change.table=='operation_attempts' and
+                        attempts.get(change.row_id,{}).get('result_event_id')==result_id
+                        for change in original.rows)):
+                raise EventValidationError('连续控制时长没有同组原STOP的实际结果和时刻')
         if after_state == 3 and before_state != 3:
             # 实际停止或原结果页的完成观察承载设备结束；本地退出
             # 和目录扫描结束均不构成该依据。
@@ -6974,7 +7018,7 @@ def _activity_guard(event, context) -> None:
                     HostTimerStopSave(elapsed)
                 except ValueError as error:
                     raise EventValidationError("主机停止的控制时长非法") from error
-                end_control = (1 if action.get("type") == 2
+                end_control = ((2 if "control_elapsed_ns" in observation else 1) if action.get("type") == 2
                                else action.get("execution_spec_json", {}).get("end_control"))
                 shape = (set(observation) == {"stop_result_event_id"} if end_control == 1
                     else set(observation) == {"stop_result_event_id", "control_elapsed_ns"} if end_control == 2

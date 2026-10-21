@@ -100,7 +100,8 @@ def complete_natural_wait(runtime, action_id):
     return event_id
 
 
-async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None, start=True):
+async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None, start=True,
+                         record_control_elapsed_ns=None, invalid_sibling=False):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
     path = Path(cfg.paths.state_db)
@@ -109,6 +110,9 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False, cata
     handler, parameter_type, operation, observation = CASES[consumer]
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     actions = []
+    if invalid_sibling:
+        actions.append({"name":"无效设备任务","type":"camera_record","device_id":"missing-device",
+            "scheduled_at":instant,"params":{"type":"video"},"policy":{"max_delay_ms":5000}})
     if independent_activity:
         actions.append({"name": "报告", "type": "report_status", "params": {"scope": "full"}})
     action_id = len(actions) + 1
@@ -146,6 +150,14 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False, cata
                 facts.update(started_at=_NOW, activity_state=2)
             await _control_call(runtime, runtime.action(action_id), operation, observation, activity_facts=facts)
         if consumer in ("record", "winddown", "cancel"):
+            if record_control_elapsed_ns is not None:
+                from camctl.capture.models import HostTimerStopSave
+                original_finish = runtime.finish
+                def finish_with_control(ticket, actual, **kwargs):
+                    if ticket.operation == 'stop':
+                        kwargs['host_timer_stop'] = HostTimerStopSave(record_control_elapsed_ns)
+                    return original_finish(ticket, actual, **kwargs)
+                runtime.finish = finish_with_control
             runtime.wall_us = lambda: _NOW + 60_000_000
             runtime.monotonic_ns = lambda: 65_000_000_000
             stop = create_autospec(StopDriver, instance=True)

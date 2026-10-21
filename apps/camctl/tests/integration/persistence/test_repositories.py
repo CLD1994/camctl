@@ -30,12 +30,12 @@ _REPOSITORIES = Path(camctl.__file__).resolve().parent / "persistence" / "reposi
 #: 仓储经数据库执行器执行的函数。其他仓储自开写事务属于违规。
 _ALLOWED_TRANSACTION_OWNERS = {"HistoryRepository", "SqliteSnapshotStore"}
 
-# 电机事实读取，以及电机和主机拍摄的未知提交回执核实，只建立一致
-# 的读视图；许可限定到函数，不允许仓储的其他入口自开事务，也不允许
-# BEGIN IMMEDIATE。
+# 电机事实读取，以及电机、主机拍摄和分段的原键核实，只建立一致读视图。
+# 许可限定到函数，不允许仓储的其他入口自开事务，也不允许BEGIN IMMEDIATE。
 _READ_TRANSACTION_FUNCTIONS = {
     "module:read_motor_facts",
     "module:_fixed_file",
+    "module:verify_segment_finish",
     "MotorRepository.verify_operation",
     "CancellationRepository.verify_motor_operation",
     "HostCaptureRepository.verify_operation",

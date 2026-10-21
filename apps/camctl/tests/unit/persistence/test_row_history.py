@@ -52,12 +52,12 @@ def database():
                      event.event_version, event.occurred_at, event.clock_status, event.change_seq, "{}")
                     for count, event in selected]
             data["pages"].append((len(rows), limit))
-            cursor.fetchall.return_value = rows
+            cursor.fetchmany.return_value = rows
         else:
             raise AssertionError(f"未声明的读取: {sql}")
         if data["fault"] == tag:
             cursor.fetchone.side_effect = sqlite3.OperationalError(tag)
-            cursor.fetchall.side_effect = sqlite3.OperationalError(tag)
+            cursor.fetchmany.side_effect = sqlite3.OperationalError(tag)
         return cursor
 
     connection.execute.side_effect = execute

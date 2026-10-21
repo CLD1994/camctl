@@ -1,6 +1,6 @@
 """绑定范围内按完整路径定位的稳定文件身份。"""
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+import posixpath
 from collections.abc import Mapping
 
 from camctl.devices.bindings import DeviceBinding
@@ -20,7 +20,7 @@ class FileIdentity:
         if (not isinstance(self.path, str) or not self.path.startswith("/")
                 or self.path.startswith("//") or self.path == "/" or "\0" in self.path
                 or any(part in (".", "..") for part in self.path.split("/"))
-                or str(PurePosixPath(self.path)) != self.path):
+                or posixpath.normpath(self.path) != self.path):
             raise ValueError("文件身份必须使用规范的完整设备路径")
         self.path.encode("utf-8")
 
