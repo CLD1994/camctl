@@ -2,7 +2,7 @@
 
 本文说明如何从已安装的 camctl 发行包导出独立演示资源，在单独数据目录中初始化 Hasselblad 配置，按实际能力生成单张拍摄计划，并分别取回原图和预览。该流程面向已安装 Python 3.11、camctl 及配套依赖的 ARM Linux 主机；安装步骤见[camctl 主机联调指南](../../../apps/host-demo/docs/camctl-integration.md)。本文给出执行步骤，不记录目标主机或真实相机已完成验证的结论；已完成的 ARM 单张拍摄与取回验收结论见[组件验证记录](../../camctl/verification.md#hasselblad-arm-真实拍摄与取回验收2026-10-12-utc)，其中也列出本地原始证据归档位置。
 
-拍摄能力、主机文件及已有的取回和保留规则见[Hasselblad 驱动设计](../../camctl/hasselblad-driver.md)和[正式产物与取回清理](../../architecture/outputs.md)。相机端是否另行保存文件仍须按[单张拍摄接口核验记录](../../superpowers/notes/2026-10-12-hasselblad-cfv100c-probe.md)确认。
+拍摄能力、正式源位置及取回和保留规则见[Hasselblad 驱动设计](../../camctl/hasselblad-driver.md)和[正式产物与取回清理](../../architecture/outputs.md)。当前参数支持 RAW／JPEG，用户须明确选择曝光、白平衡和对焦。软件参数域及现场验收分别以[单张参数规格](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)和[实施计划 H9](../../superpowers/plans/2026-10-21-hasselblad-photo-parameters.md#h9完成-arm-部署及真实相机验收)为依据；历史 RAW 现场结果不覆盖新增参数或 JPEG 相机源。
 
 ## 导出已安装发行包中的样例
 
@@ -34,6 +34,8 @@ PY
 
 编辑 `$HOME/.camctl/hasselblad-demo/hasselblad-config.toml`，将 `REPLACE_HASSELBLAD_SERIAL` 替换为目标相机的实际序列号，并确认 `executable` 指向目标机上的绝对工具路径。样例路径为 `/home/cld/hb_cli/hb_cli`，产品标识为 `10`。配置不需要相机 IP 地址或密码。`[paths]` 将状态库、日志及交接目录放在 `$HOME/.camctl/hasselblad-demo/` 下，与其他演示配置使用的状态库和目录分开。
 
+在受理拍摄前选择 `output_storage = "host"` 或 `"device"`，随后导出该配置的能力说明。源位置在受理时冻结；修改配置不改变旧动作的源位置。四组现场组合、实际参数与证据要求由 H9 的组合表维护，每组使用独立请求并保存原始计划。
+
 ## 初始化、说明能力并执行拍摄
 
 初始化并导出本次配置的能力说明：
@@ -46,7 +48,9 @@ PY
   > "$HOME/.camctl/hasselblad-demo/capabilities.json"
 ```
 
-从安装包的 `prepare-plan.py` 生成拍摄计划。生成器使用实际 `describe` 结果核对 `hb0` 的 `camera_take_photo` 能力及唯一的 `hasselblad_photo` 参数类型，同时更新请求 ID、创建时间和 UTC 执行时间。能力说明未提供唯一匹配时，生成器拒绝写入计划。
+从安装包的 `prepare-plan.py` 生成拍摄计划。生成器使用实际 `describe` 结果核对 `hb0` 的 `camera_take_photo` 能力及唯一的 `hasselblad_photo` 参数类型，同时更新请求 ID、创建时间和 UTC 执行时间。能力说明未提供唯一匹配或模板参数不完整时，生成器拒绝写入计划。生成器消费包内模板；导出的 `hasselblad-photo.json` 用于查阅，修改该副本不会改变生成器读取的内容。
+
+以下命令验证安装模板。完整参数验收时，将本次 `capabilities.json` 交给真实客户端，按 H9 组合选择格式、曝光、白平衡和对焦，保存并重开预设，再导出独立计划。分别保留三个短快门的精确数值；不能用修改模板的源码运行代替客户端导出。
 
 ```bash
 "$HOME/.camctl/venv/bin/python" \
@@ -113,8 +117,27 @@ printf '拍摄 action_instance_id=%s\n' "$ACTION_ID"
   --config "$HOME/.camctl/hasselblad-demo/hasselblad-config.toml"
 ```
 
-检查新报告中两个取回动作的 delivery 及文件名、长度和摘要。两次取回各自形成独立 delivery；领取或传输 delivery 不删除长期保留的主机原图和预览。来源文件的清理仍须通过正式产物清理流程明确发起。
+检查新报告中两个取回动作的 delivery 及文件名、长度和摘要。两次取回各自形成独立 delivery；领取或传输 delivery 不删除原正式源。主机源可在相机离线后继续取回；相机源须连接原机身，按原机内文件名分别下载 original／thumbnail。JPEG 原图和 JPEG 预览仍是两个独立角色。来源文件的清理仍须通过正式产物清理流程明确发起。
 
-## 相机端保存情况
+## 通过 C host 完成现场业务链
 
-现有接口核验观察到工具将 3FR 原图和 JPEG 缩略图写到主机；拍摄前后 `images` 返回的条目相同。因此，这些观察没有证明本次拍摄也在相机存储中留下新文件。若演示需要确认相机端保存位置或相机目录中的新文件，应按接口核验记录补充对应设备观察，再记录实际结论。
+完成 H8 软件门禁和目标安装核对后，用下列入口管理独立演示。配置中的 staging、ready、processing 必须与 host 使用相同路径；已有演示目录只在确认属于本次计划后复用。
+
+```bash
+"$HOME/.camctl/host/bin/host-demo" \
+  --camctl "$HOME/.camctl/venv/bin/camctl" \
+  --config "$HOME/.camctl/hasselblad-demo/hasselblad-config.toml" \
+  --ready "$HOME/.camctl/hasselblad-demo/ready" \
+  --processing "$HOME/.camctl/hasselblad-demo/processing" \
+  --log "$HOME/.camctl/hasselblad-demo/host.log"
+```
+
+在该终端输入 `submit <客户端导出计划的绝对路径>`，再用 `claim` 领取文件。交互路径不展开 `$HOME` 或 `~`，也不加引号；此时 run 由 host 管理。分别递交原图和预览取回，再用新请求各重复一次，核对四份独立交付。把报告和媒体按 H9 要求的不同先后顺序导入真实客户端，将客户端导出的累计 ACK 经同一 host 递交并核对 camctl 水位。启动、领取及异常排查细节见[主程序联调指南](../../../apps/host-demo/docs/camctl-integration.md#四启动-host-demo)。
+
+## 相机源的内容证据
+
+当前工具的 `capture` 契约包含主机双文件和 `camera file:` 机内定位，或明确的未报告名称提示。主机名称与机内名称分别保存；明确缺名仅允许满足其他条件的主机源完成。相机源没有可靠机内定位时不得登记成功，也不得用主机名称猜测下载目标。
+
+相机源原图和预览的大小及 SHA-256 固定于拍摄时核验的主机副本。现场按[字节一致性验收](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#jpeg-相机源的字节一致性验收)保留该副本或可靠摘要，与后续两种下载及再次下载逐一比较。双文件看起来相同或只有扩展名正确，不能证明内容一致；JPEG 缩略图的实际提取／生成路径没有依据时记录未知。
+
+设置、调焦、capture、结果保存或取回出现失败、超时及未知结果时，保留原请求、原响应、工作文件和活动事实，沿原责任有限恢复。相对调焦和 capture 不因失败重发；`hb_cli stop` 是关机命令。现场记录分别列出安装、实际采集、文件字节、客户端媒体导入、ACK 和 180 秒调用预算的实际证据，未验证项保持未完成。

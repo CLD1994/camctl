@@ -10,4 +10,4 @@
 
 部署配置的全部字段、默认值、合法范围及主程序路径对应关系见[配置项参考](../../docs/camctl/configuration-reference.md)；首次安装和联调步骤见[部署样例](../../docs/architecture/deployment-example.md)。
 
-Hasselblad CFV 100C 单张 RAW 驱动的设备身份、`hb_cli` 调用及正式源部署选择见[专项驱动说明](../../docs/camctl/hasselblad-driver.md)；公共拍摄与正式产物规则见[相机拍摄规格](../../docs/architecture/camera-capture.md)和[正式产物规格](../../docs/architecture/outputs.md)。
+Hasselblad CFV 100C 单张 RAW／JPEG 驱动的设备身份、完整拍摄参数、`hb_cli` 调用及正式源部署选择见[专项驱动说明](../../docs/camctl/hasselblad-driver.md)；公共拍摄与正式产物规则见[相机拍摄规格](../../docs/architecture/camera-capture.md)和[正式产物规格](../../docs/architecture/outputs.md)。
