@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from camctl.contracts.json_values import is_json_integer
 from camctl.history.events import SCHEMA_RESOURCES, load_event_registry
 from camctl.persistence.transaction import encode_json_value, json_columns
+from camctl.persistence.derived_storage import configure_derived_connection
 from camctl.resources import resource_bytes
 
 
@@ -58,11 +59,11 @@ class ProjectionRowValidator:
             raise ProjectionRowValidationError("完整行校验器不能重复进入读取范围")
         connection = sqlite3.connect(str(self._storage_path) if self._storage_path is not None else ":memory:", isolation_level=None)
         try:
-            with closing(connection.execute("PRAGMA temp_store = FILE" if self._storage_path is not None else "PRAGMA temp_store = MEMORY")):
-                pass
-            connection.execute("PRAGMA cache_size=-2048").close()
             if self._storage_path is not None:
-                connection.execute("PRAGMA temp.cache_size=-2048").close()
+                configure_derived_connection(connection)
+            else:
+                connection.execute("PRAGMA temp_store=MEMORY").close()
+                connection.execute("PRAGMA cache_size=-2048").close()
             for script in _schema_scripts():
                 with closing(connection.executescript(script)):
                     pass

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import sqlite3
+import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
 from contextlib import closing, contextmanager
@@ -63,6 +64,7 @@ from camctl.persistence.models import (
     DbOutcome,
     DbOutcomeKind,
     DbPriority,
+    DbExecutorError,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.row_validation import ProjectionRowValidator
@@ -1288,21 +1290,26 @@ class SqliteSnapshotStore:
                     pass
                 raise
         loaded = await self._run(DbJobKind.READ, execute, "快照依据读取")
-        images = []
-        try:
-            for image in loaded:
-                if isinstance(image, tuple):
-                    ref,boundary = image
-                    image = repository.open_segment_history(ref.entity_id,boundary)
-                images.append(image)
-            return tuple(images)
-        except BaseException as error:
-            for image in images:
-                if hasattr(image,"close"):
-                    image.close()
-            if isinstance(error, Exception):
-                raise SnapshotMaintenanceError(f"快照依据读取失败: {error}") from error
-            raise
+        if all(not isinstance(image,tuple) for image in loaded):
+            return loaded
+
+        def restore(owned):
+            images = []
+            try:
+                for image in loaded:
+                    if isinstance(image, tuple):
+                        ref,boundary = image
+                        image = repository.open_segment_history(ref.entity_id,boundary)
+                        images.append(image)
+                        image.detach()
+                    else:
+                        images.append(image)
+                return tuple(images)
+            except BaseException:
+                _close_snapshot_images(images)
+                raise
+        return await self._run(DbJobKind.READ, restore, "快照分段依据恢复",
+                               cancelled_value=_close_snapshot_images)
 
     async def save_snapshots(
             self, prepared: tuple[PreparedSnapshot | PreparedSnapshotSource, ...]
@@ -1322,29 +1329,55 @@ class SqliteSnapshotStore:
             return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=saved)
         return await self._run(DbJobKind.WRITE, execute, "快照保存")
 
-    async def _run(self, kind: DbJobKind, execute, description: str):
+    async def _run(self, kind: DbJobKind, execute, description: str, *, cancelled_value=None):
         job = DbJob(
             key=new_operation_key(), description=description, kind=kind,
             priority=DbPriority.SNAPSHOT, execute=execute)
         submit = (self._executor.submit_read if kind is DbJobKind.READ
                   else self._executor.submit_write)
-        payload = await submit(job)
+        future = submit(job)
+        try:
+            payload = await asyncio.shield(future)
+        except asyncio.CancelledError:
+            if not future.done():
+                try:
+                    await self._executor.withdraw(job.key)
+                except DbExecutorError:
+                    # 工作已结束但结果投递尚未到事件循环时，key已离开队列；
+                    # 原Future仍是唯一真实结果责任，继续等待其投递。
+                    pass
+            from camctl.history.snapshots import _await_actual_result
+            payload = await _await_actual_result(future)
+            # READ迟到结果只包含无活连接的描述符，监督者接收后回收。
+            if kind is DbJobKind.READ and not isinstance(payload,DbOutcome):
+                if payload.error is not None:
+                    raise SnapshotMaintenanceError(f"{description}取消后实际读取失败: {payload.error}", operation_key=job.key, result=payload) from payload.error
+                if cancelled_value is not None:
+                    cancelled_value(payload.value)
+            elif isinstance(payload,DbOutcome) and payload.kind in (DbOutcomeKind.UNKNOWN,DbOutcomeKind.ROLLED_BACK):
+                raise SnapshotMaintenanceError(f"{description}取消后实际结果为{payload.kind.value}: {payload.error}", operation_key=job.key, result=payload) from payload.error
+            raise
         if kind is DbJobKind.READ:
             if isinstance(payload, DbOutcome):
-                _raise_snapshot_failure(payload.error, description)
+                _raise_snapshot_failure(payload.error, description, operation_key=job.key, result=payload)
             if payload.error is not None:
                 raise SnapshotMaintenanceError(
-                    f"{description}失败: {payload.error}") from payload.error
+                    f"{description}失败: {payload.error}", operation_key=job.key, result=payload) from payload.error
             return payload.value
         if payload.kind is DbOutcomeKind.COMPLETED:
             return payload.value
-        _raise_snapshot_failure(payload.error, description)
+        _raise_snapshot_failure(payload.error, description, operation_key=job.key, result=payload)
 
 
-def _raise_snapshot_failure(error: BaseException | None, description: str) -> None:
+def _close_snapshot_images(images):
+    from camctl.history.snapshots import _close_resources
+    _close_resources(images)
+
+
+def _raise_snapshot_failure(error: BaseException | None, description: str, *, operation_key=None, result=None) -> None:
     if isinstance(error, DbEnqueueTimeoutError):
         raise SnapshotEnqueueTimeout(f"{description}入队前等待空位超时") from error
-    raise SnapshotMaintenanceError(f"{description}失败: {error}") from error
+    raise SnapshotMaintenanceError(f"{description}失败: {error}", operation_key=operation_key, result=result) from error
 
 
 def _snapshot_entity_name(entity_type: int) -> str:

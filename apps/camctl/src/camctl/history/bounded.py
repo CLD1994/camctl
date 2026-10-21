@@ -18,6 +18,7 @@ from camctl.history.events import business_columns, foreign_key_targets, load_ev
 from camctl.history.replay import reverse_row_values
 from camctl.history.snapshots import SnapshotRow
 from camctl.persistence.transaction import encode_json_value
+from camctl.persistence.derived_storage import configure_derived_connection
 
 
 MAX_BATCH = 128
@@ -118,11 +119,11 @@ class SegmentHistoryHandle:
         self.identity = uuid4().hex
         self._temporary = TemporaryDirectory(prefix='camctl-history-')
         self._db = None
+        self._closed = False
+        self._path = Path(self._temporary.name)/'rows.db'
         try:
-            self._db = sqlite3.connect(str(Path(self._temporary.name)/'rows.db'), isolation_level=None)
-            self._db.execute('PRAGMA cache_size=-2048').close()
-            self._db.execute('PRAGMA temp_store=FILE').close()
-            self._db.execute('PRAGMA temp.cache_size=-2048').close()
+            self._db = sqlite3.connect(str(self._path), isolation_level=None)
+            configure_derived_connection(self._db)
             self._db.execute('CREATE TABLE candidates (tab TEXT NOT NULL, id INTEGER NOT NULL, body TEXT NOT NULL, upper_event INTEGER NOT NULL, PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
             self._db.execute('CREATE TABLE set_refs (scan INTEGER, final_event INTEGER, version INTEGER, id INTEGER NOT NULL, PRIMARY KEY(scan,final_event,version)) WITHOUT ROWID').close()
             self._db.execute('CREATE TABLE row_order (tab TEXT,set_id INTEGER,k1 INTEGER,k2 INTEGER,k3 TEXT,id INTEGER,PRIMARY KEY(tab,set_id,k1,k2,k3,id)) WITHOUT ROWID').close()
@@ -144,6 +145,7 @@ class SegmentHistoryHandle:
         self.close()
 
     def close(self):
+        self._closed = True
         db, self._db = self._db, None
         try:
             if db is not None:
@@ -151,9 +153,23 @@ class SegmentHistoryHandle:
         finally:
             self._temporary.cleanup()
 
+    def detach(self):
+        """在当前所属线程关闭连接，只交接可重建文件及有限描述符。"""
+        db,self._db=self._db,None
+        if db is not None:
+            db.close()
+        return self
+
     def _require_ready(self):
-        if self._db is None or not self.ready:
+        if self._closed or not self.ready:
             raise ConsistencyError('历史句柄尚未完成恢复或已经关闭')
+        if self._db is None:
+            self._db=sqlite3.connect(self._path.as_uri()+'?mode=rw',uri=True,isolation_level=None)
+            try:
+                configure_derived_connection(self._db)
+            except BaseException:
+                self.detach()
+                raise
 
     def _one(self, sql, args=()):
         with closing(self._db.execute(sql,args)) as cursor:
@@ -269,15 +285,7 @@ class SegmentHistoryHandle:
 
     def iter_rows(self):
         self._require_ready()
-        previous = ('',0)
-        while True:
-            with closing(self._db.execute('SELECT tab,id,body FROM rows WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as cursor:
-                selected = cursor.fetchall()
-            if not selected:
-                return
-            for table,identity,body in selected:
-                yield SnapshotRow(table,identity,parse_exact_json(body))
-            previous = selected[-1][:2]
+        yield from self._iter_rows()
 
     def _copy_candidates(self):
         from camctl.persistence.repositories.history import _table_row
@@ -351,37 +359,41 @@ class SegmentHistoryHandle:
                 count += 1 if forward else -1
 
     def _apply(self,event,forward):
-        for change in event.rows:
-            key = (change.table,change.row_id)
-            candidate = self._one('SELECT body,upper_event FROM candidates WHERE tab=? AND id=?',key)
-            if candidate is None or (not forward and event.event_id > candidate[1]):
-                continue
-            current = parse_exact_json(candidate[0])
-            target = self._get(*key)
-            columns = business_columns(change.table)
-            if not change.after.exists:
-                raise ConsistencyError('永久自身行不能被历史事件删除')
-            if forward:
-                if not change.before.exists:
-                    if target is not None or set(change.after.values) != columns:
-                        raise ConsistencyError('历史创建行不完整或重复')
-                    target = {k:v for k,v in current.items() if k not in columns}
-                elif target is None:
-                    raise ConsistencyError('历史更新行不存在')
-                else:
-                    for column,value in change.before.values.items():
-                        if column not in target or not json_equal(target[column],value):
-                            raise ConsistencyError('历史更新前值不连续')
-                target.update(change.after.values)
-                self._put(*key,target)
-            elif not change.before.exists:
-                if target is None or not json_equal({k:target[k] for k in columns},dict(change.after.values)):
-                    raise ConsistencyError('逆向创建事实不连续')
-                self._db.execute('DELETE FROM rows WHERE tab=? AND id=?',key).close()
+        changes = event.rows if forward else reversed(event.rows)
+        for change in changes:
+            self._apply_change(event.event_id,change,forward)
+
+    def _apply_change(self,event_id,change,forward):
+        key = (change.table,change.row_id)
+        candidate = self._one('SELECT body,upper_event FROM candidates WHERE tab=? AND id=?',key)
+        if candidate is None or (not forward and event_id > candidate[1]):
+            return
+        current = parse_exact_json(candidate[0])
+        target = self._get(*key)
+        columns = business_columns(change.table)
+        if not change.after.exists:
+            raise ConsistencyError('永久自身行不能被历史事件删除')
+        if forward:
+            if not change.before.exists:
+                if target is not None or set(change.after.values) != columns:
+                    raise ConsistencyError('历史创建行不完整或重复')
+                target = {k:v for k,v in current.items() if k not in columns}
+            elif target is None:
+                raise ConsistencyError('历史更新行不存在')
             else:
-                if target is None:
-                    raise ConsistencyError('逆向更新行不存在')
-                self._put(*key,reverse_row_values(target,change,frozenset(target)))
+                for column,value in change.before.values.items():
+                    if column not in target or not json_equal(target[column],value):
+                        raise ConsistencyError('历史更新前值不连续')
+            target.update(change.after.values)
+            self._put(*key,target)
+        elif not change.before.exists:
+            if target is None or not json_equal({k:target[k] for k in columns},dict(change.after.values)):
+                raise ConsistencyError('逆向创建事实不连续')
+            self._db.execute('DELETE FROM rows WHERE tab=? AND id=?',key).close()
+        else:
+            if target is None:
+                raise ConsistencyError('逆向更新行不存在')
+            self._put(*key,reverse_row_values(target,change,frozenset(target)))
 
     def restore(self,strategy):
         upper,head = self._copy_candidates()
@@ -391,17 +403,21 @@ class SegmentHistoryHandle:
             for event in self._events(self.boundary,upper,head[1],self.seed.floor[1]+1,False):
                 self._apply(event,False)
         elif strategy == 'initial':
+            self._prove_fixed_values(self.boundary,self.seed.floor[1])
             for event in self._events(INITIAL_BOUNDARY,self.boundary,1,self.seed.floor[1],True):
                 self._apply(event,True)
         elif strategy == 'snapshot':
-            self._load_snapshot()
             choice = self.seed.snapshot
-            for event in self._events(choice.boundary,self.boundary,choice.position[1]+1,self.seed.floor[1],True):
-                self._apply(event,True)
+            if choice is None:
+                raise ConsistencyError('请求的快照恢复路径没有可靠S')
+            self._prove_fixed_values(choice.boundary,choice.position[1])
+            self._load_snapshot()
+            self._replay_proved_changes()
         else:
             raise ValueError('未知历史恢复路径')
         if strategy != 'current':
             self._verify_complete_keys()
+            self._verify_fixed_values()
         primary = self._get('actions',self.action_id)
         if self.seed.floor[1]:
             if primary is None:
@@ -415,23 +431,108 @@ class SegmentHistoryHandle:
         self.ready = True
         return self
 
-    def _verify_complete_keys(self):
-        """永久C0候选减去H后创建行，独立证明H处完整自身身份集合。
+    def _prove_fixed_values(self, lower, lower_count):
+        """沿每行Ci逆向一次，分别取得S/H的原write_once事实。
 
-        旧自身表没有统一创建位置列；只扫描(H,Cmax]，与正向区间
-        不重叠。不依赖快照自身声称的行数，也不读H前正文来验身份。
+        (S,H]的已验证变化落盘后供快照正向复用；源事件只读取一次。
+        fixed表也记录存在性，完整身份校验复用同一份创建事实。
         """
-        self._db.execute('CREATE TABLE expected (tab TEXT,id INTEGER,PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
-        self._db.execute('INSERT INTO expected SELECT tab,id FROM candidates').close()
-        for event in self._events(self.boundary,self._upper,self.seed.floor[1]+1,self._head[1],True):
-            for change in event.rows:
+        self._db.execute('CREATE TABLE fixed_work (tab TEXT,id INTEGER,body TEXT,PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
+        self._db.execute('CREATE TABLE proved_changes (event INTEGER,ordinal INTEGER,tab TEXT,id INTEGER,before_exists INTEGER,before_body TEXT,after_body TEXT,PRIMARY KEY(event,ordinal)) WITHOUT ROWID').close()
+        registry=load_event_registry()['tables']
+        previous=('',0)
+        while True:
+            with closing(self._db.execute('SELECT tab,id,body FROM candidates WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as query:
+                selected=query.fetchall()
+            if not selected:
+                break
+            for table,identity,body in selected:
+                values=parse_exact_json(body)
+                fixed={column:values[column] for column in registry[table]['write_once']}
+                self._db.execute('INSERT INTO fixed_work VALUES (?,?,?)',
+                    (table,identity,encode_json_value(fixed))).close()
+            previous=selected[-1][:2]
+        copied_h=False
+        for event in self._events(lower,self._upper,self._head[1],lower_count+1,False):
+            if not copied_h and event.event_id <= self.boundary.last_event_id:
+                self._copy_fixed('fixed_h')
+                copied_h=True
+            for ordinal,change in reversed(tuple(enumerate(event.rows))):
+                key=(change.table,change.row_id)
+                candidate=self._one('SELECT upper_event FROM candidates WHERE tab=? AND id=?',key)
+                if candidate is None or event.event_id > candidate[0]:
+                    continue
+                if not change.after.exists:
+                    raise ConsistencyError('永久自身行不能被历史删除')
+                found=self._one('SELECT body FROM fixed_work WHERE tab=? AND id=?',key)
+                if found is None:
+                    raise ConsistencyError('一次固定证据缺少原行')
+                fixed=parse_exact_json(found[0])
+                for column in registry[change.table]['write_once']:
+                    if column in change.after.values:
+                        if not json_equal(fixed[column],change.after.values[column]):
+                            raise ConsistencyError('一次固定事实与Ci后值不连续')
+                        if change.before.exists:
+                            fixed[column]=change.before.values[column]
                 if not change.before.exists:
-                    self._db.execute('DELETE FROM expected WHERE tab=? AND id=?',(change.table,change.row_id)).close()
-        missing=self._one('SELECT tab,id FROM expected EXCEPT SELECT tab,id FROM rows LIMIT 1')
-        extra=self._one('SELECT tab,id FROM rows EXCEPT SELECT tab,id FROM expected LIMIT 1')
+                    self._db.execute('DELETE FROM fixed_work WHERE tab=? AND id=?',key).close()
+                else:
+                    self._db.execute('UPDATE fixed_work SET body=? WHERE tab=? AND id=?',
+                        (encode_json_value(fixed),*key)).close()
+                if event.event_id <= self.boundary.last_event_id:
+                    self._db.execute('INSERT INTO proved_changes VALUES (?,?,?,?,?,?,?)',
+                        (event.event_id,ordinal,*key,int(change.before.exists),
+                         encode_json_value(dict(change.before.values)),encode_json_value(dict(change.after.values)))).close()
+        if not copied_h:
+            self._copy_fixed('fixed_h')
+        self._copy_fixed('fixed_s')
+        self._db.execute('DROP TABLE fixed_work').close()
+
+    def _copy_fixed(self,name):
+        self._db.execute(f'CREATE TABLE {name} (tab TEXT,id INTEGER,body TEXT,PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
+        self._db.execute(f'INSERT INTO {name} SELECT tab,id,body FROM fixed_work').close()
+
+    def _replay_proved_changes(self):
+        from camctl.history.events import RowChange,RowImage
+        previous=(0,-1)
+        while True:
+            with closing(self._db.execute('SELECT event,ordinal,tab,id,before_exists,before_body,after_body FROM proved_changes WHERE (event,ordinal)>(?,?) ORDER BY event,ordinal LIMIT ?',(*previous,self.batch_size))) as query:
+                selected=query.fetchall()
+            if not selected:
+                return
+            for event,ordinal,table,identity,exists,before,after in selected:
+                change=RowChange(table,identity,RowImage(bool(exists),parse_exact_json(before)),RowImage(True,parse_exact_json(after)))
+                self._apply_change(event,change,True)
+            previous=selected[-1][:2]
+
+    def _fixed_values(self,table,identity,at='fixed_s'):
+        found=self._one(f'SELECT body FROM {at} WHERE tab=? AND id=?',(table,identity))
+        if found is None:
+            raise ConsistencyError('快照包含原边界尚未创建的行')
+        return parse_exact_json(found[0])
+
+    def _verify_complete_keys(self):
+        missing=self._one('SELECT tab,id FROM fixed_h EXCEPT SELECT tab,id FROM rows LIMIT 1')
+        extra=self._one('SELECT tab,id FROM rows EXCEPT SELECT tab,id FROM fixed_h LIMIT 1')
         if missing or extra:
             raise ConsistencyError('H处恢复自身成员不完整或包含后创建行')
-        self._db.execute('DROP TABLE expected').close()
+
+    def _verify_fixed_values(self):
+        for record in self._iter_rows():
+            expected=self._fixed_values(record.table,record.row_id,'fixed_h')
+            if any(not json_equal(record.values[column],value) for column,value in expected.items()):
+                raise ConsistencyError('恢复结果的一次固定事实不属于H')
+
+    def _iter_rows(self):
+        previous=('',0)
+        while True:
+            with closing(self._db.execute('SELECT tab,id,body FROM rows WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as query:
+                selected=query.fetchall()
+            if not selected:
+                return
+            for table,identity,body in selected:
+                yield SnapshotRow(table,identity,parse_exact_json(body))
+            previous=selected[-1][:2]
 
     def _validate(self):
         from camctl.history.validators import EventContext,_resolve_owner_spec

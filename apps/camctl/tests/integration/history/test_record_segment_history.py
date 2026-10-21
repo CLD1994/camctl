@@ -701,7 +701,10 @@ async def test_snapshot_seed_keeps_database_instance_before_bounded_read(tmp_pat
     try:
         original=HistoryRepository.open_segment_history
         def change_instance(self,*args,**kwargs):
-            owned.connection.execute('UPDATE database_metadata SET instance_id=?',(str(new_operation_key()),))
+            import sqlite3
+            from contextlib import closing
+            with closing(sqlite3.connect(history.path,isolation_level=None)) as changed:
+                changed.execute('UPDATE database_metadata SET instance_id=?',(str(new_operation_key()),))
             return original(self,*args,**kwargs)
         monkeypatch.setattr(HistoryRepository,'open_segment_history',change_instance)
         with pytest.raises(SnapshotMaintenanceError):

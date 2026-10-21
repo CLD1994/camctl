@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from contextlib import ExitStack
 from enum import Enum
 from typing import TYPE_CHECKING, Mapping, Protocol
 
@@ -53,6 +54,11 @@ class SnapshotMaintenanceError(Exception):
     候选或进度缺失、计数矛盾、保存失败、提交结果未知及编码输入
     不合法都属于本类；不把损坏解释为没有候选或空快照。
     """
+
+    def __init__(self, message, *, operation_key=None, result=None):
+        super().__init__(message)
+        self.operation_key = operation_key
+        self.result = result
 
 
 class SnapshotEnqueueTimeout(Exception):
@@ -321,6 +327,47 @@ class MaintenanceResult:
     batches: int = 0
 
 
+def _close_resources(resources):
+    with ExitStack() as cleanup:
+        for resource in resources:
+            close=getattr(resource,'close',None)
+            if close is not None:
+                cleanup.callback(close)
+
+
+async def _await_actual_result(future):
+    """首次取消之后仍跟踪原结果；重复取消不丢弃实际资源责任。"""
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            continue
+    return future.result()
+
+
+def _prepare_images_in_worker(images):
+    prepared=[]
+    try:
+        for image in images:
+            prepared.append(prepare_snapshot(image))
+        return prepared
+    except BaseException:
+        _close_resources(prepared)
+        raise
+
+
+async def _prepare_images(images):
+    if all(isinstance(image,EntityImage) for image in images):
+        return _prepare_images_in_worker(images)
+    task=asyncio.create_task(asyncio.to_thread(_prepare_images_in_worker,images))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        prepared=await _await_actual_result(task)
+        _close_resources(prepared)
+        raise
+
+
 async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
     """按窄仓储端口分批推进快照维护。
 
@@ -358,8 +405,7 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
                 saved=tuple(saved), batches=batches)
         prepared = []
         try:
-            for image in images:
-                prepared.append(prepare_snapshot(image))
+            prepared = await _prepare_images(images)
             if prepared:
                 try:
                     batch_saved = await context.store.save_snapshots(tuple(prepared))
@@ -370,10 +416,7 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
                         saved=tuple(saved), batches=batches)
                 saved.extend(batch_saved)
         finally:
-            for resource in (*prepared, *images):
-                close = getattr(resource, "close", None)
-                if close is not None:
-                    close()
+            _close_resources((*prepared,*images))
         batches += 1
         await asyncio.sleep(0)
         if len(candidates) < context.batch_size:

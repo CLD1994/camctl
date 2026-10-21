@@ -1,8 +1,9 @@
 """磁盘历史句柄的逐块快照编码与增量解码。"""
 from contextlib import closing
+import codecs
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, TemporaryFile
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -39,6 +40,15 @@ class PreparedSnapshotSource:
 
 
 def prepare_segment_snapshot(handle):
+    detached=handle._db is None
+    try:
+        return _prepare_segment_snapshot(handle)
+    finally:
+        if detached:
+            handle.detach()
+
+
+def _prepare_segment_snapshot(handle):
     handle._require_ready()
     if handle.seed.floor[1] < 1:
         raise SnapshotMaintenanceError('不存在的动作不能保存快照')
@@ -66,18 +76,52 @@ def prepare_segment_snapshot(handle):
 
 
 def _records(chunks):
-    buffer = bytearray()
-    for chunk in chunks:
-        buffer.extend(chunk)
-        while (end := buffer.find(b'\n')) >= 0:
-            raw = bytes(buffer[:end])
-            del buffer[:end+1]
-            try:
-                yield parse_exact_json(raw.decode('utf-8'))
-            except (ValueError,UnicodeError) as error:
-                raise SnapshotMaintenanceError('快照行无法增量解码') from error
-    if buffer:
-        raise SnapshotMaintenanceError('快照正文缺少结尾换行')
+    """LF前只暂存磁盘和固定UTF8余量；完整行构造一个必要值。
+
+    第一版单个字段须能在目标环境处理。完整行的解析驻留取决于
+    该行大小；总正文、缺LF残留和累计行数均不进入Python全集。
+    """
+    decoder=codecs.getincrementaldecoder('utf-8')('strict')
+    try:
+        with TemporaryFile(mode='w+b',prefix='camctl-snapshot-row-') as pending:
+            length=0
+            for chunk in chunks:
+                # 来源按CHUNK_BYTES读取；对直接调用也控制每次解码的片段。
+                for offset in range(0,len(chunk),CHUNK_BYTES):
+                    block=chunk[offset:offset+CHUNK_BYTES]
+                    start=0
+                    while start<len(block):
+                        end=block.find(b'\n',start)
+                        fragment=block[start:] if end<0 else block[start:end]
+                        decoder.decode(fragment,final=False)
+                        if pending.write(fragment)!=len(fragment):
+                            raise SnapshotMaintenanceError('快照临时行写入不完整')
+                        length+=len(fragment)
+                        if end<0:
+                            break
+                        decoder.decode(b'',final=True)
+                        pending.seek(0)
+                        raw=pending.read()
+                        try:
+                            if len(raw)!=length:
+                                raise SnapshotMaintenanceError('快照临时行回读不完整')
+                            text=raw.decode('utf-8')
+                        finally:
+                            del raw
+                        try:
+                            value=parse_exact_json(text)
+                        finally:
+                            del text
+                        pending.seek(0);pending.truncate(0)
+                        length=0;decoder.reset()
+                        yield value
+                        del value
+                        start=end+1
+            decoder.decode(b'',final=True)
+            if length:
+                raise SnapshotMaintenanceError('快照正文缺少结尾换行')
+    except (ValueError,UnicodeError) as error:
+        raise SnapshotMaintenanceError('快照行无法增量解码') from error
 
 
 def _chunks(handle,choice):
@@ -106,40 +150,42 @@ def load_snapshot(handle):
     if choice is None:
         raise ConsistencyError('请求的快照恢复路径没有可靠S')
     try:
-        records = iter(_records(_chunks(handle,choice)))
-        header = next(records,None)
-        expected = {'format_version':FORMAT_VERSION,'entity_type':handle.seed.ref[0],
-                    'entity_id':handle.action_id,'boundary_event_id':choice.boundary.last_event_id,
-                    'change_count':choice.position[1]}
-        if not json_equal(header,expected):
-            raise SnapshotMaintenanceError('快照头不符合固定S及目录计数')
-        registry = load_event_registry()['tables']
-        previous = ('',0)
-        for record in records:
-            if not isinstance(record,dict) or set(record) != {'table','row'}:
-                raise SnapshotMaintenanceError('快照行结构非法')
-            table,values = record['table'],record['row']
-            if table not in registry or not isinstance(values,dict):
-                raise SnapshotMaintenanceError('快照行类型非法')
-            ObjectId(values.get('id'))
-            key = (table,values['id'])
-            if key <= previous:
-                raise SnapshotMaintenanceError('快照行排序不连续或包含重复身份')
-            current = handle._get(*key,source='candidates')
-            if current is None or values.keys() != current.keys():
-                raise SnapshotMaintenanceError('快照行超出自身范围或列不完整')
-            for column in (*registry[table]['immutable'],'id','created_event_id'):
-                if column in current and not json_equal(values[column],current[column]):
-                    raise SnapshotMaintenanceError('快照不可变身份不符合永久投影')
-            for column in registry[table]['write_once']:
-                if values[column] is not None and not json_equal(values[column],current[column]):
-                    raise SnapshotMaintenanceError('快照一次固定事实与原投影矛盾')
-            if ('created_event_id' in values and values['created_event_id'] > choice.boundary.last_event_id):
-                raise SnapshotMaintenanceError('快照包含S之后创建的行')
-            handle._put(*key,values)
-            previous = key
-        primary = handle._get('actions',handle.action_id)
-        if primary is None or (primary['last_event_id'],primary['change_count']) != choice.position:
-            raise SnapshotMaintenanceError('快照主行缺失或目录计数不符')
+        with closing(_records(_chunks(handle,choice))) as records:
+            header = next(records,None)
+            expected = {'format_version':FORMAT_VERSION,'entity_type':handle.seed.ref[0],
+                        'entity_id':handle.action_id,'boundary_event_id':choice.boundary.last_event_id,
+                        'change_count':choice.position[1]}
+            if not json_equal(header,expected):
+                raise SnapshotMaintenanceError('快照头不符合固定S及目录计数')
+            registry = load_event_registry()['tables']
+            previous = ('',0)
+            for record in records:
+                if not isinstance(record,dict) or set(record) != {'table','row'}:
+                    raise SnapshotMaintenanceError('快照行结构非法')
+                table,values = record['table'],record['row']
+                if table not in registry or not isinstance(values,dict):
+                    raise SnapshotMaintenanceError('快照行类型非法')
+                ObjectId(values.get('id'))
+                key = (table,values['id'])
+                if key <= previous:
+                    raise SnapshotMaintenanceError('快照行排序不连续或包含重复身份')
+                current = handle._get(*key,source='candidates')
+                if current is None or values.keys() != current.keys():
+                    raise SnapshotMaintenanceError('快照行超出自身范围或列不完整')
+                for column in (*registry[table]['immutable'],'id','created_event_id'):
+                    if column in current and not json_equal(values[column],current[column]):
+                        raise SnapshotMaintenanceError('快照不可变身份不符合永久投影')
+                fixed=handle._fixed_values(*key)
+                for column in registry[table]['write_once']:
+                    if not json_equal(values[column],fixed[column]):
+                        raise SnapshotMaintenanceError('快照一次固定事实不属于原S')
+                if ('created_event_id' in values and values['created_event_id'] > choice.boundary.last_event_id):
+                    raise SnapshotMaintenanceError('快照包含S之后创建的行')
+                handle._put(*key,values)
+                previous = key
+                del record,values,current,fixed
+            primary = handle._get('actions',handle.action_id)
+            if primary is None or (primary['last_event_id'],primary['change_count']) != choice.position:
+                raise SnapshotMaintenanceError('快照主行缺失或目录计数不符')
     except (SnapshotMaintenanceError,ValueError,TypeError,KeyError) as error:
         raise ConsistencyError('已选快照损坏，无法可靠恢复') from error
