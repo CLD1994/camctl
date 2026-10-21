@@ -362,6 +362,26 @@ class SqlEventReads:
         size = self.scope.batch_size if limit is None else limit
         if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= self.scope.batch_size:
             raise ConsistencyError("事实读取限额超出可信范围")
+        if isinstance(self.scope, SourceResolutionReadScope) and (table, column, identity) == ('actions', 'plan_id', self.scope.plan_id):
+            from camctl.persistence.repositories.source_transactions import bind_aggregate_page
+            after = 0
+            while True:
+                previous_aggregate = self._source_aggregate_page
+                try:
+                    ids = bind_aggregate_page(self, table, column, identity, after=after, limit=size)
+                    if not ids:
+                        return
+                    batch = []
+                    for key in ids:
+                        facts = self.optional(table, key, columns)
+                        if facts is not None:
+                            batch.append((key, facts))
+                    yield tuple(batch)
+                finally:
+                    self._source_aggregate_page = previous_aggregate
+                after = ids[-1]
+                if len(ids) < size:
+                    return
         changed = tuple(key[1] for key in self._overlay if key[0] == table)
         plan_owners = {}
         if isinstance(self.scope, PlanReadScope):
@@ -404,10 +424,6 @@ class SqlEventReads:
             if not ids:
                 return
             batch = []
-            if isinstance(self.scope, SourceResolutionReadScope):
-                from camctl.persistence.repositories.source_transactions import bind_aggregate_page
-                previous_aggregate = self._source_aggregate_page
-                bind_aggregate_page(self, ids[:size])
             for key in ids[:size]:
                 if key in plan_owners and plan_owners[key] != self.scope.plan_id:
                     continue
@@ -415,11 +431,7 @@ class SqlEventReads:
                 if facts is not None and facts.get(column, key if column == "id" else None) == identity:
                     batch.append((key, facts))
             after = ids[min(size, len(ids)) - 1]
-            try:
-                yield tuple(batch)
-            finally:
-                if isinstance(self.scope, SourceResolutionReadScope):
-                    self._source_aggregate_page = previous_aggregate
+            yield tuple(batch)
             if len(candidates) < size and len(ids) <= size:
                 return
 

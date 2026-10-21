@@ -846,3 +846,195 @@ def test_handler_cannot_prefill_aggregate_page_to_grant_foreign_points(tmp_path,
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
     finally:
         owned.connection.close()
+
+
+def _aggregate_role_world(tmp_path, start):
+    """真实三计划：目标 owner=8/main plan=3，源页与数值碰撞 action 分开。"""
+    from ..acceptance.test_source_member_proof import _accept, _body
+    _, owned, _ = _real_environment(tmp_path)
+    body = _body()
+    if not start:
+        body["actions"][-1]["params"]["source"] = {"plan_instance_id":"1"}
+        local = _body()["actions"][-1]
+        local["name"] = "local-fetch"
+        body["actions"].append(local)
+    accepted = _accept(body, owned)
+    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+    assert accepted.value.plan_id == 3
+    request = outputs.StartObtainAction(8,_NOW) if start else outputs.ResolveSources(8,SourceSpec(plan_instance_id=1),_NOW)
+    if not start:
+        local_started = outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(9,_NOW),new_operation_key(),owned)
+        assert local_started.kind is DbOutcomeKind.COMPLETED, local_started.error
+        started = outputs.OutputsRepository(1).start_obtain_action(outputs.StartObtainAction(8,_NOW),new_operation_key(),owned)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+    return owned, request
+
+
+def _run_aggregate_role_command(owned, request, monkeypatch, *, start, finite):
+    command = outputs._StartObtainCommand if start else outputs._ResolveSourcesCommand
+    original = command.plan
+    monkeypatch.setattr(command,"plan",lambda self,scope:_rewrite_plan(original(self,scope),"clear_progress",finite))
+    repository = outputs.OutputsRepository(1)
+    return repository.start_obtain_action(request,new_operation_key(),owned) if start else repository.resolve_sources(request,new_operation_key(),owned)
+
+
+@pytest.mark.parametrize("start", [False,True])
+@pytest.mark.parametrize("finite", [False,True])
+@pytest.mark.parametrize("table", ["plans","action_dependencies","obtain_source_selections"])
+def test_point_iteration_cannot_relabel_its_numeric_ids_as_actions(tmp_path,monkeypatch,start,finite,table):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned,request = _aggregate_role_world(tmp_path,start)
+    original = streams._verify_context
+    checked = []
+    try:
+        def inspect(db,event,context,reads,q):
+            original(db,event,context,reads,q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            identity = 3 if table == "plans" or not start else 1
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",identity)
+            iterator = reads.iter_members(table,"id",identity)
+            for page in iterator:
+                assert all(key == identity for key,_ in page)
+                with pytest.raises(ConsistencyError):
+                    reads.optional("actions",identity)
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",identity)
+            assert reads.required("actions",8)["plan_id"] == 3
+            assert reads.required("plans",3)["id"] == 3
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False,True])
+@pytest.mark.parametrize("finite", [False,True])
+@pytest.mark.parametrize("failure", ["optional","sql"])
+def test_aggregate_role_is_revoked_when_page_assembly_fails(tmp_path,monkeypatch,start,finite,failure):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    import sqlite3
+    owned,request = _aggregate_role_world(tmp_path,start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db,event,context,reads,q):
+            verify(db,event,context,reads,q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            target = 6 if start else 5
+            optional = reads.optional
+            fault = sqlite3.DatabaseError("page SQL failed") if failure=="sql" else RuntimeError("page assembly failed")
+            def failed(table,identity,columns=None):
+                if (table,identity)==("actions",target):
+                    if failure == "sql":
+                        db.set_authorizer(lambda action, table_name, *rest: sqlite3.SQLITE_DENY
+                            if action == sqlite3.SQLITE_READ and table_name == "actions" else sqlite3.SQLITE_OK)
+                        try:
+                            return optional(table,identity,columns)
+                        finally:
+                            db.set_authorizer(None)
+                    raise fault
+                return optional(table,identity,columns)
+            reads.optional = failed
+            iterator = reads.iter_members("actions","plan_id",3)
+            try:
+                with pytest.raises(type(fault)):
+                    while True:
+                        next(iterator)
+            finally:
+                reads.optional = optional
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",target)
+            iterator.close()
+            assert reads.required("actions",8)["plan_id"] == 3
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False,True])
+@pytest.mark.parametrize("finite", [False,True])
+@pytest.mark.parametrize("exit_kind", ["exhaust","close","throw","consumer_error"])
+def test_real_plan_aggregate_page_role_ends_with_its_iterator(tmp_path,monkeypatch,start,finite,exit_kind):
+    from contextlib import closing
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    owned,request = _aggregate_role_world(tmp_path,start)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db,event,context,reads,q):
+            verify(db,event,context,reads,q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            target = 6 if start else 5
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",target)
+            for table,column,identity in (("plans","id",3),("action_dependencies","id",1),("actions","plan_id",1)):
+                with pytest.raises(ConsistencyError):
+                    streams.bind_aggregate_page(reads,table,column,identity,after=0,limit=1)
+            iterator = reads.iter_members("actions","plan_id",3)
+            page = next(iterator)
+            while target not in {key for key,_ in page}:
+                page = next(iterator)
+            assert reads.required("actions",target)["plan_id"] == 3
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",3)
+            if exit_kind == "exhaust":
+                for _ in iterator:
+                    pass
+            elif exit_kind == "close":
+                iterator.close()
+            elif exit_kind == "throw":
+                with pytest.raises(RuntimeError):
+                    iterator.throw(RuntimeError("consumer stopped"))
+            else:
+                with pytest.raises(RuntimeError):
+                    with closing(iterator):
+                        raise RuntimeError("consumer stopped")
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",target)
+            assert reads.required("actions",8)["plan_id"] == 3
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=start,finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("finite", [False,True])
+def test_plan_aggregate_keeps_real_accepted_prefix_fields(tmp_path,monkeypatch,finite):
+    from camctl.persistence.repositories import source_transactions as streams
+    owned,request = _aggregate_role_world(tmp_path,True)
+    verify = streams._verify_context
+    checked = []
+    try:
+        def inspect(db,event,context,reads,q):
+            verify(db,event,context,reads,q)
+            if event.event_id != context.transaction.last_event_id:
+                return
+            # START owner 已经是实际已接受前序；finite 尚未写 SQL，Bounded 已写。
+            assert any(row.table == "plans" and row.row_id == 3 for row in event.rows)
+            rows = [facts for page in reads.iter_members("actions","plan_id",3) for _,facts in page]
+            owner = next(row for row in rows if row["id"] == 8)
+            assert (owner["status"],owner["execution_started"]) == (2,1)
+            checked.append(event.event_id)
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        result = _run_aggregate_role_command(owned,request,monkeypatch,start=True,finite=finite)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        assert checked
+    finally:
+        owned.connection.close()

@@ -507,11 +507,21 @@ class _SourceAggregatePage:
     identities: frozenset
 
 
-def bind_aggregate_page(reads, identities):
-    # 只由有限主计划聚合读取器在可靠 SQL/accepted 页上调用。
-    roles = reads._source_roles
-    source_read_role(reads, 'actions', 'plan_id', reads.scope.plan_id)
-    reads._source_aggregate_page = _SourceAggregatePage(roles.proof, frozenset(identities))
+def bind_aggregate_page(reads, table, column, identity, *, after, limit):
+    """仅由真实主计划查询产生当前页角色，不接收调用方的 ID 列表。"""
+    ObjectId(identity)
+    if not reads.connection.in_transaction or (table, column, identity) != ('actions', 'plan_id', reads.scope.plan_id):
+        raise ConsistencyError('来源聚合页必须查询原主计划动作')
+    source_read_role(reads, table, column, identity)
+    if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= reads.scope.batch_size:
+        raise ConsistencyError('来源聚合页游标或限额不合法')
+    # source/init 规范流不创建 action，也不改其 plan_id；未写前序只覆盖当前字段。
+    with closing(reads.connection.execute(
+            'SELECT id FROM actions WHERE plan_id=? AND id>? ORDER BY id LIMIT ?',
+            (identity, after, limit))) as cursor:
+        identities = tuple(row[0] for row in cursor.fetchmany(limit))
+    reads._source_aggregate_page = _SourceAggregatePage(reads._source_roles.proof, frozenset(identities))
+    return identities
 
 
 def _bind_read_roles(db, reads, q, event, transaction):
