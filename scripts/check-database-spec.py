@@ -413,6 +413,9 @@ def main() -> None:
            reset_state=1, slot_device_id='camera', verification_state=1)
     insert(db, 'operation_attempts', id=1, run_id=1, attempt_no=1, copy_round=1, status=1,
            intent_event_id=1, max_attempts_used=3, timeout_s_json='10', retry_interval_s_json='3', effect_state=1)
+    insert(db, 'result_page_files', id=1, created_event_id=2, action_id=2, run_id=1, attempt_id=1,
+           page_event_id=1, file_id=1, identity='/mnt/media/DCIM/take.OSV',
+           family_directory='/mnt/media/DCIM', family_stem='take', family_role=1)
     insert(db, 'cleanup_items', id=1, action_id=3, requested_output_id=1, output_id=1, status=2, restriction_state=2)
     insert(db, 'cancel_items', id=1, action_id=4, target_action_id=2, selection_basis=1, status=2, cancellation_effect=2)
     insert(db, 'cancel_delivery_items', id=1, cancel_item_id=1, delivery_id=1, status=1)

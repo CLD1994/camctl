@@ -79,6 +79,31 @@ CREATE TABLE operation_attempts (
     CHECK (status <> 2 OR (result_json IS NOT NULL AND error_json IS NULL))
 ) STRICT;
 
+CREATE TABLE result_page_files (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    run_id INTEGER NOT NULL REFERENCES operation_runs(id) DEFERRABLE INITIALLY DEFERRED,
+    attempt_id INTEGER NOT NULL REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
+    page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    file_id INTEGER NOT NULL REFERENCES device_files(id) DEFERRABLE INITIALLY DEFERRED,
+    identity TEXT NOT NULL CHECK (length(identity) > 0),
+    family_directory TEXT,
+    family_stem TEXT,
+    family_role INTEGER CHECK (family_role IS NULL OR family_role IN (1,2)),
+    UNIQUE (page_event_id, file_id),
+    UNIQUE (page_event_id, identity),
+    CHECK ((family_directory IS NULL) = (family_stem IS NULL)
+        AND (family_stem IS NULL) = (family_role IS NULL)),
+    CHECK (family_directory IS NULL OR length(family_directory) > 0),
+    CHECK (family_stem IS NULL OR length(family_stem) > 0)
+) STRICT;
+CREATE INDEX result_page_files_family ON result_page_files(
+    attempt_id, family_directory COLLATE BINARY, family_stem COLLATE BINARY,
+    family_role, file_id, page_event_id, id
+);
+CREATE INDEX result_page_files_run_file ON result_page_files(run_id, file_id, page_event_id, id);
+
 CREATE TABLE device_activities (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     action_id INTEGER NOT NULL UNIQUE REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,

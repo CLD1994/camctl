@@ -669,6 +669,15 @@
 | 2 | `PREVIEW` |
 | 3 | `OTHER` |
 
+### `result_page_files.family_role`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `ORIGINAL` |
+| 2 | `PREVIEW` |
+
 ### `segment_sets.state`
 
 [行为说明](segments.md)

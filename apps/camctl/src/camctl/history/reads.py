@@ -56,10 +56,26 @@ class CaptureResultReadScope:
             raise ValueError("结果事实读取每批须为 1 至 128 项")
 
 
+@dataclass(frozen=True)
+class ResultPageWriteScope:
+    """只定位一页原始结果写入的动作、活动、流程及物理尝试。"""
+
+    action_id: int
+    activity_id: int
+    run_id: int
+    attempt_id: int
+    page_no: int
+
+    def __post_init__(self):
+        for value in (self.action_id, self.activity_id, self.run_id,
+                      self.attempt_id, self.page_no):
+            ObjectId(value)
+
+
 class CurrentEventReads(Protocol):
     """原写事务的已验证前序事实；正式发布只另提供单事件身份查证。"""
 
-    scope: ProductReadScope | PlanReadScope | CaptureResultReadScope
+    scope: "ProductReadScope | PlanReadScope | CaptureResultReadScope | ResultPageWriteScope | SourceResolutionReadScope | AdmissionSourceReadScope"
     ACTION_COLUMNS: tuple[str, ...]
     SOURCE_COLUMNS: tuple[str, ...]
 
@@ -71,6 +87,10 @@ class CurrentEventReads(Protocol):
                      limit: int | None = None) -> Iterable[tuple[tuple[int, Mapping[str, Any]], ...]]: ...
     def actions(self) -> Iterable[tuple[int, Mapping[str, Any]]]: ...
     def result_pages(self, ticket, cursor, batch): ...
+    def result_page_create_prefix(self): ...
+    def prepare_result_page_append(self, event, expected_index): ...
+    def accepted_result_page_event(self, page_event_id, transaction): ...
+    def expected_result_page_index(self): ...
     def segment_activation_event(self, event_id, transaction): ...
     def transaction_event(self, event_id, transaction): ...
     def verify_segment_finish_event(self, event, context, action_id): ...

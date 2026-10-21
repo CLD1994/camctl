@@ -844,6 +844,9 @@ class HistoryRepository:
             action = entity_id
             yield from _ids_where(connection, "device_activities", "action_id", action)
             yield from _ids_where(connection, "motor_notifications", "action_id", action)
+            # RESULT_PAGE.APPEND/INDEX_FILES 产生的观察关系归动作所有；
+            # 快照与 H 恢复必须按 action_id 读取这些不可变关系行。
+            yield from _ids_where(connection, "result_page_files", "action_id", action)
             # 录像动作自身包含内部处理引用的拷贝行（交付拷贝由交付
             # 子树包含）；归属列不变，恢复范围按处理行归属。
             for _, processing_id in _ids_where(connection, "recording_processing", "action_id", action):

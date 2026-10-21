@@ -282,7 +282,26 @@ async def test_original_first_page_key_remains_exact_after_later_pages(tmp_path)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         second = _request(runtime, ticket, _actual(ticket, entries=[_entry("b")], cursor=_CURSOR), page_no=2, cursor=_CURSOR)
         assert runtime.capture.save_result_page(second, new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+        attempt_id, = owned.connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (ticket.run_id, ticket.attempt_id)).fetchone()
+        before_replay = owned.connection.execute(
+            "SELECT (SELECT MAX(id) FROM history_transactions),"
+            "(SELECT MAX(id) FROM history_events),"
+            "(SELECT MAX(id) FROM device_files),"
+            "(SELECT MAX(id) FROM result_page_files),"
+            "(SELECT COUNT(*) FROM result_page_files),"
+            "result_first_page_event_id,result_last_page_event_id "
+            "FROM operation_attempts WHERE id=?", (attempt_id,)).fetchone()
         assert runtime.capture.save_result_page(first, key, owned).value == receipt.value
+        assert owned.connection.execute(
+            "SELECT (SELECT MAX(id) FROM history_transactions),"
+            "(SELECT MAX(id) FROM history_events),"
+            "(SELECT MAX(id) FROM device_files),"
+            "(SELECT MAX(id) FROM result_page_files),"
+            "(SELECT COUNT(*) FROM result_page_files),"
+            "result_first_page_event_id,result_last_page_event_id "
+            "FROM operation_attempts WHERE id=?", (attempt_id,)).fetchone() == before_replay
         assert runtime.capture.save_result_page(replace(first, occurred_at=first.occurred_at + 1), key, owned).kind is DbOutcomeKind.ROLLED_BACK
         altered = _request(runtime, ticket, _actual(ticket, entries=[_entry("b")], next_cursor=_CURSOR))
         assert runtime.capture.save_result_page(altered, key, owned).kind is DbOutcomeKind.ROLLED_BACK
@@ -318,6 +337,8 @@ async def test_new_result_attempt_keeps_previous_interrupted_scan_separate(tmp_p
 
 
 async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_path):
+    from camctl.persistence.transaction import row_facts
+
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     history = HistoryRepository(path)
@@ -341,6 +362,19 @@ async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_pa
         end = history.current_boundary()
         reverse = history.restore_entity("action", action_id, middle)
         snapshot = history.restore_entity("action", action_id, end)
+        expected_middle_relations = {
+            ("result_page_files", row[0]): {
+                "id": int(row[0]),
+                **{key: value for key, value in row_facts(
+                    owned.connection, "result_page_files", row[0]).items()
+                    if key != "id"}
+            }
+            for row in owned.connection.execute(
+                "SELECT id FROM result_page_files WHERE action_id=? AND page_event_id=?",
+                (action_id, receipt.value.event_id))
+        }
+        assert {key: value for key, value in reverse.items()
+                if key[0] == "result_page_files"} == expected_middle_relations
         events = []
         for raw in owned.connection.execute("SELECT h.id,h.transaction_id,h.event_type,h.event_version,h.occurred_at,h.clock_status,h.change_seq,h.body_json"
                 " FROM history_events h JOIN entity_event_links l ON l.event_id=h.id"
@@ -349,11 +383,30 @@ async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_pa
             events.append(ValidatedEvent(event, event_type_name(event.event_type), branch_of(event.event_type, event.reason)[0],
                 ((1, action_id),), {(row.table, row.row_id): (1, action_id) for row in event.rows}))
         forward = restore(RestoreSeed(EntityImage(1, action_id, False, {}, 0, 0), INITIAL_BOUNDARY), events, end)
+        expected_end_relations = {
+            ("result_page_files", row[0]): {
+                "id": int(row[0]),
+                **{key: value for key, value in row_facts(
+                    owned.connection, "result_page_files", row[0]).items()
+                    if key != "id"}
+            }
+            for row in owned.connection.execute(
+                "SELECT id FROM result_page_files WHERE action_id=?", (action_id,))
+        }
+        assert {
+            key: {name: value for name, value in row.items() if name != "id"}
+            for key, row in forward.rows.items() if key[0] == "result_page_files"
+        } == {
+            key: {name: value for name, value in row.items() if name != "id"}
+            for key, row in expected_end_relations.items()
+        }
         attempt_id = owned.connection.execute("SELECT id FROM operation_attempts WHERE run_id=?", (ticket.run_id,)).fetchone()[0]
         row_key = ("operation_attempts", attempt_id)
         assert reverse[row_key]["result_last_page_event_id"] == receipt.value.event_id
         assert snapshot[row_key]["result_last_page_event_id"] == last.value.event_id
         assert {key: value for key, value in snapshot[row_key].items() if key != "id"} == forward.rows[row_key]
+        assert {key: value for key, value in snapshot.items()
+                if key[0] == "result_page_files"} == expected_end_relations
         pages = runtime.capture.read_result_pages(ticket, None, 128, owned)
         assert [page.ref.event_id for page in pages.items] == [receipt.value.event_id, last.value.event_id]
     finally:
@@ -501,12 +554,39 @@ async def test_page_created_files_and_catalog_restore_from_three_paths(tmp_path)
             EntityImage(1, action_id, True, _seed(middle_action_image),
                         middle.last_event_id, middle_action_image.change_count),
             middle)
+        expected_middle_relations = {
+            ("result_page_files", row[0]): {
+                **{key: value for key, value in row_facts(
+                    owned.connection, "result_page_files", row[0]).items()
+                    if key != "id"}
+            }
+            for row in owned.connection.execute(
+                "SELECT id FROM result_page_files WHERE action_id=? AND page_event_id=?",
+                (action_id, saved.value.event_id))
+        }
+        expected_end_relations = {
+            ("result_page_files", row[0]): {
+                **{key: value for key, value in row_facts(
+                    owned.connection, "result_page_files", row[0]).items()
+                    if key != "id"}
+            }
+            for row in owned.connection.execute(
+                "SELECT id FROM result_page_files WHERE action_id=?", (action_id,))
+        }
         for target, tail_event in (
                 (middle, saved.value.event_id), (end, last.value.event_id)):
             initial_action = restore(_empty_seed(1, action_id), action_events, target)
             snapshot_action = restore(seed_action, action_events, target)
             assert _attempt_row(initial_action) == _attempt_row(snapshot_action)
             assert _attempt_row(initial_action)["result_last_page_event_id"] == tail_event
+            expected_relations = (expected_middle_relations if target == middle else expected_end_relations)
+            assert {key: value for key, value in initial_action.rows.items()
+                    if key[0] == "result_page_files"} == expected_relations
+            assert {
+                key: {name: value for name, value in row.items() if name != "id"}
+                for key, row in snapshot_action.rows.items()
+                if key[0] == "result_page_files"
+            } == expected_relations
         assert _attempt_row(restore(seed_action, action_events, end))[
             "result_first_page_event_id"] == saved.value.event_id
         pages = repository.read_result_pages(ticket, None, 128, owned)

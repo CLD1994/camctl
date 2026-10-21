@@ -874,6 +874,29 @@
       },
       "state_columns": []
     },
+    "result_page_files": {
+      "immutable": [
+        "created_event_id",
+        "action_id",
+        "run_id",
+        "attempt_id",
+        "page_event_id",
+        "file_id",
+        "identity",
+        "family_directory",
+        "family_stem",
+        "family_role"
+      ],
+      "mutable": [],
+      "derived": ["id"],
+      "write_once": [],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": []
+    },
     "segment_gaps": {
       "immutable": [
         "set_id",
@@ -1228,6 +1251,11 @@
     "result_page": {
       "contract": "history-formats.md#结果页的分批记录",
       "rule": "页属于原 CHECK_CAPTURE_RESULTS 活动、流程和 RUNNING 尝试；从页号 1 连续推进，原游标和后游标精确衔接，末页或实际错误后不再追加。原完整 Outcome、文件输入和页范围同事务保存，实际发现的新文件按 DEVICE_FILE_OBSERVED.CREATE 登记。基准比较使用原 FIXED 范围，以单序稳定路径流形成差集；原键逐字段核实时刻、页和完整错误，不依赖当前投影反推原输入。",
+      "scope": "transaction"
+    },
+    "result_page_index": {
+      "contract": "operations-devices.md#结果页文件身份索引",
+      "rule": "独立复核本组已接受APPEND及其实际差集文件ID，为每个原始身份保存唯一、不可变的文件关系和派生族字段。",
       "scope": "transaction"
     },
     "finite_cancel_end": {
@@ -9338,6 +9366,27 @@
             "attempt_id",
             "result_page"
           ]
+        },
+        "INDEX_FILES": {
+          "reason": 2,
+          "title": "索引本页实际差集文件身份",
+          "rows": [
+            {
+              "table": "result_page_files",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "result_page_index"
+          ],
+          "evidence": [
+            "result_page_index"
+          ]
         }
       }
     },
@@ -9661,6 +9710,13 @@
     },
     "segment_scope_members.created_event_id": {
       "target": "creating_event"
+    },
+    "result_page_files.created_event_id": {
+      "target": "creating_event"
+    },
+    "result_page_files.page_event_id": {
+      "target": "prior_event",
+      "exception": "本页关系只能引用同一事务中已完整通过守卫的 RESULT_PAGE.APPEND；物理尝试边界也只指向该 APPEND。"
     },
     "segment_sets.published_event_id": {
       "target": "assigning_event"

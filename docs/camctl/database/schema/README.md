@@ -7,13 +7,13 @@
 | [core.sql](core.sql) | 计划与动作 | [计划与动作](../plans-actions.md)、[执行定义](../execution-definitions.md) |
 | [workflows.sql](workflows.sql) | 自动预览、来源、取回、清理和取消明细 | [流程字段](../workflow-fields.md) |
 | [files.sql](files.sql) | 设备文件、中间文件、正式产物、来源关系、交付和拷贝 | [文件字段](../file-fields.md) |
-| [operations.sql](operations.sql) | 操作流程、尝试、设备活动、录像处理及分段关系 | [操作字段](../operation-fields.md) |
+| [operations.sql](operations.sql) | 操作流程、尝试、结果页文件身份索引、设备活动、录像处理及分段关系 | [操作字段](../operation-fields.md) |
 | [reports.sql](reports.sql) | 输入诊断、报告、同步、全局运行状态和元信息 | [报告与运行状态](../reports-runtime.md#字段与状态组合) |
 | [history.sql](history.sql) | 历史事务、事件、自身恢复关联、报告变化目录、快照和维护进度 | [历史格式](../history-formats.md) |
 
 ## 结构同步状态
 
-本目录六份文件合起来定义 35 张表。来源依赖、清理项结果与产物汇总、单向流程关联、独立文件历史、两类目录及文件快照范围已落实到 SQL；[报告字段登记](../report-dependencies.json)的来源列与关联均使用实际结构核对。
+本目录六份文件合起来定义 36 张表。来源依赖、清理项结果与产物汇总、单向流程关联、独立文件历史、结果页身份索引、两类目录及文件快照范围已落实到 SQL；[报告字段登记](../report-dependencies.json)的来源列与关联均使用实际结构核对。
 
 当前 SQL 的元信息 CHECK 接受整体格式 1 和 2，中间文件用途 CHECK 包含当前登记的完整用途集合。它因此也可创建兼容格式 1 的库；运行时依据元信息版本核对必要 CHECK，只有格式 2 才能使用主机照片用途和对应 fixedspec。旧格式 1 的数据库保留其原 SQL 检查，不通过重复初始化改写。
 

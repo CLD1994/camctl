@@ -5,7 +5,15 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope
+from camctl.history.reads import (
+    AdmissionSourceReadScope,
+    CaptureResultReadScope,
+    PlanReadScope,
+    ProductReadScope,
+    ResultPageWriteScope,
+    SegmentReadScope,
+    SourceResolutionReadScope,
+)
 
 
 @dataclass(frozen=True)
@@ -41,8 +49,13 @@ class SqlEventReads:
     SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
-    def __init__(self, connection, scope, validated=(), planned_events=(), *, proposal_event=None, segment_ref=None, segment_guard_state=None):
-        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope)):
+    def __init__(self, connection, scope, validated=(), planned_events=(), *,
+                 proposal_event=None, segment_ref=None, segment_guard_state=None,
+                 result_page_guard_state=None, result_page_bounded=False):
+        if not isinstance(scope, (
+                ProductReadScope, PlanReadScope, CaptureResultReadScope,
+                ResultPageWriteScope, SegmentReadScope,
+                SourceResolutionReadScope, AdmissionSourceReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
         self._planned_events = planned_events
@@ -51,6 +64,9 @@ class SqlEventReads:
         self.segment_ref = segment_ref
         self._segment_guard_state = segment_guard_state
         self._segment_guard_transaction = None
+        self._result_page_guard_state = result_page_guard_state
+        self._result_page_transaction = None
+        self._result_page_bounded = result_page_bounded
         self._result_file_ids = frozenset()
         self._overlay = {}
         for accepted in validated:
@@ -62,6 +78,159 @@ class SqlEventReads:
                 else:
                     prior = self._overlay.get(key, {})
                     self._overlay[key] = {**(prior or {}), **row.after.values}
+
+    def bind_result_page_write_state(self, state, transaction, connection):
+        """由原写事务内核绑定窄页组进度和实际连接。"""
+        if (not isinstance(self.scope, ResultPageWriteScope)
+                or connection is not self.connection
+                or not self.connection.in_transaction):
+            raise ConsistencyError("结果页写入缺少原连接及窄写入范围")
+        if self._result_page_guard_state is not state:
+            raise ConsistencyError("结果页读取端口携带另一页组进度")
+        if self._result_page_transaction not in (None, transaction):
+            raise ConsistencyError("结果页读取端口已经绑定另一完整事务")
+        if state.get("scope") != self.scope or state.get("transaction") != transaction:
+            raise ConsistencyError("结果页页组进度改变原写入范围")
+        if state.get("connection") is not connection:
+            raise ConsistencyError("结果页页组进度改变原SQL连接")
+        self._result_page_transaction = transaction
+
+    def result_page_create_prefix(self):
+        """返回内核已封存且通过全部守卫的本组 CREATE 前缀。"""
+        self._check_result_page_state()
+        if self._result_page_guard_state["phase"] != "PREFIX":
+            raise ConsistencyError("结果页新增文件前缀已结束")
+        return tuple(self._result_page_guard_state["prefix"])
+
+    def prepare_result_page_append(self, event, expected_index):
+        """结果页独立守卫提交期望 INDEX；内核只在 APPEND 全部通过后封存。"""
+        state = self._check_result_page_state()
+        from camctl.history.events import load_event_registry
+        append = load_event_registry()["events"]["RESULT_PAGE"]["branches"]["APPEND"]["reason"]
+        if ((event.event_type, event.reason) != (load_event_registry()["events"]["RESULT_PAGE"]["id"], append)
+                or state["phase"] != "PREFIX" or state.get("pending") is not None):
+            raise ConsistencyError("结果页 APPEND 不在唯一页组前缀之后")
+        state["pending"] = (event, expected_index)
+
+    def accepted_result_page_event(self, page_event_id, transaction):
+        """只返回本页组已封存的实际 APPEND，不提供提案或未来事件读取。"""
+        ObjectId(page_event_id)
+        state = self._check_result_page_state()
+        accepted = state.get("append")
+        if (accepted is None or state.get("phase") != "PAGE_ACCEPTED"
+                or state.get("transaction") != transaction
+                or accepted.event_id != page_event_id
+                or accepted.transaction_id != transaction.txn_id
+                or accepted.event_id <= transaction.first_event_id - 1):
+            raise ConsistencyError("INDEX_FILES 没有本组已通过的真实前序 APPEND")
+        if self._result_page_bounded:
+            from camctl.history.decoding import decode_event_row
+            with closing(self.connection.execute(
+                    "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
+                    " FROM history_events WHERE id=?", (page_event_id,))) as cursor:
+                row = cursor.fetchone()
+            if row is None:
+                raise ConsistencyError("有界结果页实际 APPEND 尚未写入同连接历史")
+            actual = decode_event_row(row)
+            if actual != accepted:
+                raise ConsistencyError("有界结果页已写 APPEND 与内核封存身份不同")
+            return actual
+        actual = next((item.envelope for item in self._validated
+                       if item.envelope.event_id == page_event_id), None)
+        if actual is None or actual != accepted:
+            raise ConsistencyError("有限结果页 APPEND 不在内核已验证前序中")
+        return actual
+
+    def expected_result_page_index(self):
+        state = self._check_result_page_state()
+        if state.get("phase") != "PAGE_ACCEPTED" or state.get("expected_index") is None:
+            raise ConsistencyError("当前结果页没有已封存的非空 INDEX_FILES")
+        return state["expected_index"]
+
+    def seal_result_page_event(self, validated):
+        """全部登记守卫通过后，按唯一 CREATE→APPEND→INDEX 语法封存实际事件。"""
+        if self._result_page_guard_state is None:
+            return
+        state = self._check_result_page_state()
+        event = validated.envelope
+        from camctl.history.events import load_event_registry
+        registry = load_event_registry()["events"]
+        page_type = registry["RESULT_PAGE"]["id"]
+        append_reason = registry["RESULT_PAGE"]["branches"]["APPEND"]["reason"]
+        index_reason = registry["RESULT_PAGE"]["branches"]["INDEX_FILES"]["reason"]
+        create_type = registry["DEVICE_FILE_OBSERVED"]["id"]
+        create_reason = registry["DEVICE_FILE_OBSERVED"]["branches"]["CREATE"]["reason"]
+        expected_id = state["transaction"].first_event_id + len(state["prefix"])
+        phase = state["phase"]
+        if phase == "PREFIX":
+            if event.event_id != expected_id or event.transaction_id != state["transaction"].txn_id:
+                raise ConsistencyError("结果页实际 CREATE/APPEND 没有沿 F 顺序推进")
+            if (event.event_type, event.reason) == (create_type, create_reason):
+                if len(state["prefix"]) >= 128 or len(event.rows) != 1:
+                    raise ConsistencyError("结果页 CREATE 前缀超过128个单行文件事件")
+                row = event.rows[0]
+                if row.table != "device_files" or row.before.exists or not row.after.exists:
+                    raise ConsistencyError("结果页 CREATE 前缀包含非首次设备文件")
+                state["prefix"].append(event)
+                state["last_event_id"] = event.event_id
+                return
+            if (event.event_type, event.reason) != (page_type, append_reason):
+                raise ConsistencyError("结果页 CREATE 前缀后必须紧接唯一 APPEND")
+            pending = state.pop("pending", None)
+            if pending is None or pending[0] != event:
+                raise ConsistencyError("结果页 APPEND 未经独立守卫封存")
+            expected_index = pending[1]
+            if expected_index is not None:
+                if (expected_index.event_id != event.event_id + 1
+                        or expected_index.event_id != state["transaction"].last_event_id
+                        or expected_index.transaction_id != state["transaction"].txn_id):
+                    raise ConsistencyError("结果页 INDEX_FILES 不是规范事务末事件")
+                state["expected_index"] = expected_index
+                state["phase"] = "PAGE_ACCEPTED"
+            else:
+                if event.event_id != state["transaction"].last_event_id:
+                    raise ConsistencyError("零差集结果页 APPEND 必须是事务末事件")
+                state["expected_index"] = None
+                state["phase"] = "PAGE_EMPTY"
+            state["append"] = event
+            state["last_event_id"] = event.event_id
+            return
+        if phase == "PAGE_ACCEPTED":
+            expected = state.get("expected_index")
+            if ((event.event_type, event.reason) != (page_type, index_reason)
+                    or expected is None or replace(event, change_seq=None) != expected
+                    or event.event_id != state["transaction"].last_event_id):
+                raise ConsistencyError("实际 INDEX_FILES 与原页规范关系不符")
+            state["phase"] = "INDEX_ACCEPTED"
+            state["index"] = event
+            state["last_event_id"] = event.event_id
+            return
+        raise ConsistencyError("结果页完整规范组之后出现额外事件")
+
+    @staticmethod
+    def finalize_result_page_write(state, scope, transaction, connection):
+        if (state is None or state.get("scope") != scope or state.get("transaction") != transaction
+                or state.get("connection") is not connection or not connection.in_transaction):
+            raise ConsistencyError("结果页finalize没有原连接及唯一写入范围")
+        phase = state.get("phase")
+        if phase == "PAGE_EMPTY":
+            valid = state.get("last_event_id") == transaction.last_event_id
+        elif phase == "INDEX_ACCEPTED":
+            valid = state.get("last_event_id") == transaction.last_event_id
+        else:
+            valid = False
+        if not valid:
+            raise ConsistencyError("结果页事务没有完整的 CREATE→APPEND→可选INDEX_FILES 规范组")
+
+    def _check_result_page_state(self):
+        state = self._result_page_guard_state
+        if (not isinstance(self.scope, ResultPageWriteScope) or state is None
+                or self._result_page_transaction is None or not self.connection.in_transaction
+                or state.get("connection") is not self.connection
+                or state.get("scope") != self.scope
+                or state.get("transaction") != self._result_page_transaction):
+            raise ConsistencyError("结果页事实访问超出原事务窄写入范围")
+        return state
 
     def segment_activation_event(self, event_id, transaction):
         """只定位原提案中的一个发布事件，不向业务提供未来状态资格。"""
@@ -292,6 +461,8 @@ class SqlEventReads:
     def _check(self, table, column="id", identity=None):
         if not self.connection.in_transaction:
             raise ConsistencyError("当前事件事实端口必须在原写事务内使用")
+        if isinstance(self.scope, ResultPageWriteScope):
+            raise ConsistencyError("结果页写范围只提供本组CREATE/APPEND/INDEX专属端口")
         if isinstance(self.scope, SegmentReadScope):
             raise ConsistencyError('分段端口只提供原集合专属复核')
         if table not in self._RANGES or column not in self._RANGES[table]:

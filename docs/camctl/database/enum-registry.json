@@ -545,6 +545,13 @@
         "OTHER": 3
       }
     },
+    "result_page_files.family_role": {
+      "contract": "segments.md",
+      "members": {
+        "ORIGINAL": 1,
+        "PREVIEW": 2
+      }
+    },
     "segment_sets.state": {
       "contract": "segments.md",
       "members": {

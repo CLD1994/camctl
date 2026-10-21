@@ -57,6 +57,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | `operation_runs`，`STOP_RESIDUAL` 或 `EMERGENCY_STOP` | 沿 `activity_id` 找到设备活动，再取其 `action_id`；后续残留收场的触发者不取得这条流程的历史归属 |
 | `operation_runs`，其余类型，包括全部 `QUERY_ACTIVITY` 用途 | 该行的 `action_id`；查询保存的新活动观察另行更新活动所属动作，不能将查询预算一并转给被观察动作 |
 | `operation_attempts` | 沿 `run_id` 找到流程，使用该流程的历史归属 |
+| `result_page_files` | 各行的 `action_id` 指定拍摄动作；`file_id` 指向独立设备文件，不复制文件自身历史 |
 | `device_files`、`intermediate_files` | 各表的 `id` 指定的文件自身；每个文件快照只包含该文件行 |
 | `plan_file_diagnostics`、`reports`、`state_syncs`、`runtime_state` | 各行自身的目录对象；保存可逆历史，但不参加对象快照维护 |
 
@@ -160,7 +161,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 32 `CLEANUP_CURSOR_MOVED` | 1 保存可靠清理检查位置 |
 | 33 `EMERGENCY_RECORDED` | 1 共同补记最终应急事实 |
 | 34 `MOTOR_CHANGED` | 1 保存电机发送意图与动作开始；2 保存完整通知写入；3 保存明确通知写入失败；4 保存通道不可用与可靠未发送；5 保存可靠未发送与过期；7 保存恢复时发送结果不确定 |
-| 35 `RESULT_PAGE` | 1 保存本轮实际页返回、文件观察及页范围 |
+| 35 `RESULT_PAGE` | 1 保存本轮实际页返回、文件观察及页范围；2 索引本页实际差集文件身份 |
 | 36 `SEGMENT_FACTS` | 1 建立原扫描的分段集合；2 保存有限原扫描成员；3 固定完整分段成员；4 保存第二遍缺口事实；5 固定两遍完整判断；6 保存有序默认原片成员；7 发布默认成员的实际产物关联；8 共同发布唯一正式分段集合 |
 <!-- 事件登记生成结束 -->
 
@@ -252,7 +253,7 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 
 ## 结果页的分批记录
 
-`RESULT_PAGE.APPEND` 保存同一 RESULTS 尝试的一批实际返回。页中的完整文件观察与 `operation_attempts.result_first_page_event_id`、`result_last_page_event_id` 同事务保存；实际差集中的首次发现同时使用 `DEVICE_FILE_OBSERVED.CREATE` 保存设备文件。归属、在场、完成及配对仍沿已有独立文件事实责任可靠保存，原页已经保存不能使未完成子责任消失。全部页和适用文件事实可靠后才允许集合结论、产物或终态成立。
+`RESULT_PAGE.APPEND` 保存同一 RESULTS 尝试的一批实际返回。页中的完整文件观察与 `operation_attempts.result_first_page_event_id`、`result_last_page_event_id` 同事务保存；实际差集中的首次发现同时使用 `DEVICE_FILE_OBSERVED.CREATE` 保存设备文件。差集非空时，同一事务紧接 APPEND 保存唯一 `RESULT_PAGE.INDEX_FILES`，为每个差集身份创建 `result_page_files` 关系；零差集不产生该事件。INDEX_FILES 只保存原页身份与独立文件 ID 的关系，不改写原始文件身份，也不宣告角色拥有、文件完成或配对。`ResultPageRef` 和尝试首末页边界始终指向 APPEND，事务末位可能是 INDEX_FILES。读页按 APPEND 分页，并在同一完整事务核对关系与 APPEND 的 `file_ids` 双向一致。归属、在场、完成及配对仍沿已有独立文件事实责任可靠保存，原页已经保存不能使未完成子责任消失。全部页和适用文件事实可靠后才允许集合结论、产物或终态成立。
 
 该分支恰好使用 `attempt_id` 和 `result_page` 两个 evidence 成员。`attempt_id` 是物理尝试 ID；`result_page` 恰好包含 `run_id`、`attempt_no`、`activity_id`、`page_no`、`cursor`、`outcome`、`baseline_position`、`last_identity`、`file_ids`。前三项是原票据的正整数身份，`page_no` 从 1 连续递增。`cursor` 是本次原请求游标。`outcome` 恰好包含 `status`、`effect_state`、`error`、`result`：前两项使用尝试行的整数枚举；后两项保持完整实际错误和格式 1 的实际调用结果，不能只保留最后一页的退出信息。
 

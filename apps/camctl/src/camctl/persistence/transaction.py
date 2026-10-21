@@ -37,7 +37,17 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope
+from camctl.history.reads import (
+    AdmissionSourceReadScope,
+    BaselineRangeRead,
+    CaptureResultReadScope,
+    PlanReadScope,
+    ProductReadScope,
+    ReadCoverage,
+    ResultPageWriteScope,
+    SegmentReadScope,
+    SourceResolutionReadScope,
+)
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -89,6 +99,7 @@ class CommandPlan:
     capture_result_read_scope: CaptureResultReadScope | None = None
     segment_read_scope: SegmentReadScope | None = None
     source_read_scope: SourceResolutionReadScope | AdmissionSourceReadScope | None = None
+    result_page_write_scope: ResultPageWriteScope | None = None
 
 
 class TransactionScope:
@@ -138,38 +149,67 @@ class BoundedCommandPlan:
     context: Callable[[EventEnvelope, TransactionRange], EventContext]
     result: Any
     complete: Callable[[sqlite3.Connection], None]
+    result_page_write_scope: ResultPageWriteScope | None = None
 
 
-def _bind_event_reads(context,event,transaction,segment_guard_state,source_guard_state,connection,operation_key,accepted=None):
-    """内核分别持有分段和来源进度；上下文不能丢弃已验证F。"""
+def _bind_event_reads(context, event, transaction, segment_guard_state,
+                      source_guard_state, connection, operation_key,
+                      result_page_write_scope=None, result_page_guard_state=None,
+                      *, validated=(), planned_events=(), bounded=False):
+    """分别绑定分段、来源和结果页进度，返回有效上下文及读取端口。"""
     from camctl.persistence.event_reads import SqlEventReads
     reads=context.current_reads
+    if result_page_write_scope is not None:
+        if reads is not None:
+            raise TransactionError('结果页窄写入范围不能混用调用者事实读取端口')
+        reads=SqlEventReads(connection,result_page_write_scope,validated,planned_events,
+            result_page_guard_state=result_page_guard_state,result_page_bounded=bounded)
+        SqlEventReads.bind_result_page_write_state(reads,result_page_guard_state,transaction,connection)
+        context=replace(context,current_reads=reads)
+    elif (event.event_type == load_event_registry()["events"]["RESULT_PAGE"]["id"]):
+        raise TransactionError('结果页事件必须声明原页窄写入范围')
     if reads is None:
         from camctl.persistence.repositories.source_transactions import required_stream
         from camctl.persistence.repositories.admission_sources import required as admission_required
         if segment_guard_state or source_guard_state or 'segment_finish_request' in event.evidence or required_stream(connection,event) or admission_required(event):
             raise TransactionError('来源或分段事件缺少原事务的可靠读取端口')
-        return None
+        return context, None
     if type(reads) is not SqlEventReads or reads.connection is not connection:
         raise TransactionError('事件读取端口必须由原事务同一连接的可靠SQL实现提供')
     SqlEventReads.bind_segment_finish_state(reads,segment_guard_state,transaction)
-    # accepted 由内核传入；Bounded 只能读取同连接已写入的真实前序。
-    reads._kernel_accepted = accepted
+    # 有限入口使用内核已验证前序；Bounded 只读同连接已写入的事实。
+    reads._kernel_accepted = None if bounded else validated
     reads._kernel_transaction = transaction
     reads._kernel_event_id = event.event_id
     from camctl.persistence.repositories.source_transactions import bind_stream
     bind_stream(connection,event,transaction,reads,source_guard_state,operation_key,context)
     from camctl.persistence.repositories.admission_sources import bind as bind_admission
     bind_admission(connection,event,transaction,reads,source_guard_state)
-    return reads
+    return context,reads
 
 
 def _seal_event_reads(reads,validated,source_guard_state):
     if reads is not None:
         from camctl.persistence.event_reads import SqlEventReads
         SqlEventReads.seal_segment_finish(reads,validated)
+        SqlEventReads.seal_result_page_event(reads,validated)
         from camctl.persistence.repositories.source_transactions import seal_stream
         seal_stream(reads,validated,source_guard_state)
+
+
+def _new_result_page_guard_state(scope,transaction,connection):
+    if scope is None:
+        return None
+    return {"scope":scope,"transaction":transaction,"connection":connection,
+        "phase":"PREFIX","prefix":[],"pending":None,"append":None,
+        "expected_index":None,"index":None,"last_event_id":None}
+
+
+def _finalize_result_page_write(state,scope,transaction,connection):
+    if scope is None:
+        return
+    from camctl.persistence.event_reads import SqlEventReads
+    SqlEventReads.finalize_result_page_write(state,scope,transaction,connection)
 
 
 def _write_bounded_plan(plan, scope, operation_key):
@@ -185,13 +225,17 @@ def _write_bounded_plan(plan, scope, operation_key):
     expected = allocation.first_event_id
     segment_guard_state = {}
     source_guard_state = {}
+    result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction,connection)
     for proposed in plan.events:
         if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
             raise TransactionError("实际有界事件与预分配完整范围不符")
         if len(proposed.rows) > 128:
             raise TransactionError("有界事件超过128行")
         context = plan.context(proposed, transaction)
-        reads = _bind_event_reads(context, proposed, transaction, segment_guard_state, source_guard_state, connection, operation_key)
+        context, reads = _bind_event_reads(
+            context, proposed, transaction, segment_guard_state,
+            source_guard_state, connection, operation_key,
+            plan.result_page_write_scope, result_page_guard_state, bounded=True)
         targets = event_report_targets(proposed, context.state_rows)
         if targets:
             sequence += 1
@@ -234,11 +278,13 @@ def _write_bounded_plan(plan, scope, operation_key):
         expected += 1
     if expected != allocation.last_event_id+1:
         raise TransactionError("实际有界事件少于预分配完整范围")
+    _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     from camctl.persistence.repositories.source_transactions import finish_stream
     finish_stream(source_guard_state)
     from camctl.persistence.repositories.admission_sources import finish as finish_admission
     finish_admission(connection, transaction, None, source_guard_state)
     plan.complete(connection)
+    _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
         connection.execute("COMMIT")
     except Exception as error:
@@ -590,9 +636,18 @@ def commit_operation(
             except Exception as error:
                 return rollback_error(error)
         events = plan.events
+        scopes = (
+            plan.product_read_scope, plan.plan_read_scope,
+            plan.capture_result_read_scope, plan.segment_read_scope,
+            plan.source_read_scope, plan.result_page_write_scope,
+        )
+        if sum(value is not None for value in scopes) > 1:
+            raise TransactionError("同一命令不能混用结果页写范围与其他事实读取范围")
         if len(events) == 0:
             if not plan.read_only:
                 raise TransactionError("写事务没有权威事件")
+            if plan.result_page_write_scope is not None:
+                raise TransactionError("结果页写入范围不能用于只读命令")
             try:
                 result = (
                     plan.complete_result(connection, plan.result)
@@ -655,12 +710,12 @@ def commit_operation(
         )
         from camctl.persistence.event_reads import SqlEventReads
 
-        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope, plan.segment_read_scope, plan.source_read_scope)
-        if sum(value is not None for value in scopes) > 1:
-            raise TransactionError("同一命令不能混用不同事实读取范围")
         read_scope = next((value for value in scopes if value is not None), None)
+        if isinstance(read_scope, ResultPageWriteScope):
+            read_scope = None
         segment_guard_state = {}
         source_guard_state = {}
+        result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction_range,connection)
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,
@@ -672,12 +727,17 @@ def commit_operation(
                 current_reads=(None if read_scope is None else
                                SqlEventReads(connection, read_scope, validated, sequenced)),
             )
-            reads = _bind_event_reads(context, event, transaction_range, segment_guard_state, source_guard_state, connection, operation_key, validated)
+            context, reads = _bind_event_reads(
+                context, event, transaction_range, segment_guard_state,
+                source_guard_state, connection, operation_key,
+                plan.result_page_write_scope, result_page_guard_state,
+                validated=validated, planned_events=sequenced)
             accepted = validate_event(event, context)
             _seal_event_reads(reads, accepted, source_guard_state)
             validated.append(accepted)
             _apply_rows(validation_state, (event,))
 
+        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         from camctl.persistence.repositories.source_transactions import finish_stream
         finish_stream(source_guard_state)
         from camctl.persistence.repositories.admission_sources import finish as finish_admission
@@ -769,6 +829,7 @@ def commit_operation(
             raise
         except Exception as error:
             return rollback_error(error)
+        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         committing = True
         connection.execute("COMMIT")
         return WriteReceipt(

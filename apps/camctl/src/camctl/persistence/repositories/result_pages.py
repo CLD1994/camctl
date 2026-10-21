@@ -19,12 +19,15 @@ from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.operations.models import AttemptTicket
 from camctl.persistence.transaction import (CommandPlan, TransactionError,
-    event_envelope, next_row_id, read_transaction_range, row_facts, saved_transaction_events, update_change)
+    event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
+    saved_transaction_events, update_change)
+from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
 _EVENT = load_event_registry()["events"]["RESULT_PAGE"]
 _TYPE = _EVENT["id"]
 _APPEND = _EVENT["branches"]["APPEND"]["reason"]
+_INDEX_FILES = _EVENT["branches"]["INDEX_FILES"]["reason"]
 _FILE_EVENT = load_event_registry()["events"]["DEVICE_FILE_OBSERVED"]
 _COLUMNS = "id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
 _PAYLOAD_FIELDS = {"run_id", "attempt_no", "activity_id", "page_no", "cursor", "outcome", "baseline_position", "last_identity", "file_ids"}
@@ -32,6 +35,7 @@ _OWNERSHIP = enum_for("device_activities.ownership_mode")
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _RUN_KIND = enum_for("operation_runs.kind")
 _ROLE = enum_for("device_files.role")
+_FAMILY_ROLE = enum_for("result_page_files.family_role")
 
 
 def capture_result_scope(action_id, ticket, last_page_event_id):
@@ -232,6 +236,182 @@ def _decode(event):
         raise ConsistencyError("结果页原历史不可解释") from error
 
 
+def _family_fields(identity):
+    """保留原路径与主干码点，只按OSV/LRF后缀派生有限族字段。"""
+    directory, separator, name = identity.rpartition("/")
+    if separator and not directory:
+        directory = "/"
+    stem, dot, suffix = name.rpartition(".")
+    if not separator or not directory or not dot or not stem:
+        return None, None, None
+    suffix = suffix.lower()
+    if suffix == "osv":
+        role = int(_FAMILY_ROLE.ORIGINAL)
+    elif suffix == "lrf":
+        role = int(_FAMILY_ROLE.PREVIEW)
+    else:
+        return None, None, None
+    return directory, stem, role
+
+
+def _relation_values(*, created_event_id, action_id, run_id, attempt_id,
+                     page_event_id, file_id, identity):
+    directory, stem, role = _family_fields(identity)
+    return {
+        "created_event_id": created_event_id,
+        "action_id": action_id,
+        "run_id": run_id,
+        "attempt_id": attempt_id,
+        "page_event_id": page_event_id,
+        "file_id": file_id,
+        "identity": identity,
+        "family_directory": directory,
+        "family_stem": stem,
+        "family_role": role,
+    }
+
+
+def _verify_page_relations(connection, saved, raw, event, transaction):
+    """按完整原事务核对 APPEND 与 INDEX_FILES 的双向精确关系。"""
+    from .capture import file_discovery_row
+
+    attempt_id = event.evidence["attempt_id"]
+    with closing(connection.execute(
+            "SELECT r.action_id,r.activity_id,r.id,a.run_id FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id WHERE a.id=?", (attempt_id,))) as cursor:
+        owner = cursor.fetchone()
+    if owner is None:
+        raise ConsistencyError("结果页关系缺少原活动、动作或流程")
+    action_id, activity_id, run_id, joined_run_id = owner
+    if joined_run_id != raw["run_id"] or activity_id != raw["activity_id"]:
+        raise ConsistencyError("结果页关系改变原流程、活动或尝试")
+    action = row_facts(connection, "actions", action_id)
+    if action is None:
+        raise ConsistencyError("结果页动作不存在")
+    append_id = event.event_id
+    with closing(connection.execute(
+            f"SELECT {_COLUMNS} FROM history_events WHERE transaction_id=? ORDER BY id LIMIT 131",
+            (transaction.txn_id,))) as cursor:
+        transaction_events = [decode_event_row(row) for row in cursor]
+    if (len(transaction_events) != transaction.last_event_id - transaction.first_event_id + 1
+            or len(transaction_events) > 130
+            or any(item.event_id != transaction.first_event_id + index
+                   or item.transaction_id != transaction.txn_id
+                   for index, item in enumerate(transaction_events))):
+        raise ConsistencyError("结果页所在原事务事件范围不连续或超过页组容量")
+    append_position = next((index for index, item in enumerate(transaction_events)
+                            if item.event_id == append_id), None)
+    if append_position is None or transaction_events[append_position] != event:
+        raise ConsistencyError("原页APPEND不在其完整历史事务内")
+    create_events = transaction_events[:append_position]
+    create_type = _FILE_EVENT["id"]
+    create_reason = _FILE_EVENT["branches"]["CREATE"]["reason"]
+    page_entries = {entry.identity: entry for entry in saved.page.entries}
+    file_ids = tuple(saved.file_ids)
+    expected_created = []
+    for identity, file_id in file_ids:
+        facts = row_facts(connection, "device_files", file_id)
+        if facts is None or facts["identity_key"] != file_identity_key(
+                action["device_id"], action["driver_id"], identity):
+            raise ConsistencyError("原页文件ID与完整身份登记不符")
+        if transaction.first_event_id <= facts["created_event_id"] <= transaction.last_event_id:
+            expected_created.append((identity, file_id, facts["created_event_id"]))
+        elif facts["created_event_id"] >= transaction.first_event_id:
+            raise ConsistencyError("原页文件首次发现身份越过事务末位")
+    expected_created_ids = [(identity, file_id, created_id)
+                            for identity, file_id, created_id in expected_created]
+    actual_created = []
+    for create in create_events:
+        validate_event_structure(create)
+        if ((create.event_type, create.reason) != (create_type, create_reason)
+                or create.occurred_at != event.occurred_at or len(create.rows) != 1):
+            raise ConsistencyError("结果页APPEND前包含非单行首次发现事件")
+        row = create.rows[0]
+        if row.table != "device_files" or row.before.exists or not row.after.exists:
+            raise ConsistencyError("结果页首次发现事件改变了其他文件事实")
+        try:
+            identity_key = parse_exact_json(row.after.values["identity_key"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("原首次发现身份不可解释") from error
+        identity = identity_key[2] if isinstance(identity_key, list) and len(identity_key) == 3 else None
+        file_id = dict(file_ids).get(identity)
+        entry = page_entries.get(identity)
+        if file_id is None or entry is None or row.row_id != file_id:
+            raise ConsistencyError("原首次发现不是APPEND的实际差集身份")
+        command = FileObservationSave(action_id, identity, entry.locator, event.occurred_at,
+            entry.original_name, entry.media_type)
+        expected_row = file_discovery_row(command, file_id,
+            file_identity_key(action["device_id"], action["driver_id"], identity))
+        if dict(row.after.values) != dict(expected_row.after.values):
+            raise ConsistencyError("原首次发现没有精确保存该页的原文件事实")
+        if facts := row_facts(connection, "device_files", file_id):
+            if facts["created_event_id"] != create.event_id:
+                raise ConsistencyError("原首次发现的持久文件创建事件身份不同")
+        actual_created.append((identity, file_id, create.event_id))
+    expected_create_order = [item for item in file_ids if any(
+        identity == item[0] and file_id == item[1] for identity, file_id, _ in expected_created_ids)]
+    if actual_created != [(identity, file_id, created_id) for identity, file_id, created_id in expected_created_ids]:
+        raise ConsistencyError("结果页CREATE前缀没有精确覆盖本页首次发现")
+    if [(identity, file_id) for identity, file_id, _ in actual_created] != expected_create_order:
+        raise ConsistencyError("结果页CREATE前缀没有保持APPEND差集顺序")
+    if any(item.event_id < append_id for item in transaction_events[:append_position]
+           if item.event_type != create_type):
+        raise ConsistencyError("结果页CREATE前缀混入其他事件")
+    with closing(connection.execute(
+            "SELECT id FROM history_events WHERE transaction_id=? AND event_type=?"
+            " AND json_extract(body_json,'$.reason')=? ORDER BY id",
+            (transaction.txn_id, _TYPE, _APPEND))) as cursor:
+        append_rows = cursor.fetchmany(2)
+    if len(append_rows) != 1 or append_rows[0][0] != append_id:
+        raise ConsistencyError("原事务没有唯一RESULT_PAGE.APPEND")
+    with closing(connection.execute(
+            "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
+            " FROM history_events WHERE transaction_id=? AND event_type=?"
+            " AND json_extract(body_json,'$.reason')=? ORDER BY id",
+            (transaction.txn_id, _TYPE, _INDEX_FILES))) as cursor:
+        index_rows = [decode_event_row(row) for row in cursor]
+    with closing(connection.execute(
+            "SELECT id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,"
+            "family_directory,family_stem,family_role FROM result_page_files"
+            " WHERE page_event_id=? ORDER BY id", (append_id,))) as cursor:
+        relations = cursor.fetchmany(128)
+        extra_relation = cursor.fetchone()
+    if extra_relation is not None:
+        raise ConsistencyError("原页INDEX_FILES关系超过单页容量")
+    file_ids = tuple(saved.file_ids)
+    if not file_ids:
+        if index_rows or relations or transaction.last_event_id != append_id:
+            raise ConsistencyError("零差集页包含关系或非规范尾事件")
+        return
+    if len(index_rows) != 1 or len(relations) != len(file_ids):
+        raise ConsistencyError("原页与INDEX_FILES关系数量不完整或存在额外成员")
+    index = index_rows[0]
+    if (index.event_id != transaction.last_event_id or index.event_id != append_id + 1
+            or index.occurred_at != event.occurred_at
+            or index.evidence != {"result_page_index": {"page_event_id": append_id}}):
+        raise ConsistencyError("原页INDEX_FILES身份、证据、时刻或事务位置不符")
+    validate_event_structure(index)
+    expected_rows = []
+    for pair in file_ids:
+        identity, file_id = pair
+        expected_rows.append((
+            index.event_id, action_id, run_id, attempt_id, append_id,
+            file_id, identity, *_family_fields(identity)))
+    relation_shape = [row[1:] for row in relations]
+    if relation_shape != expected_rows:
+        raise ConsistencyError("原页关系与实际APPEND差集身份、文件或族字段不符")
+    if (len(index.rows) != len(expected_rows)
+            or any(row.table != "result_page_files" or row.before.exists for row in index.rows)):
+        raise ConsistencyError("INDEX_FILES行形状与原页关系不符")
+    for relation, row in zip(relations, index.rows):
+        relation_id = relation[0]
+        expected = dict(zip(("created_event_id", "action_id", "run_id", "attempt_id",
+                             "page_event_id", "file_id", "identity", "family_directory",
+                             "family_stem", "family_role"), relation[1:]))
+        if row.row_id != relation_id or dict(row.after.values) != expected:
+            raise ConsistencyError("INDEX_FILES正文与持久关系行不符")
+
+
 def _at(connection, event_id):
     with closing(connection.execute(f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (event_id,))) as cursor:
         row = cursor.fetchone()
@@ -241,7 +421,12 @@ def _at(connection, event_id):
     txn = read_transaction_range(connection, event.transaction_id)
     if not txn.first_event_id <= event.event_id <= txn.last_event_id:
         raise ConsistencyError("结果页不属于原事务范围")
-    return _decode(event)
+    saved, raw = _decode(event)
+    try:
+        _verify_page_relations(connection, saved, raw, event, txn)
+    except EventValidationError as error:
+        raise ConsistencyError("结果页关系事件不可解释") from error
+    return saved, raw
 
 
 def read_pages(ticket, cursor, batch, owned):
@@ -267,8 +452,9 @@ def read_pages(ticket, cursor, batch, owned):
         if previous.ref.ticket != ticket:
             raise ConsistencyError("结果页游标属于其他尝试")
     with closing(owned.connection.execute(f"SELECT {_COLUMNS} FROM history_events WHERE id>=? AND id<=?"
-            " AND id>? AND event_type=? AND json_extract(body_json,'$.evidence.attempt_id')=?"
-            " ORDER BY id LIMIT ?", (first, last, cursor or 0, _TYPE, attempt["id"], batch + 1))) as reader:
+            " AND id>? AND event_type=? AND json_extract(body_json,'$.reason')=?"
+            " AND json_extract(body_json,'$.evidence.attempt_id')=?"
+            " ORDER BY id LIMIT ?", (first, last, cursor or 0, _TYPE, _APPEND, attempt["id"], batch + 1))) as reader:
         pages = []
         for row in reader:
             event = decode_event_row(row)
@@ -336,10 +522,12 @@ def read_file_input(last_ref, identity, owned, *, allow_missing=False):
             "SELECT DISTINCT e.id FROM history_events e,"
             " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
             " WHERE e.id>=? AND e.id<=? AND e.event_type=?"
+            " AND json_extract(e.body_json,'$.reason')=?"
             " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
             " AND json_extract(f.value,'$[0]')=? ORDER BY e.id LIMIT 2",
-            (attempt["result_first_page_event_id"], last.ref.event_id, _TYPE, attempt["id"], identity))) as reader:
-        found = reader.fetchall()
+            (attempt["result_first_page_event_id"], last.ref.event_id, _TYPE, _APPEND,
+             attempt["id"], identity))) as reader:
+        found = reader.fetchmany(2)
     if not found and allow_missing:
         return None
     if len(found) != 1:
@@ -446,10 +634,11 @@ def _complete_source_entry(connection, ticket, identity, file_id, facts, activit
     with closing(connection.execute(
             "SELECT DISTINCT e.id FROM history_events e,"
             " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
-            " WHERE e.event_type=? AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
+            " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+            " AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
             " AND json_extract(e.body_json,'$.evidence.result_page.activity_id')=?"
             " AND json_extract(f.value,'$[0]')=? AND json_extract(f.value,'$[1]')=? ORDER BY e.id",
-            (_TYPE, ticket.run_id, int(ticket.target_id), identity, file_id))) as reader:
+            (_TYPE, _APPEND, ticket.run_id, int(ticket.target_id), identity, file_id))) as reader:
         for event_id, in reader:
             saved, _ = _at(connection, event_id)
             entry = next(item for item in saved.page.entries if item.identity == identity)
@@ -484,9 +673,10 @@ def read_source_inputs(ticket, cursor, batch, owned):
         with closing(owned.connection.execute(
                 "SELECT DISTINCT e.id FROM history_events e,"
                 " json_each(e.body_json,'$.evidence.result_page.file_ids') f"
-                " WHERE e.event_type=? AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
+                " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+                " AND json_extract(e.body_json,'$.evidence.result_page.run_id')=?"
                 " AND json_extract(f.value,'$[1]')=? ORDER BY e.id DESC LIMIT 1",
-                (_TYPE, ticket.run_id, file_id))) as reader:
+                (_TYPE, _APPEND, ticket.run_id, file_id))) as reader:
             row = reader.fetchone()
         completion = facts["completion_evidence_json"]
         if facts["completion_state"] == 3 and not isinstance(completion, dict):
@@ -545,25 +735,67 @@ class SaveResultPageCommand:
         owners = {("operation_attempts", attempt["id"]): owner}
         saved = saved_transaction_events(scope.connection, self.key)
         if saved is not None:
-            if not saved or saved[-1]["type"] != _TYPE or saved[-1]["reason"] != _APPEND:
+            append_events = [item for item in saved
+                             if item["type"] == _TYPE and item["reason"] == _APPEND]
+            index_events = [item for item in saved
+                            if item["type"] == _TYPE and item["reason"] == _INDEX_FILES]
+            if len(append_events) != 1:
                 raise TransactionError("原键不是结果页事务")
-            event = saved[-1]
+            event = append_events[0]
             raw = event["body"]["evidence"]["result_page"]
             expected = result_page_input(request)
             if (event["occurred_at"] != request.occurred_at or event["body"]["evidence"]["attempt_id"] != attempt["id"]
                     or any(not json_equal(raw.get(name), value) for name, value in expected.items())):
                 raise TransactionError("原结果页的完整输入、时刻或尝试不同")
             original, _ = _at(scope.connection, event["event_id"])
-            for discovery in saved[:-1]:
+            event_index = saved.index(event)
+            discoveries = saved[:event_index]
+            if (any(item["type"] != _FILE_EVENT["id"]
+                    or item["reason"] != _FILE_EVENT["branches"]["CREATE"]["reason"]
+                    or item["occurred_at"] != request.occurred_at for item in discoveries)
+                    or event_index + 1 + len(index_events) != len(saved)
+                    or (bool(original.file_ids) != (len(index_events) == 1))
+                    or (index_events and (index_events[0] != saved[-1]
+                        or index_events[0]["occurred_at"] != request.occurred_at))):
+                raise TransactionError("原结果页事务没有CREATE→APPEND→可选INDEX_FILES规范顺序")
+            actual_creates = []
+            page_entries = {entry.identity: entry for entry in original.page.entries}
+            original_file_ids = dict(original.file_ids)
+            for discovery in discoveries:
                 if (discovery["type"] != _FILE_EVENT["id"] or discovery["reason"] != _FILE_EVENT["branches"]["CREATE"]["reason"]
                         or discovery["occurred_at"] != request.occurred_at):
                     raise TransactionError("原结果页事务混入其他事实")
                 rows = discovery["body"]["rows"]
-                if (len(rows) != 1 or rows[0]["table"] != "device_files" or rows[0]["before"]["exists"]
-                        or [rows[0]["after"]["values"]["identity_key"], rows[0]["id"]] not in [
-                            [file_identity_key(action["device_id"], action["driver_id"], identity), file_id]
-                            for identity, file_id in original.file_ids]):
+                if (len(rows) != 1 or rows[0]["table"] != "device_files"
+                        or rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]):
                     raise TransactionError("原首次发现不属于本页原输入")
+                values = rows[0]["after"]["values"]
+                identity_parts = parse_exact_json(values.get("identity_key"))
+                identity = (identity_parts[2] if isinstance(identity_parts, list)
+                            and len(identity_parts) == 3
+                            and identity_parts[:2] == [action["device_id"], action["driver_id"]]
+                            else None)
+                entry = page_entries.get(identity)
+                file_id = original_file_ids.get(identity)
+                if entry is None or file_id != rows[0]["id"]:
+                    raise TransactionError("原首次发现身份或文件ID不属于APPEND差集")
+                from .capture import file_discovery_row
+                command = FileObservationSave(action["id"], identity, entry.locator,
+                    request.occurred_at, entry.original_name, entry.media_type)
+                expected_row = file_discovery_row(command, file_id,
+                    file_identity_key(action["device_id"], action["driver_id"], identity))
+                if values != dict(expected_row.after.values):
+                    raise TransactionError("原首次发现没有保存原页实际定位及元数据")
+                facts = row_facts(scope.connection, "device_files", file_id)
+                actual_creates.append((identity, file_id, facts["created_event_id"]))
+            expected_creates = []
+            txn = event["transaction"]
+            for identity, file_id in original.file_ids:
+                facts = row_facts(scope.connection, "device_files", file_id)
+                if txn.first_event_id <= facts["created_event_id"] <= txn.last_event_id:
+                    expected_creates.append((identity, file_id, facts["created_event_id"]))
+            if actual_creates != expected_creates:
+                raise TransactionError("原键CREATE前缀没有精确覆盖本页首次发现文件")
             return CommandPlan((), owners, state, result=original.ref, read_only=True)
         if attempt["status"] != int(enum_for("operation_attempts.status").RUNNING):
             raise ConsistencyError("已结束尝试不能再追加结果页")
@@ -614,11 +846,11 @@ class SaveResultPageCommand:
                     raise ConsistencyError("本次结果页不能引用已属于其他动作的文件")
                 state["device_files"][file_id] = facts
             file_ids.append([entry.identity, file_id])
-        allocation = scope.allocate(len(creates) + 1)
+        allocation = scope.allocate(len(creates) + 1 + (1 if file_ids else 0))
         events = [event_envelope(allocation.first_event_id + i, allocation.txn_id, _FILE_EVENT["id"],
                                 _FILE_EVENT["branches"]["CREATE"]["reason"], (row,), request.occurred_at)
                   for i, row in enumerate(creates)]
-        event_id = allocation.last_event_id
+        event_id = allocation.first_event_id + len(creates)
         before = {name: attempt[name] for name in ("result_first_page_event_id", "result_last_page_event_id")}
         after = {"result_first_page_event_id": before["result_first_page_event_id"] or event_id,
                  "result_last_page_event_id": event_id}
@@ -627,8 +859,143 @@ class SaveResultPageCommand:
         events.append(event_envelope(event_id, allocation.txn_id, _TYPE, _APPEND,
             (update_change("operation_attempts", attempt["id"], before, after),), request.occurred_at,
             {"attempt_id": attempt["id"], "result_page": raw}))
+        if file_ids:
+            index_event_id = event_id + 1
+            relation_id = next_row_id(scope.connection, "result_page_files")
+            relation_rows = []
+            for identity, file_id in file_ids:
+                values = _relation_values(created_event_id=index_event_id,
+                    action_id=action["id"], run_id=run["id"], attempt_id=attempt["id"],
+                    page_event_id=event_id, file_id=file_id, identity=identity)
+                relation_rows.append(row_change("result_page_files", relation_id, values))
+                owners[("result_page_files", relation_id)] = owner
+                relation_id += 1
+            events.append(event_envelope(index_event_id, allocation.txn_id, _TYPE,
+                _INDEX_FILES, relation_rows, request.occurred_at,
+                {"result_page_index": {"page_event_id": event_id}}))
         return CommandPlan(tuple(events), owners, state,
-                           result=ResultPageRef(request.ticket, request.page_no, event_id, page.next_cursor))
+                           result=ResultPageRef(request.ticket, request.page_no, event_id, page.next_cursor),
+                           result_page_write_scope=ResultPageWriteScope(action["id"], activity["id"],
+                               run["id"], attempt["id"], request.page_no))
+
+
+def _verify_append_difference(event, context, page, raw, reads, action, activity, attempt, run):
+    """从原SQL基准和封存CREATE前缀重算APPEND的完整差集及文件映射。"""
+    scope = reads.scope
+    if (scope.action_id != action["id"] or scope.activity_id != activity["id"]
+            or scope.run_id != run["id"] or scope.attempt_id != attempt["id"]
+            or scope.page_no != page.ref.page_no):
+        raise ConsistencyError("结果页窄写入范围与原动作、活动、流程、尝试或页号不同")
+    if (activity["ownership_mode"] == _OWNERSHIP.BASELINE_COMPARISON
+            and activity["baseline_state"] != enum_for("device_activities.baseline_state").FIXED):
+        raise ConsistencyError("差集结果页需要原固定基准")
+    previous, previous_raw = None, None
+    prior_event_id = attempt["result_last_page_event_id"]
+    if prior_event_id is not None:
+        previous, previous_raw = _at(reads.connection, prior_event_id)
+        if (previous.ref.ticket != page.ref.ticket or previous.ref.page_no + 1 != page.ref.page_no
+                or previous.page.next_cursor is None or previous.page.outcome.error is not None
+                or page.page.cursor != previous.page.next_cursor):
+            raise ConsistencyError("结果页没有沿原尝试末页的成功游标连续推进")
+    elif page.ref.page_no != 1 or page.page.cursor is not None:
+        raise ConsistencyError("结果页首批必须从空游标开始")
+    if page.ref.page_no != (1 if previous is None else previous.ref.page_no + 1):
+        raise ConsistencyError("结果页未按原页号连续推进")
+
+    if activity["ownership_mode"] == _OWNERSHIP.BASELINE_COMPARISON:
+        expected_entries, baseline_position, last_identity = _difference(
+            reads, activity, action, page.page, previous_raw)
+    else:
+        expected_entries = list(page.page.entries)
+        if len({entry.identity for entry in expected_entries}) != len(expected_entries):
+            raise ConsistencyError("任务独立范围页重复列出稳定身份")
+        baseline_position = None
+        last_identity = (expected_entries[-1].identity if expected_entries else
+                         None if previous_raw is None else previous_raw["last_identity"])
+    if (not json_equal(raw["baseline_position"], baseline_position)
+            or raw["last_identity"] != last_identity):
+        raise ConsistencyError("APPEND没有保存原基准比较位置或末身份")
+
+    prefix = reads.result_page_create_prefix()
+    expected_by_identity = {entry.identity: entry for entry in expected_entries}
+    prefix_by_identity = {}
+    for create in prefix:
+        if (create.event_type != _FILE_EVENT["id"]
+                or create.reason != _FILE_EVENT["branches"]["CREATE"]["reason"]
+                or create.transaction_id != context.transaction.txn_id
+                or create.occurred_at != event.occurred_at or len(create.rows) != 1):
+            raise ConsistencyError("结果页CREATE前缀混入其他文件或时刻")
+        row = create.rows[0]
+        if row.table != "device_files" or row.before.exists or not row.after.exists:
+            raise ConsistencyError("结果页CREATE前缀不是首次文件发现")
+        try:
+            identity_key = parse_exact_json(row.after.values["identity_key"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("结果页CREATE身份键不可解释") from error
+        identity = identity_key[2] if (isinstance(identity_key, list) and len(identity_key) == 3
+            and identity_key[:2] == [action["device_id"], action["driver_id"]]) else None
+        entry = expected_by_identity.get(identity)
+        if entry is None or identity in prefix_by_identity:
+            raise ConsistencyError("结果页CREATE包含多余或重复身份")
+        from .capture import file_discovery_row
+        command = FileObservationSave(action["id"], entry.identity, entry.locator,
+            event.occurred_at, entry.original_name, entry.media_type)
+        expected_row = file_discovery_row(command, row.row_id,
+            file_identity_key(action["device_id"], action["driver_id"], entry.identity))
+        if dict(row.after.values) != dict(expected_row.after.values):
+            raise ConsistencyError("结果页首次发现与原实际条目的定位或元数据不同")
+        with closing(reads.connection.execute(
+                "SELECT id FROM device_files WHERE identity_key=?", (row.after.values["identity_key"],))) as cursor:
+            stored = cursor.fetchone()
+        if stored is not None:
+            facts = row_facts(reads.connection, "device_files", stored[0])
+            if facts["created_event_id"] != create.event_id or stored[0] != row.row_id:
+                raise ConsistencyError("结果页CREATE身份在F前已存在或对应另一实际文件")
+        prefix_by_identity[identity] = row.row_id
+    expected_prefix_order = [entry.identity for entry in expected_entries
+                             if entry.identity in prefix_by_identity]
+    if list(prefix_by_identity) != expected_prefix_order:
+        raise ConsistencyError("结果页CREATE前缀没有保持原差集身份顺序")
+
+    file_ids = []
+    for entry in expected_entries:
+        identity_key = file_identity_key(action["device_id"], action["driver_id"], entry.identity)
+        if entry.identity in prefix_by_identity:
+            file_id = prefix_by_identity[entry.identity]
+        else:
+            with closing(reads.connection.execute(
+                    "SELECT id FROM device_files WHERE identity_key=?", (identity_key,))) as cursor:
+                stored = cursor.fetchone()
+            if stored is None:
+                raise ConsistencyError("原差集身份既无F前文件行也无本组CREATE")
+            facts = row_facts(reads.connection, "device_files", stored[0])
+            if (facts["created_event_id"] >= context.transaction.first_event_id
+                    or facts["identity_key"] != identity_key
+                    or not json_equal(facts["locator_json"], dict(entry.locator))
+                    or facts["source_action_id"] not in (None, action["id"])):
+                raise ConsistencyError("F前复用文件与本页实际身份、定位或归属不同")
+            file_id = stored[0]
+        file_ids.append([entry.identity, file_id])
+    if not json_equal(raw["file_ids"], file_ids):
+        raise ConsistencyError("APPEND的file_ids没有精确覆盖原差集身份及实际文件ID")
+
+    index_id = event.event_id + 1
+    expected_index = None
+    if file_ids:
+        if index_id != context.transaction.last_event_id:
+            raise ConsistencyError("非空结果页INDEX_FILES必须是唯一事务末事件")
+        first_relation_id = next_row_id(reads.connection, "result_page_files")
+        rows = []
+        for offset, (identity, file_id) in enumerate(file_ids):
+            relation_id = first_relation_id + offset
+            values = _relation_values(created_event_id=index_id,
+                action_id=action["id"], run_id=run["id"], attempt_id=attempt["id"],
+                page_event_id=event.event_id, file_id=file_id, identity=identity)
+            rows.append(row_change("result_page_files", relation_id, values))
+        expected_index = event_envelope(index_id, context.transaction.txn_id, _TYPE,
+            _INDEX_FILES, rows, event.occurred_at,
+            {"result_page_index": {"page_event_id": event.event_id}})
+    reads.prepare_result_page_append(event, expected_index)
 
 
 def _page_guard(event, context):
@@ -658,9 +1025,35 @@ def _page_guard(event, context):
             if (facts is None or facts["identity_key"] != file_identity_key(action["device_id"], action["driver_id"], identity)
                     or facts["source_action_id"] not in (None, action["id"])):
                 raise ConsistencyError("原页文件引用与可靠文件身份或归属不同")
+        from camctl.persistence.event_reads import SqlEventReads
+        if (type(context.current_reads) is SqlEventReads
+                and isinstance(context.current_reads.scope, ResultPageWriteScope)):
+            _verify_append_difference(event, context, page, raw, context.current_reads,
+                                      action, activity, attempt, run)
+    except (KeyError, TypeError, ValueError, ConsistencyError) as error:
+        raise EventValidationError(str(error)) from error
+
+
+def _page_index_guard(event, context):
+    try:
+        from camctl.persistence.event_reads import SqlEventReads
+        reads = context.current_reads
+        if (type(reads) is not SqlEventReads or not isinstance(reads.scope, ResultPageWriteScope)
+                or set(event.evidence) != {"result_page_index"}):
+            raise ConsistencyError("INDEX_FILES缺少原页窄写入范围")
+        expected = reads.expected_result_page_index()
+        page_event_id = event.evidence["result_page_index"].get("page_event_id")
+        actual_append = reads.accepted_result_page_event(page_event_id, context.transaction)
+        if (actual_append.event_id != expected.evidence["result_page_index"]["page_event_id"]
+                or event.event_id <= actual_append.event_id
+                or event.transaction_id != actual_append.transaction_id
+                or event.occurred_at != actual_append.occurred_at
+                or replace(event, change_seq=None) != expected):
+            raise ConsistencyError("INDEX_FILES与本组实际APPEND的完整差集关系不符")
     except (KeyError, TypeError, ValueError, ConsistencyError) as error:
         raise EventValidationError(str(error)) from error
 
 
 def register_result_page_guard():
     register_guard("result_page", _page_guard)
+    register_guard("result_page_index", _page_index_guard)
