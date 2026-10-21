@@ -10,6 +10,7 @@ import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import wraps
 from typing import Any
 
 from camctl.contracts.public_projection import (
@@ -157,12 +158,52 @@ def _projected_entities(entries: tuple[EntityEntry, ...], entity: str, facts: Ma
             yield fragment
 
 
-class ReportStream:
-    """一份报告的分段字节流：根实体片段按集合登记顺序逐段供给。
+@dataclass
+class _Frame:
+    kind: str
+    entity: str | None = None
+    name: str | None = None
+    wrote: bool = False
+    last_field: str | None = None
+    child_position: int = -1
+    count: int = 0
+    last_id: int = 0
+    expected_id: int | None = None
+    identity_seen: bool = False
 
-    字段、分隔符与集合顺序和整树编码共用同一规则，分段供给不改
-    变字节内容；未供给任何片段的集合整体省略。生成调用方按批恢
-    复入选事实并逐段供给，不组装整份报告对象。
+
+def _emission(method):
+    """一次供给必须耗尽；失败或中途关闭的字节只能作为未完成前缀。"""
+    @wraps(method)
+    def emit(self, *args, **kwargs):
+        if self._busy:
+            self._failed = True
+            raise ValueError('上次报告字节供给尚未耗尽')
+        if self._failed or self._finished:
+            raise ValueError('报告字节流已失败或已收尾')
+        self._busy = True
+        try:
+            for token in method(self, *args, **kwargs):
+                if self._failed:
+                    raise ValueError('报告字节供给期间文档已失败')
+                yield token
+                if self._failed:
+                    raise ValueError('报告字节供给期间文档已失败')
+        except BaseException:
+            self._failed = True
+            raise
+        finally:
+            self._busy = False
+    return emit
+
+
+class ReportStream:
+    """一份报告的字节状态：有限 section 或逐层字段/数组/对象供给。
+
+    每次返回的迭代器须耗尽后再供给下一步，失败即终止文档。逐层
+    模式只保留当前嵌套帧，不收集成员；实体子集合按登记顺序输出，
+    空集合省略，普通数组保留。field/item 的值须由调用者保证有限，
+    增长关系用节点 API 逐项供给。业务 Schema 和回执由调用方校验。
     """
 
     def __init__(self, document: ReportDocument) -> None:
@@ -178,11 +219,18 @@ class ReportStream:
         self._position = -1
         self._opened = False
         self._finished = False
+        self._started = False
+        self._failed = False
+        self._busy = False
+        self._mode = None
+        self._frames: list[_Frame] = []
 
+    @_emission
     def open(self) -> Iterator[bytes]:
         """文档起始：身份与覆盖元数据，首个集合由第一个片段打开。"""
-        if self._position != -1 or self._opened or self._finished:
+        if self._started:
             raise ValueError("报告字节流已打开或已收尾")
+        self._started = True
         yield b"{"
         for index, name in enumerate(sorted(self._metadata)):
             if index:
@@ -191,11 +239,11 @@ class ReportStream:
             yield b":"
             yield from _iter_value(self._metadata[name])
 
+    @_emission
     def section(self, collection: str, fragment: Mapping) -> Iterator[bytes]:
         """供给一个根实体片段；集合只能沿登记顺序推进。"""
+        self._choose_mode('section')
         entity = self._entity_of(collection)
-        if self._finished:
-            raise ValueError("报告字节流已收尾")
         index = self._collection_index(collection)
         if index < self._position:
             raise ValueError(f"报告集合 {collection!r} 的供给顺序回退")
@@ -204,8 +252,13 @@ class ReportStream:
                 yield b"]"
             self._position = index
             self._opened = False
+            self._section_id = 0
         # 单个根实体与真实公共结构组合校验；不建立整份报告列表。
         validate_document(_SCHEMA, {**self._metadata, collection: [fragment]})
+        identity = parse_object_id(fragment[projection_structure(entity).identity_field])
+        if identity <= self._section_id:
+            raise ValueError('报告实体身份重复或回退')
+        self._section_id = identity
         if self._opened:
             yield b","
         else:
@@ -213,14 +266,151 @@ class ReportStream:
             self._opened = True
         yield from _iter_object(fragment, entity)
 
+    def _choose_mode(self, mode):
+        if not self._started:
+            raise ValueError('报告字节流尚未打开')
+        if self._mode not in (None, mode):
+            raise ValueError('整片段与逐层供给不能混用')
+        if self._mode is None:
+            self._mode = mode
+            if mode == 'nodes':
+                self._frames.append(_Frame('object', entity='report', wrote=True))
+
+    def _node(self, kind):
+        self._choose_mode('nodes')
+        frame = self._frames[-1]
+        if frame.kind != kind:
+            raise ValueError(f'当前报告节点不是 {kind}')
+        return frame
+
+    @staticmethod
+    def _children(frame):
+        return () if frame.entity is None else projection_structure(frame.entity).entity_fields
+
+    def _field_prefix(self, name):
+        frame = self._node('object')
+        if not isinstance(name, str):
+            raise ValueError('报告字段名必须是字符串')
+        if frame.entity == 'report' or any(name == child for child, _ in self._children(frame)):
+            raise ValueError('实体子集合必须逐层打开数组')
+        if frame.child_position >= 0 or (frame.last_field is not None and name <= frame.last_field):
+            raise ValueError('报告字段重复、倒序或位于实体子集合之后')
+        frame.last_field = name
+        if frame.wrote:
+            yield b','
+        yield _string(name)
+        yield b':'
+        frame.wrote = True
+
+    def _item_prefix(self, identity=None):
+        frame = self._node('array')
+        if frame.entity is not None:
+            current = ObjectId(identity)
+            if current <= frame.last_id:
+                raise ValueError('报告实体身份重复或回退')
+            frame.last_id = current
+            if not frame.count:
+                parent = self._frames[-2]
+                if parent.wrote:
+                    yield b','
+                yield _string(frame.name)
+                yield b':['
+                parent.wrote = True
+        elif identity is not None:
+            raise ValueError('普通数组成员不接受实体身份')
+        if frame.count:
+            yield b','
+        frame.count += 1
+
+    @_emission
+    def field(self, name: str, value: Any) -> Iterator[bytes]:
+        """写当前对象的一个有限自身值；增长字段由逐层节点供给。"""
+        frame = self._node('object')
+        if frame.expected_id is not None and name == projection_structure(frame.entity).identity_field:
+            if parse_object_id(value) != frame.expected_id:
+                raise ValueError('实体身份字段与供给身份不符')
+            frame.identity_seen = True
+        yield from self._field_prefix(name)
+        yield from _iter_value(value)
+
+    @_emission
+    def open_array(self, field: str | None = None) -> Iterator[bytes]:
+        """实体子集合延迟到首项才开字段；普通数组包括空数组均写出。"""
+        self._choose_mode('nodes')
+        parent = self._frames[-1]
+        if parent.kind == 'object':
+            for index, (name, entity) in enumerate(self._children(parent)):
+                if name == field:
+                    if index <= parent.child_position:
+                        raise ValueError('报告实体子集合重复或倒序')
+                    parent.child_position = index
+                    self._frames.append(_Frame('array', entity=entity, name=name))
+                    return
+            yield from self._field_prefix(field)
+        else:
+            if field is not None or parent.entity is not None:
+                raise ValueError('数组成员不能指定字段或替代实体对象')
+            yield from self._item_prefix()
+        yield b'['
+        self._frames.append(_Frame('array'))
+
+    @_emission
+    def open_object(self, field: str | None = None, *, identity: int | None = None) -> Iterator[bytes]:
+        """打开自身普通对象或一个实体/普通数组项，不接收完整片段。"""
+        self._choose_mode('nodes')
+        parent = self._frames[-1]
+        entity = None
+        if parent.kind == 'object':
+            if identity is not None:
+                raise ValueError('普通对象字段不接受实体身份')
+            yield from self._field_prefix(field)
+        else:
+            if field is not None:
+                raise ValueError('数组成员不能指定字段')
+            entity = parent.entity
+            if entity is not None and projection_structure(entity).identity_field is None:
+                raise ValueError('报告实体缺少登记身份字段')
+            yield from self._item_prefix(identity)
+        yield b'{'
+        self._frames.append(_Frame('object', entity=entity, expected_id=identity))
+
+    @_emission
+    def item(self, value: Any) -> Iterator[bytes]:
+        """供给普通数组的有限值；实体项须用 open_object 逐字段写。"""
+        if self._node('array').entity is not None:
+            raise ValueError('实体数组不接受整片段成员')
+        yield from self._item_prefix()
+        yield from _iter_value(value)
+
+    @_emission
+    def close_object(self) -> Iterator[bytes]:
+        frame = self._node('object')
+        if len(self._frames) == 1:
+            raise ValueError('报告根对象须用 finish 收尾')
+        if frame.expected_id is not None and not frame.identity_seen:
+            raise ValueError('实体身份字段尚未写出')
+        self._frames.pop()
+        yield b'}'
+
+    @_emission
+    def close_array(self) -> Iterator[bytes]:
+        frame = self._node('array')
+        self._frames.pop()
+        if frame.entity is None or frame.count:
+            yield b']'
+
+    @_emission
     def finish(self) -> Iterator[bytes]:
         """关闭当前集合并收尾；此后不能再供给片段。"""
-        if self._finished:
-            raise ValueError("报告字节流已收尾")
+        if not self._started:
+            raise ValueError('报告字节流尚未打开')
+        if self._mode == 'nodes' and len(self._frames) != 1:
+            raise ValueError('报告仍有未关闭的对象或数组')
         self._finished = True
         if self._opened:
             yield b"]"
         yield b"}\n"
+        self._frames.clear()
 
     def _collection_index(self, collection: str) -> int:
         for index, (name, _) in enumerate(self._collections):
