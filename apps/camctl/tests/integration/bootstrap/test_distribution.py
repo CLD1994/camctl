@@ -248,7 +248,11 @@ def _assert_hasselblad_capture_trajectory(call_log: Path, capture_format: str) -
     return calls
 
 
-def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
+def _hasselblad_tool_source(
+    call_log: Path, serial: str, *, installed_python: Path | None = None,
+    expected_commands: tuple[tuple[str, ...], ...] | None = None,
+    provenance_log: Path | None = None, jpeg_original_bytes: bytes | None = None,
+) -> str:
     """受 hb_cli 实际 argv/文本响应契约约束的最小可执行替身。"""
     set_values = {
         _PHOTO_COMMANDS.DRIVE_MODE_FIELD.value: {_PHOTO_COMMANDS.DRIVE_MODE_SINGLE.value},
@@ -268,26 +272,49 @@ def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
             _HASSELBLAD_PHOTO_SAMPLE_PARAMS["focus"]["mode"]
         },
     }
-    return "#!" + sys.executable + "\n" + textwrap.dedent(
+    if expected_commands is not None:
+        # 每次安装链仅允许明确传入的代表设置；不复制产品完整档位目录。
+        set_values = {}
+        for command in expected_commands:
+            if len(command) == 3 and command[0] == "set":
+                set_values.setdefault(command[1], set()).add(command[2])
+    return "#!" + str(installed_python or sys.executable) + "\n" + textwrap.dedent(
         f"""\
         import json
         import pathlib
+        import os
         import sys
+        import camctl
         from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
 
         CALL_LOG = pathlib.Path({str(call_log)!r})
         SETTINGS_STATE = pathlib.Path(__file__).with_suffix(".settings.json")
         CAPTURE_STATE = pathlib.Path(__file__).with_suffix(".capture.json")
+        COMMAND_STATE = pathlib.Path(__file__).with_suffix(".commands.json")
         SET_VALUES = {set_values!r}
+        EXPECTED_COMMANDS = {expected_commands!r}
+        PROVENANCE_LOG = {str(provenance_log) if provenance_log is not None else None!r}
         SERIAL = {serial!r}
         RAW = bytes.fromhex({_HASSELBLAD_ORIGINAL_BYTES.hex()!r})
-        JPEG = bytes.fromhex({_HASSELBLAD_JPEG_ORIGINAL_BYTES.hex()!r})
+        JPEG = bytes.fromhex({(jpeg_original_bytes if jpeg_original_bytes is not None else _HASSELBLAD_JPEG_ORIGINAL_BYTES).hex()!r})
         PREVIEW = bytes.fromhex({_HASSELBLAD_PREVIEW_BYTES.hex()!r})
         argv = sys.argv
         with CALL_LOG.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(argv, ensure_ascii=True) + "\\n")
+        if PROVENANCE_LOG is not None:
+            with pathlib.Path(PROVENANCE_LOG).open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps({{
+                    "kind": "hb_cli", "argv": argv, "python": sys.executable,
+                    "camctl": camctl.__file__, "cwd": os.getcwd(),
+                    "pid": os.getpid(), "ppid": os.getppid(), "pgid": os.getpgrp(),
+                }}) + "\\n")
 
         args = argv[1:]
+        if EXPECTED_COMMANDS is not None and args[2:3] in (["set"], ["focus"], ["autofocus"]):
+            index = json.loads(COMMAND_STATE.read_text()) if COMMAND_STATE.is_file() else 0
+            if index >= len(EXPECTED_COMMANDS) or tuple(args[2:]) != EXPECTED_COMMANDS[index]:
+                raise SystemExit("unexpected representative settings order or value")
+            COMMAND_STATE.write_text(json.dumps(index + 1))
         if args[:2] != ["--pid", "0x000a"]:
             raise SystemExit("unexpected fixed camera PID arguments")
         if args == ["--pid", "0x000a", "list"]:
@@ -301,6 +328,8 @@ def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
             settings = json.loads(SETTINGS_STATE.read_text()) if SETTINGS_STATE.is_file() else {{}}
             settings[field] = value
             SETTINGS_STATE.write_text(json.dumps(settings))
+        elif EXPECTED_COMMANDS is not None and args[2:3] in (["focus"], ["autofocus"]):
+            pass
         elif len(args) == 5 and args[:4] == [
             "--pid", "0x000a", "capture", "--output"
         ]:
@@ -312,6 +341,8 @@ def _hasselblad_tool_source(call_log: Path, serial: str) -> str:
             settings = json.loads(SETTINGS_STATE.read_text())
             if set(settings) != set(SET_VALUES):
                 raise SystemExit("capture requires all Hasselblad sample settings")
+            if EXPECTED_COMMANDS is not None and json.loads(COMMAND_STATE.read_text()) != len(EXPECTED_COMMANDS):
+                raise SystemExit("capture requires every representative command")
             capture_format = CaptureFormat(settings["capture-format"])
             description = CAPTURE_FORMATS[capture_format]
             original_bytes = RAW if capture_format is CaptureFormat.RAW else JPEG
