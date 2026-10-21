@@ -104,7 +104,7 @@ def test_action_finish_event_guard_rejects_host_spec_without_source_responsibili
         )
 
         with pytest.raises(EventValidationError):
-            _action_finish_guard(SimpleNamespace(rows=(row,)), Context())
+            _action_finish_guard(SimpleNamespace(rows=(row,), evidence={}), Context())
     finally:
         owned.connection.close()
 

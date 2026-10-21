@@ -1,9 +1,20 @@
 """原写事务的已验证事件覆盖，以及正式发布身份的单事件查证。"""
 
 from contextlib import closing
+from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope
+
+
+@dataclass(frozen=True)
+class _ValidatedSegmentFinish:
+    scope: object
+    transaction: object
+    first_event_id: int
+    header: str
+    qualification: object
 
 
 class SqlEventReads:
@@ -30,12 +41,15 @@ class SqlEventReads:
     SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
-    def __init__(self, connection, scope, validated=(), planned_events=()):
+    def __init__(self, connection, scope, validated=(), planned_events=(), *, proposal_event=None, segment_ref=None, segment_guard_state=None):
         if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
         self._planned_events = planned_events
         self._validated = validated
+        self.proposal_event = proposal_event
+        self.segment_ref = segment_ref
+        self._segment_guard_state = segment_guard_state
         self._result_file_ids = frozenset()
         self._overlay = {}
         for accepted in validated:
@@ -50,12 +64,21 @@ class SqlEventReads:
 
     def segment_activation_event(self, event_id, transaction):
         """只定位原提案中的一个发布事件，不向业务提供未来状态资格。"""
+        return self.transaction_event(event_id,transaction)
+
+    def transaction_event(self, event_id, transaction):
+        """查证原完整提案中的单条实际事件；不提供未来业务状态。"""
         ObjectId(event_id)
         if (not self.connection.in_transaction
                 or not isinstance(self.scope,(SegmentReadScope,PlanReadScope))
                 or not transaction.first_event_id<=event_id<=transaction.last_event_id):
             raise ConsistencyError('正式marker不属于原完整完成事务')
         offset=event_id-transaction.first_event_id
+        if self.proposal_event is not None:
+            found = self.proposal_event(event_id)
+            if found.event_id != event_id or found.transaction_id != transaction.txn_id:
+                raise ConsistencyError('正式marker的实际事件位置或事务不同')
+            return found
         if offset>=len(self._planned_events):
             raise ConsistencyError('正式marker没有原事务实际ACTIVATE事件')
         found=self._planned_events[offset]
@@ -80,6 +103,46 @@ class SqlEventReads:
             raise ConsistencyError('分段守卫缺少原集合或原计划范围')
         verify_segment_event(self.connection, ref, event, context,
             prior_events=self._validated)
+
+    def verify_segment_finish_event(self, event, context, action_id):
+        from camctl.persistence.repositories.segment_transactions import verify_finish_request_event
+        if not self.connection.in_transaction:
+            raise ConsistencyError('分段终态守卫只能读取原写事务')
+        self.required('actions',action_id)
+        verify_finish_request_event(self.connection,event,context,action_id)
+
+    def prepare_segment_finish(self,event,transaction,header,qualification):
+        if self._segment_guard_state is None:return
+        from camctl.persistence.transaction import encode_json_value
+        self._segment_guard_state.pop('accepted',None)
+        self._segment_guard_state['pending']=(self.scope,transaction,event,
+            encode_json_value(header),MappingProxyType(dict(qualification)))
+
+    def seal_segment_finish(self,validated):
+        """内核在全部守卫通过后封存F资格，并独立核实际L的完整marker身份。"""
+        if self._segment_guard_state is None:return
+        pending=self._segment_guard_state.pop('pending',None)
+        if pending is None:
+            proof=self._segment_guard_state.get('accepted')
+            event=validated.envelope
+            if isinstance(proof,_ValidatedSegmentFinish) and event.event_id==proof.transaction.last_event_id:
+                if proof.scope!=self.scope:raise ConsistencyError('实际L改变原完成读范围')
+                marker=self.transaction_event(event.event_id,proof.transaction)
+                if replace(event,change_seq=marker.change_seq)!=marker:
+                    raise ConsistencyError('实际L不是原唯一正式ACTIVATE完整事件')
+            return
+        scope,transaction,event,header,qualification=pending
+        if scope!=self.scope or validated.envelope!=event or event.event_id!=transaction.first_event_id:
+            raise ConsistencyError('原F资格没有当前scope实际通过的首事件')
+        self._segment_guard_state['accepted']=_ValidatedSegmentFinish(scope,transaction,event.event_id,header,qualification)
+
+    def validated_segment_finish(self,transaction,header):
+        from camctl.persistence.transaction import encode_json_value
+        proof=None if self._segment_guard_state is None else self._segment_guard_state.get('accepted')
+        if (not isinstance(proof,_ValidatedSegmentFinish) or proof.scope!=self.scope or proof.transaction!=transaction
+                or proof.first_event_id!=transaction.first_event_id or proof.header!=encode_json_value(header)):
+            raise ConsistencyError('最终守卫没有同scope/完整组/实际原头的已验证F资格')
+        return proof.qualification
 
     def _check(self, table, column="id", identity=None):
         if not self.connection.in_transaction:

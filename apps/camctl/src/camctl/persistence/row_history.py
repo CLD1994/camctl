@@ -10,7 +10,7 @@ import sqlite3
 from typing import Any, Mapping
 
 from camctl.contracts.enums import load_registry as load_enum_registry
-from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import business_columns, HistoryEventError, load_event_registry
@@ -40,6 +40,7 @@ def read_row_values_at_boundary(
     connection: sqlite3.Connection, *, owner: tuple[str, int], table: str, row_id: int,
     columns: frozenset[str], current_values: Mapping[str, Any],
     boundary: HistoryBoundary, current_boundary: HistoryBoundary,
+    validated_transaction: TransactionRange | None = None,
 ) -> dict[str, Any]:
     """核实完整 H/C 和目录后返回 H 时存在行的指定列，游标全部释放。"""
     if not connection.in_transaction:
@@ -59,7 +60,8 @@ def read_row_values_at_boundary(
     for value in (boundary, current_boundary):
         if value.txn_id == 0:
             continue
-        recent = read_transaction_range(connection, value.txn_id)
+        recent = read_transaction_range(connection, value.txn_id,
+            validated_transaction if validated_transaction is not None and validated_transaction.txn_id==value.txn_id else None)
         if recent.last_event_id != value.last_event_id:
             raise ConsistencyError("限定行恢复的 H 或 C 不是完整事务边界")
     entity = load_enum_registry()["history_objects"].get(owner[0])
@@ -107,7 +109,7 @@ def read_row_values_at_boundary(
             " AND l.event_id <= ? AND l.event_id < ? ORDER BY l.event_id DESC LIMIT ?",
             (*ref, boundary.last_event_id, current_boundary.last_event_id, previous, _BATCH_LIMIT),
         )) as cursor:
-            rows = cursor.fetchall()
+            rows = cursor.fetchmany(_BATCH_LIMIT)
         if not rows or len(rows) > _BATCH_LIMIT:
             raise ConsistencyError("对象历史目录缺少必要事件或批量范围无效")
         for stored in rows:
@@ -115,8 +117,9 @@ def read_row_values_at_boundary(
             if (stored[0] != expected_count or not boundary.last_event_id < event.event_id < previous
                     or not boundary.txn_id < event.transaction_id <= current_boundary.txn_id):
                 raise ConsistencyError("对象历史目录的事件位置、事务或累计次数不连续")
-            recent = read_transaction_range(connection, event.transaction_id,
-                recent if recent is not None and recent.txn_id == event.transaction_id else None)
+            checked=(validated_transaction if validated_transaction is not None and validated_transaction.txn_id==event.transaction_id
+                else recent if recent is not None and recent.txn_id==event.transaction_id else None)
+            recent = read_transaction_range(connection, event.transaction_id,checked)
             if not recent.first_event_id <= event.event_id <= recent.last_event_id:
                 raise ConsistencyError("对象历史事件不属于其完整事务范围")
             for change in event.rows:

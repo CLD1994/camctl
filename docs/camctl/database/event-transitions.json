@@ -4310,7 +4310,9 @@
             "plan_aggregate",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "segment_finish_request"
+          ]
         },
         "FAIL": {
           "reason": 2,
@@ -4360,7 +4362,8 @@
             "output"
           ],
           "evidence": [
-            "preparation_resolved"
+            "preparation_resolved",
+            "segment_finish_request"
           ]
         },
         "EXPIRE": {

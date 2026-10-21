@@ -14,7 +14,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
-from typing import Any, Callable, Mapping, Protocol, TypedDict
+from typing import Any, Callable, Iterable, Mapping, Protocol, TypedDict
 
 from camctl.resources import resource_bytes
 from camctl.contracts.enums import load_registry as load_enum_registry
@@ -108,6 +108,9 @@ class TransactionScope:
             raise TransactionError("一次命令只能分配一次编号范围")
         if isinstance(event_count, bool) or not isinstance(event_count, int) or event_count < 1:
             raise TransactionError(f"事件数量必须是正整数: {event_count!r}")
+        from camctl.contracts.values import MAX_OBJECT_ID
+        if self.max_txn_id + 1 > MAX_OBJECT_ID or self.max_event_id + event_count > MAX_OBJECT_ID:
+            raise TransactionError("完整历史编号范围超过整数上界")
         self.allocation = TransactionAllocations(
             txn_id=self.max_txn_id + 1,
             first_event_id=self.max_event_id + 1,
@@ -120,6 +123,93 @@ class AtomicCommand(Protocol):
     """仓储实现的完整用例命令。"""
 
     def plan(self, scope: TransactionScope) -> CommandPlan: ...
+
+
+@dataclass(frozen=True)
+class BoundedCommandPlan:
+    """在原写事务投影上逐事件执行的有限计划。
+
+    context 每次仅提供本事件的事实；已验证前序事件已写入原连接。
+    proposal 只查证一条提案结构，不能将未来资格注入 state_rows。
+    """
+
+    events: Iterable[EventEnvelope]
+    context: Callable[[EventEnvelope, TransactionRange], EventContext]
+    result: Any
+    complete: Callable[[sqlite3.Connection], None]
+
+
+def _write_bounded_plan(plan, scope, operation_key):
+    connection = scope.connection
+    allocation = scope.allocation
+    if allocation is None:
+        raise TransactionError("有界命令没有分配完整编号范围")
+    transaction = TransactionRange(allocation.txn_id, allocation.first_event_id, allocation.last_event_id)
+    connection.execute(
+        "INSERT INTO history_transactions(id,operation_key,first_event_id,last_event_id) VALUES(?,?,?,?)",
+        (allocation.txn_id,str(operation_key),allocation.first_event_id,allocation.last_event_id))
+    sequence = _scalar(connection,"SELECT MAX(change_seq) FROM history_events")
+    expected = allocation.first_event_id
+    for proposed in plan.events:
+        if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
+            raise TransactionError("实际有界事件与预分配完整范围不符")
+        if len(proposed.rows) > 128:
+            raise TransactionError("有界事件超过128行")
+        context = plan.context(proposed, transaction)
+        targets = event_report_targets(proposed, context.state_rows)
+        if targets:
+            sequence += 1
+            from camctl.contracts.values import ObjectId
+            ObjectId(sequence)
+        event = replace(proposed,change_seq=sequence if targets else None)
+        validated = validate_event(event,context)
+        if context.current_reads is not None:
+            seal=getattr(context.current_reads,'seal_segment_finish',None)
+            if seal is not None:seal(validated)
+        refs = set(validated.row_owners.values())
+        before_counts = {}
+        for ref in refs:
+            row = connection.execute(
+                "SELECT MAX(change_count) FROM entity_event_links WHERE entity_type=? AND entity_id=?",ref).fetchone()
+            if row[0] is not None:
+                before_counts[ref] = row[0]
+            from camctl.contracts.values import ObjectId
+            ObjectId(before_counts.get(ref,0)+1)
+        # 这两个切片只包含当前事件的有限关联行；没有事务级工作副本。
+        after = _copy_rows(context.state_rows)
+        _apply_rows(after,(event,))
+        changes = derive_changes((validated,),StateSlice(context.state_rows,before_counts),
+            StateSlice(after,{ref:before_counts.get(ref,0)+1 for ref in refs}))
+        connection.execute(
+            "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
+            (event.event_id,event.transaction_id,event.event_type,event.event_version,event.occurred_at,event.clock_status,event.change_seq,_encode_body(event)))
+        for link in changes.links:
+            connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
+                (link.entity_type,link.entity_id,link.event_id,link.change_count))
+        for link in changes.report_changes:
+            connection.execute("INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)",
+                (link.entity_type,link.entity_id,link.event_id,link.change_seq))
+        for progress in changes.progress_updates:
+            connection.execute(
+                "INSERT INTO entity_snapshot_progress(entity_type,entity_id,current_change_count,snapshot_change_count,latest_snapshot_id) VALUES(?,?,?,0,NULL) "
+                "ON CONFLICT(entity_type,entity_id) DO UPDATE SET current_change_count=excluded.current_change_count",
+                (progress.entity_type,progress.entity_id,progress.current_change_count))
+        derived = _derived_map((event,),changes.links,changes.change_counts)
+        _write_projections(connection,(event,),derived)
+        _write_derived_history(connection,(event,),derived)
+        expected += 1
+    if expected != allocation.last_event_id+1:
+        raise TransactionError("实际有界事件少于预分配完整范围")
+    plan.complete(connection)
+    try:
+        connection.execute("COMMIT")
+    except Exception as error:
+        return WriteReceipt(kind="unknown",error=error)
+    except BaseException as control:
+        _attach_control_receipt(control,"unknown")
+        raise
+    return WriteReceipt(kind="completed",result=plan.result,
+        boundary=HistoryBoundary(allocation.txn_id,allocation.last_event_id))
 
 
 @dataclass(frozen=True)
@@ -454,6 +544,13 @@ def commit_operation(
         except Exception as error:
             # 命令执行期意外失败：整组不提交，按回滚或未知分类。
             return rollback_error(error)
+        if isinstance(plan, BoundedCommandPlan):
+            try:
+                return _write_bounded_plan(plan, scope, operation_key)
+            except SchemaRuleError:
+                raise
+            except Exception as error:
+                return rollback_error(error)
         events = plan.events
         if len(events) == 0:
             if not plan.read_only:
@@ -648,6 +745,9 @@ def commit_operation(
     except BaseException as control:
         if isinstance(control, Exception):
             raise
+        if (write_receipt_for(control) is not None
+                and write_receipt_for(control).kind == 'unknown'):
+            raise
         if committing:
             _attach_control_receipt(control, "unknown")
             raise
@@ -832,6 +932,48 @@ class SavedEvent(TypedDict):
     type: int
     reason: int
     body: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SavedTransactionCursor:
+    instance_id: str
+    operation_key: str
+    transaction: TransactionRange
+    after_event_id: int
+
+
+def read_saved_transaction_page(connection, operation_key, transaction, cursor=None, limit=128):
+    """按固定原组分页精确解码；缺行、错组及查询失败均拒绝。"""
+    from camctl.contracts.pages import Page
+    if type(limit) is not int or not 1 <= limit <= 128:
+        raise ValueError("原组读取批次必须为1—128")
+    row = connection.execute("SELECT instance_id FROM database_metadata").fetchone()
+    instance = row[0]
+    found = connection.execute("SELECT id FROM history_transactions WHERE operation_key=?",(str(operation_key),)).fetchone()
+    if found is None or found[0] != transaction.txn_id:
+        raise ConsistencyError("原操作键与固定事务范围不同")
+    if cursor is None:
+        if read_transaction_range(connection,transaction.txn_id) != transaction:
+            raise ConsistencyError("原组完整范围与请求不同")
+        after = transaction.first_event_id-1
+    else:
+        if (not isinstance(cursor,SavedTransactionCursor) or cursor.instance_id != instance
+                or cursor.operation_key != str(operation_key) or cursor.transaction != transaction
+                or not transaction.first_event_id <= cursor.after_event_id < transaction.last_event_id):
+            raise ConsistencyError("原组游标不属于固定实例、操作键和完整范围")
+        after = cursor.after_event_id
+    size = min(limit,transaction.last_event_id-after)
+    with closing(connection.execute(
+        "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json "
+        "FROM history_events WHERE transaction_id=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+        (transaction.txn_id,after,transaction.last_event_id,size))) as reader:
+        rows = reader.fetchmany(size)
+    events = tuple(decode_event_row(row) for row in rows)
+    if len(events) != size or any(event.event_id != after+i+1 or event.transaction_id != transaction.txn_id for i,event in enumerate(events)):
+        raise ConsistencyError("原组分页事件缺失或顺序不同")
+    following = after+size
+    return Page(events,None if following==transaction.last_event_id else
+        SavedTransactionCursor(instance,str(operation_key),transaction,following))
 
 
 def saved_transaction_events(
