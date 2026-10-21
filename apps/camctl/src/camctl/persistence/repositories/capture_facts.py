@@ -138,18 +138,24 @@ def start_facts_from_summary(action, activity, run, statistics, pending_confirma
     return StartFacts(activity, run, used, not_started and not pending_confirmation, dispatch)
 
 
-def start_facts_from_rows(action, activities, runs, attempts_by_run):
-    """完整原行读取层生成有限统计；所有 run 及其尝试都必须可核实。"""
+def start_facts_from_rows(action, activities, runs, attempts_by_run, *, activity_targets=()):
+    """自身活动范围与 run 引用目标分别输入；完整 run/attempt 生成有限统计。"""
     if len(activities) > 1 or any(row["action_id"] != action["id"] for row in activities):
         raise ConsistencyError("原拍摄活动归属或唯一性不符")
     if set(attempts_by_run) != {run["id"] for run in runs}:
         raise ConsistencyError("原操作与完整尝试范围不一致")
+    targets = {}
+    for activity in (*activities, *activity_targets):
+        if activity["id"] in targets and targets[activity["id"]] != activity:
+            raise ConsistencyError("原操作目标活动事实矛盾")
+        targets[activity["id"]] = activity
+    state = {"device_activities": targets,
+             "operation_runs": {run["id"]: run for run in runs}}
     starts, pending_confirmation = [], False
     for run in runs:
         if run["action_id"] != action["id"] or run["id"] not in attempts_by_run:
             raise ConsistencyError("原操作责任缺少归属或完整尝试范围")
-        if run["activity_id"] is not None and (not activities or run["activity_id"] != activities[0]["id"]):
-            raise ConsistencyError("原操作关联活动与动作不符")
+        _verify_start_scope_run(run, state)
         attempts = attempts_by_run[run["id"]]
         numbers = {attempt["attempt_no"] for attempt in attempts}
         if (any(attempt["run_id"] != run["id"] for attempt in attempts)
@@ -175,6 +181,29 @@ def start_facts_from_rows(action, activities, runs, attempts_by_run):
     return start_facts_from_summary(action, activities[0] if activities else None, run,
         (len(attempts), max((a["attempt_no"] for a in attempts), default=0), unresolved, dispatched),
         pending_confirmation, attempts)
+
+
+def _verify_start_scope_run(run, state):
+    """活动目标沿原操作职责校验；其他目标只核原固定组合与责任键。"""
+    from camctl.persistence.repositories.operations import _verify_run_identity, _fixed_reference
+    if run["kind"] == int(_KIND.EMERGENCY_STOP):
+        activity = _fixed_reference(state, "device_activities", run["activity_id"])
+        if activity["action_id"] != run["action_id"]:
+            raise ConsistencyError("原应急补记与目标活动所属动作不符")
+        return
+    if run["activity_id"] is not None or (run["copy_id"] is None and run["cleanup_item_id"] is None):
+        _verify_run_identity(run, state)
+        return
+    from camctl.operations.attempts import OperationKind, QueryPurpose, AttemptTarget, operation_responsibility_key
+    try:
+        kind = OperationKind[_KIND(run["kind"]).name]
+        purpose = None if run["query_purpose"] is None else QueryPurpose[_PURPOSE(run["query_purpose"]).name]
+        expected = operation_responsibility_key(kind, run["action_id"], AttemptTarget(
+            activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"]), purpose)
+    except (KeyError, ValueError) as error:
+        raise ConsistencyError("原操作固定身份组合无效") from error
+    if run["responsibility_key"] != expected:
+        raise ConsistencyError("原操作责任键与固定身份不符")
 
 
 def release_basis_holds(facts: Mapping[str, Any]) -> bool:

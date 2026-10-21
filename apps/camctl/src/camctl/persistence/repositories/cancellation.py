@@ -2087,6 +2087,14 @@ def include_photo_entry_rows(connection, action, state, owners):
             state.setdefault(table, {})[identity] = row
             owners[(table, identity)] = ('action', action['id'])
             if table == 'operation_runs':
+                target_id = row['activity_id']
+                if target_id is not None:
+                    target = row_facts(connection, 'device_activities', target_id)
+                    if target is None:
+                        raise ConsistencyError('原操作目标活动不存在')
+                    state.setdefault('device_activities', {})[target_id] = target
+                    owners[('device_activities', target_id)] = ('action', target['action_id'])
+                    ranges.setdefault(('device_activities', 'id'), set()).add(target_id)
                 ranges.setdefault(('operation_attempts', 'run_id'), set()).add(identity)
                 for attempt_id, in connection.execute('SELECT id FROM operation_attempts WHERE run_id=?', (identity,)):
                     state.setdefault('operation_attempts', {})[attempt_id] = row_facts(connection, 'operation_attempts', attempt_id)
@@ -2251,7 +2259,17 @@ def _source_start_rows(context, source):
             attempts[identity] = tuple(rows.values())
         if any(row['id'] != key for key, row in activities.items()):
             raise ConsistencyError('原活动行身份与完整范围不符')
-        facts = start_facts_from_rows(source, tuple(activities.values()), tuple(runs.values()), attempts)
+        targets = {}
+        for run in runs.values():
+            identity = run['activity_id']
+            if identity is not None and identity not in activities:
+                rows = context.complete_rows('device_activities', 'id', identity)
+                target = rows.get(identity)
+                if target is None or target['id'] != identity:
+                    raise ConsistencyError('原操作目标活动缺失或身份不符')
+                targets[identity] = target
+        facts = start_facts_from_rows(source, tuple(activities.values()), tuple(runs.values()), attempts,
+            activity_targets=tuple(targets.values()))
         return facts, attempts
     except (KeyError, TypeError, ValueError) as error:
         raise EventValidationError('取消来源的原 START 完整事实不可核实') from error
