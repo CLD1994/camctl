@@ -136,5 +136,7 @@ int main(void) {
     assert(camctl_host_init(&c, NULL) == 0);
     assert(camctl_host_init(&c, NULL) == -1);
     assert(errno == EALREADY);
+    cond_failure = 1;
+    assert(camctl_host_submit("/A") == -1 && errno == EAGAIN);
     return 0;
 }

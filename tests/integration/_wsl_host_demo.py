@@ -213,7 +213,7 @@ class HostDemo:
         assert self.proc is not None
         self.proc.stdin.write(f"submit {to_wsl(plan)}\n")
         self.proc.stdin.flush()
-        assert self._reply() == "路径已接收；计划受理与执行结果请查看状态报告。"
+        assert "原计划文件可删除" in self._reply()
 
     def claim(self) -> None:
         assert self.proc is not None

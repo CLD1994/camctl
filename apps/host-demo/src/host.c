@@ -17,6 +17,12 @@
 #include <time.h>
 #include <unistd.h>
 
+typedef struct host_submission {
+    pthread_cond_t ready;
+    bool done;
+    int error;
+} host_submission;
+
 typedef struct {
     camctl_host_config config;
     char paths[6][CAMCTL_HOST_PATH_MAX + 1];
@@ -39,6 +45,7 @@ typedef struct {
     char *notification_bytes;
     size_t notification_offset, notification_length;
     int runtime_error; /* inputs_mutex 保护；无法继续启动时拒绝新路径。 */
+    int submit_start_error; /* 工作线程保存当前提交最后一次明确的启动错误。 */
 } host;
 static pthread_mutex_t instance_mutex = PTHREAD_MUTEX_INITIALIZER;
 static host *instance;
@@ -162,9 +169,26 @@ static void child_log(void *p, const char *stream, const char *data, size_t n) {
     host_log(&c->h->logger, "call=%" PRIu64 " command=%s pid=%ld stream=%s data=%.*s", c->child->id,
              command_name(c->command), (long)c->child->pid, stream, (int)n, data);
 }
-static void finish_submit(host *h) {
-    pthread_mutex_lock(&h->inputs_mutex);
+/* inputs_mutex 保护队列和调用线程持有的完成记录。 */
+static void finish_submit_locked(host *h, int error) {
+    host_input *input = host_inputs_front(&h->inputs);
+    if (!input)
+        return;
+    host_submission *submission = input->submission;
     host_inputs_pop(&h->inputs);
+    submission->error = error;
+    submission->done = true;
+    pthread_cond_signal(&submission->ready);
+}
+static void finish_submit(host *h, int error) {
+    pthread_mutex_lock(&h->inputs_mutex);
+    finish_submit_locked(h, error);
+    pthread_mutex_unlock(&h->inputs_mutex);
+}
+static void fail_submissions(host *h) {
+    pthread_mutex_lock(&h->inputs_mutex);
+    while (h->inputs.count)
+        finish_submit_locked(h, h->runtime_error);
     pthread_mutex_unlock(&h->inputs_mutex);
 }
 static void collect(host *h, host_command command) {
@@ -192,7 +216,8 @@ static void collect(host *h, host_command command) {
     host_schedule_finished(&h->schedule, command, r, now_ms(h));
     c->pid = 0;
     if (command == HOST_SUBMIT)
-        finish_submit(h);
+        finish_submit(h, r.kind == HOST_RESULT_SUCCESS ? 0 :
+                         r.kind == HOST_RESULT_ERROR ? EIO : EPROTO);
 }
 static void launch(host *h, host_command command, uint64_t now) {
     if (h->clock_failed)
@@ -220,7 +245,7 @@ static void launch(host *h, host_command command, uint64_t now) {
             host_log(&h->logger, "command=%s retry_exhausted used=%u", command_name(command),
                      s->retries_used);
             if (command == HOST_SUBMIT)
-                finish_submit(h);
+                finish_submit(h, h->submit_start_error);
         }
         return;
     }
@@ -242,6 +267,8 @@ static void launch(host *h, host_command command, uint64_t now) {
     }
     int e = host_child_spawn(c, &h->config, command, path);
     if (e) {
+        if (command == HOST_SUBMIT)
+            h->submit_start_error = e;
         host_log(&h->logger, "call=%" PRIu64 " command=%s not_started errno=%d detail=%s", id,
                  command_name(command), e, strerror(e));
         host_schedule_spawn_failed(s, command, now_ms(h));
@@ -265,7 +292,8 @@ static void *worker_main(void *p) {
         if (!h->clock_failed) {
             launch(h, HOST_RUN, now);
             launch(h, HOST_SUBMIT, now);
-        }
+        } else
+            fail_submissions(h);
         struct pollfd fds[6];
         nfds_t n = 1;
         fds[0] = (struct pollfd){h->wake[0], POLLIN, 0};
@@ -282,6 +310,7 @@ static void *worker_main(void *p) {
             pthread_mutex_lock(&h->inputs_mutex);
             h->runtime_error = e;
             pthread_mutex_unlock(&h->inputs_mutex);
+            fail_submissions(h);
             host_log(&h->logger, "poll_failed errno=%d", e);
             /* 保留进程占位，避免错误循环；该线程停止，公开领取仍可工作。 */
             return NULL;
@@ -430,14 +459,28 @@ int camctl_host_submit(const char *path) {
     pthread_mutex_unlock(&instance_mutex);
     if (!h)
         return failure(ENODEV);
+    host_submission submission = {0};
+    int e = pthread_cond_init(&submission.ready, NULL);
+    if (e)
+        return failure(e);
+    /* 入队后，完成记录必须保持有效；取消在工作线程释放该记录后生效。 */
+    int cancel_state;
+    e = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    if (e) {
+        pthread_cond_destroy(&submission.ready);
+        return failure(e);
+    }
     pthread_mutex_lock(&h->inputs_mutex);
     uint64_t id = h->next_id;
-    int e = h->runtime_error ? h->runtime_error : host_inputs_push(&h->inputs, path, id);
+    e = h->runtime_error ? h->runtime_error : host_inputs_push(&h->inputs, path, id, &submission);
     if (!e)
         h->next_id++;
     pthread_mutex_unlock(&h->inputs_mutex);
     if (e) {
         host_log(&h->logger, "submit rejected errno=%d", e);
+        pthread_cond_destroy(&submission.ready);
+        pthread_setcancelstate(cancel_state, NULL);
+        pthread_testcancel();
         return failure(e);
     }
     host_log(&h->logger, "call=%" PRIu64 " submit accepted path=%s", id, path);
@@ -445,7 +488,15 @@ int camctl_host_submit(const char *path) {
     ssize_t sent = write(h->wake[1], "x", 1);
     if (sent < 0 && errno != EAGAIN && errno != EINTR)
         host_log(&h->logger, "notification_write_failed errno=%d", errno);
-    return 0;
+    pthread_mutex_lock(&h->inputs_mutex);
+    while (!submission.done)
+        pthread_cond_wait(&submission.ready, &h->inputs_mutex);
+    e = submission.error;
+    pthread_mutex_unlock(&h->inputs_mutex);
+    pthread_cond_destroy(&submission.ready);
+    pthread_setcancelstate(cancel_state, NULL);
+    pthread_testcancel();
+    return e ? failure(e) : 0;
 }
 void camctl_host_claim(void) {
     pthread_mutex_lock(&instance_mutex);

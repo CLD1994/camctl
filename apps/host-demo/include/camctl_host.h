@@ -92,7 +92,12 @@ int camctl_host_register_motor_control_callback(camctl_host_motor_control_callba
  * 不抢先回收模块子进程；模块检查可检查的信号设置，不修改全局处置。 */
 int camctl_host_init(const camctl_host_config *config, const char *initial_plan_path);
 
-/* 复制路径；调用方保留完整写入并关闭的文件。0 不代表计划已受理。 */
+/* 阻塞至本次 submit 正常结束、输入处理结果已保存后返回 0，此时原文件可删除。
+ * 文件须完整写入并关闭，等待期间保持路径和内容不变。不等待设备动作执行结束。
+ * 0 不代表计划已受理；业务受理、拒绝及执行结果仍看状态报告。
+ * 失败或结果未知返回 -1 并设置 errno，调用方保留原文件以核实或重送。
+ * 会话错误为 EIO，输出或进程结果异常为 EPROTO；启动重试耗尽保留实际错误。
+ * 调用线程的取消延后到本次提交等待结束。 */
 int camctl_host_submit(const char *plan_path);
 
 /* 主程序决定调用时机，同步逐文件移动并覆盖同名文件，诊断异步记录。 */

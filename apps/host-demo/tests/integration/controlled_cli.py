@@ -44,4 +44,8 @@ if mode == 'empty':
 message = {'kind': 'succeeded'}
 if command == 'submit':
     message['body'] = {'needs_run': mode == 'true'}
-print(json.dumps(message))
+print(json.dumps(message), flush=True)
+if command == 'submit' and (root / 'hold-submit-exit').exists():
+    (root / 'submit-result-written').touch()
+    while (root / 'hold-submit-exit').exists():
+        time.sleep(.005)

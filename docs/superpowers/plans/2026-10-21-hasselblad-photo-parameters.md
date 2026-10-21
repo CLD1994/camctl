@@ -222,11 +222,13 @@ camctl_pytest() {
 
 **输入与交付：** 消费 H1—H6 的完整规则与执行行为；交付权威文档样例、生成后的包资源及安装版四种格式／源组合的组件证据。
 
-- [ ] **步骤 1：增加安装样例测试并确认失败。** 扩展 `test_installed_hasselblad_sample_uses_actual_unique_capability`，断言安装版 describe 导出完整规则、生成器按实际设备唯一匹配并保留明确参数；缺少必填字段必须失败，示例值不被当成自动默认值。运行 `camctl_pytest apps/camctl/tests/integration/bootstrap/test_distribution.py -q`。
-- [ ] **步骤 2：更新权威样例与夹具。** photo 样例显式写入合法格式、曝光、白平衡和对焦；生成器沿用能力查找和 `validate_precise`。用 `rg` 定位各消费者的 type-only 参数及 RAW 专用断言，按各测试目的改为独立合法样例；完整允许域仍从能力消费。
+- [x] **步骤 1：增加安装样例测试并确认失败。** 扩展 `test_installed_hasselblad_sample_uses_actual_unique_capability`，断言安装版 describe 导出完整规则、生成器按实际设备唯一匹配并保留明确参数；缺少必填字段必须失败，示例值不被当成自动默认值。运行 `camctl_pytest apps/camctl/tests/integration/bootstrap/test_distribution.py -q`。
+- [x] **步骤 2：更新权威样例与夹具。** photo 样例显式写入合法格式、曝光、白平衡和对焦；生成器沿用能力查找和 `validate_precise`。用 `rg` 定位各消费者的 type-only 参数及 RAW 专用断言，按各测试目的改为独立合法样例；完整允许域仍从能力消费。
 - [ ] **步骤 3：扩展工具边界替身。** `_hasselblad_tool_source` 支持本计划需要的设置 argv、双格式文件和独立机内名称，严格按 `hb_cli` 文本／文件契约返回。参数允许域不在替身另维护；命令顺序与副作用次数由驱动测试及安装链断言。
-- [ ] **步骤 4：同步并验证安装资源。** 执行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/sync_resources.py --root .` 和同命令的 `--check`；安装测试从 wheel 读取样例与生成器。将既有 host／device 分发测试参数化为 RAW／JPEG，核对原图／预览各两次取回的身份、长度、摘要及工作副本回收条件。
+- [x] **步骤 4：同步并验证安装资源。** 执行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/sync_resources.py --root .` 和同命令的 `--check`；安装测试从 wheel 读取样例与生成器。将既有 host／device 分发测试参数化为 RAW／JPEG，核对原图／预览各两次取回的身份、长度、摘要及工作副本回收条件。
 - [ ] **步骤 5：验证通过并形成阶段提交。** 执行 `camctl_pytest apps/camctl/tests/integration/bootstrap -q`，再运行根 `tests/integration/test_device_capability_declarations.py` 的安装能力测试。建议提交名为“同步 Hasselblad 完整拍摄样例与安装资源”。
+
+**阶段证据：** `7ecee26` 已通过独立规格与质量评审，并集成至 `905b2f6`。2026-10-21 UTC，在该集成候选上，Python 3.11.16、Node.js 24.20.0 下完成安装分发矩阵 9 项及 wheel／资源检查 2 项，同一命令 11 项通过；另行完成 Hasselblad 清理接缝 2 项、安装能力完整文件 6 项及客户端参数变体 149 项，均退出 0。27 项包资源已同步并核对。工具替身已严格承接完整 P／ISO 100／自动白平衡／MF 样例，步骤 3 的其他曝光、白平衡及对焦场景由 H8 安装链继续扩展。步骤 5 的完整 bootstrap 尚未闭合：此前完整运行保留 1319 passed、17 failed、1 skipped；六项共享事务替身错误已经独立修正并验证，另十一项等待 OSMO 分段运行时接通，仍需在完整候选上取得全目录结果。已通过的合同、资源和相关分发阶段供 H8 继续开发。
 
 ## H8：完成安装版跨组件业务验收
 

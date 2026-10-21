@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <pthread.h>
+#include <poll.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <time.h>
@@ -17,6 +18,7 @@
 #include <unistd.h>
 static void handle(int sig) { (void)sig; }
 static atomic_bool break_clock;
+static atomic_bool break_poll;
 static atomic_bool suppress_kill, hold_after_kill;
 static atomic_int scan_mode, group_signals;
 static atomic_bool final_scan_delayed;
@@ -24,6 +26,29 @@ static atomic_uint_fast64_t parsed_at, retry_gap;
 static atomic_int run_attempts;
 static uint32_t final_scan_delay_ms;
 static bool fail_completion_clock;
+typedef struct {
+    char path[CAMCTL_HOST_PATH_MAX + 1];
+    pthread_t thread;
+    atomic_bool done;
+    int result, error;
+} submission;
+static submission submissions[16];
+static size_t submission_count;
+int __real_poll(struct pollfd *, nfds_t, int);
+int __wrap_poll(struct pollfd *fds, nfds_t count, int timeout) {
+    if (atomic_load(&break_poll)) {
+        errno = EIO;
+        return -1;
+    }
+    return __real_poll(fds, count, timeout);
+}
+static void *submit_in_thread(void *context) {
+    submission *s = context;
+    s->result = camctl_host_submit(s->path);
+    s->error = errno;
+    atomic_store(&s->done, true);
+    return NULL;
+}
 int __real_clock_gettime(clockid_t, struct timespec *);
 static uint64_t observation_ns(void) {
     struct timespec value;
@@ -162,7 +187,33 @@ int main(int argc, char **argv) {
     char line[8192];
     while (fgets(line, sizeof(line), stdin)) {
         line[strcspn(line, "\n")] = 0;
-        if (!strncmp(line, "submit ", 7)) {
+        if (!strncmp(line, "start-submit ", 13)) {
+            assert(submission_count < sizeof(submissions) / sizeof(submissions[0]));
+            submission *s = &submissions[submission_count];
+            assert(strlen(line + 13) <= CAMCTL_HOST_PATH_MAX);
+            strcpy(s->path, line + 13);
+            assert(!pthread_create(&s->thread, NULL, submit_in_thread, s));
+            printf("started %zu\n", submission_count++);
+        } else if (!strncmp(line, "cancel-submit ", 14)) {
+            size_t index = (size_t)strtoul(line + 14, NULL, 10);
+            assert(index < submission_count);
+            assert(!pthread_cancel(submissions[index].thread));
+            puts("cancel-requested");
+        } else if (!strncmp(line, "join-submit ", 12)) {
+            size_t index = (size_t)strtoul(line + 12, NULL, 10);
+            assert(index < submission_count);
+            void *result;
+            assert(!pthread_join(submissions[index].thread, &result));
+            puts(result == PTHREAD_CANCELED ? "canceled" : "returned");
+        } else if (!strncmp(line, "submit-result ", 14)) {
+            size_t index = (size_t)strtoul(line + 14, NULL, 10);
+            assert(index < submission_count);
+            submission *s = &submissions[index];
+            if (atomic_load(&s->done))
+                printf("submit %d errno=%d\n", s->result, s->result ? s->error : 0);
+            else
+                puts("pending");
+        } else if (!strncmp(line, "submit ", 7)) {
             int r = camctl_host_submit(line + 7);
             printf("submit %d\n", r);
             memset(line, 'x', strlen(line));
@@ -188,6 +239,9 @@ int main(int argc, char **argv) {
         } else if (!strcmp(line, "break-clock")) {
             atomic_store(&break_clock, true);
             puts("clock-failed");
+        } else if (!strcmp(line, "break-poll")) {
+            atomic_store(&break_poll, true);
+            puts("poll-failed");
         } else if (!strcmp(line, "log-state")) {
             pthread_mutex_lock(&log_gate);
             printf("log-entered %d\n", log_entered);
