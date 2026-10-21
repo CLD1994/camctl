@@ -111,6 +111,39 @@ async def test_frozen_members_roundtrip_and_child_only_history_count(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_member_batch_reuses_page_proof_only_within_one_read(tmp_path, monkeypatch):
+    from camctl.persistence.repositories import segments
+
+    owned, runtime, repo, ref, members = await _world(tmp_path, indexes=(1, 2, 3, 4, 5, 6))
+    try:
+        _ok(repo.append_members(ref, members, runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        reads = []
+        original = segments._at
+
+        def observed_page(connection, event_id):
+            reads.append(event_id)
+            return original(connection, event_id)
+
+        monkeypatch.setattr(segments, "_at", observed_page)
+        first = repo.read_members(ref, None, 3, owned)
+        assert len(first.items) == 3 and first.next_cursor is not None
+        assert reads == [ref.final_page_event_id]
+        reads.clear()
+        last = repo.read_members(ref, first.next_cursor, 3, owned)
+        assert len(last.items) == 3 and last.next_cursor is None
+        assert reads == [ref.final_page_event_id]
+        owned.connection.execute(
+            "UPDATE result_page_files SET family_stem='changed' WHERE page_event_id=?",
+            (ref.final_page_event_id,),
+        )
+        with pytest.raises(ConsistencyError):
+            repo.read_members(ref, None, 3, owned)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('case',['duplicate','false_role','wrong_page','false_ownership'])
 async def test_member_save_rejects_conflicting_actual_facts(tmp_path,case):
     owned,runtime,repo,ref,members=await _world(tmp_path,own=case!='false_ownership')

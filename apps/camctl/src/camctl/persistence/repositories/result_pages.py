@@ -1256,7 +1256,7 @@ def _replay_page_context(connection, event, original, transaction):
         with closing(connection.execute(
                 "SELECT id,created_event_id FROM device_files WHERE identity_key=? LIMIT 2",
                 (identity_key,))) as cursor:
-            candidates = cursor.fetchall()
+            candidates = cursor.fetchmany(2)
         if len(candidates) > 1:
             raise ConsistencyError("原结果页身份对应多个设备文件行")
         if not candidates or candidates[0][1] > boundary.last_event_id:
@@ -1420,7 +1420,10 @@ class _ReplayPageReads:
                 "SELECT id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,"
                 "family_directory,family_stem,family_role FROM result_page_files"
                 " WHERE page_event_id=? ORDER BY id", (append.event_id,))) as cursor:
-            relations = cursor.fetchall()
+            relations = cursor.fetchmany(128)
+            extra_relation = cursor.fetchone()
+        if extra_relation is not None:
+            raise ConsistencyError("原键结果页关系超过单页容量")
         if not file_ids:
             if (expected_index is not None or index_ids or relations
                     or transaction.last_event_id != append.event_id):

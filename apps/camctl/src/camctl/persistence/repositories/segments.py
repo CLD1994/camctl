@@ -93,8 +93,14 @@ def _position(row):
     return (row['directory_number'] or 0,row['segment_index'] or 0,row['identity'],row['id'])
 
 
-def _read_member(db,row):
-    saved,_ = _at(db,row['page_event_id'])
+def _read_member(db, row, *, page_cache=None):
+    page_id = row['page_event_id']
+    saved_page = None if page_cache is None else page_cache.get(page_id)
+    if saved_page is None:
+        saved_page = _at(db, page_id)
+        if page_cache is not None:
+            page_cache[page_id] = saved_page
+    saved, _ = saved_page
     entry = next((entry for entry in saved.page.entries if entry.identity==row['identity']),None)
     if entry is None or (row['identity'],row['file_id']) not in saved.file_ids:
         raise ConsistencyError('成员缺少原实际页和真实文件引用')
@@ -156,9 +162,21 @@ def read_segment_output_candidates(ref,cursor,batch,owned):
 
 def read_segment_members(ref,cursor,batch,owned):
     """固定集合的完整顺序页；返回独立有限值，读错误直接传播。"""
-    db=owned.connection; row=_set(db,ref,fixed=True)
     if type(batch) is not int or not 1<=batch<=128:
         raise ValueError('分段读取批次必须是 1—128')
+    db = owned.connection
+    opened = not db.in_transaction
+    if opened:
+        db.execute('BEGIN')
+    try:
+        return _read_segment_members(ref, cursor, batch, db)
+    finally:
+        if opened:
+            db.execute('ROLLBACK')
+
+
+def _read_segment_members(ref, cursor, batch, db):
+    row = _set(db, ref, fixed=True)
     after=(0,0,'',0)
     if cursor is not None:
         if not isinstance(cursor,SegmentMemberCursor) or cursor.ref!=ref:
@@ -170,7 +188,10 @@ def read_segment_members(ref,cursor,batch,owned):
     with closing(db.execute(f'SELECT id FROM segment_members WHERE set_id=? AND {_ORDER}>(?,?,?,?) ORDER BY {_ORDER[1:-1]} LIMIT ?',
         (row['id'],*after,batch))) as reader:
         ids=reader.fetchmany(batch)
-    records=tuple(_read_member(db,row_facts(db,'segment_members',value[0])) for value in ids[:batch])
+    # 缓存只服务本次快照中的一批成员，数量不超过 batch；不跨读取复用。
+    page_cache = {}
+    records=tuple(_read_member(db,row_facts(db,'segment_members',value[0]),
+                              page_cache=page_cache) for value in ids[:batch])
     position=None if not ids else _position(row_facts(db,'segment_members',ids[-1][0]))
     more=position is not None and len(ids)==batch and _one(db,f'SELECT 1 FROM segment_members WHERE set_id=? AND {_ORDER}>(?,?,?,?) LIMIT 1',(row['id'],*position)) is not None
     last=SegmentMemberCursor(ref,position) if more else None
