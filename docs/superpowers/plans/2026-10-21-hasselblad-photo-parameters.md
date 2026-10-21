@@ -224,11 +224,11 @@ camctl_pytest() {
 
 - [x] **步骤 1：增加安装样例测试并确认失败。** 扩展 `test_installed_hasselblad_sample_uses_actual_unique_capability`，断言安装版 describe 导出完整规则、生成器按实际设备唯一匹配并保留明确参数；缺少必填字段必须失败，示例值不被当成自动默认值。运行 `camctl_pytest apps/camctl/tests/integration/bootstrap/test_distribution.py -q`。
 - [x] **步骤 2：更新权威样例与夹具。** photo 样例显式写入合法格式、曝光、白平衡和对焦；生成器沿用能力查找和 `validate_precise`。用 `rg` 定位各消费者的 type-only 参数及 RAW 专用断言，按各测试目的改为独立合法样例；完整允许域仍从能力消费。
-- [ ] **步骤 3：扩展工具边界替身。** `_hasselblad_tool_source` 支持本计划需要的设置 argv、双格式文件和独立机内名称，严格按 `hb_cli` 文本／文件契约返回。参数允许域不在替身另维护；命令顺序与副作用次数由驱动测试及安装链断言。
+- [x] **步骤 3：扩展工具边界替身。** `_hasselblad_tool_source` 支持本计划需要的设置 argv、双格式文件和独立机内名称，严格按 `hb_cli` 文本／文件契约返回。参数允许域不在替身另维护；命令顺序与副作用次数由驱动测试及安装链断言。
 - [x] **步骤 4：同步并验证安装资源。** 执行 `apps/camctl/.venv311/bin/python apps/camctl/scripts/sync_resources.py --root .` 和同命令的 `--check`；安装测试从 wheel 读取样例与生成器。将既有 host／device 分发测试参数化为 RAW／JPEG，核对原图／预览各两次取回的身份、长度、摘要及工作副本回收条件。
 - [ ] **步骤 5：验证通过并形成阶段提交。** 执行 `camctl_pytest apps/camctl/tests/integration/bootstrap -q`，再运行根 `tests/integration/test_device_capability_declarations.py` 的安装能力测试。建议提交名为“同步 Hasselblad 完整拍摄样例与安装资源”。
 
-**阶段证据：** `7ecee26` 已通过独立规格与质量评审，并集成至 `905b2f6`。2026-10-21 UTC，在该集成候选上，Python 3.11.16、Node.js 24.20.0 下完成安装分发矩阵 9 项及 wheel／资源检查 2 项，同一命令 11 项通过；另行完成 Hasselblad 清理接缝 2 项、安装能力完整文件 6 项及客户端参数变体 149 项，均退出 0。27 项包资源已同步并核对。工具替身已严格承接完整 P／ISO 100／自动白平衡／MF 样例，步骤 3 的其他曝光、白平衡及对焦场景由 H8 安装链继续扩展。步骤 5 的完整 bootstrap 尚未闭合：此前完整运行保留 1319 passed、17 failed、1 skipped；六项共享事务替身错误已经独立修正并验证，另十一项等待 OSMO 分段运行时接通，仍需在完整候选上取得全目录结果。已通过的合同、资源和相关分发阶段供 H8 继续开发。
+**阶段证据：** `7ecee26` 已通过独立规格与质量评审，并集成至 `905b2f6`。2026-10-21 UTC，在该集成候选上，Python 3.11.16、Node.js 24.20.0 下完成安装分发矩阵 9 项及 wheel／资源检查 2 项，同一命令 11 项通过；另行完成 Hasselblad 清理接缝 2 项、安装能力完整文件 6 项及客户端参数变体 149 项，均退出 0。27 项包资源已同步并核对。工具替身的代表设置序列、MF／AF-S 和安装 Python 选择由 `94bc084` 扩展，经 `f739a01` 限定复核后集成至 `3489db6`；缺省严格反例 4 项与 host RAW／JPEG 重复取回 2 项在任务树同一命令中通过，协调分支另行核对缺省严格反例 4 项通过。步骤 5 的完整 bootstrap 尚未闭合：此前完整运行保留 1319 passed、17 failed、1 skipped；六项共享事务替身错误已经独立修正并验证，另十一项等待 OSMO 分段运行时接通，仍需在完整候选上取得全目录结果。已通过的合同、资源和相关分发阶段供 H8 继续开发。
 
 ## H8：完成安装版跨组件业务验收
 
@@ -239,11 +239,13 @@ camctl_pytest() {
 **输入与交付：** 消费安装 wheel、真实客户端、C HostDemo、H7 的接口受约束工具替身；交付四种组合的独立软件证据和精确参数的三端判定结果。
 
 - [x] **步骤 1：建立三端参数反例集。** 将 `validate-parameters` 输入改为显式指定 `action_type`、`device_id`、`action_name`，浏览器、客户端后端和导出计划共同使用。新测试 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` 比较浏览器、客户端后端和安装版 camctl 的接受／拒绝：合法分支、短快门、色温边界、错误模式字段、额外 tint、缺项及 `null`。反例集合只定义一次，不复制整份档位目录；更新延时摄影原调用方后确认其原行为保持。
-- [ ] **步骤 2：建立四种安装链并确认失败。** `test_installed_hasselblad_photo_delivery_roundtrip` 参数化 RAW×host、RAW×device、JPEG×host、JPEG×device。每个独立请求恰执行一次 capture，从客户端选值、预设重开和导出开始，经 C host 提交、安装版 CLI 执行、SQLite／历史／报告到正式输出；比较三个短快门在草稿、预设、导出正文、受理、生效参数、历史恢复、报告及实际 argv 中的精确数学值，并核对双文件身份。只在工具进程边界替换 hb_cli。
+- [x] **步骤 2：建立四种安装链并确认失败。** `test_installed_hasselblad_photo_roundtrip` 参数化 RAW×host、RAW×device、JPEG×host、JPEG×device。每个独立请求恰执行一次 capture，从客户端选值、预设重开和导出开始，经 C host 提交、安装版 CLI 执行、SQLite／历史／报告到正式输出；比较三个短快门在草稿、预设、导出正文、受理、生效参数、历史恢复、报告及实际 argv 中的精确数学值，并核对双文件身份。只在工具进程边界替换 hb_cli。
 - [ ] **步骤 3：补齐取回及恢复。** 分别明确取回原图和预览并重复取回，验证新 delivery 与原 output／源动作身份。主机正式源在相机不可用时仍可取回；设备正式源使用原机内 basename、绑定及读取种类。注入原结果保存后中断和提交回执丢失，核实同一申请恢复且不重复设置、调焦或拍摄；同一公共请求重送也不重复登记。
 - [ ] **步骤 4：验证文件导入与 ACK。** 通过真实 `Files.upload` 导入交付文件，覆盖报告先到、媒体先到及部分文件未到。核对 JPEG 两角色不会因 MIME 或相同内容合并，报告同历史边界重建一致；客户端导出累计 ACK 后，camctl 确认水位符合报告覆盖，媒体缺失单独呈现。单张动作仍省略公共 `result`，按原字段报告设备执行情况；步骤细节保存在内部，失败仍使用现有通用摘要。
 - [ ] **步骤 5：执行根组合测试。** 先执行 `apps/camctl/.venv311/bin/python -m pytest tests/integration/test_hasselblad_photo_parameters.py tests/integration/test_hasselblad_photo_roundtrip.py -q`，再按根测试指南运行被本次接缝影响的能力、时间参数及 C host 回归；保留各组合的计划、报告、数据库、工具轨迹、文件摘要和 ACK 证据。
 - [ ] **步骤 6：完成软件门禁。** 按下节顺序运行所需完整范围，确认全部通过后更新 `docs/camctl/verification.md`、`docs/client/verification.md`、`docs/camctl/integration-readiness.md` 和硬件交接中的软件状态；建议提交名为“验收 Hasselblad 安装版完整参数与双格式交付链”。
+
+**正常链阶段证据：** `a568c3e` 的网页／文件上传接缝、`94bc084` 的正常链及 `f739a01` 的原 START／历史核验均通过独立评审，已集成至 `3489db6`。任务树以 Python 3.11.16、Node.js 24.20.0，完成 RAW／JPEG × host／device × 三个短快门共 12 个独立软件世界，均通过安装版 CLI、真实 C host、四次独立取回、实际文件上传及网页累计 ACK。该次运行有两份安装测试入口源码，差异只涉及未启用的故障定义；两份原字节及逐例来源均保留，不称为固定入口字节的一次完整门禁。环境来源和 READ 临时目录回收各另行补验一例通过。原 START 版本化结果、三个实际事务边界及完整历史对象已在旧 12 份一致数据库上只读事后核验；当前 RAW／host、JPEG／device 两例另以新安装进程核对四次取回、原请求重送及 ACK 前后的原历史事实，2 项通过。协调分支的历史反例 6 项通过。步骤 3 的故障恢复、步骤 4 的原报告重建及步骤 5—6 的完整联合与软件门禁仍待完成；以上不包含 ARM 或真实相机验收。
 
 ### 软件门禁的范围与顺序
 
