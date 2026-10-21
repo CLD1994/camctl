@@ -59,9 +59,7 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
         found = cursor.fetchone()
     run = after("operation_runs", None if found is None else row_facts(
         connection, "operation_runs", found[0]))
-    used = 0
-    all_no_effect = True
-    all_not_dispatched = True
+    count = used = unresolved = dispatched = 0
     if run is not None:
         if (activity is None or run["kind"] != int(_KIND.START)
                 or run["action_id"] != action["id"]
@@ -96,8 +94,6 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
 
             unresolved += int(unresolved_result(final)) - int(unresolved_result(original))
             dispatched += int(dispatched_result(final)) - int(dispatched_result(original))
-        all_no_effect = unresolved == 0
-        all_not_dispatched = dispatched == 0
     with closing(connection.execute(
         "SELECT 1 FROM operation_runs WHERE action_id = ? AND kind = ?"
         " AND query_purpose = ? AND status IN (?, ?) LIMIT 1",
@@ -105,6 +101,26 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
          int(_RUN.PENDING), int(_RUN.ACTIVE)),
     )) as cursor:
         pending_confirmation = cursor.fetchone() is not None
+    attempts = ()
+    if is_hasselblad_photo(action) and used:
+        with closing(connection.execute(
+            "SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (run["id"],)
+        )) as cursor:
+            ids = [row[0] for row in cursor.fetchall()]
+        attempts = [after("operation_attempts", row_facts(connection, "operation_attempts", identity)) for identity in ids]
+    return start_facts_from_summary(action, activity, run,
+        (count, used, unresolved, dispatched), pending_confirmation, attempts)
+
+
+def start_facts_from_summary(action, activity, run, statistics, pending_confirmation, entry_attempts=()):
+    """SQL 聚合和完整原行共用的 START 分区；不推断会话许可。"""
+    count, used, unresolved, dispatched = statistics
+    if action["execution_started"] and activity is None:
+        raise ConsistencyError(f"已执行拍摄缺少设备活动: {action['id']}")
+    if run is not None and (activity is None or run["kind"] != int(_KIND.START)
+            or run["action_id"] != action["id"] or run["activity_id"] != activity["id"]
+            or count != used or used != run["attempts_used"]):
+        raise ConsistencyError(f"启动责任或累计次数与原事实不符: {action['id']}")
     dispatch = None if activity is None else int(_DISPATCH(activity["dispatch_state"]))
     if activity is None:
         return StartFacts(None, run, used, run is None and not pending_confirmation, None)
@@ -112,19 +128,53 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
     if used == 0:
         not_started = dispatch == int(_DISPATCH.NOT_DISPATCHED) and no_start_observation
     else:
-        not_started = (all_no_effect and no_start_observation
+        not_started = (unresolved == 0 and no_start_observation
                        and dispatch != int(_DISPATCH.SUCCESS_RETURNED))
         if not_started and dispatch == int(_DISPATCH.MAY_HAVE_DISPATCHED):
-            dispatch = int(_DISPATCH.NOT_DISPATCHED if all_not_dispatched
+            dispatch = int(_DISPATCH.NOT_DISPATCHED if dispatched == 0
                            else _DISPATCH.REJECTED_WITHOUT_EFFECT)
     if is_hasselblad_photo(action) and used:
-        with closing(connection.execute(
-            "SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (run["id"],)
-        )) as cursor:
-            ids = [row[0] for row in cursor.fetchall()]
-        attempts = [after("operation_attempts", row_facts(connection, "operation_attempts", identity)) for identity in ids]
-        not_started = entry_from_rows(action, activity, attempts) is EntryPhase.BLOCKED
+        not_started = entry_from_rows(action, activity, entry_attempts) is EntryPhase.BLOCKED
     return StartFacts(activity, run, used, not_started and not pending_confirmation, dispatch)
+
+
+def start_facts_from_rows(action, activities, runs, attempts_by_run):
+    """完整原行读取层生成有限统计；所有 run 及其尝试都必须可核实。"""
+    if len(activities) > 1 or any(row["action_id"] != action["id"] for row in activities):
+        raise ConsistencyError("原拍摄活动归属或唯一性不符")
+    if set(attempts_by_run) != {run["id"] for run in runs}:
+        raise ConsistencyError("原操作与完整尝试范围不一致")
+    starts, pending_confirmation = [], False
+    for run in runs:
+        if run["action_id"] != action["id"] or run["id"] not in attempts_by_run:
+            raise ConsistencyError("原操作责任缺少归属或完整尝试范围")
+        if run["activity_id"] is not None and (not activities or run["activity_id"] != activities[0]["id"]):
+            raise ConsistencyError("原操作关联活动与动作不符")
+        attempts = attempts_by_run[run["id"]]
+        numbers = {attempt["attempt_no"] for attempt in attempts}
+        if (any(attempt["run_id"] != run["id"] for attempt in attempts)
+                or len(numbers) != len(attempts) or len(attempts) != run["attempts_used"]
+                or len(attempts) != max(numbers, default=0)
+                or (numbers and min(numbers) != 1)):
+            raise ConsistencyError("原操作尝试的归属或连续累计次数不符")
+        if run["responsibility_key"] == f"start/{action['id']}":
+            starts.append(run)
+        if (run["kind"] == int(_KIND.QUERY_ACTIVITY)
+                and run["query_purpose"] == int(_PURPOSE.START_CONFIRMATION)
+                and run["status"] in (int(_RUN.PENDING), int(_RUN.ACTIVE))):
+            pending_confirmation = True
+    if len(starts) > 1:
+        raise ConsistencyError("原 START 责任不唯一")
+    run = starts[0] if starts else None
+    attempts = () if run is None else attempts_by_run[run["id"]]
+    unresolved = sum(attempt["status"] == int(_ATTEMPT.RUNNING)
+        or attempt["effect_state"] != int(_EFFECT.NO_EFFECT)
+        or attempt["result_event_id"] is None for attempt in attempts)
+    dispatched = sum(attempt["result_json"] is not None
+        and attempt["result_json"]["settlement"]["basis"] != "not_dispatched" for attempt in attempts)
+    return start_facts_from_summary(action, activities[0] if activities else None, run,
+        (len(attempts), max((a["attempt_no"] for a in attempts), default=0), unresolved, dispatched),
+        pending_confirmation, attempts)
 
 
 def release_basis_holds(facts: Mapping[str, Any]) -> bool:

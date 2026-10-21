@@ -378,7 +378,7 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
                  cancel_action: bool = False, legacy: bool = False,
                  wall: list[int] | None = None, results=None, evidence=None,
                  driver_factory=None, storage="host", capture_format="raw",
-                 extra_actions=(), photo_group=None, photo_focus=None, start_first=True):
+                 extra_actions=(), photo_group=None, photo_focus=None, start_first=True, catalog_factory=None):
     cfg = _config(tmp_path, storage=storage)
     state_db = Path(cfg.paths.state_db)
     initialized = initialize_state(cfg, state_db)
@@ -407,7 +407,8 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
     if cancel_action:
         actions.append({"name": "取消单张", "type": "cancel_task",
                         "params": {"target": {"action_instance_id": "1"}}})
-    catalog = (_LegacyPhotoCatalog() if legacy else build_catalog(
+    catalog = (catalog_factory(cfg) if catalog_factory is not None else
+        _LegacyPhotoCatalog() if legacy else build_catalog(
         cfg, DriverDefinitions({DRIVER_ID: driver_definition()})))
     accepted = AcceptanceRepository().process_input(ProcessInput(
         ParsedInput("hasselblad.json", {

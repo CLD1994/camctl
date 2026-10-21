@@ -47,7 +47,8 @@ class TargetSettlement:
                  occurred_at: Callable[[], int], work_files: Any = None,
                  withdrawal_execute: Callable[[int], Awaitable[bool]] | None = None,
                  withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None,
-                 cleanup_pending: Callable[[Any, int], bool] | None = None) -> None:
+                 cleanup_pending: Callable[[Any, int], bool] | None = None,
+                 pending_origin_settlements: dict | None = None) -> None:
         self._owned = owned
         self._outputs = outputs
         self._cancellations = cancellations
@@ -56,6 +57,7 @@ class TargetSettlement:
         self._withdrawal_execute = withdrawal_execute
         self._withdrawal_resume = withdrawal_resume
         self._cleanup_pending = cleanup_pending
+        self._pending_origin_settlements = {} if pending_origin_settlements is None else pending_origin_settlements
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
         row = self._owned.connection.execute(
@@ -279,4 +281,5 @@ class TargetSettlement:
 
         return CancellationRuntime(
             owned=self._owned, repository=self._cancellations,
-            settlement=self, occurred_at=self._occurred_at)
+            settlement=self, occurred_at=self._occurred_at,
+            pending_origin_settlements=self._pending_origin_settlements)

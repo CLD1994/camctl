@@ -311,33 +311,69 @@ class _FixCancelTargetsCommand:
                 tuple(sorted(self._state["cancel_items"]))))
 
     def _load_links(self, connection, obtain_ids: list[int]) -> ReadCoverage:
-        """完整加载候选关联及来源，HB 的入口事实不能由固定标签替代。"""
+        """从原地址加载完整直接范围，再读双向关联；不由提交标签选范围。"""
+        from camctl.cancellation.targets import resolve_cancel_target
+        origin = self._state["actions"][self._command.action_id]
+        target = _saved_cancel_target(origin)
+        ranges = {}
+        actions = self._state.setdefault("actions", {})
+        plans = self._state.setdefault("plans", {})
+        if target.action_instance_id is not None:
+            identities = {target.action_instance_id}
+        else:
+            if target.request_id is not None:
+                request_id = parse_object_id(target.request_id)
+                ranges[("plans", "request_id")] = {request_id}
+                plan_ids = [row[0] for row in connection.execute(
+                    "SELECT id FROM plans WHERE request_id=?", (request_id,))]
+            else:
+                plan_ids = [target.plan_instance_id]
+            identities = set()
+            ranges[("plans", "id")] = set(plan_ids)
+            ranges[("actions", "plan_id")] = set(plan_ids)
+            for plan_id in plan_ids:
+                plan = row_facts(connection, "plans", plan_id)
+                if plan is not None:
+                    plans[plan_id] = plan
+                identities.update(row[0] for row in connection.execute(
+                    "SELECT id FROM actions WHERE plan_id=?", (plan_id,)))
+        resolution = resolve_cancel_target(target, SqliteCancelLookup(connection))
+        if resolution.missing or resolution.lookup_failed is not None:
+            raise ConsistencyError("原取消地址不能可靠解析为完整直接范围")
+        direct = resolution.action_ids
         links = self._state.setdefault("auto_preview_links", {})
-        identities = set(obtain_ids)
-        for link_id, in connection.execute(
-                "SELECT id FROM auto_preview_links WHERE obtain_action_id IN (%s) ORDER BY id"
-                % ",".join("?" * len(obtain_ids)), obtain_ids):
-            link = row_facts(connection, "auto_preview_links", link_id)
-            links[link_id] = link
-            if link["source_action_id"] is not None:
-                identities.add(link["source_action_id"])
-        ranges = {("auto_preview_links", "obtain_action_id"): set(obtain_ids),
-                  ("actions", "id"): identities, ("plans", "id"): set()}
+        ranges[("auto_preview_links", "source_action_id")] = set(direct)
+        for source_id in direct:
+            for link_id, in connection.execute(
+                    "SELECT id FROM auto_preview_links WHERE source_action_id=?", (source_id,)):
+                links[link_id] = row_facts(connection, "auto_preview_links", link_id)
+        obtains = set(obtain_ids) | set(direct) | {link["obtain_action_id"] for link in links.values()}
+        ranges[("auto_preview_links", "obtain_action_id")] = obtains
+        for obtain_id in obtains:
+            for link_id, in connection.execute(
+                    "SELECT id FROM auto_preview_links WHERE obtain_action_id=?", (obtain_id,)):
+                links[link_id] = row_facts(connection, "auto_preview_links", link_id)
+        scope_identities = obtains | {link["source_action_id"] for link in links.values() if link["source_action_id"] is not None}
+        identities.update(scope_identities)
+        ranges[("actions", "id")] = identities
         from camctl.devices.start_entry import is_hasselblad_photo
         for identity in identities:
             action = row_facts(connection, "actions", identity)
             if action is None:
                 raise ConsistencyError("固定取消来源或目标动作不存在")
-            self._state.setdefault("actions", {})[identity] = action
+            actions[identity] = action
             plan = row_facts(connection, "plans", action["plan_id"])
             if plan is None:
                 raise ConsistencyError("固定取消来源或目标缺少原计划")
-            self._state.setdefault("plans", {})[plan["id"]] = plan
-            ranges[("plans", "id")].add(plan["id"])
-            if is_hasselblad_photo(action):
-                coverage = include_photo_entry_rows(connection, action, self._state, self._owners)
-                for key, values in coverage.ranges.items():
-                    ranges.setdefault(key, set()).update(values)
+            plans[plan["id"]] = plan
+            ranges.setdefault(("plans", "id"), set()).add(plan["id"])
+        if any(is_hasselblad_photo(actions[identity]) for identity in scope_identities):
+            for identity in direct:
+                action = actions[identity]
+                if action["type"] in (1, 2, 3):
+                    coverage = include_photo_entry_rows(connection, action, self._state, self._owners)
+                    for key, values in coverage.ranges.items():
+                        ranges.setdefault(key, set()).update(values)
         return ReadCoverage({key: frozenset(values) for key, values in ranges.items()})
 
     def _reuse(self, connection, saved) -> CommandPlan:
@@ -359,8 +395,9 @@ class _FixCancelTargetsCommand:
             for event in saved
             for row in event["body"]["rows"]
             if row["table"] == "cancel_items"}
-        if created != {(target.action_id, target.basis.value, target.cancellation_effect.value)
-                       for target in command.targets.targets}:
+        if (len(created) != len(command.targets.targets)
+                or created != {(target.action_id, target.basis.value, target.cancellation_effect.value)
+                               for target in command.targets.targets}):
             raise TransactionError("目标固定的成员集合与重送输入不同")
         return CommandPlan(
             events=(), owners=self._owners, state_rows=self._state,
@@ -1524,9 +1561,11 @@ class _FinishOriginCanceledCommand:
                 f" {command.action_id}")
         items = _load_all_items(connection, self._state, self._owners,
                                 command.action_id)
-        if not items:
-            raise TransactionError(
-                f"取消动作没有可收场成员: {command.action_id}")
+        if action["target_selection_state"] == _TARGET_PENDING:
+            if items:
+                raise ConsistencyError("待固定取消动作不能已有成员")
+        elif action["target_selection_state"] != _TARGET_FIXED or not items:
+            raise TransactionError("取消收场要求可靠待固定空集合或已固定非空集合")
         for item in items.values():
             if item["status"] in (_ITEM_PENDING, _ITEM_RUNNING):
                 raise TransactionError(
@@ -1619,9 +1658,10 @@ def _load_all_items(connection, state, owners, action_id):
     items = {}
     for item_id in ids:
         item = row_facts(connection, "cancel_items", item_id)
-        if item is not None:
-            items[item_id] = item
-            owners[("cancel_items", item_id)] = ("action", action_id)
+        if item is None:
+            raise ConsistencyError("完整取消成员查询与原行读取矛盾")
+        items[item_id] = item
+        owners[("cancel_items", item_id)] = ("action", action_id)
     state["cancel_items"] = dict(items)
     return items
 
@@ -2196,106 +2236,145 @@ def _guard_photo_entry_request(event, context, request, created, origin_id):
             raise EventValidationError('入口取消的实际同组应用结构与原完整申请不符')
 
 
+def _source_start_rows(context, source):
+    from camctl.persistence.repositories.capture_facts import start_facts_from_rows
+    try:
+        activities = context.complete_rows('device_activities', 'action_id', source['id'])
+        runs = context.complete_rows('operation_runs', 'action_id', source['id'])
+        attempts = {}
+        for identity, run in runs.items():
+            if run['id'] != identity:
+                raise ConsistencyError('原操作行身份与完整范围不符')
+            rows = context.complete_rows('operation_attempts', 'run_id', identity)
+            if any(row['id'] != key for key, row in rows.items()):
+                raise ConsistencyError('原尝试行身份与完整范围不符')
+            attempts[identity] = tuple(rows.values())
+        if any(row['id'] != key for key, row in activities.items()):
+            raise ConsistencyError('原活动行身份与完整范围不符')
+        facts = start_facts_from_rows(source, tuple(activities.values()), tuple(runs.values()), attempts)
+        return facts, attempts
+    except (KeyError, TypeError, ValueError) as error:
+        raise EventValidationError('取消来源的原 START 完整事实不可核实') from error
+
+
 def _photo_preview_source_allowed(context, source, reserved_sources, *, allow_pending_reserved=False):
     """仅消费原完整范围；取消及终态优先，其余按整次 START 入口分类。"""
     from camctl.devices.start_entry import EntryPhase, entry_from_rows
-    activities = context.complete_rows('device_activities', 'action_id', source['id'])
-    runs = context.complete_rows('operation_runs', 'action_id', source['id'])
-    starts = [run for run in runs.values() if run['responsibility_key'] == f"start/{source['id']}"]
-    if len(activities) > 1 or len(starts) > 1:
-        raise EventValidationError('HB 联动来源存在不唯一的原活动或 START')
-    activity = next(iter(activities.values()), None)
-    attempts = []
-    for run in starts:
-        if (run['kind'] != int(enum_for('operation_runs.kind').START)
-                or activity is None or run['activity_id'] != activity['id']):
-            raise EventValidationError('HB 联动来源的原 START 与活动不符')
-        attempts.extend(context.complete_rows('operation_attempts', 'run_id', run['id']).values())
-        if run['attempts_used'] != len(attempts) or len(attempts) != max((a['attempt_no'] for a in attempts), default=0):
-            raise EventValidationError('HB 联动来源的原尝试范围或累计次数不完整')
-    if source['status'] in _ACTION_TERMINAL or source['cancel_requested']:
+    facts, attempts_by_run = _source_start_rows(context, source)
+    if source['status'] in _ACTION_TERMINAL:
         return True
-    try:
-        phase = entry_from_rows(source, activity, attempts)
-    except (ConsistencyError, KeyError, TypeError, ValueError) as error:
-        raise EventValidationError('HB 联动来源的原入口事实矛盾') from error
+    if source['cancel_requested']:
+        from camctl.cancellation.rules import capture_eligibility_facts, decide_cancel_eligibility, may_link_auto_preview
+        return may_link_auto_preview(source, decide_cancel_eligibility(
+            capture_eligibility_facts(source, facts.activity)))
+    attempts = () if facts.run is None else attempts_by_run[facts.run['id']]
+    phase = entry_from_rows(source, facts.activity, attempts)
     if phase is EntryPhase.ENTERED:
         return False
     if phase is EntryPhase.BLOCKED:
-        return bool(attempts) or source['id'] in reserved_sources
-    # 规划接收外层核对的原 RESERVED 许可；独立写守卫不接受尚未保存
-    # 的结果，必须消费本事务已经验证的前序阻止结果。
+        return not _pending_start_confirmation(context, source) and (bool(attempts) or source['id'] in reserved_sources)
     return (allow_pending_reserved and source['id'] in reserved_sources and bool(attempts)
+            and not _pending_start_confirmation(context, source)
             and all(a['status'] == int(enum_for('operation_attempts.status').RUNNING)
                     and a['result_json'] is None for a in attempts))
 
 
-def _actual_direct_cancel_member(origin, target, context):
-    raw = origin['input_fields_json']
+def _pending_start_confirmation(context, source):
+    return any(run['kind'] == int(enum_for('operation_runs.kind').QUERY_ACTIVITY)
+        and run['query_purpose'] == int(enum_for('operation_runs.query_purpose').START_CONFIRMATION)
+        and run['status'] in (int(enum_for('operation_runs.status').PENDING), int(enum_for('operation_runs.status').ACTIVE))
+        for run in context.complete_rows('operation_runs', 'action_id', source['id']).values())
+
+
+def _saved_cancel_target(origin):
+    from camctl.cancellation.models import CancelTarget
     try:
-        address = raw['params']['target']
-        if 'action_instance_id' in address:
-            return target['id'] == int(address['action_instance_id'])
-        if 'plan_instance_id' in address:
-            return (target['plan_id'] == int(address['plan_instance_id'])
-                    and ('group' not in address or target['group_name'] == address['group']))
-        if 'request_id' in address:
-            plans = context.complete_rows('plans', 'id', target['plan_id'])
-            return str(plans[target['plan_id']]['request_id']) == address['request_id']
-    except (KeyError, TypeError, ValueError) as error:
-        raise EventValidationError('HB 预览固定缺少可核对的原直接寻址') from error
-    raise EventValidationError('HB 预览固定的原直接寻址不完整')
+        raw = origin['input_fields_json']['params']['target']
+        fields = {key: parse_object_id(value) if key in ('action_instance_id', 'plan_instance_id') else value
+                  for key, value in raw.items()}
+        return CancelTarget(**fields)
+    except (KeyError, AttributeError, TypeError, ValueError) as error:
+        raise EventValidationError('取消固定缺少可靠原地址') from error
+
+
+class _CancelContextLookup:
+    """四类原地址仅访问已经声明完整的当前原行范围。"""
+    def __init__(self, context):
+        self.context = context
+
+    def action_exists(self, identity):
+        return identity in self.context.complete_rows('actions', 'id', identity)
+
+    def plan_actions(self, identity):
+        if identity not in self.context.complete_rows('plans', 'id', identity):
+            return None
+        return tuple(sorted(self.context.complete_rows('actions', 'plan_id', identity)))
+
+    def group_actions(self, identity, group):
+        members = self.plan_actions(identity)
+        if members is None:
+            return None
+        return tuple(key for key in members if self.context.state_rows['actions'][key]['group_name'] == group)
+
+    def plan_by_request(self, request_id):
+        plans = self.context.complete_rows('plans', 'request_id', parse_object_id(request_id))
+        if len(plans) > 1:
+            raise EventValidationError('原请求对应多个计划')
+        return None if not plans else self.plan_actions(next(iter(plans)))
 
 
 def _validate_photo_preview_scope(origin, members, context, reserved_sources=frozenset(), *, allow_pending_reserved=False):
-    """普通固定、复合规划和独立守卫共用 HB 的直接与联动范围判定。"""
+    """原地址、完整直接集合、真实关联和资格共同决定唯一固定集合。"""
+    from camctl.cancellation.models import TargetFacts, ResolvedTargets, CancelTargetError
+    from camctl.cancellation.targets import resolve_cancel_target, prepare_cancel_set
     from camctl.devices.start_entry import is_hasselblad_photo
+    resolution = resolve_cancel_target(_saved_cancel_target(origin), _CancelContextLookup(context))
+    if resolution.missing or resolution.lookup_failed is not None:
+        raise EventValidationError('取消固定缺少可靠完整原直接集合')
     actions = context.state_rows.get('actions', {})
-    direct = {m['target_action_id'] for m in members
-              if m['selection_basis'] in (SelectionBasis.DIRECT.value, SelectionBasis.BOTH.value)}
-    if any(identity not in actions or 'type' not in actions[identity] for identity in direct):
-        raise EventValidationError('固定直接目标缺少原动作事实')
-    if any(actions[identity].get('type') == 1 and not {'driver_id', 'execution_spec_json'} <= actions[identity].keys()
-           for identity in direct):
-        raise EventValidationError('固定拍摄来源缺少原驱动或执行规格字段')
-    if not any(is_hasselblad_photo(actions[identity]) for identity in direct):
-        return
-    links = []
-    for member in members:
-        related = context.complete_rows('auto_preview_links', 'obtain_action_id', member['target_action_id'])
+    direct = resolution.action_ids
+    links = {}
+    for identity in direct:
+        links.update(context.complete_rows('auto_preview_links', 'source_action_id', identity))
+    obtains = set(direct) | {m['target_action_id'] for m in members} | {link['obtain_action_id'] for link in links.values()}
+    for identity in obtains:
+        related = context.complete_rows('auto_preview_links', 'obtain_action_id', identity)
         if len(related) > 1:
             raise EventValidationError('同一预览只能具有一条原自动关联')
-        links.extend(related.values())
-    valid_sources = [link['source_action_id'] for link in links if link['is_valid'] == 1]
-    if len(valid_sources) != len(set(valid_sources)):
+        links.update(related)
+    identities = obtains | {link['source_action_id'] for link in links.values() if link['source_action_id'] is not None}
+    for identity in identities:
+        action = context.complete_rows('actions', 'id', identity).get(identity)
+        if action is None or 'type' not in action:
+            raise EventValidationError('固定范围缺少原动作事实')
+        if action['type'] == 1 and not {'driver_id', 'execution_spec_json'} <= action.keys():
+            raise EventValidationError('固定拍摄来源缺少原驱动或执行规格字段')
+    if not any(is_hasselblad_photo(actions[identity]) for identity in identities):
+        return
+    valid = [link for link in links.values() if link['is_valid'] == 1]
+    sources = [link['source_action_id'] for link in valid]
+    if len(sources) != len(set(sources)):
         raise EventValidationError('同一来源只能具有一条有效自动预览关联')
-    eligible = {}
-    for link in links:
-        source_id = link['source_action_id']
-        if link['is_valid'] != 1 or source_id not in direct:
-            continue
-        sources = context.complete_rows('actions', 'id', source_id)
-        source = sources.get(source_id)
-        if source is None or not _actual_direct_cancel_member(origin, source, context):
-            raise EventValidationError('联动来源不属于原直接寻址')
+    facts = []
+    from camctl.cancellation.rules import capture_eligibility_facts, decide_cancel_eligibility, may_apply_cancel
+    for identity in direct:
+        source = actions[identity]
         if is_hasselblad_photo(source):
-            eligible[source_id] = _photo_preview_source_allowed(context, source, reserved_sources,
+            allowed = _photo_preview_source_allowed(context, source, reserved_sources,
                 allow_pending_reserved=allow_pending_reserved)
+        elif source['type'] in (1, 2, 3):
+            start, _ = _source_start_rows(context, source)
+            allowed = may_apply_cancel(decide_cancel_eligibility(capture_eligibility_facts(
+                source, start.activity, not_started=start.not_started)))
         else:
-            eligible[source_id] = True
-    for member in members:
-        identity, basis = member['target_action_id'], member['selection_basis']
-        target = context.complete_rows('actions', 'id', identity).get(identity)
-        if target is None:
-            raise EventValidationError('HB 预览固定缺少原目标动作')
-        actual_direct = _actual_direct_cancel_member(origin, target, context)
-        linked = any(link['obtain_action_id'] == identity and link['is_valid'] == 1
-                     and eligible.get(link['source_action_id'], False) for link in links)
-        if basis == SelectionBasis.DIRECT.value:
-            valid = actual_direct
-        elif basis == SelectionBasis.BOTH.value:
-            valid = actual_direct and linked
-        else:
-            valid = not actual_direct and linked
-        if not valid:
-            raise EventValidationError('HB 预览的原直接或联动范围与固定依据不符')
+            # 非拍摄直接目标不提供合法自动预览来源；其自身收场沿原路径。
+            allowed = False
+        facts.append(TargetFacts(identity, source['status'] in _ACTION_TERMINAL, allowed))
+    expected = prepare_cancel_set(origin['id'], ResolvedTargets(tuple(facts),
+        tuple((link['source_action_id'], link['obtain_action_id']) for link in valid if link['source_action_id'] in direct)))
+    if isinstance(expected, CancelTargetError):
+        raise EventValidationError('原完整取消集合包含发起者自身')
+    submitted = [(m['target_action_id'], m['selection_basis'], m['cancellation_effect']) for m in members]
+    actual = [(target.action_id, target.basis.value, target.cancellation_effect.value) for target in expected.targets]
+    if len(set(submitted)) != len(submitted) or sorted(submitted) != sorted(actual):
+        raise EventValidationError('固定成员、依据或初始效果与原完整申请不符')

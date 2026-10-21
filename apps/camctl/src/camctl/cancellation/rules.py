@@ -32,6 +32,7 @@ __all__ = [
     "decide_cancel_eligibility",
     "load_eligibility_facts",
     "may_apply_cancel",
+    "may_link_auto_preview",
     "summarize_cancel",
 ]
 
@@ -165,6 +166,14 @@ def may_apply_cancel(eligibility: CancelEligibility) -> bool:
                            CancelEligibility.ALLOW_WITH_STOP)
 
 
+def may_link_auto_preview(action, eligibility: CancelEligibility) -> bool:
+    """有效 HB 原取消责任可继续处理关联，其他目标沿用新施加资格。"""
+    from camctl.devices.start_entry import is_hasselblad_photo
+    return may_apply_cancel(eligibility) or (
+        eligibility is CancelEligibility.ALREADY_CANCELED
+        and is_hasselblad_photo(action) and action["cancel_requested"] == 1)
+
+
 #: 拍摄动作类型（资格表只适用设备任务）。
 _CAPTURE_TYPES = frozenset({1, 2, 3})
 _CANCEL_TASK_TYPE = 6
@@ -217,12 +226,8 @@ def load_eligibility_facts(connection, action_id: int, *, motor_permits=None, st
                       else DispatchPhase.NOT_STARTED),
             stop_supported=True)
     activity = _activity_row(connection, action_id)
-    terminal = action["status"] in _ACTION_TERMINAL
-    applied = bool(action["cancel_requested"])
-    if terminal or applied:
-        # 已有终态或生效事实不依赖重新判断物理启动阶段。
-        dispatch = DispatchPhase.UNVERIFIED
-    else:
+    not_started = None
+    if action["status"] not in _ACTION_TERMINAL and not action["cancel_requested"]:
         start = load_start_facts(connection, action)
         from camctl.devices.start_entry import is_hasselblad_photo, EntryPhase
         local = None if start_entries is None else start_entries.get(database_id, action_id)
@@ -234,13 +239,24 @@ def load_eligibility_facts(connection, action_id: int, *, motor_permits=None, st
                 not_started = False
             elif local.phase is EntryPhase.READY:
                 not_started = True
-        dispatch = (DispatchPhase.NOT_STARTED if not_started else _dispatch_phase(activity))
-    return EligibilityFacts(
-        terminal=terminal,
-        cancel_applied=applied,
-        dispatch=dispatch,
-        stop_supported=_stop_supported(action, kind, activity),
-    )
+    return capture_eligibility_facts(action, activity, not_started=not_started)
+
+
+def capture_eligibility_facts(action, activity, *, not_started=None):
+    """拍摄动作原持久事实共用资格装配；本地许可只由 SQL 外层协调。"""
+    kind = action["type"]
+    if kind not in _CAPTURE_TYPES:
+        raise ConsistencyError("拍摄资格装配只适用于拍摄动作")
+    terminal = action["status"] in _ACTION_TERMINAL
+    applied = bool(action["cancel_requested"])
+    if terminal or applied:
+        dispatch = DispatchPhase.UNVERIFIED
+    else:
+        if type(not_started) is not bool:
+            raise ConsistencyError("拍摄取消缺少原 START 判定")
+        dispatch = DispatchPhase.NOT_STARTED if not_started else _dispatch_phase(activity)
+    return EligibilityFacts(terminal=terminal, cancel_applied=applied,
+        dispatch=dispatch, stop_supported=_stop_supported(action, kind, activity))
 
 
 def _action_row(connection, action_id: int) -> dict[str, Any] | None:

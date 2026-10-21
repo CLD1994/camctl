@@ -63,6 +63,7 @@ class CancellationRuntime:
     occurred_at: Callable[[], int]
     motor_permits: dict = field(default_factory=dict)
     open_connection: Callable | None = None
+    pending_origin_settlements: dict = field(default_factory=dict)
 
 
 #: 资格分区到生效方式的映射（拒绝与不可靠不入表）。
@@ -214,8 +215,22 @@ async def settle_origin_cancel(
     repository = runtime.repository
     owned = runtime.owned
     connection = owned.connection
+    database_id = owned.metadata.instance_id
+    pending = runtime.pending_origin_settlements
+    if any(identity[0] != database_id for identity in pending):
+        raise ConsistencyError("原取消收场申请属于另一状态库")
+    identity = database_id, command.origin_action_id
+    stop_completed = False
+    if identity in pending:
+        request, _ = pending[identity]
+        if request.action_id != command.origin_action_id:
+            raise ConsistencyError("原取消收场申请与原动作不符")
+        resumed = _save_origin_settlement(runtime, request)
+        if resumed.kind is not DbOutcomeKind.COMPLETED or isinstance(request, FinishCancelAction):
+            return resumed
+        stop_completed = True
     row = connection.execute(
-        "SELECT status, cancel_requested FROM actions WHERE id = ?",
+        "SELECT status, cancel_requested, target_selection_state FROM actions WHERE id = ?",
         (command.origin_action_id,)).fetchone()
     if row is None:
         raise ConsistencyError(f"取消动作不存在: {command.origin_action_id}")
@@ -234,13 +249,33 @@ async def settle_origin_cancel(
         return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=CancelActionFinished(
             disposition=CancelActionDisposition.ALREADY,
             action_status=row[0], plan_status=0, succeeded=0, failed=0))
-    occurred = runtime.occurred_at()
-    stopped = repository.stop_wait_cancel_items(
-        StopWaitCancelItems(command.origin_action_id, occurred),
-        new_operation_key(), owned)
-    if stopped.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"结束等待事务未提交: {stopped.error}")
-    finished = repository.finish_origin_canceled(
-        FinishCancelAction(command.origin_action_id, runtime.occurred_at()),
-        new_operation_key(), owned)
-    return finished
+    if row[2] not in (1, 2) or (stop_completed and row[2] != 2):
+        raise ConsistencyError("运行中取消动作的目标选择状态矛盾")
+    if row[2] == 2 and not stop_completed:
+        stopped = _save_origin_settlement(runtime,
+            StopWaitCancelItems(command.origin_action_id, runtime.occurred_at()))
+        if stopped.kind is not DbOutcomeKind.COMPLETED:
+            return stopped
+    return _save_origin_settlement(runtime,
+        FinishCancelAction(command.origin_action_id, runtime.occurred_at()))
+
+
+def _save_origin_settlement(runtime, request):
+    """写前持有原阶段申请；未知及异常保留，完成后才回收。"""
+    identity = runtime.owned.metadata.instance_id, request.action_id
+    pending = runtime.pending_origin_settlements
+    if identity not in pending:
+        pending[identity] = request, new_operation_key()
+    original, key = pending[identity]
+    if original != request:
+        raise ConsistencyError("原取消收场阶段申请发生改变")
+    if isinstance(original, StopWaitCancelItems):
+        method = runtime.repository.stop_wait_cancel_items
+    elif isinstance(original, FinishCancelAction):
+        method = runtime.repository.finish_origin_canceled
+    else:
+        raise ConsistencyError("原取消收场阶段不可解释")
+    result = method(original, key, runtime.owned)
+    if result.kind is DbOutcomeKind.COMPLETED:
+        pending.pop(identity)
+    return result

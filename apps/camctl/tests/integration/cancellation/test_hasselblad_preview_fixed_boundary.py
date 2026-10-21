@@ -24,9 +24,9 @@ def preview():
         'params':{'source':{'action_name':'单张 RAW'},'filter':'preview','purpose':'auto_preview'}}
 
 
-async def world(tmp_path,state,monkeypatch):
+async def world(tmp_path,state,monkeypatch,*,photo_group=None):
     transport=HeldTransport(fail=state=='no_effect')
-    cfg,owned,driver,runtime,clock=await _world(tmp_path,extra_actions=[preview()],cancel_action=True,
+    cfg,owned,driver,runtime,clock=await _world(tmp_path,extra_actions=[preview()],cancel_action=True,photo_group=photo_group,
         driver_factory=lambda cfg:HasselbladDriver(cfg.devices,BoundDirectories(Path(cfg.paths.staging)),
             transport=transport,monotonic_ns=lambda:1))
     task=None
@@ -160,7 +160,8 @@ async def test_fixed_repository_accepts_reliable_original_link_source(tmp_path,m
             raw=owned.connection.execute('SELECT input_fields_json FROM actions WHERE id=3').fetchone()[0]
             _resolve_and_fix(owned,repository,3,raw,runtime.wall_us)
             origin,repository=accept_origin(cfg,owned,runtime,{'action_instance_id':'1'})
-        fixed=replace(request(runtime),action_id=origin)
+        fixed=replace(request(runtime,effect=CancellationEffect.NOT_REQUIRED if state=='terminal'
+            else CancellationEffect.NOT_APPLIED),action_id=origin)
         key=new_operation_key()
         saved=repository.fix_cancel_targets(fixed,key,owned)
         assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
@@ -172,7 +173,7 @@ async def test_fixed_repository_accepts_reliable_original_link_source(tmp_path,m
         assert repository.fix_cancel_targets(fixed,key,owned).kind is DbOutcomeKind.COMPLETED
         altered=replace(fixed,targets=FixedCancelSet((fixed.targets.targets[0],replace(fixed.targets.targets[1],basis=SelectionBasis.BOTH))))
         assert repository.fix_cancel_targets(altered,key,owned).kind is not DbOutcomeKind.COMPLETED
-        altered=replace(fixed,targets=FixedCancelSet((replace(fixed.targets.targets[0],cancellation_effect=CancellationEffect.NOT_REQUIRED),fixed.targets.targets[1])))
+        altered=replace(fixed,targets=FixedCancelSet((replace(fixed.targets.targets[0],cancellation_effect=CancellationEffect.NOT_APPLIED if state=='terminal' else CancellationEffect.NOT_REQUIRED),fixed.targets.targets[1])))
         assert repository.fix_cancel_targets(altered,key,owned).kind is not DbOutcomeKind.COMPLETED
         assert repository.fix_cancel_targets(replace(fixed,action_id=origin+100),key,owned).kind is not DbOutcomeKind.COMPLETED
         assert tuple(owned.connection.iterdump())==before
@@ -189,7 +190,10 @@ async def test_direct_preview_and_both_require_original_address_and_valid_link(t
     try:
         target={'plan_instance_id':'1'} if address=='plan' else {'request_id':'1'}
         origin,repository=accept_origin(cfg,owned,runtime,target)
-        fixed=replace(request(runtime,basis=basis),action_id=origin)
+        effect=CancellationEffect.NOT_REQUIRED if state=='terminal' else CancellationEffect.NOT_APPLIED
+        fixed=replace(request(runtime,basis=basis,effect=effect),action_id=origin)
+        fixed=replace(fixed,targets=FixedCancelSet((*fixed.targets.targets,
+            FixedTarget(3,SelectionBasis.DIRECT,CancellationEffect.NOT_APPLIED))))
         saved=repository.fix_cancel_targets(fixed,new_operation_key(),owned)
         assert (saved.kind is DbOutcomeKind.COMPLETED)==allowed,saved.error
         if allowed and basis is SelectionBasis.DIRECT:
@@ -273,11 +277,13 @@ def bare_context(owned,runtime):
     owners={('actions',3):('action',3)}
     ranges=dict(module.include_photo_entry_rows(owned.connection,state['actions'][1],state,owners).ranges)
     ranges.update({('auto_preview_links','obtain_action_id'):frozenset((1,2)),
-        ('actions','id'):frozenset((1,2,3)),('plans','id'):frozenset((1,))})
+        ('actions','id'):frozenset((1,2,3)),('plans','id'):frozenset((1,)),
+        ('actions','plan_id'):frozenset((1,)),('plans','request_id'):frozenset((1,)),
+        ('auto_preview_links','source_action_id'):frozenset((1,2,3))})
     rows=(update_change('actions',3,{'target_selection_state':1},{'target_selection_state':2}),)
     for identity,target,basis in ((1001,1,1),(1002,2,2)):
         rows+=(row_change('cancel_items',identity,{'action_id':3,'target_action_id':target,
-            'selection_basis':basis,'status':1,'cancellation_effect':1,'outcome':None,
+            'selection_basis':basis,'status':1,'cancellation_effect':3 if target==1 and runtime.action(1)['status'] in (3,4,5,6) else 1,'outcome':None,
             'error_code':None,'error_details_json':None}),)
     event=event_envelope(100,100,4,3,rows,runtime.wall_us())
     return event,EventContext(TransactionRange(100,100,100),owners,state,read_coverage=ReadCoverage(ranges))
