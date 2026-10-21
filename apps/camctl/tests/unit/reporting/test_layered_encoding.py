@@ -37,6 +37,126 @@ def test_interleaved_emission_failure_cannot_resume_original_document():
         next(opening)
 
 
+_EMISSIONS = [
+    ('open', (), {}), ('section', ('plans', None), {}), ('field', ('name', 'finite'), {}),
+    ('item', (1,), {}), ('open_object', (), {'identity': 1}),
+    ('open_array', ('plans',), {}), ('close_object', (), {}),
+    ('close_array', (), {}), ('finish', (), {}),
+]
+
+
+def _call_emission(stream, emission, fragments):
+    name, args, keywords = emission
+    if name == 'section':
+        args = ('plans', fragments[('plan', 1)])
+    return getattr(stream, name)(*args, **keywords)
+
+
+@pytest.mark.parametrize('emission', _EMISSIONS, ids=lambda item: item[0])
+@pytest.mark.parametrize('position', ['section-array-end', 'section-document-end', 'nodes-document-end'])
+def test_active_finish_interleaving_rejects_and_aborts_remaining_tokens(position, emission, fragments):
+    stream = ReportStream(ReportDocument('7', 0, 5))
+    list(stream.open())
+    if position.startswith('section'):
+        list(stream.section('plans', fragments[('plan', 1)]))
+    else:
+        list(stream.open_array('plans'))
+        list(stream.close_array())
+    ending = stream.finish()
+    first = next(ending)
+    assert first == (b']' if position.startswith('section') else b'}\n')
+    if position == 'section-document-end':
+        assert next(ending) == b'}\n'
+    attempted = []
+    with pytest.raises(ValueError):
+        attempted.extend(_call_emission(stream, emission, fragments))
+    assert attempted == []
+    resumed = []
+    with pytest.raises(ValueError):
+        resumed.extend(ending)
+    assert resumed == []  # 已经交出的 token 无法撤销；不再追加剩余 token。
+    assert stream._failed
+
+
+def _active_emission(name, fragments):
+    stream = ReportStream(ReportDocument('7', 0, 5))
+    if name == 'open':
+        return stream, stream.open()
+    list(stream.open())
+    if name == 'section':
+        return stream, stream.section('plans', fragments[('plan', 1)])
+    if name == 'finish':
+        return stream, stream.finish()
+    list(stream.open_array('plans'))
+    list(stream.open_object(identity=1))
+    list(stream.field('plan_instance_id', '1'))
+    if name == 'field':
+        return stream, stream.field('z', 'finite')
+    if name == 'open_object':
+        return stream, stream.open_object('z')
+    if name == 'open_array':
+        return stream, stream.open_array('z')
+    if name == 'close_object':
+        return stream, stream.close_object()
+    list(stream.open_array('z'))
+    return stream, stream.item(1) if name == 'item' else stream.close_array()
+
+
+@pytest.mark.parametrize('emission', _EMISSIONS, ids=lambda item: item[0])
+@pytest.mark.parametrize('active', [item[0] for item in _EMISSIONS])
+def test_each_active_emission_aborts_after_any_interleaved_api(active, emission, fragments):
+    stream, pending = _active_emission(active, fragments)
+    assert isinstance(next(pending), bytes)
+    attempted = []
+    with pytest.raises(ValueError):
+        attempted.extend(_call_emission(stream, emission, fragments))
+    assert attempted == []
+    resumed = []
+    with pytest.raises(ValueError):
+        resumed.extend(pending)
+    assert resumed == []
+    assert stream._failed
+
+
+@pytest.mark.parametrize('active', [item[0] for item in _EMISSIONS])
+def test_explicit_close_of_each_active_emission_leaves_terminal_failure(active, fragments):
+    stream, pending = _active_emission(active, fragments)
+    next(pending)
+    pending.close()
+    assert stream._failed
+    for emission in _EMISSIONS:
+        attempted = []
+        with pytest.raises(ValueError):
+            attempted.extend(_call_emission(stream, emission, fragments))
+        assert attempted == []
+
+
+@pytest.mark.parametrize('emission', _EMISSIONS, ids=lambda item: item[0])
+def test_reliably_exhausted_finish_clears_frames_and_rejects_without_bytes(emission, fragments):
+    stream = _plan_stream()
+    list(stream.field('plan_instance_id', '2'))
+    list(stream.close_object())
+    list(stream.close_array())
+    assert list(stream.finish()) == [b'}\n']
+    assert stream._frames == []
+    attempted = []
+    with pytest.raises(ValueError):
+        attempted.extend(_call_emission(stream, emission, fragments))
+    assert attempted == []
+
+
+@pytest.mark.parametrize('emission', _EMISSIONS, ids=lambda item: item[0])
+def test_structure_failure_rejects_all_apis_without_new_bytes(emission, fragments):
+    stream = ReportStream(ReportDocument('7', 0, 5))
+    list(stream.open())
+    with pytest.raises(ValueError):
+        list(stream.close_array())
+    attempted = []
+    with pytest.raises(ValueError):
+        attempted.extend(_call_emission(stream, emission, fragments))
+    assert attempted == []
+
+
 def _value(stream, value, field=None):
     if isinstance(value, dict):
         yield from stream.open_object(field)

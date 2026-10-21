@@ -176,11 +176,11 @@ def _emission(method):
     """一次供给必须耗尽；失败或中途关闭的字节只能作为未完成前缀。"""
     @wraps(method)
     def emit(self, *args, **kwargs):
-        if self._failed or self._finished:
-            raise ValueError('报告字节流已失败或已收尾')
         if self._busy:
             self._failed = True
             raise ValueError('上次报告字节供给尚未耗尽')
+        if self._failed or self._finished:
+            raise ValueError('报告字节流已失败或已收尾')
         self._busy = True
         try:
             for token in method(self, *args, **kwargs):
