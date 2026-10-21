@@ -87,7 +87,9 @@
         "is_valid"
       ],
       "mutable": [],
-      "derived": ["id"],
+      "derived": [
+        "id"
+      ],
       "write_once": [],
       "owner": {
         "entity": "action",
@@ -942,6 +944,36 @@
         "inherit": "set_id"
       },
       "state_columns": []
+    },
+    "device_file_pairing_facts": {
+      "immutable": [
+        "created_event_id",
+        "preview_file_id",
+        "original_file_id",
+        "attempt_id",
+        "final_page_event_id",
+        "source_txn_id",
+        "source_event_id",
+        "preview_page_event_id",
+        "original_page_event_id",
+        "preview_file_event_id",
+        "original_file_event_id",
+        "original_count",
+        "preview_count",
+        "state",
+        "reason"
+      ],
+      "mutable": [],
+      "derived": [
+        "id"
+      ],
+      "write_once": [],
+      "owner": {
+        "entity": "device_file",
+        "id": "preview_file_id",
+        "via": []
+      },
+      "state_columns": []
     }
   },
   "guards": {
@@ -1278,6 +1310,22 @@
       "rule": "从同源原RESULT_PAGE.APPEND及完整INDEX关系独立核原差集、尝试、绑定和OSV/LRF用途；仅首次固定来源与用途，不保存配对。",
       "scope": {
         "rows": [
+          {
+            "table": "device_files",
+            "op": "update"
+          }
+        ]
+      }
+    },
+    "result_scan_pairing": {
+      "contract": "file-fields.md#结果扫描配对",
+      "rule": "从原完整扫描、固定边界和全部相关族文件证明独立核计数、端点及分类；首次正向配对固定关联，其他分类只保存独立事实。",
+      "scope": {
+        "rows": [
+          {
+            "table": "device_file_pairing_facts",
+            "op": "create"
+          },
           {
             "table": "device_files",
             "op": "update"
@@ -6003,6 +6051,49 @@
           "evidence": [
             "ownership_from_result_page_request"
           ]
+        },
+        "PAIR_FROM_RESULT_SCAN": {
+          "reason": 7,
+          "title": "从完整结果扫描保存文件配对事实",
+          "rows": [
+            {
+              "table": "device_file_pairing_facts",
+              "op": "create",
+              "after": {}
+            },
+            {
+              "table": "device_files",
+              "op": "update",
+              "columns": [
+                "original_device_file_id",
+                "pairing_evidence_json"
+              ],
+              "before": {
+                "original_device_file_id": [
+                  null
+                ],
+                "pairing_evidence_json": [
+                  null
+                ]
+              },
+              "after": {},
+              "required": [
+                "original_device_file_id",
+                "pairing_evidence_json"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "result_scan_pairing"
+          ],
+          "evidence": [
+            "result_scan_pairing_request"
+          ]
         }
       }
     },
@@ -9787,6 +9878,31 @@
     },
     "segment_sets.published_event_id": {
       "target": "assigning_event"
+    },
+    "device_file_pairing_facts.created_event_id": {
+      "target": "creating_event"
+    },
+    "device_file_pairing_facts.final_page_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.source_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.preview_page_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.original_page_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.preview_file_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.original_file_event_id": {
+      "target": "prior_event"
+    },
+    "device_file_pairing_facts.source_txn_id": {
+      "target": "prior_transaction",
+      "exception": "与 source_event_id 共同引用配对前完整历史边界，由配对守卫核实。"
     }
   },
   "non_event_tables": {

@@ -43,7 +43,23 @@
 
 每次新保存形成状态时，事件的 `evidence.completion_request` 恰好保存原可选输入 `locator`、`original_name`、`media_type`，未提供的输入也明确保存为 `null`。申请与已有元信息相同的值仍合法，事件行只保存实际改变的字段。原键重送逐项比较原输入，并按原完整事务后的状态核对形成状态、完整大小、完成依据和实际错误；不能从未改变的列猜测申请者省略了输入。旧事件没有 `completion_request` 时仍可读取和回放；原键缺少完整输入时不能补造重送依据。
 
-`role` 为 `UNDETERMINED`、`ORIGINAL`、`PREVIEW`，保存驱动可靠确认的任务内用途，尚未确认时为 `UNDETERMINED`。预览的 `original_device_file_id` 与 `pairing_evidence_json` 同时有值或同时为空；后者包含 `method` 和 `observation`，其中 `method` 采用 `DRIVER_PAIRING` 对应的整数，表示驱动配对证据。用途已知但尚未可靠配对时，保留预览及空引用，不能任取一个原文件配对。原文件和未知用途文件不填写这两个字段；配对两端必须属于同一任务且原文件用途为 `ORIGINAL`。原文件与预览分别登记正式产物时，事务从这些可靠事实建立 `output_origins`；产物关系与设备观察各自保存其生命周期事实，不允许二者矛盾。该设计使设备先生成多份文件、框架稍后登记产物的过程可以恢复，不依赖一份内存文件清单。
+`role` 为 `UNDETERMINED`、`ORIGINAL`、`PREVIEW`，保存可靠确认的任务内用途，尚未确认时为 `UNDETERMINED`。预览的 `original_device_file_id` 与 `pairing_evidence_json` 同时有值或同时为空。驱动配对的证据恰为 `{method: DRIVER_PAIRING, observation}`；完整扫描配对的证据恰为 `{method: RESULT_SCAN_PAIRING, pairing_fact_id}`，方法使用登记整数。用途已知但尚未可靠配对时，保留预览及空引用，不能任取一个原文件配对。原文件和未知用途文件不填写这两个字段；配对两端必须属于同一任务且原文件用途为 `ORIGINAL`。原文件与预览分别登记正式产物时，事务从这些可靠事实建立 `output_origins`；产物关系与设备观察各自保存其生命周期事实，不允许二者矛盾。该设计使设备先生成多份文件、框架稍后登记产物的过程可以恢复，不依赖一份内存文件清单。
+
+### 结果扫描配对
+
+`device_file_pairing_facts` 保存原完整扫描在固定文件边界取得的配对结论。该表全部业务列不可变，归属 `preview_file_id` 指定的独立设备文件。`created_event_id` 指向创建事件；`attempt_id/final_page_event_id` 固定真实尝试与末页，`source_txn_id/source_event_id` 共同引用保存前完整历史边界。`preview_page_event_id/preview_file_event_id` 固定预览的原观察页及文件自身事实；可空的 `original_file_id/original_page_event_id/original_file_event_id` 共同指向实际唯一原片端点，三者同时有值或同时为空。`original_count/preview_count` 是扫描内按文件身份去重的完整族计数。唯一键为 `(preview_file_id, attempt_id, final_page_event_id)`，历史读取索引为 `(preview_file_id, created_event_id, id)`。
+
+配对只按原尝试、目录和完整主干的 BINARY 值分族，后缀大小写只决定 OSV/LRF 角色。仓储通过结果页族索引计数、取至多两个身份样本，并分批核实全部相关观察、归属及严格完成证明。同一文件重复出现只计一次；原始观察不填写事后配对身份。扫描不完整或任一相关元信息、归属、完成未知时，读取返回未知，不创建配对事实，也不分配历史身份或占用操作键。
+
+| 可靠完整族 | `state/reason` | 文件关联 |
+| --- | --- | --- |
+| 原片和预览各一个，均完整且非零 | `PAIRED/UNIQUE` | 首次固定原片和实际配对事实；已有相同关联保留首次证据。 |
+| 没有原片 | `UNPAIRED/MISSING` | 保持原关联。 |
+| 任一角色对应多个文件身份 | `UNPAIRED/AMBIGUOUS` | 不任选原片。 |
+| 唯一两端存在可靠零大小或其他不合格事实 | `UNPAIRED/INVALID` | 保持原关联。 |
+| 唯一有效原片与已固定关联不同 | `UNPAIRED/CONFLICT` | 保持首次关联，不覆盖。 |
+
+`DEVICE_FILE_OBSERVED.PAIR_FROM_RESULT_SCAN` 每次只创建一行事实；首次正向配对在同一事件额外更新文件的两配对列，最多两行。证据只保存 `result_scan_pairing_request`，精确包含原预览、完整末页引用及保存前边界；事实时刻由事件保存。仓储和独立守卫分别重算实际来源与分类。同一操作键核对完整原申请和原事件，后续事实不改变原结论。新的配对事实本身不登记产物。
 
 `checksum_support` 为 `UNDETERMINED`、`SUPPORTED`、`UNSUPPORTED`。`sha256` 只有完整固定文件真正取得源摘要后才填写，否则为空。摘要查询失败保存 `last_error_json`，不能改成 `UNSUPPORTED`；驱动不支持摘要的合法降级由拷贝流程判定。`last_error_json` 为空表示没有尚待表达的文件观察错误；后续可靠观察可清除当前错误，历史不删除。
 

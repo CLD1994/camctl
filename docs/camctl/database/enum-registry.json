@@ -559,6 +559,23 @@
         "MEMBERS_FIXED": 2,
         "ASSESSED": 3
       }
+    },
+    "device_file_pairing_facts.state": {
+      "contract": "file-fields.md#结果扫描配对",
+      "members": {
+        "PAIRED": 1,
+        "UNPAIRED": 2
+      }
+    },
+    "device_file_pairing_facts.reason": {
+      "contract": "file-fields.md#结果扫描配对",
+      "members": {
+        "UNIQUE": 1,
+        "MISSING": 2,
+        "AMBIGUOUS": 3,
+        "INVALID": 4,
+        "CONFLICT": 5
+      }
     }
   },
   "history_objects": {
@@ -644,7 +661,8 @@
     "device_files.pairing_evidence_json.method": {
       "contract": "file-fields.md#设备文件",
       "members": {
-        "DRIVER_PAIRING": 1
+        "DRIVER_PAIRING": 1,
+        "RESULT_SCAN_PAIRING": 2
       }
     },
     "device_activities.result_check_json.outcome": {

@@ -1079,6 +1079,8 @@ def register_capture_guards() -> None:
     register_result_page_guard()
     from .result_file_ownership import register_ownership_from_result_page_guard
     register_ownership_from_result_page_guard()
+    from .result_file_pairing import register_result_scan_pairing_guard
+    register_result_scan_pairing_guard()
 
 
 class FinishCaptureCommand:
@@ -2783,6 +2785,21 @@ class CaptureRepository:
         from .result_file_ownership import verify_ownership_from_result_page
         return verify_ownership_from_result_page(
             request, key, reader, execution_finished=execution_finished)
+
+    def save_result_file_pairing(self, request, key: OperationKey, owned: OwnedConnection):
+        from .result_file_pairing import PairResultFilesCommand
+        receipt = commit_operation(PairResultFilesCommand(request, key), key, owned)
+        if receipt.kind == "completed":
+            return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == "rolled_back":
+            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def verify_result_file_pairing(self, request, key: OperationKey, reader,
+                                   *, execution_finished: bool = True):
+        from .result_file_pairing import verify_result_file_pairing
+        return verify_result_file_pairing(request, key, reader,
+                                         execution_finished=execution_finished)
 
     def save_file_completion(
         self, command: FileCompletionSave, key: OperationKey, owned: OwnedConnection

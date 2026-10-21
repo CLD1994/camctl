@@ -58,7 +58,8 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | `operation_runs`，其余类型，包括全部 `QUERY_ACTIVITY` 用途 | 该行的 `action_id`；查询保存的新活动观察另行更新活动所属动作，不能将查询预算一并转给被观察动作 |
 | `operation_attempts` | 沿 `run_id` 找到流程，使用该流程的历史归属 |
 | `result_page_files` | 各行的 `action_id` 指定拍摄动作；`file_id` 指向独立设备文件，不复制文件自身历史 |
-| `device_files`、`intermediate_files` | 各表的 `id` 指定的文件自身；每个文件快照只包含该文件行 |
+| `device_files`、`intermediate_files` | 各表的 `id` 指定的文件自身；设备文件快照同时包含其扫描配对事实，中间文件快照只包含该文件行 |
+| `device_file_pairing_facts` | `preview_file_id` 指定的设备文件自身 |
 | `plan_file_diagnostics`、`reports`、`state_syncs`、`runtime_state` | 各行自身的目录对象；保存可逆历史，但不参加对象快照维护 |
 
 `database_metadata` 属于数据库身份、格式及部署目录管理，不是可由业务事件修改的投影。历史事务、事件、两类查询目录、快照及维护进度不属于上述业务行集合，也不递归进入对象快照。设备基准内容由不可变事件分块保存，动作快照只保留读取这些分块所需的范围引用。
@@ -143,7 +144,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 14 `BASELINE_CHUNK` | 1 保存基准内容批次；2 固定非空基准的实际范围；3 固定零批空基准并清空旧范围 |
 | 15 `CAPTURE_WAIT_CHANGED` | 1 安排适用拍摄等待；2 未完成等待实际采用新配置；3 保存等待完成 |
 | 16 `RESULT_SET_CONFIRMED` | 1 保存结果集合核实结论；2 保存结果集合核实结论；3 保存结果集合核实结论；4 开始结果集合核实；5 保存本次文件集合确定事实 |
-| 17 `DEVICE_FILE_OBSERVED` | 1 登记真实设备文件；2 确认文件归属及用途配对；3 保存文件形成状态及完成依据；4 保存摘要能力与实际摘要；5 保存实际存在性观察；6 从原结果页差集确认文件归属及用途 |
+| 17 `DEVICE_FILE_OBSERVED` | 1 登记真实设备文件；2 确认文件归属及用途配对；3 保存文件形成状态及完成依据；4 保存摘要能力与实际摘要；5 保存实际存在性观察；6 从原结果页差集确认文件归属及用途；7 从完整结果扫描保存文件配对事实 |
 | 18 `RECORDING_DECIDED` | 1 固定原片检查决定；2 固定修复决定；3 首次关联可靠原片 |
 | 19 `RECORDING_PROCESSED` | 1 保存检查阶段及媒体结果；2 保存修复阶段及结果；3 保存取消后文件处理进度 |
 | 20 `OUTPUT_REGISTERED` | 1 登记正式产物及来源；2 登记正式产物及来源；3 登记正式产物及来源；4 更新可靠产物观察及派生状态 |
@@ -290,6 +291,8 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 `DEVICE_FILE_OBSERVED.OWNERSHIP_FROM_RESULT_PAGE` 的 `evidence` 恰好包含 `ownership_from_result_page_request`，其成员为 `page` 与 `file_id`。`page` 保存完整原引用：`ticket` 恰为 `run_id/attempt_id/operation/target_id/responsibility_key`，另有 `page_no/event_id/next_cursor`；游标保存规范 DirectoryCursor 对象或 JSON `null`。票据中的 `attempt_id` 是原 `attempt_no`，物理尝试行由原 run 和 attempt_no 派生。事件时刻保持原申请 `occurred_at`。原页须属于更早完整事务；归属证据的 `result_page_event_id` 引用该页 APPEND，不是 INDEX 事件。这个 JSON 内引用由独立业务守卫核实，不增加 SQL 外键。
 
 该归属事务恰有一条事件，只更新 `source_action_id/ownership_evidence_json/role`，独立文件 owner 保存历史；不与前序事件修改的部分组状态混用。原键核实完整申请、事实时刻及该三列的原前后值，并通过同 H 恢复原文件来源、用途及 NULL 配对。可靠原保存尚未结束时不得把缺键作为未保存；读失败不返回缺键。
+
+`PAIR_FROM_RESULT_SCAN` 是独立单事件事务，事实行及首次文件关联都属于预览文件自身历史。`device_file_pairing_facts.source_txn_id` 的引用类别为 `prior_transaction`，指向更早的完整 `history_transactions.id`，并与 `source_event_id` 核对该事务实际末事件。其余端点页和文件事件不得晚于该边界。原申请只保留 `preview_file_id/scan/source_boundary`；`scan` 使用完整原 `ResultPageRef`，`source_boundary` 使用 `txn_id/last_event_id`，事件时刻保存原申请时刻。未知分类没有事务；已有原键仅在原工作收场后从完整历史核实，读取异常不解释为缺键。具体分类与不可变字段见[结果扫描配对](file-fields.md#结果扫描配对)。
 
 ## 正向、逆向与快照格式
 

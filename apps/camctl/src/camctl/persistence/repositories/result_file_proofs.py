@@ -72,14 +72,15 @@ def _completion_page(connection, page, file, boundary):
     return page_id
 
 
-def load_strict_result_file_input(connection, page, file_id, boundary):
+def load_strict_result_file_input(connection, page, file_id, boundary, *, current_boundary=None):
     """返回一个固定文件的引用及资格；不返回增长目录或候选数组。"""
     if not isinstance(page, ResultPageRef) or not isinstance(boundary, HistoryBoundary):
         raise TypeError("严格文件读取要求原页引用和完整历史边界")
     ObjectId(file_id)
     if page.event_id > boundary.last_event_id:
         raise ConsistencyError("原页位于固定文件边界之后")
-    source, role, _ = _proof(connection, OwnershipFromResultPageSave(page, file_id, 0))
+    source, role, _ = _proof(connection, OwnershipFromResultPageSave(page, file_id, 0),
+                              current_boundary=current_boundary)
     file = _file_at(connection, file_id, boundary)
     owned = (file["source_action_id"] == source and file["role"] == role
              and file["ownership_evidence_json"] is not None)

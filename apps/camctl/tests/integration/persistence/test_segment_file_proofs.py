@@ -45,14 +45,15 @@ def _boundary(owned):
     return HistoryBoundary(transaction, event)
 
 
-async def _proof_world(tmp_path, size=10):
+async def _proof_world(tmp_path, size=10, *, entries=None, next_cursor=None):
     owned, runtime, source, _ = await consumer_world(
         tmp_path, "record", catalog=WaitSegmentedCatalog())
     try:
         ticket = _begin_check_round(runtime, source).ticket
         context = _stop_context(owned, source)
-        actual = replace(_actual(ticket, entries=[_entry("raw.LRF", size=size)],
-                                  finalized=True),
+        actual = replace(_actual(ticket, entries=(
+                                  [_entry("raw.LRF", size=size)] if entries is None else entries),
+                                  next_cursor=next_cursor, finalized=next_cursor is None),
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue(
                 "results_returned", 1, {"file_completion": _completion(context),
                                       "file_completion_source_page_event_id": None})))

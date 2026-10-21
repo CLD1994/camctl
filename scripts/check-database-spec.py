@@ -416,6 +416,11 @@ def main() -> None:
     insert(db, 'result_page_files', id=1, created_event_id=2, action_id=2, run_id=1, attempt_id=1,
            page_event_id=1, file_id=1, identity='/mnt/media/DCIM/take.OSV',
            family_directory='/mnt/media/DCIM', family_stem='take', family_role=1)
+    insert(db, 'device_file_pairing_facts', id=1, created_event_id=2,
+           preview_file_id=2, original_file_id=1, attempt_id=1, final_page_event_id=1,
+           source_txn_id=1, source_event_id=2, preview_page_event_id=1,
+           original_page_event_id=1, preview_file_event_id=1, original_file_event_id=1,
+           original_count=1, preview_count=1, state=1, reason=1)
     insert(db, 'cleanup_items', id=1, action_id=3, requested_output_id=1, output_id=1, status=2, restriction_state=2)
     insert(db, 'cancel_items', id=1, action_id=4, target_action_id=2, selection_basis=1, status=2, cancellation_effect=2)
     insert(db, 'cancel_delivery_items', id=1, cancel_item_id=1, delivery_id=1, status=1)

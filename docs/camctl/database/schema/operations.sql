@@ -274,3 +274,30 @@ CREATE INDEX segment_member_history_ids ON segment_members(set_id, id);
 CREATE INDEX segment_gap_history_ids ON segment_gaps(set_id, id);
 CREATE INDEX segment_scope_history_ids ON segment_scope_members(set_id, id);
 CREATE INDEX operation_attempt_history_ids ON operation_attempts(run_id, id);
+
+CREATE TABLE device_file_pairing_facts (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    preview_file_id INTEGER NOT NULL REFERENCES device_files(id) DEFERRABLE INITIALLY DEFERRED,
+    original_file_id INTEGER REFERENCES device_files(id) DEFERRABLE INITIALLY DEFERRED,
+    attempt_id INTEGER NOT NULL REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
+    final_page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    source_txn_id INTEGER NOT NULL REFERENCES history_transactions(id) DEFERRABLE INITIALLY DEFERRED,
+    source_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    preview_page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    original_page_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    preview_file_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    original_file_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    original_count INTEGER NOT NULL CHECK (original_count >= 0),
+    preview_count INTEGER NOT NULL CHECK (preview_count > 0),
+    state INTEGER NOT NULL CHECK (state IN (1,2)),
+    reason INTEGER NOT NULL CHECK (reason IN (1,2,3,4,5)),
+    UNIQUE (preview_file_id, attempt_id, final_page_event_id),
+    CHECK ((original_file_id IS NULL) = (original_page_event_id IS NULL)),
+    CHECK ((original_file_id IS NULL) = (original_file_event_id IS NULL)),
+    CHECK (original_file_id IS NULL OR (original_count = 1 AND original_file_id <> preview_file_id)),
+    CHECK ((state = 1 AND reason = 1 AND original_file_id IS NOT NULL
+            AND original_count = 1 AND preview_count = 1)
+        OR (state = 2 AND reason IN (2,3,4,5)))
+) STRICT;
+CREATE INDEX device_file_pairing_history ON device_file_pairing_facts(preview_file_id, created_event_id, id);

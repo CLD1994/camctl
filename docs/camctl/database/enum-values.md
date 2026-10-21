@@ -688,6 +688,27 @@
 | 2 | `MEMBERS_FIXED` |
 | 3 | `ASSESSED` |
 
+### `device_file_pairing_facts.state`
+
+[行为说明](file-fields.md#结果扫描配对)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `PAIRED` |
+| 2 | `UNPAIRED` |
+
+### `device_file_pairing_facts.reason`
+
+[行为说明](file-fields.md#结果扫描配对)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `UNIQUE` |
+| 2 | `MISSING` |
+| 3 | `AMBIGUOUS` |
+| 4 | `INVALID` |
+| 5 | `CONFLICT` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`
@@ -718,6 +739,7 @@
 | 编号 | 成员 |
 | --- | --- |
 | 1 | `DRIVER_PAIRING` |
+| 2 | `RESULT_SCAN_PAIRING` |
 
 ### `device_activities.result_check_json.outcome`
 

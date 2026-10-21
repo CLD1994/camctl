@@ -870,6 +870,9 @@ class HistoryRepository:
                 yield "cancel_items", cancel_item_id
                 yield from _ids_where(
                     connection, "cancel_delivery_items", "cancel_item_id", cancel_item_id)
+        elif name == "device_files":
+            yield from _ids_where(connection, name, "id", entity_id)
+            yield from _ids_where(connection, "device_file_pairing_facts", "preview_file_id", entity_id)
         elif name == "outputs":
             yield from _ids_where(connection, "outputs", "id", entity_id)
             yield from _ids_where(connection, "output_origins", "output_id", entity_id)

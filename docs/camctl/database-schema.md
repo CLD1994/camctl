@@ -73,6 +73,7 @@
 | `segment_scope_members` | [分段集合、判断与默认范围](database/segments.md) |
 | `operation_runs` | [具体操作责任及整体进度](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `operation_attempts` | [操作流程的一次业务尝试](database/operations-devices.md#操作流程与尝试的公共模型) |
+| `device_file_pairing_facts` | [结果扫描配对](database/file-fields.md#结果扫描配对) |
 | `result_page_files` | [结果页文件身份索引](database/operations-devices.md#结果页文件身份索引) |
 | `device_activities` | [设备持续活动及可靠观察](database/operations-devices.md#设备活动记录) |
 | `recording_processing` | [录像内部检查和修复的决定、进度与结果](database/operations-devices.md#录像内部检查与修复记录) |
