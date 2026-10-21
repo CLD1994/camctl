@@ -13,6 +13,7 @@ from camctl.persistence.repositories.outputs import OutputsRepository, ResolveSo
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_sources import _NOW, _seed_action, _six_form_environment
+from .test_source_resolution_batches import _real_environment
 
 
 def _environment(tmp_path):
@@ -26,7 +27,9 @@ def _environment(tmp_path):
 
 @pytest.mark.parametrize('fault', ['rollback', 'unknown_before_commit', 'unknown_after_commit'])
 def test_cleanup_source_save_rebuild_keeps_original_request_and_key(tmp_path, fault):
-    target, owned = _environment(tmp_path)
+    target, owned, request = _real_environment(tmp_path,cleanup=True,captures=1)
+    owner_id = request.action_id
+    member_id = owned.connection.execute("SELECT id FROM actions WHERE plan_id=1").fetchone()[0]
     calls = []
     repository = OutputsRepository()
 
@@ -43,38 +46,36 @@ def test_cleanup_source_save_rebuild_keeps_original_request_and_key(tmp_path, fa
 
     pending = {}
     port = InterruptedRepository()
-    request = ResolveSources(30, SourceSpec(plan_instance_id=2), _NOW)
     runtime = SimpleNamespace(owned=owned, outputs=port, pending_saves=pending)
     first = save_cleanup_request(runtime, 'resolve_sources', request, action=True)
     assert first.kind is not DbOutcomeKind.COMPLETED
     assert len(pending) == 1
-    original = pending[('resolve_sources', 30)]
+    original = pending[('resolve_sources', owner_id)]
     owned.connection.close()
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         resumed = SimpleNamespace(owned=owned, outputs=port, pending_saves=pending)
         result = save_cleanup_request(resumed, 'resolve_sources',
-            ResolveSources(30, SourceSpec(plan_instance_id=2), _NOW + 100), action=True)
+            ResolveSources(owner_id, request.spec, _NOW + 100), action=True)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        assert result.value.fixed and result.value.member_action_ids == (21,)
-        assert result.value.selection_ids == ()
+        assert result.value.fixed and result.value.member_count == 1
+        assert result.value.selection_count == 0
         assert calls == [(request, original.key), (request, original.key)]
         assert pending == {}
         assert owned.connection.execute(
-            'SELECT source_resolution_state,resolved_source_plan_id FROM actions WHERE id=30').fetchone() == (2, 2)
+            'SELECT source_resolution_state,resolved_source_plan_id FROM actions WHERE id=?', (owner_id,)).fetchone() == (2, 1)
         assert owned.connection.execute(
-            'SELECT depends_on_action_id FROM action_dependencies WHERE action_id=30').fetchall() == [(21,)]
+            'SELECT depends_on_action_id FROM action_dependencies WHERE action_id=?', (owner_id,)).fetchall() == [(member_id,)]
         assert owned.connection.execute('SELECT COUNT(*) FROM obtain_source_selections').fetchone() == (0,)
         assert owned.connection.execute(
-            'SELECT occurred_at FROM history_events WHERE event_type=3').fetchall() == [(_NOW,)]
+            'SELECT DISTINCT occurred_at FROM history_events WHERE event_type=3').fetchall() == [(_NOW,)]
     finally:
         owned.connection.close()
 
 
 def test_fixed_cleanup_source_is_reused_without_new_dependencies(tmp_path):
-    _, owned = _environment(tmp_path)
+    _, owned, request = _real_environment(tmp_path,cleanup=True,captures=1)
     repository = OutputsRepository()
-    request = ResolveSources(30, SourceSpec(plan_instance_id=2), _NOW)
     key = new_operation_key()
     try:
         first = repository.resolve_sources(request, key, owned)
@@ -110,8 +111,8 @@ def test_cleanup_resolves_every_selected_capture_and_excludes_other_actions(tmp_
             ResolveSources(30, read_source_spec(fields), _NOW), new_operation_key(), owned)
 
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        assert result.value.member_action_ids == expected
-        assert result.value.selection_ids == ()
+        assert result.value.member_count == len(expected)
+        assert result.value.selection_count == 0
         assert connection.execute(
             'SELECT depends_on_action_id FROM action_dependencies WHERE action_id=30 ORDER BY id').fetchall() == [(identity,) for identity in expected]
         assert connection.execute('SELECT COUNT(*) FROM obtain_source_selections').fetchone() == (0,)

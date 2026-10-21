@@ -668,9 +668,10 @@ async def two_item_world(owned, tmp_path):
     resolved = outputs.resolve_sources(
         ResolveSources(2, SourceSpec(action_instance_id=1), now), new_operation_key(), owned)
     assert resolved.kind is DbOutcomeKind.COMPLETED, resolved.error
-    assert resolved.value.fixed and resolved.value.member_action_ids == (1,), resolved.value
-    assert len(resolved.value.selection_ids) == 1, resolved.value
-    selection_id = resolved.value.selection_ids[0]
+    assert resolved.value.fixed and resolved.value.member_count == 1, resolved.value
+    assert resolved.value.selection_count == 1, resolved.value
+    selection_id = owned.connection.execute(
+        "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=2").fetchone()[0]
     from camctl.outputs.sources import ResolutionState, SourceResolution
     resolution = SourceResolution(ResolutionState.FIXED, member_action_ids=(1,), source_plan_id=1)
     selected = select_outputs(resolution, load_selection_facts(owned.connection, 1),

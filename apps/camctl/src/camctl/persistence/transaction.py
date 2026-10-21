@@ -37,7 +37,7 @@ from camctl.history.events import (
     changeable_columns,
     load_event_registry,
 )
-from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope, SegmentReadScope
+from camctl.history.reads import BaselineRangeRead, PlanReadScope, ReadCoverage, ProductReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope
 from camctl.history.validators import (
     EventContext,
     EventValidationError,
@@ -88,6 +88,7 @@ class CommandPlan:
     plan_read_scope: PlanReadScope | None = None
     capture_result_read_scope: CaptureResultReadScope | None = None
     segment_read_scope: SegmentReadScope | None = None
+    source_read_scope: SourceResolutionReadScope | AdmissionSourceReadScope | None = None
 
 
 class TransactionScope:
@@ -139,24 +140,36 @@ class BoundedCommandPlan:
     complete: Callable[[sqlite3.Connection], None]
 
 
-def _bind_event_reads(context,event,transaction,segment_guard_state,connection):
-    """内核独占分段进度；上下文缺失/替换读取端口不能丢弃已验证F。"""
+def _bind_event_reads(context,event,transaction,segment_guard_state,source_guard_state,connection,operation_key,accepted=None):
+    """内核分别持有分段和来源进度；上下文不能丢弃已验证F。"""
     from camctl.persistence.event_reads import SqlEventReads
     reads=context.current_reads
     if reads is None:
-        if segment_guard_state or 'segment_finish_request' in event.evidence:
-            raise TransactionError('分段完成事件缺少原事务的可靠读取端口')
+        from camctl.persistence.repositories.source_transactions import required_stream
+        from camctl.persistence.repositories.admission_sources import required as admission_required
+        if segment_guard_state or source_guard_state or 'segment_finish_request' in event.evidence or required_stream(connection,event) or admission_required(event):
+            raise TransactionError('来源或分段事件缺少原事务的可靠读取端口')
         return None
     if type(reads) is not SqlEventReads or reads.connection is not connection:
         raise TransactionError('事件读取端口必须由原事务同一连接的可靠SQL实现提供')
     SqlEventReads.bind_segment_finish_state(reads,segment_guard_state,transaction)
+    # accepted 由内核传入；Bounded 只能读取同连接已写入的真实前序。
+    reads._kernel_accepted = accepted
+    reads._kernel_transaction = transaction
+    reads._kernel_event_id = event.event_id
+    from camctl.persistence.repositories.source_transactions import bind_stream
+    bind_stream(connection,event,transaction,reads,source_guard_state,operation_key,context)
+    from camctl.persistence.repositories.admission_sources import bind as bind_admission
+    bind_admission(connection,event,transaction,reads,source_guard_state)
     return reads
 
 
-def _seal_event_reads(reads,validated):
+def _seal_event_reads(reads,validated,source_guard_state):
     if reads is not None:
         from camctl.persistence.event_reads import SqlEventReads
         SqlEventReads.seal_segment_finish(reads,validated)
+        from camctl.persistence.repositories.source_transactions import seal_stream
+        seal_stream(reads,validated,source_guard_state)
 
 
 def _write_bounded_plan(plan, scope, operation_key):
@@ -171,13 +184,14 @@ def _write_bounded_plan(plan, scope, operation_key):
     sequence = _scalar(connection,"SELECT MAX(change_seq) FROM history_events")
     expected = allocation.first_event_id
     segment_guard_state = {}
+    source_guard_state = {}
     for proposed in plan.events:
         if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
             raise TransactionError("实际有界事件与预分配完整范围不符")
         if len(proposed.rows) > 128:
             raise TransactionError("有界事件超过128行")
         context = plan.context(proposed, transaction)
-        reads = _bind_event_reads(context, proposed, transaction, segment_guard_state, connection)
+        reads = _bind_event_reads(context, proposed, transaction, segment_guard_state, source_guard_state, connection, operation_key)
         targets = event_report_targets(proposed, context.state_rows)
         if targets:
             sequence += 1
@@ -185,7 +199,7 @@ def _write_bounded_plan(plan, scope, operation_key):
             ObjectId(sequence)
         event = replace(proposed,change_seq=sequence if targets else None)
         validated = validate_event(event,context)
-        _seal_event_reads(reads, validated)
+        _seal_event_reads(reads, validated, source_guard_state)
         refs = set(validated.row_owners.values())
         before_counts = {}
         for ref in refs:
@@ -220,6 +234,10 @@ def _write_bounded_plan(plan, scope, operation_key):
         expected += 1
     if expected != allocation.last_event_id+1:
         raise TransactionError("实际有界事件少于预分配完整范围")
+    from camctl.persistence.repositories.source_transactions import finish_stream
+    finish_stream(source_guard_state)
+    from camctl.persistence.repositories.admission_sources import finish as finish_admission
+    finish_admission(connection, transaction, None, source_guard_state)
     plan.complete(connection)
     try:
         connection.execute("COMMIT")
@@ -637,11 +655,12 @@ def commit_operation(
         )
         from camctl.persistence.event_reads import SqlEventReads
 
-        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope, plan.segment_read_scope)
+        scopes = (plan.product_read_scope, plan.plan_read_scope, plan.capture_result_read_scope, plan.segment_read_scope, plan.source_read_scope)
         if sum(value is not None for value in scopes) > 1:
             raise TransactionError("同一命令不能混用不同事实读取范围")
         read_scope = next((value for value in scopes if value is not None), None)
         segment_guard_state = {}
+        source_guard_state = {}
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,
@@ -653,11 +672,16 @@ def commit_operation(
                 current_reads=(None if read_scope is None else
                                SqlEventReads(connection, read_scope, validated, sequenced)),
             )
-            reads = _bind_event_reads(context, event, transaction_range, segment_guard_state, connection)
+            reads = _bind_event_reads(context, event, transaction_range, segment_guard_state, source_guard_state, connection, operation_key, validated)
             accepted = validate_event(event, context)
-            _seal_event_reads(reads, accepted)
+            _seal_event_reads(reads, accepted, source_guard_state)
             validated.append(accepted)
             _apply_rows(validation_state, (event,))
+
+        from camctl.persistence.repositories.source_transactions import finish_stream
+        finish_stream(source_guard_state)
+        from camctl.persistence.repositories.admission_sources import finish as finish_admission
+        finish_admission(connection, transaction_range, validated, source_guard_state)
 
         touched = {
             (entity_type, entity_id)

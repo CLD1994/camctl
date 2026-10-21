@@ -65,6 +65,8 @@ class CurrentEventReads(Protocol):
 
     def optional(self, table: str, identity: int, columns=None) -> Mapping[str, Any] | None: ...
     def required(self, table: str, identity: int) -> Mapping[str, Any]: ...
+    def admitted_source_owner(self, owner_id: int, transaction) -> Mapping[str, Any]: ...
+    def admitted_source_members(self, owner, transaction) -> Iterable[int]: ...
     def iter_members(self, table: str, column: str, identity: int, *, columns=None,
                      limit: int | None = None) -> Iterable[tuple[tuple[int, Mapping[str, Any]], ...]]: ...
     def actions(self) -> Iterable[tuple[int, Mapping[str, Any]]]: ...
@@ -132,3 +134,23 @@ class SegmentReadScope:
         from camctl.capture.segment_models import SegmentSetRef
         if not isinstance(self.ref, SegmentSetRef) or type(self.batch_size) is not int or not 1 <= self.batch_size <= 128:
             raise ValueError('分段复核要求冻结集合和有限批次')
+
+
+@dataclass(frozen=True)
+class SourceResolutionReadScope(PlanReadScope):
+    """原产物动作的来源解析及所属计划聚合。"""
+    action_id: int
+
+    def __post_init__(self):
+        super().__post_init__()
+        ObjectId(self.action_id)
+
+
+@dataclass(frozen=True)
+class ObtainInitializationReadScope(SourceResolutionReadScope):
+    """原取回动作的既有依赖初始化；不提供来源选择事实。"""
+
+
+@dataclass(frozen=True)
+class AdmissionSourceReadScope(PlanReadScope):
+    """原受理事务真实前序创建的来源 owner。"""

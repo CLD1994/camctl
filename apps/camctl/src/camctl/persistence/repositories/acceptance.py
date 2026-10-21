@@ -28,6 +28,7 @@ from camctl.contracts.json_values import MISSING, json_field
 from camctl.contracts.values import OperationKey, parse_object_id, ValueTypeError, ValueFormatError, ValueRangeError
 from camctl.contracts.workflow_errors import action_error_id, action_error_ids, registered_error_spec, validate_error_details
 from camctl.history.events import EventEnvelope, RowChange, RowImage
+from camctl.history.reads import AdmissionSourceReadScope
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection, require_host_photo_format
@@ -492,6 +493,8 @@ class ProcessInputCommand:
             owners=self._owners,
             state_rows=self._state,
             result=result,
+            source_read_scope=(None if result.plan_disposition is not PlanDisposition.REGISTERED else
+                AdmissionSourceReadScope(result.plan_id,128)),
         )
 
     @staticmethod
@@ -649,45 +652,34 @@ def _plan_aggregate_guard(event, context) -> None:
 
 
 def _source_members_guard(event, context) -> None:
-    fixed_now: dict[int, Any] = {}
-    for row in event.rows:
-        if row.table == "actions" and row.before.exists:
-            after = row.after.values
-            if after.get("source_resolution_state") == 2:
-                fixed_now[row.row_id] = after.get("resolved_source_plan_id")
+    if event.event_type == 3 and event.reason in (1, 2):
+        from .source_transactions import verify_source_guard
+        verify_source_guard(event, context)
+        return
     for row in event.rows:
         if row.table == "actions" and not row.before.exists:
             values = row.after.values
-            if values.get("source_resolution_state") == 2:
-                if values.get("resolved_source_plan_id") is None:
-                    raise EventValidationError("FIXED 来源必须保存真实来源计划")
-        if row.table == "action_dependencies" and not row.before.exists:
-            owner_id = row.after.values.get("action_id")
-            owner = context.state_rows.get("actions", {}).get(owner_id)
-            # 执行期固定在同一事件把所属动作更新为 FIXED；受理成员
-            # 则要求先前事件已创建 FIXED 动作。
-            if owner_id not in fixed_now and (
-                owner is None or owner.get("source_resolution_state") != 2
-            ):
-                raise EventValidationError("来源成员必须属于 FIXED 来源的取回或范围清理动作")
-            if owner is None or owner.get("type") not in {_action_type_code("obtain_action_outputs"), _action_type_code("delete_action_outputs")} :
-                raise EventValidationError("来源成员所属动作类型不适用")
-            plan_id = fixed_now.get(owner_id) or (owner or {}).get(
-                "resolved_source_plan_id"
-            )
-            member = context.state_rows.get("actions", {}).get(
-                row.after.values.get("depends_on_action_id")
-            )
-            if (
-                plan_id is None
-                or member is None
-                or member.get("plan_id") != plan_id
-                or member.get("type") not in _CAPTURE_TYPES
-            ):
-                raise EventValidationError(
-                    "来源成员必须是指向来源计划且能产生产物的拍摄动作:"
-                    f" {row.after.values.get('depends_on_action_id')!r}"
-                )
+            if values.get("source_resolution_state") == 2 and values.get("resolved_source_plan_id") is None:
+                raise EventValidationError("FIXED 来源必须保存真实来源计划")
+    dependencies = [row for row in event.rows if row.table == "action_dependencies" and not row.before.exists]
+    if not dependencies:
+        if event.event_type == 3 and event.reason == 3:
+            raise EventValidationError("受理零成员无需空事件")
+        return
+    reads = context.current_reads
+    if event.event_type != 3 or event.reason != 3 or reads is None:
+        raise EventValidationError("来源成员缺少可靠执行申请或真实受理前序")
+    owner_id = dependencies[0].after.values.get("action_id")
+    if any(row.after.values.get("action_id") != owner_id for row in dependencies):
+        raise EventValidationError("受理成员事件只能保存一个真实 owner 的完整成员")
+    owner = reads.admitted_source_owner(owner_id, context.transaction)
+    if owner["type"] not in {_action_type_code("obtain_action_outputs"), _action_type_code("delete_action_outputs")}:
+        raise EventValidationError("来源成员所属动作类型不适用")
+    from itertools import zip_longest
+    actual = (row.after.values.get("depends_on_action_id") for row in dependencies)
+    for member, expected in zip_longest(actual, reads.admitted_source_members(owner,context.transaction)):
+        if member is None or expected is None or member != expected:
+            raise EventValidationError("受理来源成员没有完整覆盖原 source 的真实前序拍摄动作")
 
 
 def _diagnostic_guard(event, context) -> None:

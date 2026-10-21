@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope
+from camctl.history.reads import PlanReadScope, ProductReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class SqlEventReads:
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
     def __init__(self, connection, scope, validated=(), planned_events=(), *, proposal_event=None, segment_ref=None, segment_guard_state=None):
-        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope)):
+        if not isinstance(scope, (ProductReadScope, PlanReadScope, CaptureResultReadScope, SegmentReadScope, SourceResolutionReadScope, AdmissionSourceReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")
         self.connection, self.scope = connection, scope
         self._planned_events = planned_events
@@ -218,6 +218,77 @@ class SqlEventReads:
             raise ConsistencyError('最终守卫没有同scope/完整组/实际原头的已验证F资格')
         return proof.qualification
 
+    def admitted_source_owner(self, owner_id, transaction):
+        """原 F 前不存在，且已由内核实际接受的 ACTION_ADMITTED 创建。"""
+        from camctl.persistence.transaction import row_facts
+        from camctl.history.events import load_event_registry
+        from camctl.history.decoding import decode_event_row
+        if (type(self.scope) is not AdmissionSourceReadScope or not self.connection.in_transaction
+                or getattr(self, '_kernel_transaction', None) != transaction):
+            raise ConsistencyError('受理来源成员缺少原事务可靠前序端口')
+        from camctl.persistence.repositories.admission_sources import verify
+        verify(self, transaction)
+        accepted = getattr(self, '_kernel_accepted', None)
+        current = row_facts(self.connection, 'actions', owner_id)
+        admitted_type = load_event_registry()['events']['ACTION_ADMITTED']['id']
+        if accepted is None:
+            if current is None or not transaction.first_event_id <= current['created_event_id'] < self._kernel_event_id:
+                raise ConsistencyError('受理来源 owner 在原 F 前已存在或没有实际创建前序')
+            raw = self.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?', (current['created_event_id'],)).fetchone()
+            candidates = () if raw is None else (decode_event_row(raw),)
+        else:
+            if current is not None:
+                raise ConsistencyError('既有 owner 不得借受理成员分支追加来源')
+            candidates = (entry.envelope for entry in accepted)
+        found = None
+        for event in candidates:
+            if event.event_type != admitted_type or event.transaction_id != transaction.txn_id:
+                continue
+            for row in event.rows:
+                if row.table == 'actions' and row.row_id == owner_id and not row.before.exists and row.after.exists:
+                    if found is not None:
+                        raise ConsistencyError('受理来源 owner 的实际创建前序不唯一')
+                    found = dict(row.after.values, id=owner_id)
+        if (found is None or found['plan_id'] != self.scope.plan_id
+                or found['source_resolution_state'] != 2 or found['resolved_source_plan_id'] != self.scope.plan_id):
+            raise ConsistencyError('受理成员不属于原新建 FIXED owner 的真实计划')
+        return found
+
+    def admitted_source_members(self, owner, transaction):
+        """只从实际受理前序按原 source 逐项解释预期成员。"""
+        from camctl.outputs.sources import read_source_spec, _CAPTURE_TYPES
+        from camctl.persistence.transaction import encode_json_value, row_facts
+        spec = read_source_spec(encode_json_value(owner['input_fields_json']))
+        if spec.action_instance_id is not None or spec.plan_instance_id is not None:
+            raise ConsistencyError('实例来源不属于受理时的本计划成员分区')
+        accepted = self._kernel_accepted
+        if accepted is None:
+            def candidates():
+                after = 0
+                while True:
+                    with closing(self.connection.execute('SELECT id FROM actions WHERE plan_id=? AND created_event_id>=? AND created_event_id<? AND id>? ORDER BY id LIMIT ?',
+                            (self.scope.plan_id,transaction.first_event_id,self._kernel_event_id,after,self.scope.batch_size))) as cursor:
+                        rows = tuple(cursor.fetchmany(self.scope.batch_size))
+                    if not rows:
+                        return
+                    for identity, in rows:
+                        yield identity,row_facts(self.connection,'actions',identity)
+                    after = rows[-1][0]
+        else:
+            def candidates():
+                for entry in accepted:
+                    for row in entry.envelope.rows:
+                        if row.table == 'actions' and not row.before.exists and row.after.exists:
+                            yield row.row_id,row.after.values
+        for identity, source in candidates():
+            if source.get('plan_id') != self.scope.plan_id or source.get('type') not in _CAPTURE_TYPES:
+                continue
+            if spec.action_name is not None and source.get('name') != spec.action_name:
+                continue
+            if spec.group is not None and source.get('group_name') != spec.group:
+                continue
+            yield identity
+
     def _check(self, table, column="id", identity=None):
         if not self.connection.in_transaction:
             raise ConsistencyError("当前事件事实端口必须在原写事务内使用")
@@ -227,10 +298,13 @@ class SqlEventReads:
             raise ConsistencyError("当前事件事实查询超出内部允许范围")
         if identity is not None:
             ObjectId(identity)
+        if isinstance(self.scope, SourceResolutionReadScope):
+            from camctl.persistence.repositories.source_transactions import source_read_role
+            source_read_role(self, table, column, identity)
         if isinstance(self.scope, CaptureResultReadScope) and (
                 table != "device_files" or column != "id" or identity not in self._result_file_ids):
             raise ConsistencyError("结果文件事实只能读取本批原页的成员")
-        if isinstance(self.scope, PlanReadScope) and (
+        if isinstance(self.scope, PlanReadScope) and not isinstance(self.scope, SourceResolutionReadScope) and (
                 table != "actions" or column not in ("id", "plan_id")
                 or (column == "plan_id" and identity != self.scope.plan_id)):
             raise ConsistencyError("计划聚合读取超出所属计划")
@@ -252,7 +326,7 @@ class SqlEventReads:
         if (table, identity) in self._overlay:
             changes = self._overlay[table, identity]
             facts = None if changes is None else {**(facts or {"id": identity}), **changes}
-        if isinstance(self.scope, PlanReadScope) and facts is not None and facts.get("plan_id") != self.scope.plan_id:
+        if isinstance(self.scope, PlanReadScope) and not isinstance(self.scope, SourceResolutionReadScope) and facts is not None and facts.get("plan_id") != self.scope.plan_id:
             raise ConsistencyError("计划聚合记录不属于当前计划")
         return facts
 
@@ -284,6 +358,12 @@ class SqlEventReads:
         return result
 
     def iter_members(self, table, column, identity, *, columns=None, limit=None):
+        if isinstance(self.scope, SourceResolutionReadScope) and (table, column, identity) == ('actions', 'plan_id', self.scope.plan_id):
+            from camctl.persistence.repositories.source_transactions import aggregate_pages
+            return aggregate_pages(self, table, column, identity, columns=columns, limit=limit)
+        return self._iter_members(table, column, identity, columns=columns, limit=limit)
+
+    def _iter_members(self, table, column, identity, *, columns=None, limit=None):
         self._check(table, column, identity)
         size = self.scope.batch_size if limit is None else limit
         if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= self.scope.batch_size:

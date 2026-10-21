@@ -254,6 +254,8 @@ def _six_form_environment(tmp_path: Path):
     _seed_action(connection, 21, 2, action_type=2, group_name="晨拍")
     _seed_action(connection, 22, 2, action_type=7)
     _seed_action(connection, 30, 1, action_type=4, source_resolution_state=1)
+    connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+        (json.dumps({"params":{"source":{"plan_instance_id":"2"}}}),))
     connection.commit()
     return target, owned
 
@@ -306,9 +308,9 @@ def test_resolve_sources_fixes_members_and_initializes_selections(
         )
         assert outcome.kind is DbOutcomeKind.COMPLETED
         assert outcome.value.fixed is True
-        assert outcome.value.member_action_ids == (21,)
+        assert outcome.value.member_count == 1
         assert outcome.value.source_plan_id == 2
-        assert len(outcome.value.selection_ids) == 1
+        assert outcome.value.selection_count == 1
 
         action = _value(
             owned,
@@ -335,6 +337,9 @@ def test_resolve_sources_failure_saves_terminal_action(tmp_path: Path) -> None:
     """可靠确认引用无效：动作失败终态与错误详情共同保存。"""
     _, owned = _six_form_environment(tmp_path)
     repository = OutputsRepository()
+    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+        (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
+    owned.connection.commit()
     try:
         outcome = repository.resolve_sources(
             ResolveSources(
@@ -383,6 +388,9 @@ def test_resolve_sources_failure_completes_last_action_plan(
         "UPDATE actions SET status = 3 WHERE id IN (11, 12, 13, 14)")
     connection.commit()
     repository = OutputsRepository()
+    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+        (json.dumps({"params":{"source":{"action_instance_id":"99"}}}),))
+    owned.connection.commit()
     try:
         outcome = repository.resolve_sources(
             ResolveSources(
@@ -422,8 +430,8 @@ def test_legal_empty_source_set_fixes_without_selections(tmp_path: Path) -> None
         )
         assert outcome.kind is DbOutcomeKind.COMPLETED
         assert outcome.value.fixed is True
-        assert outcome.value.member_action_ids == ()
-        assert outcome.value.selection_ids == ()
+        assert outcome.value.member_count == 0
+        assert outcome.value.selection_count == 0
         action = _value(
             owned,
             "SELECT source_resolution_state, resolved_source_plan_id"
@@ -439,6 +447,9 @@ def _prepared_selection(tmp_path: Path):
     """固定单一来源（计划 2 的动作 21）并把来源置为成功终态。"""
     target, owned = _six_form_environment(tmp_path)
     repository = OutputsRepository()
+    owned.connection.execute("UPDATE actions SET input_fields_json=? WHERE id=30",
+        (json.dumps({"params":{"source":{"action_instance_id":"21"}}}),))
+    owned.connection.commit()
     outcome = repository.resolve_sources(
         ResolveSources(
             action_id=30,
@@ -449,7 +460,7 @@ def _prepared_selection(tmp_path: Path):
         owned,
     )
     assert outcome.kind is DbOutcomeKind.COMPLETED
-    selection_id = outcome.value.selection_ids[0]
+    selection_id = _value(owned, "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=30")[0]
     owned.connection.execute("BEGIN IMMEDIATE")
     owned.connection.execute("UPDATE actions SET status = 3 WHERE id = 21")
     owned.connection.commit()

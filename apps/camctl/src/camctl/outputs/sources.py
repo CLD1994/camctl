@@ -17,7 +17,7 @@ from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
-from camctl.contracts.values import ConsistencyError, ObjectId, parse_object_id
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, parse_object_id
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
@@ -120,9 +120,11 @@ class SourceSpec:
                 f"plan_instance_id={self.plan_instance_id!r}, group={self.group!r}, "
                 f"action_name={self.action_name!r}, current_plan={self.current_plan!r}"
             )
+        if type(self.current_plan) is not bool:
+            raise ValueError("current_plan 必须是布尔值")
         for value in (self.action_instance_id, self.plan_instance_id):
-            if value is not None and (isinstance(value, bool) or value <= 0):
-                raise ValueError(f"来源实例引用必须是正整数: {value!r}")
+            if value is not None:
+                ObjectId(value)
         for text in (self.group, self.action_name):
             if text is not None and not text:
                 raise ValueError("来源名称引用不能为空")
@@ -146,6 +148,34 @@ def read_source_spec(input_fields_json: str) -> SourceSpec:
         return SourceSpec(**values)
     except (TypeError, ValueError) as error:
         raise ConsistencyError(f"产物来源引用不可解释: {error}") from error
+
+
+def validate_source_transaction_header(value, kind):
+    """历史解码与写守卫共用有限申请形状；完整事实仍由内核独立核。"""
+    from collections.abc import Mapping
+    from camctl.contracts.values import OperationKey
+    common = {'version','action_id','occurred_at','operation_key','batch_size','member_count',
+              'first_selection_id','first_event_id','last_event_id'}
+    extra = {'source','source_plan_id','first_dependency_id','complete_plan'} if kind == 'source_resolution_request' else {'start_plan'}
+    if not isinstance(value,Mapping) or set(value) != common | extra or type(value['version']) is not int or value['version'] != 1:
+        raise ConsistencyError('来源事务申请字段或版本不可解释')
+    for name in ('action_id','first_selection_id','first_event_id','last_event_id'):
+        ObjectId(value[name])
+    UtcMicros(value['occurred_at'])
+    OperationKey(value['operation_key'])
+    if (type(value['batch_size']) is not int or not 1 <= value['batch_size'] <= 64
+            or type(value['member_count']) is not int or value['member_count'] < 0
+            or value['first_event_id'] > value['last_event_id']):
+        raise ConsistencyError('来源事务批次、计数或完整范围不可解释')
+    if kind == 'source_resolution_request':
+        ObjectId(value['first_dependency_id'])
+        if value['source_plan_id'] is not None:
+            ObjectId(value['source_plan_id'])
+        if type(value['complete_plan']) is not bool or not isinstance(value['source'],Mapping):
+            raise ConsistencyError('来源申请缺少原 source 或真实完成分区')
+        SourceSpec(**value['source'])
+    elif type(value['start_plan']) is not bool:
+        raise ConsistencyError('初始化申请的父计划分区必须为布尔值')
 
 
 @dataclass(frozen=True)
