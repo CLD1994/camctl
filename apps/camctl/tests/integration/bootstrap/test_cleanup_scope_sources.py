@@ -65,9 +65,41 @@ async def test_cross_instance_cleanup_resolves_source_before_targets(tmp_path, s
                 if action['type'] == 'delete_action_outputs']
     assert len(reported) == 1 and reported[0]['status'] == 'succeeded'
     with sqlite3.connect(db) as connection:
-        events = [(event_type, json.loads(body)['reason']) for event_type, body in connection.execute(
-            'SELECT event_type,body_json FROM history_events WHERE event_type IN (3,4) ORDER BY id')]
-    assert events == [(3, 1), (4, 2)]
+        events = [(event_id, event_type, json.loads(body))
+                  for event_id, event_type, body in connection.execute(
+                      'SELECT id,event_type,body_json FROM history_events '
+                      'WHERE event_type IN (3,4) ORDER BY id')]
+        # 来源成员与唯一末固定事件共同提交，之后才允许固定清理目标。
+        assert [(kind, body['reason']) for _, kind, body in events] == [(3, 1), (3, 1), (4, 2)]
+        members, fixed, targets = events
+        header = members[2]['evidence']['source_resolution_request']
+        assert fixed[2]['evidence']['source_resolution_request'] == header
+        cleanup_action, = connection.execute('SELECT id FROM actions WHERE type=5').fetchone()
+        assert header['action_id'] == cleanup_action
+        assert header['source'] == {source_field: identity}
+        assert header['member_count'] == 1
+        assert header['source_plan_id'] == source_plan
+        assert (header['first_event_id'], header['last_event_id']) == (members[0], fixed[0])
+        assert connection.execute(
+            'SELECT first_event_id,last_event_id FROM history_transactions WHERE operation_key=?',
+            (header['operation_key'],),
+        ).fetchone() == (members[0], fixed[0])
+    member, = members[2]['rows']
+    assert member['table'] == 'action_dependencies'
+    assert member['before'] == {'exists': False, 'values': {}}
+    assert member['after'] == {'exists': True, 'values': {
+        'action_id': cleanup_action, 'depends_on_action_id': source_action,
+    }}
+    assert fixed[2]['rows'] == [{
+        'table': 'actions', 'id': cleanup_action,
+        'before': {'exists': True, 'values': {
+            'source_resolution_state': 1, 'resolved_source_plan_id': None,
+        }},
+        'after': {'exists': True, 'values': {
+            'source_resolution_state': 2, 'resolved_source_plan_id': source_plan,
+        }},
+    }]
+    assert targets[0] > fixed[0]
 
 
 @pytest.mark.parametrize('source_field', ['plan_instance_id', 'action_instance_id'])

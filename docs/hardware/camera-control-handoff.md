@@ -8,6 +8,8 @@
 
 项目的 Action6 普通录像执行语义由[录像运行假设](../architecture/camera-recording.md#action6-普通录像的运行假设)定义，当前现场结果见[相机验收状态](camera-demo-validation.md#arm-linux-的完整验收)。本页整理原始交接资料、后续补充的设备参数限制及尚存缺口；原表参数和候选命令不直接成为项目的完成保证。
 
+Hasselblad 完整参数及 RAW／JPEG 的安装版软件证据见[联合续验记录](../camctl/verification.md#hasselblad-完整参数的安装版联合续验2026-10-21-utc)；真实机身、镜头及设备源字节的验收步骤见[现场指南](hasselblad/validation.md)，实际完成状态由[完整参数计划 H9](../superpowers/plans/2026-10-21-hasselblad-photo-parameters.md#h9完成-arm-部署及真实相机验收)跟踪。
+
 ## 阅读约定
 
 - 原表是口头会议的随手记录。整理时提取任务意图和具体命令；参考数值、设置说明及其适用条件不能直接作为完整设备契约，需核对的细节由用户后续与提供方确认。
