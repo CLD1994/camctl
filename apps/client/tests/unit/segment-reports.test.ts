@@ -32,7 +32,11 @@ describe("完整分段错误报告", () => {
   });
   it("同份已知来源的冻结默认范围不能互相矛盾", () => {
     const r = scopeReport("empty");
-    source(r).error = source(segmentReport()).error;
+    details(r).default_scope = {
+      state: "nonempty",
+      member_count: 2,
+      output_ids: ["2", "10"],
+    };
     expect(() => validateReport(r)).toThrow();
   });
   it.each(["scope", "retained", "gap", "neighbor"])(

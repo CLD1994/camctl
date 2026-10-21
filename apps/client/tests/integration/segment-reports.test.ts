@@ -111,37 +111,73 @@ it.each(["header", "missing-gaps", "wrong-source"])(
     expect(app.snapshot().plans).toBeUndefined();
   },
 );
-it.each(["preview", "wrong-source"])(
-  "待关联分段引用遇晚到%s时不提交后续报告",
-  async (kind) => {
-    const a = segmentReport();
-    a.plans![0].actions![0].outputs = [];
+it.each([
+  ["preview", "later"],
+  ["wrong-source", "later"],
+  ["preview", "earlier"],
+  ["wrong-source", "earlier"],
+] as const)("待关联分段引用与%s矛盾时不提交%s报告", async (kind, boundary) => {
+  const a = segmentReport();
+  a.plans![0].actions![0].outputs = [];
+  const b = segmentReport();
+  b.report_id = "2";
+  b.from_wm = 10;
+  b.to_wm = 20;
+  const source = b.plans![0].actions![0];
+  if (kind === "preview") {
+    source.outputs![0].kind = "preview";
+    source.outputs![0].preview_of_output_id = "10";
+  } else {
+    const output = source.outputs![0];
+    source.outputs = [];
+    b.plans![0].actions!.push({
+      ...source,
+      action_instance_id: "30",
+      name: "另一来源",
+      error: undefined,
+      status: "succeeded",
+      outputs: [{ ...output, source_action_instance_id: "30" }],
+    });
+  }
+  if (boundary === "later") {
     expect((await uploadReport(a)).file.status).toBe("accepted");
-    const b = segmentReport();
-    b.report_id = "2";
-    b.from_wm = 10;
-    b.to_wm = 20;
-    const source = b.plans![0].actions![0];
-    if (kind === "preview") {
-      source.outputs![0].kind = "preview";
-      source.outputs![0].preview_of_output_id = "10";
-    } else {
-      const output = source.outputs![0];
-      source.outputs = [];
-      b.plans![0].actions!.push({
-        ...source,
-        action_instance_id: "30",
-        name: "另一来源",
-        error: undefined,
-        status: "succeeded",
-        outputs: [{ ...output, source_action_instance_id: "30" }],
-      });
-    }
     expect((await uploadReport(b)).file.status).toBe("failed");
     expect(app.store.report("2")).toBeUndefined();
     expect(app.coverage()).toBe(10);
     expect(app.ackId()).toBe("1");
     expect(app.snapshot().plans![0].actions![0].outputs).toEqual([]);
+  } else {
+    b.from_wm = 0;
+    source.error = { code: "future", stage: "execution", details: {} };
+    expect((await uploadReport(b)).file.status).toBe("accepted");
+    const before = stringifyJson(app.snapshot());
+    expect((await uploadReport(a)).file.status).toBe("failed");
+    expect(app.store.report("1")).toBeUndefined();
+    expect(app.coverage()).toBe(20);
+    expect(app.ackId()).toBe("2");
+    expect(stringifyJson(app.snapshot())).toBe(before);
+  }
+});
+it.each(["later", "earlier"] as const)(
+  "同源冻结范围矛盾的%s报告不提交原文投影和ACK",
+  async (boundary) => {
+    const a = segmentReport(),
+      b = segmentReport();
+    b.report_id = "2";
+    b.to_wm = 20;
+    (b.plans![0].actions![0].error!.details as any).default_scope.output_ids = [
+      "2",
+      "12",
+    ];
+    const first = boundary === "later" ? a : b,
+      second = boundary === "later" ? b : a;
+    expect((await uploadReport(first)).file.status).toBe("accepted");
+    const before = stringifyJson(app.snapshot());
+    expect((await uploadReport(second)).file.status).toBe("failed");
+    expect(app.store.report(second.report_id)).toBeUndefined();
+    expect(stringifyJson(app.snapshot())).toBe(before);
+    expect(app.coverage()).toBe(first.to_wm);
+    expect(app.ackId()).toBe(first.report_id);
   },
 );
 it.each(["report-first", "media-first"] as const)(

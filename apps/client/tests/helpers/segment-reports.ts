@@ -90,6 +90,17 @@ export function scopeReport(state: "empty" | "unknown"): StatusReport {
     details.gap_count = null;
     details.gaps = [];
     delete (details as Partial<typeof details>).first_gap;
+  } else {
+    const gap: any = details.gaps[0];
+    gap.start_key = { directory_number: 1, index: 1 };
+    gap.end_key = { directory_number: 1, index: 1 };
+    gap.left = { state: "absent" };
+    gap.right = {
+      state: "known",
+      file_identity: "observed-first",
+      output_id: "2",
+    };
+    details.first_gap = cloneProtocolJson(gap);
   }
   report.plans![0].actions![0].error =
     state === "empty"
