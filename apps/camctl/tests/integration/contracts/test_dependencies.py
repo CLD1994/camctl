@@ -163,6 +163,14 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
     """对一条内部边应用依赖方向规则；返回违规描述。"""
     if _starts_with(name, ENTRY_PREFIXES):
         return []
+    # 该历史仓储适配器只创建可重建的派生库；不授予整个 history 包
+    # SQLite 权限，也不允许它直接打开业务状态库。
+    if name == "camctl.history.bounded" and (
+        target == "sqlite3" or _starts_with(target, (
+            "camctl.persistence.derived_storage", "camctl.persistence.row_validation",
+        ))
+    ):
+        return []
     if _starts_with(name, PORT_PREFIXES):
         # 端口服务层不反向依赖业务流程、持久化或适配器实现；端口
         # 模块之间可以互相依赖（文件执行使用读取会话端口等）。
@@ -339,6 +347,19 @@ class TestCheckerDetectsViolations:
         flow = _imported_modules(source, "from camctl.acceptance.service import accept_input\n")
         assert _forbidden_edges({source: shared}) == []
         assert _forbidden_edges({source: flow})
+
+    @pytest.mark.parametrize("dependency", [
+        "import sqlite3\n",
+        "from camctl.persistence.derived_storage import configure_derived_connection\n",
+        "from camctl.persistence.row_validation import ProjectionRowValidator\n",
+    ])
+    def test_history_disk_adapter_owns_only_its_derived_storage_edges(self, dependency):
+        adapter = "camctl.history.bounded"
+        assert _forbidden_edges({adapter: _imported_modules(adapter, dependency)}) == []
+        for flow in ("camctl.history.fake", "camctl.history.bounded.child", "camctl.capture.fake"):
+            assert _forbidden_edges({flow: _imported_modules(flow, dependency)})
+        assert _forbidden_edges({adapter: _imported_modules(
+            adapter, "from camctl.persistence.runtime import open_existing\n")})
 
 
 class TestPureRulesMakeNoExternalCalls:

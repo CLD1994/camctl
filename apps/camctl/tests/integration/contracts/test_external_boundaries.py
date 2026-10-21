@@ -31,8 +31,8 @@ SUBPROCESS_CALLS = {
     ("asyncio", "create_subprocess_exec"),
     ("asyncio", "create_subprocess_shell"),
 }
-#: 网络客户端相关的标准库与第三方根名：CLI 部署不使用网络，
-#: 导入即违规（urllib/http 全族包含纯解析用途，一并禁止）。
+#: 网络客户端相关的标准库与第三方根名。urllib.parse 只解析本地
+#: URI，按完整模块名另行识别；其余相关模块的导入均拒绝。
 NETWORK_ROOTS = (
     "socket", "ssl", "select", "urllib", "http", "ftplib", "smtplib",
     "poplib", "imaplib", "telnetlib", "xmlrpc", "requests", "httpx",
@@ -127,11 +127,11 @@ def _network_dependencies(module: str, source: str) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] in NETWORK_ROOTS:
+                if alias.name != "urllib.parse" and alias.name.split(".")[0] in NETWORK_ROOTS:
                     found.append(f"{module}:{node.lineno} (import {alias.name})")
         elif isinstance(node, ast.ImportFrom):
             root = (node.module or "").split(".")[0]
-            if root in NETWORK_ROOTS:
+            if node.module != "urllib.parse" and root in NETWORK_ROOTS:
                 found.append(f"{module}:{node.lineno} (from {node.module} import)")
         elif isinstance(node, ast.Call):
             call = _receiver_call(node)
@@ -229,6 +229,19 @@ class TestRealSourceBoundaries:
 
 class TestCheckerDetectsViolations:
     """用故意违规的最小样本确认每条规则都能够失败。"""
+
+    def test_local_uri_parsing_does_not_grant_network_client_imports(self) -> None:
+        for source in (
+            "from urllib.parse import unquote, urldefrag, urljoin\n",
+            "import urllib.parse as uri_parser\n",
+        ):
+            assert _network_dependencies("camctl.reporting.fake", source) == []
+        for source in (
+            "import urllib\n", "from urllib import request\n",
+            "import urllib.request as client\n", "from urllib.request import urlopen\n",
+            "import http.client\n", "import socket as connection\n",
+        ):
+            assert _network_dependencies("camctl.reporting.fake", source)
 
     def test_checker_reports_each_synthetic_violation(self) -> None:
         assert _bare_excepts(
