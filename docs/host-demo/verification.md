@@ -4,6 +4,38 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## 阻塞递交与原计划文件释放验证（2026-10-21 UTC）
+
+本次在 Linux x86_64、GCC 13.3.0、CMake 3.28.3、Python 3.11.16、SQLite 3.53.1 中，验证[递交调用契约](design.md#对外调用契约)。`camctl_host_submit` 成功返回确认输入处理结果已保存，原文件可删除；业务受理或拒绝及设备动作结果仍通过报告确认。初始化入口的首次计划继续异步处理。
+
+| 检查 | 实际结果与边界 |
+| --- | --- |
+| Debug 组件全量 CTest | 34 项通过，包含 12 个单元入口和 22 个集成入口；交付入口同时验证源码包、安装与独立构建。 |
+| AddressSanitizer 与 UndefinedBehaviorSanitizer | 12 个单元入口及 host、正常／异常通知、初始化失败 4 个集成入口，共 16 项通过；启用泄漏检测。 |
+| 真实 CLI、状态库和 C 主程序 | `test_camctl_host_deployment.py`、`test_camctl_process_recovery.py`、`test_camctl_motor_notifications.py` 共 18 项通过。 |
+| 文档与差异 | 本地文件链接检查和 `git diff --check` 通过；公开接口与计划文件小节的引用锚点单独核对。 |
+
+组件集成测试用文件门闩阻止 CLI 读取输入，确认调用保持等待；另在成功消息写出后阻止 CLI 退出，确认消息本身不会提前释放调用。文件处理完成后，即使 `run` 仍在运行，递交调用也能返回。并发测试核对各调用结果、队列容量与顺序，故障分支覆盖会话错误、结果缺失、启动重试耗尽、单调钟／`poll` 失效及调用线程取消。电机回调重入递交和其他线程领取文件保持可用。
+
+真实部署组合分别使用默认目录和自定义交接目录：递交返回后立即查询状态库，确认未来报告动作已保存且尚待执行，然后删除原 JSON、结束测试 host 并重新启动。新的裸 `run` 从状态库恢复并完成动作，报告没有计划文件读取诊断。另一个用例确认，整份拒绝诊断在递交成功返回前已经保存，原文件同样可删除，状态库没有注册该计划。
+
+新增等待、错误和故障用例中，6 项先在原实现上出现预期断言失败，再由修改后的实现通过；取消用例也先出现提前正常返回的失败，再补齐取消交付边界。首次联合运行中，3 项进程门闩用例仍按异步返回组织调用而超时，改为独立递交线程后通过；5 项电机联合用例因开发工作区缺少 `tsx` 在业务验证前失败，准备与锁文件一致的依赖后复验通过。
+
+从仓库根目录执行：
+
+```sh
+cmake -S apps/host-demo -B .local/host-submit-build -DHOST_BUILD_TESTS=ON \
+  -DHOST_TEST_PYTHON="$(command -v python3.11)" -DCMAKE_BUILD_TYPE=Debug
+cmake --build .local/host-submit-build -- -j4
+ctest --test-dir .local/host-submit-build --output-on-failure
+apps/camctl/.venv311/bin/python -m pytest \
+  tests/integration/test_camctl_host_deployment.py \
+  tests/integration/test_camctl_process_recovery.py \
+  tests/integration/test_camctl_motor_notifications.py -q
+```
+
+内存检查构建使用 `-fsanitize=address,undefined -fno-omit-frame-pointer` 和相同链接参数，测试选择 `unit_` 及上述 4 个集成入口。命令输出分别保存在 `.local/host-submit-build/ctest.log`、`cross-component-final.log` 和 `sanitize-final.log`；早期失败输出单独保留。本次没有更新 ARM64 部署、连接真实设备或进行物理断电验证。
+
 ## 交付前规格核对（2026-10-08）
 
 源码和独立交付物已覆盖未知移动后的双目录同步、最终失败判定后的重试等待、跨运行日志保留数、源码路径过滤、同配置部署示例、领取步骤诊断、安装资料引用及最低 CMake 的版本标识。默认配置的五个路径由 CLI 配置适配器统一展开。逐项契约、失败反例及完成记录见[交付审查与修复计划](../superpowers/plans/2026-10-08-camctl-host-delivery-audit.md)。

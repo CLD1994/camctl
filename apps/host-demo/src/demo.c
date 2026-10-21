@@ -158,9 +158,9 @@ int main(int argc, char **argv) {
             line[n - 1] = 0;
         if (!strncmp(line, "submit ", 7)) {
             if (camctl_host_submit(line + 7))
-                printf("路径未接收：%s\n", strerror(errno));
+                printf("输入处理未确认完成：%s；请保留计划文件并查看日志。\n", strerror(errno));
             else
-                puts("路径已接收；计划受理与执行结果请查看状态报告。");
+                puts("输入处理已完成，原计划文件可删除；计划受理与执行结果请查看状态报告。");
         } else if (!strcmp(line, "claim")) {
             camctl_host_claim();
             puts("领取调用已返回；可按主程序流程处理 processing 内的文件。");
