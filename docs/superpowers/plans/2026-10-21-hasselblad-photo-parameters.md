@@ -186,12 +186,14 @@ camctl_pytest() {
 | capture 执行中、结果未知，或成功结果待归档／登记 | 拒绝本次逐项取消，继续原结果及文件责任 |
 | 原动作已终态或取消已经生效 | 消费原终态或原取消责任，关联项按公共规则处理 |
 
-- [ ] **步骤 1：增加资格矩阵及入口测试。** `test_photo_cancel_uses_whole_start_entry_not_capture_effect` 覆盖上表，分别在驱动入口前、入口后第一条 list 之前、调焦后及返回后登记前设置同步点。即使尚无工具调用，已经进入驱动也须拒绝取消。`test_photo_cancel_before_entry_prevents_late_start` 以实际执行协调制造竞争，验证只有可靠阻止入口后才允许取消；状态库或原提交不可靠时按公共恢复规则核实。
-- [ ] **步骤 2：增加各取消入口及预览测试。** `test_photo_cancel_rejection_respects_preview_addressing` 通过单动作、组、计划及原请求目标执行，断言逐项拒绝且原调用有资格时继续；仅通过被拒绝拍摄联动的自动预览意图保留，计划及请求 ID 直接寻址的预览仍独立取消。同一预览同时被直接寻址和联动时去重处理，按直接目标规则执行。拒绝请求及时结束，不等原拍摄自然完成。窗口／预算到期时由原原因阻止后续拍摄。
-- [ ] **步骤 3：确认失败。** 执行 `camctl_pytest apps/camctl/tests/integration/cancellation -q`，再单独运行上述 bootstrap 及 capture 测试。失败证据应揭示入口事实被采集效果替代或关联项被错误修改。
-- [ ] **步骤 4：实现共同事实读取及守卫。** 在授予、实际调用和取消之间使用同一协调边界；可靠区分未进入、已进入及未知。正面的调用入口事实随原结果保留，结束后仍可判断；崩溃丢失结果时保持未知。取消读取、应用事务与写入守卫消费同一判定，核对 `load_start_facts`、`_settle_unstarted_attempt`、`_failure_after_return` 等消费者，保留其他相机任务原有语义。
-- [ ] **步骤 5：补齐收场及恢复回归。** `test_photo_setup_failure_settles_activity_without_claiming_camera_unchanged` 验证真实失败、占用及活动按收场依据处理；`test_photo_restart_after_relative_focus_never_replays_start` 分别在移动后结果缺失、完整结果保存后、完成回执未知时恢复，设置／focus／autofocus／capture 不重放。可靠结果继续登记；缺失结果保持未知并有限收场。最终动作错误映射为已登记的通用错误，不直接复制工具内部错误码；步骤细节只在内部历史。
-- [ ] **步骤 6：验证通过并形成阶段提交。** 顺序运行 cancellation、相关 capture、bootstrap 范围；建议提交名为“统一 Hasselblad START 取消与恢复事实”。交接所有取消入口、入口事实保存位置及终态／占用验证记录。
+- [x] **步骤 1：增加资格矩阵及入口测试。** `test_photo_cancel_uses_whole_start_entry_not_capture_effect` 覆盖上表，分别在驱动入口前、入口后第一条 list 之前、调焦后及返回后登记前设置同步点。即使尚无工具调用，已经进入驱动也须拒绝取消。`test_photo_cancel_before_entry_prevents_late_start` 以实际执行协调制造竞争，验证只有可靠阻止入口后才允许取消；状态库或原提交不可靠时按公共恢复规则核实。
+- [x] **步骤 2：增加各取消入口及预览测试。** `test_photo_cancel_rejection_respects_preview_addressing` 通过单动作、组、计划及原请求目标执行，断言逐项拒绝且原调用有资格时继续；仅通过被拒绝拍摄联动的自动预览意图保留，计划及请求 ID 直接寻址的预览仍独立取消。同一预览同时被直接寻址和联动时去重处理，按直接目标规则执行。拒绝请求及时结束，不等原拍摄自然完成。窗口／预算到期时由原原因阻止后续拍摄。
+- [x] **步骤 3：确认失败。** 执行 `camctl_pytest apps/camctl/tests/integration/cancellation -q`，再单独运行上述 bootstrap 及 capture 测试。失败证据应揭示入口事实被采集效果替代或关联项被错误修改。
+- [x] **步骤 4：实现共同事实读取及守卫。** 在授予、实际调用和取消之间使用同一协调边界；可靠区分未进入、已进入及未知。正面的调用入口事实随原结果保留，结束后仍可判断；崩溃丢失结果时保持未知。取消读取、应用事务与写入守卫消费同一判定，核对 `load_start_facts`、`_settle_unstarted_attempt`、`_failure_after_return` 等消费者，保留其他相机任务原有语义。
+- [x] **步骤 5：补齐收场及恢复回归。** `test_photo_setup_failure_settles_activity_without_claiming_camera_unchanged` 验证真实失败、占用及活动按收场依据处理；`test_photo_restart_after_relative_focus_never_replays_start` 分别在移动后结果缺失、完整结果保存后、完成回执未知时恢复，设置／focus／autofocus／capture 不重放。可靠结果继续登记；缺失结果保持未知并有限收场。最终动作错误映射为已登记的通用错误，不直接复制工具内部错误码；步骤细节只在内部历史。
+- [x] **步骤 6：验证通过并形成阶段提交。** 顺序运行 cancellation、相关 capture、bootstrap 范围；建议提交名为“统一 Hasselblad START 取消与恢复事实”。交接所有取消入口、入口事实保存位置及终态／占用验证记录。
+
+**阶段证据：** 最终实现 `a8c1094` 已通过独立规格与质量复核，合入协调提交 `0d8a9eb`。2026-10-21 UTC，协调工作区以 Python 3.11.16 同步并检查包资源后，顺序完成全部单元测试 6476 项、完整 cancellation 目录 396 项、七个相关 capture 文件 235 项及两个 bootstrap 文件 14 项，均退出 0；随后单独运行 `test_capture_cancel_after_call.py`，3 项通过。单元测试保留 1 项跳过及 2 条既有 pytest 标记警告。验证覆盖整次 START 入口、直接寻址与自动预览联动、原申请回执未知、跨计划残留活动及独立紧急停止责任；完整样例、安装版联合链及真实设备分别由 H7—H9 验证。
 
 ## H6：实现通用中文选项及精确数字编辑
 
