@@ -96,7 +96,7 @@ class NodeBinding:
 
 @dataclass(frozen=True)
 class ReadEnd:
-    """上层读取端口确认同绑定页已耗尽后的有限证据。"""
+    """上层耗尽证据；消费时核 last_position 的精确 str/int/None 域。"""
     binding: NodeBinding
     path: Path
     count: int
@@ -194,6 +194,15 @@ def _at(value: Any, path: Path):
     return value
 
 
+def _item_result(value, schema_uri):
+    if not isinstance(value, _Array) or value.count == 0:
+        return True
+    try:
+        return value.item_results[schema_uri]
+    except KeyError as error:
+        raise StreamValidationError(f'UNKNOWN item 规则结果: {schema_uri}') from error
+
+
 class _Compiler:
     # 仅跨延迟结构的关键字；有限子树不受这张解释能力表限制。
     _STRUCTURAL = frozenset({
@@ -234,6 +243,23 @@ class _Compiler:
         self.preflighted: set[int] = set()
         self.finite_checks: list[FiniteCheck] = []
         self.parent_predicates: list[ParentPredicate] = []
+
+    def check_object_item_coverage(self):
+        """OBJECT 回执只能携带消费时实际累计过的原 item 规则结果。"""
+        for spec in self.projection.fields:
+            if spec.kind is not FieldKind.OBJECT:
+                continue
+            for path, rules in self.items.items():
+                if path[:len(spec.path)] != spec.path:
+                    continue
+                child_path = path[len(spec.path):]
+                covered = spec.node._compiler.items.get(child_path, {})
+                missing = tuple(uri for uri in rules if uri not in covered)
+                if missing:
+                    raise StreamValidationError(
+                        f'OBJECT item 规则覆盖不足: projection={self.projection.pointer} '
+                        f'path={"/".join(path)} child_schema={spec.node.schema_uri} '
+                        f'原规则/布尔位置={missing}')
 
     @staticmethod
     def _check_dialect(schema, uri):
@@ -360,8 +386,7 @@ class _Compiler:
                 item_projection = spec.item or ProjectionDescriptor(self.projection.pointer + '/items')
                 plan = derive_stream_plan(location, item_projection, registry=self.registry)
                 self.items.setdefault(path, {})[location] = plan
-                checks.append(lambda value, location=location: not isinstance(value, _Array) or
-                              value.item_results.get(location, True))
+                checks.append(lambda value, location=location: _item_result(value, location))
             elif keyword == 'uniqueItems':
                 if rule and (path not in self.specs or
                              (self.specs[path].identity is None and path not in self.unique_covered)):
@@ -429,6 +454,7 @@ def derive_stream_plan(schema_uri: str, projection: ProjectionDescriptor, *, reg
     predicate = compiler.compile(schema_uri)
     if set(paths) - compiler.reached:
         raise StreamValidationError(f'投影延迟路径不在 Schema 属性中: {set(paths)-compiler.reached}')
+    compiler.check_object_item_coverage()
     return NodeValidationPlan(schema_uri, projection, compiler, predicate)
 
 
@@ -600,6 +626,8 @@ class NodeGate:
         if (not isinstance(authority_end, ReadEnd) or authority_end.binding != self.binding
                 or authority_end.path != path or type(authority_end.count) is not int
                 or authority_end.count != slot.array.count
+                or type(authority_end.last_position) not in (str, int, type(None))
+                or type(authority_end.last_position) is not type(slot.array.last_position)
                 or authority_end.last_position != slot.array.last_position):
             error = StreamValidationError('耗尽证据与真实字段/计数/末位置不符')
             self.fail(error)

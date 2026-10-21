@@ -568,3 +568,161 @@ def test_completion_consumer_rejects_wrong_bound_request(wrong):
         gate.close_node()
     with pytest.raises(StreamValidationError):
         gate.close_node()
+
+
+def _parent_item_coverage_case(container, operator, members):
+    extra = {'properties': {'items': {'items': {'minimum': 0}}}}
+    if operator == 'count':
+        extra = {'properties': {'items': {'minItems': 1, 'maxItems': 2}}}
+    elif operator == 'allOf':
+        extra = {'allOf': [extra]}
+    elif operator == 'not':
+        extra = {'not': extra}
+    elif operator == 'anyOf':
+        extra = {'anyOf': [extra, {'properties': {'items': {'items': {'type': 'string'}}}}]}
+    elif operator == 'if_then':
+        extra = {'if': {'required': ['positive']}, 'then': extra}
+    elif operator == 'if_condition':
+        extra = {'if': extra, 'then': {'required': ['positive']},
+                 'else': {'not': {'required': ['positive']}}}
+    definitions = {
+        'child': {'type': 'object', 'properties': {
+            'items': {'type': 'array', 'items': {'type': 'integer'}}, 'positive': {'type': 'boolean'}},
+            'required': ['items']},
+    }
+    value = {'items': members, 'positive': True}
+    child_fields = (DeferredField(('items',)),)
+    if container == 'two_objects':
+        definitions['middle'] = {'type': 'object', 'properties': {
+            'child': {'$ref': '#/$defs/child'}}, 'required': ['child']}
+        definitions['root'] = {'type': 'object', 'properties': {'middle': {
+            '$ref': '#/$defs/middle', 'properties': {'child': extra}}}, 'required': ['middle']}
+        document = {'middle': {'child': value}}
+    else:
+        definitions['parent'] = {'type': 'object', 'properties': {
+            'child': {'$ref': '#/$defs/child', **extra}}, 'required': ['child']}
+        if container == 'outer_array':
+            definitions['root'] = {'type': 'object', 'properties': {
+                'groups': {'type': 'array', 'items': {'$ref': '#/$defs/parent'}}}, 'required': ['groups']}
+            document = {'groups': [{'child': value}]}
+        else:
+            definitions['root'] = {'$ref': '#/$defs/parent'}
+            document = {'child': value}
+    shared = registry({'$defs': definitions})
+    child = derive_stream_plan(URI + '#/$defs/child', ProjectionDescriptor('/child', child_fields), registry=shared)
+    direct_fields = (DeferredField(('child',), kind=FieldKind.OBJECT, node=child),)
+    if container == 'two_objects':
+        middle = derive_stream_plan(URI + '#/$defs/middle', ProjectionDescriptor('/middle', direct_fields), registry=shared)
+        projection = ProjectionDescriptor('/root', (DeferredField(('middle',), kind=FieldKind.OBJECT, node=middle),))
+    elif container == 'outer_array':
+        projection = ProjectionDescriptor('/root', (DeferredField(('groups',), item=ProjectionDescriptor('/group', direct_fields)),))
+    else:
+        projection = ProjectionDescriptor('/root', direct_fields)
+    return shared, projection, document
+
+
+@pytest.mark.parametrize('container', ['direct_object', 'outer_array', 'two_objects'])
+@pytest.mark.parametrize('operator', ['ref_sibling', 'allOf', 'not', 'anyOf', 'if_then', 'if_condition'])
+@pytest.mark.parametrize('members', [[], [1], [-1], [1, 2, -1]])
+def test_parent_item_rules_missing_from_object_consumer_reject_at_derivation(container, operator, members):
+    shared, projection, document = _parent_item_coverage_case(container, operator, members)
+    original = create_validator({'$schema': 'https://json-schema.org/draft/2020-12/schema', '$ref': URI + '#/$defs/root'}, registry=shared)
+    positive = all(member >= 0 for member in members)
+    expected = not positive if operator == 'not' else positive
+    assert (not validation_errors(original, document)) is expected
+    # 缺口与实例内容无关，合法空数组也不把该不支持的组合变成可用计划。
+    with pytest.raises(StreamValidationError, match='item.*覆盖') as failure:
+        derive_stream_plan(URI + '#/$defs/root', projection, registry=shared)
+    source = URI + ('#/$defs/root/properties/middle/properties/child' if container == 'two_objects'
+                    else '#/$defs/parent/properties/child')
+    branch = {'ref_sibling': '', 'allOf': '/allOf/0', 'not': '/not',
+              'anyOf': '/anyOf/0', 'if_then': '/then', 'if_condition': '/if'}[operator]
+    assert source + branch + '/properties/items/items' in str(failure.value)
+    instance_path = 'middle/child/items' if container == 'two_objects' else 'child/items'
+    assert 'path=' + instance_path in str(failure.value)
+
+
+@pytest.mark.parametrize('operator', ['items', 'not', 'anyOf', 'if'])
+def test_nonempty_missing_item_rule_result_is_unknown(operator):
+    from camctl.reporting.stream_validation import _Array
+    rule = {'items': {'type': 'integer'}}
+    if operator == 'not':
+        rule = {'not': rule}
+    elif operator == 'anyOf':
+        rule = {'anyOf': [rule, {'items': {'type': 'string'}}]}
+    elif operator == 'if':
+        rule = {'if': rule, 'then': {}, 'else': {}}
+    plan = plan_for({'properties': {'items': {'type': 'array', **rule}}})
+    predicate = plan._compiler.predicates[(URI + '#/properties/items', ('items',))]
+    # 有限内部证据故障注入；真实对象组合另由上面的派生矩阵检验。
+    with pytest.raises(StreamValidationError, match='UNKNOWN'):
+        predicate.check(_Array(count=1))
+
+
+@pytest.mark.parametrize('actual,claimed,expected', [
+    (1, True, False), (1, 1.0, False), (1, '1', False), (1, 1, True),
+    ('1', '1', True), ('1', 1, False), ('1', True, False), ('1', 1.0, False),
+    (None, None, True), (None, 0, False), (None, False, False), (None, 0.0, False),
+])
+def test_exhaustion_position_checks_exact_type_and_value(actual, claimed, expected):
+    plan = plan_for({'properties': {'items': {'type': 'array', 'items': {'type': 'integer'}}}})
+    gate = plan.begin(binding(plan), {})
+    gate.open_array(('items',))
+    if actual is not None:
+        gate.accept_item(('items',), 7, position=actual)
+    evidence = ReadEnd(gate.binding, ('items',), gate.count(('items',)), claimed)
+    if expected:
+        gate.exhaust_array(('items',), evidence)
+        gate.close_node()
+    else:
+        with pytest.raises(StreamValidationError):
+            gate.exhaust_array(('items',), evidence)
+        assert gate.state(('items',)) is FieldState.FAILED
+        with pytest.raises(StreamValidationError):
+            gate.close_node()
+        with pytest.raises(StreamValidationError):
+            end(gate)
+
+
+@pytest.mark.parametrize('claimed', [True, 0, 0.0, '0', [], {}])
+def test_empty_entity_omission_rejects_non_none_end_identity(claimed):
+    plan = plan_for({'properties': {'items': {'type': 'array'}}}, (DeferredField(('items',), omit_empty=True),))
+    gate = plan.begin(binding(plan), {})
+    with pytest.raises(StreamValidationError):
+        gate.omit(('items',), authority_end=ReadEnd(gate.binding, ('items',), 0, claimed))
+    assert gate.state(('items',)) is FieldState.FAILED
+    with pytest.raises(StreamValidationError):
+        gate.close_node()
+
+
+def _consume_object_document(plan, identity, document):
+    fields = {spec.path[0] for spec in plan.projection.fields}
+    gate = plan.begin(identity, {key: value for key, value in document.items() if key not in fields})
+    for spec in plan.projection.fields:
+        value = document[spec.path[0]]
+        if spec.kind is FieldKind.OBJECT:
+            child = _consume_object_document(spec.node, gate.object_binding(spec.path), value)
+            gate.accept_object(spec.path, child)
+        else:
+            gate.open_array(spec.path)
+            for position, member in enumerate(value):
+                if spec.item is not None:
+                    member = _consume_object_document(gate.item_plan(spec.path), gate.child_binding(spec.path, position), member)
+                gate.accept_item(spec.path, member, position=position)
+            end(gate, spec.path)
+    return gate.close_node()
+
+
+@pytest.mark.parametrize('container', ['direct_object', 'outer_array', 'two_objects'])
+@pytest.mark.parametrize('members', [[], [1], [1, 2], [1, 2, 3]])
+def test_parent_object_count_rules_reuse_covered_items_without_rejecting_valid_composition(container, members):
+    shared, projection, document = _parent_item_coverage_case(container, 'count', members)
+    original = create_validator({'$schema': 'https://json-schema.org/draft/2020-12/schema', '$ref': URI + '#/$defs/root'}, registry=shared)
+    expected = 1 <= len(members) <= 2
+    assert (not validation_errors(original, document)) is expected
+    plan = derive_stream_plan(URI + '#/$defs/root', projection, registry=shared)
+    if expected:
+        _consume_object_document(plan, binding(plan), document)
+    else:
+        with pytest.raises(StreamValidationError, match='权威 Schema'):
+            _consume_object_document(plan, binding(plan), document)
