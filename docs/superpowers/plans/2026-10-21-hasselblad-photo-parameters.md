@@ -234,7 +234,7 @@ camctl_pytest() {
 
 **输入与交付：** 消费安装 wheel、真实客户端、C HostDemo、H7 的接口受约束工具替身；交付四种组合的独立软件证据和精确参数的三端判定结果。
 
-- [ ] **步骤 1：建立三端参数反例集。** 将 `validate-parameters` 输入改为显式指定 `action_type`、`device_id`、`action_name`，浏览器、客户端后端和导出计划共同使用。新测试 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` 比较浏览器、客户端后端和安装版 camctl 的接受／拒绝：合法分支、短快门、色温边界、错误模式字段、额外 tint、缺项及 `null`。反例集合只定义一次，不复制整份档位目录；更新延时摄影原调用方后确认其原行为保持。
+- [x] **步骤 1：建立三端参数反例集。** 将 `validate-parameters` 输入改为显式指定 `action_type`、`device_id`、`action_name`，浏览器、客户端后端和导出计划共同使用。新测试 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` 比较浏览器、客户端后端和安装版 camctl 的接受／拒绝：合法分支、短快门、色温边界、错误模式字段、额外 tint、缺项及 `null`。反例集合只定义一次，不复制整份档位目录；更新延时摄影原调用方后确认其原行为保持。
 - [ ] **步骤 2：建立四种安装链并确认失败。** `test_installed_hasselblad_photo_delivery_roundtrip` 参数化 RAW×host、RAW×device、JPEG×host、JPEG×device。每个独立请求恰执行一次 capture，从客户端选值、预设重开和导出开始，经 C host 提交、安装版 CLI 执行、SQLite／历史／报告到正式输出；比较三个短快门在草稿、预设、导出正文、受理、生效参数、历史恢复、报告及实际 argv 中的精确数学值，并核对双文件身份。只在工具进程边界替换 hb_cli。
 - [ ] **步骤 3：补齐取回及恢复。** 分别明确取回原图和预览并重复取回，验证新 delivery 与原 output／源动作身份。主机正式源在相机不可用时仍可取回；设备正式源使用原机内 basename、绑定及读取种类。注入原结果保存后中断和提交回执丢失，核实同一申请恢复且不重复设置、调焦或拍摄；同一公共请求重送也不重复登记。
 - [ ] **步骤 4：验证文件导入与 ACK。** 通过真实 `Files.upload` 导入交付文件，覆盖报告先到、媒体先到及部分文件未到。核对 JPEG 两角色不会因 MIME 或相同内容合并，报告同历史边界重建一致；客户端导出累计 ACK 后，camctl 确认水位符合报告覆盖，媒体缺失单独呈现。单张动作仍省略公共 `result`，按原字段报告设备执行情况；步骤细节保存在内部，失败仍使用现有通用摘要。
@@ -242,6 +242,8 @@ camctl_pytest() {
 - [ ] **步骤 6：完成软件门禁。** 按下节顺序运行所需完整范围，确认全部通过后更新 `docs/camctl/verification.md`、`docs/client/verification.md`、`docs/camctl/integration-readiness.md` 和硬件交接中的软件状态；建议提交名为“验收 Hasselblad 安装版完整参数与双格式交付链”。
 
 ### 软件门禁的范围与顺序
+
+**三端参数阶段证据：** 步骤 1 作为独立阶段提交 `165a68e`，通过规格与代码质量独立评审。2026-10-21 UTC，Python 3.11.16、Node.js 24.20.0 下，在该提交上顺序完成 Hasselblad 参数模块 7 项测试与原延时参数模块 3 项测试，均退出 0。前者以同一组 56 项用例核对浏览器、Node 客户端后端及独立安装 wheel 的真实受理结果，其中 18 项合法、38 项非法；设备工具调用被测试边界禁止。留存证据包含当前提交的完整测试输出、安装命令、客户端凭据和 SQLite 结果。安装版拍摄、文件交付、媒体导入、ACK、ARM 及 H8 完整结论继续由后续步骤分别验证。客户端独立 TypeScript 检查和 Vite 构建通过，完整 `pnpm run build` 入口仍待下述软件门禁验证。
 
 先运行 `camctl_pytest apps/camctl/tests/unit -q`，再按[组件集成测试指南](../../../apps/camctl/tests/AGENTS.md)逐目录、逐进程完成完整组件集成范围。客户端完成 `pnpm --dir apps/client run typecheck`、`pnpm --dir apps/client run build`、`VITEST_MAX_WORKERS=2 pnpm --dir apps/client test`。根跨组件测试遵守[运行入口](../../../tests/integration/README.md)，保留安装链及被修改测试接缝的回归证据。
 
