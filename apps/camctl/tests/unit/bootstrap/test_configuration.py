@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from decimal import Decimal
 
 import pytest
@@ -87,6 +88,41 @@ class TestDefaultsAndOverride:
         assert cfg.paths.staging == "/data/staging"
 
 
+class TestObtainConfiguration:
+    def test_obtain_uses_its_single_default_source_and_exact_override(self):
+        assert load_config(None, ConfigDefaults()).obtain.max_source_check_attempts == 3
+        assert load_config({"obtain": {}}, ConfigDefaults()).obtain.max_source_check_attempts == 3
+        assert load_config(
+            {"obtain": {"max_source_check_attempts": 5}}, ConfigDefaults()
+        ).obtain.max_source_check_attempts == 5
+        assert load_config(
+            None, ConfigDefaults(max_source_check_attempts=7)
+        ).obtain.max_source_check_attempts == 7
+
+    @pytest.mark.parametrize("bad", [True, 1.0, "3", Decimal("3"), 0, -1, None])
+    def test_obtain_max_source_check_attempts_rejects_non_positive_exact_integers(self, bad):
+        with pytest.raises(ConfigError):
+            load_config({"obtain": {"max_source_check_attempts": bad}}, ConfigDefaults())
+
+    def test_obtain_rejects_unknown_root_and_section_fields(self):
+        with pytest.raises(ConfigError, match="未知字段"):
+            load_config({"obtain": {"unknown": 1}}, ConfigDefaults())
+        with pytest.raises(ConfigError, match="未知字段"):
+            load_config({"obtain": {"max_source_check_attempts": 3,
+                                    "source_check_timeout_s": 10}}, ConfigDefaults())
+
+    def test_obtain_snapshots_are_immutable_and_independent(self):
+        first = load_config(None, ConfigDefaults())
+        second = load_config(
+            {"obtain": {"max_source_check_attempts": 8}}, ConfigDefaults()
+        )
+
+        assert first.obtain.max_source_check_attempts == 3
+        assert second.obtain.max_source_check_attempts == 8
+        with pytest.raises(FrozenInstanceError):
+            first.obtain.max_source_check_attempts = 4  # type: ignore[misc]
+
+
 class TestCombinationAndTypes:
     def test_partial_override_checks_combination(self) -> None:
         # 只覆盖一个日志水位，造成 L≥H：整组拒绝。
@@ -158,6 +194,8 @@ class TestSnapshotImmutability:
             cfg.devices["cam-2"] = {}  # type: ignore[index]
         with pytest.raises(Exception):
             cfg.devices["cam-1"]["driver"] = "other"  # type: ignore[index]
+        with pytest.raises(Exception):
+            cfg.devices["cam-1"]["obtain"]["source_check_timeout_s"] = Decimal("20")  # type: ignore[index]
 
     def test_device_requires_kind_and_driver(self) -> None:
         with pytest.raises(ConfigError, match="kind"):

@@ -179,6 +179,11 @@ class CleanupSection:
 
 
 @dataclass(frozen=True)
+class ObtainSection:
+    max_source_check_attempts: int
+
+
+@dataclass(frozen=True)
 class ClockSection:
     min_plausible_date: date
     lower_bound_tolerance_s: Decimal
@@ -211,10 +216,11 @@ class ConfigSnapshot:
     history: HistorySection
     copy: CopySection
     cleanup: CleanupSection
+    obtain: ObtainSection
     clock: ClockSection
     adb: AdbSection
     paths: PathsSection
-    #: 设备目录的原始声明；驱动专属字段的深校验由设备接入契约承接。
+    #: 设备声明的规范化结果；驱动专属字段的深校验由设备接入契约承接。
     devices: Mapping[str, Any]
 
 
@@ -248,6 +254,9 @@ class ConfigDefaults:
     segment_size: str = "128 MiB"
     max_delete_attempts: int = 3
     max_query_attempts: int = 3
+    max_source_check_attempts: int = 3
+    source_check_timeout_s: str = "10"
+    source_check_retry_interval_s: str = "3"
     work_file_batch_size: int = 32
     work_file_limit_per_run: int = 128
     min_plausible_date: str = "2025-01-01"
@@ -268,7 +277,11 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         document = {}
     if not isinstance(document, Mapping):
         raise ConfigError(f"配置文档必须是表: {type(document).__name__}")
-    root = _take(document, "配置", ("database", "session", "log", "history", "copy", "cleanup", "clock", "adb", "paths", "devices"))
+    root = _take(
+        document, "配置",
+        ("database", "session", "log", "history", "copy", "cleanup", "obtain",
+         "clock", "adb", "paths", "devices"),
+    )
 
     database = _take(root.get("database", {}), "database", ("queue_capacity", "busy_timeout_ms", "wal_autocheckpoint_pages"))
     db_section = DatabaseSection(
@@ -374,6 +387,15 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         work_file_limit_per_run=_require_int(cleanup.get("work_file_limit_per_run", defaults.work_file_limit_per_run), "cleanup.work_file_limit_per_run", 1),
     )
 
+    obtain = _take(root.get("obtain", {}), "obtain", ("max_source_check_attempts",))
+    obtain_section = ObtainSection(
+        max_source_check_attempts=_require_int(
+            obtain.get("max_source_check_attempts", defaults.max_source_check_attempts),
+            "obtain.max_source_check_attempts",
+            1,
+        ),
+    )
+
     clock = _take(
         root.get("clock", {}),
         "clock",
@@ -396,7 +418,7 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         processing=_require_nonempty_str(paths.get("processing", defaults.processing), "paths.processing"),
     )
 
-    devices = _validate_devices(root.get("devices", {}))
+    devices = _validate_devices(root.get("devices", {}), defaults)
 
     adb = _take(root.get("adb", {}), "adb", ("terminate_grace_s",))
     raw_grace = adb.get("terminate_grace_s", defaults.adb_terminate_grace_s)
@@ -415,6 +437,7 @@ def load_config(document: Any, defaults: ConfigDefaults) -> ConfigSnapshot:
         history=history_section,
         copy=copy_section,
         cleanup=cleanup_section,
+        obtain=obtain_section,
         clock=clock_section,
         adb=adb_section,
         paths=paths_section,
@@ -514,7 +537,7 @@ def _validated_attempts_subtable(
         positive_keys=("timeout_s",), integer_fields=(("max_attempts", 1),))
 
 
-def _validate_devices(raw: Any) -> Mapping[str, Any]:
+def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise ConfigError(f"devices 必须是表: {raw!r}")
     from camctl.devices.drivers.hasselblad.configuration import read_camera_config
@@ -552,6 +575,8 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
             if serial.startswith("-") or "\0" in serial:
                 raise ConfigError(f"devices.{device_id}.adb.serial 必须是明确的 ADB serial")
             normalized["adb"] = dict(adb)
+        normalized["obtain"] = _validated_obtain(
+            device_id, normalized.get("obtain", {}), defaults)
         if "recording" in normalized:
             normalized["recording"] = _validated_recording(
                 device_id, normalized["recording"])
@@ -574,3 +599,24 @@ def _validate_devices(raw: Any) -> Mapping[str, Any]:
                     positive_keys=positive, integer_fields=integer_fields)
         validated[device_id] = _freeze(normalized)
     return MappingProxyType(validated)
+
+
+def _validated_obtain(
+    device_id: str, raw: Any, defaults: ConfigDefaults,
+) -> Mapping[str, Any]:
+    """校验并补齐设备来源核验的默认时限与重试间隔。"""
+    fields = ("source_check_timeout_s", "source_check_retry_interval_s")
+    obtain = _take(raw, f"devices.{device_id}.obtain", fields)
+    values = {
+        "source_check_timeout_s": obtain.get(
+            "source_check_timeout_s", defaults.source_check_timeout_s),
+        "source_check_retry_interval_s": obtain.get(
+            "source_check_retry_interval_s", defaults.source_check_retry_interval_s),
+    }
+    return _validated_seconds_subtable(
+        device_id,
+        values,
+        "obtain",
+        fields,
+        positive_keys=("source_check_timeout_s",),
+    )
