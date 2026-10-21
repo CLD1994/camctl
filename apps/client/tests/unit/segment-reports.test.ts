@@ -20,6 +20,16 @@ const schema = createProtocolValidator().getSchema(
 )!;
 
 describe("完整分段错误报告", () => {
+  it("接受跨目录缺口区间并将可靠文件身份保留为不透明文本", () => {
+    const r = segmentReport();
+    for (const gap of [details(r).first_gap, details(r).gaps[0]]) {
+      gap.start_key = { directory_number: 1, index: 999 };
+      gap.end_key = { directory_number: 2, index: 1 };
+      gap.left.file_identity = "opaque-left";
+      gap.right.file_identity = "opaque-right";
+    }
+    expect(() => validateReport(r)).not.toThrow();
+  });
   it("同份已知来源的冻结默认范围不能互相矛盾", () => {
     const r = scopeReport("empty");
     source(r).error = source(segmentReport()).error;
