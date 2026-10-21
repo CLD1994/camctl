@@ -575,12 +575,15 @@ def _first_complete_event(connection, facts):
     """原首次完成事件固定 proof 与大小，不采用发现条目的元信息。"""
     with closing(connection.execute(
             f"SELECT {','.join('e.' + column for column in _COLUMNS.split(','))}"
-            " FROM history_events e,json_each(e.body_json,'$.rows') r"
-            " WHERE e.event_type=? AND e.id>0"
+            " FROM entity_event_links l JOIN history_events e ON e.id=l.event_id,"
+            " json_each(e.body_json,'$.rows') r"
+            " WHERE l.entity_type=? AND l.entity_id=? AND l.event_id<=?"
+            " AND e.event_type=?"
             " AND json_extract(r.value,'$.table')='device_files' AND json_extract(r.value,'$.id')=?"
             " AND json_extract(r.value,'$.after.values.completion_state')=3"
-            " AND json_extract(r.value,'$.before.values.completion_state')<>3 ORDER BY e.id LIMIT 1",
-            (_FILE_EVENT['id'], facts['id']))) as reader:
+            " AND json_extract(r.value,'$.before.values.completion_state')<>3 ORDER BY l.event_id LIMIT 1",
+            (load_enum_registry()['history_objects']['device_file']['id'], facts['id'],
+             facts['last_event_id'], _FILE_EVENT['id'], facts['id']))) as reader:
         row = reader.fetchone()
     if row is None:
         raise ConsistencyError('完整来源文件缺少首次可靠完成事件')

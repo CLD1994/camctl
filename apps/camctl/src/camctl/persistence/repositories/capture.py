@@ -2353,6 +2353,10 @@ class CaptureRepository:
         from .result_pages import read_source_inputs
         return read_source_inputs(ticket, cursor, batch, owned)
 
+    def read_strict_result_file_input(self, page, file_id, boundary, owned: OwnedConnection):
+        from .result_file_proofs import read_strict_result_file_input
+        return read_strict_result_file_input(page, file_id, boundary, owned)
+
     def read_result_completion(self, action_id: int, owned: OwnedConnection):
         """读取原可靠结束观察；后轮没有重复提供依据时仍沿用原事实。"""
         from .result_pages import _at
