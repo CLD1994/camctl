@@ -81,10 +81,16 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 
 `test_hasselblad_photo_roundtrip.py` 的网页定向用例把实际安装 wheel 的能力交给当前构建首页，在真实控件选择三个短快门，保存预设后重建 Application、Files、HTTP 和浏览器，再重开原草稿并将预设应用到独立草稿，最终保留网页下载原请求。上传定向用例从权威正常报告派生小型图片映射，实际执行 `Files.createBatch/upload/idle`，分别观察报告先到和媒体先到的等待与核验，以及网页导出自动累计 ACK；这两组定向证据不代表已经执行相机拍摄或 C host 交付。
 
-运行前准备仓库外的准确客户端候选副本（包括根 protocol 和当前 `tests/integration/client_driver.ts`），按客户端锁文件安装依赖并实际执行普通 build，设置 `CAMCTL_HB_TEST_CLIENT_ROOT` 指向该副本根。Node 24 和 Chromium、Python 3.11、uv 离线缓存是前置。运行数据与 wheel 安装使用仓库外 pytest 临时目录，结束后再归档证据：
+正常链矩阵把 RAW/JPEG、host/device 与三个精确短快门组合为十二个独立软件世界，每个世界只有一次 capture。各行由真实网页导出，经当前 C host-demo、仓库外 wheel 安装 CLI 和受 hb_cli 契约约束的进程替身，核对 SQLite、生效参数、固定 H 历史、报告和实际 argv。原图与预览各经两份新请求取回；host 工具离线后仍从正式源交付，device 等生产回收工作副本后按原 camera basename 和 original/thumbnail 下载。JPEG 同内容双角色也分别保留身份。报告与媒体随后实际上传，分别覆盖报告先到、媒体先到和缺预览三种顺序，再由网页自动导出累计 ACK，经 C host 核实原水位持久化。此链仍是软件证据，不连接物理相机。
+
+正常用例还按实际下载 request_id 定位原 START、双文件完成和产物登记各自的完整事务 H，核版本化结果、同 activity 的照片与 entered 观察、实际步骤和诊断双流。安装入口的私有历史观察模式通过真实 HistoryRepository 恢复登记 owner 的完整关联行；晚期取回、原请求重送及 ACK 后，新安装子进程再读同三个 H 并逐项比较 before/after。晚于该 H 创建的实体保持不存在。窄反例验证中间事件不能冒充 H，缺失观察、错误 activity、角色和摘要会被拒绝。
+
+运行前准备仓库外的准确客户端候选副本（包括根 protocol 和当前 `tests/integration/client_driver.ts`），按客户端锁文件安装依赖并实际执行普通 build，设置 `CAMCTL_HB_TEST_CLIENT_ROOT` 指向该副本根。Node 24 和 Chromium、Python 3.11、uv 离线缓存、CMake 和 C 编译器是前置。运行数据与 wheel 安装使用仓库外 pytest 临时目录，结束后再归档证据：
 
 ```bash
 CAMCTL_HB_TEST_CLIENT_ROOT=/absolute/private/candidate \
+  UV_PYTHON="$PWD/apps/camctl/.venv311/bin/python" \
+  UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" \
   apps/camctl/.venv311/bin/python -m pytest tests/integration/test_hasselblad_photo_roundtrip.py -q
 ```
 
