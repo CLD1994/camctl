@@ -24,6 +24,8 @@
 
 14 个通过的目录分别为 acceptance 338、cancellation 396、capture 1990、contracts 442、devices 220、history 339、host_files 120、logging_runtime 112、motor 12、operations 209、persistence 315、reporting 433、scheduling 136、session 194。初轮目录候选为 81b0a5e；contracts 修正后和后三个完整目录在 fb1f0a1 上运行，两候选的生产源码及资源一致。acceptance、cancellation、capture 的首轮启动器漏建临时父目录，形成 setup 错误；原日志保留，修正后按目录完整重跑并取得表中结果。contracts 首轮两项为结构检查器误把可重建派生库当作普通业务 SQLite、误把本地 URI 解析当作网络客户端；限定检查范围并加入仍拒绝其他业务 SQLite 与网络客户端的反例后，完整目录 442 项通过。outputs 的 35 项失败与当前录像来源、修复媒体独立读取责任有关，仍保留失败；不能用旧归档相同这一事实认定通过。
 
+outputs 的 35 项失败可按测试入口复核：test_product_event_sequence.py 有 5 项，其中 3 项在合成的取回授予与录像来源完成事务中要求原计划读取范围，另 2 项在修复媒体复核时要求同一范围；授予计划已经声明逐产物读取范围。test_selection_derived_sequence.py 有 30 项，合成修复成品登记和选择时未声明原计划读取范围，正式修复提升守卫因而取不到独立媒体读取端口。当前事务内核对一条命令最多接受一个事实读取范围。上述合成组合是否属于有效单事务命令、应拆分事务，还是需要新的共同读取契约，不能由失败输出自行决定；目前没有放宽守卫、删除断言或补造媒体资格。
+
 安装链中的 12 个正常场景覆盖 RAW／JPEG × host／device × 三个精确短快门；六个故障场景覆盖两种正式源的 START 结果保存后重启、完整提交后回执丢失，以及结果缺失和原报告重建。测试实际经过网页预设重开／导出、安装 wheel、C host、CLI、SQLite、完整历史、原图／预览各两次独立取回、`Files.upload` 和累计 ACK。相机只在 `hb_cli` 进程边界使用受契约约束的替身。
 
 bootstrap 的两项清理来源失败来自旧断言：现行契约要求成员批次和唯一末固定事件，而原断言只列一个来源事件。只读原失败库确认实际事件及事务范围符合契约，随后补齐上述独立断言并取得完整文件通过结果。其余十一项位于 `test_osmo_shared_recovery.py`，已有分段完成依据的来源要求原完整分段申请和同组最终 `ACTIVATE`，当前运行时尚未提交该事务；未放宽生产守卫或测试。完整 bootstrap 的本次结果仍是表中的 13 项失败，不能用定向通过数替代完整目录的重新验收。H7 步骤 5、H8 步骤 6 保持未完成。
