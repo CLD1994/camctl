@@ -63,6 +63,37 @@ class SqlEventReads:
             raise ConsistencyError('正式marker的实际事件位置或事务不同')
         return found
 
+    def photo_entry_apply_event(self, fixed_event, source_action_id, item_id, transaction):
+        """只查原实际提案的同组源应用身份，不提供未来业务资格。"""
+        ObjectId(source_action_id)
+        ObjectId(item_id)
+        count = transaction.last_event_id - transaction.first_event_id + 1
+        offset = fixed_event.event_id - transaction.first_event_id
+        if (not self.connection.in_transaction or not isinstance(self.scope, PlanReadScope)
+                or len(self._planned_events) != count or not 0 <= offset < count
+                or self._planned_events[offset] is not fixed_event
+                or fixed_event.transaction_id != transaction.txn_id):
+            raise ConsistencyError('入口取消固定不属于原完整实际事务')
+        found = None
+        for index, event in enumerate(self._planned_events):
+            if (event.event_id != transaction.first_event_id + index
+                    or event.transaction_id != transaction.txn_id):
+                raise ConsistencyError('入口取消实际提案的事件位置或事务不符')
+            if event.event_id <= fixed_event.event_id or (event.event_type, event.reason) != (25, 1):
+                continue
+            members = [row for row in event.rows if row.table == 'cancel_items' and row.row_id == item_id]
+            request = event.evidence.get('cancel_request', {})
+            if not members and request.get('item_id') != item_id:
+                continue
+            sources = [row for row in event.rows if row.table == 'actions']
+            if (found is not None or len(members) != 1 or request.get('item_id') != item_id
+                    or len(sources) != 1 or sources[0].row_id != source_action_id):
+                raise ConsistencyError('入口取消的实际源或成员应用不唯一或不匹配')
+            found = event
+        if found is None:
+            raise ConsistencyError('原入口取消事务缺少对应源成员应用')
+        return found
+
     def verify_segment_event(self, event, context):
         from camctl.persistence.repositories.segments import verify_segment_event
         from camctl.capture.segment_models import SegmentSetRef
@@ -152,6 +183,29 @@ class SqlEventReads:
         if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= self.scope.batch_size:
             raise ConsistencyError("事实读取限额超出可信范围")
         changed = tuple(key[1] for key in self._overlay if key[0] == table)
+        plan_owners = {}
+        if isinstance(self.scope, PlanReadScope):
+            for key in changed:
+                changes = self._overlay[table, key]
+                if changes is None:
+                    plan_owners[key] = None
+                    continue
+                if "plan_id" in changes:
+                    owner = changes["plan_id"]
+                else:
+                    # 稀疏前序变化不带归属；只查原行，不读未来提案。
+                    with closing(self.connection.execute(
+                            "SELECT plan_id FROM actions WHERE id=?", (key,))) as cursor:
+                        original = cursor.fetchone()
+                    if original is None:
+                        raise ConsistencyError("计划覆盖行缺少可靠原归属")
+                    owner = original[0]
+                try:
+                    ObjectId(owner)
+                except (TypeError, ValueError) as error:
+                    raise ConsistencyError("计划覆盖行的归属无效") from error
+                plan_owners[key] = owner
+            changed = tuple(key for key in changed if plan_owners[key] == self.scope.plan_id)
         after = 0
         while True:
             # 前序事件可能使成员进入或离开范围；它们必须参与稳定 ID 扫描。
@@ -171,6 +225,8 @@ class SqlEventReads:
                 return
             batch = []
             for key in ids[:size]:
+                if key in plan_owners and plan_owners[key] != self.scope.plan_id:
+                    continue
                 facts = self.optional(table, key, columns)
                 if facts is not None and facts.get(column, key if column == "id" else None) == identity:
                     batch.append((key, facts))
