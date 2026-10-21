@@ -288,9 +288,22 @@ async function validateParameters(
 ) {
   type ParameterCase = { name: string; params_text: string };
   const input = JSON.parse(readFileSync(inputPath, "utf8")) as {
+    action_type: unknown;
+    device_id: unknown;
+    action_name: unknown;
     scheduled_at: string;
     cases: ParameterCase[];
   };
+  const requiredInputString = (field: string, value: unknown): string => {
+    if (typeof value !== "string" || value.trim().length === 0)
+      throw new Error(
+        `validate-parameters 输入字段 ${field} 必须是非空字符串`,
+      );
+    return value;
+  };
+  const actionType = requiredInputString("action_type", input.action_type);
+  const deviceId = requiredInputString("device_id", input.device_id);
+  const actionName = requiredInputString("action_name", input.action_name);
   const capabilitiesText = readFileSync(
     join(storeDir, "device-capabilities.json"),
     "utf8",
@@ -335,10 +348,14 @@ async function validateParameters(
         origin,
         capabilitiesText,
         cases,
+        actionType,
+        deviceId,
       }: {
         origin: string;
         capabilitiesText: string;
         cases: ParameterCase[];
+        actionType: string;
+        deviceId: string;
       }) => {
         const { parseClientJson, stringifyJson } = await import(
           `${origin}/src/shared/json.ts`
@@ -353,26 +370,32 @@ async function validateParameters(
           const params = parseClientJson(item.params_text);
           return {
             valid:
-              validateParams("camera", "camera_timelapse", params, capabilities)
+              validateParams(deviceId, actionType, params, capabilities)
                 .length === 0,
             params: stringifyJson(params),
           };
         });
       },
-      { origin, capabilitiesText, cases: input.cases },
+      {
+        origin,
+        capabilitiesText,
+        cases: input.cases,
+        actionType,
+        deviceId,
+      },
     );
     const cases = input.cases.map((item, index) => {
       const params = parseJson(item.params_text);
       const sharedValid =
-        validateParams("camera", "camera_timelapse", params, capabilities)
+        validateParams(deviceId, actionType, params, capabilities)
           .length === 0;
       const body = {
         name: "时间参数接缝",
         actions: [
           {
-            name: "延时摄影",
-            type: "camera_timelapse",
-            device_id: "camera",
+            name: actionName,
+            type: actionType,
+            device_id: deviceId,
             scheduled_at: input.scheduled_at,
             policy: { max_delay_ms: 5000 },
             params,

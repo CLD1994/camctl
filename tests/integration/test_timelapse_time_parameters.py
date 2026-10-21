@@ -175,7 +175,13 @@ def test_describe_python_browser_and_node_export_agree(tmp_path, model):
     expected_pair_count = 134 if model is CameraModel.ACTION6 else 126
     assert sum(c["valid"] for c in cases if c["name"].startswith("pair-")) == expected_pair_count
     inputs = tmp_path / "parameter-cases.json"
-    inputs.write_text(json.dumps({"scheduled_at": future_schedule(3600), "cases": cases}))
+    inputs.write_text(json.dumps({
+        "action_type": "camera_timelapse",
+        "device_id": "camera",
+        "action_name": "延时摄影",
+        "scheduled_at": future_schedule(3600),
+        "cases": cases,
+    }, ensure_ascii=False))
     result = deployment.run_client_driver("validate-parameters", str(tmp_path / "client-store"), str(inputs),
                                           output=tmp_path / "parameter-receipt.json")
     for case, observed in zip(cases, result["cases"], strict=True):

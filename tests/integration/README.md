@@ -41,6 +41,12 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 apps/camctl/.venv311/bin/python apps/camctl/scripts/render_timelapse_time_parameters.py --check
 ```
 
+`test_hasselblad_photo_parameters.py` 构建并独立安装当前 wheel，由安装版 `describe` 导出 Hasselblad 能力，再将同一份有限参数用例交给安装版 camctl、Chromium 中的客户端共享校验和 Node.js 后端导出。用例只保留有代表性的 RAW/JPEG、M/A/S/P、白平衡、对焦、短快门和色温边界，以及互斥字段、tint、缺项与 `null` 反例；每项保存原始 `params_text` 和独立预期，不复制完整档位。计划只受理，不运行设备工具。
+
+```bash
+UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project apps/camctl --group test --python 3.11 pytest tests/integration/test_hasselblad_photo_parameters.py -q
+```
+
 ### 正式源文件清理的安装版联合链
 
 `test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的 10 个分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、不支持设备源与主机源混合、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
@@ -69,7 +75,7 @@ ADB 提供的 OSV／LRF 是合成字节样例，不证明真实媒体可解码�
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_timelapse_roundtrip.py -q
 ```
 
-`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 包含 `scheduled_at` 和 `cases`，每项有 `name` 及保存完整原数字词元的 `params_text` 字符串，设备标识为 `camera`，动作类型为 `camera_timelapse`。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。用例预期由调用者独立判断；测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
+`client_driver.ts validate-parameters <客户端存储目录> <参数用例路径> <凭据路径>` 是测试接缝。存储目录应含真实 `describe` 输出的 `device-capabilities.json`；用例 JSON 显式包含非空字符串 `action_type`、`device_id`、`action_name`，以及 `scheduled_at` 和 `cases`。每项用例有 `name`、保存完整原数字词元的 `params_text` 字符串和独立预期。浏览器共享校验与客户端后端共享校验都使用输入中的动作类型和设备标识，真实导出使用同一身份及动作名；身份字段缺失或为空时命令明确报出字段错误。凭据按同序记录 `browser_valid`、`shared_valid`、`export_valid`、两处未改写的参数正文，以及成功导出的完整 JSON 正文或明确的 `invalid_plan`。测试命令不接收产品候选能力开关，也不维护设备完整参数枚举。
 
 `test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算命令只提供测试凭据，没有新增产品接口。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
 
