@@ -656,11 +656,12 @@ def test_source_write_and_original_key_keep_bounded_residency(tmp_path):
         directory.mkdir()
         _,owned,request=_real_environment(directory,captures=count)
         db=owned.connection
-        stats={"max_fetch":0,"fetched":0,"sql_calls":0,"group_checks":0}
+        stats={"max_fetch":0,"fetched":0,"sql_calls":0,"group_checks":0,"body_rows":0,"first_body_limit":None}
         txn=db.execute("SELECT MAX(id)+1 FROM history_transactions").fetchone()[0]
         class Cursor:
-            def __init__(self,cursor):
+            def __init__(self,cursor,body=False):
                 self.cursor=cursor
+                self.body=body
             def __getattr__(self,name):
                 return getattr(self.cursor,name)
             def fetchall(self):
@@ -670,6 +671,8 @@ def test_source_write_and_original_key_keep_bounded_residency(tmp_path):
                 rows=self.cursor.fetchmany(size)
                 stats["max_fetch"]=max(stats["max_fetch"],len(rows))
                 stats["fetched"]+=len(rows)
+                if self.body:
+                    stats["body_rows"]+=len(rows)
                 return rows
             def fetchone(self):
                 row=self.cursor.fetchone()
@@ -682,7 +685,10 @@ def test_source_write_and_original_key_keep_bounded_residency(tmp_path):
                 stats["sql_calls"]+=1
                 if "SELECT COUNT(*), MIN(id), MAX(id) FROM history_events" in sql and args==(txn,):
                     stats["group_checks"]+=1
-                return Cursor(db.execute(sql,args))
+                body = "FROM history_events WHERE transaction_id=? AND id>? AND id<=?" in sql
+                if body and stats["first_body_limit"] is None:
+                    stats["first_body_limit"] = args[-1]
+                return Cursor(db.execute(sql,args),body)
         try:
             measured=OwnedConnection(Measured(),None)
             repository=outputs.OutputsRepository(4)
@@ -697,6 +703,9 @@ def test_source_write_and_original_key_keep_bounded_residency(tmp_path):
             assert reused.kind is DbOutcomeKind.COMPLETED,reused.error
             assert reused.value==written.value
             assert stats["max_fetch"]<=128 and stats["group_checks"]<=3
+            event_count=db.execute("SELECT last_event_id-first_event_id+1 FROM history_transactions WHERE operation_key=?",(str(key),)).fetchone()[0]
+            assert stats["first_body_limit"] == 1
+            assert stats["body_rows"] == event_count + 1  # 头窥读一个，正文完整一遍。
             from camctl.persistence.repositories.source_transactions import _created_before
             original_f=db.execute("SELECT first_event_id FROM history_transactions WHERE operation_key=?",(str(key),)).fetchone()[0]
             query="SELECT t.id FROM action_dependencies t WHERE "+_created_before("action_dependencies","t",original_f)+" ORDER BY t.id DESC LIMIT 1"
@@ -734,5 +743,106 @@ def test_bounded_context_cannot_carry_the_whole_source_plan(tmp_path,monkeypatch
         result=outputs.OutputsRepository(1).resolve_sources(request,new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.ROLLED_BACK,result
         assert tuple(owned.connection.iterdump())==before
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("scope_name", ["SourceResolutionReadScope", "ObtainInitializationReadScope"])
+@pytest.mark.parametrize("table,identity", [("actions", 21), ("plans", 1), ("action_dependencies", 1), ("obtain_source_selections", 1)])
+def test_unbound_source_scope_cannot_grant_point_fact_roles(tmp_path, scope_name, table, identity):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.history import reads as scopes
+    from camctl.persistence.event_reads import SqlEventReads
+    _, owned = _six_form_environment(tmp_path)
+    try:
+        owned.connection.execute("BEGIN IMMEDIATE")
+        reads = SqlEventReads(owned.connection, getattr(scopes, scope_name)(1, 1, 30))
+        with pytest.raises(ConsistencyError):
+            reads.optional(table, identity)
+    finally:
+        owned.connection.rollback()
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+def test_bound_source_scope_only_exposes_actual_canonical_page_roles(tmp_path, monkeypatch, start):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    _, owned, request = _real_environment(tmp_path)
+    try:
+        # 另一 owner 的真实已提交依赖/selection 不能借同表点读取进入当前角色。
+        from camctl.acceptance.input import ParsedInput
+        from camctl.acceptance.service import CommandMode, ProcessInput
+        from camctl.persistence.repositories.acceptance import AcceptanceRepository
+        from ..acceptance.test_acceptance import Catalog, _plan_body
+        raw={"name":"other","type":"obtain_action_outputs","scheduled_at":"2026-01-15 09:00:00","params":{"source":{"plan_instance_id":"1"},"purpose":"manual"}}
+        accepted=AcceptanceRepository().process_input(ProcessInput(ParsedInput("other.json",_plan_body(request_id="503",actions=[raw])),Catalog(),CommandMode.RUN,_NOW),new_operation_key(),owned)
+        assert accepted.kind is DbOutcomeKind.COMPLETED,accepted.error
+        other=owned.connection.execute("SELECT id FROM actions WHERE plan_id=?",(accepted.value.plan_id,)).fetchone()[0]
+        repo=outputs.OutputsRepository(1)
+        assert repo.start_obtain_action(outputs.StartObtainAction(other,_NOW),new_operation_key(),owned).kind is DbOutcomeKind.COMPLETED
+        assert repo.resolve_sources(outputs.ResolveSources(other,SourceSpec(plan_instance_id=1),_NOW),new_operation_key(),owned).kind is DbOutcomeKind.COMPLETED
+        if start:
+            owned.connection.execute("UPDATE actions SET status=1,execution_started=0,source_resolution_state=2,resolved_source_plan_id=1 WHERE id=?", (request.action_id,))
+            owned.connection.executemany("INSERT INTO action_dependencies VALUES(?,?,?)", [(17,request.action_id,1),(18,request.action_id,2)])
+            owned.connection.commit()
+        verify = streams._verify_context
+        checked = []
+        def inspect(db, event, context, reads, q):
+            verify(db, event, context, reads, q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            assert reads.required("actions", request.action_id)["id"] == request.action_id
+            assert reads.required("plans", q["action"]["plan_id"])["id"] == q["action"]["plan_id"]
+            assert reads.required("actions", 1)["id"] == 1
+            # 合法 source plan 中的下一批，以及任意已有关系，都不是当前角色。
+            for table, identity in (("actions",2),("actions",3),("actions",other),("plans",1),("action_dependencies",1),("action_dependencies",18),("obtain_source_selections",1)):
+                with pytest.raises(ConsistencyError):
+                    reads.optional(table, identity)
+            for page in reads.iter_members("actions","plan_id",q["action"]["plan_id"]):
+                assert all(row["plan_id"] == q["action"]["plan_id"] for _, row in page)
+            if start:
+                assert reads.required("action_dependencies",17)["depends_on_action_id"] == 1
+            else:
+                assert reads.optional("action_dependencies",q["dependency_first"]) is None
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        repository = outputs.OutputsRepository(1)
+        result = repository.start_obtain_action(outputs.StartObtainAction(request.action_id,_NOW),new_operation_key(),owned) if start else repository.resolve_sources(request,new_operation_key(),owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert checked
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("start", [False, True])
+def test_handler_cannot_prefill_aggregate_page_to_grant_foreign_points(tmp_path, monkeypatch, start):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories import source_transactions as streams
+    _, owned, request = _real_environment(tmp_path)
+    try:
+        if start:
+            owned.connection.execute("UPDATE actions SET status=1,execution_started=0,source_resolution_state=2,resolved_source_plan_id=1 WHERE id=?",(request.action_id,))
+            owned.connection.execute("INSERT INTO action_dependencies VALUES(17,?,1)",(request.action_id,))
+            owned.connection.commit()
+        original_context = streams._context
+        verify = streams._verify_context
+        checked = []
+        def context(*args):
+            actual = original_context(*args)
+            actual.current_reads._source_aggregate_page = frozenset({2})
+            return actual
+        def inspect(db,event,actual,reads,q):
+            verify(db,event,actual,reads,q)
+            if checked:
+                return
+            checked.append(event.event_id)
+            with pytest.raises(ConsistencyError):
+                reads.optional("actions",2)
+        monkeypatch.setattr(streams,"_context",context)
+        monkeypatch.setattr(streams,"_verify_context",inspect)
+        repository=outputs.OutputsRepository(1)
+        result=repository.start_obtain_action(outputs.StartObtainAction(request.action_id,_NOW),new_operation_key(),owned) if start else repository.resolve_sources(request,new_operation_key(),owned)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
     finally:
         owned.connection.close()

@@ -146,7 +146,8 @@ def _bind_event_reads(context,event,transaction,segment_guard_state,source_guard
     reads=context.current_reads
     if reads is None:
         from camctl.persistence.repositories.source_transactions import required_stream
-        if segment_guard_state or source_guard_state or 'segment_finish_request' in event.evidence or required_stream(connection,event):
+        from camctl.persistence.repositories.admission_sources import required as admission_required
+        if segment_guard_state or source_guard_state or 'segment_finish_request' in event.evidence or required_stream(connection,event) or admission_required(event):
             raise TransactionError('来源或分段事件缺少原事务的可靠读取端口')
         return None
     if type(reads) is not SqlEventReads or reads.connection is not connection:
@@ -158,6 +159,8 @@ def _bind_event_reads(context,event,transaction,segment_guard_state,source_guard
     reads._kernel_event_id = event.event_id
     from camctl.persistence.repositories.source_transactions import bind_stream
     bind_stream(connection,event,transaction,reads,source_guard_state,operation_key,context)
+    from camctl.persistence.repositories.admission_sources import bind as bind_admission
+    bind_admission(connection,event,transaction,reads,source_guard_state)
     return reads
 
 
@@ -233,6 +236,8 @@ def _write_bounded_plan(plan, scope, operation_key):
         raise TransactionError("实际有界事件少于预分配完整范围")
     from camctl.persistence.repositories.source_transactions import finish_stream
     finish_stream(source_guard_state)
+    from camctl.persistence.repositories.admission_sources import finish as finish_admission
+    finish_admission(connection, transaction, None, source_guard_state)
     plan.complete(connection)
     try:
         connection.execute("COMMIT")
@@ -675,6 +680,8 @@ def commit_operation(
 
         from camctl.persistence.repositories.source_transactions import finish_stream
         finish_stream(source_guard_state)
+        from camctl.persistence.repositories.admission_sources import finish as finish_admission
+        finish_admission(connection, transaction_range, validated, source_guard_state)
 
         touched = {
             (entity_type, entity_id)

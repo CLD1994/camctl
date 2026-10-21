@@ -493,7 +493,7 @@ class ProcessInputCommand:
             owners=self._owners,
             state_rows=self._state,
             result=result,
-            source_read_scope=(None if result.plan_id is None or not any(e.event_type == 3 and e.reason == 3 for e in events) else
+            source_read_scope=(None if result.plan_disposition is not PlanDisposition.REGISTERED else
                 AdmissionSourceReadScope(result.plan_id,128)),
         )
 
@@ -663,6 +663,8 @@ def _source_members_guard(event, context) -> None:
                 raise EventValidationError("FIXED 来源必须保存真实来源计划")
     dependencies = [row for row in event.rows if row.table == "action_dependencies" and not row.before.exists]
     if not dependencies:
+        if event.event_type == 3 and event.reason == 3:
+            raise EventValidationError("受理零成员无需空事件")
         return
     reads = context.current_reads
     if event.event_type != 3 or event.reason != 3 or reads is None:

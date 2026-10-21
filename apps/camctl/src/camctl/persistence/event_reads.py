@@ -226,6 +226,8 @@ class SqlEventReads:
         if (type(self.scope) is not AdmissionSourceReadScope or not self.connection.in_transaction
                 or getattr(self, '_kernel_transaction', None) != transaction):
             raise ConsistencyError('受理来源成员缺少原事务可靠前序端口')
+        from camctl.persistence.repositories.admission_sources import verify
+        verify(self, transaction)
         accepted = getattr(self, '_kernel_accepted', None)
         current = row_facts(self.connection, 'actions', owner_id)
         admitted_type = load_event_registry()['events']['ACTION_ADMITTED']['id']
@@ -297,10 +299,8 @@ class SqlEventReads:
         if identity is not None:
             ObjectId(identity)
         if isinstance(self.scope, SourceResolutionReadScope):
-            point = column == "id" and table in ("actions","plans","action_dependencies","obtain_source_selections")
-            aggregate = table == "actions" and column == "plan_id" and identity == self.scope.plan_id
-            if not (point or aggregate) or (table == "plans" and identity != self.scope.plan_id):
-                raise ConsistencyError("来源事务事实端口超出原 owner/plan 和依赖初始化范围")
+            from camctl.persistence.repositories.source_transactions import source_read_role
+            source_read_role(self, table, column, identity)
         if isinstance(self.scope, CaptureResultReadScope) and (
                 table != "device_files" or column != "id" or identity not in self._result_file_ids):
             raise ConsistencyError("结果文件事实只能读取本批原页的成员")
@@ -404,6 +404,10 @@ class SqlEventReads:
             if not ids:
                 return
             batch = []
+            if isinstance(self.scope, SourceResolutionReadScope):
+                from camctl.persistence.repositories.source_transactions import bind_aggregate_page
+                previous_aggregate = self._source_aggregate_page
+                bind_aggregate_page(self, ids[:size])
             for key in ids[:size]:
                 if key in plan_owners and plan_owners[key] != self.scope.plan_id:
                     continue
@@ -411,7 +415,11 @@ class SqlEventReads:
                 if facts is not None and facts.get(column, key if column == "id" else None) == identity:
                     batch.append((key, facts))
             after = ids[min(size, len(ids)) - 1]
-            yield tuple(batch)
+            try:
+                yield tuple(batch)
+            finally:
+                if isinstance(self.scope, SourceResolutionReadScope):
+                    self._source_aggregate_page = previous_aggregate
             if len(candidates) < size and len(ids) <= size:
                 return
 

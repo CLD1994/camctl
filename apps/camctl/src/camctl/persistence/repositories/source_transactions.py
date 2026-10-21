@@ -495,6 +495,62 @@ class _SourceProof:
     event: object
 
 
+@dataclass(frozen=True)
+class _SourceReadRoles:
+    proof: _SourceProof
+    points: frozenset
+
+
+@dataclass(frozen=True)
+class _SourceAggregatePage:
+    proof: _SourceProof
+    identities: frozenset
+
+
+def bind_aggregate_page(reads, identities):
+    # 只由有限主计划聚合读取器在可靠 SQL/accepted 页上调用。
+    roles = reads._source_roles
+    source_read_role(reads, 'actions', 'plan_id', reads.scope.plan_id)
+    reads._source_aggregate_page = _SourceAggregatePage(roles.proof, frozenset(identities))
+
+
+def _bind_read_roles(db, reads, q, event, transaction):
+    points = {('actions', q['action']['id']), ('plans', q['action']['plan_id'])}
+    for row in event.rows:
+        points.add((row.table, row.row_id))
+        if row.table == 'action_dependencies':
+            points.add(('actions', row.after.values['depends_on_action_id']))
+        elif row.table == 'obtain_source_selections':
+            identity = row.after.values['dependency_id']
+            points.add(('action_dependencies', identity))
+            dependency = row_facts(db, 'action_dependencies', identity)
+            if dependency is not None:
+                if dependency['action_id'] != q['action']['id']:
+                    raise ConsistencyError('规范初始化依赖改变原 owner')
+                points.add(('actions', dependency['depends_on_action_id']))
+    proof = _SourceProof(reads.scope, transaction, event)
+    reads._source_stream = proof
+    reads._source_roles = _SourceReadRoles(proof, frozenset(points))
+    reads._source_aggregate_page = None
+
+
+def source_read_role(reads, table, column, identity):
+    roles = getattr(reads, '_source_roles', None)
+    proof = getattr(reads, '_source_stream', None)
+    if (not isinstance(roles, _SourceReadRoles) or roles.proof != proof
+            or proof.scope != reads.scope or proof.transaction != getattr(reads, '_kernel_transaction', None)):
+        raise ConsistencyError('来源事实端口没有内核原申请/当前规范页角色')
+    if table == 'actions' and column == 'plan_id' and identity == reads.scope.plan_id:
+        return
+    if column == 'id' and (table, identity) in roles.points:
+        return
+    aggregate = getattr(reads, '_source_aggregate_page', None)
+    if (table == 'actions' and column == 'id' and isinstance(aggregate, _SourceAggregatePage)
+            and aggregate.proof == proof and identity in aggregate.identities):
+        return
+    raise ConsistencyError('来源点查询不属于原 owner/计划/当前规范页角色')
+
+
 def bind_stream(db, event, transaction, reads, state, key, context):
     """唯一内核在验证前建立原资格，并在每条实际事件上重绑定。"""
     active = state.get('source_stream')
@@ -520,6 +576,7 @@ def bind_stream(db, event, transaction, reads, state, key, context):
     expected = next(active['iterator'], None)
     if expected is None or replace(event,change_seq=None) != expected:
         raise ConsistencyError('实际来源事件与原申请的完整规范流不同')
+    _bind_read_roles(db, reads, active['q'], expected, transaction)
     _verify_context(db,event,context,reads,active['q'])
     active['expected'] = replace(event,change_seq=None)
     reads._source_stream = _SourceProof(reads.scope,transaction,replace(event,change_seq=None))
