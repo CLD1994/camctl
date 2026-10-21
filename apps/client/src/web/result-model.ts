@@ -8,6 +8,35 @@ import type { Video } from "../server/models";
 import { mediaGroup } from "../shared/media";
 import { isObject } from "../shared/validation";
 import { isCameraAction } from "../shared/actions";
+import {
+  segmentIssue,
+  type SegmentIssue,
+  type SegmentKey,
+} from "../shared/segment-report-errors";
+import { displayNumber } from "../shared/json";
+
+function segmentIssueText({ details: d }: SegmentIssue): string {
+  const key = (value: SegmentKey) =>
+    `CAM${displayNumber(value, "directory_number", value.directory_number)}/${displayNumber(value, "index", value.index)}`;
+  const gap =
+    d.gap_count === null
+      ? "缺口分类未确认"
+      : `已确认 ${displayNumber(d, "gap_count", d.gap_count)} 处缺口`;
+  const first = d.first_gap;
+  const neighbors = first
+    ? [first.left, first.right].flatMap((side) =>
+        side.state === "known" ? [side.file_identity!] : [],
+      )
+    : [];
+  const scope = d.default_scope;
+  const range =
+    scope.state === "unknown"
+      ? "默认范围未确认"
+      : scope.state === "empty"
+        ? "默认范围为空，没有可默认交付的连续部分"
+        : `默认连续前缀 ${displayNumber(scope, "member_count", scope.member_count!)} 份原片`;
+  return `来源动作 ${d.source_action_instance_id}：${gap}${first ? `，首个缺口 ${key(first.start_key)} 至 ${key(first.end_key)}` : ""}${neighbors.length ? `；可靠邻接文件：${neighbors.join("、")}` : ""}；${range}；已保留 ${displayNumber(d, "retained_original_count", d.retained_original_count)} 份原片，逐文件身份见产物和技术详情。`;
+}
 
 export interface ResultActionRow {
   action: ReportAction;
@@ -109,6 +138,8 @@ export function executionText(action: ReportAction): string {
 
 export function actionIssueText(action: ReportAction): string | undefined {
   const issue = action.error;
+  const segment = segmentIssue(issue);
+  if (segment) return segmentIssueText(segment);
   if (issue?.stage === "admission")
     return `受理校验失败，未执行${typeof issue.details?.message === "string" ? `：${issue.details.message}` : "，展开查看输入问题"}`;
   if (action.type === "motor_control") {
@@ -146,6 +177,12 @@ export function resultNotes(
       error: true,
     });
   if (!result) return notes;
+  if (action.type === "obtain_action_outputs" && Array.isArray(result.failures))
+    for (const failure of result.failures) {
+      if (!isObject(failure)) continue;
+      const segment = segmentIssue(failure.error);
+      if (segment) notes.push({ text: segmentIssueText(segment), error: true });
+    }
   if (Array.isArray(result.failures) && result.failures.length)
     notes.push({
       text: `${result.failures.length} 项取回未成功，已取得的文件仍可查看`,

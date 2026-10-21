@@ -1,4 +1,10 @@
 import { isCameraAction } from "../shared/actions";
+import {
+  rejectSegmentError,
+  segmentReferences,
+  SegmentFactKnowledge,
+  type SegmentDetails,
+} from "../shared/segment-report-errors";
 import type { ValidateFunction } from "ajv";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -117,7 +123,81 @@ function failureIdentity(item: ObtainFailure): string {
     typeof requested === "string" ? requested : null,
   ]);
 }
+function consistentSegmentFacts(indexes: Index[]) {
+  const knowledge = new SegmentFactKnowledge();
+  for (const index of indexes)
+    for (const { value: action } of index.actions.values())
+      for (const { details } of segmentReferences(action))
+        knowledge.add(details);
+}
+/** 只提取分段校验知识；不会回放或修改报告状态。 */
+function accumulateSegmentFacts(
+  knowledge: SegmentFactKnowledge,
+  report: StatusReport,
+): void {
+  for (const plan of report.plans ?? [])
+    for (const action of plan.actions ?? [])
+      for (const { details } of segmentReferences(action))
+        knowledge.add(details);
+}
+interface SegmentEntityView {
+  sources: Map<string, ReportAction["type"]>;
+  outputs: Map<string, Pick<Output, "kind" | "source_action_instance_id">>;
+}
+/** 只保留分段引用所需身份；每份原文的观察独立参加核对。 */
+function segmentEntities(index: Index): SegmentEntityView {
+  return {
+    sources: new Map(
+      [...index.actions].map(([id, { value }]) => [id, value.type]),
+    ),
+    outputs: new Map(
+      [...index.outputs].map(([id, { value }]) => [
+        id,
+        {
+          kind: value.kind,
+          source_action_instance_id: value.source_action_instance_id,
+        },
+      ]),
+    ),
+  };
+}
+function segmentAssociations(
+  entities: SegmentEntityView,
+  details: SegmentDetails,
+): void {
+  const source = entities.sources.get(details.source_action_instance_id);
+  if (source)
+    requireFact(source === "camera_record", "分段错误来源必须是录像动作");
+  for (const id of details.retained_output_ids) {
+    const output = entities.outputs.get(id);
+    if (output)
+      requireFact(
+        output.kind === "original" &&
+          output.source_action_instance_id ===
+            details.source_action_instance_id,
+        "分段保留产物必须属于同一来源的原片",
+      );
+  }
+}
+/** 分段 F 与每份报告的最小 E；不合并实体状态，也不覆盖此前的身份观察。 */
+export class SegmentReportKnowledge {
+  private readonly facts = new SegmentFactKnowledge();
+  private readonly entities: SegmentEntityView[] = [];
+
+  add(report: StatusReport): void {
+    accumulateSegmentFacts(this.facts, report);
+    this.entities.push(segmentEntities(indexReport(report)));
+  }
+
+  validate(): void {
+    for (const details of this.facts.details())
+      for (const entities of this.entities)
+        segmentAssociations(entities, details);
+  }
+}
 function associations(index: Index) {
+  consistentSegmentFacts([index]);
+  const entities = segmentEntities(index);
   const names = new Map<
     string,
     Map<string, { parent: string; value: ReportAction }>
@@ -232,6 +312,8 @@ function associations(index: Index) {
   }
   for (const owner of index.actions.values()) {
     const action = owner.value;
+    for (const { details } of segmentReferences(action))
+      segmentAssociations(entities, details);
     const admission =
       action.status === "failed" && action.error?.stage === "admission";
     if (
@@ -438,6 +520,8 @@ function failureLinks(
 function ownFacts(report: StatusReport) {
   requireFact(report.from_wm <= report.to_wm, "报告水位顺序不合法");
   const index = indexReport(report);
+  for (const diagnostic of report.plan_file_diagnostics ?? [])
+    diagnostic.errors.forEach(rejectSegmentError);
   for (const plan of report.plans ?? []) {
     requireFact(
       isName(plan.name) && isTimestamp(plan.created_at),
@@ -1010,6 +1094,7 @@ export function validateReportAgainstHistory(
   validateReport(incoming);
   const old = indexReport(current);
   const next = indexReport(incoming);
+  consistentSegmentFacts([old, next]);
   const boundary: "earlier" | "same" | "later" =
     incoming.to_wm < current.to_wm
       ? "earlier"
