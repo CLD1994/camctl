@@ -21,6 +21,8 @@ CREATE TABLE history_events (
     UNIQUE (id, change_seq)
 ) STRICT;
 CREATE INDEX history_events_transaction ON history_events(transaction_id, id);
+CREATE INDEX history_events_transaction_type ON history_events(transaction_id, event_type, id);
+CREATE INDEX history_events_type ON history_events(event_type, id);
 
 CREATE TABLE entity_event_links (
     id INTEGER PRIMARY KEY CHECK (id > 0),

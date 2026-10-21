@@ -294,6 +294,8 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 
 `PAIR_FROM_RESULT_SCAN` 是独立单事件事务，事实行及首次文件关联都属于预览文件自身历史。`device_file_pairing_facts.source_txn_id` 的引用类别为 `prior_transaction`，指向更早的完整 `history_transactions.id`，并与 `source_event_id` 核对该事务实际末事件。其余端点页和文件事件不得晚于该边界。原申请只保留 `preview_file_id/scan/source_boundary`；`scan` 使用完整原 `ResultPageRef`，`source_boundary` 使用 `txn_id/last_event_id`，事件时刻保存原申请时刻。未知分类没有事务；已有原键仅在原工作收场后从完整历史核实，读取异常不解释为缺键。具体分类与不可变字段见[结果扫描配对](file-fields.md#结果扫描配对)。
 
+已可靠提交的原页供归属、完成和配对消费者使用时，独立核原规范 CREATE／APPEND／INDEX 事务、真实尝试意图、首页、紧邻页、固定基准和实际差集。两个写入入口强制执行逐页前态、游标与封口校验，已提交页形成归纳建立的连续前缀；消费者不为每份文件重新回读全部目录页或反放动作的全部无关历史。原 APPEND 保存及原键完整重算仍核自己的 F 前状态。文件自身在指定历史边界的恢复保持独立，不能用消费者证明替代文件的完成或配对事实。
+
 ## 正向、逆向与快照格式
 
 正向回放先验证 `before`，再应用 `after`；逆向按事件和行的相反顺序验证 `after` 并恢复 `before`。逆向遇到创建事实只从查询副本移除该行，不删除真实数据库记录。事件结束后按实际变化对象派生目录及历史元数据；事务尚未读完时不交付中间状态。未知类型、版本、缺失旧值或矛盾状态均报历史错误，不跳过。
@@ -307,5 +309,7 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 ## 查询形状与索引
 
 对象在 H 的末条关联使用 `entity_type = ? AND entity_id = ? AND event_id <= ? ORDER BY event_id DESC LIMIT 1`；正反向回放使用相同唯一索引按 `event_id` 翻页。报告对象选择从 `report_entity_changes` 限定类型和 `(from_wm, to_wm]`，在数据库内按整数 ID 去重和游标分页。候选预查询、容量判断与大范围续读采用[报告对象选择的具体 SQL](report-changes.md#报告对象选择的索引与分页)，不在每页重新扫描整个业务区间。父对象补齐通过业务外键读取，不改变目录。
+
+完整事务按 `history_events_transaction(transaction_id, id)` 读取；同时限定事件类型时使用 `history_events_transaction_type(transaction_id, event_type, id)`，避免只按类型读取全库同类事件。固定基准锚点使用 `history_events_type(event_type, id)` 限定基准事件，再与实际对象目录等值核同；后续结果页增长不增加该锚点查询的目录遍历。
 
 快照使用对象及边界唯一索引，按 `boundary_event_id <= H ORDER BY boundary_event_id DESC LIMIT 1` 选择。维护使用 `pending_changes >= :threshold ORDER BY pending_changes DESC, entity_type_name COLLATE BINARY, entity_id LIMIT :batch`，对应 `snapshot_candidates`。获取事件正文时限定已选 ID 和完整读取上界，不能扫描全部历史再在 Python 中筛选。初始化边界 0 的查询直接返回定义的初始状态。

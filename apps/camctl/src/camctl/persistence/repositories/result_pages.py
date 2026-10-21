@@ -450,6 +450,81 @@ def _at(connection, event_id):
     return saved, raw
 
 
+def committed_page_proof(connection, saved, raw, event, transaction):
+    """有限核实已提交 A1 页的消费者资格，不重放增长的动作历史。
+
+    A1 的两个写入入口强制校验每次 APPEND 的真实前态、相邻页和封口，
+    因而已提交首末引用构成归纳建立的连续前缀。消费者核原 intent、
+    首批、紧邻页、固定基准和本页规范组；原页保存的原键重算仍独立使用
+    _replay_page_context，不把消费者端口用于产生新的 APPEND。
+    """
+    run, attempt, action, activity = _load(connection, saved.ref.ticket)
+    if event.evidence['attempt_id'] != attempt['id']:
+        raise ConsistencyError('原提交页与真实尝试身份不同')
+    intent_id = attempt['intent_event_id']
+    if intent_id is None or intent_id >= transaction.first_event_id:
+        raise ConsistencyError('原提交页缺少更早的真实尝试意图')
+    with closing(connection.execute(f'SELECT {_COLUMNS} FROM history_events WHERE id=?',
+                                    (intent_id,))) as cursor:
+        stored = cursor.fetchone()
+    if stored is None:
+        raise ConsistencyError('原提交页意图历史缺失')
+    intent = decode_event_row(stored)
+    name, _, _ = validate_event_structure(intent)
+    intent_transaction = read_transaction_range(connection, intent.transaction_id)
+    changes = [row for row in intent.rows if row.table == 'operation_attempts'
+               and row.row_id == attempt['id'] and not row.before.exists]
+    if (name != 'ATTEMPT_STARTED' or len(changes) != 1
+            or intent_transaction.last_event_id >= transaction.first_event_id
+            or any(changes[0].after.values.get(column) != attempt[column]
+                   for column in ('run_id', 'attempt_no', 'intent_event_id'))
+            or changes[0].after.values.get('status') != int(_ATTEMPT_STATUS.RUNNING)
+            or attempt['result_event_id'] is not None
+                and attempt['result_event_id'] <= transaction.last_event_id):
+        raise ConsistencyError('原提交页不是实际意图之后、尝试结果之前的运行中返回')
+    first_id, last_id = attempt['result_first_page_event_id'], attempt['result_last_page_event_id']
+    if first_id is None or last_id is None or not first_id <= event.event_id <= last_id:
+        raise ConsistencyError('原提交页不在尝试的真实可靠范围')
+    previous_raw = None
+    if saved.ref.page_no == 1:
+        if first_id != event.event_id or saved.page.cursor is not None:
+            raise ConsistencyError('原提交首批没有共同建立原空范围')
+    else:
+        first, _ = _at(connection, first_id)
+        previous_id = event.rows[0].before.values['result_last_page_event_id']
+        previous, previous_raw = _at(connection, previous_id)
+        if (first.ref.ticket != saved.ref.ticket or first.ref.page_no != 1
+                or first.page.cursor is not None or first_id > previous_id
+                or previous.ref.ticket != saved.ref.ticket
+                or previous.ref.page_no + 1 != saved.ref.page_no
+                or previous.page.outcome.error is not None or previous.ref.next_cursor is None
+                or previous.ref.next_cursor != saved.page.cursor):
+            raise ConsistencyError('原提交页缺少同尝试首批或紧邻成功游标')
+    before = _page_before_boundary(connection, transaction)
+    if activity['ownership_mode'] == int(_OWNERSHIP.BASELINE_COMPARISON):
+        if activity['baseline_state'] != int(BaselineState.FIXED):
+            raise ConsistencyError('已提交差集页的原基准没有可靠固定')
+        scope = ResultPageWriteScope(action['id'], activity['id'], run['id'], attempt['id'], saved.ref.page_no)
+        reads = _ReplayPageReads(connection, scope, (), before, activity, action)
+        entries, position, last_identity = _difference(reads, activity, action, saved.page, previous_raw)
+        if (not json_equal(raw['baseline_position'], position) or raw['last_identity'] != last_identity):
+            raise ConsistencyError('已提交页的原固定基准位置不一致')
+    else:
+        entries = saved.page.entries
+        if raw['baseline_position'] is not None:
+            raise ConsistencyError('独立任务范围不能携带目录基准位置')
+    if [entry.identity for entry in entries] != [identity for identity, _ in saved.file_ids]:
+        raise ConsistencyError('已提交页的实际差集与完整文件关系不同')
+    for entry, (_, file_id) in zip(entries, saved.file_ids):
+        file = row_facts(connection, 'device_files', file_id)
+        if (file is None or file['identity_key'] != file_identity_key(
+                action['device_id'], action['driver_id'], entry.identity)
+                or not json_equal(file['locator_json'], entry.locator)
+                or file['source_action_id'] not in (None, action['id'])):
+            raise ConsistencyError('已提交页的文件身份、定位或固定来源不同')
+    return action, activity, attempt, run
+
+
 def read_pages(ticket, cursor, batch, owned):
     if type(batch) is not int or not 1 <= batch <= 128:
         raise ValueError("结果页读取批次必须为 1—128")
@@ -1342,7 +1417,8 @@ class _ReplayPageReads:
         owner_type = load_enum_registry()["history_objects"]["action"]["id"]
         history_columns = ",".join("h." + name for name in _COLUMNS.split(","))
         with closing(self.connection.execute(
-                f"SELECT {history_columns} FROM entity_event_links l JOIN history_events h ON h.id=l.event_id"
+                f"SELECT {history_columns} FROM history_events h INDEXED BY history_events_type"
+                " CROSS JOIN entity_event_links l ON l.event_id=h.id"
                 " WHERE l.entity_type=? AND l.entity_id=? AND h.id<=? AND h.event_type=?"
                 " AND json_extract(h.body_json,'$.evidence.activity_id')=?"
                 " AND json_extract(h.body_json,'$.reason') IN (?,?)"

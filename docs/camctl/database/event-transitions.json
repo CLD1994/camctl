@@ -862,7 +862,8 @@
         "completion",
         "pairing_state",
         "pairing_identity",
-        "created_event_id"
+        "created_event_id",
+        "pairing_fact_id"
       ],
       "mutable": [],
       "derived": [

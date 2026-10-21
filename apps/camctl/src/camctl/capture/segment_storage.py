@@ -134,10 +134,15 @@ class SegmentMemberInput:
     completion: models.FileCompletionState
     pairing_identity: str | None = None
     pairing_state: models.PreviewPairingState = models.PreviewPairingState.NOT_APPLICABLE
+    pairing_fact_id: int | None = None
 
     def __post_init__(self):
         for name in ('file_id','page_event_id','file_event_id'):
             ObjectId(getattr(self,name))
+        if self.pairing_fact_id is not None:
+            ObjectId(self.pairing_fact_id)
+            if self.role is not models.SegmentMemberRole.PREVIEW:
+                raise ValueError('只有预览成员可以引用配对事实')
         # P1 模型承担分类组合校验；此处没有独立的文件属性输入。
         models.SegmentMember('reference',None,self.role,self.ownership,self.completion,None,
             self.pairing_identity,self.pairing_state)
@@ -200,6 +205,7 @@ class StoredSegmentMember:
     page_event_id: int
     file_event_id: int
     member: SegmentMember
+    pairing_fact_id: int | None = None
 
 
 @dataclass(frozen=True)

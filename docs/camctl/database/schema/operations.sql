@@ -219,11 +219,13 @@ CREATE TABLE segment_members (
     completion INTEGER NOT NULL CHECK (completion IN (1,2,3)),
     pairing_state INTEGER NOT NULL CHECK (pairing_state IN (1,2,3,4)),
     pairing_identity TEXT CHECK (pairing_identity IS NULL OR length(pairing_identity) > 0),
+    pairing_fact_id INTEGER REFERENCES device_file_pairing_facts(id) DEFERRABLE INITIALLY DEFERRED,
     UNIQUE (set_id, file_id),
     UNIQUE (set_id, identity),
     CHECK ((directory_number IS NULL) = (segment_index IS NULL)),
     CHECK ((role = 2 AND pairing_state <> 1) OR (role <> 2 AND pairing_state = 1)),
-    CHECK ((pairing_state = 2) = (pairing_identity IS NOT NULL))
+    CHECK ((pairing_state = 2) = (pairing_identity IS NOT NULL)),
+    CHECK (pairing_fact_id IS NULL OR role = 2)
 ) STRICT;
 CREATE INDEX segment_member_order ON segment_members(set_id, COALESCE(directory_number,0), COALESCE(segment_index,0), identity, id);
 CREATE INDEX segment_member_pairing ON segment_members(set_id, pairing_identity, role, id);

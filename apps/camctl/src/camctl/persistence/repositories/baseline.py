@@ -175,7 +175,8 @@ def _fixed_counts(connection, activity):
     from camctl.contracts.enums import load_registry
     owner_type = load_registry()["history_objects"]["action"]["id"]
     columns = ",".join("h." + name for name in _EVENT_COLUMNS.split(","))
-    with closing(connection.execute(f"SELECT {columns} FROM entity_event_links l JOIN history_events h ON h.id=l.event_id"
+    with closing(connection.execute(f"SELECT {columns} FROM history_events h INDEXED BY history_events_type"
+        " CROSS JOIN entity_event_links l ON l.event_id=h.id"
         " WHERE l.entity_type=? AND l.entity_id=? AND h.event_type=?"
         " AND json_extract(h.body_json,'$.evidence.activity_id')=?"
         " AND json_extract(h.body_json,'$.reason') IN (?,?) ORDER BY h.id DESC LIMIT 1",

@@ -21,7 +21,7 @@ from .result_file_ownership import (
     _guard_boundary, _proof, _request_from_event as ownership_request,
     _saved_range, request_document as ownership_document,
 )
-from .result_file_proofs import _file_at, _one, load_strict_result_file_input
+from .result_file_proofs import _file_at, _one, load_completion_input
 
 _EVENT = load_event_registry()['events']['DEVICE_FILE_OBSERVED']
 _REASON = _EVENT['branches']['PAIR_FROM_RESULT_SCAN']['reason']
@@ -62,12 +62,7 @@ def _request(event):
 
 
 def _validate_page(connection, saved, raw, event, transaction, current_boundary):
-    context = pages._replay_page_context(connection, event, (saved, raw), transaction,
-                                         current_boundary=current_boundary)
-    action, activity, attempt, run, scope, files, prefix, before = context
-    reads = pages._ReplayPageReads(connection, scope, prefix, before, activity, action)
-    pages._verify_append_difference(event, SimpleNamespace(transaction=transaction),
-        saved, raw, reads, action, activity, attempt, run, historical_files=files)
+    action, _, attempt, _ = pages.committed_page_proof(connection, saved, raw, event, transaction)
     return action, attempt
 
 
@@ -83,20 +78,8 @@ def _scan(connection, request, current_boundary):
     if (not saved.page.scan_complete or not saved.page.set_finalized
             or saved.page.outcome.error is not None or saved.ref.next_cursor is not None):
         return None
-    # 原页逐批保存保证每次连续；这里从固定末页检查原链，不采用后来末页。
-    last = saved
-    while last.ref.page_no > 1:
-        previous_id = event.rows[0].before.values['result_last_page_event_id']
-        previous, _, event, _ = pages._at_record(connection, previous_id)
-        if (previous.ref.ticket != request.scan.ticket
-                or previous.ref.page_no + 1 != last.ref.page_no
-                or previous.page.outcome.error is not None
-                or previous.ref.next_cursor is None
-                or previous.ref.next_cursor != last.page.cursor):
-            raise ConsistencyError('配对扫描的完整原页链存在缺口或游标矛盾')
-        last = previous
-    if last.page.cursor is not None:
-        raise ConsistencyError('配对扫描首批没有从原空游标开始')
+    # A1 两入口必经的逐页 guard/seal 已归纳保存连续前缀。本次独立重放
+    # 末页 F 前资格及紧邻页，再核其原首点，避免每个 LRF 重扫全目录链。
     return action, attempt
 
 
@@ -156,7 +139,7 @@ def _classify(connection, request, *, current_boundary=None):
             entry = entries[0]
             if pages._family_fields(entry.identity) != (directory, stem, family_role):
                 raise ConsistencyError('族字段与原观察身份不符')
-            member = load_strict_result_file_input(connection, current_page.ref, file_id,
+            member = load_completion_input(connection, current_page.ref, file_id,
                 request.source_boundary, current_boundary=current_boundary)
             file = _file_at(connection, file_id, request.source_boundary)
             if (member.ownership is not OwnershipState.OWNED
@@ -282,7 +265,7 @@ class PairResultFilesCommand:
             capture_result_read_scope=pages.capture_result_scope(source, request.scan.ticket, request.scan.event_id))
 
 
-def _verify(request, key, connection):
+def _verify(request, key, connection, *, current_boundary=None):
     transaction = _saved_range(connection, key)
     if transaction is None:
         return None
@@ -299,7 +282,7 @@ def _verify(request, key, connection):
         raise TransactionError('原键配对申请、边界或事实时刻不同')
     if request.source_boundary != pages._page_before_boundary(connection, transaction):
         raise ConsistencyError('原配对没有固定其实际保存前边界')
-    _check_event(connection, event, request)
+    _check_event(connection, event, request, current_boundary=current_boundary)
     fact_id = event.rows[0].row_id
     fact = row_facts(connection, 'device_file_pairing_facts', fact_id)
     if fact is None or not json_equal({name: fact[name] for name in event.rows[0].after.values},
@@ -322,3 +305,23 @@ def verify_result_file_pairing(request, key, reader, *, execution_finished=True)
     finally:
         if opened:
             connection.execute('ROLLBACK')
+
+
+def verify_pairing_fact(connection, fact_id, preview_file_id, boundary, *, current_boundary=None):
+    """只核已有原事实及原操作键，绝不执行新的配对保存。"""
+    fact = row_facts(connection, 'device_file_pairing_facts', fact_id)
+    if (fact is None or fact['preview_file_id'] != preview_file_id
+            or fact['created_event_id'] > boundary.last_event_id
+            or fact['source_event_id'] >= fact['created_event_id']):
+        raise ConsistencyError('配对事实不存在、属于其他预览或越过固定边界')
+    anchor = _one(connection, 'SELECT t.operation_key,t.last_event_id FROM history_events e'
+        ' JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?',
+        (fact['created_event_id'],))
+    if anchor is None or anchor[1] > boundary.last_event_id:
+        raise ConsistencyError('配对事实没有边界内完整创建事务')
+    stored = _one(connection, f'SELECT {pages._COLUMNS} FROM history_events WHERE id=?',
+                  (fact['created_event_id'],))
+    request = _request(pages.decode_event_row(stored))
+    if _verify(request, anchor[0], connection, current_boundary=current_boundary) != fact_id:
+        raise ConsistencyError('实际配对事实不是原完整事务的唯一事实')
+    return fact

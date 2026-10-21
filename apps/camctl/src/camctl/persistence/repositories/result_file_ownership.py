@@ -80,17 +80,13 @@ def _proof(connection, request, *, current_boundary=None):
     if action['execution_spec_json'].get('result_policy') not in {
             item.value for item in CaptureResultPolicy}:
         raise ConsistencyError('原动作没有声明 OSMO 结果策略')
-    replay = pages._replay_page_context(connection, event, (saved, raw), transaction,
-                                       current_boundary=current_boundary)
-    old_action, old_activity, attempt, old_run, scope, files, prefix, before = replay
+    old_action, old_activity, attempt, old_run = pages.committed_page_proof(
+        connection, saved, raw, event, transaction)
     if (old_action['id'] != action['id'] or old_activity['id'] != activity['id']
             or old_run['id'] != run['id'] or attempt['id'] != actual_attempt['id']
             or (old_action['device_id'], old_action['driver_id'])
                 != (action['device_id'], action['driver_id'])):
         raise ConsistencyError('原页实际尝试、活动或固定绑定发生矛盾')
-    reads = pages._ReplayPageReads(connection, scope, prefix, before, old_activity, old_action)
-    pages._verify_append_difference(event, SimpleNamespace(transaction=transaction),
-        saved, raw, reads, old_action, old_activity, attempt, old_run, historical_files=files)
     identities = [identity for identity, file_id in saved.file_ids if file_id == request.file_id]
     if len(identities) != 1:
         raise ConsistencyError('文件不是原结果页真实差集成员')

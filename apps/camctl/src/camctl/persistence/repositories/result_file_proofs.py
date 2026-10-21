@@ -1,5 +1,6 @@
 """按固定历史边界读取原页文件证明，不搜索其他结果补齐完成依据。"""
 from contextlib import closing
+from dataclasses import replace
 from types import SimpleNamespace
 
 from camctl.capture.files import OwnershipFromResultPageSave
@@ -10,6 +11,7 @@ from camctl.capture.segment_models import (
 from camctl.capture.segment_storage import SegmentMemberInput
 from camctl.contracts.enums import enum_for, load_registry
 from camctl.contracts.history_values import HistoryBoundary
+from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.persistence.transaction import read_transaction_range
 
@@ -69,10 +71,10 @@ def _completion_page(connection, page, file, boundary):
             raise ConsistencyError("声明原页的完成证明没有适用的停止或自然等待依据")
     except (KeyError, TypeError, ValueError) as error:
         raise ConsistencyError(f"原页完成证明无效: {error}") from error
-    return page_id
+    return int(page_id)
 
 
-def load_strict_result_file_input(connection, page, file_id, boundary, *, current_boundary=None):
+def load_completion_input(connection, page, file_id, boundary, *, current_boundary=None):
     """返回一个固定文件的引用及资格；不返回增长目录或候选数组。"""
     if not isinstance(page, ResultPageRef) or not isinstance(boundary, HistoryBoundary):
         raise TypeError("严格文件读取要求原页引用和完整历史边界")
@@ -96,13 +98,55 @@ def load_strict_result_file_input(connection, page, file_id, boundary, *, curren
                        else PreviewPairingState.UNKNOWN))
 
 
-def read_strict_result_file_input(page, file_id, boundary, owned):
+def load_strict_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None,
+                                  current_boundary=None):
+    result = load_completion_input(connection, page, file_id, boundary,
+                                   current_boundary=current_boundary)
+    file = _file_at(connection, file_id, boundary)
+    if result.role is not SegmentMemberRole.PREVIEW:
+        if pairing_fact_id is not None:
+            raise ConsistencyError('原片不能引用预览配对事实')
+        return result
+    evidence = file['pairing_evidence_json']
+    method = int(enum_for('device_files.pairing_evidence_json.method').RESULT_SCAN_PAIRING)
+    if pairing_fact_id is None and isinstance(evidence, dict) and evidence.get('method') == method:
+        if set(evidence) != {'method', 'pairing_fact_id'}:
+            raise ConsistencyError('固定文件的首次扫描配对证据不完整')
+        pairing_fact_id = evidence['pairing_fact_id']
+    if pairing_fact_id is None:
+        return result
+    ObjectId(pairing_fact_id)
+    from .result_file_pairing import verify_pairing_fact
+    fact = verify_pairing_fact(connection, pairing_fact_id, file_id, boundary,
+                               current_boundary=current_boundary)
+    paired = fact['state'] == int(enum_for('device_file_pairing_facts.state').PAIRED)
+    identity = None
+    if paired:
+        if (file['original_device_file_id'] != fact['original_file_id']
+                or not isinstance(evidence, dict) or set(evidence) != {'method', 'pairing_fact_id'}
+                or evidence['method'] != method):
+            raise ConsistencyError('固定文件缺少相同原片的首次扫描配对关联')
+        first = (fact if evidence['pairing_fact_id'] == pairing_fact_id else
+                 verify_pairing_fact(connection, evidence['pairing_fact_id'], file_id, boundary,
+                                     current_boundary=current_boundary))
+        if (first['state'] != int(enum_for('device_file_pairing_facts.state').PAIRED)
+                or first['original_file_id'] != fact['original_file_id']
+                or first['created_event_id'] > fact['created_event_id']):
+            raise ConsistencyError('配对事实与文件首次正向关联不一致')
+        original = _file_at(connection, fact['original_file_id'], boundary)
+        identity = parse_exact_json(original['identity_key'])[2]
+    return replace(result, pairing_fact_id=pairing_fact_id, pairing_identity=identity,
+        pairing_state=PreviewPairingState.PAIRED if paired else PreviewPairingState.UNPAIRED)
+
+
+def read_strict_result_file_input(page, file_id, boundary, owned, *, pairing_fact_id=None):
     connection = owned.connection
     opened = not connection.in_transaction
     if opened:
         connection.execute("BEGIN")
     try:
-        return load_strict_result_file_input(connection, page, file_id, boundary)
+        return load_strict_result_file_input(connection, page, file_id, boundary,
+                                             pairing_fact_id=pairing_fact_id)
     finally:
         if opened:
             connection.execute("ROLLBACK")

@@ -393,6 +393,313 @@ async def test_later_scan_preserves_first_pair_and_original_key(tmp_path, confli
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('bounded', [False, True])
+async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tmp_path, bounded):
+    from camctl.capture.segment_models import PreviewPairingState, SegmentSetRef
+    from camctl.capture.segment_storage import SegmentSetCreate
+    from camctl.persistence.repositories.segments import SegmentRepository
+    owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
+    try:
+        preview, original = ids['/DCIM/raw.LRF'], ids['/DCIM/raw.OSV']
+        fact = _ok(runtime.capture.save_result_file_pairing(
+            _request(owned, runtime, saved, preview), new_operation_key(), owned))
+        boundary = _boundary(owned)
+        member = runtime.capture.read_strict_result_file_input(
+            saved.ref, preview, boundary, owned, pairing_fact_id=fact)
+        assert member.pairing_fact_id == fact
+        assert member.pairing_state is PreviewPairingState.PAIRED
+        assert member.pairing_identity == '/DCIM/raw.OSV'
+        source, attempt = owned.connection.execute('SELECT r.action_id,a.id FROM operation_attempts a'
+            ' JOIN operation_runs r ON r.id=a.run_id WHERE r.id=? AND a.attempt_no=?',
+            (saved.ref.ticket.run_id, saved.ref.ticket.attempt_id)).fetchone()
+        ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
+        repo = SegmentRepository()
+        _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
+            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            new_operation_key(), owned))
+        original_input = runtime.capture.read_strict_result_file_input(saved.ref, original, boundary, owned)
+        key = new_operation_key()
+        member_at = runtime.wall_us()
+        if bounded:
+            from camctl.history.validators import EventContext
+            from camctl.persistence.event_reads import SqlEventReads
+            from camctl.persistence.transaction import BoundedCommandPlan
+            from camctl.persistence.repositories.segments import _Command
+            class BoundedMembers:
+                def plan(self, scope):
+                    plan = _Command('MEMBERS', ref, (member, original_input), member_at, key).plan(scope)
+                    return BoundedCommandPlan(iter(plan.events),
+                        lambda event, transaction: EventContext(transaction, plan.owners,
+                            deepcopy(plan.state_rows),
+                            current_reads=SqlEventReads(scope.connection, plan.segment_read_scope)),
+                        plan.result, lambda connection: None)
+            receipt = commit_operation(BoundedMembers(), key, owned)
+            assert receipt.kind == 'completed', receipt.error
+        else:
+            _ok(repo.append_members(ref, (member, original_input), member_at, key, owned))
+        _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        candidates = repo.read_output_candidates(ref, None, 128, owned).items
+        assert {item.file_id for item in candidates} == {preview, original}
+        paired = next(item for item in candidates if item.file_id == preview)
+        assert paired.original_file_id == original
+        assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
+        # opaque 名称没有 CAM 顺序键，仍可使用实际完整主干的可靠配对。
+        stored = repo.read_members(ref, None, 128, owned).items
+        assert all(item.member.key is None for item in stored)
+        assert next(item for item in stored if item.file_id == preview).pairing_fact_id == fact
+        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+        path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+        owned.connection.close()
+        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        _ok(repo.append_members(ref, (member, original_input), member_at, key, owned))
+        member_id = next(item.member_id for item in stored if item.file_id == preview)
+        owned.connection.execute('PRAGMA foreign_keys=OFF')
+        owned.connection.execute('UPDATE segment_members SET pairing_fact_id=? WHERE id=?',
+                                 (fact + 1, member_id))
+        receipt = repo.append_members(ref, (member, original_input), member_at, key, owned)
+        assert receipt.kind is DbOutcomeKind.ROLLED_BACK
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bounded', [False, True])
+async def test_actual_pair_save_guard_and_verify_do_not_replay_unrelated_pages(tmp_path, bounded):
+    from camctl.capture.result_pages import ResultPageSave
+    from camctl.devices.directory import DirectoryCursor
+    from camctl.operations.validation import validate_outcome
+    from ..capture.test_result_page_history import _actual, _BINDING
+    from ..capture.test_record_file_completion_wait import _REGISTRY
+    measured = []
+    for count in (20, 200, 2000):
+        directory = tmp_path / str(count)
+        directory.mkdir()
+        cursor = DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/raw.OSV')
+        owned, runtime, first, ids, _ = await _ready(directory,
+            [_entry('raw.LRF'), _entry('raw.OSV')], next_cursor=cursor)
+        try:
+            saved = first
+            for number in range(count):
+                name = f'z{number:05d}.OSV'
+                following = (None if number == count - 1 else
+                    DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/' + name))
+                actual = _actual(first.ref.ticket, entries=[_entry(name)], cursor=cursor,
+                                 next_cursor=following, finalized=following is None)
+                ref = _ok(runtime.capture.save_result_page(ResultPageSave(first.ref.ticket,
+                    number + 2, cursor, validate_outcome(first.ref.ticket, actual, _REGISTRY),
+                    runtime.wall_us()), new_operation_key(), owned))
+                cursor = following
+            saved = runtime.capture.read_result_page(ref, owned)
+            request = _request(owned, runtime, saved, ids['/DCIM/raw.LRF'])
+            key = new_operation_key()
+            statements = []
+            steps = [0]
+            owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
+            owned.connection.set_trace_callback(statements.append)
+            if bounded:
+                receipt = commit_operation(_AlteredPair(request, key, True), key, owned)
+                assert receipt.kind == 'completed', receipt.error
+                fact = receipt.result
+            else:
+                fact = _ok(runtime.capture.save_result_file_pairing(request, key, owned))
+            assert runtime.capture.verify_result_file_pairing(request, key, owned) == fact
+            owned.connection.set_progress_handler(None, 0)
+            owned.connection.set_trace_callback(None)
+            reads = [sql for sql in statements if sql.startswith('SELECT')]
+            assert not any('l.change_count, e.id' in sql and 'l.entity_type = 1 ' in sql
+                           for sql in reads)
+            measured.append((len(reads), steps[0]))
+        finally:
+            owned.connection.close()
+    assert max(value[0] for value in measured) == min(value[0] for value in measured)
+    assert measured[-1][1] < measured[0][1] * 2
+    print('pair_save_guard_verify_growth', bounded, list(zip((20, 200, 2000), measured)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['future', 'missing', 'original', 'endpoint', 'source', 'first_binding'])
+async def test_strict_pair_reference_rejects_future_foreign_and_damaged_fact(tmp_path, case):
+    owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
+    try:
+        preview = ids['/DCIM/raw.LRF']
+        before = _boundary(owned)
+        fact = _ok(runtime.capture.save_result_file_pairing(
+            _request(owned, runtime, saved, preview), new_operation_key(), owned))
+        boundary = before if case == 'future' else _boundary(owned)
+        file_id = ids['/DCIM/raw.OSV'] if case == 'original' else preview
+        if case == 'endpoint':
+            owned.connection.execute('UPDATE device_file_pairing_facts SET original_file_event_id=1 WHERE id=?', (fact,))
+        elif case == 'source':
+            owned.connection.execute('UPDATE device_file_pairing_facts SET source_event_id=1 WHERE id=?', (fact,))
+        elif case == 'first_binding':
+            owned.connection.execute('UPDATE device_files SET pairing_evidence_json=? WHERE id=?',
+                (json.dumps({'method': 2, 'pairing_fact_id': fact + 1}), preview))
+        with pytest.raises(ConsistencyError):
+            runtime.capture.read_strict_result_file_input(saved.ref, file_id, boundary, owned,
+                pairing_fact_id=fact + 1 if case == 'missing' else fact)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_unknown_strict_completion_remains_unknown_in_member_and_candidate(tmp_path):
+    from camctl.capture.segment_models import FileCompletionState, SegmentSetRef
+    from camctl.capture.segment_storage import SegmentSetCreate
+    from camctl.persistence.repositories.segments import SegmentRepository
+    from .test_segment_file_pairing import _world
+    owned, runtime, _, saved = await _world(tmp_path, [_entry('raw.OSV')])
+    ids = dict(saved.file_ids)
+    try:
+        original = ids['/DCIM/raw.OSV']
+        _ok(runtime.capture.save_ownership_from_result_page(
+            OwnershipFromResultPageSave(saved.ref, original, runtime.wall_us()),
+            new_operation_key(), owned))
+        _ok(runtime.capture.save_file_completion(FileCompletionSave(original, 3, runtime.wall_us(),
+            basis=1, observation={}, size_bytes=10), new_operation_key(), owned))
+        member = runtime.capture.read_strict_result_file_input(saved.ref, original, _boundary(owned), owned)
+        assert member.completion is FileCompletionState.UNKNOWN
+        source, attempt = owned.connection.execute('SELECT r.action_id,a.id FROM operation_attempts a'
+            ' JOIN operation_runs r ON r.id=a.run_id WHERE r.id=? AND a.attempt_no=?',
+            (saved.ref.ticket.run_id, saved.ref.ticket.attempt_id)).fetchone()
+        ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
+        repo = SegmentRepository()
+        _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
+            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            new_operation_key(), owned))
+        before = _snapshot(owned)
+        receipt = repo.append_members(ref, (replace(member, completion=FileCompletionState.COMPLETE),),
+            runtime.wall_us(), new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.ROLLED_BACK
+        assert _snapshot(owned) == before
+        _ok(repo.append_members(ref, (member,), runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        assert not repo.read_output_candidates(ref, None, 128, owned).items
+        assert repo.read_members(ref, None, 1, owned).items[0].member.completion is FileCompletionState.UNKNOWN
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bounded', [False, True])
+@pytest.mark.parametrize('damage', ['fact', 'pair_identity', 'pair_state', 'file_event'])
+async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage):
+    from camctl.capture.segment_models import SegmentSetRef
+    from camctl.capture.segment_storage import SegmentSetCreate
+    from camctl.history.validators import EventContext
+    from camctl.persistence.event_reads import SqlEventReads
+    from camctl.persistence.repositories.segments import SegmentRepository, _Command
+    from camctl.persistence.transaction import BoundedCommandPlan
+    owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
+    try:
+        preview = ids['/DCIM/raw.LRF']
+        before_pair = _boundary(owned)
+        fact = _ok(runtime.capture.save_result_file_pairing(
+            _request(owned, runtime, saved, preview), new_operation_key(), owned))
+        member = runtime.capture.read_strict_result_file_input(saved.ref, preview, _boundary(owned),
+                                                              owned, pairing_fact_id=fact)
+        source, attempt = owned.connection.execute('SELECT r.action_id,a.id FROM operation_attempts a'
+            ' JOIN operation_runs r ON r.id=a.run_id WHERE r.id=? AND a.attempt_no=?',
+            (saved.ref.ticket.run_id, saved.ref.ticket.attempt_id)).fetchone()
+        ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
+        repo = SegmentRepository()
+        _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
+            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            new_operation_key(), owned))
+        key = new_operation_key()
+        class ForgedMembers:
+            def plan(self, scope):
+                plan = _Command('MEMBERS', ref, (member,), runtime.wall_us(), key).plan(scope)
+                event = plan.events[0]
+                row = event.rows[0]
+                after = dict(row.after.values)
+                fields = {'fact': ('pairing_fact_id', fact + 1),
+                    'pair_identity': ('pairing_identity', '/DCIM/wrong.OSV'),
+                    'pair_state': ('pairing_state', 3),
+                    'file_event': ('file_event_id', before_pair.last_event_id)}
+                column, value = fields[damage]
+                after[column] = value
+                if damage == 'pair_state': after['pairing_identity'] = None
+                evidence = deepcopy(event.evidence)
+                evidence['segment_request']['input'][0][column] = value
+                if damage == 'pair_state': evidence['segment_request']['input'][0]['pairing_identity'] = None
+                event = replace(event, rows=(replace(row, after=replace(row.after, values=after)),),
+                                evidence=evidence)
+                plan = replace(plan, events=(event,))
+                if not bounded: return plan
+                return BoundedCommandPlan(iter(plan.events),
+                    lambda event, transaction: EventContext(transaction, plan.owners,
+                        deepcopy(plan.state_rows), current_reads=SqlEventReads(scope.connection,
+                                                                              plan.segment_read_scope)),
+                    plan.result, lambda connection: None)
+        before = _snapshot(owned)
+        receipt = commit_operation(ForgedMembers(), key, owned)
+        assert receipt.kind == 'rolled_back', receipt.error
+        assert _snapshot(owned) == before
+        assert owned.connection.execute('SELECT COUNT(*) FROM segment_members').fetchone() == (0,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_replay(tmp_path):
+    from camctl.capture.baseline_models import BaselineFixSave
+    from camctl.capture.handlers import _begin_check_round, _control_call
+    from camctl.devices.directory import DirectoryCursor
+    from camctl.persistence.repositories import result_pages
+    from camctl.persistence.repositories.result_file_ownership import _proof
+    from .test_segment_file_pairing import _BaselineCatalog
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_result_page_history import _actual, _request as page_request, _BINDING
+    owned, runtime, source, _ = await consumer_world(tmp_path, 'record', start=False,
+                                                    catalog=_BaselineCatalog())
+    try:
+        activity = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?',
+                                            (source,)).fetchone()[0]
+        _ok(runtime.capture.fix_baseline(BaselineFixSave(activity, 0, 0, runtime.wall_us()),
+                                         new_operation_key(), owned))
+        await _control_call(runtime, runtime.action(source), 'start_recording', 'start_confirmed',
+                            activity_facts={'started_at': runtime.wall_us(), 'activity_state': 2})
+        ticket = _begin_check_round(runtime, source).ticket
+        cursor = DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/raw.OSV')
+        first = _ok(runtime.capture.save_result_page(page_request(runtime, ticket,
+            _actual(ticket, entries=[_entry('raw.LRF'), _entry('raw.OSV')], next_cursor=cursor)),
+            new_operation_key(), owned))
+        preview = dict(runtime.capture.read_result_page(first, owned).file_ids)['/DCIM/raw.LRF']
+        measures = []
+        for number in range(2000):
+            name = f'z{number:05d}.OSV'
+            following = None if number == 1999 else DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/' + name)
+            ref = _ok(runtime.capture.save_result_page(page_request(runtime, ticket,
+                _actual(ticket, entries=[_entry(name)], cursor=cursor, next_cursor=following,
+                    finalized=following is None), page_no=number + 2, cursor=cursor),
+                new_operation_key(), owned))
+            cursor = following
+            if number + 1 not in (20, 200, 2000): continue
+            steps = [0]
+            statements = []
+            owned.connection.execute('BEGIN')
+            owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
+            owned.connection.set_trace_callback(statements.append)
+            saved, raw, event, transaction = result_pages._at_record(owned.connection, ref.event_id)
+            result_pages.committed_page_proof(owned.connection, saved, raw, event, transaction)
+            _proof(owned.connection, OwnershipFromResultPageSave(first, preview, runtime.wall_us()))
+            owned.connection.set_progress_handler(None, 0)
+            owned.connection.set_trace_callback(None)
+            owned.connection.execute('ROLLBACK')
+            measures.append((len(statements), steps[0]))
+            anchors = [sql for sql in statements if 'INDEXED BY history_events_type' in sql]
+            assert len(anchors) == 2
+            for sql in anchors:
+                assert any('history_events_type' in row[3] and 'SEARCH' in row[3]
+                           for row in owned.connection.execute('EXPLAIN QUERY PLAN ' + sql))
+        assert len({value[0] for value in measures}) == 1
+        assert measures[-1][1] < measures[0][1] * 2
+        print('committed_baseline_proof_growth', list(zip((20, 200, 2000), measures)))
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.asyncio
 async def test_complete_family_pairs_without_rewriting_raw_page(tmp_path):
     owned, runtime, _, saved, preview, context = await _proof_world(
         tmp_path, entries=[_entry("raw.LRF"), _entry("raw.OSV")])

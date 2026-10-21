@@ -31,6 +31,7 @@ from .result_pages import _at, read_pages
 
 _EVENT = load_event_registry()['events']['SEGMENT_FACTS']
 _STATE = enum_for('segment_sets.state')
+_FAMILY_ROLE = enum_for('result_page_files.family_role')
 _ORDER = '(COALESCE(directory_number,0),COALESCE(segment_index,0),identity,id)'
 
 
@@ -93,7 +94,7 @@ def _position(row):
     return (row['directory_number'] or 0,row['segment_index'] or 0,row['identity'],row['id'])
 
 
-def _read_member(db, row, *, page_cache=None):
+def _read_member(db, row, *, page_cache=None, current_boundary=None):
     page_id = row['page_event_id']
     saved_page = None if page_cache is None else page_cache.get(page_id)
     if saved_page is None:
@@ -105,12 +106,15 @@ def _read_member(db, row, *, page_cache=None):
     if entry is None or (row['identity'],row['file_id']) not in saved.file_ids:
         raise ConsistencyError('成员缺少原实际页和真实文件引用')
     file=_fixed_file(db,row['file_id'],row['file_event_id'])
+    _verify_strict_member(db, _member_input_from_row(row), file, saved,
+                          current_boundary=current_boundary)
     member=SegmentMember(row['identity'],None if row['directory_number'] is None else
         SegmentKey(row['directory_number'],row['segment_index']),
         decode_enum(SegmentMemberRole,row['role']),decode_enum(OwnershipState,row['ownership']),
         decode_enum(FileCompletionState,row['completion']),file['size_bytes'],
         row['pairing_identity'],decode_enum(PreviewPairingState,row['pairing_state']))
-    return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],member)
+    return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],member,
+                               row['pairing_fact_id'])
 
 
 def _eligible_original(member):
@@ -128,10 +132,20 @@ def _output_candidate(db,setrow,stored):
     if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
         return None
     paired=_read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity))
-    left=parse_osmo_segment_name(member.identity)
-    right=parse_osmo_segment_name(paired.member.identity)
-    if (paired.member.role is not SegmentMemberRole.ORIGINAL or left is None or right is None
-            or left.pairing_identity!=right.pairing_identity):
+    if stored.pairing_fact_id is not None:
+        from .result_pages import _family_fields
+        left, right = _family_fields(member.identity), _family_fields(paired.member.identity)
+        same_family = (left[0] is not None and left[:2] == right[:2]
+                       and left[2] == int(_FAMILY_ROLE.PREVIEW)
+                       and right[2] == int(_FAMILY_ROLE.ORIGINAL))
+        fact = row_facts(db, 'device_file_pairing_facts', stored.pairing_fact_id)
+        same_family = (same_family and fact is not None
+                       and fact['original_file_id'] == paired.file_id)
+    else:
+        left=parse_osmo_segment_name(member.identity)
+        right=parse_osmo_segment_name(paired.member.identity)
+        same_family = left is not None and right is not None and left.pairing_identity == right.pairing_identity
+    if paired.member.role is not SegmentMemberRole.ORIGINAL or not same_family:
         raise ConsistencyError('预览没有同集合、同完整名称主干的真实原片')
     if (member.ownership is not OwnershipState.OWNED
             or member.completion is not FileCompletionState.COMPLETE
@@ -144,20 +158,32 @@ def _output_candidate(db,setrow,stored):
 def segment_output_candidate(ref,member_id,owned):
     """P3单成员候选计数/事件规划端口；不以当前文件状态替代冻结事实。"""
     ObjectId(member_id)
-    row=_set(owned.connection,ref,fixed=True)
-    member=row_facts(owned.connection,'segment_members',member_id)
-    if member is None or member['set_id']!=row['id']:
-        raise ConsistencyError('产物候选成员不属于原冻结集合')
-    return _output_candidate(owned.connection,row,_read_member(owned.connection,member))
+    db = owned.connection
+    opened = not db.in_transaction
+    if opened: db.execute('BEGIN')
+    try:
+        row=_set(db,ref,fixed=True)
+        member=row_facts(db,'segment_members',member_id)
+        if member is None or member['set_id']!=row['id']:
+            raise ConsistencyError('产物候选成员不属于原冻结集合')
+        return _output_candidate(db,row,_read_member(db,member))
+    finally:
+        if opened: db.execute('ROLLBACK')
 
 
 def read_segment_output_candidates(ref,cursor,batch,owned):
     """按原始成员技术游标续读；空候选页仍可能有继续位置。"""
-    page=read_segment_members(ref,cursor,batch,owned)
-    row=_set(owned.connection,ref,fixed=True)
-    candidates=tuple(candidate for stored in page.items
-        if (candidate:=_output_candidate(owned.connection,row,stored)) is not None)
-    return Page(candidates,page.next_cursor)
+    db = owned.connection
+    opened = not db.in_transaction
+    if opened: db.execute('BEGIN')
+    try:
+        page=read_segment_members(ref,cursor,batch,owned)
+        row=_set(db,ref,fixed=True)
+        candidates=tuple(candidate for stored in page.items
+            if (candidate:=_output_candidate(db,row,stored)) is not None)
+        return Page(candidates,page.next_cursor)
+    finally:
+        if opened: db.execute('ROLLBACK')
 
 
 def read_segment_members(ref,cursor,batch,owned):
@@ -333,21 +359,45 @@ def _fixed_file(db,file_id,file_event_id):
         if own_transaction:db.execute('ROLLBACK')
 
 
-def _input_member(db,item):
+def _input_member(db,item, *, current_boundary=None):
     file=_fixed_file(db,item.file_id,item.file_event_id)
     saved,_=_at(db,item.page_event_id)
     identity=parse_exact_json(file['identity_key'])[2]
     entry=next((value for value in saved.page.entries if value.identity==identity),None)
     if entry is None or (identity,item.file_id) not in saved.file_ids:
         raise ConsistencyError('固定文件与原页没有相同实际身份')
+    _verify_strict_member(db, item, file, saved, current_boundary=current_boundary)
     parsed=parse_osmo_segment_name(identity)
     size=file['size_bytes']
     return SegmentMember(identity,None if parsed is None else parsed.key,item.role,item.ownership,item.completion,
         size,item.pairing_identity,item.pairing_state),file
 
 
-def _member_row(db,setrow,item):
-    member,file=_input_member(db,item);ref=_ref(setrow)
+def _uses_strict_proof(item, file):
+    evidence = file['ownership_evidence_json']
+    return (item.pairing_fact_id is not None or isinstance(evidence, dict)
+        and evidence.get('method') == int(enum_for(
+            'device_files.ownership_evidence_json.method').RESULT_PAGE_DIFFERENCE))
+
+
+def _verify_strict_member(db, item, file, saved, *, current_boundary=None):
+    if not _uses_strict_proof(item, file):
+        return False
+    from .result_file_proofs import load_strict_result_file_input
+    anchor = _one(db, 'SELECT transaction_id FROM history_events WHERE id=?', (item.file_event_id,))
+    if anchor is None:
+        raise ConsistencyError('严格成员没有真实文件自身事务')
+    transaction = read_transaction_range(db, anchor[0])
+    actual = load_strict_result_file_input(db, saved.ref, item.file_id,
+        HistoryBoundary(transaction.txn_id, transaction.last_event_id), pairing_fact_id=item.pairing_fact_id,
+        current_boundary=current_boundary)
+    if actual != item:
+        raise ConsistencyError('成员分类或配对事实与固定文件的严格证明不同')
+    return True
+
+
+def _member_row(db,setrow,item, *, current_boundary=None):
+    member,file=_input_member(db,item,current_boundary=current_boundary);ref=_ref(setrow)
     action,activity,run,attempt,_=_source(db,ref)
     saved,raw=_at(db,item.page_event_id)
     entry=next((value for value in saved.page.entries if value.identity==member.identity),None)
@@ -356,14 +406,15 @@ def _member_row(db,setrow,item):
         or item.page_event_id>ref.final_page_event_id or file['source_action_id'] not in (None,ref.action_id)):
         raise ConsistencyError('成员的原页、文件或动作归属不同')
     parsed=parse_osmo_segment_name(member.identity)
+    strict = _uses_strict_proof(item, file)
     role=SegmentMemberRole.ORIGINAL if member.identity.lower().endswith('.osv') else SegmentMemberRole.PREVIEW if member.identity.lower().endswith('.lrf') else SegmentMemberRole.OTHER
     owned=OwnershipState.OWNED if file['source_action_id']==ref.action_id else OwnershipState.UNKNOWN
     completion=FileCompletionState.COMPLETE if file['completion_state']==3 else FileCompletionState.INCOMPLETE if file['completion_state']==4 else FileCompletionState.UNKNOWN
-    if (member.key!=(None if parsed is None else parsed.key) or member.role!=role or member.ownership!=owned
+    if not strict and (member.key!=(None if parsed is None else parsed.key) or member.role!=role or member.ownership!=owned
         or member.completion!=completion
         or (completion is FileCompletionState.COMPLETE and (not entry.complete or entry.size_bytes!=file['size_bytes']))):
         raise ConsistencyError('成员分类与原可靠文件和实际页不一致')
-    if member.pairing_state is PreviewPairingState.PAIRED:
+    if not strict and member.pairing_state is PreviewPairingState.PAIRED:
         original=None if file['original_device_file_id'] is None else row_facts(db,'device_files',file['original_device_file_id'])
         if (original is None or original['source_action_id']!=ref.action_id or original['role']!=2
             or parse_exact_json(original['identity_key'])[2]!=member.pairing_identity
@@ -372,12 +423,13 @@ def _member_row(db,setrow,item):
         other=parse_osmo_segment_name(member.pairing_identity)
         if parsed is None or other is None or parsed.pairing_identity!=other.pairing_identity:
             raise ConsistencyError('预览与原片名称主干不匹配')
-    if member.pairing_state is PreviewPairingState.UNPAIRED and (file['original_device_file_id'] is not None or entry.paired_identity is not None):
+    if not strict and member.pairing_state is PreviewPairingState.UNPAIRED and (file['original_device_file_id'] is not None or entry.paired_identity is not None):
         raise ConsistencyError('已配对文件不能保存为未配对')
     return dict(set_id=setrow['id'],file_id=item.file_id,page_event_id=item.page_event_id,file_event_id=item.file_event_id,
         identity=member.identity,directory_number=None if member.key is None else member.key.directory_number,
         segment_index=None if member.key is None else member.key.index,role=encode_enum(member.role),ownership=encode_enum(member.ownership),
-        completion=encode_enum(member.completion),pairing_state=encode_enum(member.pairing_state),pairing_identity=member.pairing_identity)
+        completion=encode_enum(member.completion),pairing_state=encode_enum(member.pairing_state),
+        pairing_identity=member.pairing_identity,pairing_fact_id=item.pairing_fact_id)
 
 
 def _gap_row(db,setrow,number,gap):
@@ -446,7 +498,8 @@ def _expected_scope_ids(db,setrow,count):
 def _member_input_from_row(row):
     return SegmentMemberInput(row['file_id'],row['page_event_id'],row['file_event_id'],
         decode_enum(SegmentMemberRole,row['role']),decode_enum(OwnershipState,row['ownership']),
-        decode_enum(FileCompletionState,row['completion']),row['pairing_identity'],decode_enum(PreviewPairingState,row['pairing_state']))
+        decode_enum(FileCompletionState,row['completion']),row['pairing_identity'],
+        decode_enum(PreviewPairingState,row['pairing_state']),row['pairing_fact_id'])
 
 
 def _verify_request(event,ref,context,db):
@@ -511,8 +564,10 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
             if values['set_id']!=setrow['id']:raise ConsistencyError('分段事件混入其他集合')
             if change.table=='segment_members':
                 if setrow['state']!=_STATE.COLLECTING:raise ConsistencyError('固定集合不能追加成员')
-                stored=_read_member(db,{'id':change.row_id,**values})
-                expected={**_member_row(db,setrow,_member_input_from_row(values)),'created_event_id':values['created_event_id']}
+                from .result_file_ownership import _guard_boundary
+                pending_boundary = _guard_boundary(db, event, context.transaction)
+                stored=_read_member(db,{'id':change.row_id,**values},current_boundary=pending_boundary)
+                expected={**_member_row(db,setrow,_member_input_from_row(values),current_boundary=pending_boundary),'created_event_id':values['created_event_id']}
                 from camctl.contracts.enums import load_registry
                 file_type=load_registry()['history_objects']['device_file']['id']
                 link=_one(db,'SELECT 1 FROM entity_event_links l JOIN history_events e ON e.id=l.event_id WHERE l.entity_type=? AND l.entity_id=? AND l.event_id=?',
@@ -563,6 +618,21 @@ class _Command:
         if saved is not None:
             if len(saved)!=1 or saved[0]['type']!=_EVENT['id'] or saved[0]['reason']!=_EVENT['branches'][kind]['reason'] or saved[0]['occurred_at']!=self.at or not json_equal(saved[0]['body']['evidence'],{'segment_request':{'ref':document(ref),'input':encoded}}):
                 raise TransactionError('原分段申请的类型、引用、完整输入或时刻不同')
+            if kind == 'MEMBERS':
+                original_rows = saved[0]['body']['rows']
+                setrow = _set(db, ref)
+                if len(original_rows) != len(payload):
+                    raise ConsistencyError('原成员事务没有精确覆盖原有限申请')
+                for change, item in zip(original_rows, payload):
+                    values = change['after']['values']
+                    actual = row_facts(db, 'segment_members', change['id'])
+                    if (change['table'] != 'segment_members' or change['before']['exists']
+                            or not change['after']['exists'] or values['set_id'] != setrow['id']
+                            or values['created_event_id'] != saved[0]['event_id']
+                            or _member_input_from_row(values) != item or actual is None
+                            or not json_equal({name: actual[name] for name in values}, values)):
+                        raise ConsistencyError('原成员事实、实际投影或固定证明引用不同')
+                    _read_member(db, actual)
             return CommandPlan((),{}, {},ref,True)
         action,activity,run,attempt,tail=_source(db,ref)
         state={'actions':{ref.action_id:action},'segment_sets':{}}

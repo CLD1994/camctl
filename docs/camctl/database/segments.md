@@ -4,7 +4,9 @@
 
 `segment_sets` 保存原拍摄动作、活动、RESULTS 流程、实际尝试、可靠末页、判断版本和原目标毫秒。`scan_id` 是实际 `operation_attempts.id`，不使用尝试序号替代。状态依次为 COLLECTING、MEMBERS_FIXED 和 ASSESSED；成员固定后不再增减，判断版本通过新集合版本表达。正常运行永久保留全部关系，编号在写事务中按已提交最大值加一分配。
 
-`segment_members` 保存真实设备文件、原实际结果页和固定文件历史位置，以及设备顺序键、角色、归属、写入和预览配对分类。大小、摘要及清理事实由独立文件和原页提供，不复制到成员。无可靠顺序键时两列共同为空。集合及文件、集合及稳定身份分别唯一；同集合原片可具有相同数值键但不同真实身份，完整技术排序仍稳定续读；该情形不证明摄制顺序。配对身份使用原观察提供的实际原片身份，必须与真实同源原片和设备文件配对一致。
+`segment_members` 保存真实设备文件、原实际结果页和固定文件历史位置，以及设备顺序键、角色、归属、写入和预览配对分类。大小、摘要及清理事实由独立文件和原页提供，不复制到成员。无可靠顺序键时两列共同为空。集合及文件、集合及稳定身份分别唯一；同集合原片可具有相同数值键但不同真实身份，完整技术排序仍稳定续读；该情形不证明摄制顺序。原观察已提供配对的模型输入继续核对实际同源原片和设备文件关联。原页之后的扫描配对通过可空 `pairing_fact_id` 引用独立文件的可靠事实，原始观察保持原样。
+
+成员保存、成员读取和产物候选共同使用固定文件的严格资格。使用原页差集归属方法或显式配对事实时，核原结果页、适用等待及实际完成证明；缺少证明保持未知，声明的引用损坏则报错。配对事实及两端文件事件必须位于固定文件事件所在完整边界内，事实属于申请预览，首次正向关联须与原片一致。只有预览可填写 `pairing_fact_id`；完整主干可靠但 CAM 顺序键未知时，仍可得到配对预览候选，不能因此取得顺序或默认范围资格。候选读取在同一只读事务中核双方固定事实，不按当前裸完成列提升资格，也不产生正式产物。
 
 `segment_gaps` 按 gap_no 保存完整第二遍分类。缺失位置用起止键区间表达，无 empty_member_id；非尾零原片必须引用其真实成员。左右邻接分别保存 KNOWN、ABSENT、UNKNOWN，只有 KNOWN 引用真实同集合成员。neighbors_json 只保存这两个固定状态，不积累成员。
 
@@ -27,7 +29,7 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 | 表 | 普通业务列及空值含义 | 唯一性与查询索引 |
 | --- | --- | --- |
 | `segment_sets` | `action_id`、`activity_id`、`run_id`、`attempt_id`、`final_page_event_id`、`version`、`target_duration_ms` 都必填；`state` 从收集推进至成员固定及判断完成；收集时 `member_count` 为空，固定后为实际非负数量；`facts_json`、`assessment_json` 只在判断保存时共同有值；`published_event_id` 未发布时为空，同完成事务的 ACTIVATE 一次绑定自身 E | 动作及版本、实际尝试及版本分别唯一；按动作/版本和动作/创建事件定位；published_event_id 非空时 action_id 部分唯一 |
-| `segment_members` | `set_id`、`file_id`、`page_event_id`、`file_event_id`、`identity`、`role`、`ownership`、`completion`、`pairing_state` 必填；`directory_number` 和 `segment_index` 共同为空表示键未知；`pairing_identity` 只在 PAIRED 时填写真实原片身份 | 集合/文件、集合/身份分别唯一；数值键冲突保留全部真实身份；完整设备顺序、配对身份、文件反查及集合/创建事件都有索引 |
+| `segment_members` | `set_id`、`file_id`、`page_event_id`、`file_event_id`、`identity`、`role`、`ownership`、`completion`、`pairing_state` 必填；`directory_number` 和 `segment_index` 共同为空表示键未知；`pairing_identity` 只在 PAIRED 时填写真实原片身份；可空 `pairing_fact_id` 只由预览引用已有配对事实 | 集合/文件、集合/身份分别唯一；数值键冲突保留全部真实身份；完整设备顺序、配对身份、文件反查及集合/创建事件都有索引 |
 | `segment_gaps` | `set_id`、连续 `gap_no`、`start_directory`、`start_index`、`end_directory`、`end_index`、`kind`、`neighbors_json` 必填；`left_member_id`、`right_member_id` 只在相应邻接为 KNOWN 时有值；`empty_member_id` 只在真实非尾零文件分支有值 | 集合/缺口序号唯一；按缺口序号及创建事件续读 |
 | `segment_scope_members` | `set_id`、连续 `ordinal`、`member_id` 必填；`output_id` 准备时为空，来源终态事务将其一次关联到同源同文件的 original | 集合/序号、集合/成员分别唯一，实际 output 只关联一次；按序号、成员反查及创建事件定位 |
 
