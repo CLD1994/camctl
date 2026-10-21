@@ -560,8 +560,9 @@ def test_result_recovery_pages_many_changes_in_one_complete_transaction(environm
         def __init__(self, cursor):
             self.cursor = cursor
 
-        def fetchall(self):
-            rows = self.cursor.fetchall()
+        def fetchmany(self, size):
+            assert 0 < size <= 128
+            rows = self.cursor.fetchmany(size)
             sizes.append(len(rows))
             return rows
 
