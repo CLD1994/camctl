@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Issue } from "../shared/types";
-import { isRawNumber } from "../shared/json";
+import { isRawNumber, displayNumber } from "../shared/json";
 import {
   presentIssue,
   type IssuePresentation,
@@ -171,18 +171,24 @@ const resultContainers = new Set([
 export function Facts({
   value,
   business = false,
+  parent,
+  field,
 }: {
   value: unknown;
   business?: boolean;
+  parent?: unknown;
+  field?: string | number;
 }) {
   if (isRawNumber(value)) return <span>{value.rawJSON}</span>;
+  if (typeof value === "number")
+    return <span>{displayNumber(parent, field ?? "", value)}</span>;
   if (value === null) return <span>null</span>;
   if (Array.isArray(value))
     return value.length ? (
       <ol className="facts-array">
         {value.map((v, i) => (
           <li key={i}>
-            <Facts value={v} business={business} />
+            <Facts value={v} business={business} parent={value} field={i} />
           </li>
         ))}
       </ol>
@@ -202,6 +208,8 @@ export function Facts({
                 <Facts
                   value={v}
                   business={business && resultContainers.has(k)}
+                  parent={value}
+                  field={k}
                 />
               )}
             </dd>

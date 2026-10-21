@@ -208,7 +208,7 @@ export function ActionResult({
                         },
                       },
                     },
-                    summary: `取回 ${action.name} 的默认产物：排除预览，优先对应修复成品`,
+                    summary: `按 ${action.name} 已保存的默认范围取回：排除预览，并优先对应修复成品`,
                   })
                 }
               >
