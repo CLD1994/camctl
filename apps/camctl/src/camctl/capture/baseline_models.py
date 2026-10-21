@@ -1,8 +1,11 @@
 """完整目录基准的分批保存与固定输入。"""
 from dataclasses import dataclass
+from decimal import Decimal
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
+from camctl.devices.bindings import DeviceBinding
+from camctl.devices.directory import DirectoryCursor, DirectoryRequest
 from camctl.devices.file_identity import FileIdentity
 
 BaselineState = enum_for("device_activities.baseline_state")
@@ -88,3 +91,46 @@ class BaselineRef:
                 raise ValueError("非空基准范围与计数不一致")
         elif self.chunk_count:
             raise ValueError("空范围不能携带非零计数")
+
+
+@dataclass(frozen=True)
+class BaselineReadIntent:
+    """实际目录调用之前固定的输入；不表示调用已经派发。"""
+
+    action_id: int
+    activity_id: int
+    binding: DeviceBinding
+    directories: tuple[str, ...]
+    cursor: DirectoryCursor | None
+    timeout_s: Decimal
+    baseline_ref: BaselineRef
+    read_no: int
+    call_key: OperationKey
+    result_save_key: OperationKey
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        ObjectId(self.activity_id)
+        ObjectId(self.read_no)
+        UtcMicros(self.occurred_at)
+        request = self.directory_request()
+        object.__setattr__(self, 'directories', request.directories)
+        call_key, result_key = OperationKey(self.call_key), OperationKey(self.result_save_key)
+        if call_key == result_key:
+            raise ValueError('基准调用与结果保存必须使用不同的原操作身份')
+        object.__setattr__(self, 'call_key', call_key)
+        object.__setattr__(self, 'result_save_key', result_key)
+        ref = self.baseline_ref
+        if (not isinstance(ref, BaselineRef) or ref.activity_id != self.activity_id
+                or ref.state is not BaselineState.COLLECTING):
+            raise ValueError('基准调用必须引用原活动正在收集的基准')
+        if self.read_no == 1:
+            if self.cursor is not None or ref.chunk_count:
+                raise ValueError('首次基准调用必须从空前缀及空游标开始')
+        elif self.cursor is None:
+            raise ValueError('后续基准调用必须保留原成功返回的继续游标')
+
+    def directory_request(self) -> DirectoryRequest:
+        """沿用目录端口的规范化与期限契约，批次固定为 128。"""
+        return DirectoryRequest(self.binding, self.directories, self.cursor, 128, self.timeout_s)
