@@ -10,7 +10,6 @@ from camctl.capture.result_pages import ResultPageSave
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventContext
 from camctl.operations.attempts import AttemptConfig
-from camctl.operations.models import ErrorValue
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
@@ -41,7 +40,7 @@ async def _partial_result_world(tmp_path,*,maximum=3,retained=False):
     try:
         runtime.check_config=AttemptConfig(maximum,Decimal('1.25'),Decimal('2'))
         ticket=_begin_check_round(runtime,action_id).ticket
-        actual=_actual(ticket,entries=[],finalized=False,error=ErrorValue('transport_timeout','baseline'))
+        actual=_actual(ticket,entries=[],finalized=False)
         saved=_ok(runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
             validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned))
         page=runtime.capture.read_result_page(saved,owned)

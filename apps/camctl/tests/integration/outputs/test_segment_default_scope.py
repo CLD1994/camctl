@@ -200,6 +200,91 @@ async def test_default_scope_and_explicit_ids_select_independently(tmp_path, mod
         owned.connection.close()
 
 
+async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_path):
+    from camctl.capture.files import FilePresenceSave
+    from camctl.contracts.enums import enum_for
+    from camctl.outputs.cleanup_flow import StartCleanupAction, FixCleanupTargets
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    from ..bootstrap.test_output_binding_changes import _accept
+    from .test_cleanup_query_save_recovery import _start_cleanup
+
+    owned, runtime, aid = await _source(tmp_path)
+    try:
+        originals = [row[0] for row in owned.connection.execute(
+            "SELECT id FROM outputs WHERE kind=1 ORDER BY id")]
+        previews = [row[0] for row in owned.connection.execute(
+            "SELECT id FROM outputs WHERE kind=3 ORDER BY id")]
+        scope = owned.connection.execute(
+            "SELECT * FROM segment_scope_members ORDER BY ordinal").fetchall()
+        _, original_selection = _obtain(owned, runtime, aid, "default", 100)
+        original_request = FixSegmentSelection(original_selection, runtime.wall_us())
+        original_key = new_operation_key()
+        first = fix_segment_selection(original_request, original_key, owned)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        original_items = owned.connection.execute(
+            "SELECT * FROM obtain_items WHERE selection_id=? ORDER BY id",
+            (original_selection,)).fetchall()
+
+        _, cleanup_item = _start_cleanup(owned, originals[1], "902")
+        assert owned.connection.execute(
+            "SELECT requested_output_id,output_id FROM cleanup_items WHERE id=?",
+            (cleanup_item,)).fetchone() == (originals[1], originals[1])
+        file_id = owned.connection.execute(
+            "SELECT device_file_id FROM outputs WHERE id=?", (originals[1],)).fetchone()[0]
+        absent = runtime.capture.save_file_presence(FilePresenceSave(
+            file_id, int(enum_for("device_files.presence_state").ABSENT), runtime.wall_us()),
+            new_operation_key(), owned)
+        assert absent.kind is DbOutcomeKind.COMPLETED, absent.error
+        owned.connection.close()
+        owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+        runtime.owned = owned
+        history_before = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
+        repeated = fix_segment_selection(original_request, original_key, owned)
+        assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+        assert repeated.value == first.value
+        assert owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone() == history_before
+        assert owned.connection.execute(
+            "SELECT * FROM obtain_items WHERE selection_id=? ORDER BY id",
+            (original_selection,)).fetchall() == original_items
+
+        for request_id, mode, expected, statuses in (
+            (101, "default", originals[:3], [2, 4, 2]),
+            (102, "preview", previews[:3], [2, 2, 2]),
+            (103, originals[3:5], originals[3:5], [2, 2]),
+        ):
+            _, selection = _obtain(owned, runtime, aid, mode, request_id)
+            saved = fix_segment_selection(FixSegmentSelection(selection, runtime.wall_us()),
+                new_operation_key(), owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            assert owned.connection.execute(
+                "SELECT output_id,status FROM obtain_items WHERE selection_id=? ORDER BY id",
+                (selection,)).fetchall() == list(zip(expected, statuses))
+        assert owned.connection.execute(
+            "SELECT * FROM segment_scope_members ORDER BY ordinal").fetchall() == scope
+
+        _accept(owned, "903", [{"name": "清理来源", "type": "delete_action_outputs",
+            "scheduled_at": "2026-01-15 09:00:00",
+            "params": {"source": {"action_instance_id": str(aid)}}}])
+        cleanup_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
+        repository = OutputsRepository()
+        started = repository.start_cleanup_action(StartCleanupAction(cleanup_id, runtime.wall_us()),
+            new_operation_key(), owned)
+        assert started.kind is DbOutcomeKind.COMPLETED, started.error
+        owner = row_facts(owned.connection, "actions", cleanup_id)
+        resolved = repository.resolve_sources(ResolveSources(cleanup_id,
+            read_source_spec(encode_json_value(owner["input_fields_json"])), runtime.wall_us()),
+            new_operation_key(), owned)
+        assert resolved.kind is DbOutcomeKind.COMPLETED, resolved.error
+        fixed = repository.fix_cleanup_targets(FixCleanupTargets(cleanup_id, runtime.wall_us()),
+            new_operation_key(), owned)
+        assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+        assert {row[0] for row in owned.connection.execute(
+            "SELECT requested_output_id FROM cleanup_items WHERE action_id=?",
+            (cleanup_id,))} == set(originals + previews)
+    finally:
+        owned.connection.close()
+
+
 @pytest.mark.parametrize("scope", ["group", "plan"])
 async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
     tmp_path, scope
