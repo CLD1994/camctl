@@ -4,7 +4,7 @@
 
 `segment_sets` 保存原拍摄动作、来源完整边界 H0、来源种类、发布处置、适用活动及 RESULTS 流程、当前可靠扫描、判断版本和原目标毫秒。`SegmentResultRef(action_id,set_id,version)` 表达实际集合身份；原 `SegmentSetRef` 只表达可靠完整扫描，其中 `scan_id` 是实际 `operation_attempts.id`，不使用尝试序号替代。状态依次为 COLLECTING、MEMBERS_FIXED 和 ASSESSED；成员固定后不再增减，判断版本通过新集合版本表达。正常运行永久保留全部关系，编号在写事务中按已提交最大值加一分配。
 
-来源分为完整扫描、跨轮保留及无 RESULTS。跨轮保留使用原 run 截至 H0 的全部实际文件，不将最后一轮局部观察当成完整目录。当前扫描只取原 run 最大实际轮次；最后一轮错误或必要元信息未知时为空，旧完整扫描仍可提供保留文件的原证明。只有当前扫描覆盖全部保留文件且资格一致，来源才是完整扫描。集合创建前出现 H0 后的新尝试、页面或文件资格变化时拒绝旧申请；同 run 建立集合后不再授予新 RESULTS 尝试。
+来源分为完整扫描、跨轮保留及无 RESULTS。跨轮保留使用原 run 截至 H0 的全部实际文件，不将最后一轮局部观察当成完整目录。RESULTS 流程已经建立但尚未取得尝试时，跨轮保留集合为空，当前扫描也为空；无 RESULTS 只适用于原流程不存在的情况。当前扫描只取原 run 最大实际轮次；最后一轮错误或必要元信息未知时为空，旧完整扫描仍可提供保留文件的原证明。只有当前扫描覆盖全部保留文件且资格一致，来源才是完整扫描。集合创建前出现 H0 后的新尝试、页面或文件资格变化时拒绝旧申请；同 run 建立集合后不再授予新 RESULTS 尝试。
 
 `segment_members` 保存真实设备文件、原实际结果页和固定文件历史位置，以及设备顺序键、角色、归属、写入和预览配对分类。大小、摘要及清理事实由独立文件和原页提供，不复制到成员。无可靠顺序键时两列共同为空。集合及文件、集合及稳定身份分别唯一；同集合原片可具有相同数值键但不同真实身份，完整技术排序仍稳定续读；该情形不证明摄制顺序。原观察已提供配对的模型输入继续核对实际同源原片和设备文件关联。原页之后的扫描配对通过可空 `pairing_fact_id` 引用独立文件的可靠事实，原始观察保持原样。
 
@@ -45,7 +45,7 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 `segment_check_conclusions`经`set_id`归原动作，一集合只保存一项不可变决定。`reason`、实际来源事件、原结束／配置事件及前版决定引用各有独立职责；`current_result/current_failure_json`只记录当前扫描的结果，不复制原始错误或全部成员。字段和枚举由权威SQL及内部登记维护。
 
-`ResultCheckConclusionSave`携带原集合及完整有限申请，`conclude_result_check`按原操作键保存，返回实际`ResultCheckConclusionRef`。无RESULTS的基准分区只接受原H0内可靠RETURN错误或UNCONFIRMED，独立核原未派发活动和不存在START／RESULTS责任；决定保存后动作仍运行，准备占用及正式产物没有变化。实际Task与返回交接仍由基准拥有者负责，后续共同完成事务再核取消、窗口及适用释放。
+`ResultCheckConclusionSave`携带原集合及完整有限申请，`conclude_result_check`按原操作键保存，返回实际`ResultCheckConclusionRef`。无 RESULTS 分区引用实际基准失败或已经结束的 START。基准失败只接受原 H0 内可靠 RETURN 错误或 UNCONFIRMED，独立核原未派发活动和不存在 START／RESULTS 责任。启动失败核原 START 的全部实际尝试、最后结果及关闭错误，保持既定启动失败含义，集合为空且范围未知。决定保存后动作仍运行，正式产物没有变化。实际 Task 与返回交接仍由原调用拥有者负责，后续共同完成事务再核取消、窗口及适用释放。
 
 有限结束的全部分区与配置／流程关闭顺序遵守[拍摄完成规格](../../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)及[分段规格](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)。存储决定不等同于来源终态或正式发布。
 
@@ -65,9 +65,11 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 `segment_activation_rows(ref, event_id, owned)`、`segment_scope_publication_rows(ref, bindings, owned)` 和 `segment_event(ref, branch, rows, event_id, transaction_id, occurred_at, request_input=...)` 提供 P3 组合终态的有限构造基础，不自行提交完整终态事务。`bindings` 每项为 `(scope_member_id, output_id)`；PUBLISH 事件的原申请使用相同二项元组批次。`register_segment_guards()` 接入独立守卫；`SegmentReadScope` 只授权同集合的有限复核，不授权任意 SQL、设备操作或全动作驻留。
 
-现有报告 `registered_error` 仍将 `actions.error_details_json` 视为一棵普通错误树。关系和 `segment_error_expansion_at_same_h` 已登记数据来源，P6 必须实际接入增长展开及完整公开校验；该登记不代表当前报告已经补齐数组。实际来源的发布、控制／等待资格核验及报告接入进度由[正式实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)跟踪。
+报告生成由 `reporting/bounded_generation.py` 在报告固定历史边界恢复来源动作、独立文件事实及关联实体；分段缺口、默认范围和保留产物逐批展开，再按公共错误登记流式校验和编码。动作中的有限错误头继续保持有限，报告中的完整详情引用同一边界的实际产物身份。独立 `state_sync` 通过历史归属关系读取，不要求它属于动作。实际完成与验证范围由[正式实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)及[组件验证记录](../verification.md)跟踪。
 
-完整 `SegmentAssessment` 保存及独立重算仅适用于 `osmo360ii_record_segments_v1`，原生延时 `osmo_empty_tail_classification_v1` 调用该入口明确拒绝。两种策略都可复用固定集合的 action/activity/run/实际 attempt、末页、版本、创建事件及成员 file/page/file_event 引用。原生延时目前只具备原始冻结事实端口；其专属空尾分类保存、时序和产物排除由 P4 接入，不调用普通录像下界或 N 范围。
+完整 `SegmentAssessment` 保存及独立重算仅适用于 `osmo360ii_record_segments_v1`。原生延时 `osmo_empty_tail_classification_v1` 由 `capture/native_completion.py` 和 `segment_native.py` 使用专属空尾分类，沿原自然完成或取消依据发布合格文件。两种策略复用固定集合的 action/activity/run/实际 attempt、末页、版本、创建事件及成员 file/page/file_event 引用；普通录像下界和 N 范围只适用于普通分段策略。
+
+处理器按动作中冻结的 `result_policy` 选择独立完成模块。`None` 继续使用单原片流程，Action6 以及声明该策略的后续 OSMO 任务均可使用；既有任务恢复时沿原冻结定义执行。分段模块保存可靠扫描的范围结束事实，再申请释放目录占用；仓储仍独立核对控制完成、在途调用及范围结束等释放条件。保存回执未知时保留原完整申请和操作键，核实后才继续发布。
 
 ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISHED、OUTPUT_REGISTERED、output_origins 及范围 PUBLISH 事实，核对实际来源/文件身份和完整数量。当前 action 已终态不能替代同组证明；已有正式集合时拒绝新键再次发布。UNKNOWN/EMPTY 的零范围关系仍有正式集合引用。发布事件可经原 SegmentReadScope 或已验证为同计划的 PlanReadScope 进入守卫；该端口只读取内核已有已验证事件，不复制增长事件数组。完整原申请、终态、产物、origin、范围和标记由同一有界整组执行器提交，原 key 的未知回执核实读取原完整申请；既有 FinishCaptureCommand 的整对象重用入口不能替代分段完成申请。
 

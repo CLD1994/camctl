@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Mapping, Protocol
 
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.public_projection import ProjectionInput, project_public
 from camctl.contracts.values import ConsistencyError
 from camctl.history.queries import PlanSubtree, ReportScope, ReportScopeRequest
@@ -82,7 +83,6 @@ class _ReportReader(Protocol):
 
 def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSpec) -> "HistoryBoundary":
     """核验生成输入与状态库中登记的冻结依据一致，返回完整 H。"""
-    from camctl.contracts.history_values import HistoryBoundary
 
     registered = repository.frozen_registration(spec.report_id)
     if (registered.from_wm, registered.to_wm,
@@ -110,9 +110,6 @@ def generate_report_file(
     """
     repo = repository if repository is not None else HistoryRepository(spec.db_path)
     boundary = verify_frozen_registration(repo, spec)
-    scope = repo.select_report_scope(ReportScopeRequest(
-        boundary=boundary, from_wm=spec.from_wm, to_wm=spec.to_wm,
-        entity_batch_size=spec.entity_batch_size))
     document = ReportDocument(
         report_id=str(spec.report_id), from_wm=spec.from_wm, to_wm=spec.to_wm)
     stream = ReportStream(document)
@@ -122,6 +119,19 @@ def generate_report_file(
     handle = open(spec.staging_path, "wb")
     try:
         def tokens() -> Iterator[bytes]:
+            if isinstance(repo, HistoryRepository):
+                from camctl.reporting.bounded_generation import report_tokens
+
+                yield from report_tokens(repo, spec, boundary, stream)
+                return
+            scope = repo.select_report_scope(
+                ReportScopeRequest(
+                    boundary=boundary,
+                    from_wm=spec.from_wm,
+                    to_wm=spec.to_wm,
+                    entity_batch_size=spec.entity_batch_size,
+                )
+            )
             yield from stream.open()
             for subtree in scope.plans:
                 facts = _plan_facts(repo, subtree, boundary)

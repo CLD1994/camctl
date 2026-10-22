@@ -187,6 +187,45 @@ class SegmentHistoryHandle:
         self._require_ready()
         return self._get('actions',self.action_id)
 
+    def row(self, table, identity):
+        """读取同一 H 的一份自身行，不恢复增长关系。"""
+        self._require_ready()
+        if table not in load_event_registry()["tables"]:
+            raise ConsistencyError("未登记的历史行种类")
+        return self._get(table, identity)
+
+    def related_rows(self, table, column=None, value=None):
+        """在磁盘恢复副本中按主键分批读取自身关系。"""
+        self._require_ready()
+        if table not in load_event_registry()["tables"] or (
+            column is not None and column not in business_columns(table)
+        ):
+            raise ConsistencyError("未登记的历史关系")
+        after = 0
+        predicate = (
+            "" if column is None else f" AND json_extract(body,'$.{column}') IS ?"
+        )
+        while True:
+            args = (
+                (table, after)
+                + (() if column is None else (value,))
+                + (self.batch_size,)
+            )
+            with closing(
+                self._db.execute(
+                    "SELECT id,body FROM rows WHERE tab=? AND id>?"
+                    + predicate
+                    + " ORDER BY id LIMIT ?",
+                    args,
+                )
+            ) as cursor:
+                page = cursor.fetchmany(self.batch_size)
+            if not page:
+                return
+            for identity, body in page:
+                yield SnapshotRow(table, identity, parse_exact_json(body))
+            after = page[-1][0]
+
     def read_set(self,ref):
         """精确读取H处原扫描/版本，正式集合须另由active_ref选择。"""
         self._require_ready()

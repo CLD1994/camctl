@@ -6,6 +6,27 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## OSMO 分段生产接入与联合验收（2026-10-22 UTC）
+
+拍摄与范围取回接入提交为 `dc2db5d`。对应[实施计划 P4—P8](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#当前执行位置与继续顺序)。环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0。完成模块按冻结的任务结果策略分派；Action6 保持单原片，OSMO 的单原片任务另由安装版清理链验证。下列记录区分已经取得的证据与仍在执行的完整回归。
+
+原始命令、工作目录、解释器、UTC 起止、退出码及日志保存在 `.local/verification/osmo-segmentation-20261022/` 的同名 JSON／log。复现入口为本计划的[验证命令](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#执行时使用的验证命令)与[跨组件测试说明](../../tests/integration/README.md#osmo-360-ii-正式内置合同安装版联合链)。
+
+| 已执行范围 | 结果与证据前缀 |
+| --- | --- |
+| 普通分段结果、当前扫描与跨轮保留、有限决定 | `capture-current-recheck` 14 项、`capture-current-gaps` 38 项、`capture-conclusions` 14 项通过。 |
+| 普通取消与原生空尾 | `capture-cancel2` 17 项、`native-completion3` 4 项通过；START 失败及未启动取消 `start-failure` 6 项通过。 |
+| 占用与计划／组等待 | `release-recovery` 1 项、`group-scopes2` 2 项通过；释放回执丢失沿原申请核实，同目录下一来源可继续执行。 |
+| 显式未确认条目 QUERY v2 | `query-recovery` 7 项通过，含原结果与业务保存回执未知、冷恢复、有限预算和单原片隔离。 |
+| 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建。 |
+| 单元汇总 | `unit-final3` 6977 passed、1 skipped、2 条既有警告；该次执行在最后的占用释放修正之前，完整收尾仍须复验。 |
+| 客户端完整验证 | `client-unit` 65 文件／3197 项、`client-integration` 40 文件／1566 项通过；`client-typecheck` 和 `client-build` 退出 0。构建保留原有大块体积提示。18 项直接依赖与已锁定版本一致，锁文件未修改。 |
+| 安装版分段矩阵 | `installed-segments` 4 passed、2 failed：普通两段、多录六段、缺段前缀和原生空尾通过。空范围的零条目来源失败汇总、未知名称的原配对事实重用已修正，完整六场景仍待复验。 |
+| 既有 outputs 汇总 | `outputs-final` 2449 passed、35 failed、2 skipped；35 项来自三个事件序列夹具缺少独立媒体读取范围。补齐真实读取范围后，`sequence-fixtures3` 118 项通过；完整目录仍待复验。 |
+| 规格与静态检查 | `database-final` 39 表／3803 项断言；`history-sql-final`、`event-final`、`dependencies-final`、`protocol-final`、`config-final` 均退出 0。 |
+
+P8 的完整组件目录、最终 wheel 六场景、既有 OSMO、单原片清理及 Action6 安装链正在顺序回归。跨目录起点等最后三个处理器组合与本节完整结果随后记录，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
+
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 
 按[分段实施计划](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)继续软件实现。环境为 Linux x86_64、Python 3.11.16、SQLite 3.53.1。主线已接入原始设备结果页、逐页文件索引及其历史核实，并将结果页、来源解析和原分段完成的事务读取范围及封口共同保留。文件归属提交为 `db24903`；批内原页证明复用提交为 `cd80f4f`。

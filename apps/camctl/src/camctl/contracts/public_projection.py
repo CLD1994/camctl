@@ -52,6 +52,7 @@ class ProjectionInput:
     root_id: int
     tables: Mapping[str, Mapping[int, Mapping[str, Any]]]
     selected_entities: Mapping[str, Mapping[int, Mapping[str, Any]]] = field(default_factory=dict)
+    deferred_fields: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
 PublicFragment = dict[str, Any]
@@ -268,6 +269,8 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
         return OMIT  # 类型检查器友好的省略标记
     fragment: PublicFragment = {}
     for field_name, spec in projection["fields"].items():
+        if field_name in facts.deferred_fields.get(facts.entity, ()):
+            continue
         when = spec.get("when", {"op": "literal", "value": True})
         try:
             if not _truthy(when, context):
@@ -445,6 +448,7 @@ def _project(projection_name: str, context: _Context) -> Any:
             root_id=positions[0][1],
             tables=context.input.tables,
             selected_entities=context.input.selected_entities,
+            deferred_fields=context.input.deferred_fields,
         )
     )
 
@@ -469,6 +473,7 @@ def _entities(node: Mapping[str, Any], context: _Context) -> Any:
                     root_id=child_id,
                     tables=context.input.tables,
                     selected_entities=subtree,
+                    deferred_fields=context.input.deferred_fields,
                 )
             )
         )
@@ -486,6 +491,7 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
                 root_id=row_id,
                 tables=context.input.tables,
                 selected_entities=context.input.selected_entities,
+                deferred_fields=context.input.deferred_fields,
             )
         )
         for _table, row_id in matched

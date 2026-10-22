@@ -439,6 +439,43 @@ class HistoryRepository:
         table = load_enum_registry()["history_objects"][entity]["table"]
         return rows.get((table,entity_id))
 
+    def related_primary_rows_at_h(
+        self, entity, column, value, boundary, *, batch_size=128
+    ):
+        """按不可变关系读取 H 处独立实体，每页释放业务库连接。"""
+        definition = load_enum_registry()["history_objects"][entity]
+        table = definition["table"]
+        if column not in load_event_registry()["tables"][table]["immutable"]:
+            raise ConsistencyError("历史关联读取只接受登记的不可变列")
+        if type(batch_size) is not int or not 1 <= batch_size <= 128:
+            raise ValueError("历史关联批次必须为1至128")
+        after = 0
+        while True:
+            with self._read_connection() as connection:
+                with closing(
+                    connection.execute(
+                        f"SELECT t.id FROM {table} t WHERE t.{column}=? AND t.id>?"
+                        " AND EXISTS (SELECT 1 FROM entity_event_links l WHERE l.entity_type=?"
+                        " AND l.entity_id=t.id AND l.event_id<=?) ORDER BY t.id LIMIT ?",
+                        (
+                            value,
+                            after,
+                            definition["id"],
+                            boundary.last_event_id,
+                            batch_size,
+                        ),
+                    )
+                ) as cursor:
+                    identities = tuple(row[0] for row in cursor.fetchmany(batch_size))
+            if not identities:
+                return
+            for identity in identities:
+                row = self.restore_primary_at_h(entity, identity, boundary)
+                if row is None:
+                    raise ConsistencyError("H 处关联实体缺少主行")
+                yield identity, row
+            after = identities[-1]
+
     def _restore_limited_at_h(self, entity, entity_id, boundary, *, event_batch_size=128,
                               include_file_refs=False):
         """主行及至多一份内部处理/拷贝引用，均为固定容量。"""

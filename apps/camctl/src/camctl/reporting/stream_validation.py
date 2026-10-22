@@ -49,7 +49,7 @@ class DeferredField:
     path: Path
     kind: FieldKind = FieldKind.ARRAY
     omit_empty: bool = False
-    item: ProjectionDescriptor | None = None
+    item: ProjectionDescriptor | Callable[[str], ProjectionDescriptor] | None = None
     node: NodeValidationPlan | None = None
     # 已登记稳定身份的严格顺序；uniqueItems 不允许无界去重集。
     identity: Callable[[Any], Any] | None = None
@@ -383,7 +383,9 @@ class _Compiler:
                 spec = self.specs.get(path)
                 if spec is None or spec.kind is not FieldKind.ARRAY:
                     raise StreamValidationError(f'延迟数组缺少投影描述: {uri}')
-                item_projection = spec.item or ProjectionDescriptor(self.projection.pointer + '/items')
+                item_projection = (
+                    spec.item(location) if callable(spec.item) else spec.item
+                ) or ProjectionDescriptor(self.projection.pointer + "/items")
                 plan = derive_stream_plan(location, item_projection, registry=self.registry)
                 self.items.setdefault(path, {})[location] = plan
                 checks.append(lambda value, location=location: _item_result(value, location))
@@ -578,14 +580,20 @@ class NodeGate:
             self.fail(error)
             raise
 
-    def item_plan(self, path):
+    def item_plan(self, path, *, pointer=None):
         plans = self.plan._compiler.items.get(path, {})
+        if pointer is not None:
+            plans = {
+                uri: plan
+                for uri, plan in plans.items()
+                if plan.projection.pointer == pointer
+            }
         if len(plans) != 1:
             raise StreamValidationError('逐项节点需要明确的唯一 Schema 投影')
         return next(iter(plans.values()))
 
-    def child_binding(self, path, position):
-        plan = self.item_plan(path)
+    def child_binding(self, path, position, *, pointer=None):
+        plan = self.item_plan(path, pointer=pointer)
         return NodeBinding(self.binding.instance_id, self.binding.owner_entity, self.binding.owner_id,
             self.binding.boundary, self.binding.occurrence + path + (position,),
             plan.schema_uri, plan.projection.pointer)
@@ -601,9 +609,13 @@ class NodeGate:
             if slot.spec.item is not None:
                 if not isinstance(value, NodeReceipt):
                     raise StreamValidationError('嵌套延迟项必须提供真实对象回执')
-                if value.plan is not self.item_plan(path):
+                if all(value.plan is not candidate for candidate in plans.values()):
                     raise StreamValidationError('逐项回执不是字段的完整派生计划')
-                member = value.consume(self.child_binding(path, position))
+                member = value.consume(
+                    self.child_binding(
+                        path, position, pointer=value.plan.projection.pointer
+                    )
+                )
             else:
                 if isinstance(value, NodeReceipt):
                     raise StreamValidationError('未声明逐项延迟投影')
