@@ -84,6 +84,15 @@ describe("完整分段错误报告", () => {
   ])("接受完整详情且保留其事实 %#", (make) =>
     expect(() => validateReport(make())).not.toThrow(),
   );
+  it("分段错误的保留范围只接受原片视频，媒体类型缺省时保留未知", () => {
+    const unknown = segmentReport();
+    delete source(unknown).outputs![0].media_type;
+    expect(() => validateReport(unknown)).not.toThrow();
+
+    const photo = segmentReport();
+    source(photo).outputs![0].media_type = "image/jpeg";
+    expect(() => validateReport(photo)).toThrow(/原片视频/);
+  });
   const incomplete: Array<[string, (d: any) => void]> = [
     ["缺少首项", (d: any) => delete d.first_gap],
     ["gaps", (d: any) => delete d.gaps],

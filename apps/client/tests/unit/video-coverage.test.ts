@@ -189,6 +189,23 @@ describe("视频覆盖报告", () => {
     expect(() => validateReport(photo)).toThrow(/原片视频/);
   });
 
+  it.each(["camera_record", "camera_timelapse"] as const)(
+    "%s 的视频范围允许原片类型未知，但拒绝明确的非视频类型",
+    (type) => {
+      const value = coverage(
+        type === "camera_timelapse" ? { metric: "frames", target: 151 } : {},
+      );
+      const output = original("11");
+      delete output.media_type;
+      expect(() => validateReport(report(value, type, [output]))).not.toThrow();
+
+      output.media_type = "image/jpeg";
+      expect(() => validateReport(report(value, type, [output]))).toThrow(
+        /原片视频/,
+      );
+    },
+  );
+
   it("拒绝状态、量纲、数值或默认范围相互矛盾", () => {
     const wrongMetric = report(coverage({ metric: "frames" }));
     expect(() => validateReport(wrongMetric)).toThrow();

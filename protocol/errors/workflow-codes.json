@@ -1207,7 +1207,7 @@
         "retained_original_count": {
           "type": "integer",
           "minimum": 0,
-          "description": "同一历史边界全部合格已登记 ORIGINAL 的数量，不包括 PREVIEW 或修复成品，须与完整 retained_output_ids 对应。"
+          "description": "同一历史边界全部合格且已登记的 ORIGINAL 视频数量，不包括 PREVIEW 或修复成品，须与完整 retained_output_ids 对应。"
         },
         "first_gap": {
           "$ref": "workflow-codes.json#/$defs/segment_gap",
@@ -1226,7 +1226,7 @@
             "$ref": "status-report.schema.json#/$defs/entity_id"
           },
           "uniqueItems": true,
-          "description": "正式公开报告必填，完整列出与 retained_original_count 对应的 ORIGINAL 身份；零份时为 []。数组身份引用不要求每份增量报告重复携带全部 output 实体。"
+          "description": "正式公开报告必填，完整列出与 retained_original_count 对应的 ORIGINAL 视频身份；零份时为 []。数组身份引用不要求每份增量报告重复携带全部 output 实体。"
         }
       },
       "required": [
@@ -1237,7 +1237,7 @@
         "retained_original_count"
       ],
       "additionalProperties": false,
-      "description": "分段来源结果的有限错误头。内部持久化允许省略增长数组；正式公开报告必须从同一冻结历史边界完整展开 gaps、retained_output_ids 和 default_scope.output_ids，并逐项核对原集合及实际产物身份，不能只比较数量。分段错误引用普通录像 camera_record 或原生延时 camera_timelapse 的视频结果，不用于单张拍摄。"
+      "description": "分段来源结果的有限错误头。内部持久化允许省略增长数组；正式公开报告必须从同一冻结历史边界完整展开 gaps、retained_output_ids 和 default_scope.output_ids，并逐项核对原集合及实际视频原片身份，不能只比较数量。retained_output_ids 与 default_scope.output_ids 均只列视频原片；分段错误引用普通录像 camera_record 或原生延时 camera_timelapse 的视频结果，不用于单张拍摄。"
     },
     "segment_key": {
       "type": "object",

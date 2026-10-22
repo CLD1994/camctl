@@ -269,10 +269,12 @@ function requireVideoOriginal(
   id: string,
   source: string,
 ): void {
+  // media_type 是可选观察；缺省保留未知，有值时仍必须表明它是视频。
   requireFact(
     output.kind === "original" &&
       output.source_action_instance_id === source &&
-      output.media_type?.startsWith("video/"),
+      (output.media_type === undefined ||
+        output.media_type.startsWith("video/")),
     `视频范围产物 ${id} 必须是来源动作的原片视频`,
   );
 }
@@ -289,12 +291,7 @@ function segmentAssociations(
   for (const id of details.retained_output_ids) {
     const output = entities.outputs.get(id);
     if (output)
-      requireFact(
-        output.kind === "original" &&
-          output.source_action_instance_id ===
-            details.source_action_instance_id,
-        "分段保留产物必须属于同一来源的原片",
-      );
+      requireVideoOriginal(output, id, details.source_action_instance_id);
   }
   for (const id of details.default_scope.output_ids) {
     const output = entities.outputs.get(id);
