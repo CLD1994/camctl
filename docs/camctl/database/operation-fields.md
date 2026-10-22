@@ -4,6 +4,29 @@
 
 整数编号由[统一定义](enum-registry.json)提供，[编号一览](enum-values.md)从该定义生成。本页使用成员名称说明字段含义和处理规则。
 
+## 基准目录调用
+
+`baseline_read_calls` 保存完整目录基准的一次实际读取责任，属于 `action_id` 指定的动作历史。它保存调用前的原始输入及实际返回身份，不登记目录中的业务文件，也不替代操作流程的尝试编号。目录页内容仍只由原 `BASELINE_CHUNK.APPEND` 保存。
+
+| 字段 | 类型、空值与含义 |
+| --- | --- |
+| `id`、`created_event_id` | 正整数主键及创建意图的实际历史事件外键；创建后固定。 |
+| `action_id`、`activity_id` | 必填动作及原准备活动外键；活动必须属于该动作，历史归属为动作。 |
+| `call_key`、`result_save_key` | 必填、各自唯一的32位小写操作键；调用前分别生成且互不相同。两列之间也不得复用其他调用的键。INTEND使用call_key，实际结果使用原result_save_key。 |
+| `device_id`、`driver_id` | 必填原动作绑定，创建后固定。 |
+| `directories_json`、`cursor_json`、`timeout_s_json` | 规范完整目录数组、可空原输入游标和精确正超时数字。游标为空表示首次读取，其余游标必须绑定相同设备及完整目录；输入均固定。 |
+| `baseline_first_event_id`、`baseline_last_event_id` | 可空原基准前缀首末事件外键；空前缀共同为空，非空前缀共同有值且首不晚于末。 |
+| `chunk_count`、`entry_count`、`read_no` | 必填非负前缀批数和条数、正整数调用序号。前缀为空时两计数为零，否则条数不小于批数；同一活动的read_no唯一连续，空页也消耗调用序号。 |
+| `state` | 必填INTENDED、RETURNED或UNCONFIRMED；只从INTENDED进入一种结果，不重开。 |
+| `returned_at`、`result_event_id` | 可空UTC整数微秒实际返回时刻和结果事件外键。INTENDED时共同为空；RETURNED时共同有值；UNCONFIRMED只保存结果事件，不补造返回时刻。 |
+| `error_json`、`next_cursor_json`、`chunk_event_id` | 可空实际错误、成功页下一游标和原基准批次事件外键。INTENDED及UNCONFIRMED时均为空；错误返回不带下一游标或批次。成功非空页引用同组前序APPEND，成功空页不建批次，是否结束由下一游标判断。 |
+
+意图创建必须核对原动作RUNNING且execution_started为1、活动COLLECTING/NOT_DISPATCHED/HELD、完整绑定和目录、实际前缀及连续调用关系。首调用从空前缀和空游标开始；后续调用只沿前一成功RETURNED的非空下一游标继续，前一调用未结束、出错、返回未知或已到末页时不创建下一调用。
+
+INTEND独立提交。非空成功页的APPEND与RETURN按此顺序在同一事务保存；空页、实际错误或返回未知各只保存一个结果事件。结果列首次赋值后固定。意图不表示已经派发，调用结果不自行结束动作、固定基准或释放活动。实际返回未知的拥有者及后续收场规则见[基准调用实施交接](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p4把分段规则接入正常录像异常恢复和空尾分类)。
+
+SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空值组合。业务守卫独立核对原设备/目录/前缀、跨列键唯一性、连续调用和实际批次来源。动作恢复及快照包含调用行；按 `(action_id,id)` 分页发现原调用，历史读取使用固定完整边界，不从当前状态改写原始输入。
+
 ## 操作流程的身份与参数
 
 `operation_runs.id` 表示一项操作责任；普通未完成责任可以跨会话继续，应急责任限于其所属会话。`action_id` 必填，表示承担该流程的动作；普通交付读取还填写 `delivery_id`，此时其历史归属交付；后续残留收场归属原设备活动动作的历史，`action_id` 另表示触发者。该流程实际改变原动作的公开字段时，报告更新原动作。`responsibility_key` 按下表格式确定，全库唯一，里面的 ID 使用无前导零十进制表示。

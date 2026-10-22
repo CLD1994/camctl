@@ -1075,6 +1075,8 @@ def register_capture_guards() -> None:
     register_guard("result_check", _result_check_guard)
     from .baseline import register_baseline_guard
     register_baseline_guard()
+    from .baseline_reads import register_baseline_read_guard
+    register_baseline_read_guard()
     from .result_pages import register_result_page_guard
     register_result_page_guard()
     from .result_file_ownership import register_ownership_from_result_page_guard
@@ -2452,6 +2454,19 @@ class CaptureRepository:
                       owned: OwnedConnection) -> Page[BaselineChunk, int]:
         from .baseline import read_chunks
         return read_chunks(ref, cursor, batch, owned)
+
+    def save_baseline_read_intent(self, request, key, owned):
+        from .baseline_reads import SaveBaselineReadIntent
+        receipt = commit_operation(SaveBaselineReadIntent(request, key), key, owned)
+        if receipt.kind == 'completed':
+            return DbOutcome(DbOutcomeKind.COMPLETED, value=receipt.result)
+        if receipt.kind == 'rolled_back':
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+    def read_baseline_call(self, call_id, boundary, owned):
+        from .baseline_reads import read_call
+        return read_call(call_id, boundary, owned)
 
     def finish_capture_stop(self, finish, key, owned):
         """停止确认保存实际结束；文件范围和采集目标分别核实。"""

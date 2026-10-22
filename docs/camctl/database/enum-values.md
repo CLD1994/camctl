@@ -709,6 +709,16 @@
 | 4 | `INVALID` |
 | 5 | `CONFLICT` |
 
+### `baseline_read_calls.state`
+
+[行为说明](operation-fields.md#基准目录调用)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `INTENDED` |
+| 2 | `RETURNED` |
+| 3 | `UNCONFIRMED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`

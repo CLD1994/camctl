@@ -576,6 +576,14 @@
         "INVALID": 4,
         "CONFLICT": 5
       }
+    },
+    "baseline_read_calls.state": {
+      "contract": "operation-fields.md#基准目录调用",
+      "members": {
+        "INTENDED": 1,
+        "RETURNED": 2,
+        "UNCONFIRMED": 3
+      }
     }
   },
   "history_objects": {

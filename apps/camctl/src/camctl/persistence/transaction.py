@@ -160,6 +160,8 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.repositories.obtain_check_reads import bind as bind_obtain_check
     context = bind_obtain_check(context, event, transaction, connection)
+    from camctl.persistence.repositories.baseline_reads import bind_intent
+    context = bind_intent(context, event, transaction, connection, operation_key)
     reads=context.current_reads
     if result_page_write_scope is not None:
         if reads is not None:

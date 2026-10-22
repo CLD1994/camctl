@@ -3,12 +3,15 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from camctl.contracts.enums import enum_for
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
 from camctl.devices.file_identity import FileIdentity
+from camctl.operations.models import ErrorValue
 
 BaselineState = enum_for("device_activities.baseline_state")
+BaselineReadState = enum_for("baseline_read_calls.state")
 
 
 def _count(value):
@@ -134,3 +137,19 @@ class BaselineReadIntent:
     def directory_request(self) -> DirectoryRequest:
         """沿用目录端口的规范化与期限契约，批次固定为 128。"""
         return DirectoryRequest(self.binding, self.directories, self.cursor, 128, self.timeout_s)
+
+
+@dataclass(frozen=True)
+class BaselineReadCallView:
+    """原目录调用在完整提交边界的有限事实；目录内容由原批次持有。"""
+
+    call_id: int
+    intent_event_id: int
+    state: BaselineReadState
+    request: BaselineReadIntent
+    result_event_id: int | None
+    returned_at: int | None
+    error: ErrorValue | None
+    next_cursor: DirectoryCursor | None
+    chunk_event_id: int | None
+    boundary: HistoryBoundary

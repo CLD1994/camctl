@@ -976,6 +976,51 @@
         "via": []
       },
       "state_columns": []
+    },
+    "baseline_read_calls": {
+      "immutable": [
+        "created_event_id",
+        "action_id",
+        "activity_id",
+        "call_key",
+        "result_save_key",
+        "device_id",
+        "driver_id",
+        "directories_json",
+        "cursor_json",
+        "timeout_s_json",
+        "baseline_first_event_id",
+        "baseline_last_event_id",
+        "chunk_count",
+        "entry_count",
+        "read_no"
+      ],
+      "mutable": [
+        "state",
+        "returned_at",
+        "result_event_id",
+        "error_json",
+        "next_cursor_json",
+        "chunk_event_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "returned_at",
+        "result_event_id",
+        "error_json",
+        "next_cursor_json",
+        "chunk_event_id"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": [
+        "state"
+      ]
     }
   },
   "guards": {
@@ -1330,6 +1375,22 @@
           },
           {
             "table": "device_files",
+            "op": "update"
+          }
+        ]
+      }
+    },
+    "baseline_read": {
+      "contract": "operation-fields.md#基准目录调用",
+      "rule": "核原活动、绑定、完整目录、前缀、连续调用及原操作双键；返回与原基准批次共同提交。",
+      "scope": {
+        "rows": [
+          {
+            "table": "baseline_read_calls",
+            "op": "create"
+          },
+          {
+            "table": "baseline_read_calls",
             "op": "update"
           }
         ]
@@ -3520,6 +3581,26 @@
           "to": 3,
           "by": [
             "SEGMENT_FACTS.ASSESS"
+          ],
+          "id": "transition_2"
+        }
+      ]
+    },
+    "baseline_read_calls.state": {
+      "edges": [
+        {
+          "from": 1,
+          "to": 2,
+          "by": [
+            "BASELINE_READ.RETURN"
+          ],
+          "id": "transition_1"
+        },
+        {
+          "from": 1,
+          "to": 3,
+          "by": [
+            "BASELINE_READ.UNCONFIRMED"
           ],
           "id": "transition_2"
         }
@@ -9793,6 +9874,127 @@
           ]
         }
       }
+    },
+    "BASELINE_READ": {
+      "id": 37,
+      "version": 1,
+      "branches": {
+        "INTEND": {
+          "reason": 1,
+          "title": "保存基准目录调用原始输入",
+          "rows": [
+            {
+              "table": "baseline_read_calls",
+              "op": "create",
+              "after": {
+                "state": [
+                  1
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "baseline_read"
+          ],
+          "evidence": [
+            "baseline_read_request"
+          ]
+        },
+        "RETURN": {
+          "reason": 2,
+          "title": "保存基准目录实际返回",
+          "rows": [
+            {
+              "table": "baseline_read_calls",
+              "op": "update",
+              "columns": [
+                "state",
+                "returned_at",
+                "result_event_id",
+                "error_json",
+                "next_cursor_json",
+                "chunk_event_id"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  2
+                ]
+              },
+              "required": [
+                "state",
+                "result_event_id"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_1"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "baseline_read"
+          ],
+          "evidence": [
+            "baseline_read_request"
+          ]
+        },
+        "UNCONFIRMED": {
+          "reason": 3,
+          "title": "保存基准目录返回未知",
+          "rows": [
+            {
+              "table": "baseline_read_calls",
+              "op": "update",
+              "columns": [
+                "state",
+                "result_event_id"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  3
+                ]
+              },
+              "required": [
+                "state",
+                "result_event_id"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_2"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "baseline_read"
+          ],
+          "evidence": [
+            "baseline_read_request"
+          ]
+        }
+      }
     }
   },
   "history_references": {
@@ -9905,6 +10107,22 @@
     "device_file_pairing_facts.source_txn_id": {
       "target": "prior_transaction",
       "exception": "与 source_event_id 共同引用配对前完整历史边界，由配对守卫核实。"
+    },
+    "baseline_read_calls.created_event_id": {
+      "target": "creating_event"
+    },
+    "baseline_read_calls.result_event_id": {
+      "target": "assigning_event"
+    },
+    "baseline_read_calls.baseline_first_event_id": {
+      "target": "prior_event"
+    },
+    "baseline_read_calls.baseline_last_event_id": {
+      "target": "prior_event"
+    },
+    "baseline_read_calls.chunk_event_id": {
+      "target": "assigning_event",
+      "exception": "RETURN首次赋值为同一事务前序BASELINE_CHUNK.APPEND；具体引用由基准调用守卫核对，后续保持。"
     }
   },
   "non_event_tables": {

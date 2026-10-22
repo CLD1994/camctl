@@ -390,6 +390,10 @@ def main() -> None:
            stop_supported=0, safe_repeat_stop=0, start_return_meaning=1, completion_mode=2,
            ownership_mode=1, output_scope_json='{}', baseline_state=1, dispatch_state=3,
            activity_state=1, occupancy_state=1, completion_basis=1, result_set_state=1)
+    insert(db, 'baseline_read_calls', id=1, created_event_id=1, action_id=1, activity_id=1,
+           call_key='d' * 32, result_save_key='e' * 32, device_id='camera', driver_id='driver',
+           directories_json='["/DCIM"]', timeout_s_json='0.0001', chunk_count=0, entry_count=0,
+           read_no=1, state=1)
     insert(db, 'device_files', id=1, observer_action_id=1, source_action_id=1, identity_key='["camera","driver","f1"]',
            locator_json='{}', ownership_evidence_json='{}', role=2, presence_state=2, completion_state=3,
            completion_evidence_json='{}', size_bytes=100, checksum_support=3, **meta)
@@ -448,6 +452,18 @@ def main() -> None:
     db.commit()
     verify(list(db.execute('PRAGMA foreign_key_check')) == [], '全部表样本及共同建档引用在提交时有效')
     verify(all(db.execute(f'SELECT count(*) FROM {name}').fetchone()[0] for name in tables), '全部表都有结构样本')
+
+    with case(db):
+        rejects(db, 'UPDATE baseline_read_calls SET state=2 WHERE id=1')
+        rejects(db, 'UPDATE baseline_read_calls SET result_event_id=2 WHERE id=1')
+        rejects(db, 'UPDATE baseline_read_calls SET state=3,result_event_id=2,returned_at=0 WHERE id=1')
+        rejects(db, 'UPDATE baseline_read_calls SET baseline_first_event_id=1 WHERE id=1')
+        rejects(db, 'UPDATE baseline_read_calls SET chunk_count=1,entry_count=0 WHERE id=1')
+        rejects(db, 'UPDATE baseline_read_calls SET call_key=result_save_key WHERE id=1')
+        db.execute('UPDATE baseline_read_calls SET state=2,result_event_id=2,returned_at=0 WHERE id=1')
+        rejects(db, '''UPDATE baseline_read_calls SET error_json='{}',chunk_event_id=1 WHERE id=1''')
+    with case(db):
+        db.execute('UPDATE baseline_read_calls SET state=3,result_event_id=2 WHERE id=1')
 
     # CHECK 的两种 owner 共享操作种类，但外键、规范键与唯一身份独立。
     with case(db):

@@ -165,6 +165,44 @@ CREATE TABLE device_activities (
 ) STRICT;
 CREATE INDEX activities_occupancy ON device_activities(action_id, id) WHERE occupancy_state = 1;
 
+CREATE TABLE baseline_read_calls (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    activity_id INTEGER NOT NULL REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    call_key TEXT NOT NULL UNIQUE CHECK (length(call_key) = 32 AND call_key NOT GLOB '*[^0-9a-f]*'),
+    result_save_key TEXT NOT NULL UNIQUE CHECK (length(result_save_key) = 32 AND result_save_key NOT GLOB '*[^0-9a-f]*'),
+    device_id TEXT NOT NULL,
+    driver_id TEXT NOT NULL,
+    directories_json TEXT NOT NULL CHECK (json_valid(directories_json) AND json_type(directories_json) = 'array'),
+    cursor_json TEXT CHECK (cursor_json IS NULL OR (json_valid(cursor_json) AND json_type(cursor_json) = 'object')),
+    timeout_s_json TEXT NOT NULL CHECK (json_valid(timeout_s_json) AND json_type(timeout_s_json) IN ('integer','real')),
+    baseline_first_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    baseline_last_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    chunk_count INTEGER NOT NULL CHECK (chunk_count >= 0),
+    entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+    read_no INTEGER NOT NULL CHECK (read_no > 0),
+    state INTEGER NOT NULL CHECK (state IN (1,2,3)),
+    returned_at INTEGER,
+    result_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
+    next_cursor_json TEXT CHECK (next_cursor_json IS NULL OR (json_valid(next_cursor_json) AND json_type(next_cursor_json) = 'object')),
+    chunk_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (activity_id, read_no),
+    CHECK (call_key <> result_save_key),
+    CHECK ((baseline_first_event_id IS NULL AND baseline_last_event_id IS NULL AND chunk_count = 0 AND entry_count = 0)
+        OR (baseline_first_event_id IS NOT NULL AND baseline_last_event_id IS NOT NULL
+            AND baseline_last_event_id >= baseline_first_event_id
+            AND chunk_count > 0 AND entry_count >= chunk_count)),
+    CHECK ((state = 1 AND result_event_id IS NULL AND returned_at IS NULL AND error_json IS NULL
+            AND next_cursor_json IS NULL AND chunk_event_id IS NULL)
+        OR (state = 2 AND result_event_id IS NOT NULL AND returned_at IS NOT NULL)
+        OR (state = 3 AND result_event_id IS NOT NULL AND returned_at IS NULL AND error_json IS NULL
+            AND next_cursor_json IS NULL AND chunk_event_id IS NULL)),
+    CHECK (error_json IS NULL OR (next_cursor_json IS NULL AND chunk_event_id IS NULL))
+) STRICT;
+CREATE INDEX baseline_calls_action ON baseline_read_calls(action_id, id);
+
 CREATE TABLE recording_processing (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     action_id INTEGER NOT NULL UNIQUE REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,

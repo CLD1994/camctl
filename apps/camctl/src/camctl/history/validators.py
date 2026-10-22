@@ -67,6 +67,7 @@ class EventContext:
     current_reads: CurrentEventReads | None = None
     #: 内核按实际操作行自动绑定的取回检查读取端口。
     obtain_check_reads: object | None = None
+    baseline_read_reads: object | None = None
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；
