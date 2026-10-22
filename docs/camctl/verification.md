@@ -21,7 +21,7 @@
 | 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建；最终完整 `component-reporting-145300` 435 项通过。 |
 | 单元汇总 | `unit-delivery` 6977 passed、1 skipped、2 条既有警告，退出 0；该次包含占用释放修正后的生产代码。 |
 | 客户端完整验证 | `client-unit` 65 文件／3197 项、`client-integration` 40 文件／1566 项通过；`client-typecheck` 和 `client-build` 退出 0。构建保留原有大块体积提示。18 项直接依赖与已锁定版本一致，锁文件未修改。 |
-| 安装版分段矩阵 | 初轮 `installed-segments` 为 4 passed、2 failed；后续 `installed-segments-final-150140` 为 5 passed、1 failed。空范围已通过，未知名称跨轮配对仍暴露尝试身份问题；修正后的完整六场景待复验。 |
+| 安装版分段矩阵 | 初轮 `installed-segments` 为 4 passed、2 failed；后续 `installed-segments-final-150140` 为 5 passed、1 failed。跨轮配对身份修正后增加少于默认选段数及非尾零原片分区，最终 `installed-segments-final-163749` 为 8 passed，633.01 秒、退出 0。 |
 | 完整 outputs | `component-outputs-isolated-143747` 2487 passed、2 skipped，退出 0。两项跳过分别是内部副本不发布普通 delivery、主机源不携带设备读取配置；未缺少工具。 |
 | 规格与静态检查 | `database-final` 39 表／3803 项断言；`history-sql-final`、`event-final`、`dependencies-final`、`protocol-final`、`config-final` 均退出 0。 |
 
@@ -43,7 +43,11 @@ bootstrap 的首次结果页尚未返回即中断场景暴露分段入口错误�
 
 容器重启中断了 `component-capture-final-145524`、`component-bootstrap-final-150123` 和 `component-persistence-isolated-151822`；这些日志没有最终退出码，不计为通过。bootstrap 和 persistence 在中断前已有失败，后续分别定位并复验。其他独立目录已有完整退出 0 的结果：acceptance 338 项、cancellation 396 项、host_files 120 项、logging_runtime 112 项（保留一条既有标记警告）、motor 12 项及 operations 314 项；原命令和提交保留在 `isolated-components-results.json`。history 的旧归属断言和事件覆盖表待补齐后复验。
 
-P8 的完整组件目录、最终 wheel 六场景、既有 OSMO、单原片清理及 Action6 安装链继续按实际结果收尾，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
+完整 capture 的 `capture-candidate-ab1820e-162339` 为 2052 passed，1323.68 秒、退出 0。其后无首张结果页的修正由原生 5 项及 OSMO 装配 22 项补充核对；完整组件不以这些局部结果拼接成一次运行。
+
+完整 bootstrap 在 `e87ae61` 上的首轮为 4 passed、1 failed：共享夹具误将 Action6 冻结定义也断言为 OSMO 分段策略。夹具分别声明 OSMO OSV 与 Action6 MP4 路径，Action6 继续断言无分段策略；未修改 Action6 生产行为。修正后的两个完整文件 `bootstrap-shared-policy-fixed-164916` 为 28 passed。完整 history 首轮 `history-candidate-ab1820e-162341` 为 343 passed、1 failed：三路径预期全局剔除了 `created_event_id`，但该列在结果页索引等表中是业务事实。改为按权威表登记保留完整业务列，`history-replay-columns-fixed-164916` 完整文件 3 passed；两目录分别完整复验。
+
+P8 的其余完整组件目录、既有 OSMO、单原片清理及 Action6 安装链继续按实际结果收尾，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
 
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 

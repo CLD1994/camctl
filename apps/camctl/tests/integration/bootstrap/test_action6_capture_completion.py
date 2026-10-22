@@ -18,6 +18,8 @@ BINDING = DeviceBinding("cam-1", "dji-action6")
 
 
 class Action6Channel(Channel):
+    result_path = "/mnt/media_rw/emulated/DCIM/a.MP4"
+
     def __init__(self, stop_payload="00"):
         super().__init__()
         self.stop_payload = stop_payload
@@ -25,9 +27,6 @@ class Action6Channel(Channel):
     async def run(self, spec, stop):
         result = await super().run(spec, stop)
         script = shlex.split(spec.argv[5])[2]
-        if "CAMCTL-DIRECTORY/1" in script:
-            return RawToolOutcome(LocalExit(exit_code=0), result.output.replace(b"a.OSV", b"a.MP4"),
-                None, None, stderr=b"")
         if shlex.split(script)[-3:] == ["-c", "01", "00"]:
             return RawToolOutcome(LocalExit(exit_code=0),
                 f"Resp message, len = 1, data:\n {self.stop_payload}\n".encode(), None, None, stderr=b"")

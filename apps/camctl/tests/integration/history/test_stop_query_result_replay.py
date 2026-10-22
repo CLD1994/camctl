@@ -29,7 +29,7 @@ from camctl.devices.evidence import (
 )
 from camctl.devices.ports import DeviceCallResult
 from camctl.history.decoding import decode_event_row
-from camctl.history.events import branch_of, event_type_name
+from camctl.history.events import branch_of, business_columns, event_type_name
 from camctl.history.replay import EntityImage, RestoreSeed, apply_reverse, restore
 from camctl.history.validators import ValidatedEvent
 from camctl.operations.attempts import RetryWaitGate
@@ -86,9 +86,6 @@ _REPLAY_EVIDENCE = EvidenceRegistry((
     RESULT_FILES_CONTRACT,
     RESULT_PAGE_CONTRACT,
 ))
-
-_META = {"id", "created_event_id", "last_event_id", "change_count"}
-
 
 class BlockingStop:
     """停止端口替身：在途暂停供测试读取事务前状态。
@@ -222,9 +219,9 @@ def _boundary_at(connection) -> HistoryBoundary:
 
 
 def _business_rows(rows) -> dict:
-    """剔除行元数据列，只保留与回放可比的业务列。"""
+    """按各表的权威登记保留完整业务列。"""
     return {key: {name: value for name, value in facts.items()
-                  if name not in _META}
+                  if name in business_columns(key[0])}
             for key, facts in rows.items()}
 
 

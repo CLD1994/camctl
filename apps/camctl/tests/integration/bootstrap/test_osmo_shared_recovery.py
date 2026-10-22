@@ -47,6 +47,8 @@ OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261022100000_0007_D.OSV"
 
 class Channel:
     """只提供正式设备工具的发送回执；恢复后禁止重开旧调用。"""
+    result_path = OSV_PATH
+
     def __init__(self):
         self.calls = []
         self.forbidden = False
@@ -64,7 +66,7 @@ class Channel:
         script = shlex.split(spec.argv[5])[2]
         if "CAMCTL-DIRECTORY/1" in script:
             self.result_tickets.append(ticket)
-            return RawToolOutcome(LocalExit(exit_code=0), b"CAMCTL-DIRECTORY/1\0" + OSV_PATH.encode() + b"\0" + self.directory_end + b"\0",
+            return RawToolOutcome(LocalExit(exit_code=0), b"CAMCTL-DIRECTORY/1\0" + self.result_path.encode() + b"\0" + self.directory_end + b"\0",
                                   None, None, stderr=b"")
         if "stat -c %s" in script:
             return RawToolOutcome(LocalExit(exit_code=7 if self.metadata_error else 0), b"" if self.metadata_error else b"50\n",
@@ -109,7 +111,7 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
     body["actions"][0].update(type=kind, params=_params(binding.driver_id, kind))
     await _accept_plan(owned, tmp_path, body, catalog)
     frozen = json.loads(owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=1").fetchone()[0])
-    assert frozen.get("result_policy") == (None if single_original else
+    assert frozen.get("result_policy") == (None if single_original or binding.driver_id != BINDING.driver_id else
         "osmo_empty_tail_classification_v1" if finite else "osmo360ii_record_segments_v1")
     started = _start(owned, 1, now=_SCHEDULED)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
