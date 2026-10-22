@@ -94,7 +94,13 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 完整 `SegmentAssessment` 保存及独立重算仅适用于 `osmo360ii_record_segments_v1`。原生延时 `osmo_empty_tail_classification_v1` 由 `capture/native_completion.py` 和 `segment_native.py` 使用专属空尾分类，沿原自然完成或取消依据发布合格文件。两种策略复用固定集合的 action/activity/run/实际 attempt、末页、版本、创建事件及成员 file/page/file_event 引用；普通录像下界和 N 范围只适用于普通分段策略。
 
-公共层重构后，处理器按动作中显式冻结的单文件或多段结果合同选择独立模块。Action6 与 OSMO 360 II 都保留两种流程，各恢复入口消费同一选择。分段模块保存可靠扫描的范围结束事实，再申请释放目录占用；仓储仍独立核对控制完成、在途调用及范围结束等释放条件。保存回执未知时保留原完整申请和操作键，核实后才继续发布。
+处理器按动作中显式冻结的单文件或多段结果合同选择独立模块。Action6 与 OSMO 360 II 都保留两种流程，各恢复入口消费同一选择。分段模块保存可靠扫描的范围结束事实，再申请释放目录占用；仓储仍独立核对控制完成、在途调用及范围结束等释放条件。保存回执未知时保留原完整申请和操作键，核实后才继续发布。
+
+Action6 的有限决策使用 `assessment_json.decision_type="video_coverage_v1"`，通过 `SegmentRepository.save_decision()` 保存，由 `read_decision()` 恢复。头只保存目标、可靠累计量、已检查数量、覆盖状态、范围边界及诊断原因；实际产物身份经 `segment_scope_members` 展开。时长使用精确数值，帧数使用整数。来源动作的失败代码和覆盖诊断分别解释，成功动作也可保存覆盖未确认的原因。OSMO 的 `SegmentAssessment` 继续维护自己的下界与空尾合同。
+
+检查副本的复用截点以 `segment_sets.published_event_id` 所属完整事务 H 为权威。原片与检查副本沿 `segment_inspections.member_id`、`file_copies.inspection_id` 和目标文件关系定位；已绑定等待者从 H 处的动作和来源选择历史按页恢复。后来的动作或选择状态不改变这个集合，不另存一份等待者清单。每次正式取回仍保存自己的 item、delivery 和目标文件，正式 output 的设备源身份保持不变。
+
+复用授权由 `outputs/segment_copy_reuse.py` 和原读取资格事务核对，显式清理和来源限制仍有效。实际使用及哈希校验均向文件执行器登记检查源文件，交付读取同时登记目标文件。维护器只在固定等待者均已结束、检查已结束且实际文件操作停止后释放检查副本；公开范围和报告不会因副本清理而改变。实际交付与待完善的恢复边界见[视频结果模式执行计划](../../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#当前进度与交接记录)。
 
 ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISHED、OUTPUT_REGISTERED、output_origins 及范围 PUBLISH 事实，核对实际来源/文件身份和完整数量。当前 action 已终态不能替代同组证明；已有正式集合时拒绝新键再次发布。UNKNOWN/EMPTY 的零范围关系仍有正式集合引用。发布事件可经原 SegmentReadScope 或已验证为同计划的 PlanReadScope 进入守卫；该端口只读取内核已有已验证事件，不复制增长事件数组。完整原申请、终态、产物、origin、范围和标记由同一有界整组执行器提交，原 key 的未知回执核实读取原完整申请；既有 FinishCaptureCommand 的整对象重用入口不能替代分段完成申请。
 
