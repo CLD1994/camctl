@@ -41,6 +41,14 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 保存请求 `SegmentMemberInput(file_id, page_event_id, file_event_id, role, ownership, completion, pairing_identity=None, pairing_state=NOT_APPLICABLE)` 不接收大小或摘要。提交守卫独立读取原页、实际差集文件、固定文件历史和原动作/活动/流程/尝试，核对分类及配对。P1 的完整 `SegmentMember` 是读取和纯判断结果，不是另一份文件属性权威。
 
+## 有限核实决定
+
+`segment_check_conclusions`经`set_id`归原动作，一集合只保存一项不可变决定。`reason`、实际来源事件、原结束／配置事件及前版决定引用各有独立职责；`current_result/current_failure_json`只记录当前扫描的结果，不复制原始错误或全部成员。字段和枚举由权威SQL及内部登记维护。
+
+`ResultCheckConclusionSave`携带原集合及完整有限申请，`conclude_result_check`按原操作键保存，返回实际`ResultCheckConclusionRef`。无RESULTS的基准分区只接受原H0内可靠RETURN错误或UNCONFIRMED，独立核原未派发活动和不存在START／RESULTS责任；决定保存后动作仍运行，准备占用及正式产物没有变化。实际Task与返回交接仍由基准拥有者负责，后续共同完成事务再核取消、窗口及适用释放。
+
+有限结束的全部分区与配置／流程关闭顺序遵守[拍摄完成规格](../../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)及[分段规格](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)。存储决定不等同于来源终态或正式发布。
+
 ## 生产端口与后续分工
 
 `create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。

@@ -593,6 +593,32 @@
         "NO_RESULTS": 3
       }
     },
+    "segment_check_conclusions.reason": {
+      "contract": "segments.md",
+      "members": {
+        "CONTROL_SUFFICIENT": 1,
+        "SEGMENTS_SUFFICIENT": 2,
+        "GAP_CONFIRMED": 3,
+        "ORIGINAL_ABSENT": 4,
+        "EXPLICIT_RESULT_ERROR": 5,
+        "RESULT_BUDGET_EXHAUSTED": 6,
+        "BINDING_UNAVAILABLE": 7,
+        "STOP_UNCONFIRMED_CLOSED": 8,
+        "NO_RESULT_WORK": 9,
+        "NATIVE_RESULT_DECIDED": 10,
+        "NATIVE_FINITE_CANCEL_END": 11,
+        "CANCELED_BEFORE_PUBLICATION": 12
+      }
+    },
+    "segment_check_conclusions.current_result": {
+      "contract": "segments.md",
+      "members": {
+        "NONE": 1,
+        "SUFFICIENT": 2,
+        "UNMET": 3,
+        "UNCONFIRMED": 4
+      }
+    },
     "segment_sets.publication_kind": {
       "contract": "segments.md",
       "members": {

@@ -583,6 +583,8 @@ class SegmentHistoryHandle:
                         if table == 'segment_members':
                             from camctl.persistence.repositories.segments import _position
                             position=_position(values)
+                        elif table == 'segment_check_conclusions':
+                            position=(identity,0,'',identity)
                         else:
                             position=(values.get('gap_no',values.get('ordinal')),0,'',identity)
                         self._db.execute('INSERT INTO row_order VALUES (?,?,?,?,?,?)',

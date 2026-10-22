@@ -22,6 +22,10 @@ SegmentSourceKind = _text_enum('SegmentSourceKind','segment_sets.source_kind')
 
 PublicationKind = _text_enum('PublicationKind','segment_sets.publication_kind')
 
+ResultCheckEndReason = _text_enum('ResultCheckEndReason','segment_check_conclusions.reason')
+
+CurrentSegmentResult = _text_enum('CurrentSegmentResult','segment_check_conclusions.current_result')
+
 
 SegmentMemberRole = _text_enum("SegmentMemberRole", "segment_members.role")
 

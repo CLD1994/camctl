@@ -2,10 +2,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from camctl.capture import segment_models as models
 from camctl.capture.segment_models import (
-    SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind)
+    SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind,
+    ResultCheckEndReason,CurrentSegmentResult)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.contracts.history_values import HistoryBoundary
@@ -13,11 +15,17 @@ from camctl.devices.segments import SegmentKey
 from camctl.outputs.catalog import OutputKind
 from camctl.capture.result_pages import ResultPageRef
 
+if TYPE_CHECKING:
+    from camctl.operations.attempts import AttemptConfig
+    from camctl.capture.media import RecordingFailure
+
 
 # 类型映射不维护成员清单；编号和值只从权威登记派生。
 _ENUM_COLUMNS = {
     SegmentSourceKind:'segment_sets.source_kind',
     PublicationKind:'segment_sets.publication_kind',
+    ResultCheckEndReason:'segment_check_conclusions.reason',
+    CurrentSegmentResult:'segment_check_conclusions.current_result',
     models.EvidenceState: 'segment_sets.facts_json.evidence',
     models.SegmentMemberRole: 'segment_members.role',
     models.OwnershipState: 'segment_members.ownership',
@@ -80,6 +88,42 @@ class ResultSetCreate:
         if self.current_scan is not None and not isinstance(self.current_scan,ResultPageRef):
             raise TypeError('当前扫描必须引用真实原末页')
         UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class ResultCheckConclusionSave:
+    ref: SegmentResultRef
+    reason: ResultCheckEndReason
+    anchor_event_id: int|None
+    prior_run_end_event_id: int|None
+    check_config: AttemptConfig|None
+    binding_failure: RecordingFailure|None
+    prior_conclusion_id: int|None
+    occurred_at: int
+
+    def __post_init__(self):
+        from camctl.operations.attempts import AttemptConfig
+        from camctl.capture.media import RecordingFailure
+        if not isinstance(self.ref,SegmentResultRef) or not isinstance(self.reason,ResultCheckEndReason):
+            raise TypeError('有限决定必须使用实际集合和结束分类')
+        for value in (self.anchor_event_id,self.prior_run_end_event_id,self.prior_conclusion_id):
+            if value is not None:ObjectId(value)
+        if self.check_config is not None and not isinstance(self.check_config,AttemptConfig):
+            raise TypeError('有限决定必须保留完整采用配置')
+        if self.binding_failure is not None and not isinstance(self.binding_failure,RecordingFailure):
+            raise TypeError('绑定决定必须使用原有限失败输入')
+        UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class ResultCheckConclusionRef:
+    ref: SegmentResultRef
+    conclusion_id: int
+    event_id: int
+
+    def __post_init__(self):
+        if not isinstance(self.ref,SegmentResultRef):raise TypeError('有限决定引用必须属于实际结果集合')
+        ObjectId(self.conclusion_id);ObjectId(self.event_id)
 
 
 def encode_enum(value):

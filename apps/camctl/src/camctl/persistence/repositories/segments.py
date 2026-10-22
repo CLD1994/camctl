@@ -562,6 +562,9 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
         raise ConsistencyError('分段事件超过有限行数')
     from camctl.capture.segment_storage import SegmentResultRef
     if isinstance(ref,SegmentResultRef):
+        if event.reason==_EVENT['branches']['CONCLUDE_CHECK']['reason']:
+            from .segment_check_conclusions import verify_conclusion_event
+            return verify_conclusion_event(db,ref,event,context)
         if event.reason==_EVENT['branches']['CREATE_RESULT']['reason']:
             from .segment_result_sets import verify_create_event
             return verify_create_event(db,ref,event,context)
@@ -948,6 +951,16 @@ class SegmentRepository:
         return (DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result) if receipt.kind=='completed'
             else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
                 error=receipt.error))
+
+    def conclude_result_check(self,request,key,owned):
+        from .segment_check_conclusions import ConcludeResultCheckCommand
+        register_segment_guards()
+        receipt=commit_operation(ConcludeResultCheckCommand(request,key),key,owned)
+        return DbOutcome(DbOutcomeKind(receipt.kind),value=receipt.result,error=receipt.error)
+
+    def verify_result_check_conclusion(self,request,key,owned,*,execution_finished=True):
+        from .segment_check_conclusions import verify_result_check_conclusion
+        return verify_result_check_conclusion(request,key,owned,execution_finished=execution_finished)
 
     def read_result_set(self,ref,owned):
         from .segment_result_sets import read_result_set

@@ -443,6 +443,10 @@ def main() -> None:
            current_attempt_id=1,current_final_page_event_id=2,source_kind=1,source_txn_id=1,
            source_event_id=2,publication_kind=1,version=1,target_duration_ms=60000,state=1)
     rejects(db, 'UPDATE segment_sets SET published_event_id=1 WHERE id=1')
+    insert(db, 'segment_check_conclusions', id=1, created_event_id=1, set_id=1, reason=9,
+           anchor_event_id=1, prior_run_end_event_id=None, config_event_id=None,
+           prior_conclusion_id=None, current_result=1, current_failure_json=None)
+    rejects(db, "UPDATE segment_check_conclusions SET current_failure_json='[]' WHERE id=1")
     insert(db, 'segment_members', id=1, created_event_id=1, set_id=1, file_id=1, page_event_id=2, file_event_id=2,
            identity='real-osv', directory_number=1, segment_index=1, role=1, ownership=1,
            completion=1, pairing_state=1)

@@ -729,6 +729,36 @@
 | 2 | `RETAINED_SOURCES` |
 | 3 | `NO_RESULTS` |
 
+### `segment_check_conclusions.reason`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `CONTROL_SUFFICIENT` |
+| 2 | `SEGMENTS_SUFFICIENT` |
+| 3 | `GAP_CONFIRMED` |
+| 4 | `ORIGINAL_ABSENT` |
+| 5 | `EXPLICIT_RESULT_ERROR` |
+| 6 | `RESULT_BUDGET_EXHAUSTED` |
+| 7 | `BINDING_UNAVAILABLE` |
+| 8 | `STOP_UNCONFIRMED_CLOSED` |
+| 9 | `NO_RESULT_WORK` |
+| 10 | `NATIVE_RESULT_DECIDED` |
+| 11 | `NATIVE_FINITE_CANCEL_END` |
+| 12 | `CANCELED_BEFORE_PUBLICATION` |
+
+### `segment_check_conclusions.current_result`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `NONE` |
+| 2 | `SUFFICIENT` |
+| 3 | `UNMET` |
+| 4 | `UNCONFIRMED` |
+
 ### `segment_sets.publication_kind`
 
 [行为说明](segments.md)

@@ -267,6 +267,20 @@ CREATE UNIQUE INDEX segment_sets_cancellation ON segment_sets(predecessor_set_id
 CREATE UNIQUE INDEX segment_sets_initial_cancellation ON segment_sets(action_id, cancel_event_id)
     WHERE publication_kind = 2 AND predecessor_set_id IS NULL;
 
+CREATE TABLE segment_check_conclusions (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    set_id INTEGER NOT NULL UNIQUE REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    reason INTEGER NOT NULL CHECK (reason BETWEEN 1 AND 12),
+    anchor_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    prior_run_end_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    config_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    prior_conclusion_id INTEGER REFERENCES segment_check_conclusions(id) DEFERRABLE INITIALLY DEFERRED,
+    current_result INTEGER NOT NULL CHECK (current_result IN (1,2,3,4)),
+    current_failure_json TEXT CHECK (current_failure_json IS NULL
+        OR (json_valid(current_failure_json) AND json_type(current_failure_json) = 'object'))
+) STRICT;
+
 CREATE TABLE segment_members (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,

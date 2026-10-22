@@ -855,6 +855,28 @@
         "state"
       ]
     },
+    "segment_check_conclusions": {
+      "immutable": [
+        "created_event_id",
+        "set_id",
+        "reason",
+        "anchor_event_id",
+        "prior_run_end_event_id",
+        "config_event_id",
+        "prior_conclusion_id",
+        "current_result",
+        "current_failure_json"
+      ],
+      "mutable": [],
+      "derived": [
+        "id"
+      ],
+      "write_once": [],
+      "owner": {
+        "inherit": "set_id"
+      },
+      "state_columns": []
+    },
     "segment_members": {
       "immutable": [
         "set_id",
@@ -9901,6 +9923,27 @@
             "segment_request"
           ]
         },
+        "CONCLUDE_CHECK": {
+          "reason": 11,
+          "title": "保存结果核实的有限决定",
+          "rows": [
+            {
+              "table": "segment_check_conclusions",
+              "op": "create",
+              "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "result_check_decision"
+          ]
+        },
         "FIX_RESULT_MEMBERS": {
           "reason": 10,
           "title": "固定原H0的完整结果成员",
@@ -10202,6 +10245,21 @@
     "segment_sets.source_event_id": {
       "target": "prior_event",
       "exception": "原来源H0的真实事务末位。"
+    },
+    "segment_check_conclusions.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_check_conclusions.anchor_event_id": {
+      "target": "prior_event",
+      "exception": "按原有限决定分区核实际来源和完整事务。"
+    },
+    "segment_check_conclusions.prior_run_end_event_id": {
+      "target": "prior_event",
+      "exception": "按原有限决定分区核实际来源和完整事务。"
+    },
+    "segment_check_conclusions.config_event_id": {
+      "target": "prior_event",
+      "exception": "按原有限决定分区核实际来源和完整事务。"
     },
     "segment_sets.cancel_event_id": {
       "target": "prior_event",

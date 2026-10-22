@@ -209,12 +209,15 @@ def test_default_segment_count_uses_exact_milliseconds(target_ms, expected):
 - [x] 统一结果身份、固定H0的跨轮来源及当前扫描选择、来源分页与RESULTS意图限制的实现和回归。
 - [x] 统一成员追加／双向固定、跨轮预览保留、原完整模型写入范围的实现和回归。
 - [x] 取消版本的完整成员接手、唯一定位、新连接核实及同H历史组合验收；终态发布接线另列于下。
+- [x] 无RESULTS基准错误／返回未知的有限决定存储、原键只读核实、两事务入口及同H恢复；其余有限结论分区继续实施。
 - [ ] 真实RuntimeDeps、恢复资格提供者与共同处理器接线，以及实际起点派生和恢复组合验证。
 - [ ] 有限结论、原生专属分类及全部正常／异常入口的共同终态发布与消费者接线。
 
 P4整体、P5的QUERY v2与调度、P6后端报告及原字节重建、P8安装版联合验收继续实施。P9由用户另行安排，当前不执行ARM、相机或现场媒体操作。
 
 **取消版本存储阶段：** `3548096`在取消发布前按明确前版及取消事件接手原H0，完整重建全部成员并保留旧版本；只读恢复按唯一键定位，发布后的取消复用原正式结果。有限／有界入口、部分保存／已固定前版、提交前后回执未知及initial／snapshot／current恢复已组合验证。相关集合、版本和仓储审计134项通过，完整unit6975项通过、1项跳过及2条既有warning；命令、环境、UTC、退出码和日志保存在`.local/verification/osmo-resume-20261022/a2-cancel-versions-final.*`及`a2-cancel-versions-unit.*`。独立上下文固定`23cfad2..3548096`评审通过，无Critical／Important／Minor；共同处理器和终态发布继续实施。后补满批专项在两事务入口分别实际保存128＋1项来源并固定129个成员，2项通过，日志为`a2-members-full-batch.*`；该专项证明满批事件及续页，不代替增长资源测试。
+
+**基准有限决定存储阶段：** 新增`segment_check_conclusions`及原申请／引用，NO_RESULT_WORK的基准分区只消费原H0内实际RETURN错误或UNCONFIRMED；动作保持RUNNING，占用及正式产物不变。两事务入口独立核锚点、来源、身份及有限字段，原键可经只读新连接核实。相关存储及仓储审计77项、后补快照2项、完整unit6975项分别通过；保留1项跳过及2条既有warning。日志为`.local/verification/osmo-resume-20261022/a3-baseline-conclusion-final.*`、`a3-baseline-conclusion-snapshot.*`及`a3-baseline-conclusion-unit.*`，环境仍为Python 3.11.16／SQLite 3.53.1。结构39表3800项断言、事件37类131分支及报告依赖检查通过。本阶段待独立评审；实际基准拥有者装配、其余结束分区、共同处理器和发布继续实施，不据此标记完整A3或P4完成。
 
 ## P5：让所有取回入口消费同一默认范围
 

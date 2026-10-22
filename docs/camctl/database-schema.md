@@ -68,6 +68,7 @@
 | `cancel_items` | [取消的逐目标处理](database/cleanup-cancellation.md#取消目标明细) |
 | `cancel_delivery_items` | [取消目标中的逐交付处理](database/cleanup-cancellation.md#取消动作的交付处理明细) |
 | `segment_sets` | [分段集合、判断与默认范围](database/segments.md) |
+| `segment_check_conclusions` | [分段核实的有限决定](database/segments.md#有限核实决定) |
 | `segment_members` | [分段集合、判断与默认范围](database/segments.md) |
 | `segment_gaps` | [分段集合、判断与默认范围](database/segments.md) |
 | `segment_scope_members` | [分段集合、判断与默认范围](database/segments.md) |
