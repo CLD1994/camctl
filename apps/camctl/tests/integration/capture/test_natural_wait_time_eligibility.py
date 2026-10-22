@@ -136,7 +136,12 @@ async def test_in_flight_regressed_page_remains_successful_but_cannot_complete_f
         mono[0] += (startup+1200)*1000000
         await advance(action_id, runtime)
         assert runtime.action(action_id)['status'] == 2
-        first = owned.connection.execute('SELECT id,occurred_at,body_json FROM history_events WHERE event_type=?', (load_event_registry()['events']['RESULT_PAGE']['id'],)).fetchall()
+        page_event = load_event_registry()['events']['RESULT_PAGE']
+        first = owned.connection.execute(
+            "SELECT id,occurred_at,body_json FROM history_events WHERE event_type=?"
+            " AND json_extract(body_json,'$.reason')=?",
+            (page_event['id'], page_event['branches']['APPEND']['reason']),
+        ).fetchall()
         assert len(first) == 1 and first[0][1] == due-1000
         assert owned.connection.execute('SELECT COUNT(*) FROM device_files WHERE completion_state=3').fetchone() == (0,)
         assert owned.connection.execute('SELECT status FROM operation_attempts WHERE run_id=? AND attempt_no=1', (calls[0].run_id,)).fetchone() == (2,)
