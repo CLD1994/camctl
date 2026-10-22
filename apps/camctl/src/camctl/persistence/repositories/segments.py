@@ -26,7 +26,8 @@ from camctl.contracts.pages import Page
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, MAX_OBJECT_ID
-from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_name
+from camctl.devices.segment_profiles import SegmentFileKind
+from .segment_profiles import profile_for_action
 from camctl.devices.segments import SegmentKey
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.outputs.catalog import OutputKind
@@ -160,6 +161,12 @@ def _eligible_original(member):
 def _output_candidate(db,setrow,stored):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
     member=stored.member
+    if (member.role is SegmentMemberRole.OTHER
+            and profile_for_action(db,setrow['action_id']).classify_file(member.identity).kind is SegmentFileKind.PHOTO
+            and member.ownership is OwnershipState.OWNED
+            and member.completion is FileCompletionState.COMPLETE
+            and member.size_bytes is not None and member.size_bytes > 0):
+        return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
     if _eligible_original(member):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
     if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
@@ -175,9 +182,10 @@ def _output_candidate(db,setrow,stored):
         same_family = (same_family and fact is not None
                        and fact['original_file_id'] == paired.file_id)
     else:
-        left=parse_osmo_segment_name(member.identity)
-        right=parse_osmo_segment_name(paired.member.identity)
-        same_family = left is not None and right is not None and left.pairing_identity == right.pairing_identity
+        profile=profile_for_action(db,setrow['action_id'])
+        left=profile.classify_file(member.identity)
+        right=profile.classify_file(paired.member.identity)
+        same_family = left.key is not None and right.key is not None and left.pairing_identity == right.pairing_identity
     if paired.member.role is not SegmentMemberRole.ORIGINAL or not same_family:
         raise ConsistencyError('预览没有同集合、同完整名称主干的真实原片')
     if (member.ownership is not OwnershipState.OWNED
@@ -420,7 +428,8 @@ def _input_member(db,item, *, current_boundary=None):
     if entry is None or (identity,item.file_id) not in saved.file_ids:
         raise ConsistencyError('固定文件与原页没有相同实际身份')
     _verify_strict_member(db, item, file, saved, current_boundary=current_boundary)
-    parsed=parse_osmo_segment_name(identity)
+    source=row_facts(db,'operation_runs',saved.ref.ticket.run_id)['action_id']
+    parsed=profile_for_action(db,source).classify_file(identity)
     size=file['size_bytes']
     return SegmentMember(identity,None if parsed is None else parsed.key,item.role,item.ownership,item.completion,
         size,item.pairing_identity,item.pairing_state),file
@@ -458,9 +467,10 @@ def _member_row(db,setrow,item, *, current_boundary=None):
         or raw['run_id']!=run['id'] or raw['attempt_no']!=attempt['attempt_no']
         or item.page_event_id>ref.final_page_event_id or file['source_action_id'] not in (None,ref.action_id)):
         raise ConsistencyError('成员的原页、文件或动作归属不同')
-    parsed=parse_osmo_segment_name(member.identity)
+    profile=profile_for_action(db,ref.action_id)
+    parsed=profile.classify_file(member.identity)
     strict = _uses_strict_proof(item, file)
-    role=SegmentMemberRole.ORIGINAL if member.identity.lower().endswith('.osv') else SegmentMemberRole.PREVIEW if member.identity.lower().endswith('.lrf') else SegmentMemberRole.OTHER
+    role=(SegmentMemberRole.ORIGINAL if parsed.kind is SegmentFileKind.VIDEO else SegmentMemberRole.PREVIEW if parsed.kind is SegmentFileKind.PREVIEW else SegmentMemberRole.OTHER)
     owned=OwnershipState.OWNED if file['source_action_id']==ref.action_id else OwnershipState.UNKNOWN
     completion=FileCompletionState.COMPLETE if file['completion_state']==3 else FileCompletionState.INCOMPLETE if file['completion_state']==4 else FileCompletionState.UNKNOWN
     if not strict and (member.key!=(None if parsed is None else parsed.key) or member.role!=role or member.ownership!=owned
@@ -473,8 +483,8 @@ def _member_row(db,setrow,item, *, current_boundary=None):
             or parse_exact_json(original['identity_key'])[2]!=member.pairing_identity
             or entry.paired_identity!=member.pairing_identity):
             raise ConsistencyError('预览配对不是同动作可靠原片')
-        other=parse_osmo_segment_name(member.pairing_identity)
-        if parsed is None or other is None or parsed.pairing_identity!=other.pairing_identity:
+        other=profile.classify_file(member.pairing_identity)
+        if parsed.key is None or other.key is None or parsed.pairing_identity!=other.pairing_identity:
             raise ConsistencyError('预览与原片名称主干不匹配')
     if not strict and member.pairing_state is PreviewPairingState.UNPAIRED and (file['original_device_file_id'] is not None or entry.paired_identity is not None):
         raise ConsistencyError('已配对文件不能保存为未配对')

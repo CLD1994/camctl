@@ -5,9 +5,8 @@ from camctl.contracts.enums import enum_for, load_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
-from camctl.devices.drivers.adb_cameras.osmo360ii_segments import (
-    parse_osmo_segment_name,
-)
+from camctl.devices.segment_profiles import SegmentFileKind
+from .segment_profiles import profile_for_action
 from camctl.history.events import load_event_registry
 
 from .result_file_proofs import _file_at
@@ -80,8 +79,10 @@ def segment_start_from_set(connection, setrow):
         if file["source_action_id"] != action_id or file["role"] != role:
             order_unknown = True
         identity = parse_exact_json(file["identity_key"])[2]
-        parsed = parse_osmo_segment_name(identity)
-        if parsed is None:
+        parsed = profile_for_action(connection, setrow["action_id"]).classify_file(identity)
+        if parsed.kind is SegmentFileKind.PHOTO:
+            continue
+        if parsed.key is None:
             order_unknown = True
             continue
         position = (parsed.key, page_id, file_id)

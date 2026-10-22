@@ -13,7 +13,7 @@ from camctl.contracts.enums import enum_for, load_registry
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
-from camctl.persistence.transaction import read_transaction_range
+from camctl.persistence.transaction import read_transaction_range, row_facts
 
 from . import capture, result_pages
 from .result_file_ownership import _proof
@@ -87,11 +87,19 @@ def load_completion_input(connection, page, file_id, boundary, *, current_bounda
     owned = (file["source_action_id"] == source and file["role"] == role
              and file["ownership_evidence_json"] is not None)
     original_role = role == int(enum_for("device_files.role").ORIGINAL)
+    member_role = SegmentMemberRole.ORIGINAL if original_role else SegmentMemberRole.PREVIEW
+    if original_role:
+        from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
+        spec = row_facts(connection, "actions", source)["execution_spec_json"]
+        if spec.get("result_policy") is not None:
+            identity = parse_exact_json(file["identity_key"])[2]
+            if profile_for_policy(spec["result_policy"]).classify_file(identity).kind is SegmentFileKind.PHOTO:
+                member_role = SegmentMemberRole.OTHER
     completed_page = _completion_page(connection, page, file, boundary)
     return SegmentMemberInput(
         file_id, page.event_id if completed_page is None else completed_page,
         file["last_event_id"],
-        SegmentMemberRole.ORIGINAL if original_role else SegmentMemberRole.PREVIEW,
+        member_role,
         OwnershipState.OWNED if owned else OwnershipState.UNKNOWN,
         FileCompletionState.UNKNOWN if completed_page is None else FileCompletionState.COMPLETE,
         pairing_state=(PreviewPairingState.NOT_APPLICABLE if original_role

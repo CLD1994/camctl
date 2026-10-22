@@ -2,16 +2,9 @@
 
 from dataclasses import dataclass
 import posixpath
-import re
+from camctl.devices.segment_profiles import profile_for_policy
 
 from camctl.devices.segments import SegmentKey
-
-
-_DIRECTORY = re.compile(r"CAM_(?P<number>[0-9]{3,})")
-_NAME = re.compile(
-    r"(?i:CAM)_(?P<datetime>[0-9]{14})_(?P<index>[0-9]{4})_"
-    r"(?P<camera_marker>D)\.(?P<suffix>(?i:OSV|LRF))"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,26 +31,13 @@ def parse_osmo_segment_name(path: str) -> OsmoSegmentName | None:
     datetime 不参与排序；配对身份保留完整目录和主干的原始大小写，
     只有文件扩展名按既有契约忽略大小写。
     """
-    if (not isinstance(path, str) or not path.startswith("/")
-            or "\0" in path or posixpath.normpath(path) != path):
+    facts = profile_for_policy("osmo360ii_record_segments_v1").classify_file(path)
+    if facts.key is None:
         return None
-    if any(part in {".", ".."} for part in path.split("/")):
-        return None
-    directory_name = posixpath.basename(posixpath.dirname(path))
-    directory = _DIRECTORY.fullmatch(directory_name)
-    filename = _NAME.fullmatch(posixpath.basename(path))
-    if directory is None or filename is None:
-        return None
-    try:
-        directory_number = int(directory.group("number"))
-        if directory_name != f"CAM_{directory_number:03d}":
-            return None
-        key = SegmentKey(directory_number, int(filename.group("index")))
-    except (ValueError, OverflowError):
-        return None
-    suffix = "." + filename.group("suffix").casefold()
-    pairing_identity = path[:-(len(suffix))]
-    return OsmoSegmentName(key=key, pairing_identity=pairing_identity, suffix=suffix)
+    return OsmoSegmentName(
+        key=facts.key, pairing_identity=facts.pairing_identity,
+        suffix=posixpath.splitext(path)[1].casefold(),
+    )
 
 
 def parse_osmo_segment_key(path: str) -> SegmentKey | None:

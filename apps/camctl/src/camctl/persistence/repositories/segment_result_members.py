@@ -7,7 +7,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal,parse_exact_json
 from camctl.contracts.values import ConsistencyError,OperationKey,UtcMicros
-from camctl.devices.drivers.adb_cameras.osmo360ii_segments import parse_osmo_segment_name
+from .segment_profiles import profile_for_action
 from camctl.history.events import load_event_registry
 from camctl.history.reads import SegmentReadScope
 from camctl.persistence.transaction import (
@@ -35,7 +35,7 @@ def _member_values(db,setrow,item):
         raise ConsistencyError('结果成员没有保持原H0的文件、页和严格分类')
     file=_fixed_file(db,item.file_id,item.file_event_id)
     identity=parse_exact_json(file['identity_key'])[2]
-    parsed=parse_osmo_segment_name(identity)
+    parsed=profile_for_action(db,setrow['action_id']).classify_file(identity)
     return dict(set_id=setrow['id'],file_id=item.file_id,page_event_id=item.page_event_id,
         file_event_id=item.file_event_id,identity=identity,
         directory_number=None if parsed is None else parsed.key.directory_number,
