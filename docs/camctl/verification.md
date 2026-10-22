@@ -620,7 +620,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 
 组合树的两项生成器 `--check`、包资源逐字节 `--check` 及诊断 `--help` 均退出 0。生成器源码变异验证覆盖重绑定、相对或嵌套导入、未知依赖和分发漂移的明确拒绝；生产完整模板和纯编码函数仍是独立诊断编码的来源。
 
-阶段命令、日志和退出码保存在各工作区忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/`：主树 `integrated-d1-unit`、`integrated-d1-dispatch`、`integrated-e1-p3`、`integrated-d1a-unit`、`integrated-d1a-integration`，交付树 `task-E1-chain-report.md` 及 `logs/e1-chain-verify-*`、`logs/e1-chain-review-products.log`，诊断树 `task-D1A-report.md` 及 `d1a-fix-logs`，客户端树 `task-C3-final-*`。原阶段日志与本次复验分别保留。
+阶段命令、日志和退出码保存在各工作区忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/`：主树 `integrated-d1-unit`、`integrated-d1-dispatch`、`integrated-e1-p3`、`integrated-d1a-unit`、`integrated-d1a-integration`，交付树 `logs/e1-chain-verify-*`、`logs/e1-chain-review-products.log`，诊断树 `d1a-fix-logs`，客户端树 `task-C3-final-*`。原阶段日志与本次复验分别保留。
 
 候选整链通过测试启动器显式注入相机合同，ADB、ffprobe 和采集时钟按测试范围替代；生产登记未由这些测试启用延时。整秒负载映射来自已有完整样例的有界推导，保留非时间字节，仍需实机核验模板适用性和未观察位。软件测试没有取得参数生效、实际开始、自然结束、停止重复安全性、单文件写完或结果集合齐备的新设备依据。正式 OSMO 合同和 ARM 完整业务验收继续由计划中的设备及后续阶段跟踪，Action6 正式延时仍沿原 T9 门槛。
 
@@ -645,7 +645,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 | `integration/session/test_clock.py` | 4 项通过，含完整目录之后加强的真实无更新路径 |
 | `integration/bootstrap/test_acceptance_clock_status.py` | 4 项通过 |
 
-以上命令退出码均为 `0`，stderr 日志为空。单元跳过验证 Linux 之外的守护行为；bootstrap 跳过依赖 Windows 文件系统的大小写别名。两条警告来自已有同步测试的 asyncio 标记，未修改对应测试。完整命令、红绿次序、日志和退出结果保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw01-acceptance-clock-status/sw01-report.md` 及其 `logs/`；早期一轮受理回归未捕获退出码，最终扩展后的完整目录已有退出码 `0` 的记录。
+以上命令退出码均为 `0`，stderr 日志为空。单元跳过验证 Linux 之外的守护行为；bootstrap 跳过依赖 Windows 文件系统的大小写别名。两条警告来自已有同步测试的 asyncio 标记，未修改对应测试。早期一轮受理回归未捕获退出码，最终扩展后的完整目录已有退出码 `0` 的记录。
 
 本次验证只覆盖软件受理、会话、事务和历史恢复，没有连接相机或 ARM 主机。
 
@@ -667,7 +667,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 | `integration/bootstrap` | 1025 项通过、1 项跳过 |
 | `integration/bootstrap/test_log_copy_diagnostics.py` | 29 项通过，含完整目录后增补的双诊断出口失败组合 |
 
-以上命令退出码均为 `0`，stderr 日志为空。跳过范围与 SW-01 相同；三条警告均为已有同步测试携带 asyncio 标记，日志目录新增的第三条来自 `test_handler.py::TestTwoProcesses::test_two_processes_share_file`。完整命令、红绿次序、输出和退出结果保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw02-log-copy-diagnostics/sw02-report.md` 及其 `logs/`；最终目录记录为 `084`、`085`、`086`、`092`，最后仅改 bootstrap 的工厂检查后，重新执行了受影响的完整目录。随后仅新增双诊断出口失败组合，生产文件保持原版本；`093` 新用例及 `094` 完整诊断模块分别通过，均退出码为 `0`。
+以上命令退出码均为 `0`，stderr 日志为空。跳过范围与 SW-01 相同；三条警告均为已有同步测试携带 asyncio 标记，日志目录新增的第三条来自 `test_handler.py::TestTwoProcesses::test_two_processes_share_file`。最终目录记录为 `084`、`085`、`086`、`092`，最后仅改 bootstrap 的工厂检查后，重新执行了受影响的完整目录。随后仅新增双诊断出口失败组合，生产文件保持原版本；`093` 新用例及 `094` 完整诊断模块分别通过，均退出码为 `0`。
 
 本次软件证据覆盖日志回执、报告触发及诊断装配。标记临时文件清理和取消后的文件责任由后续 SW-03、SW-04 承接，设备及目标部署验收保持各自范围。
 
@@ -691,7 +691,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 | `integration/logging_runtime/test_marker_temp_cleanup.py` | 8 项通过 |
 | `integration/bootstrap/test_log_copy_diagnostics.py` | 33 项通过 |
 
-以上命令退出码均为 `0`；完整目录的 stderr 日志为空，跳过及已有警告范围与 SW-02 相同。窄验证后生产及测试保持冻结，完整目录覆盖同一最终快照。命令、红绿次序、输出、耗时、退出码和文件摘要保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw03-marker-temp-cleanup/sw03-report.md` 及相邻日志；完整目录记录为 `sw03-full-*-execution.json`。早期测试构造或启动器错误与有效测试结果分别记录。
+以上命令退出码均为 `0`；完整目录的 stderr 日志为空，跳过及已有警告范围与 SW-02 相同。窄验证后生产及测试保持冻结，完整目录覆盖同一最终快照。完整目录记录为 `sw03-full-*-execution.json`。早期测试构造或启动器错误与有效测试结果分别记录。
 
 本次软件证据覆盖同步保存拥有者和诊断消费者。等待协程取消后的全部日志文件责任、遗留启动检查及会话锁放行由 SW-04 承接；真实设备、ARM 部署及物理断电保持各自验收范围。
 
@@ -716,7 +716,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 
 最终四份记录的 pytest 退出码均为 `0`，stderr 为空。跳过及既有警告范围与 SW-03 相同。启动目录首次完整运行是 1064 项通过、1 项跳过、10 项测试装配错误：两处包装函数未接收新增的可选日志拥有者参数，尚未执行原业务断言。仅同步这两个测试包装器并原样转发后，原十个参数通过，随后完整启动目录通过；生产及其余测试保持不变，前三目录沿原通过快照复用。单元测试结束后的记录脚本曾在汇总元数据时报错，已补全记录，未重跑已通过的 pytest。
 
-完整命令、红绿与夹具错误区别、stdout／stderr、时间、退出码和文件 SHA-256 保存在工作区忽略的 `.superpowers/sdd/2026-10-13-camctl-sw04-startup-log-sweep/execution-index.md` 及 `logs/full-gate/`；最终启动复验对应 `integration-bootstrap-recheck.json`。24 个生产与测试 Python 文件在最终复验前后摘要一致。文档检查和提交核验由根代理收口。
+最终启动复验对应 `integration-bootstrap-recheck.json`。24 个生产与测试 Python 文件在最终复验前后摘要一致。文档检查和提交核验由根代理收口。
 
 本次结果证明开发环境的软件启动、日志实际责任、取消及锁内消费；真实设备、ARM 部署和物理断电继续按各自计划验收。通用锁错误与独立资源释放由 SW-05 承接。
 

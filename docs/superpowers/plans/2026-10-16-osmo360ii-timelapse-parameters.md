@@ -117,7 +117,7 @@ assert params_after_validation == params_before_validation
 - `render_timelapse_time_parameters.py --write` 从生产定义生成共同硬件表及独立 `docs/hardware/timelapse-time-parameters.json`。后者保存精确 JSON 数字、严格关系、合法数量及最短组合，可随 Windows 诊断独立交付；不要求目标机安装源码或 Python 包。`--check` 核对两份派生内容并报告具体路径，缺失或损坏生成标记时明确失败。
 - 根时间接缝先确认生成器缺失和测试驱动命令缺失；两款既有 Python Schema 判定首次即符合预期。最终执行 `P tests/integration/test_timelapse_time_parameters.py -q`，3 项通过。两款分别从权威域穷举 144 对候选，使用独立有理数比较核对各 134 对合法输入，并覆盖精确等值／邻近值、半秒域外值、缺失及错误类型、型号输出和曝光结构；相同实际 `describe` 输出由 Chromium、Node.js 共享模块和真实后端导出消费。
 - 最短等值词元参数经真实受理，生效参数保持原值，执行目标为 `300000` 毫秒。未启动取消后的发布报告和客户端导入保持相同参数，估算元数据不进入导出动作、生效参数、执行定义或报告；设备调用数为零。该边界验证不替代完成拍摄的软件整链。
-- 既有 `test_video_size_estimate.py` 单独回归，12 项通过，验证原导出、HTTP、估算、执行及报告接缝。生成器 `--check`、文档文件链接、协议检查及 `git diff --check` 均按本阶段命令验证，完整命令、日志与退出码保存在本工作区 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/task-P3-report.md`。
+- 既有 `test_video_size_estimate.py` 单独回归，12 项通过，验证原导出、HTTP、估算、执行及报告接缝。生成器 `--check`、文档文件链接、协议检查及 `git diff --check` 均按本阶段命令验证，本节记录对应范围与结果。
 
 本阶段使用测试专用任务工厂，未增加产品候选能力开关。正式 OSMO 内置及安装版链由 E2 重验；Action6 延时继续保留自身启用门槛。以上不包含 ARM、真实相机、Windows 上的实际诊断执行或新命令编码验收。
 

@@ -57,7 +57,7 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 `append_result_members(ref,items,occurred_at,key,owned)` 只保存1—128项实际来源引用，独立核对原H0中的完整文件、原页和分类；`fix_result_members(ref,occurred_at,key,owned)` 按file_id双向比较全部实际来源与已保存成员，遗漏、替换、错误固定事件或分类均拒绝。成员来源仍覆盖早轮已可靠取得文件；后轮负向配对事实不会抹去保留文件的首次正向关联。当前扫描分类继续采用最后实际轮次自身的事实，不能借用保留资格补足当前集合。
 
-取消版本绑定实际取消请求及适用原未发布版本，同前版／取消事件唯一；没有前版时按动作／取消事件唯一。版本准备不登记正式outputs或scope。有限结论、原生摘要和完成发布由后续对应阶段接通。下述完整扫描模型端口保留其原有职责；它们不能用于把跨轮保留或无 RESULTS 集合转换成完整扫描。
+取消版本绑定实际取消请求及适用原未发布版本，同前版／取消事件唯一；没有前版时按动作／取消事件唯一。版本准备不登记正式 outputs 或 scope，实际取消处置按[普通录像取消](../../architecture/camera-recording.md#camera_record-取消)及原生规则分别判断。下述完整扫描模型端口保留其原有职责；它们不能用于把跨轮保留或无 RESULTS 集合转换成完整扫描。
 
 `SegmentRepository.create(SegmentSetCreate, key, owned)` 建立原扫描集合。`append_members(ref, inputs, occurred_at, key, owned)`、`append_gaps(ref, gaps, occurred_at, key, owned)`、`append_scope(ref, member_ids, occurred_at, key, owned)` 只接受 1—128 项元组；回执只返回原 `SegmentSetRef`。`fix_members(ref, occurred_at, key, owned)` 核对完整原页覆盖后固定成员。`save_assessment(ref, facts, assessment, occurred_at, key, owned)` 在可靠成员上重跑 P1 首遍及完整第二遍，并逐项对比保存缺口；缺项、多项、末游标、首缺口或数量不同均回滚。
 
@@ -65,11 +65,11 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 `segment_activation_rows(ref, event_id, owned)`、`segment_scope_publication_rows(ref, bindings, owned)` 和 `segment_event(ref, branch, rows, event_id, transaction_id, occurred_at, request_input=...)` 提供 P3 组合终态的有限构造基础，不自行提交完整终态事务。`bindings` 每项为 `(scope_member_id, output_id)`；PUBLISH 事件的原申请使用相同二项元组批次。`register_segment_guards()` 接入独立守卫；`SegmentReadScope` 只授权同集合的有限复核，不授权任意 SQL、设备操作或全动作驻留。
 
-现有报告 `registered_error` 仍将 `actions.error_details_json` 视为一棵普通错误树。关系和 `segment_error_expansion_at_same_h` 已登记数据来源，P6 必须实际接入增长展开及完整公开校验；该登记不代表当前报告已经补齐数组。P3 的完整原子发布、原申请有界核实和增长历史读取，以及 P4 的实际控制/等待资格核验，仍分别由对应任务完成。
+现有报告 `registered_error` 仍将 `actions.error_details_json` 视为一棵普通错误树。关系和 `segment_error_expansion_at_same_h` 已登记数据来源，P6 必须实际接入增长展开及完整公开校验；该登记不代表当前报告已经补齐数组。实际来源的发布、控制／等待资格核验及报告接入进度由[正式实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)跟踪。
 
 完整 `SegmentAssessment` 保存及独立重算仅适用于 `osmo360ii_record_segments_v1`，原生延时 `osmo_empty_tail_classification_v1` 调用该入口明确拒绝。两种策略都可复用固定集合的 action/activity/run/实际 attempt、末页、版本、创建事件及成员 file/page/file_event 引用。原生延时目前只具备原始冻结事实端口；其专属空尾分类保存、时序和产物排除由 P4 接入，不调用普通录像下界或 N 范围。
 
-ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISHED、OUTPUT_REGISTERED、output_origins 及范围 PUBLISH 事实，核对实际来源/文件身份和完整数量。当前 action 已终态不能替代同组证明；已有正式集合时拒绝新键再次发布。UNKNOWN/EMPTY 的零范围关系仍有正式集合引用。发布事件可经原 SegmentReadScope 或已验证为同计划的 PlanReadScope 进入守卫；该端口只读取内核已有已验证事件，不复制增长事件数组。P3 仍须将完整原申请、终态、产物、origin、范围和标记放入有界整组执行器，并负责原 key 的未知回执核实；既有 FinishCaptureCommand 的整对象重用入口不是该新完成申请的正式实现。
+ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISHED、OUTPUT_REGISTERED、output_origins 及范围 PUBLISH 事实，核对实际来源/文件身份和完整数量。当前 action 已终态不能替代同组证明；已有正式集合时拒绝新键再次发布。UNKNOWN/EMPTY 的零范围关系仍有正式集合引用。发布事件可经原 SegmentReadScope 或已验证为同计划的 PlanReadScope 进入守卫；该端口只读取内核已有已验证事件，不复制增长事件数组。完整原申请、终态、产物、origin、范围和标记由同一有界整组执行器提交，原 key 的未知回执核实读取原完整申请；既有 FinishCaptureCommand 的整对象重用入口不能替代分段完成申请。
 
 分段公共 scope/neighbor/kind 字面量由 enum-registry.json 的成员名小写生成；check-database-spec.py --write-enum-doc 同步公开 Schema 并在只读检查时核对。Python StrEnum 类同样从该登记生成，数据库使用原整数编号。事件类型与分支由 event-transitions.json 生成，动作及逐项错误编号从公共错误登记生成。
 

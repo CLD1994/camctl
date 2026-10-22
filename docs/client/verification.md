@@ -196,7 +196,7 @@ Linux x86_64 上的 Node.js 24.20.0、25.9.0 和 26.12.0 分别使用当前锁�
 
 双浏览器新增清洁删除验证由 A 实际点击删除按钮，B 的 Editor 结束，实际焦点回到可见草稿入口，B 零 POST／PUT、无合成离页责任，reload 不重建旧 ID。配对验证保留 save 在途、export/delete unknown 的完整只读输入与具体处理入口；领域分区补齐 recoveryContent、append、selection、copy 的独立责任。unavailable/invalid 不按删除导航，迟到 deleted 不抢已经选择的其他草稿／记录／设备页。copy 断言比较实际 `c.local` 全部源动作 ID 集合，目标全部 ID 与之不相交，sourceId 指向目标自身来源，所选业务内容、私有分支和精确数字保持。
 
-当前源码门禁如下。2026-10-12 的独立限定复审完整核对 12 个文件的修复差异及实际门禁日志，F1、F2、F3、M1、M2 全部为 `ADDRESSED`，结论为 `Approved`，没有新增或残留的阻断项。最终报告为 `.superpowers/sdd/2026-10-11-client-draft-conflicts/final-fix-rereview-report.md`，门禁日志为同目录的 `final-fix-*.log`。历史 Task7 端点不与当前门禁数量相加。
+当前源码门禁如下。2026-10-12 的独立限定复审完整核对 12 个文件的修复差异及实际门禁日志，F1、F2、F3、M1、M2 全部为 `ADDRESSED`，结论为 `Approved`，没有新增或残留的阻断项。本节保存该次复审结论及对应门禁结果。历史 Task7 端点不与当前门禁数量相加。
 
 | 当前命令与范围 | 2026-10-12 北京时间、退出码与结果 |
 | --- | --- |
