@@ -5,13 +5,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import islice, chain
 
-from camctl.capture.segment_errors import public_gap, validate_segment_error_header
-from camctl.capture.segment_models import (
+from camctl.contracts.segment_errors import public_gap, validate_segment_error_header
+from camctl.contracts.segment_values import (
     SegmentGap,
     SegmentGapKind,
     SegmentGapNeighborState,
 )
-from camctl.capture.segment_storage import decode_enum
 from camctl.contracts.public_projection import (
     OMIT,
     ProjectionInput,
@@ -20,7 +19,7 @@ from camctl.contracts.public_projection import (
 )
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import _public_json_registry
-from camctl.devices.segments import SegmentKey
+from camctl.contracts.segment_values import SegmentKey, decode_text_enum
 from camctl.history.queries import ReportScopeRequest
 from camctl.reporting.stream_validation import (
     CompletionRequirement,
@@ -230,11 +229,11 @@ class _SegmentExpansion:
         gap = SegmentGap(
             SegmentKey(values["start_directory"], values["start_index"]),
             SegmentKey(values["end_directory"], values["end_index"]),
-            decode_enum(SegmentGapKind, values["kind"]),
+            decode_text_enum(SegmentGapKind, values["kind"], column="segment_gaps.kind"),
             None if left is None else left["identity"],
             None if right is None else right["identity"],
-            decode_enum(SegmentGapNeighborState, values["neighbors_json"]["left"]),
-            decode_enum(SegmentGapNeighborState, values["neighbors_json"]["right"]),
+            decode_text_enum(SegmentGapNeighborState, values["neighbors_json"]["left"], column="segment_gaps.neighbors_json.state"),
+            decode_text_enum(SegmentGapNeighborState, values["neighbors_json"]["right"], column="segment_gaps.neighbors_json.state"),
             None if empty is None else empty["identity"],
         )
         result = public_gap(gap)

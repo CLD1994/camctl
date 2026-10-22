@@ -10,6 +10,7 @@ from camctl.capture.segment_models import (
     SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind,
     ResultCheckEndReason,CurrentSegmentResult)
 from camctl.contracts.enums import enum_for
+from camctl.contracts.segment_values import decode_text_enum
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.devices.segments import SegmentKey
@@ -132,9 +133,7 @@ def encode_enum(value):
 
 
 def decode_enum(kind, value):
-    if type(value) is not int:
-        raise ValueError('保存的分段枚举必须是整数')
-    return kind[enum_for(_ENUM_COLUMNS[kind])(value).name]
+    return decode_text_enum(kind, value, column=_ENUM_COLUMNS[kind])
 
 
 def document(value):

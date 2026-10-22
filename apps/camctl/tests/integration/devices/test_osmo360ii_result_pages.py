@@ -41,8 +41,10 @@ BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
 class Filesystem:
     def __init__(self, paths):
         self.paths = sorted(paths)
+        self.directory_calls = []
 
     async def read_directory(self, request, *, stop):
+        self.directory_calls.append(request)
         after = None if request.cursor is None else request.cursor.after_path
         remaining = [path for path in self.paths if after is None or path > after]
         selected = remaining[:request.batch]
@@ -154,18 +156,20 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
     assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (len(expected),)
     assert pages[-1].page.set_finalized is True
     previews = [entry for page in pages for entry in page.page.entries if entry.format_id == "lrf"]
-    assert all(entry.paired_identity == entry.identity.rsplit(".", 1)[0] + ".OSV" for entry in previews)
+    assert all(entry.paired_identity is None for entry in previews)
+    assert len(fs.directory_calls) == len(pages)
     for preview in previews:
-        original = runtime.capture.read_result_file_input(saved_refs[-1], preview.paired_identity,
+        original_identity = preview.identity.rsplit(".", 1)[0] + ".OSV"
+        original = runtime.capture.read_result_file_input(saved_refs[-1], original_identity,
             owned, allow_missing=True)
-        if preview.paired_identity in baseline:
+        if original_identity in baseline:
             assert original is None
         else:
-            assert original is not None and original[0].identity == preview.paired_identity
+            assert original is not None and original[0].identity == original_identity
     assert owned.connection.execute("SELECT COUNT(*) FROM device_files WHERE source_action_id IS NOT NULL").fetchone() == (0,)
 
 
-async def test_osmo_formal_result_adapter_conflicts_when_prior_osv_disappears(
+async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_disappears(
         owned, tmp_path, monkeypatch):
     paths = [ROOT + f"/a/{index:03}.OSV" for index in range(31)]
     original, preview = ROOT + "/z/Clip.OSV", ROOT + "/z/Clip.lrf"
@@ -190,12 +194,18 @@ async def test_osmo_formal_result_adapter_conflicts_when_prior_osv_disappears(
     second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
         output_scope=output_scope, completion_context=context)
 
-    diagnostic = second.outcome.settlement.evidence.data["optional_preview_observations"][0]
     page = next(value.data for value in second.outcome.observations
         if value.type == "result_files_listed")
-    assert second.outcome.error.code == "osmo360ii_result_conflict"
+    assert second.outcome.error is None
     assert second.outcome.settlement.evidence.version == 1
-    assert page["set_finalized"] is False and page["entries"] == []
-    assert diagnostic["state"] == "original_missing"
-    assert diagnostic["original_identity"] == original
-    assert diagnostic["osv_count"] == 0
+    assert page["set_finalized"] is True
+    assert [entry["identity"] for entry in page["entries"]] == [preview]
+    assert page["entries"][0]["paired_identity"] is None
+    assert len(filesystem.directory_calls) == 2
+    second_save = runtime.capture.save_result_page(ResultPageSave(ticket, 2, first.next_cursor,
+        validate_outcome(ticket, second.outcome, driver.contract.evidence), _SCHEDULED + 4),
+        new_operation_key(), owned)
+    assert second_save.kind is DbOutcomeKind.COMPLETED, second_save.error
+    observed = runtime.capture.read_result_file_input(second_save.value, original, owned)
+    assert observed[0].identity == original and observed[0].size_bytes == 10
+    assert runtime.capture.read_result_file_input(second_save.value, preview, owned)[0].identity == preview

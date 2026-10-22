@@ -21,7 +21,7 @@
 | 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建；最终完整 `component-reporting-145300` 435 项通过。 |
 | 单元汇总 | `unit-delivery` 6977 passed、1 skipped、2 条既有警告，退出 0；该次包含占用释放修正后的生产代码。 |
 | 客户端完整验证 | `client-unit` 65 文件／3197 项、`client-integration` 40 文件／1566 项通过；`client-typecheck` 和 `client-build` 退出 0。构建保留原有大块体积提示。18 项直接依赖与已锁定版本一致，锁文件未修改。 |
-| 安装版分段矩阵 | `installed-segments` 4 passed、2 failed：普通两段、多录六段、缺段前缀和原生空尾通过。空范围的零条目来源失败汇总、未知名称的原配对事实重用已修正，完整六场景仍待复验。 |
+| 安装版分段矩阵 | 初轮 `installed-segments` 为 4 passed、2 failed；后续 `installed-segments-final-150140` 为 5 passed、1 failed。空范围已通过，未知名称跨轮配对仍暴露尝试身份问题；修正后的完整六场景待复验。 |
 | 完整 outputs | `component-outputs-isolated-143747` 2487 passed、2 skipped，退出 0。两项跳过分别是内部副本不发布普通 delivery、主机源不携带设备读取配置；未缺少工具。 |
 | 规格与静态检查 | `database-final` 39 表／3803 项断言；`history-sql-final`、`event-final`、`dependencies-final`、`protocol-final`、`config-final` 均退出 0。 |
 
@@ -31,7 +31,15 @@ outputs 初轮 `outputs-final` 为 2449 passed、35 failed、2 skipped；35 项�
 
 bootstrap 初轮发现失败后主动中断，`component-bootstrap-145433` 为 213 passed、1 failed，退出 2。恢复夹具补全正式 `capture_segment_writes` 集合，并同步另一处共同恢复夹具；恢复及报告错误流程三个完整文件 `bootstrap-recovery-fixtures` 共 4 项通过。完整 bootstrap 仍待重跑；其余组件在独立工作区 `/tmp/camctl-osmo-components-20261022`、提交 `b776301` 上逐目录运行。
 
-P8 的完整组件目录、最终 wheel 六场景、既有 OSMO、单原片清理及 Action6 安装链正在顺序回归。剩余完整结果随后记录，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
+完整依赖回归发现报告层引用拍摄／设备模块、拍摄预分类直接依赖 SQLite。共享有限值和错误头移至 `contracts`，临时排序索引移至持久化仓储；未放宽依赖检查。修正后 `contracts-repaired-161619` 为 442 passed，`devices-repaired-161714` 为 220 passed，`reporting-repaired-161745` 为 435 passed。`unit-architecture-final-151618` 为 6977 passed、1 skipped，保留两条既有警告。
+
+跨轮配对查重原先把 `AttemptTicket.attempt_id` 的尝试序号直接与配对事实中的实际尝试行 ID 比较，导致第二轮已保存事实无法复用。修正为按原 run 和尝试序号定位实际行；`capture-pairing-repeat-151747` 完整文件 25 passed，覆盖两轮行 ID 与序号不同、配对及正式产物不重复、唯一 STOP。
+
+历史全库独立预期补齐结果页索引、基准调用、分段集合及成员和配对事实的归属，并登记实际 `BASELINE_READ` 验证入口；内部读取场景继续逐行比较动作自身完整成员。`history-oracle-repaired2-162140` 完整文件 21 passed；完整 history 目录另行复验。
+
+容器重启中断了 `component-capture-final-145524`、`component-bootstrap-final-150123` 和 `component-persistence-isolated-151822`；这些日志没有最终退出码，不计为通过。bootstrap 和 persistence 在中断前已有失败，后续分别定位并复验。其他独立目录已有完整退出 0 的结果：acceptance 338 项、cancellation 396 项、host_files 120 项、logging_runtime 112 项（保留一条既有标记警告）、motor 12 项及 operations 314 项；原命令和提交保留在 `isolated-components-results.json`。history 的旧归属断言和事件覆盖表待补齐后复验。
+
+P8 的完整组件目录、最终 wheel 六场景、既有 OSMO、单原片清理及 Action6 安装链继续按实际结果收尾，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
 
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 

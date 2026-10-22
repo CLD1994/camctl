@@ -162,6 +162,8 @@ def _expected_row_owner(image, key):
         "cleanup_items": "action_id", "cancel_items": "action_id",
         "action_dependencies": "action_id", "auto_preview_links": "obtain_action_id",
         "motor_notifications": "action_id",
+        "result_page_files": "action_id", "baseline_read_calls": "action_id",
+        "segment_sets": "action_id",
     }
     if table in action_columns:
         return _entity_type_of("action"), values[action_columns[table]]
@@ -172,6 +174,11 @@ def _expected_row_owner(image, key):
         "obtain_items": ("obtain_source_selections", "selection_id"),
         "cancel_delivery_items": ("cancel_items", "cancel_item_id"),
         "operation_attempts": ("operation_runs", "run_id"),
+        "segment_members": ("segment_sets", "set_id"),
+        "segment_gaps": ("segment_sets", "set_id"),
+        "segment_scope_members": ("segment_sets", "set_id"),
+        "segment_check_conclusions": ("segment_sets", "set_id"),
+        "device_file_pairing_facts": ("device_files", "preview_file_id"),
     }
     if table in parents:
         parent_table, column = parents[table]
@@ -458,7 +465,7 @@ async def test_real_internal_read_event_helper_inherits_processing_action(owned)
     # 场景只有一个录像动作；启动、停止、结果列举及内部读取均属于它。
     members = {("actions", 1), ("device_activities", 1),
                ("recording_processing", 1), ("file_copies", copy_id)}
-    for table in ("operation_runs", "operation_attempts"):
+    for table in ("operation_runs", "operation_attempts", "result_page_files"):
         members.update((table, row[0]) for row in owned.connection.execute(f"SELECT id FROM {table}"))
     expected = _business_rows({key: row_facts(owned.connection, *key) for key in members})
     history = HistoryRepository(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2]))
@@ -708,6 +715,7 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
     "ATTEMPT_RESULT": (False, ["apps/camctl/tests/integration/operations/test_attempts.py"]),
     "DEVICE_OBSERVED": (False, ["apps/camctl/tests/integration/capture/test_capture_contract.py"]),
     "BASELINE_CHUNK": (False, ["apps/camctl/tests/integration/capture/test_baseline_history.py"]),
+    "BASELINE_READ": (False, ["apps/camctl/tests/integration/capture/test_baseline_read_owner.py"]),
     "CAPTURE_WAIT_CHANGED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
     "RESULT_SET_CONFIRMED": (False, ["apps/camctl/tests/integration/capture/test_result_confirmation.py"]),
     "RESULT_PAGE": (False, ["apps/camctl/tests/integration/capture/test_result_page_history.py"]),

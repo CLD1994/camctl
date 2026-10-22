@@ -1,28 +1,10 @@
 """固定结果前的有界分类，仅决定是否继续原有限核实。"""
 
-from contextlib import closing, contextmanager
-from tempfile import TemporaryDirectory
-from pathlib import Path
-import sqlite3
-
-from camctl.capture.segment_models import (
-    CompletionFacts,
-    EvidenceState,
-    SegmentAccumulator,
-    SegmentSetRef,
-    SegmentMember,
-    SegmentMemberRole,
-    OwnershipState,
-    FileCompletionState,
-    PreviewPairingState,
-)
-from camctl.capture.segment_storage import SegmentSourceKind, document, decode_enum, key
-from camctl.capture.segments import (
-    advance_segment_assessment,
-    finish_segment_assessment,
-)
-from camctl.contracts.json_values import parse_exact_json
-from camctl.persistence.transaction import row_facts, encode_json_value
+from camctl.capture.segment_models import CompletionFacts, EvidenceState, SegmentAccumulator, SegmentSetRef
+from camctl.capture.segment_storage import SegmentSourceKind
+from camctl.capture.segments import advance_segment_assessment, finish_segment_assessment
+from camctl.persistence.repositories.segment_listing import ordered_listing_members
+from camctl.persistence.transaction import row_facts
 
 
 def assess_current_listing(runtime, action, listing, control, overrun):
@@ -82,67 +64,7 @@ def assess_current_listing(runtime, action, listing, control, overrun):
     state = SegmentAccumulator(
         ref, action["execution_spec_json"]["target_duration_ms"], start.key
     )
-    with ordered_listing_members(runtime, listing) as members:
+    with ordered_listing_members(runtime.owned, listing) as members:
         for member in members():
             state = advance_segment_assessment(state, member)
     return finish_segment_assessment(state, facts)
-
-
-@contextmanager
-def ordered_listing_members(runtime, listing):
-    from camctl.persistence.repositories.segment_result_sets import (
-        _boundary,
-        _current_input,
-    )
-    from camctl.persistence.repositories.segments import _input_member
-
-    db = runtime.owned.connection
-    boundary = _boundary(db)
-    attempt = row_facts(
-        db,
-        "operation_attempts",
-        db.execute(
-            "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-            (listing.ticket.run_id, listing.ticket.attempt_id),
-        ).fetchone()[0],
-    )
-    with (
-        TemporaryDirectory(prefix="camctl-segment-order-") as folder,
-        closing(sqlite3.connect(str(Path(folder) / "order.db"))) as ordered,
-    ):
-        ordered.execute(
-            "CREATE TABLE members (directory INTEGER, position INTEGER, identity TEXT, file_id INTEGER PRIMARY KEY, value TEXT)"
-        )
-        for saved in listing.entries.pages():
-            for _, file_id in saved.file_ids:
-                item = _current_input(
-                    db, saved.ref, file_id, attempt, listing.entries.last_ref, boundary
-                )
-                member, _ = _input_member(db, item)
-                ordered.execute(
-                    "INSERT INTO members VALUES (?,?,?,?,?)",
-                    (
-                        0 if member.key is None else member.key.directory_number,
-                        0 if member.key is None else member.key.index,
-                        member.identity,
-                        file_id,
-                        encode_json_value(document(member)),
-                    ),
-                )
-
-        def members():
-            for (raw,) in ordered.execute(
-                "SELECT value FROM members ORDER BY directory,position,identity,file_id"
-            ):
-                value = parse_exact_json(raw)
-                value["key"] = key(value["key"])
-                for field, kind in (
-                    ("role", SegmentMemberRole),
-                    ("ownership", OwnershipState),
-                    ("completion", FileCompletionState),
-                    ("pairing_state", PreviewPairingState),
-                ):
-                    value[field] = decode_enum(kind, value[field])
-                yield SegmentMember(**value)
-
-        yield members

@@ -186,10 +186,13 @@ def register_segment_observations(runtime, action_id, listing):
                 if identity.rpartition(".")[2].lower() != "lrf":
                     continue
                 existing = runtime.owned.connection.execute(
-                    "SELECT id FROM device_file_pairing_facts WHERE preview_file_id=?"
-                    " AND attempt_id=? AND final_page_event_id=?",
+                    "SELECT p.id FROM device_file_pairing_facts p"
+                    " JOIN operation_attempts a ON a.id=p.attempt_id"
+                    " WHERE p.preview_file_id=? AND a.run_id=? AND a.attempt_no=?"
+                    " AND p.final_page_event_id=?",
                     (
                         file_id,
+                        listing.ticket.run_id,
                         listing.ticket.attempt_id,
                         listing.entries.last_ref.event_id,
                     ),

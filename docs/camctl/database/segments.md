@@ -53,6 +53,10 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 ## 生产端口与后续分工
 
+`contracts/segment_values.py` 提供拍摄、持久化和报告共用的有限值，`contracts/segment_errors.py` 维护有限错误头及单个缺口的公开表示。文本枚举仍从权威整数登记派生。报告层读取共享契约，不依赖拍摄处理器或设备模块。
+
+`persistence/repositories/segment_listing.py` 将已保存原页的单文件事实逐项写入临时磁盘索引，按设备键续读；普通录像和原生延时的完成模块消费同一读取端口。该索引不替代原页、固定文件事实或正式集合，也不提交业务状态。
+
 `create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。
 
 `append_result_members(ref,items,occurred_at,key,owned)` 只保存1—128项实际来源引用，独立核对原H0中的完整文件、原页和分类；`fix_result_members(ref,occurred_at,key,owned)` 按file_id双向比较全部实际来源与已保存成员，遗漏、替换、错误固定事件或分类均拒绝。成员来源仍覆盖早轮已可靠取得文件；后轮负向配对事实不会抹去保留文件的首次正向关联。当前扫描分类继续采用最后实际轮次自身的事实，不能借用保留资格补足当前集合。

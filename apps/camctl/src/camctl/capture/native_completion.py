@@ -18,7 +18,7 @@ from camctl.persistence.transaction import row_facts
 
 async def advance_native_result(runtime, action_id, *, canceled=False):
     from camctl.capture import handlers as common
-    from camctl.capture.segment_preflight import ordered_listing_members
+    from camctl.persistence.repositories.segment_listing import ordered_listing_members
 
     resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
     db = runtime.owned.connection
@@ -42,7 +42,7 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
         prepared = repository.prepare_result_set(
             action_id, runtime.wall_us(), runtime.owned
         )
-        with ordered_listing_members(runtime, listing) as members:
+        with ordered_listing_members(runtime.owned, listing) as members:
             classified = classify_native_members(
                 members,
                 complete=prepared.source_kind is SegmentSourceKind.COMPLETE_SCAN,

@@ -732,6 +732,43 @@ async def test_incomplete_segment_scan_keeps_qualified_files_without_complete_de
         owned.connection.close()
 
 
+async def test_repeated_unknown_order_scan_reuses_pairing_by_attempt_row_identity(tmp_path):
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
+    try:
+        runtime.check_config = AttemptConfig(2, Decimal("2"), Decimal("0"))
+        context = _stop_context(owned, action_id)
+
+        async def read(request, batch):
+            runtime.wall_us = lambda: _NOW + 17_000_000
+            runtime.monotonic_ns = lambda: 22_000_000_000
+            return _completed_result(
+                request.ticket, context,
+                entries=[_entry("CAM001/unknown.LRF"), _entry("CAM001/unknown.OSV")],
+                finalized=True,
+            )
+
+        driver = _result_port(runtime, read)
+        await capture_handler(handler)(action_id, runtime)
+        assert runtime.action(action_id)["status"] == 2
+        await capture_handler(handler)(action_id, runtime)
+        assert runtime.action(action_id)["status"] == 4
+        assert owned.connection.execute(
+            "SELECT COUNT(*),COUNT(DISTINCT final_page_event_id) FROM device_file_pairing_facts"
+        ).fetchone() == (2, 2)
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM device_file_pairing_facts p JOIN operation_attempts a"
+            " ON a.id=p.attempt_id WHERE a.id<>a.attempt_no"
+        ).fetchone()[0] == 2
+        assert owned.connection.execute(
+            "SELECT kind,COUNT(*) FROM outputs GROUP BY kind ORDER BY kind"
+        ).fetchall() == [(1, 1), (3, 1)]
+        assert owned.connection.execute("SELECT COUNT(*) FROM segment_scope_members").fetchone() == (0,)
+        assert driver.list_results.await_count == 2
+        stopper.stop.assert_awaited_once()
+    finally:
+        owned.connection.close()
+
+
 async def test_single_original_frozen_task_keeps_its_existing_handler(
     tmp_path, monkeypatch
 ):

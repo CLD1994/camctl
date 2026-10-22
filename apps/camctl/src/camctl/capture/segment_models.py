@@ -1,19 +1,16 @@
 """拍摄分段规则使用的稳定事实、有限摘要与结果分类。"""
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId
-from camctl.contracts.enums import enum_for
-from camctl.devices.segments import SegmentKey
+from camctl.contracts.segment_values import (
+    DefaultScopeState, SegmentGap, SegmentGapKind, SegmentGapNeighborState,
+    SegmentKey, text_enum_for,
+)
 
 
 def _text_enum(name, column):
-    """从唯一整数登记派生 P1 文本枚举，保留原 StrEnum 契约。"""
-    return StrEnum(
-        name, {member.name: member.name.lower() for member in enum_for(column)},
-        module=__name__,
-    )
+    return text_enum_for(name, column, module=__name__)
 
 
 EvidenceState = _text_enum("EvidenceState", "segment_sets.facts_json.evidence")
@@ -50,18 +47,7 @@ CompletionBasis = _text_enum("CompletionBasis", "segment_sets.assessment_json.ba
 
 OverrecordStatus = _text_enum("OverrecordStatus", "segment_sets.assessment_json.overrecord")
 
-
-DefaultScopeState = _text_enum("DefaultScopeState", "segment_sets.assessment_json.scope_state")
-
-
 DefaultScopeBasis = _text_enum("DefaultScopeBasis", "segment_sets.assessment_json.scope_basis")
-
-
-SegmentGapKind = _text_enum("SegmentGapKind", "segment_gaps.kind")
-
-
-SegmentGapNeighborState = _text_enum("SegmentGapNeighborState", "segment_gaps.neighbors_json.state")
-
 
 @dataclass(frozen=True, slots=True)
 class SegmentSetRef:
@@ -239,48 +225,6 @@ class DefaultSegmentScope:
                     or self.last_cursor is None or type(self.member_count) is not int
                     or self.member_count <= 0 or self.last_cursor < self.first_cursor):
                 raise ValueError("非空默认范围必须提供有效首尾游标和成员数")
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentGap:
-    """一个缺失区间或一个非尾部零字节原片的结构化诊断。"""
-
-    start_key: SegmentKey
-    end_key: SegmentKey
-    kind: SegmentGapKind
-    left_member_identity: str | None
-    right_member_identity: str | None
-    left_neighbor_state: SegmentGapNeighborState
-    right_neighbor_state: SegmentGapNeighborState
-    empty_member_identity: str | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.start_key, SegmentKey) or not isinstance(self.end_key, SegmentKey):
-            raise ValueError("缺口必须提供可靠起止顺序键")
-        if self.end_key < self.start_key:
-            raise ValueError("缺口结束位置不能早于起始位置")
-        if not isinstance(self.kind, SegmentGapKind):
-            raise ValueError("缺口类型未登记")
-        if (self.kind is SegmentGapKind.ZERO_BYTE_NON_TAIL
-                and self.start_key != self.end_key):
-            raise ValueError("零字节缺口必须只指向一个OSV位置")
-        for name in ("left_neighbor_state", "right_neighbor_state"):
-            if not isinstance(getattr(self, name), SegmentGapNeighborState):
-                raise ValueError(f"{name} 未登记")
-        for name in ("left_member_identity", "right_member_identity", "empty_member_identity"):
-            value = getattr(self, name)
-            if value is not None:
-                if not isinstance(value, str) or not value:
-                    raise ValueError(f"{name} 必须是非空文件身份或未知")
-                value.encode("utf-8")
-        for side in ("left", "right"):
-            state = getattr(self, f"{side}_neighbor_state")
-            identity = getattr(self, f"{side}_member_identity")
-            if (state is SegmentGapNeighborState.KNOWN) != (identity is not None):
-                raise ValueError("已知邻接必须提供身份，未知或不存在邻接不得冒用身份")
-        if ((self.kind is SegmentGapKind.ZERO_BYTE_NON_TAIL)
-                != (self.empty_member_identity is not None)):
-            raise ValueError("零字节缺口必须引用真实OSV身份，缺失位置不得携带文件身份")
 
 
 @dataclass(frozen=True, slots=True)
