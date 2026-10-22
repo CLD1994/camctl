@@ -172,7 +172,7 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     from camctl.outputs.segment_query import advance_segment_queries
 
     await advance_segment_queries(runtime, now)
-    _qualify_selected_items(runtime, now)
+    await _qualify_selected_items(runtime, now)
     publish_remaining = runtime.discovery.batch_size
     for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "finish", now,
             "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4").items:
@@ -305,22 +305,23 @@ def _fix_pending_selections(
                 f" {outcome.error}")
 
 
-def _qualify_selected_items(
+async def _qualify_selected_items(
         runtime: ObtainRuntime, now: int) -> None:
     """为没有交付的已选中条目申请读取资格建档；等待不阻塞其他条目。"""
     connection = runtime.owned.connection
     page = runtime.discovery.rows(connection, "items", now,
-        "SELECT i.id,i.output_id,d.action_id FROM obtain_items i"
+        "SELECT i.id,i.output_id,d.action_id,i.selection_id FROM obtain_items i"
         " JOIN obtain_source_selections s ON s.id=i.selection_id"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
         " JOIN actions a ON a.id=d.action_id"
         " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
         " AND i.status=? AND i.delivery_id IS NULL", (int(_ITEM_STATUS.SELECTED),), identity="i.id")
-    for item_id, output_id, action_id in page.items:
+    for item_id, output_id, action_id, selection_id in page.items:
         action = _action_facts(connection, action_id)
+        candidate = await _delivery_candidate(
+            runtime, action, int(item_id), int(output_id), int(selection_id), now)
         outcome = runtime.outputs.grant_file(
-            _delivery_candidate(runtime, action, int(item_id),
-                                int(output_id), now),
+            candidate,
             new_operation_key(), runtime.owned)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(
@@ -328,20 +329,20 @@ def _qualify_selected_items(
                 f" {outcome.error}")
 
 
-def _delivery_candidate(
+async def _delivery_candidate(
         runtime: ObtainRuntime, action: Mapping, item_id: int,
-        output_id: int, now: int,
+        output_id: int, selection_id: int, now: int,
 ) -> FileCandidate:
     """从产物事实构造交付建档候选；来源与可读名称由产物行推导。"""
     connection = runtime.owned.connection
     with closing(connection.execute(
-        "SELECT source_action_id, device_file_id, intermediate_file_id"
+        "SELECT source_action_id, device_file_id, intermediate_file_id, original_name"
         " FROM outputs WHERE id = ?", (output_id,),
     )) as cursor:
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError(f"取回条目的产物缺失: {output_id}")
-    source_action_id, device_file_id, intermediate_file_id = row
+    source_action_id, device_file_id, intermediate_file_id, original_name = row
     with closing(connection.execute(
         "SELECT a.name, p.name FROM actions a"
         " JOIN plans p ON p.id = a.plan_id WHERE a.id = ?",
@@ -352,6 +353,37 @@ def _delivery_candidate(
         raise ConsistencyError(f"产物来源动作缺失: {source_action_id}")
     source_action_name, plan_name = names
     if device_file_id is not None:
+        from camctl.persistence.repositories.segment_selections import (
+            is_segmented_source,
+        )
+        from camctl.outputs.segment_copy_reuse import (
+            check_copy_is_locally_usable,
+            read_bound_check_copy,
+        )
+
+        bound = None
+        if is_segmented_source(connection, int(source_action_id)):
+            bound = read_bound_check_copy(
+                source_action_id=int(source_action_id),
+                source_device_file_id=int(device_file_id),
+                obtain_action_id=int(action["id"]),
+                selection_id=selection_id,
+                owned=runtime.owned)
+        if (bound is not None and runtime.file_executor is not None
+                and await check_copy_is_locally_usable(
+                    bound.copy, runtime.directories.staging)):
+            stem = _original_stem(original_name)
+            extension = _extension_of(original_name)
+            return FileCandidate(
+                action_id=action["id"], item_id=item_id,
+                processing_id=None, output_id=output_id,
+                source_device_file_id=None,
+                source_intermediate_file_id=bound.copy.target_file_id,
+                target_extension="part", delivery_extension=extension,
+                delivery_display_name=(
+                    f"{stem}-{plan_name}-{source_action_name}.{extension}"),
+                config=None, occurred_at=now,
+                reuse_inspection_id=bound.inspection.inspection_id)
         return _device_source_candidate(
             runtime, action, item_id, output_id, device_file_id, now,
             plan_name, source_action_name)

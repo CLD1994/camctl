@@ -108,10 +108,13 @@ class FileCandidate:
     binding_result: BindingResult | None = None
     #: 独立分段检查责任；与取回项、单原片处理责任互斥。
     inspection_id: int | None = None
+    #: 取回项已绑定检查副本的复用凭据；与 inspection_id 的责任归属不同。
+    reuse_inspection_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
-        for value in (self.item_id, self.processing_id, self.inspection_id, self.output_id,
+        for value in (self.item_id, self.processing_id, self.inspection_id,
+                      self.reuse_inspection_id, self.output_id,
                       self.source_device_file_id, self.source_intermediate_file_id):
             if value is not None:
                 ObjectId(value)
@@ -138,6 +141,12 @@ class FileCandidate:
         elif (self.config is not None or self.processing_id is not None
               or self.inspection_id is not None or self.binding_result is not None):
             raise ValueError("主机产物取回不采用设备配置，内部原片必须来自设备")
+        if self.reuse_inspection_id is not None and (
+                self.item_id is None or self.output_id is None
+                or self.source_device_file_id is not None
+                or self.source_intermediate_file_id is None
+                or self.processing_id is not None or self.inspection_id is not None):
+            raise ValueError("检查副本复用只适用于主机源的正式取回项")
         validate_file_extension(self.target_extension)
         if self.item_id is not None:
             validate_file_extension(self.delivery_extension, required=True)

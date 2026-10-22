@@ -248,15 +248,19 @@ async def run_owned_read(runtime, copy_id, body):
     from camctl.host_files.tasks import AsyncFileTask, FileTaskId
 
     row = runtime.owned.connection.execute(
-        "SELECT target_file_id FROM file_copies WHERE id=?", (copy_id,)).fetchone()
+        "SELECT target_file_id,source_intermediate_file_id"
+        " FROM file_copies WHERE id=?", (copy_id,)).fetchone()
     if row is None or row[0] is None:
         raise ConsistencyError("实际读取拥有者缺少原目标文件")
 
     async def owned_body(_control):
         return await body()
 
+    pinned_files = tuple(dict.fromkeys(
+        file_id for file_id in (row[1], row[0]) if file_id is not None))
     return await executor.run_owned_async_file_task(AsyncFileTask(
-        FileTaskId(f"read/{new_operation_key()}"), (row[0],), "source_read", "read", owned_body))
+        FileTaskId(f"read/{new_operation_key()}"), pinned_files,
+        "source_read", "read", owned_body))
 
 
 def running_read_ticket(owned, copy_id: int):

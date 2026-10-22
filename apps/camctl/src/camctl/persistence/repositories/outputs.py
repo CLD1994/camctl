@@ -14,6 +14,7 @@ from contextlib import closing
 from decimal import Decimal
 from dataclasses import dataclass, fields, replace
 from enum import Enum
+from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
@@ -1757,6 +1758,7 @@ class _GrantFileCommand:
             int(_OUTPUT_KIND.ORIGINAL): int(_DEVICE_FILE_ROLE.ORIGINAL),
             int(_OUTPUT_KIND.PREVIEW): int(_DEVICE_FILE_ROLE.PREVIEW),
         }.get(output["kind"])
+        reuse_check_copy = command.reuse_inspection_id is not None
         if (
             action["type"] != _OBTAIN_TYPE
             or action["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
@@ -1765,11 +1767,56 @@ class _GrantFileCommand:
             or selection["status"] != int(_SELECTION_STATUS.FIXED)
             or item["output_id"] != command.output_id
             or dependency["depends_on_action_id"] != output["source_action_id"]
-            or output["device_file_id"] != command.source_device_file_id
-            or output["intermediate_file_id"] != command.source_intermediate_file_id
+            or (not reuse_check_copy and (
+                output["device_file_id"] != command.source_device_file_id
+                or output["intermediate_file_id"] != command.source_intermediate_file_id))
+            or (reuse_check_copy and (
+                command.source_device_file_id is not None
+                or command.source_intermediate_file_id is None
+                or output["device_file_id"] is None
+                or output["intermediate_file_id"] is not None))
         ):
             raise ConsistencyError("取回动作、固定选择、产物与源文件归属不一致")
-        if command.source_device_file_id is not None:
+        if reuse_check_copy:
+            from camctl.outputs.segment_copy_reuse import read_bound_check_copy
+
+            bound = read_bound_check_copy(
+                source_action_id=output["source_action_id"],
+                source_device_file_id=output["device_file_id"],
+                obtain_action_id=command.action_id,
+                selection_id=selection["id"],
+                owned=SimpleNamespace(connection=connection))
+            if (bound is None
+                    or bound.inspection.inspection_id != command.reuse_inspection_id
+                    or bound.copy.target_file_id != command.source_intermediate_file_id):
+                raise ConsistencyError("正式取回无权复用该来源提交的分段检查副本")
+            inspection = self._required(
+                connection, "segment_inspections", bound.inspection.inspection_id)
+            member = self._required(connection, "segment_members", inspection["member_id"])
+            segment_set = self._required(connection, "segment_sets", inspection["set_id"])
+            self._required(connection, "file_copies", bound.copy.copy_id)
+            original = self._required(connection, "device_files", output["device_file_id"])
+            if (
+                inspection["action_id"] != output["source_action_id"]
+                or inspection["state"] != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
+                or inspection["source_device_file_id"] != output["device_file_id"]
+                or member["file_id"] != output["device_file_id"]
+                or member["set_id"] != segment_set["id"]
+                or segment_set["action_id"] != output["source_action_id"]
+                or original["source_action_id"] != output["source_action_id"]
+                or original["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or original["completion_state"] != int(_COMPLETION.COMPLETE)
+                or source_file["owner_action_id"] != output["source_action_id"]
+                or source_file["owner_delivery_id"] is not None
+                or source_file["purpose"] != int(_PURPOSE.RECORDING_INPUT)
+                or source_file["retention_state"] != int(_RETENTION.REQUIRED)
+                or source_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
+                or source_file["size_bytes"] != bound.copy.source_size
+                or source_file["sha256"] != bound.copy.target_sha256
+                or source_file["relative_path"] != bound.copy.input_relative_path
+            ):
+                raise ConsistencyError("分段检查副本的保存责任与正式来源不一致")
+        elif command.source_device_file_id is not None:
             if (source_role is None or source_file["role"] != source_role
                     or output["source_action_id"] != source_file["source_action_id"]):
                 raise ConsistencyError("设备产物与源文件角色或归属不一致")
@@ -1784,7 +1831,7 @@ class _GrantFileCommand:
             or source_file["size_bytes"] is None
         ):
             raise ConsistencyError("主机产物必须关联来源动作已提升的完整角色文件")
-        if command.source_intermediate_file_id is not None:
+        if command.source_intermediate_file_id is not None and not reuse_check_copy:
             try:
                 validate_relative_file_path(
                     FilePurpose[_host_source_purpose(output["kind"], source_action["type"]).name], command.source_intermediate_file_id,
@@ -1829,6 +1876,13 @@ class _GrantFileCommand:
                 raise ConsistencyError("产物可用性与设备文件存在事实不一致")
 
         details = {"output_id": str(output["id"])}
+        if self._command.reuse_inspection_id is not None:
+            if availability == _AVAILABILITY.CLEANED:
+                details["availability"] = availability.name.lower()
+                return self._reject_item(scope, _OUTPUT_UNAVAILABLE_CODE, details)
+            if availability == _AVAILABILITY.RESTRICTED:
+                return self._reject_item(scope, _OUTPUT_CLEANUP_STARTED_CODE, details)
+            return None
         if availability in (_AVAILABILITY.CLEANED, _AVAILABILITY.MISSING):
             details["availability"] = availability.name.lower()
             return self._reject_item(scope, _OUTPUT_UNAVAILABLE_CODE, details)
@@ -4645,12 +4699,13 @@ class _CleanupCheckedCommand(_WorkFileMixin):
             read_only=True)
 
 
-def _load_work_file_facts(connection, file_id: int) -> WorkFileFacts:
+def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts:
     """只读加载一份中间文件的清理判定事实。
 
     归属终态与操作停止都按当前可靠记录核实；记录缺失或不可解释
     属于状态库矛盾，不解释为归属活跃或已停止。
     """
+    connection = owned.connection
     ObjectId(file_id)
     file = row_facts(connection, "intermediate_files", file_id)
     if file is None:
@@ -4669,12 +4724,64 @@ def _load_work_file_facts(connection, file_id: int) -> WorkFileFacts:
             raise ConsistencyError(
                 f"中间文件的归属动作缺失: {file['owner_action_id']}")
         owner_finished = action["status"] in _WorkFileMixin._TERMINAL_ACTIONS
+        if file["purpose"] == int(_PURPOSE.RECORDING_INPUT):
+            with closing(connection.execute(
+                "SELECT inspection_id FROM file_copies"
+                " WHERE target_file_id=? AND inspection_id IS NOT NULL",
+                (file_id,),
+            )) as cursor:
+                inspection_rows = cursor.fetchall()
+            if len(inspection_rows) > 1:
+                raise ConsistencyError(
+                    f"检查副本输入对应多个检查责任: {file_id}")
+            if inspection_rows:
+                inspection_id = inspection_rows[0][0]
+                inspection = row_facts(
+                    connection, "segment_inspections", inspection_id)
+                if inspection is None:
+                    raise ConsistencyError(
+                        f"检查副本责任缺失: {inspection_id}")
+                member = row_facts(
+                    connection, "segment_members", inspection["member_id"])
+                if member is None:
+                    raise ConsistencyError(
+                        f"检查副本的分段成员缺失: {inspection['member_id']}")
+                from camctl.persistence.repositories.segment_inspections import (
+                    read_inspection_for_member,
+                )
+                from camctl.outputs.segment_copy_reuse import (
+                    all_bound_waiters_terminal,
+                )
+
+                facts = read_inspection_for_member(
+                    int(file["owner_action_id"]), int(member["id"]), owned)
+                if (facts.inspection is None or facts.copy is None
+                        or facts.inspection.inspection_id != inspection_id
+                        or facts.copy.target_file_id != file_id
+                        or facts.inspection.action_id != file["owner_action_id"]):
+                    raise ConsistencyError(
+                        f"检查副本与工作文件责任不一致: {file_id}")
+                if facts.inspection.state == int(_SEGMENT_INSPECTION_STATE.PENDING):
+                    owner_finished = False
+                with closing(connection.execute(
+                    "SELECT published_event_id FROM segment_sets WHERE id=?",
+                    (facts.inspection.set_id,),
+                )) as cursor:
+                    set_row = cursor.fetchone()
+                if set_row is None:
+                    raise ConsistencyError(
+                        f"检查副本分段集合缺失: {facts.inspection.set_id}")
+                published_event_id = set_row[0]
+                if published_event_id is not None:
+                    owner_finished = owner_finished and all_bound_waiters_terminal(
+                        int(file["owner_action_id"]), int(published_event_id), owned)
     with closing(connection.execute(
         "SELECT COUNT(*) FROM operation_attempts AS a"
         " JOIN operation_runs AS r ON a.run_id = r.id"
         " JOIN file_copies AS c ON r.copy_id = c.id"
-        " WHERE c.target_file_id = ? AND a.status = 1",
-        (file_id,),
+        " WHERE (c.target_file_id = ? OR c.source_intermediate_file_id = ?)"
+        " AND a.status = 1",
+        (file_id, file_id),
     )) as cursor:
         operations_stopped = cursor.fetchone()[0] == 0
     try:
@@ -5424,7 +5531,7 @@ class OutputsRepository:
     def load_work_file_state(
         self, file_id: int, owned: OwnedConnection,
     ) -> WorkFileFacts:
-        return _load_work_file_facts(owned.connection, file_id)
+        return _load_work_file_facts(owned, file_id)
 
     def save_retention_release(
         self, request: RetentionRelease, key: OperationKey,

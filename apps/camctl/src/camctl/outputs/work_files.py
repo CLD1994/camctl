@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -604,10 +605,29 @@ async def _delete_with_release(
 ) -> tuple[WorkFileSingleOutcome, str | None, bool]:
     """已判定可清理的文件先释放保留状态，再按意图、删除、结果推进。"""
     if facts.retention_state == int(_RETENTION.REQUIRED):
-        release = context.repository.save_retention_release(
-            RetentionRelease(
-                file_id=facts.file_id, occurred_at=context.occurred_at),
-            new_operation_key(), context.owned)
+        with closing(context.owned.connection.execute(
+            "SELECT inspection_id FROM file_copies"
+            " WHERE target_file_id=? AND inspection_id IS NOT NULL",
+            (facts.file_id,),
+        )) as cursor:
+            inspections = cursor.fetchall()
+        if len(inspections) > 1:
+            raise WorkFileCleanupError(
+                "retention_release_failed",
+                f"检查副本目标存在多个保留责任: {facts.file_id}")
+        if inspections:
+            from camctl.persistence.repositories.segment_inspections import (
+                release_inspection_copy_pin,
+            )
+
+            release = release_inspection_copy_pin(
+                int(inspections[0][0]), context.occurred_at,
+                new_operation_key(), context.owned)
+        else:
+            release = context.repository.save_retention_release(
+                RetentionRelease(
+                    file_id=facts.file_id, occurred_at=context.occurred_at),
+                new_operation_key(), context.owned)
         _require_completed(release, "retention_release_failed")
     return await _perform_deletion(facts, context, advance_cursor=advance_cursor)
 
