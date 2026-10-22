@@ -47,12 +47,14 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | `cancel_delivery_items` | 沿 `cancel_item_id` 找到取消项，再取其 `action_id` |
 | `segment_sets` | `action_id` 指定的原拍摄动作 |
 | `segment_members`、`segment_gaps`、`segment_scope_members` | 沿 `set_id` 继承原拍摄动作；独立文件不复制进入动作 |
+| `segment_inspections` | `action_id` 指定的原拍摄动作；每条记录固定一个真实成员的检查责任，状态与结果推进原动作历史 |
 | `device_activities`、`recording_processing` | 各行的 `action_id` |
 | `outputs` | `id` 指定的产物 |
 | `output_origins` | `output_id` 指定的引用方产物，不是 `original_output_id` 指定的原产物 |
 | `deliveries` | `id` 指定的交付 |
 | `file_copies`，普通交付分支 | `delivery_id` 指定的交付 |
 | `file_copies`，录像内部分支 | 沿 `processing_id` 找到录像处理，再取其 `action_id` |
+| `file_copies`，分段检查分支 | 沿 `inspection_id` 找到分段检查，再取其 `action_id` |
 | `operation_runs`，`READ_FILE` | 沿 `copy_id` 找到拷贝，使用该拷贝的历史归属；流程中重复保存的动作、交付关联须与此一致 |
 | `operation_runs`，`STOP_RESIDUAL` 或 `EMERGENCY_STOP` | 沿 `activity_id` 找到设备活动，再取其 `action_id`；后续残留收场的触发者不取得这条流程的历史归属 |
 | `operation_runs`，其余类型，包括全部 `QUERY_ACTIVITY` 用途 | 该行的 `action_id`；查询保存的新活动观察另行更新活动所属动作，不能将查询预算一并转给被观察动作 |
@@ -165,6 +167,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 35 `RESULT_PAGE` | 1 保存本轮实际页返回、文件观察及页范围；2 索引本页实际差集文件身份 |
 | 36 `SEGMENT_FACTS` | 1 建立原扫描的分段集合；2 保存有限原扫描成员；3 固定完整分段成员；4 保存第二遍缺口事实；5 固定两遍完整判断；6 保存有序默认原片成员；7 发布默认成员的实际产物关联；8 共同发布唯一正式分段集合；9 建立固定来源的结果集合；10 固定原H0的完整结果成员；11 保存结果核实的有限决定；12 固定已结束核实的结果处置 |
 | 37 `BASELINE_READ` | 1 保存基准目录调用原始输入；2 保存基准目录实际返回；3 保存基准目录返回未知 |
+| 38 `SEGMENT_INSPECTION` | 1 建立分段检查责任；2 保存分段媒体检查结果 |
 <!-- 事件登记生成结束 -->
 
 同一事务可以组合多类事件。复杂集合按成员分批形成事件，最后一条记录集合固定事实，但整个固定操作只提交一次；这样既能逐事件读取，又不会公开半个集合。事件处理器验证该类型允许的表和状态变化，再应用前后值，不能提供一个允许调用者任意写表的通用补丁入口。

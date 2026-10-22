@@ -22,6 +22,14 @@
 
 `segment_scope_members` 按 ordinal 保存已判断范围的实际原片成员。output_id 准备时为空，只能由录像终态事务共同发布其真实 original output；未发布的关系不能作为正式默认目录使用。UNKNOWN 与 EMPTY 分别保存，既不补选范围外原片，也不把未知解释为空。
 
+## 逐段媒体检查责任
+
+`segment_inspections` 是来源 action 的子记录。每条记录固定一个 `segment_sets`、真实 `segment_members`、`device_files` 原片、`target_json` 覆盖目标及首次采用的 `budget_json`；同一 action/member 只能建立一条检查。`state` 从 PENDING 只推进一次到 COMPLETED、FAILED 或 UNCONFIRMED，`result_json` 与 `result_event_id` 只在结果可靠保存时写入。检查事实通过所属 action 的事件历史恢复，不设置独立 `last_event_id` 或 `change_count`。
+
+检查输入沿 `file_copies.inspection_id` 关联唯一读取副本。`file_copies` 仍保存固定源长度、连续可靠字节进度、原读取流程与尝试预算及摘要校验；完整字节和校验状态可靠保存前不得探测媒体。检查副本的中间文件归来源 action，用途为 RECORDING_INPUT，创建时以 REQUIRED 保留状态固定。检查终态不自动释放该保护；来源提交与等待者复用完成后，由明确的 retention release 事件转为 RELEASABLE，之后才可进入维护清理。
+
+`result_json.metric` 保存所请求量纲上的实际主视频值或未知原因；时长来自唯一主视频流时长，帧数只使用媒体工具显式计数得到的主流 `frame_count`，不会由时长或帧率推算。`result_json.probe` 保存同一媒体探测的完整逐流事实，`tool` 保存受管工具是否执行及错误。调用方可按固定成员逐个读取已保存事实并恢复覆盖累计；来源集合完整性、累计值、连续性与中断判断仍由来源 assessment 保存，不在检查行中复制聚合结论。
+
 所有四表都属于原 action 的自身历史，成员、缺口、范围沿 set_id 继承所有权。成员和缺口列均为创建后不变的业务列；集合身份列不变，state 单调推进，member_count、facts_json、assessment_json 和 published_event_id 只写一次；默认关系身份列不变，output_id 只从空值发布一次。id 是结构身份，没有独立派生历史元数据。实际独立 device_files 行不进入动作自身快照。新增关系由 SEGMENT_FACTS 事件保存，普通内部进度不触发报告水位。
 
 每次保存或读取最多 128 项。成员按集合、完整设备顺序键、稳定身份和行 ID 续读；缺口按集合及 gap_no，范围按集合及 ordinal 续读。游标绑定完整 SegmentSetRef 和读取种类。只有可靠固定的集合能向判断消费者提供成员；错误不返回空页。判断以整数保存已确认缺口计数；顺序未知或可信起点矛盾时 gap_count 为 JSON null，first_gap 也为空，不建立已确认缺口行。其他未知仍运行严格二遍分类；毫秒下界使用规范十进制文本，不能让 SQLite 上限改变事实。
@@ -42,10 +50,15 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 | `segment_members` | `set_id`、`file_id`、`page_event_id`、`file_event_id`、`identity`、`role`、`ownership`、`completion`、`pairing_state` 必填；`directory_number` 和 `segment_index` 共同为空表示键未知；`pairing_identity` 只在 PAIRED 时填写真实原片身份；可空 `pairing_fact_id` 只由预览引用已有配对事实 | 集合/文件、集合/身份分别唯一；数值键冲突保留全部真实身份；完整设备顺序、配对身份、文件反查及集合/创建事件都有索引 |
 | `segment_gaps` | `set_id`、连续 `gap_no`、`start_directory`、`start_index`、`end_directory`、`end_index`、`kind`、`neighbors_json` 必填；`left_member_id`、`right_member_id` 只在相应邻接为 KNOWN 时有值；`empty_member_id` 只在真实非尾零文件分支有值 | 集合/缺口序号唯一；按缺口序号及创建事件续读 |
 | `segment_scope_members` | `set_id`、连续 `ordinal`、`member_id` 必填；`output_id` 准备时为空，来源终态事务将其一次关联到同源同文件的 original | 集合/序号、集合/成员分别唯一，实际 output 只关联一次；按序号、成员反查及创建事件定位 |
+| `segment_inspections` | 每个实际完整原片成员至多一条；固定 `action_id`、`set_id`、`member_id`、`source_device_file_id`、媒体目标和首次读取预算；结果可靠保存后写入终态、有限指标、主流探测事实及结果事件引用 | `(action_id, member_id)` 唯一；按集合和固定原片反查；所有业务变化沿来源 action 历史恢复，不建立独立对象计数 |
 
 `scan_id` 指向原 RESULTS 的实际尝试。`PendingResultScan` 在页间保持同一个票据，可靠保存后只推进 `page_no` 和目录游标。`SaveResultPageCommand` 更新原尝试的首末页引用并保持其 RUNNING；只有整轮结束才保存尝试结果。另一轮重试取得新的物理尝试，不将前轮页面并入本轮完整扫描依据。固定成员时逐页核对原页链和差集引用数量，不能用单页或错误页固定集合。
 
 `file_event_id` 指向该独立文件在一个完整历史事务中的最后自身事件。这条事件可以位于多文件事务的中间；读取先验证所属完整事务和文件关联，再以该事务的末事件作为合法 H，核对该文件在同一事务内没有更晚自身变化，然后复用限定单行恢复读取文件事实。绝不把中间事件号当作完整全局 H。后来确认大小、补齐摘要、改变存在性或清理状态，都不替换固定事实。P1 的 `size_bytes` 从这个固定文件事实取得；未知时保持 `None`，原页仍独立保留实际观察。
+
+`inspect_segment(flow, SegmentInspectionRequest(action_id, member_id, target, budget, occurred_at))` 只接受固定集合中由该动作拥有、完整写入且仍存在的实际 original 成员。它保存或恢复唯一检查责任，沿可靠读取机会取得整个输入副本，并在副本完成字节校验后调用受管主视频探测；帧数目标显式请求主流帧数，时长目标读取主流时长。返回 `SegmentInspectionStep`，阶段为 WAITING、COMPLETED、FAILED 或 UNCONFIRMED；已保存终态直接返回持久化指标和 probe 文档，不再次调用探测器。
+
+`read_inspection_for_member(action_id, member_id, owned)` 返回 `InspectionMemberFacts(inspection, copy)`；其副本事实同时核对来源原片、集合、用途、固定路径、字节长度、完整写入及校验状态。`release_inspection_copy_pin(inspection_id, occurred_at, key, owned)` 只允许已结束的检查责任调用现有中间文件保留释放事务；调用者须在来源和依赖该副本的取回责任收场后释放。失败或未完成时，该副本仍保持原保留限制，不能由维护器清理。
 
 保存请求 `SegmentMemberInput(file_id, page_event_id, file_event_id, role, ownership, completion, pairing_identity=None, pairing_state=NOT_APPLICABLE)` 不接收大小或摘要。提交守卫独立读取原页、实际差集文件、固定文件历史和原动作/活动/流程/尝试，核对分类及配对。P1 的完整 `SegmentMember` 是读取和纯判断结果，不是另一份文件属性权威。
 

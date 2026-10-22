@@ -441,7 +441,7 @@ def main() -> None:
            snapshot_change_count=64, latest_snapshot_id=1)
     insert(db, 'segment_sets', id=1, created_event_id=1, action_id=1, activity_id=1, run_id=1,
            current_attempt_id=1,current_final_page_event_id=2,source_kind=1,source_txn_id=1,
-           source_event_id=2,publication_kind=1,version=1,target_duration_ms=60000,state=1)
+           source_event_id=2,publication_kind=1,version=1,target_duration_ms=60000,state=2,member_count=1)
     rejects(db, 'UPDATE segment_sets SET published_event_id=1 WHERE id=1')
     insert(db, 'segment_check_conclusions', id=1, created_event_id=1, set_id=1, reason=9,
            anchor_event_id=1, prior_run_end_event_id=None, config_event_id=None,
@@ -450,6 +450,10 @@ def main() -> None:
     insert(db, 'segment_members', id=1, created_event_id=1, set_id=1, file_id=1, page_event_id=2, file_event_id=2,
            identity='real-osv', directory_number=1, segment_index=1, role=1, ownership=1,
            completion=1, pairing_state=1)
+    insert(db, 'segment_inspections', id=1, created_event_id=2, action_id=1, set_id=1,
+           member_id=1, source_device_file_id=1,
+           target_json='{"metric":"duration_s","value":60}',
+           budget_json='{"max_attempts":3,"timeout_s":10,"retry_interval_s":3}', state=1)
     insert(db, 'segment_gaps', id=1, created_event_id=1, set_id=1, gap_no=1, start_directory=1, start_index=2,
            end_directory=1, end_index=3, kind=1, left_member_id=1,
            neighbors_json='{"left":1,"right":3}')

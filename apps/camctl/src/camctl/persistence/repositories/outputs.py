@@ -279,6 +279,7 @@ _DELIVERY_STATUS = enum_for("deliveries.status")
 _WITHDRAWAL = enum_for("deliveries.withdrawal_state")
 _RESET_STATE = enum_for("file_copies.reset_state")
 _VERIFICATION = enum_for("file_copies.verification_state")
+_SEGMENT_INSPECTION_STATE = enum_for("segment_inspections.state")
 
 #: 清理项仍对源产物构成读取限制的状态组合。
 _ACTIVE_RESTRICTIONS = (
@@ -1594,6 +1595,9 @@ class _GrantFileCommand:
         "device_files",
         "cleanup_items",
         "recording_processing",
+        "segment_inspections",
+        "segment_sets",
+        "segment_members",
         "deliveries",
         "file_copies",
         "operation_runs",
@@ -1644,7 +1648,7 @@ class _GrantFileCommand:
                         reason="item_finished",
                     ),
                 )
-        else:
+        elif command.processing_id is not None:
             requirement = _internal_input_requirement(
                 self._state["recording_processing"][command.processing_id])
             if requirement is not None:
@@ -1711,15 +1715,34 @@ class _GrantFileCommand:
         """先核对固定归属，再由调用方判断当前执行状态。"""
         command = self._command
         if command.item_id is None:
-            processing = self._required(connection, "recording_processing", command.processing_id)
-            if (
-                action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
-                or processing["action_id"] != command.action_id
-                or processing["source_device_file_id"] != command.source_device_file_id
-                or source_file["source_action_id"] != command.action_id
-                or source_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
-            ):
-                raise ConsistencyError("内部读取的录像、处理责任与原片归属不一致")
+            if command.processing_id is not None:
+                processing = self._required(connection, "recording_processing", command.processing_id)
+                if (
+                    action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+                    or processing["action_id"] != command.action_id
+                    or processing["source_device_file_id"] != command.source_device_file_id
+                    or source_file["source_action_id"] != command.action_id
+                    or source_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                ):
+                    raise ConsistencyError("内部读取的录像、处理责任与原片归属不一致")
+            else:
+                inspection = self._required(connection, "segment_inspections", command.inspection_id)
+                member = self._required(connection, "segment_members", inspection["member_id"])
+                segment_set = self._required(connection, "segment_sets", inspection["set_id"])
+                budget = {"max_attempts": command.config.max_attempts,
+                          "timeout_s": command.config.timeout_s,
+                          "retry_interval_s": command.config.retry_interval_s}
+                if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+                        or inspection["action_id"] != command.action_id
+                        or inspection["state"] != int(_SEGMENT_INSPECTION_STATE.PENDING)
+                        or inspection["source_device_file_id"] != command.source_device_file_id
+                        or segment_set["action_id"] != command.action_id
+                        or member["set_id"] != inspection["set_id"]
+                        or member["file_id"] != command.source_device_file_id
+                        or source_file["source_action_id"] != command.action_id
+                        or source_file["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                        or not json_equal(inspection["budget_json"], budget)):
+                    raise ConsistencyError("分段检查责任、原片或首次保存的读取预算不一致")
             return None
 
         item = self._required(connection, "obtain_items", command.item_id)
@@ -1957,6 +1980,7 @@ class _GrantFileCommand:
             {
                 "delivery_id": delivery_id,
                 "processing_id": command.processing_id,
+                "inspection_id": command.inspection_id,
                 "source_device_file_id": command.source_device_file_id,
                 "source_intermediate_file_id": command.source_intermediate_file_id,
                 "target_file_id": target_file_id,
@@ -2123,20 +2147,28 @@ class _GrantFileCommand:
                                     (delivery_id, int(_PURPOSE.DELIVERY_COPY)))
             purpose = FilePurpose.DELIVERY_COPY
         else:
-            copy = self._find_one(connection, "file_copies", "processing_id = ?", (command.processing_id,))
-            target = self._find_one(connection, "intermediate_files", "owner_action_id = ? AND purpose = ?",
-                                    (command.action_id, int(_PURPOSE.RECORDING_INPUT)))
-            internal_run = self._find_one(connection, "operation_runs",
-                f"action_id = ? AND kind = {int(_RUN_KIND.READ_FILE)}", (command.action_id,))
+            if command.processing_id is not None:
+                copy = self._find_one(connection, "file_copies", "processing_id = ?", (command.processing_id,))
+                target = self._find_one(connection, "intermediate_files", "owner_action_id = ? AND purpose = ?",
+                                        (command.action_id, int(_PURPOSE.RECORDING_INPUT)))
+                internal_run = self._find_one(connection, "operation_runs",
+                    f"action_id = ? AND kind = {int(_RUN_KIND.READ_FILE)}", (command.action_id,))
+            else:
+                copy = self._find_one(connection, "file_copies", "inspection_id = ?", (command.inspection_id,))
+                target = (self._find_one(connection, "intermediate_files", "id = ?",
+                                          (copy["target_file_id"],)) if copy is not None else None)
+                internal_run = None
             purpose = FilePurpose.RECORDING_INPUT
             if copy is None and target is None and internal_run is None:
-                if _processing_requires_existing_input(self._state["recording_processing"][command.processing_id]):
+                if (command.processing_id is not None and
+                        _processing_requires_existing_input(self._state["recording_processing"][command.processing_id])):
                     raise ConsistencyError("原片工具处理已经开始，但原输入准备责任缺失")
                 return None
         if copy is None or target is None:
             raise ConsistencyError("已有读取准备责任缺少拷贝或目标文件")
         if (
             copy["delivery_id"] != delivery_id or copy["processing_id"] != command.processing_id
+            or copy.get("inspection_id") != command.inspection_id
             or copy["source_device_file_id"] != command.source_device_file_id
             or copy["source_intermediate_file_id"] != command.source_intermediate_file_id
             or copy["target_file_id"] != target["id"]
@@ -2296,7 +2328,34 @@ def _copy_owner_of(connection, copy, state, owners) -> None:
         state.setdefault("recording_processing", {})[copy["processing_id"]] = facts
         owners[("file_copies", copy["id"])] = ("action", facts["action_id"])
         return
-    raise ConsistencyError("拷贝缺少交付或处理归属")
+    if copy.get("inspection_id") is not None:
+        facts = row_facts(connection, "segment_inspections", copy["inspection_id"])
+        if facts is None:
+            raise ConsistencyError(
+                f"机会责任关联记录缺失: segment_inspections#{copy['inspection_id']}")
+        state.setdefault("segment_inspections", {})[copy["inspection_id"]] = facts
+        owners[("file_copies", copy["id"])] = ("action", facts["action_id"])
+        return
+    raise ConsistencyError("拷贝缺少交付、处理或分段检查归属")
+
+
+def _copy_action_id(connection, copy, state) -> int:
+    """按三种读取责任取得拥有动作，并缓存固定父行。"""
+    if copy["delivery_id"] is not None:
+        parent_table, parent_id = "deliveries", copy["delivery_id"]
+    elif copy["processing_id"] is not None:
+        parent_table, parent_id = "recording_processing", copy["processing_id"]
+    elif copy.get("inspection_id") is not None:
+        parent_table, parent_id = "segment_inspections", copy["inspection_id"]
+    else:
+        raise ConsistencyError("拷贝缺少交付、处理或分段检查归属")
+    parent = state.setdefault(parent_table, {}).get(parent_id)
+    if parent is None:
+        parent = row_facts(connection, parent_table, parent_id)
+        if parent is None:
+            raise ConsistencyError(f"拷贝责任父行缺失: {parent_table}#{parent_id}")
+        state[parent_table][parent_id] = parent
+    return parent["action_id"]
 
 
 class _SlotChangeCommand:
@@ -2309,7 +2368,7 @@ class _SlotChangeCommand:
 
     _TABLES = (
         "file_copies", "device_files", "operation_runs", "operation_attempts",
-        "actions", "deliveries", "recording_processing",
+        "actions", "deliveries", "recording_processing", "segment_inspections",
     )
 
     def __init__(self, request: SlotRequest, direction: str, key: OperationKey) -> None:
@@ -2385,12 +2444,7 @@ class _SlotChangeCommand:
         return self._required(connection, "operation_runs", identities[0][0])
 
     def _load_owner_action(self, connection, copy) -> dict:
-        if copy["delivery_id"] is not None:
-            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
-        elif copy["processing_id"] is not None:
-            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
-        else:
-            raise ConsistencyError("拷贝缺少交付或处理归属")
+        action_id = _copy_action_id(connection, copy, self._state)
         return self._required(connection, "actions", action_id)
 
     def _load_attempts(self, connection, run_id: int) -> None:
@@ -2719,7 +2773,7 @@ class _SegmentSaveCommand:
     执行时不新增进度提交。不新建读取尝试，不改动预算与等待。
     """
 
-    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "segment_inspections", "actions")
 
     def __init__(self, command: ReliableSegment, key: OperationKey) -> None:
         if not isinstance(command, ReliableSegment):
@@ -2782,10 +2836,7 @@ class _SegmentSaveCommand:
         )
 
     def _owner_action(self, connection, copy) -> dict:
-        if copy["delivery_id"] is not None:
-            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
-        else:
-            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
+        action_id = _copy_action_id(connection, copy, self._state)
         facts = row_facts(connection, "actions", action_id)
         if facts is None:
             raise ConsistencyError(f"发起动作记录缺失: actions#{action_id}")
@@ -2841,10 +2892,7 @@ class _CopyCompletionTablesMixin:
         return copy
 
     def _owner_action(self, connection, copy) -> dict:
-        if copy["delivery_id"] is not None:
-            action_id = self._state["deliveries"][copy["delivery_id"]]["action_id"]
-        else:
-            action_id = self._state["recording_processing"][copy["processing_id"]]["action_id"]
+        action_id = _copy_action_id(connection, copy, self._state)
         facts = row_facts(connection, "actions", action_id)
         if facts is None:
             raise ConsistencyError(f"发起动作记录缺失: actions#{action_id}")
@@ -2875,7 +2923,7 @@ class _IntegritySaveCommand(_CopyCompletionTablesMixin):
     事实。不改动轮次、进度与预算。
     """
 
-    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "segment_inspections", "actions")
 
     def __init__(self, command: VerificationSave, key: OperationKey) -> None:
         if not isinstance(command, VerificationSave):
@@ -2981,7 +3029,7 @@ class _RecopyCommand(_CopyCompletionTablesMixin):
     存判定上限，取消或动作不在执行时不开始新重拷。
     """
 
-    _TABLES = ("file_copies", "deliveries", "recording_processing", "actions")
+    _TABLES = ("file_copies", "deliveries", "recording_processing", "segment_inspections", "actions")
 
     def __init__(self, command: RecopyRegistration, key: OperationKey) -> None:
         if not isinstance(command, RecopyRegistration):
@@ -6009,8 +6057,9 @@ def _copy_guard(event, context) -> None:
                 )
         if values.get("source_size") is None:
             raise EventValidationError("新建拷贝必须携带源长度")
-        if (values.get("delivery_id") is None) == (values.get("processing_id") is None):
-            raise EventValidationError("拷贝必须恰归属交付或录像处理之一")
+        if sum(values.get(name) is not None for name in
+               ("delivery_id", "processing_id", "inspection_id")) != 1:
+            raise EventValidationError("拷贝必须恰归属交付、录像处理或分段检查之一")
         if values.get("processing_id") is not None:
             processing = context.state_rows.get("recording_processing", {}).get(values["processing_id"])
             try:
@@ -6021,6 +6070,17 @@ def _copy_guard(event, context) -> None:
                 raise EventValidationError(
                     "当前处理不具备新的内部输入需求，不能创建输入拷贝")
             parent = processing
+        elif values.get("inspection_id") is not None:
+            parent = context.state_rows.get("segment_inspections", {}).get(values["inspection_id"])
+            member = (context.state_rows.get("segment_members", {}).get(parent.get("member_id"))
+                      if parent is not None else None)
+            source = context.state_rows.get("device_files", {}).get(values.get("source_device_file_id"))
+            if (parent is None or member is None or source is None
+                    or parent.get("state") != int(_SEGMENT_INSPECTION_STATE.PENDING)
+                    or parent.get("source_device_file_id") != values.get("source_device_file_id")
+                    or member.get("file_id") != values.get("source_device_file_id")
+                    or source.get("source_action_id") != parent.get("action_id")):
+                raise EventValidationError("检查拷贝必须关联 PENDING 检查及其固定原片")
         else:
             parent = context.association_rows.get("deliveries", {}).get(values["delivery_id"])
         if parent is None:
@@ -6198,6 +6258,9 @@ def _slot_owner_action(context, copy) -> dict[str, Any]:
     elif copy.get("processing_id") is not None:
         action_id = context.state_rows.get("recording_processing", {}).get(
             copy["processing_id"], {}).get("action_id")
+    elif copy.get("inspection_id") is not None:
+        action_id = context.state_rows.get("segment_inspections", {}).get(
+            copy["inspection_id"], {}).get("action_id")
     if not is_json_integer(action_id):
         raise EventValidationError("机会授予缺少发起动作的固定关联")
     return _guard_facts(context, "actions", action_id)

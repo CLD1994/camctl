@@ -769,6 +769,17 @@
 | 2 | `CANCELED` |
 | 3 | `EXPIRED` |
 
+### `segment_inspections.state`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `PENDING` |
+| 2 | `COMPLETED` |
+| 3 | `FAILED` |
+| 4 | `UNCONFIRMED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`

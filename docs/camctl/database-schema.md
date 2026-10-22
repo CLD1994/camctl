@@ -23,7 +23,7 @@
 | 如何保存自动预览关联、固定来源和逐项取回状态？ | [来源关联与取回明细](database/sources-obtaining.md) |
 | 如何保存清理目标、删除限制、取消目标及逐交付处理？ | [清理与取消明细](database/cleanup-cancellation.md) |
 | 正式产物、普通交付、设备文件、拷贝和中间文件如何关联？ | [产物、交付与文件记录](database/outputs-files.md) |
-| 如何保存操作尝试、设备活动及录像内部检查与修复？ | [操作尝试与设备执行记录](database/operations-devices.md) |
+| 如何保存操作尝试、设备活动、录像内部处理及逐成员分段检查？ | [操作尝试与设备执行记录](database/operations-devices.md)与[分段集合和检查](database/segments.md) |
 | 如何保存诊断、报告、同步、ACK、可信时间和数据库身份？ | [报告、运行状态与数据库元信息](database/reports-runtime.md) |
 | 历史事件、事务、对象关联、快照及维护进度如何组织？ | [历史基础表与快照表](database/history.md) |
 
@@ -35,7 +35,7 @@
 
 计划、动作、正式产物、普通交付、输入文件诊断和状态报告分别建立主表。产物之间的来源关联由 `output_origins` 表保存，自动预览取回与来源拍摄的关联由 `auto_preview_links` 表保存，取回和范围清理的来源成员由 `action_dependencies` 表保存。取回的逐来源选择与逐目标处理分别由 `obtain_source_selections`、`obtain_items` 保存，清理的逐目标处理由 `cleanup_items` 保存。公共操作流程及其尝试分别由 `operation_runs`、`operation_attempts` 保存，文件拷贝专属状态由 `file_copies` 保存。
 
-设备文件的身份、定位信息、业务归属及可靠取得的文件事实由 `device_files` 保存；主机中间文件的归属、用途及清理状态由 `intermediate_files` 保存。取消动作的逐目标处理由 `cancel_items` 保存，针对目标取回中各份交付的处理由 `cancel_delivery_items` 保存。录像内部检查与修复的决定、进度和结果由 `recording_processing` 保存，动作在设备上启动的持续活动及其已知状态由 `device_activities` 保存。
+设备文件的身份、定位信息、业务归属及可靠取得的文件事实由 `device_files` 保存；主机中间文件的归属、用途及清理状态由 `intermediate_files` 保存。取消动作的逐目标处理由 `cancel_items` 保存，针对目标取回中各份交付的处理由 `cancel_delivery_items` 保存。单原片录像检查与修复的决定、进度和结果由 `recording_processing` 保存；实际分段成员的独立媒体检查及其受管输入副本由 `segment_inspections` 与 `file_copies` 保存；动作在设备上启动的持续活动及其已知状态由 `device_activities` 保存。
 
 显式状态同步的固定起点、开始依据和责任结束情况由 `state_syncs` 保存，客户端累计确认位置、可信历史时间下界及中间文件清理继续位置由 `runtime_state` 保存。业务投影按下表职责组织；实施进度由对应模块计划跟踪。
 
@@ -72,6 +72,7 @@
 | `segment_members` | [分段集合、判断与默认范围](database/segments.md) |
 | `segment_gaps` | [分段集合、判断与默认范围](database/segments.md) |
 | `segment_scope_members` | [分段集合、判断与默认范围](database/segments.md) |
+| `segment_inspections` | [分段集合与逐成员检查](database/segments.md) |
 | `operation_runs` | [具体操作责任及整体进度](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `operation_attempts` | [操作流程的一次业务尝试](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `device_file_pairing_facts` | [结果扫描配对](database/file-fields.md#结果扫描配对) |

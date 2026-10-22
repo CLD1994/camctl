@@ -420,6 +420,7 @@ class MediaFlow:
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
     pending_media_results: dict = field(default_factory=dict)
+    pending_segment_inspection_results: dict = field(default_factory=dict)
     read_discovery_batch_size: int | None = None
 
     def saves(self, *, file_ids=()) -> CaptureProcessingSaves:
@@ -620,7 +621,8 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     await run_owned_read(flow, copy_id, complete_and_save)
 
 
-def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep) -> None:
+def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
+                          max_attempts: int | None = None) -> None:
     """连接已经关闭后保存读取结果；重拷继续原尝试。"""
     from camctl.outputs.read_attempts import require_preparation_settled
 
@@ -646,7 +648,7 @@ def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep) -> None:
         raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
     succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
     # 原 ticket 的连续编号已由意图／恢复事务核实，实际返回后先持有结果。
-    exhausted = ticket.attempt_id >= flow.max_read_attempts
+    exhausted = ticket.attempt_id >= (max_attempts or flow.max_read_attempts)
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
         error=None if succeeded else ErrorValue("device_error", "read", {"reason": str(step.error)}),
@@ -776,7 +778,13 @@ def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
     exhausted = (pending.finish.run_finish is not None
                  and pending.finish.run_finish.status is RunOutcome.FAILED)
     if exhausted:
-        _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
+        row = flow.owned.connection.execute(
+            "SELECT processing_id,inspection_id FROM file_copies WHERE id=?",
+            (int(ticket.target_id),)).fetchone()
+        if row is None:
+            raise ConsistencyError("已结束读取尝试缺少对应拷贝")
+        if row[0] is not None:
+            _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
     if succeeded and not exhausted:
         from camctl.outputs.read_attempts import save_read_business
 

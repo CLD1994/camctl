@@ -434,6 +434,7 @@
       "immutable": [
         "delivery_id",
         "processing_id",
+        "inspection_id",
         "source_device_file_id",
         "source_intermediate_file_id",
         "target_file_id",
@@ -467,6 +468,18 @@
               "entity": "delivery",
               "id": "delivery_id",
               "via": []
+            }
+          },
+          {
+            "when": {
+              "inspection_id": "present"
+            },
+            "owner": {
+              "entity": "action",
+              "id": "action_id",
+              "via": [
+                "inspection_id"
+              ]
             }
           }
         ],
@@ -1049,6 +1062,37 @@
       "state_columns": [
         "state"
       ]
+    },
+    "segment_inspections": {
+      "immutable": [
+        "created_event_id",
+        "action_id",
+        "set_id",
+        "member_id",
+        "source_device_file_id",
+        "target_json",
+        "budget_json"
+      ],
+      "mutable": [
+        "state",
+        "result_json",
+        "result_event_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "result_json",
+        "result_event_id"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": [
+        "state"
+      ]
     }
   },
   "guards": {
@@ -1212,6 +1256,22 @@
       "contract": "operation-fields.md#录像内部处理",
       "rule": "已保存检查与修复决定及依据不重算；实际工具阶段与结果、媒体结构、输出文件一致。取消或过期后不重启检查修复，必要文件收场仍保存；原片、输入拷贝和修复成品沿原身份。",
       "scope": "transaction"
+    },
+    "segment_inspection": {
+      "contract": "segments.md",
+      "rule": "检查只能归属来源动作固定集合内已完成、已拥有的真实原片成员；目标与首次设备读取预算保持不变。一次完整输入副本关联一份检查责任；结果仅由 PENDING 一次转为 COMPLETED、FAILED 或 UNCONFIRMED，并引用实际可靠保存结果事件。",
+      "scope": {
+        "rows": [
+          {
+            "table": "segment_inspections",
+            "op": "create"
+          },
+          {
+            "table": "segment_inspections",
+            "op": "update"
+          }
+        ]
+      }
     },
     "output": {
       "contract": "file-fields.md#正式产物与来源",
@@ -3623,6 +3683,34 @@
             "SEGMENT_FACTS.DECIDE_RESULT"
           ],
           "id": "transition_2"
+        }
+      ]
+    },
+    "segment_inspections.state": {
+      "edges": [
+        {
+          "from": 1,
+          "to": 2,
+          "by": [
+            "SEGMENT_INSPECTION.RESULT"
+          ],
+          "id": "transition_1"
+        },
+        {
+          "from": 1,
+          "to": 3,
+          "by": [
+            "SEGMENT_INSPECTION.RESULT"
+          ],
+          "id": "transition_2"
+        },
+        {
+          "from": 1,
+          "to": 4,
+          "by": [
+            "SEGMENT_INSPECTION.RESULT"
+          ],
+          "id": "transition_3"
         }
       ]
     },
@@ -6771,7 +6859,9 @@
             "obtain_member",
             "segment_query_resolution"
           ],
-          "evidence": ["obtain_check_source"]
+          "evidence": [
+            "obtain_check_source"
+          ]
         },
         "RELEASE": {
           "reason": 3,
@@ -6861,7 +6951,9 @@
             "obtain_member",
             "segment_query_resolution"
           ],
-          "evidence": ["obtain_check_source"]
+          "evidence": [
+            "obtain_check_source"
+          ]
         },
         "CANCEL": {
           "reason": 5,
@@ -10169,6 +10261,82 @@
           ]
         }
       }
+    },
+    "SEGMENT_INSPECTION": {
+      "id": 38,
+      "version": 1,
+      "branches": {
+        "CREATE": {
+          "reason": 1,
+          "title": "建立分段检查责任",
+          "rows": [
+            {
+              "table": "segment_inspections",
+              "op": "create",
+              "after": {
+                "state": [
+                  1
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segment_inspection"
+          ],
+          "evidence": []
+        },
+        "RESULT": {
+          "reason": 2,
+          "title": "保存分段媒体检查结果",
+          "rows": [
+            {
+              "table": "segment_inspections",
+              "op": "update",
+              "columns": [
+                "state",
+                "result_json",
+                "result_event_id"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  2,
+                  3,
+                  4
+                ]
+              },
+              "required": [
+                "state",
+                "result_json",
+                "result_event_id"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segment_inspection"
+          ],
+          "evidence": []
+        }
+      }
     }
   },
   "history_references": {
@@ -10242,6 +10410,12 @@
     },
     "segment_scope_members.created_event_id": {
       "target": "creating_event"
+    },
+    "segment_inspections.created_event_id": {
+      "target": "creating_event"
+    },
+    "segment_inspections.result_event_id": {
+      "target": "assigning_event"
     },
     "result_page_files.created_event_id": {
       "target": "creating_event"

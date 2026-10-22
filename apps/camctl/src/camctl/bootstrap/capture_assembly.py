@@ -164,6 +164,16 @@ class HostMediaTools:
             owner=self._owner,
         )
 
+    async def probe_segment(self, input: Any, *, count_frames: bool) -> FileTaskResult:
+        """按分段检查量纲明确请求主流帧数或普通时长。"""
+        request = replace(self._probe_request, count_frames=count_frames)
+        return await probe_media(
+            input, self._roots, request,
+            executor=self._executor,
+            task_id=self._next_task_id("segment-probe"),
+            owner=self._owner,
+        )
+
     async def repair(self, input: Any, output: Any,
                      *, trim_s: Decimal, stream_indices: tuple[int, ...] | None = None,
                      output_format: str | None = None) -> FileTaskResult:

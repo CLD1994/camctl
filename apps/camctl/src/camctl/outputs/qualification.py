@@ -83,8 +83,8 @@ class FileQualification:
 class FileCandidate:
     """一次文件资格申请：目标产物、源文件与建档所需身份。
 
-    取回路径携带 item_id（已固定取回项，首次建档须为 SELECTED）；内部检查/修复路径携
-    带 processing_id（录像处理责任），共用设备单文件读取机会且不
+    取回路径携带 item_id（已固定取回项，首次建档须为 SELECTED）；单原片处理携带
+    processing_id，分段检查携带 inspection_id，两类内部路径都共用设备单文件读取机会且不
     创建交付。主机产物使用 source_intermediate_file_id，config 为
     None 表示不适用设备配置；本地读取的次数上限固定为 1。
     调用方只提供扩展名，事务分配身份后生成目标路径及交付文件名；
@@ -106,17 +106,21 @@ class FileCandidate:
     source_intermediate_file_id: int | None = None
     #: 设备源按原观察者身份核对本次配置；异常时不建立读取配置或流程。
     binding_result: BindingResult | None = None
+    #: 独立分段检查责任；与取回项、单原片处理责任互斥。
+    inspection_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
-        for value in (self.item_id, self.processing_id, self.output_id,
+        for value in (self.item_id, self.processing_id, self.inspection_id, self.output_id,
                       self.source_device_file_id, self.source_intermediate_file_id):
             if value is not None:
                 ObjectId(value)
-        if (self.item_id is None) == (self.processing_id is None):
+        if sum(value is not None for value in
+               (self.item_id, self.processing_id, self.inspection_id)) != 1:
             raise ValueError(
-                "候选必须恰属于取回项或录像处理之一:"
+                "候选必须恰属于取回项、录像处理或分段检查之一:"
                 f" item={self.item_id!r} processing={self.processing_id!r}"
+                f" inspection={self.inspection_id!r}"
             )
         if (self.item_id is None) != (self.output_id is None):
             raise ValueError("取回候选必须填写正式产物，内部处理候选不填写正式产物")
@@ -131,7 +135,8 @@ class FileCandidate:
                 raise ValueError("设备读取候选必须使用已校验的读取配置")
             if self.binding_result is not None and self.binding_result.status is BindingStatus.UNAVAILABLE:
                 raise ValueError("无法可靠取得的配置不能作为普通设备绑定异常")
-        elif self.config is not None or self.processing_id is not None or self.binding_result is not None:
+        elif (self.config is not None or self.processing_id is not None
+              or self.inspection_id is not None or self.binding_result is not None):
             raise ValueError("主机产物取回不采用设备配置，内部原片必须来自设备")
         validate_file_extension(self.target_extension)
         if self.item_id is not None:

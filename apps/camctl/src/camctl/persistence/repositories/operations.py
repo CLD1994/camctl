@@ -160,20 +160,28 @@ def _load_flow_context(
         if copy is None:
             raise TransactionError(f"文件拷贝不存在: {target.copy_id}")
         state.setdefault("file_copies", {})[copy["id"]] = copy
-        if (copy["delivery_id"] is None) == (copy["processing_id"] is None):
-            raise ConsistencyError("拷贝必须恰归属交付或录像处理之一")
+        if sum(copy.get(name) is not None for name in
+               ("delivery_id", "processing_id", "inspection_id")) != 1:
+            raise ConsistencyError("拷贝必须恰归属交付、录像处理或分段检查之一")
         if copy["delivery_id"] is not None:
             delivery = _load_row(connection, "deliveries", copy["delivery_id"])
             if delivery is None:
                 raise TransactionError(f"交付不存在: {copy['delivery_id']}")
             state.setdefault("deliveries", {})[delivery["id"]] = delivery
-        else:
+        elif copy["processing_id"] is not None:
             processing = _load_row(
                 connection, "recording_processing", copy["processing_id"]
             )
             if processing is None:
                 raise TransactionError(f"录像处理不存在: {copy['processing_id']}")
             state.setdefault("recording_processing", {})[processing["id"]] = processing
+        else:
+            inspection = _load_row(connection, "segment_inspections", copy["inspection_id"])
+            if inspection is None:
+                raise TransactionError(f"分段检查不存在: {copy['inspection_id']}")
+            if inspection["action_id"] != action_id:
+                raise ConsistencyError("分段检查与读取动作归属不同")
+            state.setdefault("segment_inspections", {})[inspection["id"]] = inspection
         return
     needs_activity = (
         kind in _ACTIVITY_KINDS
@@ -401,16 +409,20 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
     elif target.copy_id is not None:
         copy = _fixed_reference(state, "file_copies", target.copy_id)
         try:
-            copy_delivery, copy_processing = copy["delivery_id"], copy["processing_id"]
+            copy_delivery, copy_processing, copy_inspection = (
+                copy["delivery_id"], copy["processing_id"], copy.get("inspection_id"))
         except KeyError as error:
             raise ConsistencyError("拷贝缺少完整的交付与处理关联字段") from error
-        if (copy_delivery is None) == (copy_processing is None):
-            raise ConsistencyError("拷贝必须恰归属交付或录像处理之一")
+        if sum(value is not None for value in
+               (copy_delivery, copy_processing, copy_inspection)) != 1:
+            raise ConsistencyError("拷贝必须恰归属交付、录像处理或分段检查之一")
         if not json_equal(delivery_id, copy_delivery):
             raise ConsistencyError("读取流程与拷贝的交付引用不符")
         parent = (_fixed_reference(state, "deliveries", copy_delivery)
                   if copy_delivery is not None else
-                  _fixed_reference(state, "recording_processing", copy_processing))
+                  _fixed_reference(state, "recording_processing", copy_processing)
+                  if copy_processing is not None else
+                  _fixed_reference(state, "segment_inspections", copy_inspection))
         if not json_equal(parent.get("action_id"), action_id):
             raise ConsistencyError("读取流程与拷贝所属动作不符")
         matches = [identity for identity, facts in state.get("operation_runs", {}).items()
@@ -483,10 +495,15 @@ def _run_owner_ref(
             raise TransactionError("读取流程缺少拷贝事实")
         if copy["delivery_id"] is not None:
             return ("delivery", copy["delivery_id"])
-        processing = state.get("recording_processing", {}).get(copy["processing_id"])
-        if processing is None:
-            raise TransactionError("读取流程缺少录像处理事实")
-        return ("action", processing["action_id"])
+        if copy["processing_id"] is not None:
+            processing = state.get("recording_processing", {}).get(copy["processing_id"])
+            if processing is None:
+                raise TransactionError("读取流程缺少录像处理事实")
+            return ("action", processing["action_id"])
+        inspection = state.get("segment_inspections", {}).get(copy["inspection_id"])
+        if inspection is None:
+            raise TransactionError("读取流程缺少分段检查事实")
+        return ("action", inspection["action_id"])
     if kind in (int(_RUN_KIND.STOP_RESIDUAL), int(_RUN_KIND.EMERGENCY_STOP)):
         activity = state.get("device_activities", {}).get(run_facts["activity_id"])
         if activity is None:

@@ -496,6 +496,12 @@ class HistoryRepository:
                         raise ConsistencyError("处理拷贝引用不唯一")
                     for (copy_id,) in copies:
                         rows[("file_copies",copy_id)] = _table_row(connection,"file_copies",copy_id)
+                for _, inspection_id in _ids_where(connection, "segment_inspections", "action_id", entity_id):
+                    rows[("segment_inspections", inspection_id)] = _table_row(
+                        connection, "segment_inspections", inspection_id)
+                    for _, copy_id in _ids_where(connection, "file_copies", "inspection_id", inspection_id):
+                        rows[("file_copies", copy_id)] = _table_row(
+                            connection, "file_copies", copy_id)
             seed = replace(seed,rows=rows)
         keys = frozenset(rows)
         count, previous = seed.head[1], seed.current.last_event_id+1
@@ -747,13 +753,13 @@ class HistoryRepository:
         elif kind is FileHistoryKind.COPY_FILES:
             with self._read_connection() as connection:
                 owner = _one(connection,
-                    "SELECT delivery_id, processing_id FROM file_copies WHERE id = ?",
+                    "SELECT delivery_id, processing_id, inspection_id FROM file_copies WHERE id = ?",
                     (request.copy_id,))
             if owner is None:
                 return self._absent_page()
             if owner[0] is not None:
                 rows = self._restore_owner_rows("delivery", int(owner[0]), boundary)
-            else:
+            elif owner[1] is not None:
                 with self._read_connection() as connection:
                     action_id = _one(
                         connection,
@@ -762,6 +768,15 @@ class HistoryRepository:
                 if action_id is None:
                     raise ConsistencyError(
                         f"拷贝 {request.copy_id} 的处理行不存在: {owner[1]!r}")
+                rows = self._restore_owner_rows("action", int(action_id[0]), boundary)
+            else:
+                with self._read_connection() as connection:
+                    action_id = _one(connection,
+                        "SELECT action_id FROM segment_inspections WHERE id = ?",
+                        (int(owner[2]),))
+                if action_id is None:
+                    raise ConsistencyError(
+                        f"拷贝 {request.copy_id} 的分段检查行不存在: {owner[2]!r}")
                 rows = self._restore_owner_rows("action", int(action_id[0]), boundary)
             if rows is None:
                 return self._absent_page()
@@ -798,6 +813,10 @@ class HistoryRepository:
                 if values["repair_output_file_id"] is not None:
                     refs.append(("intermediate_file", "intermediate_files",
                                  values["repair_output_file_id"]))
+            for (table, _), values in rows.items():
+                if table == "segment_inspections":
+                    refs.append(("device_file", "device_files",
+                                 values["source_device_file_id"]))
         items = tuple(
             self._restored_file(entity, table, file_id, boundary, required=True)
             for entity, table, file_id in refs)
@@ -891,6 +910,9 @@ class HistoryRepository:
                 yield "recording_processing", processing_id
                 yield from _ids_where(
                     connection, "file_copies", "processing_id", processing_id)
+            for _, inspection_id in _ids_where(connection, "segment_inspections", "action_id", action):
+                yield "segment_inspections", inspection_id
+                yield from _ids_where(connection, "file_copies", "inspection_id", inspection_id)
             # 停止沿原活动归属，读取沿拷贝归属，查询保留触发动作。
             for _, run_id in _owned_operation_run_ids(connection, "action", action):
                 yield "operation_runs", run_id
@@ -1148,16 +1170,21 @@ def _owned_operation_run_ids(
             raise ConsistencyError(f"流程 {run_id} 的种类未登记") from error
         if kind is kinds.READ_FILE:
             copy = _table_row(connection, "file_copies", run["copy_id"])
-            delivery_id, processing_id = copy["delivery_id"], copy["processing_id"]
-            if (delivery_id is None) == (processing_id is None):
+            delivery_id, processing_id, inspection_id = (
+                copy["delivery_id"], copy["processing_id"], copy.get("inspection_id"))
+            if sum(value is not None for value in
+                   (delivery_id, processing_id, inspection_id)) != 1:
                 raise ConsistencyError(f"读取流程 {run_id} 的拷贝没有唯一归属")
             if run["delivery_id"] != delivery_id:
                 raise ConsistencyError(f"读取流程 {run_id} 的交付关联与拷贝不符")
             if delivery_id is not None:
                 parent = _table_row(connection, "deliveries", delivery_id)
                 owner = ("delivery", delivery_id)
-            else:
+            elif processing_id is not None:
                 parent = _table_row(connection, "recording_processing", processing_id)
+                owner = ("action", parent["action_id"])
+            else:
+                parent = _table_row(connection, "segment_inspections", inspection_id)
                 owner = ("action", parent["action_id"])
             if run["action_id"] != parent["action_id"]:
                 raise ConsistencyError(f"读取流程 {run_id} 的动作关联与拷贝归属不符")
@@ -1190,10 +1217,15 @@ def _operation_run_candidates(connection, entity, entity_id, kinds) -> Iterator[
                 " UNION SELECT r.id FROM recording_processing p"
                 " JOIN file_copies c ON c.processing_id = p.id"
                 " JOIN operation_runs r ON r.copy_id = c.id AND r.kind = ?"
-                " WHERE p.action_id = ? AND r.id > ? ORDER BY id LIMIT ?")
+                " WHERE p.action_id = ? AND r.id > ?"
+                " UNION SELECT r.id FROM segment_inspections i"
+                " JOIN file_copies c ON c.inspection_id = i.id"
+                " JOIN operation_runs r ON r.copy_id = c.id AND r.kind = ?"
+                " WHERE i.action_id = ? AND r.id > ? ORDER BY id LIMIT ?")
             parameters = (entity_id, previous,
                 entity_id, int(kinds.STOP_RESIDUAL), previous,
                 entity_id, int(kinds.EMERGENCY_STOP), previous,
+                int(kinds.READ_FILE), entity_id, previous,
                 int(kinds.READ_FILE), entity_id, previous, _MEMBER_BATCH_SIZE)
         else:
             # READ_FILE 的 delivery_id 必须与 copy 的 delivery_id 相同；

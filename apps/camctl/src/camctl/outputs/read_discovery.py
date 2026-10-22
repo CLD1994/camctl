@@ -5,6 +5,10 @@ from dataclasses import dataclass
 
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.contracts.enums import enum_for
+
+_INSPECTION_STATE = enum_for("segment_inspections.state")
+_INSPECTION_PENDING = int(_INSPECTION_STATE.PENDING)
 
 
 DEFAULT_BATCH_SIZE = 100
@@ -68,13 +72,15 @@ _READ_FROM = (
     " LEFT JOIN actions origin ON origin.id=df.source_action_id"
     " LEFT JOIN deliveries d ON d.id=fc.delivery_id"
     " LEFT JOIN recording_processing rp ON rp.id=fc.processing_id"
-    " LEFT JOIN actions a ON a.id=COALESCE(d.action_id,rp.action_id)"
+    " LEFT JOIN segment_inspections si ON si.id=fc.inspection_id"
+    " LEFT JOIN actions a ON a.id=COALESCE(d.action_id,rp.action_id,si.action_id)"
     " LEFT JOIN plans p ON p.id=a.plan_id"
     " LEFT JOIN operation_runs r ON r.responsibility_key='read/'||fc.id"
 )
 _ACTIVE_COPY = (
     " (fc.slot_device_id IS NOT NULL OR (fc.verification_state NOT IN (3,5)"
-    " AND (d.status IN (1,2) OR rp.id IS NOT NULL OR (d.id IS NULL AND rp.id IS NULL))))"
+    " AND (d.status IN (1,2) OR rp.id IS NOT NULL OR (d.id IS NULL AND rp.id IS NULL"
+    f" AND si.state={_INSPECTION_PENDING}))))"
 )
 _ELIGIBLE = (
     " a.status=2 AND a.cancel_requested=0 AND a.scheduled_at<=?"
@@ -101,6 +107,9 @@ def validate_read_basis(connection, device_id=None):
         " OR ob.device_id IS NOT origin.device_id OR ob.driver_id IS NOT origin.driver_id"
         " OR (fc.slot_device_id IS NOT NULL AND fc.slot_device_id IS NOT ob.device_id)))"
         " OR (fc.source_device_file_id IS NULL AND (hf.id IS NULL OR fc.slot_device_id IS NOT NULL))"
+        " OR (fc.inspection_id IS NOT NULL AND (si.id IS NULL OR si.action_id IS NOT a.id"
+        f" OR si.state!={_INSPECTION_PENDING} OR si.source_device_file_id IS NOT df.id))"
+        " OR (fc.inspection_id IS NULL AND fc.processing_id IS NULL AND fc.delivery_id IS NULL)"
         " OR a.id IS NULL OR p.id IS NULL OR a.scheduled_at IS NULL"
         " OR a.input_index IS NULL OR r.id IS NULL OR r.kind<>3 OR r.copy_id IS NOT fc.id"
         " OR r.action_id IS NOT a.id OR r.delivery_id IS NOT fc.delivery_id"
@@ -177,7 +186,8 @@ def read_candidates(connection, scope, cursor=None, *, limit):
         if scope.kind in ("delivery", "reads"):
             condition += " AND fc.delivery_id IS NOT NULL"
         elif scope.kind == "internal":
-            condition += " AND fc.processing_id IS NOT NULL"
+            condition += (" AND (fc.processing_id IS NOT NULL OR "
+                          f"(fc.inspection_id IS NOT NULL AND si.state={_INSPECTION_PENDING}))")
     if scope.device_id is not None:
         condition += " AND ob.device_id=?"
         parameters.append(scope.device_id)

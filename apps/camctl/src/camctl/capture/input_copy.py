@@ -133,14 +133,14 @@ class InputStep:
 
 @dataclass(frozen=True)
 class InputContext:
-    """一次输入取得的输入：处理事实、源文件、配置与端口。
+    """一次输入取得的输入：处理或分段检查责任、源文件、配置与端口。
 
     源设备文件须已停止并写完；扩展名沿用原片容器类型。digest 为
     None 表示不提供源端摘要读取，源端支持与否由实际读取表达。
     """
 
     action_id: int
-    processing_id: int
+    processing_id: int | None
     source_device_file_id: int
     target_extension: str | None
     config: OperationConfig
@@ -153,10 +153,16 @@ class InputContext:
     read_end: ReadEnd | None = None
     on_read_end: Callable[[ReadEnd, bool], None] | None = None
     on_read_start: Callable[[], None] | None = None
+    inspection_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
-        ObjectId(self.processing_id)
+        if (self.processing_id is None) == (self.inspection_id is None):
+            raise ValueError("输入副本必须恰属于单原片处理或分段检查")
+        if self.processing_id is not None:
+            ObjectId(self.processing_id)
+        if self.inspection_id is not None:
+            ObjectId(self.inspection_id)
         ObjectId(self.source_device_file_id)
 
 
@@ -179,6 +185,7 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
         delivery_display_name=None,
         config=context.config,
         occurred_at=context.occurred_at,
+        inspection_id=context.inspection_id,
     ))
     if receipt.disposition is SaveDisposition.REJECTED:
         return InputStep(InputPhase.QUALIFY_REJECTED, error=receipt.error)

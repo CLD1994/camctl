@@ -308,6 +308,26 @@ CREATE INDEX segment_member_order ON segment_members(set_id, COALESCE(directory_
 CREATE INDEX segment_member_pairing ON segment_members(set_id, pairing_identity, role, id);
 CREATE INDEX segment_member_file ON segment_members(file_id, set_id, id);
 
+-- 每个实际分段成员有独立检查责任；事实通过原动作的事件历史推进。
+CREATE TABLE segment_inspections (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    set_id INTEGER NOT NULL REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    member_id INTEGER NOT NULL REFERENCES segment_members(id) DEFERRABLE INITIALLY DEFERRED,
+    source_device_file_id INTEGER NOT NULL REFERENCES device_files(id) DEFERRABLE INITIALLY DEFERRED,
+    target_json TEXT NOT NULL CHECK (json_valid(target_json) AND json_type(target_json) = 'object'),
+    budget_json TEXT NOT NULL CHECK (json_valid(budget_json) AND json_type(budget_json) = 'object'),
+    state INTEGER NOT NULL CHECK (state BETWEEN 1 AND 4),
+    result_json TEXT CHECK (result_json IS NULL OR (json_valid(result_json) AND json_type(result_json) = 'object')),
+    result_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (action_id, member_id),
+    CHECK ((state = 1 AND result_json IS NULL AND result_event_id IS NULL)
+        OR (state <> 1 AND result_json IS NOT NULL AND result_event_id IS NOT NULL))
+) STRICT;
+CREATE INDEX segment_inspection_set ON segment_inspections(set_id, id);
+CREATE INDEX segment_inspection_source ON segment_inspections(source_device_file_id, id);
+
 CREATE TABLE segment_gaps (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,

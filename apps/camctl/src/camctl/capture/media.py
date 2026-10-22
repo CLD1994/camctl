@@ -322,6 +322,8 @@ class MediaTools(Protocol):
 
     async def probe(self, input: FileRef) -> FileTaskResult: ...
 
+    async def probe_segment(self, input: FileRef, *, count_frames: bool) -> FileTaskResult: ...
+
     async def repair(
         self, input: FileRef, output: FileRef, *, trim_s: Decimal,
         stream_indices: tuple[int, ...] | None = None, output_format: str | None = None,
