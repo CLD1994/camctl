@@ -272,7 +272,8 @@ def qualify(db, request, *, saved=None, batch=128):
 
 def _photo_items(db, q):
     """独立照片沿原片规则选择，不接受视频范围或预览意图过滤。"""
-    if q["setrow"] is None:
+    if (q["setrow"] is None or q["source"]["execution_spec_json"].get("result_policy")
+            != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
         return
     after = 0
     while True:
