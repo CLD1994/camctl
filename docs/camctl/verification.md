@@ -67,6 +67,12 @@ Python 3.11.16、SQLite 3.53.1 下，新增首票测试及事务路径审计共6
 
 新增2项有效RED后，相关持久化文件与事务路径审计94项通过，完整unit6975项通过，保留1项跳过及2条既有warning。日志为`.local/verification/osmo-resume-20261022/a1p-read-port-red.log`、`a1p-read-port-final.log`和`a1p-read-port-unit.log`，同名JSON保存实际命令、提交前HEAD、UTC及退出码。UNKNOWN保存及其恢复读取、实际调用/保存拥有者和生产接线仍待，未验证设备或完整P4。
 
+## 基准目录实际调用拥有者（2026-10-22 UTC）
+
+新增逐页PendingBaselineRead，使用既有owned_tool_call持有实际目录Task；BaselineSaveOwner扩展INTEND/RETURN并保留原追加/FIX。意图可靠后、实际Task创建前分别调用原资格端口，后续生产装配须从最新取消及窗口提供该端口。实际返回先由原拥有者接手并固定一次时刻，Task结束后保存原RETURN，随后传播等待者取消。已有返回不因回执未知而重读，时钟失败保留实际返回及诊断，不补造UNKNOWN或终态。
+
+拥有者与原基准历史/准备回归33项通过；完整unit6975项通过，保留1项跳过和2条既有warning。日志为`.local/verification/osmo-resume-20261022/a1p-owner-final-2.log`、`a1p-owner-unit.log`及同名JSON。最初3项因模块缺失有效RED；实际Task结束前的保存接手、StopSignal接口不符分别经有效RED修正。新增替身消费实际DirectoryReader及StopSignal契约，不访问相机。UNKNOWN本地收场/冷恢复上下文、真实RuntimeDeps/lifecycle/handler资格及所有终态接线仍待，不能据此勾选完整P4。
+
 ## 显式取回源检查身份与共享内核组合
 
 按 OSMO 计划继续 P5 身份底座。主线候选为 `747b754`，环境沿用 Python 3.11.16、SQLite 3.53.1；实现与两次守卫修复已经独立评审，事务入口合成另经限定复核。原页、来源、准入和分段的读取范围、实际前序、封口及完成检查保留，新取回读口从同一实际写连接独立绑定。
