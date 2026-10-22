@@ -1,6 +1,9 @@
 """固定 H 错误不能解释时停止报告；合法历史的文件失败仍归 REPORT。"""
 
 from copy import deepcopy
+from contextlib import contextmanager
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from unittest.mock import create_autospec
 
@@ -10,7 +13,7 @@ from camctl.persistence.directory_switch import canonical_to_path
 from camctl.contracts.public_projection import PublicProjectionError
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.reporting import generation
+from camctl.reporting import generation, worker
 from camctl.reporting.generation import generate_report_file
 from camctl.reporting.messages import ErrorKind, JobMessage, ResultFailureMessage, new_job_id
 from camctl.reporting.worker import run_job
@@ -21,27 +24,38 @@ pytestmark = pytest.mark.asyncio
 
 
 def _incomplete_history_reader(spec, report, action_id, activity_id, expected_error):
-    """只改变稳定读取返回值；冻结校验、入选和实体回放均委托真实仓储。"""
+    """只改变同 H 关联行的返回值；分页选择和历史恢复均委托真实仓储。"""
     actual = HistoryRepository(spec.db_path)
     reader = create_autospec(HistoryRepository, instance=True, spec_set=True)
     reader.frozen_registration.side_effect = actual.frozen_registration
-    reader.select_report_scope.side_effect = actual.select_report_scope
-    reader.related_entity_ids.side_effect = actual.related_entity_ids
+    reader.open_report_selection.side_effect = actual.open_report_selection
+    reader.restore_primary_at_h.side_effect = actual.restore_primary_at_h
+    reader.related_primary_rows_at_h.side_effect = actual.related_primary_rows_at_h
+    reader.restore_entity.side_effect = actual.restore_entity
     supplied = []
 
-    def restore(entity, entity_id, boundary, *, event_batch_size=128):
-        rows = deepcopy(actual.restore_entity(
-            entity, entity_id, boundary, event_batch_size=event_batch_size))
-        if entity == "action" and entity_id == action_id:
-            assert boundary == report.boundary
-            activity = rows["device_activities", activity_id]
-            assert activity["last_error_json"] == expected_error
-            # 模拟读取端口返回不能解释的 H 字段，不修改任何 SQLite 行。
-            activity["last_error_json"] = {"code": expected_error["code"]}
-            supplied.append(boundary)
-        return rows
+    @contextmanager
+    def open_history(entity_id, boundary, **options):
+        with actual.open_segment_history(entity_id, boundary, **options) as handle:
+            related = handle.related_rows
 
-    reader.restore_entity.side_effect = restore
+            def rows(table, column=None, value=None):
+                for row in related(table, column, value):
+                    if (entity_id == action_id and table == "device_activities"
+                            and row.row_id == activity_id):
+                        assert boundary == report.boundary
+                        activity = deepcopy(row.values)
+                        assert activity["last_error_json"] == expected_error
+                        # 只替换读取返回值，不修改业务库或历史恢复副本。
+                        activity["last_error_json"] = {"code": expected_error["code"]}
+                        row = replace(row, values=activity)
+                        supplied.append(boundary)
+                    yield row
+
+            handle.related_rows = rows
+            yield handle
+
+    reader.open_segment_history.side_effect = open_history
     return reader, supplied
 
 
@@ -114,8 +128,8 @@ async def test_uninterpretable_frozen_error_stops_worker_without_publish(tmp_pat
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
-        constructor = create_autospec(HistoryRepository, spec_set=True, return_value=reader)
-        monkeypatch.setattr(generation, "HistoryRepository", constructor)
+        monkeypatch.setattr(worker, "generate_report_file",
+                            partial(generate_report_file, repository=reader))
         before = _snapshot(owned, report, runtime)
         job = _job(owned, spec)
         try:

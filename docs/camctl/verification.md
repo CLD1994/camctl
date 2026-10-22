@@ -18,14 +18,18 @@
 | 普通取消与原生空尾 | `capture-cancel2` 17 项、`native-completion3` 4 项通过；START 失败及未启动取消 `start-failure` 6 项通过。 |
 | 占用与计划／组等待 | `release-recovery` 1 项、`group-scopes2` 2 项通过；释放回执丢失沿原申请核实，同目录下一来源可继续执行。 |
 | 显式未确认条目 QUERY v2 | `query-recovery` 7 项通过，含原结果与业务保存回执未知、冷恢复、有限预算和单原片隔离。 |
-| 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建。 |
+| 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建；最终完整 `component-reporting-145300` 435 项通过。 |
 | 单元汇总 | `unit-delivery` 6977 passed、1 skipped、2 条既有警告，退出 0；该次包含占用释放修正后的生产代码。 |
 | 客户端完整验证 | `client-unit` 65 文件／3197 项、`client-integration` 40 文件／1566 项通过；`client-typecheck` 和 `client-build` 退出 0。构建保留原有大块体积提示。18 项直接依赖与已锁定版本一致，锁文件未修改。 |
 | 安装版分段矩阵 | `installed-segments` 4 passed、2 failed：普通两段、多录六段、缺段前缀和原生空尾通过。空范围的零条目来源失败汇总、未知名称的原配对事实重用已修正，完整六场景仍待复验。 |
-| 既有 outputs 汇总 | `outputs-final` 2449 passed、35 failed、2 skipped；35 项来自三个事件序列夹具缺少独立媒体读取范围。补齐真实读取范围后，`sequence-fixtures3` 118 项通过；完整目录仍待复验。 |
+| 完整 outputs | `component-outputs-isolated-143747` 2487 passed、2 skipped，退出 0。两项跳过分别是内部副本不发布普通 delivery、主机源不携带设备读取配置；未缺少工具。 |
 | 规格与静态检查 | `database-final` 39 表／3803 项断言；`history-sql-final`、`event-final`、`dependencies-final`、`protocol-final`、`config-final` 均退出 0。 |
 
-完整 capture 初轮 `component-capture-141545` 为 2040 passed、8 failed。8 项均因原始页查询同时计入文件索引事件；查询限定到权威 `APPEND` 分支后，完整时间资格文件及分段处理器文件 `capture-last-boundaries` 共 136 项通过，包含跨目录、首位置只有 LRF 和顺序未知的三个新增组合。原有实际时刻、文件完成和调用次数断言保留。完整 outputs 在独立工作区 `/tmp/camctl-osmo-verify-20261022`、提交 `d4e9be0` 上运行，包资源与当前工作区分别同步。
+完整 capture 初轮 `component-capture-141545` 为 2040 passed、8 failed。8 项均因原始页查询同时计入文件索引事件；查询限定到权威 `APPEND` 分支后，完整时间资格文件及分段处理器文件 `capture-last-boundaries` 共 136 项通过，包含跨目录、首位置只有 LRF 和顺序未知的三个新增组合。原有实际时刻、文件完成和调用次数断言保留。完整 outputs 在独立工作区 `/tmp/camctl-osmo-verify-20261022`、提交 `d4e9be0` 上通过；随后接入原始页查询修正，在 `b9f3acd` 上运行最终完整 capture，包资源与当前工作区分别同步。
+
+outputs 初轮 `outputs-final` 为 2449 passed、35 failed、2 skipped；35 项来自三个事件序列夹具缺少独立媒体读取范围。补齐真实读取范围后，相关 118 项及上述完整目录通过。reporting 初轮为 433 passed、2 failed；测试替身补全真实分页历史端口并从实际生成函数传入读取器后，错误分类专项 3 项及上述完整目录通过，状态错误、停止发布和库／文件不变的断言保留。
+
+bootstrap 初轮发现失败后主动中断，`component-bootstrap-145433` 为 213 passed、1 failed，退出 2。恢复夹具补全正式 `capture_segment_writes` 集合，并同步另一处共同恢复夹具；恢复及报告错误流程三个完整文件 `bootstrap-recovery-fixtures` 共 4 项通过。完整 bootstrap 仍待重跑；其余组件在独立工作区 `/tmp/camctl-osmo-components-20261022`、提交 `b776301` 上逐目录运行。
 
 P8 的完整组件目录、最终 wheel 六场景、既有 OSMO、单原片清理及 Action6 安装链正在顺序回归。剩余完整结果随后记录，未据局部通过勾选完整阶段。所有设备输入均为受真实契约约束的替身；本次没有 ARM 部署、相机控制或现场媒体验收，P9 待用户另行安排。
 

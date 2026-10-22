@@ -29,7 +29,8 @@ async def test_common_resume_recovers_original_page_without_reading_next_page(tm
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         deps = SimpleNamespace(capture_baselines={}, capture_result_scans=runtime.pending_result_scans,
-            capture_result_closes={}, capture_completions={}, capture_retry_gate=None)
+            capture_result_closes={}, capture_completions={}, capture_retry_gate=None,
+            capture_segment_writes={})
         _resume_capture_requests(deps, owned)
         assert pending.saves.pending.response is not None
         driver.list_results.assert_awaited_once()

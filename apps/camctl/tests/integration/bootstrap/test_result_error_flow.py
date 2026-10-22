@@ -2,6 +2,7 @@
 
 import json
 import multiprocessing
+from functools import partial
 from multiprocessing.connection import Connection
 from pathlib import Path
 from unittest.mock import create_autospec
@@ -14,10 +15,9 @@ from camctl.bootstrap.flows import report_flow
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.enums import enum_for
 from camctl.persistence.repositories.acceptance import AcceptanceRepository
-from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.repositories.session import SessionRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.reporting import generation
+from camctl.reporting import generation, worker
 from camctl.reporting.maintenance import MaintenanceLimits
 from camctl.reporting.messages import (
     ErrorKind, JobMessage, ReadyMessage, ResultFailureMessage, ShutdownMessage,
@@ -131,8 +131,8 @@ async def test_state_result_stops_following_flow_without_report_failure_write(tm
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
-        monkeypatch.setattr(generation, "HistoryRepository",
-                            create_autospec(HistoryRepository, spec_set=True, return_value=reader))
+        monkeypatch.setattr(worker, "generate_report_file",
+                            partial(generation.generate_report_file, repository=reader))
         rig = _InlineWorker(spec.db_path)
         following_calls = []
 
