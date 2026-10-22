@@ -217,7 +217,7 @@ P4整体、P5的QUERY v2与调度、P6后端报告及原字节重建、P8安装�
 
 **取消版本存储阶段：** `3548096`在取消发布前按明确前版及取消事件接手原H0，完整重建全部成员并保留旧版本；只读恢复按唯一键定位，发布后的取消复用原正式结果。有限／有界入口、部分保存／已固定前版、提交前后回执未知及initial／snapshot／current恢复已组合验证。相关集合、版本和仓储审计134项通过，完整unit6975项通过、1项跳过及2条既有warning；命令、环境、UTC、退出码和日志保存在`.local/verification/osmo-resume-20261022/a2-cancel-versions-final.*`及`a2-cancel-versions-unit.*`。独立上下文固定`23cfad2..3548096`评审通过，无Critical／Important／Minor；共同处理器和终态发布继续实施。后补满批专项在两事务入口分别实际保存128＋1项来源并固定129个成员，2项通过，日志为`a2-members-full-batch.*`；该专项证明满批事件及续页，不代替增长资源测试。
 
-**基准有限决定存储阶段：** `e354b01`新增`segment_check_conclusions`及原申请／引用，NO_RESULT_WORK的基准分区只消费原H0内实际RETURN错误或UNCONFIRMED；动作保持RUNNING，占用及正式产物不变。两事务入口核锚点、来源、身份及有限字段，原键可经只读新连接核实，同H历史和快照恢复通过。独立评审发现的实际事务范围核对遗漏已补回归并修复，结构导航也已移除重复表总数；限定复核待完成。修复后相关存储与仓储审计79项、原分段完成103项分别通过，后者1项增长测试未选中；日志为`.local/verification/osmo-resume-20261022/a3-baseline-conclusion-review-green-valid.*`及`a3-conclusion-review-segment-regression-valid.*`。实际基准拥有者装配、其余结束分区、共同处理器和发布继续实施，完整A3及P4保持未完成。
+**基准有限决定存储阶段：** `e354b01`新增`segment_check_conclusions`及原申请／引用，NO_RESULT_WORK的基准分区只消费原H0内实际RETURN错误或UNCONFIRMED；动作保持RUNNING，占用及正式产物不变。两事务入口核锚点、来源、身份及有限字段，原键可经只读新连接核实，同H历史和快照恢复通过。`06a8821`修复实际事务范围核对遗漏并移除结构导航的重复表总数；限定独立复核确认两项均闭合，无新增缺陷。修复后相关存储与仓储审计79项、原分段完成103项分别通过，后者1项增长测试未选中；日志为`.local/verification/osmo-resume-20261022/a3-baseline-conclusion-review-green-valid.*`及`a3-conclusion-review-segment-regression-valid.*`。实际基准拥有者装配、其余结束分区、共同处理器和发布继续实施，完整A3及P4保持未完成。
 
 ## P5：让所有取回入口消费同一默认范围
 
