@@ -179,3 +179,10 @@ class BaselineReadReturn:
             page = Page(tuple(page.items), page.next_cursor)
         object.__setattr__(self, 'error', error)
         object.__setattr__(self, 'returned', DirectoryRead(None, error, page))
+
+
+@dataclass(frozen=True)
+class BaselineCallsCursor:
+    action_id: int
+    boundary: HistoryBoundary
+    after_call_id: int

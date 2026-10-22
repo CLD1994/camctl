@@ -42,7 +42,7 @@ _READ_TRANSACTION_FUNCTIONS = {
     "module:read_strict_result_file_input",
     "module:verify_ownership_from_result_page",
     "module:verify_result_file_pairing",
-    "module:read_call",
+    "module:_read_transaction",
     "MotorRepository.verify_operation",
     "CancellationRepository.verify_motor_operation",
     "HostCaptureRepository.verify_operation",

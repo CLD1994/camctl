@@ -231,6 +231,10 @@ async def test_actual_error_stays_returned_and_does_not_end_action(owned, tmp_pa
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     assert saved.value.error == error and saved.value.state.name == 'RETURNED'
     assert saved.value.chunk_event_id is None and saved.value.next_cursor is None
+    assert capture.read_baseline_failure_anchor(intent.action_id,first.value.call_id,
+        first.value.boundary,owned) is None
+    assert capture.read_baseline_failure_anchor(intent.action_id,first.value.call_id,
+        saved.value.boundary,owned)==saved.value
     assert owned.connection.execute('SELECT status FROM actions WHERE id=?',
                                   (intent.action_id,)).fetchone() == (2,)
 
@@ -360,3 +364,59 @@ async def test_return_replay_after_later_call_and_fix_keeps_original_group(owned
     assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
     assert replay.value==saved.value
     assert capture.read_baseline_call(first.value.call_id,first.value.boundary,owned)==first.value
+
+
+async def test_fresh_original_result_lookup_and_verification_never_create_a_write(owned,tmp_path):
+    from camctl.capture import baseline_models as models
+    from camctl.contracts.pages import Page
+    from camctl.devices.directory import DirectoryCursor,DirectoryRead
+    from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    assert first.kind is DbOutcomeKind.COMPLETED,first.error
+    assert capture.read_baseline_call_result(first.value.call_id,owned) is None
+    cursor=DirectoryCursor(intent.binding,intent.directories,1,None)
+    returned=models.BaselineReadReturn(first.value.call_id,_SCHEDULED+1,None,
+        DirectoryRead(None,None,Page((),cursor)))
+    saved=capture.save_baseline_read_return(returned,intent.result_save_key,owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+    before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+    fresh=open_existing(tmp_path/'state.db',DbOpenMode.EXISTING_RW,DbConfig())
+    try:
+        assert capture.read_baseline_call_result(first.value.call_id,fresh)==saved.value
+        assert capture.verify_baseline_read_write(returned,intent.result_save_key,fresh)==saved.value
+        assert capture.verify_baseline_read_write(intent,intent.call_key,fresh)==first.value
+        assert capture.verify_baseline_read_write(replace(intent,call_key=new_operation_key()),
+            new_operation_key(),fresh) is None
+    finally:
+        fresh.connection.close()
+    assert owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()==before
+
+
+async def test_call_discovery_uses_fixed_boundary_and_cursor(owned,tmp_path):
+    from camctl.capture import baseline_models as models
+    from camctl.contracts.pages import Page
+    from camctl.devices.directory import DirectoryCursor,DirectoryRead
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    cursor=DirectoryCursor(intent.binding,intent.directories,1,None)
+    returned=models.BaselineReadReturn(first.value.call_id,_SCHEDULED+1,None,
+        DirectoryRead(None,None,Page((),cursor)))
+    saved=capture.save_baseline_read_return(returned,intent.result_save_key,owned)
+    followup=replace(intent,cursor=cursor,read_no=2,call_key=new_operation_key(),result_save_key=new_operation_key())
+    second=capture.save_baseline_read_intent(followup,followup.call_key,owned)
+    assert second.kind is DbOutcomeKind.COMPLETED,second.error
+    old=capture.read_baseline_calls(intent.action_id,first.value.boundary,None,1,owned)
+    assert old.items==(first.value,) and old.next_cursor is None
+    page=capture.read_baseline_calls(intent.action_id,second.value.boundary,None,1,owned)
+    assert page.items==(saved.value,) and page.next_cursor is not None
+    last=capture.read_baseline_calls(intent.action_id,second.value.boundary,page.next_cursor,1,owned)
+    assert last.items==(second.value,) and last.next_cursor is None
+    from camctl.contracts.values import ConsistencyError
+    with pytest.raises(ConsistencyError):
+        capture.read_baseline_calls(intent.action_id,first.value.boundary,page.next_cursor,1,owned)
+    for limit in (2,128):
+        complete=capture.read_baseline_calls(intent.action_id,second.value.boundary,None,limit,owned)
+        assert complete.items==(saved.value,second.value) and complete.next_cursor is None

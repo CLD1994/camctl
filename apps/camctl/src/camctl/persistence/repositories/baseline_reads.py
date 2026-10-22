@@ -1,14 +1,15 @@
 """基准目录调用原始输入的保存、独立核对及同边界读取。"""
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 from decimal import Decimal
 
 from camctl.capture.baseline_models import (
-    BaselineChunkSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
+    BaselineCallsCursor, BaselineChunkSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
     BaselineRef, BaselineState)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.json_values import json_equal
+from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
@@ -17,7 +18,7 @@ from camctl.history.reads import BaselineReadWriteScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
-    CommandPlan, row_change, event_envelope, read_transaction_range,
+    CommandPlan, TransactionScope, row_change, event_envelope, read_transaction_range,
     row_facts, saved_transaction_events, update_change)
 from camctl.operations.models import ErrorValue
 from camctl.operations.result_format import error_document
@@ -122,8 +123,7 @@ def _current_boundary(connection):
     return INITIAL_BOUNDARY if row is None else HistoryBoundary(*row)
 
 
-def _read_call(connection, call_id, boundary):
-    ObjectId(call_id)
+def _read_boundary(connection,boundary):
     if not isinstance(boundary, HistoryBoundary):
         raise ValueError('基准调用读取需要完整历史边界')
     current = _current_boundary(connection)
@@ -133,6 +133,12 @@ def _read_call(connection, call_id, boundary):
         transaction = read_transaction_range(connection, boundary.txn_id)
         if transaction.last_event_id != boundary.last_event_id:
             raise ConsistencyError('基准调用读取边界不是完整事务')
+    return current
+
+
+def _read_call(connection, call_id, boundary):
+    ObjectId(call_id)
+    current=_read_boundary(connection,boundary)
     row = row_facts(connection, 'baseline_read_calls', call_id)
     if row is None or row['created_event_id'] > boundary.last_event_id:
         return None
@@ -193,16 +199,87 @@ def _read_call(connection, call_id, boundary):
         HistoryBoundary(result_tx.txn_id,result_tx.last_event_id))
 
 
-def read_call(call_id, boundary, owned):
+@contextmanager
+def _read_transaction(owned):
     connection = owned.connection
     begun = not connection.in_transaction
     if begun:
         connection.execute('BEGIN')
     try:
-        return _read_call(connection, call_id, boundary)
+        yield connection
     finally:
         if begun:
             connection.execute('ROLLBACK')
+
+
+def read_call(call_id,boundary,owned):
+    with _read_transaction(owned) as connection:
+        return _read_call(connection,call_id,boundary)
+
+
+def read_calls(action_id,boundary,cursor,limit,owned):
+    ObjectId(action_id)
+    if type(limit) is not int or not 1 <= limit <=128:
+        raise ValueError('基准调用分页上限必须为1—128')
+    previous=0
+    if cursor is not None:
+        if (not isinstance(cursor,BaselineCallsCursor) or cursor.action_id != action_id
+                or cursor.boundary != boundary):
+            raise ConsistencyError('基准调用游标不能改变原动作及完整边界')
+        previous=ObjectId(cursor.after_call_id)
+    with _read_transaction(owned) as connection:
+        _read_boundary(connection,boundary)
+        with closing(connection.execute('SELECT id FROM baseline_read_calls INDEXED BY baseline_calls_action'
+                ' WHERE action_id=? AND id>? AND created_event_id<=? ORDER BY id LIMIT ?',
+                (action_id,previous,boundary.last_event_id,limit+1))) as rows:
+            identities=tuple(row[0] for row in rows)
+        items=tuple(_read_call(connection,identity,boundary) for identity in identities[:limit])
+        next_cursor=(None if len(identities)<=limit else
+                     BaselineCallsCursor(action_id,boundary,identities[limit-1]))
+        return Page(items,next_cursor)
+
+
+def read_call_result(call_id,owned,*,execution_finished=True):
+    if not execution_finished:
+        return None
+    with _read_transaction(owned) as connection:
+        view=_read_call(connection,call_id,_current_boundary(connection))
+        if view is None:
+            raise ConsistencyError('基准调用结果读取缺少原意图')
+        saved=saved_transaction_events(connection,view.request.result_save_key)
+        if saved is None:
+            if view.state is not _STATE.INTENDED:
+                raise ConsistencyError('基准已知结果缺少原结果事务')
+            return None
+        if view.result_event_id != saved[-1]['event_id']:
+            raise ConsistencyError('基准调用结果键属于其他完整事务')
+        return view
+
+
+def verify_write(request,key,owned,*,execution_finished=True):
+    if not execution_finished:
+        return None
+    with _read_transaction(owned) as connection:
+        saved=saved_transaction_events(connection,key)
+        if saved is None:
+            return None
+        boundary=_current_boundary(connection)
+        scope=TransactionScope(connection,boundary.txn_id,boundary.last_event_id)
+        command=(SaveBaselineReadIntent(request,key) if isinstance(request,BaselineReadIntent)
+                 else SaveBaselineReadReturn(request,key))
+        plan=command.plan(scope)
+        if not plan.read_only or scope.allocation is not None:
+            raise ConsistencyError('原基准调用核实不能创建新写入')
+        return plan.result
+
+
+def read_failure_anchor(action_id,call_id,boundary,owned):
+    ObjectId(action_id)
+    with _read_transaction(owned) as connection:
+        view=_read_call(connection,call_id,boundary)
+        if view is None or view.request.action_id != action_id:
+            raise ConsistencyError('基准失败依据不属于原动作和调用')
+        return view if view.error is not None else None
 
 
 class SaveBaselineReadIntent:

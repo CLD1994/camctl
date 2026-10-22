@@ -2468,6 +2468,22 @@ class CaptureRepository:
         from .baseline_reads import read_call
         return read_call(call_id, boundary, owned)
 
+    def read_baseline_calls(self,action_id,boundary,cursor,limit,owned):
+        from .baseline_reads import read_calls
+        return read_calls(action_id,boundary,cursor,limit,owned)
+
+    def read_baseline_call_result(self,call_id,owned,*,execution_finished=True):
+        from .baseline_reads import read_call_result
+        return read_call_result(call_id,owned,execution_finished=execution_finished)
+
+    def verify_baseline_read_write(self,request,key,owned,*,execution_finished=True):
+        from .baseline_reads import verify_write
+        return verify_write(request,key,owned,execution_finished=execution_finished)
+
+    def read_baseline_failure_anchor(self,action_id,call_id,boundary,owned):
+        from .baseline_reads import read_failure_anchor
+        return read_failure_anchor(action_id,call_id,boundary,owned)
+
     def save_baseline_read_return(self, request, key, owned):
         from .baseline_reads import SaveBaselineReadReturn
         receipt = commit_operation(SaveBaselineReadReturn(request, key), key, owned)
