@@ -8,7 +8,7 @@
 
 ## OSMO 分段生产接入与联合验收（2026-10-22 UTC）
 
-拍摄与范围取回接入提交为 `dc2db5d`。对应[实施计划 P4—P8](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#当前执行位置与继续顺序)。环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0。完成模块按冻结的任务结果策略分派；Action6 保持单原片，OSMO 的单原片任务另由安装版清理链验证。下列记录区分已经取得的证据与仍在执行的完整回归。
+拍摄与范围取回接入提交为 `dc2db5d`。对应[实施计划 P4—P8](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#当前执行位置与继续顺序)。环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0。完成模块按冻结的任务结果策略分派；Action6 保持单原片，OSMO 的单原片任务另由安装版清理链验证。下列记录按执行顺序保留各轮失败、修复及最终完整回归结果；不同阶段不拼为同一次完整运行，当前阶段由正式计划维护。
 
 原始命令、工作目录、解释器、UTC 起止、退出码及日志保存在 `.local/verification/osmo-segmentation-20261022/` 的同名 JSON／log。复现入口为本计划的[验证命令](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#执行时使用的验证命令)与[跨组件测试说明](../../tests/integration/README.md#osmo-360-ii-正式内置合同安装版联合链)。
 
@@ -18,14 +18,14 @@
 | 普通取消与原生空尾 | `capture-cancel2` 17 项、`native-completion3` 4 项通过；START 失败及未启动取消 `start-failure` 6 项通过。 |
 | 占用与计划／组等待 | `release-recovery` 1 项、`group-scopes2` 2 项通过；释放回执丢失沿原申请核实，同目录下一来源可继续执行。 |
 | 显式未确认条目 QUERY v2 | `query-recovery` 7 项通过，含原结果与业务保存回执未知、冷恢复、有限预算和单原片隔离。 |
-| 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建；最终完整 `component-reporting-145300` 435 项通过。 |
-| 单元汇总 | `unit-delivery` 6977 passed、1 skipped、2 条既有警告，退出 0；该次包含占用释放修正后的生产代码。 |
+| 历史报告 | `reporting-segments` 9 项通过，含缺口完整详情及清理、摘要变化后的同边界原字节重建；最终完整 `reporting-repaired-161745` 435 项通过。 |
+| 单元汇总 | 后续恢复接线修正后的当前源码完整复验 `unit-software-final-192326` 为 6977 passed、1 skipped、2 条既有警告，45.06 秒、退出 0。跳过项仅验证非 Linux 平台的父进程守护无操作行为，在本次 Linux 环境不适用。 |
 | 客户端完整验证 | `client-unit` 65 文件／3197 项、`client-integration` 40 文件／1566 项通过；`client-typecheck` 和 `client-build` 退出 0。构建保留原有大块体积提示。18 项直接依赖与已锁定版本一致，锁文件未修改。 |
 | 安装版分段矩阵 | 初轮 `installed-segments` 为 4 passed、2 failed；后续 `installed-segments-final-150140` 为 5 passed、1 failed。跨轮配对身份修正后增加少于默认选段数及非尾零原片分区，最终 `installed-segments-final-163749` 为 8 passed，633.01 秒、退出 0。 |
 | 完整 outputs | `component-outputs-isolated-143747` 2487 passed、2 skipped，退出 0。两项跳过分别是内部副本不发布普通 delivery、主机源不携带设备读取配置；未缺少工具。 |
 | 规格与静态检查 | `database-final` 39 表／3803 项断言；`history-sql-final`、`event-final`、`dependencies-final`、`protocol-final`、`config-final` 均退出 0。 |
 
-完整 capture 初轮 `component-capture-141545` 为 2040 passed、8 failed。8 项均因原始页查询同时计入文件索引事件；查询限定到权威 `APPEND` 分支后，完整时间资格文件及分段处理器文件 `capture-last-boundaries` 共 136 项通过，包含跨目录、首位置只有 LRF 和顺序未知的三个新增组合。原有实际时刻、文件完成和调用次数断言保留。完整 outputs 在独立工作区 `/tmp/camctl-osmo-verify-20261022`、提交 `d4e9be0` 上通过；随后接入原始页查询修正，在 `b9f3acd` 上运行最终完整 capture，包资源与当前工作区分别同步。
+完整 capture 初轮 `component-capture-141545` 为 2040 passed、8 failed。8 项均因原始页查询同时计入文件索引事件；查询限定到权威 `APPEND` 分支后，完整时间资格文件及分段处理器文件 `capture-last-boundaries` 共 136 项通过，包含跨目录、首位置只有 LRF 和顺序未知的三个新增组合。原有实际时刻、文件完成和调用次数断言保留。完整 outputs 在独立工作区 `/tmp/camctl-osmo-verify-20261022`、提交 `d4e9be0` 上通过；完整 capture 的最终通过结果在 `ab1820e` 上取得，包资源与当前工作区分别同步。
 
 outputs 初轮 `outputs-final` 为 2449 passed、35 failed、2 skipped；35 项来自三个事件序列夹具缺少独立媒体读取范围。补齐真实读取范围后，相关 118 项及上述完整目录通过。reporting 初轮为 433 passed、2 failed；测试替身补全真实分页历史端口并从实际生成函数传入读取器后，错误分类专项 3 项及上述完整目录通过，状态错误、停止发布和库／文件不变的断言保留。
 
@@ -61,7 +61,13 @@ P5 的 `segment-scope-cleanup-cold-165720` 完整文件为 10 passed、233.45 �
 
 在提交 `5d87469` 上，`scheduling-complete-final-181848` 为 136 passed，`session-complete-final-181859` 为 194 passed，均为完整目录且退出 0。`installed-action6-regression-final-181751` 的普通录像及原生有限延时两个安装版联合用例均通过，78.95 秒、退出 0；分别经实际 wheel、C host、CLI、持久化、取回、客户端导入和 ACK，继续使用各自原有计时与单原片规则。bootstrap、persistence 的完整复验使用两个独立工作区，实际命令及退出结果继续保留。
 
-发行物审计 `release-wheel-audit-182318` 核对实际安装链归档的 `tmp/osmo-installed-chain-archive-81825/dist/camctl-0.1.0-py3-none-any.whl`：290 份生产 Python 文件与当前源码逐字节一致，27 份资源与唯一权威映射中的仓库来源逐字节一致，且无额外资源或生产 Python 文件。wheel 的 SHA-256 为 `176e3418a4ff02ca58f5de365039af269b6d6967e25d477fbcf24b3394f27bd9`。包资源只读同步检查退出 0；现场计划生成入口及独立媒体验收工具部署入口由[演示说明](../hardware/camera-demo-validation.md#osmo-正式计划与分段验收)维护。
+`5d87469` 在 `/tmp/camctl-osmo-verify-20261022` 上的完整 persistence 复验 `persistence-complete-source-fixed-181750` 为 860 passed，1234.17 秒、退出 0；包含 20／200／400 文件的固定批次写入、核实和内存增长检查。同提交在 `/tmp/camctl-osmo-components-20261022` 上的完整 bootstrap 复验 `bootstrap-complete-seed-fixed-181749` 为 1340 passed、1 skipped，1490.71 秒、退出 0；跳过项为 Windows 专用的大小写路径检查，在本次 Linux 环境不适用，未缺少工具。
+
+按 camctl 测试指南的权威目录清单核对，16 个组件集成目录均有分别完整运行、退出 0 的记录。上述单元、客户端、静态检查、安装版分段八场景、既有 OSMO、单原片清理链及 Action6 安装链共同提供本次软件汇总证据；各阶段保留自己的提交、工作目录和实际范围，后续修复由对应的完整目录或受影响文件复验。软件设备替身不提供 ARM、相机固件或现场媒体结论。
+
+发行物收尾审计 `release-wheel-final-192125` 核对实际安装链归档的 `tmp/osmo-installed-chain-archive-81825/dist/camctl-0.1.0-py3-none-any.whl`：290 份生产 Python 文件与当前源码逐字节一致，27 份资源与唯一权威映射中的仓库来源逐字节一致，且无额外资源或生产 Python 文件。wheel 的 SHA-256 为 `176e3418a4ff02ca58f5de365039af269b6d6967e25d477fbcf24b3394f27bd9`。包资源只读同步检查退出 0；现场计划生成入口及独立媒体验收工具部署入口由[演示说明](../hardware/camera-demo-validation.md#osmo-正式计划与分段验收)维护。
+
+文档收尾检查 `docs-software-final-192326` 核对 5261 个本地文件链接，退出 0；该脚本不校验标题锚点。本节、正式计划与演示说明之间的引用锚点已按实际标题逐项核对，`git diff --check` 通过。
 
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 
