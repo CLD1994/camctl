@@ -100,7 +100,7 @@ test('未取得产物摘要时不填空摘要', () => {
   assert.equal(field('checksum','sha256',rows),omitted);
 });
 for (const [type, started, status, expected] of [
-  [1,1,3,omitted], [3,1,3,omitted], [4,0,6,omitted], [4,1,6,'obtain_result'],
+  [1,1,3,omitted], [3,1,3,'camera_timelapse_result'], [4,0,6,omitted], [4,1,6,'obtain_result'],
   [5,1,2,'delete_result'], [6,1,2,'cancel_result'], [7,1,2,omitted], [7,1,3,'report_result'], [2,1,2,'camera_result']
 ]) test(`动作结果分支：type=${type}, started=${started}, status=${status}`, () => assert.equal(
   field('action','result',{actions:{type,execution_started:started,status}}),expected
