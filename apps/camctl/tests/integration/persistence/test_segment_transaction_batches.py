@@ -629,7 +629,14 @@ async def test_segmented_prestart_failure_keeps_original_finite_contract(tmp_pat
         runtime.start_config=AttemptConfig(1,Decimal('10'))
         await capture_handler('camera_record')(action_id,runtime)
         assert owned.connection.execute('SELECT status FROM actions WHERE id=?',(action_id,)).fetchone()==(4,)
-        assert owned.connection.execute('SELECT COUNT(*) FROM segment_sets').fetchone()==(0,)
+        assert owned.connection.execute(
+            'SELECT source_kind,member_count,run_id,published_event_id IS NOT NULL'
+            ' FROM segment_sets WHERE action_id=?',(action_id,)).fetchall()==[(3,0,None,1)]
+        assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()==(0,)
+        assert owned.connection.execute(
+            'SELECT COUNT(*) FROM operation_runs WHERE action_id=? AND kind=4',
+            (action_id,)).fetchone()==(0,)
+        assert runtime.driver.control.call_count==1
     finally:owned.connection.close()
 
 

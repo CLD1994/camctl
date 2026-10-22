@@ -69,7 +69,7 @@ from .test_recording_stop import (
     _submit_plan,
 )
 from camctl.history.decoding import decode_event_row
-from camctl.history.events import branch_of, event_type_name
+from camctl.history.events import branch_of, business_columns, event_type_name
 from camctl.history.validators import ValidatedEvent
 from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.history.replay import EntityImage, RestoreSeed, restore
@@ -720,11 +720,9 @@ class TestConfigurationChangeHistoryRecovery:
             assert frozen2.kind is DbOutcomeKind.COMPLETED, frozen2.error
             report2 = frozen2.value.report
 
-            _META = {"id", "created_event_id", "last_event_id", "change_count"}
-
-            def _business(values: dict) -> dict:
+            def _business(table: str, values: dict) -> dict:
                 return {name: value for name, value in values.items()
-                        if name not in _META}
+                        if name in business_columns(table)}
 
             def _events(entity_id: int):
                 rows = owned.connection.execute(
@@ -755,11 +753,11 @@ class TestConfigurationChangeHistoryRecovery:
 
             def _projected(seed, entity_id: int, boundary) -> dict:
                 image = restore(seed, action_events[entity_id], boundary)
-                return {key: _business(values) for key, values in image.rows.items()
+                return {key: _business(key[0], values) for key, values in image.rows.items()
                         if key[0] in _TABLES}
 
             def _expected_rows(expected: dict, keys) -> dict:
-                return {(table, row_id): _business(expected[table][row_id])
+                return {(table, row_id): _business(table, expected[table][row_id])
                         for table, row_id in keys}
 
             for aid in (1, 2):
@@ -781,16 +779,20 @@ class TestConfigurationChangeHistoryRecovery:
                     first_boundary)
                 assert (_projected(snapshot_seed, aid, end_boundary)
                         == _projected(empty, aid, end_boundary))
-                # 当前投影逆向：H2 业务列种子回退到 H1 与 H1 初始回放一致。
+                # 逆向种子包含事件涉及的全部当前行；四表裁剪只用于比较。
                 counted = int(owned.connection.execute(
                     "SELECT MAX(change_count) FROM entity_event_links"
                     " WHERE entity_type=1 AND entity_id=?",
                     (aid,)).fetchone()[0])
-                h2_projection = _projected(empty, aid, end_boundary)
+                current_keys = {
+                    (row.table, row.row_id)
+                    for event in action_events[aid]
+                    for row in event.envelope.rows}
                 reverse_seed = RestoreSeed(
                     EntityImage(1, aid, True,
-                                {key: _business(expected_h2[key[0]][key[1]])
-                                 for key in h2_projection},
+                                {(table, row_id): _business(table, row_facts(
+                                    owned.connection, table, row_id))
+                                 for table, row_id in current_keys},
                                 end_boundary.last_event_id, counted),
                     end_boundary)
                 assert (_projected(reverse_seed, aid, first_boundary)

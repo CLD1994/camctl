@@ -55,6 +55,10 @@ P5 的 `segment-scope-cleanup-cold-165720` 完整文件为 10 passed、233.45 �
 
 既有 OSMO 安装链初轮 `installed-osmo-existing-164823` 为 2 passed、2 failed，旧预期把跨会话只有一份尾段的普通录像当作成功，并要求 LRF 在原页内已经配对。实际报告为 `capture_result_unconfirmed/completion_unknown`，保留两份合格产物；配对由完整扫描的实际配对事实提供。测试分别核对原失败、有限预算耗尽、每轮原页、配对事实身份及后续取回，不改变生产判定。最终 `installed-osmo-existing-budget-final-170015` 完整模块为 4 passed、156.62 秒、退出 0，含源码／安装版能力和资源一致性。中间两次预期修订失败日志继续保留；此模块也归档实际状态库与客户端凭据。
 
+后续完整 history 的 `history-complete-final-165029` 为 344 passed，1060.75 秒、退出 0；安装版单原片清理链 `installed-single-original-cleanup-final-170335` 为 11 passed，576.29 秒、退出 0。完整 bootstrap 的 `bootstrap-complete-final-165029` 为 1180 passed、1 failed、1 skipped，配置变化恢复场景在逆向移除 `result_page_files` 时发现种子缺行。完整 persistence 的 `persistence-complete-delivery-170335` 为 769 passed、1 failed，启动前失败场景的集合数量断言不符。两项失败分别核对完整实体种子及无 RESULTS 来源发布契约，尚未计为通过；串行队列因此未运行 scheduling 和 session。
+
+配置变化测试现从实际事件涉及的全部当前行建立逆向种子，并按各表权威登记保留业务列；四表裁剪仅用于本场景的业务比较。`bootstrap-projection-seed-fixed-181544` 完整文件为 4 passed。启动失败测试按既定无 RESULTS 发布契约核对唯一零成员来源、实际发布标记、无正式产物、无 RESULTS 流程及唯一 START 调用；`persistence-start-contract-fixed-181636` 为 1 passed。两项修正均为测试预期维护，生产行为保持原契约，完整目录另行验证。
+
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 
 按[分段实施计划](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)继续软件实现。环境为 Linux x86_64、Python 3.11.16、SQLite 3.53.1。主线已接入原始设备结果页、逐页文件索引及其历史核实，并将结果页、来源解析和原分段完成的事务读取范围及封口共同保留。文件归属提交为 `db24903`；批内原页证明复用提交为 `cd80f4f`。
