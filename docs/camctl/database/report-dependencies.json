@@ -167,6 +167,11 @@
       "to": "segment_sets.action_id",
       "cardinality": "many"
     },
+    "action_segment_inspections": {
+      "from": "actions.id",
+      "to": "segment_inspections.action_id",
+      "cardinality": "many"
+    },
     "segment_set_members": {
       "from": "segment_sets.id",
       "to": "segment_members.set_id",
@@ -641,6 +646,19 @@
               },
               {
                 "when": {
+                  "op": "enum_is",
+                  "column": "actions.type",
+                  "members": [
+                    "CAMERA_TIMELAPSE"
+                  ]
+                },
+                "value": {
+                  "op": "project",
+                  "projection": "camera_timelapse_result"
+                }
+              },
+              {
+                "when": {
                   "op": "all",
                   "args": [
                     {
@@ -820,7 +838,8 @@
       "assertions": [
         "original_input_unique_source",
         "action_saved_state_combinations",
-        "segment_error_expansion_at_same_h"
+        "segment_error_expansion_at_same_h",
+        "video_coverage_expansion_at_same_h"
       ]
     },
     "automation": {
@@ -984,47 +1003,79 @@
       "root_table": "actions",
       "entity": "action",
       "relations": [
-        "action_processing"
+        "action_processing",
+        "action_segment_sets"
       ],
       "when": {
-        "op": "all",
+        "op": "any",
         "args": [
           {
-            "op": "exists",
-            "table": "recording_processing"
-          },
-          {
-            "op": "any",
+            "op": "all",
             "args": [
               {
-                "op": "enum_is",
-                "column": "recording_processing.check_state",
-                "members": [
-                  "COMPLETED",
-                  "FAILED",
-                  "UNCONFIRMED"
-                ]
+                "op": "exists",
+                "table": "recording_processing"
               },
               {
-                "op": "enum_is",
-                "column": "recording_processing.repair_state",
-                "members": [
-                  "NOT_NEEDED",
-                  "SUCCEEDED",
-                  "FAILED",
-                  "CANCELED"
+                "op": "any",
+                "args": [
+                  {
+                    "op": "enum_is",
+                    "column": "recording_processing.check_state",
+                    "members": [
+                      "COMPLETED",
+                      "FAILED",
+                      "UNCONFIRMED"
+                    ]
+                  },
+                  {
+                    "op": "enum_is",
+                    "column": "recording_processing.repair_state",
+                    "members": [
+                      "NOT_NEEDED",
+                      "SUCCEEDED",
+                      "FAILED",
+                      "CANCELED"
+                    ]
+                  },
+                  {
+                    "op": "eq",
+                    "left": {
+                      "op": "read",
+                      "column": "actions.cancel_requested",
+                      "encoding": "identity"
+                    },
+                    "right": {
+                      "op": "literal",
+                      "value": 1
+                    }
+                  }
                 ]
+              }
+            ]
+          },
+          {
+            "op": "all",
+            "args": [
+              {
+                "op": "exists",
+                "table": "segment_sets"
+              },
+              {
+                "op": "json_has",
+                "column": "segment_sets.assessment_json",
+                "pointer": "/decision_type"
               },
               {
                 "op": "eq",
                 "left": {
-                  "op": "read",
-                  "column": "actions.cancel_requested",
-                  "encoding": "identity"
+                  "op": "json_member",
+                  "column": "segment_sets.assessment_json",
+                  "pointer": "/decision_type"
                 },
                 "right": {
                   "op": "literal",
-                  "value": 1
+                  "value": "video_coverage_v1"
                 }
               }
             ]
@@ -1075,6 +1126,38 @@
           "value": {
             "op": "project",
             "projection": "discard_cleanup"
+          }
+        },
+        "coverage": {
+          "when": {
+            "op": "all",
+            "args": [
+              {
+                "op": "exists",
+                "table": "segment_sets"
+              },
+              {
+                "op": "json_has",
+                "column": "segment_sets.assessment_json",
+                "pointer": "/decision_type"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "json_member",
+                  "column": "segment_sets.assessment_json",
+                  "pointer": "/decision_type"
+                },
+                "right": {
+                  "op": "literal",
+                  "value": "video_coverage_v1"
+                }
+              }
+            ]
+          },
+          "value": {
+            "op": "project",
+            "projection": "video_coverage"
           }
         }
       },
@@ -2313,6 +2396,240 @@
           }
         }
       }
+    },
+    "camera_timelapse_result": {
+      "schema": "#/$defs/camera_timelapse_result",
+      "root_table": "actions",
+      "entity": "action",
+      "relations": [
+        "action_segment_sets"
+      ],
+      "when": {
+        "op": "all",
+        "args": [
+          {
+            "op": "exists",
+            "table": "segment_sets"
+          },
+          {
+            "op": "json_has",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/decision_type"
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "json_member",
+              "column": "segment_sets.assessment_json",
+              "pointer": "/decision_type"
+            },
+            "right": {
+              "op": "literal",
+              "value": "video_coverage_v1"
+            }
+          }
+        ]
+      },
+      "fields": {
+        "coverage": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "video_coverage"
+          }
+        }
+      }
+    },
+    "video_coverage": {
+      "schema": "#/$defs/video_coverage",
+      "root_table": "segment_sets",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "metric": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/metric"
+          }
+        },
+        "target": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/target"
+          }
+        },
+        "confirmed": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/confirmed"
+          }
+        },
+        "status": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/coverage_status"
+          }
+        },
+        "checked_output_ids": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "literal",
+            "value": []
+          }
+        },
+        "default_scope": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "project",
+            "projection": "video_default_scope"
+          }
+        },
+        "reason": {
+          "when": {
+            "op": "not",
+            "arg": {
+              "op": "eq",
+              "left": {
+                "op": "json_member",
+                "column": "segment_sets.assessment_json",
+                "pointer": "/reason"
+              },
+              "right": {
+                "op": "literal",
+                "value": null
+              }
+            }
+          },
+          "value": {
+            "op": "project",
+            "projection": "video_coverage_reason"
+          }
+        }
+      }
+    },
+    "video_default_scope": {
+      "schema": "#/$defs/default_video_scope",
+      "root_table": "segment_sets",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "state": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_enum",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/default_scope/state",
+            "enum_column": "segment_sets.assessment_json.scope_state",
+            "map": {
+              "UNKNOWN": "unknown",
+              "EMPTY": "empty",
+              "NONEMPTY": "nonempty"
+            }
+          }
+        },
+        "member_count": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/default_scope/member_count"
+          }
+        },
+        "output_ids": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "literal",
+            "value": []
+          }
+        }
+      }
+    },
+    "video_coverage_reason": {
+      "schema": "#/$defs/video_coverage/properties/reason",
+      "root_table": "segment_sets",
+      "entity": "action",
+      "relations": [],
+      "when": {
+        "op": "literal",
+        "value": true
+      },
+      "fields": {
+        "code": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "json_member",
+            "column": "segment_sets.assessment_json",
+            "pointer": "/reason"
+          }
+        },
+        "message": {
+          "when": {
+            "op": "literal",
+            "value": false
+          },
+          "value": {
+            "op": "omit"
+          }
+        },
+        "output_id": {
+          "when": {
+            "op": "literal",
+            "value": false
+          },
+          "value": {
+            "op": "omit"
+          }
+        }
+      }
     }
   },
   "sql_pending": {},
@@ -2438,6 +2755,29 @@
         "device_files.size_bytes"
       ],
       "contract": "segments.md#错误头与完整公开详情"
+    },
+    "video_coverage_expansion_at_same_h": {
+      "columns": [
+        "actions.id",
+        "actions.type",
+        "segment_sets.id",
+        "segment_sets.action_id",
+        "segment_sets.version",
+        "segment_sets.assessment_json",
+        "segment_sets.published_event_id",
+        "segment_members.id",
+        "segment_members.set_id",
+        "segment_members.file_id",
+        "segment_scope_members.set_id",
+        "segment_scope_members.ordinal",
+        "segment_scope_members.member_id",
+        "segment_scope_members.output_id",
+        "outputs.id",
+        "outputs.source_action_id",
+        "outputs.kind",
+        "outputs.device_file_id"
+      ],
+      "contract": "segments.md#有限核实决定"
     }
   },
   "routes": {
@@ -2639,6 +2979,14 @@
           }
         }
       ]
+    },
+    "segment_inspections": {
+      "entity": "action",
+      "identity": "segment_inspections.action_id",
+      "relations": [
+        "action_segment_inspections"
+      ],
+      "mode": "public_change"
     }
   },
   "notes": {

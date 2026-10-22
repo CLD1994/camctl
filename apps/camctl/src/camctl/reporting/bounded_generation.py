@@ -38,9 +38,18 @@ _SEGMENT_PATHS = (
 _EXPANSION = CompletionRequirement(
     "segment_expansion", ("error", "details"), _SEGMENT_PATHS[1:]
 )
+_COVERAGE_PATHS = (
+    ("result", "coverage", "checked_output_ids"),
+    ("result", "coverage", "default_scope", "output_ids"),
+)
+_COVERAGE_EXPANSION = CompletionRequirement(
+    "video_coverage_expansion", ("result", "coverage"), _COVERAGE_PATHS
+)
 _DEFERRED = {
     "plan": frozenset({"actions"}),
     "action": frozenset({"outputs", "deliveries"}),
+    "video_coverage": frozenset({"checked_output_ids"}),
+    "video_default_scope": frozenset({"output_ids"}),
     "obtain_result": frozenset({"failures"}),
     "delete_result": frozenset({"items"}),
     "cancel_result": frozenset({"items"}),
@@ -73,12 +82,16 @@ def _report_plan():
         "/action",
         (
             *_segment_fields(),
+            *(
+                DeferredField(path, unique_by=_COVERAGE_EXPANSION.name)
+                for path in _COVERAGE_PATHS
+            ),
             DeferredField(("result", "failures"), item=failure),
             DeferredField(("result", "items"), item=_result_item_descriptor),
             DeferredField(("outputs",), omit_empty=True),
             DeferredField(("deliveries",), omit_empty=True),
         ),
-        (_EXPANSION,),
+        (_EXPANSION, _COVERAGE_EXPANSION),
     )
     plan = ProjectionDescriptor(
         "/plan", (DeferredField(("actions",), omit_empty=True, item=action),)
@@ -134,6 +147,15 @@ def _primary_facts(repo, entity, identity, boundary):
 
 def _action_facts(repo, handle, boundary):
     facts = {"actions": {handle.action_id: handle.primary()}}
+    # 报告只投影 H 处唯一发布集合；成员数组仍由下方有界端口逐页展开。
+    result_ref = handle.active_result_ref()
+    if result_ref is not None:
+        _merge(
+            facts,
+            "segment_sets",
+            result_ref.set_id,
+            handle.read_result(result_ref),
+        )
     # 每个动作至多一份；增长关系只通过下方逐项端口读取。
     for table in ("recording_processing", "device_activities", "auto_preview_links"):
         count = 0
@@ -185,8 +207,8 @@ class _SegmentExpansion:
         )
         self.ref = self.handle.active_result_ref()
         source = self.handle.primary()
-        if source["type"] != 2:
-            raise ConsistencyError("分段公开详情必须属于普通录像")
+        if source["type"] not in (2, 3):
+            raise ConsistencyError("分段公开详情必须属于普通录像或原生延时")
         if (
             source["execution_started"]
             and source["status"] in (3, 4, 5, 6)
@@ -270,15 +292,31 @@ class _SegmentExpansion:
                 first = False
                 yield row.values["gap_no"], value
         elif path == _SEGMENT_PATHS[1]:
-            for identity, output in self.repo.related_primary_rows_at_h(
-                "output",
-                "source_action_id",
-                self.header.source_action_id,
-                self.boundary,
-            ):
-                if output["kind"] == 1:
-                    self._output(identity)
-                    yield identity, str(identity)
+            if self.ref is None:
+                return
+            from camctl.contracts.enums import enum_for
+
+            original_role = int(enum_for("segment_members.role").ORIGINAL)
+            position = 0
+            for row in _rows(self.handle, "segment_members", self.ref):
+                member = row.values
+                if member["role"] != original_role or member["file_id"] is None:
+                    continue
+                output_id = None
+                for identity, output in self.repo.related_primary_rows_at_h(
+                    "output", "device_file_id", member["file_id"], self.boundary
+                ):
+                    if (
+                        output["kind"] == 1
+                        and output["source_action_id"] == self.header.source_action_id
+                    ):
+                        if output_id is not None:
+                            raise ConsistencyError("一个视频原片关联了多个正式原片产物")
+                        output_id = identity
+                if output_id is not None:
+                    self._output(output_id, member["file_id"])
+                    position += 1
+                    yield position, str(output_id)
         else:
             if self.ref is None:
                 return
@@ -321,6 +359,149 @@ class _SegmentExpansion:
                 or end.binding != request.binding
             ):
                 raise ConsistencyError("同 H 的完整增长详情与原有限错误头不同")
+
+
+@dataclass
+class _CoverageExpansion:
+    repo: object
+    handle: object
+    boundary: object
+    binding: object
+    public: dict | None
+    ends: dict = None
+    consumed: bool = False
+
+    def __post_init__(self):
+        self.ends = {}
+        self.ref = self.decision = None
+        if self.public is None:
+            return
+        from camctl.capture.segment_models import SegmentDecision
+        from camctl.capture.segment_storage import assessment_from_document
+
+        self.ref = self.handle.active_result_ref()
+        if self.ref is None:
+            raise ConsistencyError("公开覆盖没有同 H 正式结果集合")
+        values = self.handle.read_result(self.ref)
+        if values["assessment_json"] is None:
+            raise ConsistencyError("同 H 正式结果集合缺少覆盖判断")
+        self.decision = assessment_from_document(values["assessment_json"])
+        if not isinstance(self.decision, SegmentDecision):
+            raise ConsistencyError("公开覆盖没有 Action6 公共分段判断")
+        self._validate_projection()
+
+    def _validate_projection(self):
+        from camctl.capture.segment_models import DefaultScopeState
+
+        decision = self.decision
+        scope = decision.default_scope
+        expected_scope_count = (
+            0 if scope.state in (DefaultScopeState.UNKNOWN, DefaultScopeState.EMPTY)
+            else scope.member_count
+        )
+        if type(expected_scope_count) is not int or expected_scope_count < 0:
+            raise ConsistencyError("覆盖默认范围成员数无效")
+        if decision.checked_count > expected_scope_count:
+            raise ConsistencyError("覆盖检查前缀超过同 H 默认视频范围")
+        if scope.state is DefaultScopeState.UNKNOWN and decision.checked_count:
+            raise ConsistencyError("未知默认视频范围不能引用已检查前缀")
+        expected = {
+            "metric": decision.metric.value,
+            "target": decision.target,
+            "confirmed": decision.confirmed,
+            "status": decision.coverage_status.value,
+            "default_scope": {
+                "state": scope.state.value,
+                "member_count": scope.member_count,
+            },
+        }
+        if decision.reason is not None:
+            reason = {"code": decision.reason}
+            expected["reason"] = reason
+        if self.public != expected:
+            raise ConsistencyError("公开覆盖有限字段与同 H 决策不同")
+
+    def _scope_members(self):
+        if self.ref is None:
+            return
+        for row in _rows(self.handle, "segment_scope_members", self.ref):
+            output_id = row.values["output_id"]
+            member = self.handle.row("segment_members", row.values["member_id"])
+            if (
+                output_id is None
+                or member is None
+                or member["set_id"] != self.ref.set_id
+                or member["file_id"] is None
+            ):
+                raise ConsistencyError("覆盖范围缺少同 H 原片与正式产物关联")
+            output = self.repo.restore_primary_at_h("output", output_id, self.boundary)
+            if (
+                output is None
+                or output["source_action_id"] != self.ref.action_id
+                or output["kind"] != 1
+                or output["device_file_id"] != member["file_id"]
+            ):
+                raise ConsistencyError("覆盖范围引用不属于同 H 的视频原片")
+            yield row.values["ordinal"], str(output_id)
+
+    def members(self, path):
+        if self.decision is None:
+            return
+        if path == _COVERAGE_PATHS[1]:
+            yield from self._scope_members()
+            return
+        remaining = self.decision.checked_count
+        for position, output_id in self._scope_members():
+            if remaining == 0:
+                return
+            yield position, output_id
+            remaining -= 1
+        if remaining:
+            raise ConsistencyError("覆盖检查前缀超过同 H 已发布范围")
+
+    def consume(self, request):
+        if (
+            self.consumed
+            or request.binding != self.binding
+            or request.requirement != _COVERAGE_EXPANSION
+        ):
+            raise ConsistencyError("覆盖展开回执的对象、H 或消费次数不同")
+        self.consumed = True
+        counts = dict(request.counts)
+        if self.decision is None:
+            if self.ends or any(counts.get(path, 0) for path in _COVERAGE_PATHS):
+                raise ConsistencyError("没有覆盖的动作不能带增长覆盖数组")
+            return
+        scope = self.decision.default_scope
+        expected_scope = (
+            0 if scope.state.value in ("unknown", "empty") else scope.member_count
+        )
+        expected = (self.decision.checked_count, expected_scope)
+        for path, count in zip(_COVERAGE_PATHS, expected):
+            end = self.ends.get(path)
+            if (
+                end is None
+                or counts.get(path) != count
+                or end.count != count
+                or end.binding != request.binding
+            ):
+                raise ConsistencyError("同 H 覆盖增长数组与有限判断头不同")
+
+
+def _coverage_arrays(expansion, stream, gate):
+    arrays = {}
+    for path in _COVERAGE_PATHS:
+        if expansion.decision is None:
+            if gate.state(path).value == "undecided":
+                gate.omit(path)
+        else:
+            arrays[path] = (
+                expansion.members(path),
+                lambda position, value: _plain(stream, position, value),
+                lambda end, path=path: expansion.ends.__setitem__(path, end),
+            )
+    gate.supply_completion(_COVERAGE_EXPANSION.name, expansion)
+    return arrays
 
 
 def _end(gate, path, last, count):
@@ -471,8 +652,16 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
         expansion = _SegmentExpansion(
             repo, boundary, binding, finite.get("error"), stack
         )
+        coverage = _CoverageExpansion(
+            repo,
+            handle,
+            boundary,
+            binding,
+            finite.get("result", {}).get("coverage"),
+        )
         gate = plan.begin(binding, finite)
         arrays = _expansion_arrays(expansion, stream, gate)
+        arrays.update(_coverage_arrays(coverage, stream, gate))
         for path in (("result", "failures"), ("result", "items")):
             if path[:-1][0] not in finite or (
                 (path[-1] == "failures") != (finite["type"] == "obtain_action_outputs")

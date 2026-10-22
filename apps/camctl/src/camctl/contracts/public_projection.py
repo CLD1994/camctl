@@ -118,7 +118,9 @@ def projection_structure(entity: str) -> ProjectionStructure:
 
 
 def _enum_member(column: str, value: int) -> str:
-    members = load_enum_registry()["enums"].get(column, {}).get("members", {})
+    registry = load_enum_registry()
+    definition = registry["enums"].get(column) or registry["json_enums"].get(column)
+    members = {} if definition is None else definition.get("members", {})
     for member_name, code in members.items():
         if code == value:
             return member_name
@@ -332,6 +334,20 @@ def _eval(node: Mapping[str, Any], context: _Context) -> Any:
     if op == "json_has":
         document = _json(node["column"], context)
         return _pointer(document, node["pointer"]) is not MISSING
+    if op == "json_enum":
+        document = _json(node["column"], context)
+        value = _pointer(document, node["pointer"])
+        if value is MISSING:
+            raise PublicProjectionError(
+                f"{node['column']} 缺少成员 {node['pointer']!r}"
+            )
+        member = _enum_member(node["enum_column"], value)
+        mapped = node["map"].get(member)
+        if mapped is None:
+            raise PublicProjectionError(
+                f"{node['enum_column']} 的成员 {member} 没有公开映射"
+            )
+        return mapped
     if op == "json_member":
         document = _json(node["column"], context)
         value = _pointer(document, node["pointer"])

@@ -1198,7 +1198,7 @@
             "null"
           ],
           "minimum": 0,
-          "description": "缺口记录或区间的数量，不是缺失文件总数。正式公开报告中，null 表示缺口分类尚未确认，此时 gaps 为 []、first_gap 省略且默认范围为 unknown；0 表示已确认无缺口，此时 gaps 为 [] 且 first_gap 省略。正整数必须与完整 gaps 长度相同。"
+        "description": "缺口记录或区间的数量，不是缺失文件总数。正式公开报告中，null 表示缺口分类尚未确认，此时 gaps 为 [] 且 first_gap 省略；它不表示已确认无缺口。默认视频范围由冻结的范围事实独立决定，不由 gap_count 推导。0 表示已确认无缺口，此时 gaps 为 [] 且 first_gap 省略。正整数必须与完整 gaps 长度相同。"
         },
         "default_scope": {
           "$ref": "status-report.schema.json#/$defs/default_video_scope",

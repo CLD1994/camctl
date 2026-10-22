@@ -16,7 +16,7 @@ import {
 } from "../../src/shared/json";
 import { resultProducts } from "../../src/web/result-model";
 import type { StatusReport } from "../../src/shared/types";
-import { segmentReport } from "../helpers/segment-reports";
+import { segmentReport, scopeReport } from "../helpers/segment-reports";
 
 let directory: string, app: Application, files: Files;
 beforeEach(() => {
@@ -111,6 +111,23 @@ it.each(["header", "missing-gaps", "wrong-source"])(
     expect(app.snapshot().plans).toBeUndefined();
   },
 );
+it("imports an empty frozen video scope while gap classification remains unknown", async () => {
+  const r = scopeReport("empty");
+  r.plans![0].actions![0].error = {
+    code: "capture_failed",
+    stage: "execution",
+    details: { activity_id: "10", reason: "ended_early" },
+  };
+  const details = (r.plans![0].actions![1].result as any).failures[0].error
+    .details;
+  details.gap_count = null;
+  details.gaps = [];
+  delete details.first_gap;
+  const result = await uploadReport(r);
+  expect(result.file.status).toBe("accepted");
+  expect(app.ackId()).toBe(r.report_id);
+  expect(app.store.report(r.report_id)).toBeDefined();
+});
 it.each([
   ["preview", "later"],
   ["wrong-source", "later"],

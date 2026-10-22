@@ -197,10 +197,8 @@ export function segmentIssue(error: unknown): SegmentIssue | undefined {
   );
   if (d.gap_count === null) {
     requireFact(
-      d.gaps.length === 0 &&
-        d.first_gap === undefined &&
-        d.default_scope.state === "unknown",
-      "缺口分类未知不能声明已知缺口或可靠范围",
+      d.gaps.length === 0 && d.first_gap === undefined,
+      "缺口分类未知不能声明已知缺口",
     );
   } else {
     requireFact(

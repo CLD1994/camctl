@@ -17,6 +17,10 @@ const grammar = {
       operation('read', { column, encoding: { enum: ['identity', 'id', 'utc_seconds', 'json'] }, schema: text }, ['column', 'encoding']),
       operation('enum', { column, map: { type: 'object', minProperties: 1, additionalProperties: text } }),
       operation('enum_is', { column, members: { ...strings, minItems: 1 } }),
+      operation('json_enum', {
+        column, pointer: { type: 'string', pattern: '^/' }, enum_column: text,
+        map: { type: 'object', minProperties: 1, additionalProperties: text }
+      }),
       operation('not_null', { column }), operation('exists', { table: text }),
       ...['json_member', 'json_has'].map(op => operation(op, { column, pointer: { type: 'string', pattern: '^/' } })),
       ...['all', 'any'].map(op => operation(op, { args: { type: 'array', minItems: 1, items: expression } })),
@@ -118,7 +122,7 @@ function structuredValue(node, schema) {
 
 function generatedLiterals(node) {
   if (node.op === 'literal') return [node.value];
-  if (node.op === 'enum') return Object.values(node.map);
+  if (node.op === 'enum' || node.op === 'json_enum') return Object.values(node.map);
   if (['omit', 'error'].includes(node.op)) return [];
   if (node.op !== 'cases') return undefined;
   const values = [...node.branches.map(branch => generatedLiterals(branch.value)), generatedLiterals(node.otherwise)];
@@ -232,6 +236,14 @@ export function validateRegistration(registry, schema, { enums, errors, tables, 
           assert.deepEqual(Object.keys(node.map).sort(), [...requiredMembers].sort(), `内部枚举映射不完整：${node.column}`);
           for (const value of Object.values(node.map)) validateValue(value, fieldSchema, node.column);
         }
+        break;
+      }
+      case 'json_enum': {
+        const members = enums.json_enums[node.enum_column]?.members;
+        assert(members, `未登记内部 JSON 枚举：${node.enum_column}`);
+        assert(node.enum_column.startsWith(`${node.column}.`), `JSON 枚举来源与 JSON 文档列不匹配：${node.enum_column}`);
+        assert.deepEqual(Object.keys(node.map).sort(), Object.keys(members).sort(), `JSON 枚举映射不完整：${node.enum_column}`);
+        for (const value of Object.values(node.map)) validateValue(value, fieldSchema, node.enum_column);
         break;
       }
       case 'exists': assert(scope.has(node.table), `存在性条件缺少关联：${node.table}`); break;

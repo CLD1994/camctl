@@ -147,6 +147,20 @@ describe("完整分段错误报告", () => {
     d.retained_output_ids = [];
     expect(() => validateReport(r)).not.toThrow();
   });
+  it("默认视频范围已确认为空时仍可将整体缺口分类保留为未知", () => {
+    const r = scopeReport("empty");
+    source(r).error = {
+      code: "capture_failed",
+      stage: "execution",
+      details: { activity_id: "10", reason: "ended_early" },
+    };
+    const d = (r.plans![0].actions![1].result as any).failures[0].error
+      .details;
+    d.gap_count = null;
+    d.gaps = [];
+    delete d.first_gap;
+    expect(() => validateReport(r)).not.toThrow();
+  });
   it("缺口未知时非空gaps或首项仍拒绝", () => {
     for (const field of ["first_gap", "gaps"]) {
       const r = scopeReport("unknown");
