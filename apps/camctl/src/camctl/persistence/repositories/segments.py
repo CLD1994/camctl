@@ -961,6 +961,10 @@ class SegmentRepository:
         from .segment_result_sets import read_result_member_inputs
         return read_result_member_inputs(ref,cursor,limit,owned)
 
+    def find_canceled_result_ref(self,action_id,predecessor_set_id,cancel_event_id,owned):
+        from .segment_result_sets import find_canceled_result_ref
+        return find_canceled_result_ref(action_id,predecessor_set_id,cancel_event_id,owned)
+
     def _save_result_members(self,kind,ref,payload,occurred_at,key,owned):
         from .segment_result_members import ResultMembersCommand
         register_segment_guards()

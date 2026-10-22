@@ -8,7 +8,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.pages import Page
-from camctl.contracts.values import ConsistencyError,OperationKey
+from camctl.contracts.values import ConsistencyError,ObjectId,OperationKey
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.history.events import load_event_registry
 from camctl.history.events import business_columns
@@ -63,6 +63,15 @@ def read_result_set(ref,owned):
     if row is None or row['action_id']!=ref.action_id or row['version']!=ref.version:
         raise ConsistencyError('结果集合引用与实际动作、集合或版本不同')
     return row
+
+
+def find_canceled_result_ref(action_id,predecessor_set_id,cancel_event_id,owned):
+    ObjectId(action_id);ObjectId(cancel_event_id)
+    if predecessor_set_id is not None:ObjectId(predecessor_set_id)
+    found=_one(owned.connection,'SELECT id,version FROM segment_sets WHERE action_id=?'
+        ' AND publication_kind=? AND predecessor_set_id IS ? AND cancel_event_id=?',
+        (action_id,encode_enum(PublicationKind.CANCELED),predecessor_set_id,cancel_event_id))
+    return None if found is None else SegmentResultRef(action_id,found[0],found[1])
 
 
 def read_current_segment_ref(ref,owned):
@@ -273,10 +282,14 @@ def _publication(db,request):
         previous=row_facts(db,'segment_sets',request.predecessor_set_id)
         if (previous is None or previous['action_id']!=request.action_id
                 or previous['published_event_id'] is not None
+                or previous['publication_kind']==encode_enum(PublicationKind.CANCELED)
                 or previous['source_kind']!=encode_enum(request.source_kind)
                 or (previous['source_txn_id'],previous['source_event_id'])!=(
                     request.source_boundary.txn_id,request.source_boundary.last_event_id)):
             raise ConsistencyError('取消集合没有接手同一原动作的未发布来源版本')
+    elif _one(db,'SELECT id FROM segment_sets WHERE action_id=? AND published_event_id IS NULL LIMIT 1',
+            (request.action_id,)) is not None:
+        raise ConsistencyError('已有未发布结果的取消集合必须明确原前版')
 
 
 def _values(db,request):
@@ -347,6 +360,11 @@ class CreateResultSetCommand:
                         'state','member_count','facts_json','assessment_json','published_event_id')})):
                 raise ConsistencyError('原集合实际身份与原创建事务不同')
             return CommandPlan((),{},{},ref,True)
+        if request.publication_kind is PublicationKind.CANCELED:
+            published=_one(db,'SELECT id,version FROM segment_sets WHERE action_id=?'
+                ' AND published_event_id IS NOT NULL',(request.action_id,))
+            if published is not None:
+                return CommandPlan((),{},{},SegmentResultRef(request.action_id,*published),True)
         values=_values(db,request)
         version=_one(db,'SELECT COALESCE(MAX(version),0)+1 FROM segment_sets WHERE action_id=?',
             (request.action_id,))[0]
