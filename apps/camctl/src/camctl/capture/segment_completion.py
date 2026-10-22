@@ -91,6 +91,9 @@ def register_segment_observations(runtime, action_id, listing):
     from camctl.capture.result_scans import SavedResultEntries
 
     if not isinstance(listing.entries, SavedResultEntries):
+        if (listing.entries == () and listing.already_saved
+                and runtime.capture.read_last_result_page(listing.ticket, runtime.owned) is None):
+            return
         raise ConsistencyError("分段策略要求可靠原始结果页")
     source = runtime.capture.read_result_source(listing.ticket, runtime.owned)
     context = source.context

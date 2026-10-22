@@ -31,11 +31,15 @@ outputs 初轮 `outputs-final` 为 2449 passed、35 failed、2 skipped；35 项�
 
 bootstrap 初轮发现失败后主动中断，`component-bootstrap-145433` 为 213 passed、1 failed，退出 2。恢复夹具补全正式 `capture_segment_writes` 集合，并同步另一处共同恢复夹具；恢复及报告错误流程三个完整文件 `bootstrap-recovery-fixtures` 共 4 项通过。完整 bootstrap 仍待重跑；其余组件在独立工作区 `/tmp/camctl-osmo-components-20261022`、提交 `b776301` 上逐目录运行。
 
-完整依赖回归发现报告层引用拍摄／设备模块、拍摄预分类直接依赖 SQLite。共享有限值和错误头移至 `contracts`，临时排序索引移至持久化仓储；未放宽依赖检查。修正后 `contracts-repaired-161619` 为 442 passed，`devices-repaired-161714` 为 220 passed，`reporting-repaired-161745` 为 435 passed。`unit-architecture-final-151618` 为 6977 passed、1 skipped，保留两条既有警告。
+完整依赖回归发现报告层引用拍摄／设备模块、拍摄预分类直接依赖 SQLite。共享有限值和错误头移至 `contracts`，临时排序索引移至持久化适配器；未放宽依赖检查。修正后 `contracts-repaired-161619` 为 442 passed，`devices-repaired-161714` 为 220 passed，`reporting-repaired-161745` 为 435 passed。`unit-architecture-final-151618` 为 6977 passed、1 skipped，保留两条既有警告。
 
 跨轮配对查重原先把 `AttemptTicket.attempt_id` 的尝试序号直接与配对事实中的实际尝试行 ID 比较，导致第二轮已保存事实无法复用。修正为按原 run 和尝试序号定位实际行；`capture-pairing-repeat-151747` 完整文件 25 passed，覆盖两轮行 ID 与序号不同、配对及正式产物不重复、唯一 STOP。
 
 历史全库独立预期补齐结果页索引、基准调用、分段集合及成员和配对事实的归属，并登记实际 `BASELINE_READ` 验证入口；内部读取场景继续逐行比较动作自身完整成员。`history-oracle-repaired2-162140` 完整文件 21 passed；完整 history 目录另行复验。
+
+`ab1820e` 的完整 persistence 回归在提交路径审计处为 114 passed、1 failed，临时索引连接不能置于正式仓储目录。连接责任移出后，`persistence-connection-audit-163307` 完整文件 55 passed；随后模块依赖检查发现业务层不能直接调用持久化内部适配器。最终仓储保留有序读取端口，`persistence/segment_order.py` 只管理临时索引的连接与清理，业务层继续消费仓储。正式状态库连接与提交规则不变；最终结构的 `persistence-adapter-final-163633` 为 55 passed，`contracts-adapter-final-163702` 为 442 passed。
+
+bootstrap 的首次结果页尚未返回即中断场景暴露分段入口错误要求已有原页；普通和原生完成模块现保留无观察、当前集合未知及原有限预算，不能把无页解释为已确认空集合。`bootstrap-osmo-recovery5-162857` 完整文件 22 passed，覆盖原页复用、无页／部分页恢复、原预算及原尝试；分段场景使用合法 CAM 名称，内部媒体读取场景显式冻结单原片任务。`native-first-page-recovery-163013` 完整文件 5 passed，包含原生首次页前中断冷恢复，未重新 START 或 RESULTS。
 
 容器重启中断了 `component-capture-final-145524`、`component-bootstrap-final-150123` 和 `component-persistence-isolated-151822`；这些日志没有最终退出码，不计为通过。bootstrap 和 persistence 在中断前已有失败，后续分别定位并复验。其他独立目录已有完整退出 0 的结果：acceptance 338 项、cancellation 396 项、host_files 120 项、logging_runtime 112 项（保留一条既有标记警告）、motor 12 项及 operations 314 项；原命令和提交保留在 `isolated-components-results.json`。history 的旧归属断言和事件覆盖表待补齐后复验。
 

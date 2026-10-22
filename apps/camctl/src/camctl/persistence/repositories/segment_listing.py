@@ -1,9 +1,6 @@
 """将可靠原页的单文件事实存入临时派生索引，按设备键有界续读。"""
 
-from contextlib import closing, contextmanager
-from pathlib import Path
-from tempfile import TemporaryDirectory
-import sqlite3
+from contextlib import contextmanager
 
 from camctl.capture.segment_models import (
     SegmentMember, SegmentMemberRole, OwnershipState, FileCompletionState, PreviewPairingState,
@@ -11,10 +8,14 @@ from camctl.capture.segment_models import (
 from camctl.capture.segment_storage import document, decode_enum, key
 from camctl.contracts.json_values import parse_exact_json
 from camctl.persistence.transaction import row_facts, encode_json_value
+from camctl.persistence.segment_order import temporary_segment_index
 
 
 @contextmanager
 def ordered_listing_members(owned, listing):
+    if listing.entries == () and listing.already_saved:
+        yield lambda: iter(())
+        return
     from camctl.persistence.repositories.segment_result_sets import (
         _boundary,
         _current_input,
@@ -31,10 +32,7 @@ def ordered_listing_members(owned, listing):
             (listing.ticket.run_id, listing.ticket.attempt_id),
         ).fetchone()[0],
     )
-    with (
-        TemporaryDirectory(prefix="camctl-segment-order-") as folder,
-        closing(sqlite3.connect(str(Path(folder) / "order.db"))) as ordered,
-    ):
+    with temporary_segment_index() as ordered:
         ordered.execute(
             "CREATE TABLE members (directory INTEGER, position INTEGER, identity TEXT, file_id INTEGER PRIMARY KEY, value TEXT)"
         )

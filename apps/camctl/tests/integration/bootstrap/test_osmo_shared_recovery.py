@@ -42,6 +42,7 @@ from ..scheduling.test_start_action import owned, _accept_plan, _start, _SCHEDUL
 
 pytestmark = pytest.mark.asyncio
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
+OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261022100000_0007_D.OSV"
 
 
 class Channel:
@@ -63,7 +64,7 @@ class Channel:
         script = shlex.split(spec.argv[5])[2]
         if "CAMCTL-DIRECTORY/1" in script:
             self.result_tickets.append(ticket)
-            return RawToolOutcome(LocalExit(exit_code=0), b"CAMCTL-DIRECTORY/1\0/mnt/media_rw/emulated/DCIM/a.OSV\0" + self.directory_end + b"\0",
+            return RawToolOutcome(LocalExit(exit_code=0), b"CAMCTL-DIRECTORY/1\0" + OSV_PATH.encode() + b"\0" + self.directory_end + b"\0",
                                   None, None, stderr=b"")
         if "stat -c %s" in script:
             return RawToolOutcome(LocalExit(exit_code=7 if self.metadata_error else 0), b"" if self.metadata_error else b"50\n",
@@ -78,7 +79,8 @@ class Channel:
         return RawToolOutcome(LocalExit(exit_code=7), None, None, None, stderr=b"source interrupted")
 
 
-async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING):
+async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
+                 single_original=False):
     monkeypatch.setattr(definitions_runtime, "_definitions", {})
     monkeypatch.setattr(drivers_runtime, "_entries", {})
     cfg = load_config({"paths": {name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
@@ -88,6 +90,16 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING)
             "copy": {"retry_interval_s": "0"}}}}, ConfigDefaults())
     from camctl.persistence.initialization import _prepare_directories
     _prepare_directories(tmp_path / "state.db", Path(cfg.paths.staging), Path(cfg.paths.ready), Path(cfg.paths.processing))
+    if single_original:
+        from camctl.devices.drivers.adb_cameras import osmo360ii_capture
+        original_task = osmo360ii_capture._task
+
+        def task(params):
+            declared = original_task(params)
+            return replace(declared, result_policy=None,
+                product_rules=tuple({**rule, "exact_count": 1} for rule in declared.product_rules))
+
+        monkeypatch.setattr(osmo360ii_capture, "_task", task)
     register_builtin_camera_drivers(cfg)
     registry = drivers_runtime.current_registry()
     entry = registry.entry(binding.driver_id)
@@ -96,6 +108,9 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING)
     body = _plan_body()
     body["actions"][0].update(type=kind, params=_params(binding.driver_id, kind))
     await _accept_plan(owned, tmp_path, body, catalog)
+    frozen = json.loads(owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=1").fetchone()[0])
+    assert frozen.get("result_policy") == (None if single_original else
+        "osmo_empty_tail_classification_v1" if finite else "osmo360ii_record_segments_v1")
     started = _start(owned, 1, now=_SCHEDULED)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     activity_id = started.value.activity_id
@@ -259,7 +274,7 @@ async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_
         if original is not None:
             assert resumed.capture.read_result_page(original.ref, world.owned) == original
             assert world.owned.connection.execute("SELECT identity_key,size_bytes FROM device_files").fetchone() == (
-                json.dumps([BINDING.device_id, BINDING.driver_id, "/mnt/media_rw/emulated/DCIM/a.OSV"], separators=(",", ":")),
+                json.dumps([BINDING.device_id, BINDING.driver_id, OSV_PATH], separators=(",", ":")),
                 None if pages == "terminal_error" else 50)
         else:
             assert world.owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (0,)
@@ -267,7 +282,10 @@ async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_
         assert world.owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
         assert world.owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (int(pages in ("partial", "terminal")),)
         if pages == "terminal_error":
-            assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+            assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
+            assert world.owned.connection.execute(
+                "SELECT COUNT(*) FROM segment_sets WHERE action_id=1 AND published_event_id IS NOT NULL"
+            ).fetchone() == (1,)
         saved_attempt = _row(world, ticket)
         await capture_handler(world.kind)(1, resumed)
         assert _row(world, ticket) == saved_attempt
@@ -351,7 +369,7 @@ async def _pending_read(world, tmp_path, monkeypatch, *, internal):
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 async def test_unavailable_original_read_keeps_progress_and_uses_own_consumer(
         owned, tmp_path, monkeypatch, internal, change):
-    world = await _world(owned, tmp_path, monkeypatch)
+    world = await _world(owned, tmp_path, monkeypatch, single_original=internal)
     ticket, source_id, target = await _pending_read(world, tmp_path, monkeypatch, internal=internal)
     source = world.owned.connection.execute("SELECT * FROM device_files WHERE id=?", (source_id,)).fetchone()
     progress = world.owned.connection.execute("SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state"

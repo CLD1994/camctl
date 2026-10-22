@@ -55,7 +55,7 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 `contracts/segment_values.py` 提供拍摄、持久化和报告共用的有限值，`contracts/segment_errors.py` 维护有限错误头及单个缺口的公开表示。文本枚举仍从权威整数登记派生。报告层读取共享契约，不依赖拍摄处理器或设备模块。
 
-`persistence/repositories/segment_listing.py` 将已保存原页的单文件事实逐项写入临时磁盘索引，按设备键续读；普通录像和原生延时的完成模块消费同一读取端口。该索引不替代原页、固定文件事实或正式集合，也不提交业务状态。
+`persistence/repositories/segment_listing.py` 将已保存原页的单文件事实逐项写入临时派生索引，按设备键续读；普通录像和原生延时的完成模块消费同一仓储端口。`persistence/segment_order.py` 只管理该临时索引的连接与清理。索引不替代原页、固定文件事实或正式集合，也不提交业务状态；正式状态库的连接和提交仍由既有事务内核管理。
 
 `create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。
 

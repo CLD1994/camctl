@@ -202,7 +202,7 @@ def test_default_segment_count_uses_exact_milliseconds(target_ms, expected):
 - [x] **步骤 6：覆盖终结、取消及异常入口。** 审计 `_finish_capture()`、`_settle_stop_exhausted()`、`_binding_failure_files()` 和 `_finish_canceled_capture()`。取消优先于未提交的产物登记；终态先提交则保持原终态。停止未知不由分段数量覆盖，已经确认 STOP 不重发。
 - [x] **步骤 7：接入原生延时的空尾分类。** `2 秒／300 秒` 等任务继续采用原设备目标和自然完成规则；只放宽可靠空尾的处理，不使用普通录像的下界或选段公式。
 - [x] **步骤 8：证明正常和异常路径均不读取媒体时长。** 新增 `test_segmented_recovery_never_invokes_media_processing`，在控制依据充分、下界充分、下界不足、空尾及缺口分区中核对零次主机媒体拷贝／探测调用；报告时长保持未知。
-- [ ] **步骤 9：修订有效能力说明，运行最窄设备／capture／bootstrap 验证并提交。** 普通录像说明准确表达整段交付和全部原片保留；不声明尚未取得的媒体或浏览器播放保证。
+- [x] **步骤 9：修订有效能力说明，运行最窄设备／capture／bootstrap 验证并提交。** 普通录像说明准确表达整段交付和全部原片保留；不声明尚未取得的媒体或浏览器播放保证。设备完整目录 220 项、普通分段处理器 25 项、原生完成 5 项及 OSMO 装配恢复 22 项通过；完整组件回归与安装链由 P8 收齐。
 
 ### 原九步的交付映射
 
