@@ -655,13 +655,13 @@ async def _two_scan_result(tmp_path):
     from .test_segment_file_pairing import _entry
     from ..capture.test_record_file_completion_wait import _REGISTRY
     from ..capture.test_result_page_history import _actual
-    owned,runtime,first,_,_=await _ready(tmp_path,[_entry('CAM001/CAM_20261021090000_0001_D.OSV')])
+    owned,runtime,first,_,_=await _ready(tmp_path,[_entry('CAM_001/CAM_20261021090000_0001_D.OSV')])
     try:
         _finish_scan(owned,runtime,first,retry_wait=True)
         action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
             (first.ref.ticket.run_id,)).fetchone()[0]
         ticket=_begin_check_round(runtime,action_id).ticket
-        actual=_actual(ticket,entries=[_entry('CAM001/CAM_20261021090000_0002_D.OSV')],finalized=True)
+        actual=_actual(ticket,entries=[_entry('CAM_001/CAM_20261021090000_0002_D.OSV')],finalized=True)
         saved=runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
             validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned)
         assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
@@ -792,7 +792,7 @@ async def test_unified_complete_result_keeps_h0_member_writer_and_ordinary_asses
     from .test_segment_scan_pairing import _ready
     from .test_segment_file_pairing import _entry
     from .test_segment_storage import _assessment
-    owned,runtime,saved,_,_=await _ready(tmp_path,[_entry('CAM001/CAM_20261021090000_0001_D.OSV')])
+    owned,runtime,saved,_,_=await _ready(tmp_path,[_entry('CAM_001/CAM_20261021090000_0001_D.OSV')])
     try:
         _finish_scan(owned,runtime,saved)
         action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',

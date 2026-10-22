@@ -58,7 +58,7 @@ async def _world(tmp_path, indexes=(1,2,4), *, sizes=None, own=True, consumer="r
     ticket=_begin_check_round(runtime,action_id).ticket
     entries=[]
     for i,index in enumerate(indexes):
-        name=f'/DCIM/CAM001/CAM_20261021{90000+i if unique_names else 90000:06d}_{index:04d}_D.OSV'
+        name=f'/DCIM/CAM_001/CAM_20261021{90000+i if unique_names else 90000:06d}_{index:04d}_D.OSV'
         if unknown_keys:name=f'/DCIM/UNKNOWN_{i:04d}.OSV'
         entries.append({'identity':name,'locator':{'path':name},'complete':True,'size_bytes':10 if sizes is None else sizes[i],'kind':'video','format_id':'osv'})
     from camctl.devices.directory import DirectoryCursor
@@ -334,8 +334,8 @@ async def test_preview_pairing_requires_its_actual_original_name_stem(tmp_path):
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
     try:
         ticket=_begin_check_round(runtime,action_id).ticket
-        original='/DCIM/CAM001/CAM_20261021090000_0002_D.OSV'
-        preview='/DCIM/CAM001/CAM_20261021090000_0001_D.LRF'
+        original='/DCIM/CAM_001/CAM_20261021090000_0002_D.OSV'
+        preview='/DCIM/CAM_001/CAM_20261021090000_0001_D.LRF'
         entries=[{'identity':name,'locator':{'path':name},'complete':True,'size_bytes':10,'kind':'video','format_id':format,
             **({'paired_identity':original} if name==preview else {})} for name,format in [(preview,'lrf'),(original,'osv')]]
         last=_ok(runtime.capture.save_result_page(_request(runtime,ticket,_actual(ticket,entries=entries,finalized=True)),new_operation_key(),owned))
@@ -682,7 +682,7 @@ async def _preview_world(tmp_path, *, original_sizes=(10,0), paired_index=2, pre
     from camctl.persistence.repositories.segments import iter_segment_members
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
     ticket=_begin_check_round(runtime,action_id).ticket
-    names=tuple(f'/DCIM/CAM001/CAM_20261021090000_{index:04d}_D.OSV' for index in range(1,len(original_sizes)+1))
+    names=tuple(f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.OSV' for index in range(1,len(original_sizes)+1))
     preview=names[paired_index-1].replace('.OSV','.LRF')
     entries=[{'identity':name,'locator':{'path':name},'complete':size is not None,'size_bytes':size,'kind':'video','format_id':'osv'} for name,size in zip(names,original_sizes)]
     entries.append({'identity':preview,'locator':{'path':preview},'complete':preview_size is not None,'size_bytes':preview_size,'kind':'video','format_id':'lrf',**({'paired_identity':names[paired_index-1]} if preview_pairing is PreviewPairingState.PAIRED else {})})
@@ -758,7 +758,7 @@ async def test_preview_paired_to_zero_tail_is_optional_and_does_not_block_comple
     try:
         assert assessment.status is SegmentAssessmentStatus.SUCCEEDED
         assert assessment.empty_tail_count==1 and assessment.gap_count==0
-        original=next(item for item in members if item.role is SegmentMemberRole.ORIGINAL and item.file_id==files['/DCIM/CAM001/CAM_20261021090000_0001_D.OSV'])
+        original=next(item for item in members if item.role is SegmentMemberRole.ORIGINAL and item.file_id==files['/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'])
         key=new_operation_key()
         saved=commit_operation(_completion_command(ref,(original,),runtime.wall_us(),key),key,owned)
         assert saved.kind=='completed',saved.error
@@ -928,7 +928,7 @@ async def test_preview_candidate_pair_and_original_cross_page_and_batch_boundari
         drafts=_candidate_drafts(repo,ref,owned,batch=7)
         assert len(drafts)==130
         paired=[item for item in members if item.role is SegmentMemberRole.PREVIEW][0]
-        original=[item for item in members if item.file_id==files['/DCIM/CAM001/CAM_20261021090000_0128_D.OSV']][0]
+        original=[item for item in members if item.file_id==files['/DCIM/CAM_001/CAM_20261021090000_0128_D.OSV']][0]
         assert paired.page_event_id!=original.page_event_id
         key=new_operation_key();saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,drafts=drafts),key,owned)
         assert saved.kind=='completed',saved.error
@@ -954,7 +954,7 @@ async def test_preview_output_and_origin_identity_errors_roll_back_entire_comple
             name=next(name for name in files if name.endswith('.LRF'))
             drafts+=(OutputDraft(OutputKind.PREVIEW,FileReference(device_file_id=files[name]),True,original_batch_file_id=files[name.replace('.LRF','.OSV')]),)
         elif mode=='extra_frozen_unknown_original':
-            drafts+=(OutputDraft(OutputKind.ORIGINAL,FileReference(device_file_id=files['/DCIM/CAM001/CAM_20261021090000_0002_D.OSV']),True),)
+            drafts+=(OutputDraft(OutputKind.ORIGINAL,FileReference(device_file_id=files['/DCIM/CAM_001/CAM_20261021090000_0002_D.OSV']),True),)
         before=_publication_snapshot(owned);key=new_operation_key()
         saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,drafts=drafts,mode=mode),key,owned)
         assert saved.kind=='rolled_back',saved.error
@@ -974,7 +974,7 @@ async def test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep
         last=repo.read_output_candidates(ref,second.next_cursor,1,owned)
         assert len(last.items)==1 and last.next_cursor is None
         first=repo.read_members(ref,None,128,owned)
-        target=next(item for item in first.items if item.file_id==files['/DCIM/CAM001/CAM_20261021090000_0001_D.OSV'])
+        target=next(item for item in first.items if item.file_id==files['/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'])
         assert owned.connection.execute('SELECT size_bytes FROM device_files WHERE id=?',(target.file_id,)).fetchone()==(10,)
         assert target.member.size_bytes is None
         assert segment_output_candidate(ref,target.member_id,owned) is None

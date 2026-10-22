@@ -14,7 +14,7 @@ def test_dynamic_segment_filename_is_not_interned(monkeypatch):
         if value.startswith('CAM_20261021'):seen.append(value)
         return original(value)
     monkeypatch.setattr(sys,'intern',intern)
-    assert parse_osmo_segment_name('/DCIM/CAM001/CAM_20261021090000_0001_D.OSV') is not None
+    assert parse_osmo_segment_name('/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV') is not None
     assert seen==[]
 
 
@@ -28,7 +28,7 @@ def test_file_identity_and_redecoded_directory_pages_do_not_intern_paths(monkeyp
     monkeypatch.setattr(sys,'intern',intern)
     binding=DeviceBinding('cam-1','camctl-adb')
     for index in (128,256,384):
-        path=f'/DCIM/CAM001/CAM_20261021090000_{index:04d}_D.OSV'
+        path=f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.OSV'
         if via_cursor:
             cursor=DirectoryCursor(binding,('/DCIM',),0,path)
             assert DirectoryCursor.from_json(cursor.as_json())==cursor
@@ -38,8 +38,8 @@ def test_file_identity_and_redecoded_directory_pages_do_not_intern_paths(monkeyp
 
 @pytest.mark.parametrize('prefix,valid',[('/DCIM/',True),('//DCIM/',True),('///DCIM/',False),('/DCIM//',False),('/DCIM/./',False),('/DCIM/../',False)])
 def test_canonical_segment_path_prefix_keeps_existing_semantics(prefix,valid):
-    assert (parse_osmo_segment_name(prefix+'CAM001/CAM_20261021090000_0001_D.OSV') is not None) is valid
+    assert (parse_osmo_segment_name(prefix+'CAM_001/CAM_20261021090000_0001_D.OSV') is not None) is valid
 
 @pytest.mark.parametrize('suffix',['/','/.','/..'])
 def test_canonical_segment_filename_cannot_have_trailing_path_segments(suffix):
-    assert parse_osmo_segment_name('/DCIM/CAM001/CAM_20261021090000_0001_D.OSV'+suffix) is None
+    assert parse_osmo_segment_name('/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'+suffix) is None

@@ -41,7 +41,7 @@ def _member(api, index, *, directory=1, name=None, role="original", size=10,
             ownership="owned", completion="complete", pairing_identity=None,
             pairing_state=None):
     key = api["SegmentKey"](directory, index)
-    identity = name or f"/DCIM/CAM{directory:03d}/CAM_20261021090000_{index:04d}_D.OSV"
+    identity = name or f"/DCIM/CAM_{directory:03d}/CAM_20261021090000_{index:04d}_D.OSV"
     if role == "preview":
         identity = identity.replace(".OSV", ".LRF")
     values = dict(
@@ -600,7 +600,7 @@ def test_conflicting_originals_with_the_same_key_remain_unknown():
     api = _api()
     first = _member(api, 1)
     conflicting = _member(
-        api, 1, name="/DCIM/CAM001/CAM_20261021090001_0001_D.OSV")
+        api, 1, name="/DCIM/CAM_001/CAM_20261021090001_0001_D.OSV")
     _, result = _assess(api, [first, conflicting])
 
     assert result.status is api["SegmentAssessmentStatus"].UNCONFIRMED
@@ -924,7 +924,7 @@ def test_unclassified_order_has_nullable_gap_summary(case):
     members=[_member(api,1),_member(api,3)] if case=='partial_duplicate' else [_member(api,1)]
     facts=_facts(api)
     if case in ('duplicate','partial_duplicate'):
-        members.append(_member(api,members[-1].key.index,name='/DCIM/CAM001/CAM_20261021100000_0003_D.OSV'))
+        members.append(_member(api,members[-1].key.index,name='/DCIM/CAM_001/CAM_20261021100000_0003_D.OSV'))
     elif case=='unknown_key': members=[replace(members[0],key=None)]
     else: facts=_facts(api,start_key=(1,2))
     _,result=_assess(api,members,facts=facts)

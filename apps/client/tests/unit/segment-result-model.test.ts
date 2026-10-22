@@ -16,7 +16,7 @@ it("缺段说明定位来源、区间、邻接和保留原片", () => {
   const text = [actionIssueText(a), ...resultNotes(a).map((n) => n.text)].join(
     " ",
   );
-  for (const fact of ["10", "1/3", "observed-left", "observed-right", "2", "4"])
+  for (const fact of ["10", "CAM_1/3", "observed-left", "observed-right", "2", "4"])
     expect(text).toContain(fact);
   expect(text).toMatch(/缺口|缺段/);
   expect(text).toMatch(/默认/);

@@ -17,7 +17,7 @@ import { displayNumber } from "../shared/json";
 
 function segmentIssueText({ details: d }: SegmentIssue): string {
   const key = (value: SegmentKey) =>
-    `CAM${displayNumber(value, "directory_number", value.directory_number)}/${displayNumber(value, "index", value.index)}`;
+    `CAM_${displayNumber(value, "directory_number", value.directory_number)}/${displayNumber(value, "index", value.index)}`;
   const gap =
     d.gap_count === null
       ? "缺口分类未确认"

@@ -29,35 +29,35 @@
       "output_id": "output-original-0034",
       "role": "original",
       "file_status": "retained",
-      "source_device_path": "CAM001/CAM_20261021_120000_0034_D.OSV",
+      "source_device_path": "CAM_001/CAM_20261021120000_0034_D.OSV",
       "source_size_bytes": null,
       "source_sha256": null,
       "source_evidence_ref": null,
       "source_locator_basis_ref": "camera-directory-listing.json#osv-0034-path",
-      "local_copy_path": "media/CAM_20261021_120000_0034_D.OSV"
+      "local_copy_path": "media/CAM_20261021120000_0034_D.OSV"
     },
     {
       "file_id": "osv-0035",
       "output_id": "output-original-0035",
       "role": "original",
       "file_status": "retained",
-      "source_device_path": "CAM001/CAM_20261021_120000_0035_D.OSV",
+      "source_device_path": "CAM_001/CAM_20261021120000_0035_D.OSV",
       "source_size_bytes": null,
       "source_sha256": null,
       "source_evidence_ref": null,
       "source_locator_basis_ref": "camera-directory-listing.json#osv-0035-path",
-      "local_copy_path": "media/CAM_20261021_120000_0035_D.OSV"
+      "local_copy_path": "media/CAM_20261021120000_0035_D.OSV"
     },
     {
       "file_id": "empty-tail-0036",
       "output_id": null,
       "role": "original",
       "file_status": "observed_empty",
-      "source_device_path": "CAM001/CAM_20261021_120000_0036_D.OSV",
+      "source_device_path": "CAM_001/CAM_20261021120000_0036_D.OSV",
       "source_size_bytes": 0,
       "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "source_evidence_ref": "camera-readback.json#empty-tail-0036",
-      "local_copy_path": "media/CAM_20261021_120000_0036_D.OSV"
+      "local_copy_path": "media/CAM_20261021120000_0036_D.OSV"
     }
   ]
 }

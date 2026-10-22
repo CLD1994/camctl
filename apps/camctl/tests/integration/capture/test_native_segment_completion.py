@@ -99,7 +99,7 @@ async def test_native_empty_tail_uses_original_natural_target_and_retains_per_fi
             entries = sorted(
                 [
                     _entry(
-                        f"CAM001/CAM_20261022100000_{n:04d}_D.{suffix}",
+                        f"CAM_001/CAM_20261022100000_{n:04d}_D.{suffix}",
                         size=0 if n == (9 if zero_position == "tail" else 8) else 20,
                     )
                     for n in (7, 8, 9)

@@ -7,7 +7,7 @@ import re
 from camctl.devices.segments import SegmentKey
 
 
-_DIRECTORY = re.compile(r"CAM(?P<number>[0-9]{3,})")
+_DIRECTORY = re.compile(r"CAM_(?P<number>[0-9]{3,})")
 _NAME = re.compile(
     r"(?i:CAM)_(?P<datetime>[0-9]{14})_(?P<index>[0-9]{4})_"
     r"(?P<camera_marker>D)\.(?P<suffix>(?i:OSV|LRF))"
@@ -33,7 +33,7 @@ class OsmoSegmentName:
 
 
 def parse_osmo_segment_name(path: str) -> OsmoSegmentName | None:
-    """解析直接位于 CAM<目录号> 下的 OSV/LRF 文件名。
+    """解析直接位于 CAM_<目录号> 下的 OSV/LRF 文件名。
 
     datetime 不参与排序；配对身份保留完整目录和主干的原始大小写，
     只有文件扩展名按既有契约忽略大小写。
@@ -50,7 +50,7 @@ def parse_osmo_segment_name(path: str) -> OsmoSegmentName | None:
         return None
     try:
         directory_number = int(directory.group("number"))
-        if directory_name != f"CAM{directory_number:03d}":
+        if directory_name != f"CAM_{directory_number:03d}":
             return None
         key = SegmentKey(directory_number, int(filename.group("index")))
     except (ValueError, OverflowError):

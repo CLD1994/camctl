@@ -107,7 +107,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                 if scenario != "unknown"
                 else f"UNKNOWN.{suffix}"
             )
-            path = f"/mnt/media_rw/emulated/DCIM/CAM001/{name}"
+            path = f"/mnt/media_rw/emulated/DCIM/CAM_001/{name}"
             # 独立身份特意使用相同内容，核对每份交付都继续保留。
             content = (
                 b"osmo-independent-segment\x00" * 8000

@@ -65,7 +65,7 @@ async def _source(
     async def read(request, batch):
         entries = []
         for index in indexes:
-            name = f"CAM001/CAM_20261022100000_{index:04d}_D."
+            name = f"CAM_001/CAM_20261022100000_{index:04d}_D."
             entries.extend(
                 (
                     _entry(name + "OSV", size=10 if sizes is None else sizes[index]),

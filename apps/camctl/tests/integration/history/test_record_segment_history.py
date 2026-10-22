@@ -544,7 +544,7 @@ async def _large_fixture(tmp_path,count):
             entries=[]
             for number in range(offset,min(offset+128,count)):
                 directory,index=divmod(number,999)
-                name=f'/DCIM/CAM{directory+1:03d}/CAM_20261021090000_{index+1:04d}_D.OSV'
+                name=f'/DCIM/CAM_{directory+1:03d}/CAM_20261021090000_{index+1:04d}_D.OSV'
                 entries.append({'identity':name,'locator':{'path':name},'complete':True,
                     'size_bytes':10 if number in (0,count-1) else 0,'kind':'video','format_id':'osv'})
             following=(None if offset+128>=count else DirectoryCursor(

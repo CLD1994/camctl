@@ -321,7 +321,7 @@ async def test_cross_page_preview_keeps_exact_original_and_origin(tmp_path,bad_o
             assert (saved.result.original_count,saved.result.preview_count)==(5,1)
             assert transactions.verify_segment_finish(request,key,owned,execution_finished=True,batch_size=1)==saved.result
             paired=owned.connection.execute('SELECT p.device_file_id,o.device_file_id FROM output_origins r JOIN outputs p ON p.id=r.output_id JOIN outputs o ON o.id=r.original_output_id').fetchone()
-            assert paired==(files['/DCIM/CAM001/CAM_20261021090000_0001_D.LRF'],files['/DCIM/CAM001/CAM_20261021090000_0001_D.OSV'])
+            assert paired==(files['/DCIM/CAM_001/CAM_20261021090000_0001_D.LRF'],files['/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'])
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
@@ -925,7 +925,7 @@ async def test_original_file_wait_proof_can_reuse_earlier_actual_results_attempt
             listing=await _listing_round(runtime,action_id)
             source_id=runtime.capture.read_last_result_page(listing.ticket,owned).ref.event_id
             _finish_listing_result(runtime,listing,retry_wait=True)
-        entry={'identity':'/DCIM/CAM001/CAM_20261021090000_0001_D.OSV','locator':{'path':'/DCIM/CAM001/CAM_20261021090000_0001_D.OSV'},'complete':True,'size_bytes':10,'kind':'video','format_id':'osv'}
+        entry={'identity':'/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV','locator':{'path':'/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'},'complete':True,'size_bytes':10,'kind':'video','format_id':'osv'}
         async def final(request,batch):return _completed_result(request.ticket,context,entries=[entry],finalized=True,source_page_event_id=source_id)
         _result_port(runtime,final)
         listing=await _listing_round(runtime,action_id)

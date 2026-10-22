@@ -40,7 +40,7 @@ def valid_manifest():
                 "file_id": "segment-1",
                 "output_id": "output-1",
                 "role": "original",
-                "source_device_path": "DCIM/CAM001/segment-1.OSV",
+                "source_device_path": "DCIM/CAM_001/segment-1.OSV",
                 "source_size_bytes": 10,
                 "source_sha256": "a" * 64,
                 "source_evidence_ref": "capture-record.json#file-1",
@@ -295,7 +295,7 @@ def test_manifest_preserves_independent_file_and_source_copy_identity():
 
     assert result["retained_file_ids"] == ["segment-1"]
     assert result["default_file_ids"] == ["segment-1"]
-    assert result["files"][0]["source_device_path"] == "DCIM/CAM001/segment-1.OSV"
+    assert result["files"][0]["source_device_path"] == "DCIM/CAM_001/segment-1.OSV"
     assert result["files"][0]["output_id"] == "output-1"
     assert result["files"][0]["source_evidence_ref"] == "capture-record.json#file-1"
 
@@ -338,7 +338,7 @@ def test_abnormal_manifest_keeps_partial_default_scope_separate_from_retained_sc
     second.update(
         file_id="segment-2",
         output_id="output-2",
-        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_device_path="DCIM/CAM_001/segment-2.OSV",
         source_locator_basis_ref="camera-readback.json#file-2-path",
         local_copy_path="segment-2.OSV",
     )
@@ -363,7 +363,7 @@ def test_complete_retained_scope_must_cover_every_retained_original(recording_cl
     second.update(
         file_id="segment-2",
         output_id="output-2",
-        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_device_path="DCIM/CAM_001/segment-2.OSV",
         source_locator_basis_ref="camera-readback.json#file-2-path",
         local_copy_path="segment-2.OSV",
     )
@@ -387,7 +387,7 @@ def test_unknown_retained_scope_can_keep_a_partial_list_of_retained_originals():
     second.update(
         file_id="segment-2",
         output_id="output-2",
-        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_device_path="DCIM/CAM_001/segment-2.OSV",
         source_locator_basis_ref="camera-readback.json#file-2-path",
         local_copy_path="segment-2.OSV",
     )
@@ -413,7 +413,7 @@ def test_preview_and_observed_empty_files_do_not_expand_complete_retained_scope(
         file_id="preview-1",
         output_id="preview-output-1",
         role="preview",
-        source_device_path="DCIM/CAM001/segment-1.LRF",
+        source_device_path="DCIM/CAM_001/segment-1.LRF",
         source_locator_basis_ref="camera-readback.json#preview-1-path",
         local_copy_path="segment-1.LRF",
         preview_of_output_id="output-1",
@@ -422,7 +422,7 @@ def test_preview_and_observed_empty_files_do_not_expand_complete_retained_scope(
     empty.update(
         file_id="empty-tail",
         output_id=None,
-        source_device_path="DCIM/CAM001/empty-tail.OSV",
+        source_device_path="DCIM/CAM_001/empty-tail.OSV",
         source_locator_basis_ref="camera-readback.json#empty-tail-path",
         source_size_bytes=0,
         file_status="observed_empty",
@@ -465,7 +465,7 @@ def test_same_bytes_at_distinct_reliable_source_paths_remain_distinct_files():
     second.update(
         file_id="segment-2",
         output_id="output-2",
-        source_device_path="DCIM/CAM001/segment-2.OSV",
+        source_device_path="DCIM/CAM_001/segment-2.OSV",
         source_locator_basis_ref=manifest["files"][0]["source_locator_basis_ref"],
         local_copy_path="segment-2.OSV",
     )
@@ -495,10 +495,10 @@ def test_local_source_hash_cannot_make_a_missing_locator_reliable():
     [
         (".", "camera-readback.json#dot", None),
         ("segment/..", "camera-readback.json#parent", None),
-        ("CAM001/segment/..", "camera-readback.json#directory", None),
-        ("DCIM/CAM001/segment-1.OSV", "camera-readback.json#valid", "DCIM/CAM001/segment-1.OSV"),
+        ("CAM_001/segment/..", "camera-readback.json#directory", None),
+        ("DCIM/CAM_001/segment-1.OSV", "camera-readback.json#valid", "DCIM/CAM_001/segment-1.OSV"),
         (None, "camera-readback.json#missing-path", None),
-        ("DCIM/CAM001/segment-1.OSV", None, None),
+        ("DCIM/CAM_001/segment-1.OSV", None, None),
     ],
 )
 def test_manifest_locator_qualification_matches_normalized_file_path(

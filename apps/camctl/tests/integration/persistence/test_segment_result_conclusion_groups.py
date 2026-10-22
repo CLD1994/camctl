@@ -31,7 +31,7 @@ async def _partial_result_world(tmp_path,*,maximum=3,retained=False):
     if retained:
         from .test_segment_scan_pairing import _ready
         from .test_segment_file_pairing import _entry
-        owned,runtime,first,_,_=await _ready(tmp_path,[_entry('CAM001/CAM_20261021090000_0001_D.OSV')])
+        owned,runtime,first,_,_=await _ready(tmp_path,[_entry('CAM_001/CAM_20261021090000_0001_D.OSV')])
         action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
             (first.ref.ticket.run_id,)).fetchone()[0]
         _finish_scan(owned,runtime,first,retry_wait=True)

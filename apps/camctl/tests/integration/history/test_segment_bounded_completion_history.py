@@ -289,7 +289,7 @@ async def test_bounded_completion_keeps_original_h_after_checksum_and_cleanup(tm
                         expected_identity = f'/DCIM/UNKNOWN_{offset:04d}.OSV'
                     else:
                         index = 1 if offset == expected_originals else offset+(2 if case == 'missing_start' else 1)
-                        expected_identity = f'/DCIM/CAM001/CAM_20261021090000_{index:04d}_D.'+('LRF' if offset == expected_originals else 'OSV')
+                        expected_identity = f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.'+('LRF' if offset == expected_originals else 'OSV')
                     assert parse_exact_json(source['identity_key']) == ['cam-1', 'camctl-adb', expected_identity]
                     assert output['kind'] == int(enum_for('outputs.kind').PREVIEW if offset == expected_originals
                                                  else enum_for('outputs.kind').ORIGINAL)

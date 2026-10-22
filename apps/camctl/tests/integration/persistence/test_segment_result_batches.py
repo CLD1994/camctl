@@ -26,8 +26,8 @@ async def test_full_member_batch_and_following_page_fix_all_129_actual_sources(t
     try:
         ticket=_begin_check_round(runtime,action_id).ticket
         binding=DeviceBinding('cam-1','camctl-adb')
-        entries=[{'identity':f'/DCIM/CAM001/CAM_20261021090000_{number:04d}_D.OSV',
-            'locator':{'path':f'/DCIM/CAM001/CAM_20261021090000_{number:04d}_D.OSV'},
+        entries=[{'identity':f'/DCIM/CAM_001/CAM_20261021090000_{number:04d}_D.OSV',
+            'locator':{'path':f'/DCIM/CAM_001/CAM_20261021090000_{number:04d}_D.OSV'},
             'complete':True,'size_bytes':10,'kind':'video','format_id':'osv'}
             for number in range(1,130)]
         previous=None

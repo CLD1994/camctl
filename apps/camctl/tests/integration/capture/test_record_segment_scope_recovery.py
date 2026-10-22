@@ -223,7 +223,7 @@ async def test_segmented_cancel_publishes_zero_outputs_and_preserves_original_st
                 request.ticket,
                 context,
                 finalized=True,
-                entries=[_entry("CAM001/CAM_20261022100000_0007_D.OSV")],
+                entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
             )
 
         driver = _result_port(runtime, read)
@@ -317,7 +317,7 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
     try:
         context = _stop_context(owned, action_id)
         names = [
-            f"CAM001/CAM_20261022100000_{index:04d}_D.OSV" for index in (7, 8, 9, 10)
+            f"CAM_001/CAM_20261022100000_{index:04d}_D.OSV" for index in (7, 8, 9, 10)
         ]
         preview = names[0].removesuffix("OSV") + "LRF"
         cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, "/DCIM/" + names[1])
@@ -388,10 +388,10 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
     [
         (
             (
-                "CAM001/CAM_20261022100000_0999_D.LRF",
-                "CAM001/CAM_20261022100000_0999_D.OSV",
-                "CAM002/CAM_20261022110000_0001_D.LRF",
-                "CAM002/CAM_20261022110000_0001_D.OSV",
+                "CAM_001/CAM_20261022100000_0999_D.LRF",
+                "CAM_001/CAM_20261022100000_0999_D.OSV",
+                "CAM_002/CAM_20261022110000_0001_D.LRF",
+                "CAM_002/CAM_20261022110000_0001_D.OSV",
             ),
             3,
             2,
@@ -401,9 +401,9 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
         ),
         (
             (
-                "CAM001/CAM_20261022100000_0007_D.LRF",
-                "CAM001/CAM_20261022100000_0008_D.LRF",
-                "CAM001/CAM_20261022100000_0008_D.OSV",
+                "CAM_001/CAM_20261022100000_0007_D.LRF",
+                "CAM_001/CAM_20261022100000_0008_D.LRF",
+                "CAM_001/CAM_20261022100000_0008_D.OSV",
             ),
             4,
             1,
@@ -411,7 +411,7 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
             "empty",
             0,
         ),
-        (("CAM001/unknown.LRF", "CAM001/unknown.OSV"), 4, 1, 1, "unknown", 0),
+        (("CAM_001/unknown.LRF", "CAM_001/unknown.OSV"), 4, 1, 1, "unknown", 0),
     ],
 )
 async def test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order(
@@ -492,7 +492,7 @@ async def test_segmented_completion_and_default_scope_remain_independent(
                 context,
                 finalized=True,
                 entries=[
-                    _entry(f"CAM001/CAM_20261022100000_{index:04d}_D.OSV", size=size)
+                    _entry(f"CAM_001/CAM_20261022100000_{index:04d}_D.OSV", size=size)
                     for index, size in zip(indexes, sizes)
                 ],
             )
@@ -536,7 +536,7 @@ async def test_segment_finish_lost_receipt_recovers_original_request_without_dup
             return _completed_result(
                 request.ticket,
                 context,
-                entries=[_entry("CAM001/CAM_20261022100000_0007_D.OSV")],
+                entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
                 finalized=True,
             )
 
@@ -586,7 +586,7 @@ async def test_segment_release_lost_receipt_keeps_original_request_before_public
                 request.ticket,
                 context,
                 finalized=True,
-                entries=[_entry("CAM001/CAM_20261022100000_0007_D.OSV")],
+                entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
             )
 
         driver = _result_port(runtime, read)
@@ -641,7 +641,7 @@ async def test_last_scan_keeps_qualified_prior_files_and_its_own_failure(
         return _completed_result(
             request.ticket,
             context,
-            entries=[_entry(f"CAM001/CAM_20261022100000_{index:04d}_D.OSV")],
+            entries=[_entry(f"CAM_001/CAM_20261022100000_{index:04d}_D.OSV")],
             finalized=count > 1,
             error=ErrorValue("device_error", "device")
             if count > 1 and latest == "error"
@@ -656,7 +656,7 @@ async def test_last_scan_keeps_qualified_prior_files_and_its_own_failure(
             return _completed_result(
                 request.ticket,
                 context,
-                entries=[_entry("CAM001/CAM_20261022100000_0007_D.OSV")]
+                entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")]
                 if count == 1
                 else [],
                 finalized=count > 1,
@@ -703,7 +703,7 @@ async def test_incomplete_segment_scan_keeps_qualified_files_without_complete_de
             return _completed_result(
                 request.ticket,
                 context,
-                entries=[_entry("CAM001/CAM_20261022100000_0007_D.OSV")],
+                entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
                 finalized=False,
             )
 
@@ -743,7 +743,7 @@ async def test_repeated_unknown_order_scan_reuses_pairing_by_attempt_row_identit
             runtime.monotonic_ns = lambda: 22_000_000_000
             return _completed_result(
                 request.ticket, context,
-                entries=[_entry("CAM001/unknown.LRF"), _entry("CAM001/unknown.OSV")],
+                entries=[_entry("CAM_001/unknown.LRF"), _entry("CAM_001/unknown.OSV")],
                 finalized=True,
             )
 
@@ -814,7 +814,7 @@ async def test_segment_scan_resume_reuses_original_baseline_and_saved_pages(tmp_
     try:
         runtime.check_config = AttemptConfig(1, Decimal("2"), Decimal("0"))
         context = _stop_context(owned, action_id)
-        original = "/DCIM/CAM001/CAM_20261022100000_0007_D.OSV"
+        original = "/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
         cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, original)
         entered = asyncio.Event()
 

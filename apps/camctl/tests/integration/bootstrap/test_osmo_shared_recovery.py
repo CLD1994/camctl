@@ -42,7 +42,7 @@ from ..scheduling.test_start_action import owned, _accept_plan, _start, _SCHEDUL
 
 pytestmark = pytest.mark.asyncio
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
-OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261022100000_0007_D.OSV"
+OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
 
 
 class Channel:
