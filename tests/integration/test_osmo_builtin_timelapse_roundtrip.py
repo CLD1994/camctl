@@ -150,9 +150,13 @@ def osmo_package(tmp_path_factory) -> _InstalledPackage:
         _archive_logs(root, log_dir)
 
 
-def _osmo_config(path: Path, *, serial: str = "osmo-installed-test-serial") -> Path:
-    path.write_text(
-        "\n".join((
+def _osmo_config(
+        path: Path,
+        *,
+        serial: str = "osmo-installed-test-serial",
+        result_mode: str | None = None,
+) -> Path:
+    lines = [
             "[paths]",
             f'state_db = "{path.parent / "state.db"}"',
             f'log_file = "{path.parent / "camctl.log"}"',
@@ -173,8 +177,17 @@ def _osmo_config(path: Path, *, serial: str = "osmo-installed-test-serial") -> P
             f'serial = "{serial}"',
             "[devices.osmo360ii.copy]",
             'read_idle_timeout_s = "60"',
+    ]
+    if result_mode is not None:
+        if result_mode not in {"single_file", "segmented"}:
+            raise ValueError("OSMO 测试配置的视频结果模式无效")
+        lines.extend((
             "",
-        )), encoding="utf-8")
+            "[devices.osmo360ii.video]",
+            f'result_mode = "{result_mode}"',
+        ))
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
 

@@ -32,6 +32,35 @@ SETTINGS = {
 }
 
 
+def _scenario_files():
+    """Read only the explicit source files declared by an integration case."""
+    manifest = os.environ.get("CAMCTL_ACTION6_TEST_FILES")
+    if manifest is None:
+        return ()
+    entries = json.loads(Path(manifest).read_text(encoding="utf-8"))
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("Action6 文件场景必须显式声明非空路径集合")
+    result = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"path", "source"}:
+            raise ValueError("Action6 文件场景条目必须只含 path 和 source")
+        path, source = entry["path"], Path(entry["source"])
+        if (
+            not isinstance(path, str)
+            or not path.startswith(REMOTE_DIRECTORY + "/")
+            or "\0" in path
+            or os.path.normpath(path) != path
+            or ".." in Path(path).parts
+            or not source.is_file()
+            or path in seen
+        ):
+            raise ValueError("Action6 文件场景路径越界、重复或缺少本地样例")
+        seen.add(path)
+        result.append((path, source))
+    return tuple(result)
+
+
 def _clock_fields(prefix):
     state = os.environ.get("CAMCTL_OSMO_TEST_CLOCK_FILE")
     if not state:
@@ -45,8 +74,9 @@ def _clock_fields(prefix):
 def _file_kind(script):
     from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
     tools = ShellFileTools()
-    paths = (NEW_VIDEO, NEW_PREVIEW, NEW_PHOTO,
-             REMOTE_DIRECTORY + "/DJI_001/DJI_OLD.MP4")
+    paths = tuple(path for path, _ in _scenario_files()) + (
+        NEW_VIDEO, NEW_PREVIEW, NEW_PHOTO,
+        REMOTE_DIRECTORY + "/DJI_001/DJI_OLD.MP4")
     for path in paths:
         for kind, candidate in (("metadata", tools.metadata_script(path)),
                                 ("digest", tools.digest_script(path)),
@@ -122,14 +152,23 @@ def main():
         start_code = "1" if timelapse else "2"
         if (code, payload) == (start_code, "01"):
             record["kind"] = "start"
-            target = root / NEW_VIDEO.lstrip("/")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():
-                raise ValueError("START 被重发，会复用本次源文件路径")
-            shutil.copyfile(root.parent / "sample.mp4", target)
-            (root / NEW_PREVIEW.lstrip("/")).write_bytes(b"Action6 auxiliary preview")
-            if timelapse:
-                (root / NEW_PHOTO.lstrip("/")).write_bytes(b"Action6 independent JPEG original")
+            files = _scenario_files()
+            if files:
+                for path, source in files:
+                    target = root / path.lstrip("/")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if target.exists():
+                        raise ValueError("START 被重发，会复用本次源文件路径")
+                    shutil.copyfile(source, target)
+            else:
+                target = root / NEW_VIDEO.lstrip("/")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    raise ValueError("START 被重发，会复用本次源文件路径")
+                shutil.copyfile(root.parent / "sample.mp4", target)
+                (root / NEW_PREVIEW.lstrip("/")).write_bytes(b"Action6 auxiliary preview")
+                if timelapse:
+                    (root / NEW_PHOTO.lstrip("/")).write_bytes(b"Action6 independent JPEG original")
         elif (code, payload) == (start_code, "00"):
             record["kind"] = "stop"
         elif (code, payload) in ({("e1", "02"), ("18", "1003000000"),

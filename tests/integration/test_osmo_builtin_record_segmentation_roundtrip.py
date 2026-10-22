@@ -88,7 +88,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
 ):
     package = osmo_package
     deployment = Deployment(tmp_path / "world", devices=False)
-    _osmo_config(deployment.config_path)
+    _osmo_config(deployment.config_path, result_mode="segmented")
     native = scenario == "native-tail"
     action_type = "camera_timelapse" if native else "camera_record"
     params = _capture_params(action_type)
