@@ -159,13 +159,31 @@ assert all(callable(entry.driver.contract.commands[kind]) for kind in (CameraCal
 print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":str(importlib.metadata.distribution("camctl")._path),"python":sys.executable,"modules":{n:importlib.import_module(n).__file__ for n in names},"osmo_file_declaration":declaration}))''')
     installed = json.loads(provenance.stdout)
     assert all("site-packages" in path and str(REPO) not in path for path in installed["modules"].values())
-    json_write(root / "provenance.json", {**installed, "wheel_sha256": sha(wheel.read_bytes()),
-        "wheel": wheel,
-        "source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
-        "tracked_diff_sha256": sha(subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=REPO)),
-        "test_inputs": {name: sha((HERE / name).read_bytes()) for name in (
-            "test_device_file_cleanup_roundtrip.py", "_cleanup_roundtrip_support.py",
-            "_cleanup_roundtrip_adb.py", "_cleanup_roundtrip_fault.py", "_osmo_builtin_adb.py")}})
+    json_write(
+        root / "provenance.json",
+        {
+            **installed,
+            "wheel_sha256": sha(wheel.read_bytes()),
+            "wheel": wheel,
+            "source_head": subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=REPO, text=True
+            ).strip(),
+            "tracked_diff_sha256": sha(
+                subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=REPO)
+            ),
+            "test_inputs": {
+                name: sha((HERE / name).read_bytes())
+                for name in (
+                    "test_device_file_cleanup_roundtrip.py",
+                    "_cleanup_roundtrip_support.py",
+                    "_cleanup_roundtrip_adb.py",
+                    "_cleanup_roundtrip_fault.py",
+                    "_osmo_builtin_adb.py",
+                    "_osmo_builtin_clock_entry.py",
+                )
+            },
+        },
+    )
     try:
         yield Package(root, python, root / "venv/bin/camctl", env, logs)
     finally:
@@ -212,14 +230,22 @@ class World:
                 shutil.copy2(HERE / source, self.tools / source)
         self.clock_cli = self.launcher("clock-cli", self.tools / "_osmo_builtin_clock_entry.py")
         self.launcher("adb", self.tools / "_osmo_builtin_adb.py")
-        self.env.update({"PATH": str(self.tools) + os.pathsep + self.env["PATH"],
-            "CAMCTL_OSMO_TEST_ACTION": "camera_record", "CAMCTL_OSMO_TEST_PARAMS": json.dumps(self.params),
-            "CAMCTL_OSMO_TEST_INCLUDE_PREVIEW": "1", "CAMCTL_OSMO_TEST_SERIAL": SERIAL,
-            "CAMCTL_OSMO_TEST_ADB_ROOT": str(self.remote), "CAMCTL_OSMO_TEST_ADB_LOG": str(self.calls_path),
-            "CAMCTL_OSMO_TEST_SAMPLE": str(self.root / "sample.OSV"),
-            "CAMCTL_OSMO_TEST_CLOCK_FILE": str(self.clock),
-            "CAMCTL_OSMO_TEST_CLOCK_LOG": str(self.root / "clock-reads.jsonl"),
-            "CAMCTL_OSMO_TEST_PROCESS_LOG": str(self.root / "clock-cli.jsonl")})
+        self.env.update(
+            {
+                "PATH": str(self.tools) + os.pathsep + self.env["PATH"],
+                "CAMCTL_OSMO_TEST_SINGLE_ORIGINAL": "1",
+                "CAMCTL_OSMO_TEST_ACTION": "camera_record",
+                "CAMCTL_OSMO_TEST_PARAMS": json.dumps(self.params),
+                "CAMCTL_OSMO_TEST_INCLUDE_PREVIEW": "1",
+                "CAMCTL_OSMO_TEST_SERIAL": SERIAL,
+                "CAMCTL_OSMO_TEST_ADB_ROOT": str(self.remote),
+                "CAMCTL_OSMO_TEST_ADB_LOG": str(self.calls_path),
+                "CAMCTL_OSMO_TEST_SAMPLE": str(self.root / "sample.OSV"),
+                "CAMCTL_OSMO_TEST_CLOCK_FILE": str(self.clock),
+                "CAMCTL_OSMO_TEST_CLOCK_LOG": str(self.root / "clock-reads.jsonl"),
+                "CAMCTL_OSMO_TEST_PROCESS_LOG": str(self.root / "clock-cli.jsonl"),
+            }
+        )
         set_frozen(self.clock, utc_us=whole_second_utc_us(), monotonic_ns=time.monotonic_ns())
         self.command(package.cli, "init", "--config", self.deployment.config_path)
         self.install_capabilities()
@@ -373,6 +399,10 @@ max_query_attempts={max_q}
         self.start(self.clock_cli)
         actions = self.wait_action(receipt["request_id"], "SUCCEEDED")
         self.stop()
+        (frozen,) = rows(
+            self.db, "SELECT execution_spec_json FROM actions WHERE name='capture-osmo'"
+        )
+        assert json.loads(frozen["execution_spec_json"]).get("result_policy") is None
         calls = records(self.calls_path)
         starts = [row for row in calls if row.get("kind") == "start"]
         stops = [row for row in calls if row.get("kind") == "stop"]

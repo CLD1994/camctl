@@ -26,6 +26,33 @@ LRF_PATH = REMOTE_DIRECTORY + "/OSMO_0001/VID_0001.LRF"
 _IMPORT_ORIGINS: dict[str, str] = {}
 
 
+def _scenario_files(include_preview=True):
+    manifest = os.environ.get("CAMCTL_OSMO_TEST_FILES")
+    if manifest is None:
+        source = Path(os.environ["CAMCTL_OSMO_TEST_SAMPLE"])
+        return (
+            [(OSV_PATH, source), (LRF_PATH, source.with_suffix(".lrf"))]
+            if include_preview
+            else [(OSV_PATH, source)]
+        )
+    entries = json.loads(Path(manifest).read_text(encoding="utf-8"))
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("OSMO 文件场景必须明确声明非空路径集合")
+    result = []
+    for entry in entries:
+        path, source = entry["path"], Path(entry["source"])
+        if (
+            not path.startswith(REMOTE_DIRECTORY + "/")
+            or ".." in Path(path).parts
+            or not source.is_file()
+        ):
+            raise ValueError("OSMO 文件场景改变了远端范围或缺少本地样例")
+        if any(path == previous for previous, _ in result):
+            raise ValueError("OSMO 文件场景重复路径")
+        result.append((path, source))
+    return result
+
+
 def _clock_fields(prefix: str) -> dict:
     reading = read_clock(Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_FILE"]))
     return {
@@ -93,15 +120,12 @@ def _control(script: str, *, root: Path, calls_path: Path):
         kind, payload = "start", "00"
         if any(record.get("kind") == "start" for record in _calls(calls_path)):
             raise ValueError("同一安装版场景重发了原生 START")
-        source = Path(os.environ["CAMCTL_OSMO_TEST_SAMPLE"])
-        video = root / OSV_PATH.lstrip("/")
-        preview = root / LRF_PATH.lstrip("/")
-        video.parent.mkdir(parents=True, exist_ok=True)
-        if video.exists() or preview.exists():
-            raise ValueError("START 目标路径在本场景开始前已经存在")
-        shutil.copyfile(source, video)
-        if include_preview:
-            shutil.copyfile(source.with_suffix(".lrf"), preview)
+        for path, source in _scenario_files(include_preview):
+            target = root / path.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                raise ValueError("START 目标路径在本场景开始前已经存在")
+            shutil.copyfile(source, target)
     elif words == stop:
         kind = "stop"
         payload = "df" if action_type == "camera_timelapse" else "00"
@@ -160,7 +184,7 @@ def _shell_kind(script: str) -> str:
     from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
 
     tools = ShellFileTools()
-    known_files = (OSV_PATH, LRF_PATH)
+    known_files = tuple(path for path, _ in _scenario_files())
     for path in known_files:
         if script == tools.metadata_script(path):
             return "metadata"

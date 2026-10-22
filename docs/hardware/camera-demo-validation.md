@@ -398,6 +398,28 @@ PY
 
 保留本次计划、客户端导入凭据、最终报告及源文件信息。host 的 `logs` 命令用于查看 CLI 调用和收场；受理或执行失败以正式结果及报告中的错误为依据。
 
+## OSMO 正式计划与分段验收
+
+OSMO 的现场安排和分层验收项见[分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成-arm-与实机验收)。使用上节从安装包提取的资源，将 OSMO 绑定合并到实际部署配置，初始化、能力导出和 host 使用同一配置及状态库。以下示例采用提取出的 `osmo360ii-config.toml`；已有部署使用实际配置路径。
+
+在终端 B 导出能力，再生成普通录像计划：
+
+```bash
+"$HOME/.camctl/venv/bin/camctl" describe \
+  --config "$HOME/.camctl/camera-demo/osmo360ii-config.toml" \
+  > "$HOME/.camctl/camera-demo/osmo-capabilities.json"
+"$HOME/.camctl/venv/bin/python" "$HOME/.camctl/camera-demo/prepare-plan.py" osmo360ii-record \
+  --capabilities "$HOME/.camctl/camera-demo/osmo-capabilities.json" \
+  --device-id osmo360ii \
+  --output "$HOME/.camctl/camera-demo/osmo-record-plan.json"
+```
+
+`prepare-plan.py` 使用本次安装包中的正式模板和刚导出的参数 Schema 校验，然后生成独立请求身份与 UTC 时间。原生延时使用样例名 `osmo360ii-timelapse` 和独立输出文件名；自定义参数可由客户端按同一能力说明编辑、校验并导出。生成后将打印的完整 `submit` 命令交给使用同一配置的 host；重送沿用原计划文件。
+
+拍摄报告保留每份合格原片及其独立预览身份。默认取回和预览取回消费来源已保存的范围；需要范围外文件时，由客户端以明确 `output_ids` 导出独立取回计划。来源缺段失败与前缀文件成功交付分别核对。每份文件领取后保留实际名称、长度、SHA-256、output／delivery 关联、客户端导入凭据和报告 ACK。
+
+本地副本的实际时长、双路视频、解码和容限采用[分段媒体验收工具](osmo360ii-segment-media-validation.md#运行工具)。验收环境单独部署 `validate_osmo_segments.py` 与其权威依赖清单，准备 Python 3.11、ffprobe／ffmpeg 后，按该专题建立本地清单并运行；工具及其依赖不加入 camctl 运行环境。软件安装链、ARM 部署和真实媒体分别记录证据。
+
 ## ARM Linux 的完整验收
 
 本节对应的 ARM Action6 普通录像演示已由用户现场确认正常，当前 T9 演示范围完成；用户不需要重新拍摄或补交报告。现场结果和未归档材料边界见[组件验证记录](../camctl/verification.md#action6-普通录像演示的现场验收2026-10-11)。本节以下内容是操作流程和验收项的参考，供另行安排的演示使用，不是当前待办。

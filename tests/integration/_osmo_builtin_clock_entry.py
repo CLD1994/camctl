@@ -40,6 +40,33 @@ def _install_clock_ports(controlled_time) -> None:
     cleanup_assembly.time = controlled_time
 
 
+def _install_single_original_task() -> None:
+    """既有清理链显式采用单原片任务声明，继续覆盖独立修复产物。"""
+    from dataclasses import replace
+    from camctl.devices.drivers.adb_cameras import osmo360ii_capture
+
+    original = osmo360ii_capture._task
+
+    def task(params):
+        declared = original(params)
+        return replace(
+            declared,
+            result_policy=None,
+            product_rules=(
+                {
+                    "kind": "video",
+                    "format_id": "osv",
+                    "min_count": 1,
+                    "exact_count": 1,
+                    "require_pairing": False,
+                    "min_size_bytes": 1,
+                },
+            ),
+        )
+
+    osmo360ii_capture._task = task
+
+
 def main() -> int:
     started_ns = _real_time.monotonic_ns()
     log_path = Path(os.environ["CAMCTL_OSMO_TEST_PROCESS_LOG"])
@@ -58,6 +85,12 @@ def main() -> int:
         clock_log_path = Path(os.environ["CAMCTL_OSMO_TEST_CLOCK_LOG"])
         controlled_time = ControlledClock(state_path, clock_log_path)
         _install_clock_ports(controlled_time)
+        if os.environ.get("CAMCTL_OSMO_TEST_SINGLE_ORIGINAL") == "1":
+            _install_single_original_task()
+        if os.environ.get("CAMCTL_OSMO_TEST_SEGMENT_FAULT"):
+            from _osmo_segment_observer import install
+
+            install()
         import camctl
         from camctl import cli as camctl_cli
         from camctl.capture import handlers

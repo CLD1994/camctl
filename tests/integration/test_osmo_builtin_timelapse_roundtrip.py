@@ -40,8 +40,8 @@ _PYTHON311 = Path(os.environ.get(
 _OSMO_CONFIG_RESOURCE = "examples/camera-demo/osmo360ii-config.toml"
 _OSMO_RECORD_RESOURCE = "examples/camera-demo/osmo360ii-record.json"
 _OSMO_TIMELAPSE_RESOURCE = "examples/camera-demo/osmo360ii-timelapse.json"
-_OSV_PATH = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV"
-_LRF_PATH = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF"
+_OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261022100000_0007_D.OSV"
+_LRF_PATH = "/mnt/media_rw/emulated/DCIM/CAM001/CAM_20261022100000_0007_D.LRF"
 _SERIAL = "osmo-installed-test-serial"
 _OSV_CONTENT = (b"synthetic-osmo-osv-v1\x00" + bytes(range(256))) * 600
 _LRF_CONTENT = (b"synthetic-osmo-lrf-v1\x00" + bytes(reversed(range(256)))) * 300
@@ -57,12 +57,16 @@ def _archive_logs(package_root: Path, log_dir: Path) -> Path:
         if not scenario.is_dir():
             continue
         for name in ("adb-calls.jsonl", "installed-cli-processes.jsonl",
-                     "controlled-clock-reads.jsonl"):
+                     "controlled-clock-reads.jsonl", "segment-marker.json", "files.json"):
             source = scenario / name
             if source.is_file():
                 target = archive / "runtime" / scenario.name / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
+    if (package_root / "dist").is_dir():
+        shutil.copytree(package_root / "dist", archive / "dist", dirs_exist_ok=True)
+    if (package_root / "requirements.txt").is_file():
+        shutil.copy2(package_root / "requirements.txt", archive / "requirements.txt")
     return archive
 
 
@@ -370,26 +374,34 @@ def _install_osmo_process_tools(
     sample.write_bytes(_OSV_CONTENT)
     if include_preview:
         sample.with_suffix(".lrf").write_bytes(_LRF_CONTENT)
+    manifest = scratch / "files.json"
+    files = [{"path": _OSV_PATH, "source": str(sample)}]
+    if include_preview:
+        files.append({"path": _LRF_PATH, "source": str(sample.with_suffix(".lrf"))})
+    manifest.write_text(json.dumps(files), encoding="utf-8")
     adb_log = scratch / "adb-calls.jsonl"
     process_log = scratch / "installed-cli-processes.jsonl"
     read_gate = scratch / "obtain-read.gate"
     read_gate.touch()
     environment = dict(package.environment)
     environment["PATH"] = str(tools) + os.pathsep + environment.get("PATH", "")
-    environment.update({
-        "CAMCTL_OSMO_TEST_ACTION": action_type,
-        "CAMCTL_OSMO_TEST_PARAMS": json.dumps(params, separators=(",", ":")),
-        "CAMCTL_OSMO_TEST_INCLUDE_PREVIEW": "1" if include_preview else "0",
-        "CAMCTL_OSMO_TEST_SERIAL": _SERIAL,
-        "CAMCTL_OSMO_TEST_ADB_ROOT": str(adb_root),
-        "CAMCTL_OSMO_TEST_ADB_LOG": str(adb_log),
-        "CAMCTL_OSMO_TEST_SAMPLE": str(sample),
-        "CAMCTL_OSMO_TEST_CLOCK_FILE": str(clock_file),
-        "CAMCTL_OSMO_TEST_CLOCK_LOG": str(clock_log),
-        "CAMCTL_OSMO_TEST_PROCESS_LOG": str(process_log),
-        "CAMCTL_OSMO_TEST_READ_GATE": str(read_gate),
-        "CAMCTL_OSMO_TEST_READ_GATE_AFTER_BYTES": "65536",
-    })
+    environment.update(
+        {
+            "CAMCTL_OSMO_TEST_ACTION": action_type,
+            "CAMCTL_OSMO_TEST_PARAMS": json.dumps(params, separators=(",", ":")),
+            "CAMCTL_OSMO_TEST_INCLUDE_PREVIEW": "1" if include_preview else "0",
+            "CAMCTL_OSMO_TEST_SERIAL": _SERIAL,
+            "CAMCTL_OSMO_TEST_ADB_ROOT": str(adb_root),
+            "CAMCTL_OSMO_TEST_ADB_LOG": str(adb_log),
+            "CAMCTL_OSMO_TEST_SAMPLE": str(sample),
+            "CAMCTL_OSMO_TEST_FILES": str(manifest),
+            "CAMCTL_OSMO_TEST_CLOCK_FILE": str(clock_file),
+            "CAMCTL_OSMO_TEST_CLOCK_LOG": str(clock_log),
+            "CAMCTL_OSMO_TEST_PROCESS_LOG": str(process_log),
+            "CAMCTL_OSMO_TEST_READ_GATE": str(read_gate),
+            "CAMCTL_OSMO_TEST_READ_GATE_AFTER_BYTES": "65536",
+        }
+    )
     return environment, camctl, clock_file, adb_root
 
 
@@ -799,9 +811,16 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert any(frame.get("line") == line for frame in _clock_frames(
             released_read, module="camctl.capture.handlers", function=decision[0]))
 
+        capture_status = "failed" if action_type == "camera_record" else "succeeded"
         capture_report = wait_for(
-            lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
-            150, "安装版 OSMO capture 未完成或未发布成功报告")
+            lambda: _report_with_statuses(deployment.ready, {"capture": capture_status}),
+            150, "安装版 OSMO capture 未完成或未发布预期报告")
+        if action_type == "camera_record":
+            # 跨会话控制计时未知，单份尾段不提供分段时长下界；
+            # 来源保持未确认失败，已确定的原片仍可独立取回。
+            failure = _action(capture_report, "capture")["error"]
+            assert failure["code"] == "capture_result_unconfirmed"
+            assert failure["details"]["reason"] == "completion_unknown"
         final_start = _capture_facts(deployment.state_db)
         assert len(final_start) == 1
         assert final_start[0][:5] == started[:5]
@@ -886,8 +905,11 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             preview = by_path[_LRF_PATH]
             assert preview[2] == int(roles.PREVIEW)
             assert preview[3] == original[0]
-            assert json.loads(preview[4]) == {
-                "method": 1, "observation": {"paired_identity": _OSV_PATH}}
+            pairing = json.loads(preview[4])
+            assert pairing["method"] == 2
+            assert query_state(deployment.state_db,
+                "SELECT original_file_id,preview_file_id FROM device_file_pairing_facts WHERE id=?",
+                (pairing["pairing_fact_id"],)) == [(original[0], preview[0])]
             assert preview[5] == int(completed) and preview[6] == len(_LRF_CONTENT) >= 1
 
         if action_type == "camera_record":
@@ -940,18 +962,21 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         outputs = query_state(deployment.state_db,
             "SELECT o.kind,f.original_name FROM outputs o JOIN device_files f ON f.id=o.device_file_id"
             " WHERE o.source_action_id=? ORDER BY o.kind", (action_id,))
-        expected_outputs = [(int(output_kinds.ORIGINAL), "VID_0001.OSV")]
+        expected_outputs = [(int(output_kinds.ORIGINAL), Path(_OSV_PATH).name)]
         if include_preview:
-            expected_outputs.append((int(output_kinds.PREVIEW), "VID_0001.LRF"))
+            expected_outputs.append((int(output_kinds.PREVIEW), Path(_LRF_PATH).name))
         assert outputs == expected_outputs
 
         if action_type == "camera_record":
             activity_id = query_state(deployment.state_db,
                 "SELECT id FROM device_activities WHERE action_id=?", (action_id,))[0][0]
+        from camctl.history.events import load_event_registry
+        page_event = load_event_registry()["events"]["RESULT_PAGE"]
         page_rows = query_state(deployment.state_db,
             "SELECT body_json FROM history_events"
-            " WHERE json_extract(body_json,'$.evidence.result_page.activity_id')=?",
-                (activity_id,))
+            " WHERE event_type=? AND json_extract(body_json,'$.reason')=?"
+            " AND json_extract(body_json,'$.evidence.result_page.activity_id')=?",
+                (page_event["id"], page_event["branches"]["APPEND"]["reason"], activity_id))
         listed = []
         for (body,) in page_rows:
             page = json.loads(body)["evidence"]["result_page"]
@@ -961,7 +986,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
                           for entry in observation["data"]["entries"])
         expected_listed = {(_OSV_PATH, "video", "osv", None)}
         if include_preview:
-            expected_listed.add((_LRF_PATH, "video", "lrf", _OSV_PATH))
+            expected_listed.add((_LRF_PATH, "video", "lrf", None))
         assert {(entry["identity"], entry["kind"], entry["format_id"], entry["paired_identity"])
                 for entry in listed} == expected_listed
         assert len(listed) == len(expected_listed)
@@ -1171,3 +1196,6 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         _assert_adb_process_provenance(package, adb_log)
     finally:
         demo.stop()
+        archive = _archive_logs(package.root, package.log_dir)
+        shutil.copytree(deployment.root,
+            archive / "cases" / f"{action_type}-{preview_suffix}", dirs_exist_ok=True)
