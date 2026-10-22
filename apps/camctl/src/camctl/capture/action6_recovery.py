@@ -180,6 +180,7 @@ async def advance_action6_recovery(runtime, action, decision=None):
     explicit_failure = (
         result.status is SegmentDecisionStatus.FAILED
         or explicit_media_failure
+        or coverage.status.value == "confirmed_short"
         or coverage.reason in ("segment_gap", "empty_original")
     )
     if explicit_failure:
