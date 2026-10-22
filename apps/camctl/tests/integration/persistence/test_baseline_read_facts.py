@@ -240,7 +240,7 @@ async def test_actual_error_stays_returned_and_does_not_end_action(owned, tmp_pa
 
 
 @pytest.mark.parametrize('bounded', [False, True])
-@pytest.mark.parametrize('mutation', ['valid','chunk_only','return_only','wrong_chunk','wrong_time','extra','no_scope'])
+@pytest.mark.parametrize('mutation', ['valid','chunk_only','return_only','replace_return','wrong_chunk','wrong_time','extra','no_scope'])
 async def test_return_group_is_complete_in_both_entrypoints(owned,tmp_path,bounded,mutation):
     from camctl.capture import baseline_models as models
     from camctl.contracts.pages import Page
@@ -265,6 +265,17 @@ async def test_return_group_is_complete_in_both_entrypoints(owned,tmp_path,bound
                 events=events[:1]
             elif mutation=='return_only':
                 events=events[1:]
+            elif mutation=='replace_return':
+                from camctl.persistence.repositories.baseline import append_event
+                from camctl.persistence.transaction import row_facts
+                activity=row_facts(scope.connection,'device_activities',intent.activity_id)
+                activity={**activity,**events[0].rows[0].after.values}
+                replacement=append_event(models.BaselineChunkSave(intent.activity_id,2,
+                    _entries('b.OSV'),_SCHEDULED+1),activity,events[1].event_id,events[1].transaction_id)
+                # 两条均为结构合法APPEND，数量与编号正确，只有本业务组语法不合法。
+                from camctl.history.validators import validate_event_structure
+                assert validate_event_structure(replacement)[:2]==('BASELINE_CHUNK','APPEND')
+                events=(events[0],replacement)
             elif mutation=='wrong_chunk':
                 raw={**events[-1].evidence['baseline_read_request'],'chunk_event_id':first.value.intent_event_id}
                 events=(*events[:-1],replace(events[-1],evidence={'baseline_read_request':raw}))
