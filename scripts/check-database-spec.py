@@ -439,8 +439,9 @@ def main() -> None:
     insert(db, 'entity_snapshots', id=1, entity_type=1, entity_id=1, boundary_event_id=2, change_count=64, format_version=1, content=b'{}\n')
     insert(db, 'entity_snapshot_progress', id=1, entity_type=1, entity_id=1, current_change_count=70,
            snapshot_change_count=64, latest_snapshot_id=1)
-    insert(db, 'segment_sets', id=1, created_event_id=1, action_id=1, activity_id=1, run_id=1, attempt_id=1,
-           final_page_event_id=2, version=1, target_duration_ms=60000, state=1)
+    insert(db, 'segment_sets', id=1, created_event_id=1, action_id=1, activity_id=1, run_id=1,
+           current_attempt_id=1,current_final_page_event_id=2,source_kind=1,source_txn_id=1,
+           source_event_id=2,publication_kind=1,version=1,target_duration_ms=60000,state=1)
     rejects(db, 'UPDATE segment_sets SET published_event_id=1 WHERE id=1')
     insert(db, 'segment_members', id=1, created_event_id=1, set_id=1, file_id=1, page_event_id=2, file_event_id=2,
            identity='real-osv', directory_number=1, segment_index=1, role=1, ownership=1,

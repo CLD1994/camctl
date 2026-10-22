@@ -2,7 +2,9 @@
 
 [数据库入口](../database-schema.md) · [分段行为规格](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)
 
-`segment_sets` 保存原拍摄动作、活动、RESULTS 流程、实际尝试、可靠末页、判断版本和原目标毫秒。`scan_id` 是实际 `operation_attempts.id`，不使用尝试序号替代。状态依次为 COLLECTING、MEMBERS_FIXED 和 ASSESSED；成员固定后不再增减，判断版本通过新集合版本表达。正常运行永久保留全部关系，编号在写事务中按已提交最大值加一分配。
+`segment_sets` 保存原拍摄动作、来源完整边界 H0、来源种类、发布处置、适用活动及 RESULTS 流程、当前可靠扫描、判断版本和原目标毫秒。`SegmentResultRef(action_id,set_id,version)` 表达实际集合身份；原 `SegmentSetRef` 只表达可靠完整扫描，其中 `scan_id` 是实际 `operation_attempts.id`，不使用尝试序号替代。状态依次为 COLLECTING、MEMBERS_FIXED 和 ASSESSED；成员固定后不再增减，判断版本通过新集合版本表达。正常运行永久保留全部关系，编号在写事务中按已提交最大值加一分配。
+
+来源分为完整扫描、跨轮保留及无 RESULTS。跨轮保留使用原 run 截至 H0 的全部实际文件，不将最后一轮局部观察当成完整目录。当前扫描只取原 run 最大实际轮次；最后一轮错误或必要元信息未知时为空，旧完整扫描仍可提供保留文件的原证明。只有当前扫描覆盖全部保留文件且资格一致，来源才是完整扫描。集合创建前出现 H0 后的新尝试、页面或文件资格变化时拒绝旧申请；同 run 建立集合后不再授予新 RESULTS 尝试。
 
 `segment_members` 保存真实设备文件、原实际结果页和固定文件历史位置，以及设备顺序键、角色、归属、写入和预览配对分类。大小、摘要及清理事实由独立文件和原页提供，不复制到成员。无可靠顺序键时两列共同为空。集合及文件、集合及稳定身份分别唯一；同集合原片可具有相同数值键但不同真实身份，完整技术排序仍稳定续读；该情形不证明摄制顺序。原观察已提供配对的模型输入继续核对实际同源原片和设备文件关联。原页之后的扫描配对通过可空 `pairing_fact_id` 引用独立文件的可靠事实，原始观察保持原样。
 
@@ -28,7 +30,7 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 | 表 | 普通业务列及空值含义 | 唯一性与查询索引 |
 | --- | --- | --- |
-| `segment_sets` | `action_id`、`activity_id`、`run_id`、`attempt_id`、`final_page_event_id`、`version`、`target_duration_ms` 都必填；`state` 从收集推进至成员固定及判断完成；收集时 `member_count` 为空，固定后为实际非负数量；`facts_json`、`assessment_json` 只在判断保存时共同有值；`published_event_id` 未发布时为空，同完成事务的 ACTIVATE 一次绑定自身 E | 动作及版本、实际尝试及版本分别唯一；按动作/版本和动作/创建事件定位；published_event_id 非空时 action_id 部分唯一 |
+| `segment_sets` | 动作、版本、原目标、来源种类、H0事务及末位、发布处置必填；无 RESULTS 时 run 为空，活动按原事实可空；`current_attempt_id/current_final_page_event_id` 共同有值或为空，完整扫描来源必须有值。取消版本可引用同源前版及实际取消事件；收集时计数为空，固定后为实际数量；普通模型的两个JSON共同有值，其他分区保留为空；正式发布只绑定一次 `published_event_id` | 动作及版本唯一；取消前版及取消事件唯一；按动作/版本、run/H0及创建事件定位；published_event_id 非空时 action_id 部分唯一 |
 | `segment_members` | `set_id`、`file_id`、`page_event_id`、`file_event_id`、`identity`、`role`、`ownership`、`completion`、`pairing_state` 必填；`directory_number` 和 `segment_index` 共同为空表示键未知；`pairing_identity` 只在 PAIRED 时填写真实原片身份；可空 `pairing_fact_id` 只由预览引用已有配对事实 | 集合/文件、集合/身份分别唯一；数值键冲突保留全部真实身份；完整设备顺序、配对身份、文件反查及集合/创建事件都有索引 |
 | `segment_gaps` | `set_id`、连续 `gap_no`、`start_directory`、`start_index`、`end_directory`、`end_index`、`kind`、`neighbors_json` 必填；`left_member_id`、`right_member_id` 只在相应邻接为 KNOWN 时有值；`empty_member_id` 只在真实非尾零文件分支有值 | 集合/缺口序号唯一；按缺口序号及创建事件续读 |
 | `segment_scope_members` | `set_id`、连续 `ordinal`、`member_id` 必填；`output_id` 准备时为空，来源终态事务将其一次关联到同源同文件的 original | 集合/序号、集合/成员分别唯一，实际 output 只关联一次；按序号、成员反查及创建事件定位 |
@@ -40,6 +42,10 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 保存请求 `SegmentMemberInput(file_id, page_event_id, file_event_id, role, ownership, completion, pairing_identity=None, pairing_state=NOT_APPLICABLE)` 不接收大小或摘要。提交守卫独立读取原页、实际差集文件、固定文件历史和原动作/活动/流程/尝试，核对分类及配对。P1 的完整 `SegmentMember` 是读取和纯判断结果，不是另一份文件属性权威。
 
 ## 生产端口与后续分工
+
+`create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。
+
+统一成员固定、有限结论、原生摘要和完成发布由后续对应阶段接通。下述完整扫描模型端口保留其原有职责；它们不能用于把跨轮保留或无 RESULTS 集合转换成完整扫描。
 
 `SegmentRepository.create(SegmentSetCreate, key, owned)` 建立原扫描集合。`append_members(ref, inputs, occurred_at, key, owned)`、`append_gaps(ref, gaps, occurred_at, key, owned)`、`append_scope(ref, member_ids, occurred_at, key, owned)` 只接受 1—128 项元组；回执只返回原 `SegmentSetRef`。`fix_members(ref, occurred_at, key, owned)` 核对完整原页覆盖后固定成员。`save_assessment(ref, facts, assessment, occurred_at, key, owned)` 在可靠成员上重跑 P1 首遍及完整第二遍，并逐项对比保存缺口；缺项、多项、末游标、首缺口或数量不同均回滚。
 

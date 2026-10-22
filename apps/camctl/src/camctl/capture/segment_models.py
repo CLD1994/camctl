@@ -18,6 +18,10 @@ def _text_enum(name, column):
 
 EvidenceState = _text_enum("EvidenceState", "segment_sets.facts_json.evidence")
 
+SegmentSourceKind = _text_enum('SegmentSourceKind','segment_sets.source_kind')
+
+PublicationKind = _text_enum('PublicationKind','segment_sets.publication_kind')
+
 
 SegmentMemberRole = _text_enum("SegmentMemberRole", "segment_members.role")
 

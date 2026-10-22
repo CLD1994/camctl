@@ -275,7 +275,8 @@ async def test_growth_has_bounded_python_peak_and_linear_projection_reads(tmp_pa
             tracemalloc.stop()
             evidence.append((size,peak,resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,stats))
             assert stats['events'] == 0
-            assert stats['projection_rows'] < 2*size+30
+            # 成员、缺口及原页文件索引各随真实文件数量线性增长。
+            assert stats['projection_rows'] < 3*size+30
             assert peak < 4_000_000
         finally:owned.connection.close()
     print('GROWTH',evidence)

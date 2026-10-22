@@ -22,6 +22,7 @@ from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventValidationError, register_guard
+from camctl.history.reads import PlanReadScope
 from camctl.operations.attempts import (
     AttemptFinish,
     ReadResumeDecision,
@@ -545,6 +546,10 @@ class BeginAttemptCommand:
         )
         if found is not None and run_facts is None:
             raise ConsistencyError("责任键引用的流程记录不存在")
+        if intent.kind is OperationKind.CHECK_CAPTURE_RESULTS and run_facts is not None:
+            from .segment_result_sets import result_run_has_set
+            if result_run_has_set(connection,run_facts['id']):
+                return self._rejected('result_set_fixed')
         read_has_slot = True
         if run_facts is not None:
             self._state.setdefault("operation_runs", {})[run_facts["id"]] = run_facts
@@ -693,6 +698,8 @@ class BeginAttemptCommand:
             result=BeginAttemptResult(
                 disposition=BeginDisposition.GRANTED, ticket=ticket
             ),
+            plan_read_scope=(PlanReadScope(action['plan_id'],128)
+                if intent.kind is OperationKind.CHECK_CAPTURE_RESULTS else None),
         )
 
     def _rejected(self, reason: str) -> CommandPlan:
@@ -1637,6 +1644,10 @@ def _attempt_intent_guard(event, context) -> None:
     elif attempt_no != 1:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
+    if kind==int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+        if context.current_reads is None:
+            _fail('RESULTS意图缺少原连接的固定集合核验')
+        context.current_reads.verify_result_run_open(run_row.row_id,run_after['action_id'])
     if run_after.get("obtain_item_id") is not None:
         if context.obtain_check_reads is None:
             _fail('取回 CHECK 意图缺少原内核的实际读取端口')

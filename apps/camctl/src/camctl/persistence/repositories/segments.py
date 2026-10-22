@@ -47,7 +47,7 @@ def _batch(values):
 
 
 def _ref(row):
-    return SegmentSetRef(row['action_id'],row['attempt_id'],row['final_page_event_id'],row['version'])
+    return SegmentSetRef(row['action_id'],row['current_attempt_id'],row['current_final_page_event_id'],row['version'])
 
 
 def _set(db,ref, *, fixed=False):
@@ -449,7 +449,7 @@ def _gap_row(db,setrow,number,gap):
 def _verify_set_identity(db, ref, values):
     action, activity, run, attempt, _ = _source(db, ref)
     expected = {'action_id':ref.action_id,'activity_id':activity['id'],'run_id':run['id'],
-        'attempt_id':attempt['id'],'final_page_event_id':ref.final_page_event_id,
+        'current_attempt_id':attempt['id'],'current_final_page_event_id':ref.final_page_event_id,
         'version':ref.version,'target_duration_ms':action['execution_spec_json'].get('target_duration_ms')}
     if any(not json_equal(values.get(name),value) for name,value in expected.items()):
         raise ConsistencyError('集合事件与原执行定义、活动和扫描不同')
@@ -511,6 +511,14 @@ def _verify_request(event,ref,context,db):
         if row['state']!=_STATE.COLLECTING or any(row[name] is not None for name in ('member_count','facts_json','assessment_json','published_event_id')):
             raise ConsistencyError('新集合必须从收集状态开始')
         request=SegmentSetCreate(ref,row['activity_id'],row['run_id'],row['target_duration_ms'],event.occurred_at)
+        from .result_pages import _page_before_boundary
+        from camctl.capture.segment_storage import SegmentSourceKind,PublicationKind
+        boundary=_page_before_boundary(db,context.transaction)
+        if (row['source_kind']!=encode_enum(SegmentSourceKind.COMPLETE_SCAN)
+                or row['publication_kind']!=encode_enum(PublicationKind.RESULT)
+                or (row['source_txn_id'],row['source_event_id'])!=(boundary.txn_id,boundary.last_event_id)
+                or row['predecessor_set_id'] is not None or row['cancel_event_id'] is not None):
+            raise ConsistencyError('原完整扫描模型必须保留其实际创建前边界及来源')
     elif branch=='MEMBERS':
         request=tuple(_member_input_from_row(row) for change in event.rows for row in (values(change),))
     elif branch=='GAPS':
@@ -539,6 +547,10 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
     """提交守卫独立复核有限行与冻结集合，不相信调用方分类摘要。"""
     if len(event.rows)>128:
         raise ConsistencyError('分段事件超过有限行数')
+    from camctl.capture.segment_storage import SegmentResultRef
+    if isinstance(ref,SegmentResultRef):
+        from .segment_result_sets import verify_create_event
+        return verify_create_event(db,ref,event,context)
     _verify_request(event,ref,context,db)
     if event.reason in (_EVENT['branches']['PUBLISH']['reason'],_EVENT['branches']['ACTIVATE']['reason']):
         _verify_publication(db,ref,event,context,prior_events)
@@ -641,7 +653,14 @@ class _Command:
             if request.activity_id!=activity['id'] or request.run_id!=run['id'] or request.target_duration_ms!=action['execution_spec_json'].get('target_duration_ms'):
                 raise ConsistencyError('集合声明与原执行定义、扫描或活动不一致')
             sid=next_row_id(db,'segment_sets')
-            rows=[row_change('segment_sets',sid,dict(action_id=ref.action_id,activity_id=activity['id'],run_id=run['id'],attempt_id=attempt['id'],final_page_event_id=ref.final_page_event_id,version=ref.version,target_duration_ms=request.target_duration_ms,state=int(_STATE.COLLECTING),member_count=None,facts_json=None,assessment_json=None,published_event_id=None))]
+            from camctl.capture.segment_storage import SegmentSourceKind,PublicationKind
+            rows=[row_change('segment_sets',sid,dict(action_id=ref.action_id,activity_id=activity['id'],run_id=run['id'],
+                current_attempt_id=attempt['id'],current_final_page_event_id=ref.final_page_event_id,
+                source_kind=encode_enum(SegmentSourceKind.COMPLETE_SCAN),source_txn_id=scope.max_txn_id,
+                source_event_id=scope.max_event_id,publication_kind=encode_enum(PublicationKind.RESULT),
+                predecessor_set_id=None,cancel_event_id=None,version=ref.version,
+                target_duration_ms=request.target_duration_ms,state=int(_STATE.COLLECTING),member_count=None,
+                facts_json=None,assessment_json=None,published_event_id=None))]
         else:
             setrow=_set(db,ref);sid=setrow['id'];state['segment_sets'][sid]=setrow
             if kind=='MEMBERS':
@@ -899,6 +918,26 @@ def segment_event(ref,branch,rows,event_id,transaction_id,occurred_at,*,request_
 
 class SegmentRepository:
     """每项写入只形成一个有限事件；返回固定集合引用。"""
+
+    def create_result_set(self,request,key,owned):
+        from .segment_result_sets import CreateResultSetCommand
+        register_segment_guards()
+        receipt=commit_operation(CreateResultSetCommand(request,key),key,owned)
+        return (DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result) if receipt.kind=='completed'
+            else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
+                error=receipt.error))
+
+    def read_result_set(self,ref,owned):
+        from .segment_result_sets import read_result_set
+        return read_result_set(ref,owned)
+
+    def read_current_segment_ref(self,ref,owned):
+        from .segment_result_sets import read_current_segment_ref
+        return read_current_segment_ref(ref,owned)
+
+    def read_result_member_inputs(self,ref,cursor,limit,owned):
+        from .segment_result_sets import read_result_member_inputs
+        return read_result_member_inputs(ref,cursor,limit,owned)
     def _save(self,kind,ref,payload,occurred_at,key,owned):
         register_segment_guards()
         receipt=commit_operation(_Command(kind,ref,payload,occurred_at,key),key,owned)

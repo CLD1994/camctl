@@ -305,6 +305,14 @@ class SqlEventReads:
         verify_segment_event(self.connection, ref, event, context,
             prior_events=self._validated)
 
+    def verify_result_run_open(self,run_id,action_id):
+        from camctl.persistence.repositories.segment_result_sets import result_run_has_set
+        from camctl.persistence.transaction import row_facts
+        action=row_facts(self.connection,'actions',action_id)
+        if (not isinstance(self.scope,PlanReadScope) or action is None
+                or action['plan_id']!=self.scope.plan_id or result_run_has_set(self.connection,run_id)):
+            raise ConsistencyError('RESULTS意图不能越过原计划或已固定的结果集合')
+
     def verify_segment_finish_event(self, event, context, action_id):
         from camctl.persistence.repositories.segment_transactions import verify_finish_request_event
         if not self.connection.in_transaction:

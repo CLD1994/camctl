@@ -584,6 +584,22 @@
         "RETURNED": 2,
         "UNCONFIRMED": 3
       }
+    },
+    "segment_sets.source_kind": {
+      "contract": "segments.md",
+      "members": {
+        "COMPLETE_SCAN": 1,
+        "RETAINED_SOURCES": 2,
+        "NO_RESULTS": 3
+      }
+    },
+    "segment_sets.publication_kind": {
+      "contract": "segments.md",
+      "members": {
+        "RESULT": 1,
+        "CANCELED": 2,
+        "EXPIRED": 3
+      }
     }
   },
   "history_objects": {

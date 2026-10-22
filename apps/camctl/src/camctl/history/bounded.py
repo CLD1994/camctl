@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.capture.segment_models import SegmentSetRef
+from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError
@@ -105,7 +106,7 @@ class RowCursor:
     boundary: HistoryBoundary
     action_id: int
     table: str
-    ref: SegmentSetRef | None
+    ref: SegmentSetRef | SegmentResultRef | None
     position: int | tuple
 
 
@@ -198,18 +199,36 @@ class SegmentHistoryHandle:
             raise ConsistencyError('原集合在H处不存在')
         return self._get('segment_sets',found[0])
 
-    def active_ref(self):
+    def read_result(self,ref):
+        self._require_ready()
+        if not isinstance(ref,SegmentResultRef) or ref.action_id!=self.action_id:
+            raise ConsistencyError('历史结果引用不属于当前动作')
+        values=self._get('segment_sets',ref.set_id)
+        if values is None or values['version']!=ref.version:
+            raise ConsistencyError('原结果集合在H处不存在或版本不同')
+        return values
+
+    def _published_set(self):
         """只消费H处唯一正式发布标记，不按最大版本推断。"""
         self._require_ready()
-        from camctl.capture.segment_models import SegmentSetRef
         with closing(self._db.execute("SELECT body FROM rows WHERE tab='segment_sets' AND json_extract(body,'$.published_event_id') IS NOT NULL LIMIT 2")) as query:
             rows=query.fetchall()
         if len(rows)>1:
             raise ConsistencyError('H处动作存在多个正式分段集合')
         if not rows:
             return None
-        values=parse_exact_json(rows[0][0])
-        return SegmentSetRef(self.action_id,values['attempt_id'],values['final_page_event_id'],values['version'])
+        return parse_exact_json(rows[0][0])
+
+    def active_ref(self):
+        values=self._published_set()
+        if values is None:return None
+        if values['current_attempt_id'] is None:
+            raise ConsistencyError('正式结果集合没有完整扫描模型引用')
+        return SegmentSetRef(self.action_id,values['current_attempt_id'],values['current_final_page_event_id'],values['version'])
+
+    def active_result_ref(self):
+        values=self._published_set()
+        return None if values is None else SegmentResultRef(self.action_id,values['id'],values['version'])
 
     def read_assessment(self,ref):
         from camctl.capture.segment_storage import assessment_from_document
@@ -219,7 +238,7 @@ class SegmentHistoryHandle:
         return assessment_from_document(values['assessment_json'])
 
     def read_page(
-            self, table: str, *, ref: SegmentSetRef | None = None,
+            self, table: str, *, ref: SegmentSetRef | SegmentResultRef | None = None,
             cursor: RowCursor | None = None, limit: int = MAX_BATCH,
     ) -> Page[SnapshotRow, RowCursor]:
         """自身表按ID续读；引用集合按设备/保存序号的完整键续读。"""
@@ -236,14 +255,17 @@ class SegmentHistoryHandle:
             previous = cursor.position
         set_id = None
         if ref is not None:
-            from camctl.capture.segment_models import SegmentSetRef
-            if not isinstance(ref,SegmentSetRef) or ref.action_id != self.action_id:
+            if not isinstance(ref,(SegmentSetRef,SegmentResultRef)) or ref.action_id != self.action_id:
                 raise ConsistencyError('集合不属于历史动作')
-            selected_set = self._one('SELECT id FROM set_refs WHERE scan=? AND final_event=? AND version=?',
-                (ref.scan_id,ref.final_page_event_id,ref.version))
-            set_id = None if selected_set is None else selected_set[0]
-            if set_id is None:
-                raise ConsistencyError('集合在H处不存在')
+            if isinstance(ref,SegmentResultRef):
+                self.read_result(ref)
+                set_id=ref.set_id
+            else:
+                selected_set = self._one('SELECT id FROM set_refs WHERE scan=? AND final_event=? AND version=?',
+                    (ref.scan_id,ref.final_page_event_id,ref.version))
+                set_id = None if selected_set is None else selected_set[0]
+                if set_id is None:
+                    raise ConsistencyError('集合在H处不存在')
         if ref is not None and foreign_key_targets().get((table,'set_id')) == 'segment_sets':
             return self._ordered_page(table,set_id,ref,cursor,limit)
         if cursor is not None and (type(previous) is not int or previous < 1 or self._get(table,previous) is None):
@@ -554,9 +576,9 @@ class SegmentHistoryHandle:
                         raise ConsistencyError('恢复行归属不属于同H动作')
                     if table == 'actions':
                         read_action_spec(values)
-                    if table == 'segment_sets':
+                    if table == 'segment_sets' and values['current_attempt_id'] is not None:
                         self._db.execute('INSERT INTO set_refs VALUES (?,?,?,?)',
-                            (values['attempt_id'],values['final_page_event_id'],values['version'],identity)).close()
+                            (values['current_attempt_id'],values['current_final_page_event_id'],values['version'],identity)).close()
                     if foreign_key_targets().get((table,'set_id')) == 'segment_sets':
                         if table == 'segment_members':
                             from camctl.persistence.repositories.segments import _position
@@ -593,7 +615,7 @@ class SegmentHistoryHandle:
                     facts_from_document(values['facts_json'])
                 if values['assessment_json'] is not None:
                     assessment=assessment_from_document(values['assessment_json'])
-                    ref=SegmentSetRef(self.action_id,values['attempt_id'],values['final_page_event_id'],values['version'])
+                    ref=SegmentSetRef(self.action_id,values['current_attempt_id'],values['current_final_page_event_id'],values['version'])
                     if assessment.set_ref != ref or assessment.target_duration_ms != values['target_duration_ms']:
                         raise ConsistencyError('H处判断改变原集合或目标')
                     if gaps[0] != (0 if assessment.gap_count is None else assessment.gap_count):

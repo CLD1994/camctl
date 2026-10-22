@@ -229,10 +229,16 @@ CREATE TABLE segment_sets (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
-    activity_id INTEGER NOT NULL REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
-    run_id INTEGER NOT NULL REFERENCES operation_runs(id) DEFERRABLE INITIALLY DEFERRED,
-    attempt_id INTEGER NOT NULL REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
-    final_page_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    activity_id INTEGER REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    run_id INTEGER REFERENCES operation_runs(id) DEFERRABLE INITIALLY DEFERRED,
+    current_attempt_id INTEGER REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
+    current_final_page_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    source_kind INTEGER NOT NULL CHECK (source_kind IN (1,2,3)),
+    source_txn_id INTEGER NOT NULL REFERENCES history_transactions(id) DEFERRABLE INITIALLY DEFERRED,
+    source_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    publication_kind INTEGER NOT NULL CHECK (publication_kind IN (1,2,3)),
+    predecessor_set_id INTEGER REFERENCES segment_sets(id) DEFERRABLE INITIALLY DEFERRED,
+    cancel_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     version INTEGER NOT NULL CHECK (version > 0),
     target_duration_ms INTEGER NOT NULL CHECK (target_duration_ms > 0),
     state INTEGER NOT NULL CHECK (state IN (1,2,3)),
@@ -242,13 +248,22 @@ CREATE TABLE segment_sets (
     assessment_json TEXT CHECK (assessment_json IS NULL OR (json_valid(assessment_json) AND json_type(assessment_json) = 'object')),
     CHECK (published_event_id IS NULL OR state = 3),
     UNIQUE (action_id, version),
-    UNIQUE (attempt_id, version),
+    CHECK ((current_attempt_id IS NULL) = (current_final_page_event_id IS NULL)),
+    CHECK ((source_kind = 3 AND run_id IS NULL AND current_attempt_id IS NULL)
+        OR (source_kind IN (1,2) AND run_id IS NOT NULL AND activity_id IS NOT NULL)),
+    CHECK (source_kind != 1 OR current_attempt_id IS NOT NULL),
+    CHECK ((publication_kind = 2 AND cancel_event_id IS NOT NULL)
+        OR (publication_kind IN (1,3) AND cancel_event_id IS NULL AND predecessor_set_id IS NULL)),
+    CHECK ((facts_json IS NULL) = (assessment_json IS NULL)),
     CHECK ((state = 1 AND member_count IS NULL AND facts_json IS NULL AND assessment_json IS NULL)
         OR (state = 2 AND member_count IS NOT NULL AND facts_json IS NULL AND assessment_json IS NULL)
-        OR (state = 3 AND member_count IS NOT NULL AND facts_json IS NOT NULL AND assessment_json IS NOT NULL))
+        OR (state = 3 AND member_count IS NOT NULL))
 ) STRICT;
 CREATE UNIQUE INDEX segment_sets_published_action ON segment_sets(action_id) WHERE published_event_id IS NOT NULL;
 CREATE INDEX segment_sets_action ON segment_sets(action_id, version, id);
+CREATE INDEX segment_sets_run_source ON segment_sets(run_id, source_event_id, id);
+CREATE UNIQUE INDEX segment_sets_cancellation ON segment_sets(predecessor_set_id, cancel_event_id)
+    WHERE predecessor_set_id IS NOT NULL;
 
 CREATE TABLE segment_members (
     id INTEGER PRIMARY KEY CHECK (id > 0),

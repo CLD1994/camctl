@@ -719,6 +719,26 @@
 | 2 | `RETURNED` |
 | 3 | `UNCONFIRMED` |
 
+### `segment_sets.source_kind`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `COMPLETE_SCAN` |
+| 2 | `RETAINED_SOURCES` |
+| 3 | `NO_RESULTS` |
+
+### `segment_sets.publication_kind`
+
+[行为说明](segments.md)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `RESULT` |
+| 2 | `CANCELED` |
+| 3 | `EXPIRED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`

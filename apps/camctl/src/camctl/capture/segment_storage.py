@@ -1,16 +1,23 @@
 """分段关系的有限保存请求与确定编码；不保存增长成员数组。"""
+from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
 
 from camctl.capture import segment_models as models
-from camctl.capture.segment_models import SegmentSetRef, SegmentMember, CompletionFacts, SegmentAssessment
+from camctl.capture.segment_models import (
+    SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.devices.segments import SegmentKey
 from camctl.outputs.catalog import OutputKind
+from camctl.capture.result_pages import ResultPageRef
+
 
 # 类型映射不维护成员清单；编号和值只从权威登记派生。
 _ENUM_COLUMNS = {
+    SegmentSourceKind:'segment_sets.source_kind',
+    PublicationKind:'segment_sets.publication_kind',
     models.EvidenceState: 'segment_sets.facts_json.evidence',
     models.SegmentMemberRole: 'segment_members.role',
     models.OwnershipState: 'segment_members.ownership',
@@ -25,6 +32,54 @@ _ENUM_COLUMNS = {
     models.SegmentGapKind: 'segment_gaps.kind',
     models.SegmentGapNeighborState: 'segment_gaps.neighbors_json.state',
 }
+
+
+@dataclass(frozen=True)
+class SegmentResultRef:
+    action_id: int
+    set_id: int
+    version: int
+
+    def __post_init__(self):
+        for value in (self.action_id,self.set_id,self.version):
+            ObjectId(value)
+
+
+@dataclass(frozen=True)
+class ResultMemberInputCursor:
+    ref: SegmentResultRef
+    after_file_id: int
+
+    def __post_init__(self):
+        if not isinstance(self.ref,SegmentResultRef):
+            raise TypeError('来源成员游标必须绑定原集合身份')
+        ObjectId(self.after_file_id)
+
+
+@dataclass(frozen=True)
+class ResultSetCreate:
+    action_id: int
+    activity_id: int|None
+    run_id: int|None
+    source_kind: SegmentSourceKind
+    source_boundary: HistoryBoundary
+    current_scan: ResultPageRef|None
+    publication_kind: PublicationKind
+    predecessor_set_id: int|None
+    cancel_event_id: int|None
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        for value in (self.activity_id,self.run_id,self.predecessor_set_id,self.cancel_event_id):
+            if value is not None:ObjectId(value)
+        if not isinstance(self.source_kind,SegmentSourceKind) or not isinstance(self.publication_kind,PublicationKind):
+            raise TypeError('结果集合必须使用来源及发布分类')
+        if not isinstance(self.source_boundary,HistoryBoundary):
+            raise TypeError('结果集合必须使用原完整历史边界')
+        if self.current_scan is not None and not isinstance(self.current_scan,ResultPageRef):
+            raise TypeError('当前扫描必须引用真实原末页')
+        UtcMicros(self.occurred_at)
 
 
 def encode_enum(value):
