@@ -1112,7 +1112,7 @@
     },
     "capture_segment_gap": {
       "stage": "execution",
-      "description": "普通录像存在缺段或非尾零字节原片。此码只属于来源 camera_record 动作的最终 error，详情 source_action_instance_id 与该动作相同。",
+      "description": "分段普通录像或原生延时存在缺段或非尾零字节原片。此码只属于来源 camera_record 或 camera_timelapse 动作的最终 error，详情 source_action_instance_id 与该动作相同。",
       "details_schema": {
         "allOf": [
           {
@@ -1132,7 +1132,7 @@
     },
     "default_segment_scope_empty": {
       "stage": "output_selection",
-      "description": "来源没有可默认交付的连续原片。此码只属于 obtain_action_outputs 的 result.failures 来源级错误；失败项来源与详情来源一致，不附 output_id 或 delivery_id。可见来源须为 camera_record，保留原片仍可按明确 ID 取回。",
+      "description": "来源没有可默认交付的连续视频原片。此码只属于 obtain_action_outputs 的 result.failures 来源级错误；失败项来源与详情来源一致，不附 output_id 或 delivery_id。可见来源须为 camera_record 或 camera_timelapse，保留原片仍可按明确 ID 取回。",
       "details_schema": {
         "allOf": [
           {
@@ -1157,7 +1157,7 @@
     },
     "default_segment_scope_unconfirmed": {
       "stage": "output_selection",
-      "description": "来源默认原片范围尚无法确认。此码只属于 obtain_action_outputs 的 result.failures 来源级错误；失败项来源与详情来源一致，不附 output_id 或 delivery_id。可见来源须为 camera_record，保留原片仍可按明确 ID 取回。",
+      "description": "来源默认视频原片范围尚无法确认。此码只属于 obtain_action_outputs 的 result.failures 来源级错误；失败项来源与详情来源一致，不附 output_id 或 delivery_id。可见来源须为 camera_record 或 camera_timelapse，保留原片仍可按明确 ID 取回。",
       "details_schema": {
         "allOf": [
           {
@@ -1201,87 +1201,8 @@
           "description": "缺口记录或区间的数量，不是缺失文件总数。正式公开报告中，null 表示缺口分类尚未确认，此时 gaps 为 []、first_gap 省略且默认范围为 unknown；0 表示已确认无缺口，此时 gaps 为 [] 且 first_gap 省略。正整数必须与完整 gaps 长度相同。"
         },
         "default_scope": {
-          "type": "object",
-          "properties": {
-            "state": {
-              "enum": [
-                "unknown",
-                "empty",
-                "nonempty"
-              ]
-            },
-            "member_count": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 0
-            },
-            "output_ids": {
-              "type": "array",
-              "items": {
-                "$ref": "status-report.schema.json#/$defs/entity_id"
-              },
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "state",
-            "member_count"
-          ],
-          "additionalProperties": false,
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "state": {
-                    "const": "unknown"
-                  }
-                }
-              },
-              "then": {
-                "properties": {
-                  "member_count": {
-                    "type": "null"
-                  }
-                }
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "state": {
-                    "const": "empty"
-                  }
-                }
-              },
-              "then": {
-                "properties": {
-                  "member_count": {
-                    "const": 0
-                  }
-                }
-              }
-            },
-            {
-              "if": {
-                "properties": {
-                  "state": {
-                    "const": "nonempty"
-                  }
-                }
-              },
-              "then": {
-                "properties": {
-                  "member_count": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                }
-              }
-            }
-          ],
-          "description": "来源已冻结的默认原片范围，与动作执行结果和本次交付结果分别表达。正式公开报告必须完整提供 output_ids；nonempty 的正 member_count 对应完整列表，且是 retained_output_ids 的子集；empty 为 0/[]；unknown 为 null/[]。unknown 的空数组只表示未保存已选关系，不表示已确认空范围。具体成员及顺序由同一历史边界的来源范围保证，不能从文件名或产物 ID 重算。"
+          "$ref": "status-report.schema.json#/$defs/default_video_scope",
+          "description": "来源已冻结的默认视频原片范围，与动作执行结果和本次交付结果分别表达。正式公开报告必须完整提供 output_ids；nonempty 的正 member_count 对应完整列表，且是 retained_output_ids 的子集；empty 为 0/[]；unknown 为 null/[]。unknown 的空数组只表示未保存已选关系，不表示已确认空范围。具体成员及顺序由同一历史边界的来源范围保证，不能从文件名或产物 ID 重算。照片不属于视频范围。"
         },
         "retained_original_count": {
           "type": "integer",
@@ -1316,7 +1237,7 @@
         "retained_original_count"
       ],
       "additionalProperties": false,
-      "description": "分段来源结果的有限错误头。内部持久化允许省略增长数组；正式公开报告必须从同一冻结历史边界完整展开 gaps、retained_output_ids 和 default_scope.output_ids，并逐项核对原集合及实际产物身份，不能只比较数量。三个分段错误均引用普通录像 camera_record 的分段结果，不用于单张拍摄或原生延时的采集目标。"
+      "description": "分段来源结果的有限错误头。内部持久化允许省略增长数组；正式公开报告必须从同一冻结历史边界完整展开 gaps、retained_output_ids 和 default_scope.output_ids，并逐项核对原集合及实际产物身份，不能只比较数量。分段错误引用普通录像 camera_record 或原生延时 camera_timelapse 的视频结果，不用于单张拍摄。"
     },
     "segment_key": {
       "type": "object",

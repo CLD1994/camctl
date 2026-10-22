@@ -14,10 +14,11 @@ import {
   type SegmentKey,
 } from "../shared/segment-report-errors";
 import { displayNumber } from "../shared/json";
+import type { VideoCoverage } from "../shared/status-report.generated";
 
 function segmentIssueText({ details: d }: SegmentIssue): string {
   const key = (value: SegmentKey) =>
-    `CAM_${displayNumber(value, "directory_number", value.directory_number)}/${displayNumber(value, "index", value.index)}`;
+    `目录 ${displayNumber(value, "directory_number", value.directory_number)}/索引 ${displayNumber(value, "index", value.index)}`;
   const gap =
     d.gap_count === null
       ? "缺口分类未确认"
@@ -36,6 +37,38 @@ function segmentIssueText({ details: d }: SegmentIssue): string {
         ? "默认范围为空，没有可默认交付的连续部分"
         : `默认连续前缀 ${displayNumber(scope, "member_count", scope.member_count!)} 份原片`;
   return `来源动作 ${d.source_action_instance_id}：${gap}${first ? `，首个缺口 ${key(first.start_key)} 至 ${key(first.end_key)}` : ""}${neighbors.length ? `；可靠邻接文件：${neighbors.join("、")}` : ""}；${range}；已保留 ${displayNumber(d, "retained_original_count", d.retained_original_count)} 份原片，逐文件身份见产物和技术详情。`;
+}
+
+function videoCoverageNote(coverage: VideoCoverage) {
+  const unit = coverage.metric === "duration_s" ? "秒" : "帧";
+  const target = displayNumber(coverage, "target", coverage.target);
+  const status = {
+    not_performed: "未执行实际内容检查",
+    reached: "已达到覆盖目标",
+    confirmed_short: "已确认完整内容不足",
+    unconfirmed: "内容覆盖未确认",
+  }[coverage.status];
+  const amount =
+    coverage.status === "not_performed"
+      ? "实际量未检查"
+      : coverage.confirmed === null
+        ? "实际累计量未知"
+        : `已确认累计 ${displayNumber(coverage, "confirmed", coverage.confirmed)}${unit}`;
+  const scope =
+    coverage.default_scope.state === "unknown"
+      ? "默认视频范围未确认"
+      : coverage.default_scope.state === "empty"
+        ? "默认视频范围为空"
+        : `默认视频范围 ${displayNumber(coverage.default_scope, "member_count", coverage.default_scope.member_count!)} 段`;
+  const reason = coverage.reason
+    ? `；原因：${coverage.reason.message ?? coverage.reason.code}${coverage.reason.output_id ? `（产物 ${coverage.reason.output_id}）` : ""}`
+    : "";
+  return {
+    text: `视频内容覆盖：${status}，目标 ${target}${unit}，${amount}；${scope}${reason}。`,
+    error:
+      coverage.status === "confirmed_short" ||
+      coverage.status === "unconfirmed",
+  };
 }
 
 export interface ResultActionRow {
@@ -177,6 +210,8 @@ export function resultNotes(
       error: true,
     });
   if (!result) return notes;
+  if (isObject(result) && isObject(result.coverage))
+    notes.push(videoCoverageNote(result.coverage as unknown as VideoCoverage));
   if (action.type === "obtain_action_outputs" && Array.isArray(result.failures))
     for (const failure of result.failures) {
       if (!isObject(failure)) continue;

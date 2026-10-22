@@ -175,14 +175,16 @@ describe("完整分段错误报告", () => {
     };
     expect(() => validateReport(r)).not.toThrow();
   });
-  it.each(["camera_take_photo", "camera_timelapse"] as const)(
-    "分段来源不能是%s",
-    (type) => {
-      const r = segmentReport();
-      source(r).type = type;
-      expect(() => validateReport(r)).toThrow();
-    },
-  );
+  it("分段来源允许原生延时", () => {
+    const r = segmentReport();
+    source(r).type = "camera_timelapse";
+    expect(() => validateReport(r)).not.toThrow();
+  });
+  it("分段来源不能是单张拍摄", () => {
+    const r = segmentReport();
+    source(r).type = "camera_take_photo";
+    expect(() => validateReport(r)).toThrow();
+  });
   it("来源错误不能指向其他动作", () => {
     const r = segmentReport();
     details(r).source_action_instance_id = "30";
@@ -506,21 +508,18 @@ describe("完整分段错误报告", () => {
     expect(schema(q)).toBe(true);
     expect(() => validateReport(q)).toThrow();
   });
-  it.each(["camera_take_photo", "camera_timelapse"] as const)(
-    "scope引用的%s晚到才拒绝，不把缺席当不存在",
-    (type) => {
-      const a = scopeReport("unknown");
-      a.plans![0].actions = a.plans![0].actions!.slice(1);
-      expect(() => validateReport(a)).not.toThrow();
-      const b = segmentReport();
-      source(b).error = undefined;
-      source(b).status = "succeeded";
-      source(b).type = type;
-      b.report_id = "2";
-      b.from_wm = 10;
-      b.to_wm = 20;
-      expect(() => validateReportAgainstHistory(a, b)).toThrow();
-      expect(() => validateReportAgainstHistory(b, a)).toThrow();
-    },
-  );
+  it("scope引用的单张拍摄来源晚到时拒绝，不把缺席当不存在", () => {
+    const a = scopeReport("unknown");
+    a.plans![0].actions = a.plans![0].actions!.slice(1);
+    expect(() => validateReport(a)).not.toThrow();
+    const b = segmentReport();
+    source(b).error = undefined;
+    source(b).status = "succeeded";
+    source(b).type = "camera_take_photo";
+    b.report_id = "2";
+    b.from_wm = 10;
+    b.to_wm = 20;
+    expect(() => validateReportAgainstHistory(a, b)).toThrow();
+    expect(() => validateReportAgainstHistory(b, a)).toThrow();
+  });
 });

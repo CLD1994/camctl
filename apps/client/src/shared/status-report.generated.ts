@@ -261,11 +261,67 @@ export type Diagnostic = {
 export type Id = string;
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "default_video_scope_output_ids".
+ *
+ * Items: 数据库对象 ID 的规范十进制字符串，整数范围为 1～9223372036854775807；19 位值另按上界约束校验。
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "entity_id".
+ */
+export type DefaultVideoScopeOutputIds = (EntityId & EntityId1)[];
+/**
+ * 来源冻结的默认视频范围。unknown 的 member_count 为 null；empty 为 0；nonempty 为正整数。照片不属于该范围。
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "default_video_scope".
+ */
+export type DefaultVideoScope = {
+  state: "unknown" | "empty" | "nonempty";
+  member_count: number | null;
+  output_ids?: DefaultVideoScopeOutputIds;
+};
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "repair".
  */
 export type Repair = {
   status: "not_needed" | "succeeded" | "failed" | "canceled";
   error?: Error;
+};
+/**
+ * 采用实际内容策略的录像及原生延时覆盖事实。duration_s 使用精确秒数，frames 使用整数帧；confirmed 为 null 表示未知，0 表示已确认零。范围沿用公共分段范围状态，但报告必须完整展开 output_ids。
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "video_coverage".
+ */
+export type VideoCoverage = {
+  metric: "duration_s" | "frames";
+  target: number;
+  confirmed: number | null;
+  status: "not_performed" | "reached" | "confirmed_short" | "unconfirmed";
+  /**
+   * Items: 数据库对象 ID 的规范十进制字符串，整数范围为 1～9223372036854775807；19 位值另按上界约束校验。
+   *
+   * This interface was referenced by `Camctl`'s JSON-Schema
+   * via the `definition` "entity_id".
+   */
+  checked_output_ids: (EntityId & EntityId1)[];
+  default_scope: DefaultVideoScope & {
+    state: "unknown" | "empty" | "nonempty";
+    member_count: number | null;
+    output_ids: DefaultVideoScopeOutputIds;
+  };
+  reason?: {
+    code: Text;
+    /**
+     * 数据库对象 ID 的规范十进制字符串，整数范围为 1～9223372036854775807；19 位值另按上界约束校验。
+     *
+     * This interface was referenced by `Camctl`'s JSON-Schema
+     * via the `definition` "entity_id".
+     */
+    output_id?: EntityId & EntityId1;
+    message?: Text;
+  };
 };
 /**
  * 取消要求涉及的拍摄内容处理结果；状态与错误来自实际处理事实。
@@ -420,12 +476,20 @@ export interface DeviceExecution {
  * via the `definition` "camera_result".
  */
 export interface CameraResult {
+  coverage?: VideoCoverage;
   check?: Media & {
     check_status?: "completed" | "failed" | "unconfirmed";
     [k: string]: unknown;
   };
   repair?: Repair;
   discard_cleanup?: DiscardCleanup;
+}
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "camera_timelapse_result".
+ */
+export interface CameraTimelapseResult {
+  coverage?: VideoCoverage;
 }
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema

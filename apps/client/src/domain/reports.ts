@@ -13,6 +13,9 @@ import {
   parseJson,
   cloneProtocolJson,
   exactJsonIdentity,
+  exactJsonValueIdentity,
+  compareJsonNumberTokens,
+  originalNumberToken,
 } from "../shared/json";
 import { validateBuiltinParams } from "../shared/action-params";
 import {
@@ -37,6 +40,7 @@ import type {
   DeleteResult,
   CancelResult,
   ObtainFailure,
+  VideoCoverage,
 } from "../shared/status-report.generated";
 
 const validate: ValidateFunction<StatusReport> =
@@ -140,9 +144,13 @@ function accumulateSegmentFacts(
       for (const { details } of segmentReferences(action))
         knowledge.add(details);
 }
+type SegmentOutput = Pick<
+  Output,
+  "kind" | "source_action_instance_id" | "media_type"
+>;
 interface SegmentEntityView {
   sources: Map<string, ReportAction["type"]>;
-  outputs: Map<string, Pick<Output, "kind" | "source_action_instance_id">>;
+  outputs: Map<string, SegmentOutput>;
 }
 /** 只保留分段引用所需身份；每份原文的观察独立参加核对。 */
 function segmentEntities(index: Index): SegmentEntityView {
@@ -156,10 +164,117 @@ function segmentEntities(index: Index): SegmentEntityView {
         {
           kind: value.kind,
           source_action_instance_id: value.source_action_instance_id,
+          media_type: value.media_type,
         },
       ]),
     ),
   };
+}
+function videoCoverage(action: ReportAction): VideoCoverage | undefined {
+  const result = action.result;
+  return isObject(result) && isObject(result.coverage)
+    ? (result.coverage as unknown as VideoCoverage)
+    : undefined;
+}
+function coverageToken(
+  coverage: VideoCoverage,
+  key: "target" | "confirmed",
+  value: number,
+): string {
+  return originalNumberToken(coverage, key, value) ?? String(value);
+}
+function validateVideoCoverage(action: ReportAction): void {
+  const coverage = videoCoverage(action);
+  if (!coverage) return;
+  requireFact(
+    action.type === "camera_record" || action.type === "camera_timelapse",
+    "覆盖结果只属于普通录像或原生延时",
+  );
+  requireFact(
+    (action.type === "camera_record" && coverage.metric === "duration_s") ||
+      (action.type === "camera_timelapse" && coverage.metric === "frames"),
+    "覆盖量纲与拍摄动作不一致",
+  );
+  const scope = coverage.default_scope;
+  requireFact(
+    Array.isArray(scope.output_ids),
+    "覆盖默认视频范围必须完整展开产物身份",
+  );
+  if (scope.state === "unknown")
+    requireFact(
+      scope.member_count === null && scope.output_ids.length === 0,
+      "未知覆盖范围不能携带数量或产物身份",
+    );
+  else {
+    requireFact(
+      typeof scope.member_count === "number",
+      "已知覆盖范围必须提供数量",
+    );
+    requireFact(
+      originalNumberToken(scope, "member_count", scope.member_count) !==
+        undefined
+        ? compareJsonNumberTokens(
+            originalNumberToken(scope, "member_count", scope.member_count)!,
+            String(scope.output_ids.length),
+          ) === 0
+        : scope.member_count === scope.output_ids.length,
+      "覆盖范围数量与完整产物身份列表不一致",
+    );
+    requireFact(
+      (scope.state === "empty" && scope.output_ids.length === 0) ||
+        (scope.state === "nonempty" && scope.output_ids.length > 0),
+      "覆盖范围状态与产物身份列表不一致",
+    );
+  }
+  if (coverage.status === "not_performed")
+    requireFact(
+      coverage.confirmed === null && coverage.checked_output_ids.length === 0,
+      "未执行内容检查不能报告已确认量或已检查产物",
+    );
+  else if (coverage.status === "unconfirmed")
+    requireFact(
+      coverage.confirmed === null ||
+        compareJsonNumberTokens(
+          coverageToken(coverage, "confirmed", coverage.confirmed),
+          coverageToken(coverage, "target", coverage.target),
+        ) < 0,
+      "未确认覆盖不能包含已达到目标的连续量",
+    );
+  else {
+    requireFact(
+      coverage.confirmed !== null,
+      "已确定覆盖结果必须包含实际累计量",
+    );
+    const comparison = compareJsonNumberTokens(
+      coverageToken(coverage, "confirmed", coverage.confirmed),
+      coverageToken(coverage, "target", coverage.target),
+    );
+    requireFact(
+      coverage.status === "reached"
+        ? comparison >= 0 && scope.state === "nonempty"
+        : comparison < 0 && scope.state !== "unknown",
+      "覆盖状态与实际累计量或默认范围不一致",
+    );
+    requireFact(
+      coverage.checked_output_ids.length === scope.output_ids.length &&
+        coverage.checked_output_ids.every(
+          (id, index) => id === scope.output_ids[index],
+        ),
+      "已确定的完整覆盖结果须与实际检查的连续前缀一致",
+    );
+  }
+}
+function requireVideoOriginal(
+  output: SegmentOutput,
+  id: string,
+  source: string,
+): void {
+  requireFact(
+    output.kind === "original" &&
+      output.source_action_instance_id === source &&
+      output.media_type?.startsWith("video/"),
+    `视频范围产物 ${id} 必须是来源动作的原片视频`,
+  );
 }
 function segmentAssociations(
   entities: SegmentEntityView,
@@ -167,7 +282,10 @@ function segmentAssociations(
 ): void {
   const source = entities.sources.get(details.source_action_instance_id);
   if (source)
-    requireFact(source === "camera_record", "分段错误来源必须是录像动作");
+    requireFact(
+      source === "camera_record" || source === "camera_timelapse",
+      "分段错误来源必须是视频拍摄动作",
+    );
   for (const id of details.retained_output_ids) {
     const output = entities.outputs.get(id);
     if (output)
@@ -177,6 +295,37 @@ function segmentAssociations(
             details.source_action_instance_id,
         "分段保留产物必须属于同一来源的原片",
       );
+  }
+  for (const id of details.default_scope.output_ids) {
+    const output = entities.outputs.get(id);
+    if (output)
+      requireVideoOriginal(output, id, details.source_action_instance_id);
+  }
+  for (const gap of details.gaps)
+    for (const side of [gap.left, gap.right])
+      if (side.output_id !== undefined) {
+        const output = entities.outputs.get(side.output_id);
+        if (output)
+          requireVideoOriginal(
+            output,
+            side.output_id,
+            details.source_action_instance_id,
+          );
+      }
+}
+function coverageAssociations(index: Index, entities: SegmentEntityView): void {
+  for (const { value: action } of index.actions.values()) {
+    const coverage = videoCoverage(action);
+    if (!coverage) continue;
+    const ids = new Set([
+      ...coverage.checked_output_ids,
+      ...coverage.default_scope.output_ids,
+      ...(coverage.reason?.output_id ? [coverage.reason.output_id] : []),
+    ]);
+    for (const id of ids) {
+      const output = entities.outputs.get(id);
+      if (output) requireVideoOriginal(output, id, action.action_instance_id);
+    }
   }
 }
 /** 分段 F 与每份报告的最小 E；不合并实体状态，也不覆盖此前的身份观察。 */
@@ -198,6 +347,7 @@ export class SegmentReportKnowledge {
 function associations(index: Index) {
   consistentSegmentFacts([index]);
   const entities = segmentEntities(index);
+  coverageAssociations(index, entities);
   const names = new Map<
     string,
     Map<string, { parent: string; value: ReportAction }>
@@ -529,6 +679,7 @@ function ownFacts(report: StatusReport) {
     );
     for (const action of plan.actions ?? []) {
       requireFact(isName(action.name), "动作名称不合法");
+      validateVideoCoverage(action);
       const admission =
         action.status === "failed" && action.error?.stage === "admission";
       if (!admission) {
@@ -773,7 +924,7 @@ function sameOwnFields(old: Index, next: Index) {
   }
   for (const [id, action] of next.actions) {
     const before = old.actions.get(id);
-    if (before)
+    if (before) {
       requireFact(
         action.value.type === "motor_control"
           ? exactJsonIdentity(own(before.value, ["outputs", "deliveries"])) ===
@@ -784,6 +935,17 @@ function sameOwnFields(old: Index, next: Index) {
             ),
         "同水位动作自身快照不一致",
       );
+      const beforeCoverage = videoCoverage(before.value);
+      const nextCoverage = videoCoverage(action.value);
+      if (beforeCoverage || nextCoverage)
+        requireFact(
+          beforeCoverage !== undefined &&
+            nextCoverage !== undefined &&
+            exactJsonValueIdentity(beforeCoverage) ===
+              exactJsonValueIdentity(nextCoverage),
+          "同水位覆盖事实不一致",
+        );
+    }
   }
   for (const [id, output] of next.outputs) {
     const before = old.outputs.get(id);
@@ -838,6 +1000,17 @@ function actionResultHistory(before: ReportAction, after: ReportAction) {
     const next = after.result as CameraResult | undefined;
     if (old && terminal(before.status))
       requireFact(isDeepStrictEqual(old, next), "拍摄终态结果不可改写");
+    const oldCoverage = videoCoverage(before);
+    const nextCoverage = videoCoverage(after);
+    if (oldCoverage) {
+      requireFact(
+        nextCoverage !== undefined &&
+          exactJsonValueIdentity(oldCoverage) ===
+            exactJsonValueIdentity(nextCoverage),
+        "拍摄覆盖事实不可改写",
+      );
+    } else if (nextCoverage)
+      requireFact(!terminal(before.status), "拍摄终态结果不能新增覆盖事实");
   }
 
   if (before.type === "obtain_action_outputs") {
@@ -1122,8 +1295,12 @@ export function validateReportAgainstHistory(
     outputs: new Map([...first.outputs, ...second.outputs]),
     deliveries: new Map([...first.deliveries, ...second.deliveries]),
   });
-  associations(combined(old, next));
-  associations(combined(next, old));
+  const oldThenNext = combined(old, next);
+  const nextThenOld = combined(next, old);
+  coverageAssociations(old, segmentEntities(oldThenNext));
+  coverageAssociations(next, segmentEntities(nextThenOld));
+  associations(oldThenNext);
+  associations(nextThenOld);
   failureLinks(old, current.to_wm, next, incoming.to_wm);
   failureLinks(next, incoming.to_wm, old, current.to_wm);
 }

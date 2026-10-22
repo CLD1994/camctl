@@ -50,6 +50,92 @@
       "type": "string",
       "minLength": 1
     },
+    "default_video_scope_output_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity_id"
+      },
+      "uniqueItems": true
+    },
+    "default_video_scope": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "enum": [
+            "unknown",
+            "empty",
+            "nonempty"
+          ]
+        },
+        "member_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_ids": {
+          "$ref": "#/$defs/default_video_scope_output_ids"
+        }
+      },
+      "required": [
+        "state",
+        "member_count"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "member_count": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "empty"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "member_count": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "nonempty"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "member_count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "description": "来源冻结的默认视频范围。unknown 的 member_count 为 null；empty 为 0；nonempty 为正整数。照片不属于该范围。"
+    },
     "name": {
       "type": "string",
       "minLength": 1,
@@ -295,6 +381,9 @@
     "camera_result": {
       "type": "object",
       "properties": {
+        "coverage": {
+          "$ref": "#/$defs/video_coverage"
+        },
         "check": {
           "allOf": [
             {
@@ -322,6 +411,151 @@
       },
       "additionalProperties": false,
       "minProperties": 1
+    },
+    "camera_timelapse_result": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/video_coverage"
+        }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    },
+    "video_coverage": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "enum": [
+            "duration_s",
+            "frames"
+          ]
+        },
+        "target": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "confirmed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "not_performed",
+            "reached",
+            "confirmed_short",
+            "unconfirmed"
+          ]
+        },
+        "checked_output_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entity_id"
+          },
+          "uniqueItems": true
+        },
+        "default_scope": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/default_video_scope"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "$ref": "#/$defs/default_video_scope/properties/state"
+                },
+                "member_count": {
+                  "$ref": "#/$defs/default_video_scope/properties/member_count"
+                },
+                "output_ids": {
+                  "$ref": "#/$defs/default_video_scope_output_ids"
+                }
+              },
+              "required": [
+                "state",
+                "member_count",
+                "output_ids"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "reason": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/text"
+            },
+            "output_id": {
+              "$ref": "#/$defs/entity_id"
+            },
+            "message": {
+              "$ref": "#/$defs/text"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "metric",
+        "target",
+        "confirmed",
+        "status",
+        "checked_output_ids",
+        "default_scope"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "metric": {
+                "const": "frames"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "integer"
+              },
+              "confirmed": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_performed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmed": {
+                "type": "null"
+              },
+              "checked_output_ids": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "description": "采用实际内容策略的录像及原生延时覆盖事实。duration_s 使用精确秒数，frames 使用整数帧；confirmed 为 null 表示未知，0 表示已确认零。范围沿用公共分段范围状态，但报告必须完整展开 output_ids。"
     },
     "obtain_failure": {
       "type": "object",
@@ -1625,6 +1859,91 @@
           "if": {
             "properties": {
               "type": {
+                "const": "camera_timelapse"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "$ref": "#/$defs/camera_timelapse_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera_record"
+              },
+              "result": {
+                "type": "object",
+                "required": [
+                  "coverage"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "coverage": {
+                    "properties": {
+                      "metric": {
+                        "const": "duration_s"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "camera_timelapse"
+              },
+              "result": {
+                "type": "object",
+                "required": [
+                  "coverage"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "coverage": {
+                    "properties": {
+                      "metric": {
+                        "const": "frames"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "obtain_action_outputs"
               }
             },
@@ -1845,10 +2164,7 @@
           "if": {
             "properties": {
               "type": {
-                "enum": [
-                  "camera_take_photo",
-                  "camera_timelapse"
-                ]
+                "const": "camera_take_photo"
               }
             },
             "required": [

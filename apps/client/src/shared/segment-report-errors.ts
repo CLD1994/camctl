@@ -265,8 +265,9 @@ export function segmentReferences(action: ReportAction): SegmentIssue[] {
   const issue = segmentIssue(action.error);
   if (issue) {
     requireFact(
-      issue.code === "capture_segment_gap" && action.type === "camera_record",
-      "分段缺口只属于来源录像动作的最终错误",
+      issue.code === "capture_segment_gap" &&
+        ["camera_record", "camera_timelapse"].includes(action.type),
+      "分段缺口只属于来源视频拍摄动作的最终错误",
     );
     requireFact(
       issue.details.source_action_instance_id === action.action_instance_id,
