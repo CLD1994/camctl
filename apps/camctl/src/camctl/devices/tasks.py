@@ -25,8 +25,29 @@ class CompletionMode(IntEnum):
 class CaptureResultPolicy(StrEnum):
     """显式固定拍摄结果的设备专属解释方式。"""
 
+    ACTION6_VIDEO_SEGMENTS_V1 = "action6_video_segments_v1"
     OSMO360II_RECORD_SEGMENTS_V1 = "osmo360ii_record_segments_v1"
     OSMO_EMPTY_TAIL_CLASSIFICATION_V1 = "osmo_empty_tail_classification_v1"
+
+
+class VideoResultMode(StrEnum):
+    """按设备部署选择视频结果的单文件或分段处理流程。"""
+
+    SINGLE_FILE = "single_file"
+    SEGMENTED = "segmented"
+
+
+def video_result_mode_for_declaration(
+    declaration: Mapping[str, object],
+) -> VideoResultMode:
+    """读取已校验的设备视频结果模式；未声明时采用部署默认值。"""
+    video = declaration.get("video", {})
+    if not isinstance(video, Mapping):
+        raise ValueError("video 部署选择必须是表")
+    try:
+        return VideoResultMode(video.get("result_mode", VideoResultMode.SINGLE_FILE.value))
+    except (TypeError, ValueError) as error:
+        raise ValueError("video.result_mode 必须是 single_file 或 segmented") from error
 
 
 class CaptureStorage(StrEnum):
@@ -58,6 +79,7 @@ class CaptureTask:
     ownership_mode: int | None = None
     output_scope: dict[str, JsonValue] | None = None
     product_rules: tuple[Mapping[str, JsonValue], ...] | None = None
+    video_result_mode: VideoResultMode | None = None
     result_policy: CaptureResultPolicy | None = None
     file_completion_wait_s: JsonValue = None
     output_storage: CaptureStorage | None = None

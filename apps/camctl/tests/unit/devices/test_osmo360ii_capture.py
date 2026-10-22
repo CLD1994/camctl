@@ -208,6 +208,16 @@ async def test_current_driver_interprets_start_using_original_frozen_record_cont
 
 def test_osmo_record_task_declares_segment_policy_without_fixed_osv_count():
     task = _contract().task_factories["osmo360ii_record"]({"duration_s": 12})
-    assert task.result_policy.value == "osmo360ii_record_segments_v1"
+    assert task.video_result_mode.value == "single_file"
+    assert task.result_policy is None
     assert task.product_rules == ({"kind": "video", "format_id": "osv", "min_count": 1,
         "exact_count": None, "require_pairing": False, "min_size_bytes": 1},)
+
+    cap = next(cap for cap in _contract().capabilities()
+               if cap.action_type == "camera_record")
+    segmented_factory = cap.deployment_task_factory({
+        "video": {"result_mode": "segmented"}})
+    segmented = segmented_factory({"duration_s": 12})
+    assert segmented.video_result_mode.value == "segmented"
+    assert segmented.result_policy.value == "osmo360ii_record_segments_v1"
+    assert segmented.product_rules == task.product_rules

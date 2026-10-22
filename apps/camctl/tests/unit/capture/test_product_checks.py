@@ -110,7 +110,9 @@ def test_product_rules_are_fixed_with_original_task():
 def test_invalid_saved_product_rule_is_rejected(changes):
     from camctl.capture.models import validate_capture_spec
     with pytest.raises(ValueError):
-        validate_capture_spec("camera_record", {"target_duration_ms": 10000, "product_rules": [{**_RULE_DOCUMENT, **changes}]})
+        validate_capture_spec("camera_record", {
+            "target_duration_ms": 10000, "video_result_mode": "single_file",
+            "product_rules": [{**_RULE_DOCUMENT, **changes}]})
 
 
 @pytest.mark.parametrize('size,state', [(None, 'unknown'), (0, 'failed'), (1, 'passed'), (123, 'passed')])

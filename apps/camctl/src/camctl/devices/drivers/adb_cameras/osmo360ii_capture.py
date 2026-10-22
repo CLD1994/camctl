@@ -6,7 +6,9 @@ import shlex
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
-from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, CaptureTask, CompletionMode, EndControl, StartReturn)
+from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, CaptureTask,
+                                  CompletionMode, EndControl, StartReturn, VideoResultMode,
+                                  video_result_mode_for_declaration)
 from .action6_record import _digest_timeout
 from .commands import CameraModel, OSMO_RECORD_FORMAT, OSMO_SESSION_SETUP
 from .contracts import CameraCall, CameraContract
@@ -16,7 +18,8 @@ from .osmo360ii_responses import OSMO360II_OBSERVATIONS, Osmo360IIDjiInterpreter
 from .osmo360ii_results import list_osmo360ii_results
 
 
-def _task(params):
+def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
+    result_mode = VideoResultMode(result_mode)
     timelapse = params.get("type") == "osmo360ii_timelapse"
     task = CaptureTask("camera_timelapse" if timelapse else "camera_record",
         target_duration_s=params["duration_s"], stop_supported=True,
@@ -26,13 +29,46 @@ def _task(params):
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "osv", "min_count": 1,
             "exact_count": None, "require_pairing": False, "min_size_bytes": 1},),
-        result_policy=(CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1 if timelapse
-            else CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1))
+        video_result_mode=result_mode,
+        result_policy=((CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1 if timelapse
+            else CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1)
+            if result_mode is VideoResultMode.SEGMENTED else None))
     if timelapse:
         task = replace(task, duration_based=True, wait_after_send=True, end_control=EndControl.DEVICE,
             start_return_meaning=StartReturn.SENT, completion_mode=CompletionMode.TIME_AND_OUTPUTS,
             result_wait_margin_s=Decimal("30"), cancel_completion_policy=CancelCompletionPolicy.FINITE_DEVICE_END)
     return task
+
+
+def _bind_osmo_task(task_type):
+    def bind(declaration):
+        result_mode = video_result_mode_for_declaration(declaration)
+        return lambda params: _task({**params, "type": task_type}, result_mode=result_mode)
+    return bind
+
+
+def _deployment_description_factory(action_type):
+    def describe(declaration):
+        result_mode = video_result_mode_for_declaration(declaration)
+        if action_type == "camera_record":
+            if result_mode is VideoResultMode.SINGLE_FILE:
+                return "当前部署使用单文件视频结果模式，普通录像沿单原片流程处理。"
+            return ("当前部署使用分段视频结果模式，普通录像按实际分段保留所有合格 OSV，"
+                    "逐段登记可选配对 LRF。")
+        if result_mode is VideoResultMode.SINGLE_FILE:
+            return "当前部署使用单文件视频结果模式，原生延时保留有限任务的原有产物规则。"
+        return "当前部署使用分段视频结果模式，原生延时使用 OSMO 空尾分类策略。"
+    return describe
+
+
+_OSMO_DEPLOYMENT_TASK_FACTORIES = {
+    "osmo360ii_record": _bind_osmo_task("osmo360ii_record"),
+    "osmo360ii_timelapse": _bind_osmo_task("osmo360ii_timelapse"),
+}
+_OSMO_DEPLOYMENT_DESCRIPTION_FACTORIES = {
+    action_type: _deployment_description_factory(action_type)
+    for action_type in ("camera_record", "camera_timelapse")
+}
 
 
 class _Osmo360IIContract(CameraContract):
@@ -41,6 +77,10 @@ class _Osmo360IIContract(CameraContract):
             replace(
                 cap,
                 preview_supported=True,
+                deployment_task_factory=(_OSMO_DEPLOYMENT_TASK_FACTORIES.get(cap.parameter_type)
+                    if callable(cap.task_factory) else None),
+                deployment_description_factory=(_OSMO_DEPLOYMENT_DESCRIPTION_FACTORIES.get(cap.action_type)
+                    if callable(cap.task_factory) else None),
                 description=cap.description.replace(
                     "参数合法不表示已有完整命令映射；", ""
                 )
@@ -48,7 +88,6 @@ class _Osmo360IIContract(CameraContract):
                 + "相机在本会话首次拍摄准备时跳过时间设置并选择仅充电；固定设置按需执行，码率按每个动作动态设置。"
                 + (
                     "完成判断采用正常设备运行与停止确认后固定 30 秒文件等待假设。"
-                    "普通录像按实际分段保留全部合格 OSV，逐段登记可选配对 LRF。"
                     "普通取回按已保存范围交付整段原文件，明确产物 ID 可取回范围外原片；"
                     "运行时不测量或裁剪媒体时长，浏览器播放能力由实际格式和解码支持决定。"
                     if cap.action_type == "camera_record"
@@ -91,7 +130,9 @@ def osmo360ii_contract():
 
     # 两个入口固定任务种类；工厂不会依赖可省略的 type 来混淆任务。
     return _Osmo360IIContract(CameraModel.OSMO360II,
-        task_factories={name: (lambda params, name=name: _task({**params, "type": name}))
+        task_factories={name: (lambda params, name=name,
+            result_mode=VideoResultMode.SINGLE_FILE: _task(
+                {**params, "type": name}, result_mode=result_mode))
             for name in ("osmo360ii_record", "osmo360ii_timelapse")},
         commands={**{kind: factory(kind) for kind in (CameraCall.SETTING, CameraCall.START, CameraCall.STOP)},
             **{kind: file_command_factory(kind, tools=tools, evidence=evidence)

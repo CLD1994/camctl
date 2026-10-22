@@ -111,6 +111,92 @@ def test_repeated_same_driver_registration_refreshes_config_without_replacing_en
     assert current.driver.roots.staging.as_posix() == "/srv/second"
 
 
+def test_video_result_modes_bind_real_action6_and_osmo_factories_per_device():
+    from camctl.bootstrap.config import ConfigDefaults, load_config
+    from camctl.devices.catalog import build_catalog
+    from camctl.devices.definitions_runtime import current_driver_definitions
+    from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
+
+    config = load_config({"devices": {
+        "action6-single": {"kind": "camera", "driver": "dji-action6"},
+        "action6-segmented": {"kind": "camera", "driver": "dji-action6",
+                               "video": {"result_mode": "segmented"}},
+        "osmo-single": {"kind": "camera", "driver": "dji-osmo360-ii"},
+        "osmo-segmented": {"kind": "camera", "driver": "dji-osmo360-ii",
+                            "video": {"result_mode": "segmented"}},
+    }}, ConfigDefaults())
+    register_builtin_camera_drivers(config)
+    register_builtin_camera_drivers(config)
+    catalog = build_catalog(config, current_driver_definitions())
+
+    def build(device_id, action_type, parameter_type, params):
+        parameter = catalog.parameter_definition(device_id, action_type, parameter_type)
+        assert parameter is not None and callable(parameter.task_factory)
+        return parameter.task_factory(params)
+
+    def freeze(action_type, task):
+        from camctl.capture.models import build_capture_spec
+        return build_capture_spec(action_type, task)
+
+    ordinary_params = {"type": "action6_record", "duration_s": 12}
+    single = build("action6-single", "camera_record", "action6_record", ordinary_params)
+    segmented = build("action6-segmented", "camera_record", "action6_record", ordinary_params)
+    assert single.video_result_mode.value == "single_file"
+    assert single.product_rules[0]["exact_count"] == 1
+    assert freeze("camera_record", single)["video_result_mode"] == "single_file"
+    assert segmented.video_result_mode.value == "segmented"
+    assert segmented.product_rules[0]["exact_count"] is None
+    assert segmented.product_rules[0]["min_size_bytes"] == 1
+    assert freeze("camera_record", segmented)["video_result_mode"] == "segmented"
+    assert segmented.result_policy.value == "action6_video_segments_v1"
+    assert freeze("camera_record", segmented)["result_policy"] == \
+        "action6_video_segments_v1"
+
+    timelapse_params = {"type": "action6_timelapse", "duration_s": 300,
+                        "outputs": "video_raw"}
+    native_single = build("action6-single", "camera_timelapse", "action6_timelapse",
+                          timelapse_params)
+    native_segmented = build("action6-segmented", "camera_timelapse", "action6_timelapse",
+                             timelapse_params)
+    assert native_single.video_result_mode.value == "single_file"
+    assert native_single.product_rules[0]["exact_count"] is None
+    assert [rule["kind"] for rule in native_segmented.product_rules] == ["video", "photo"]
+    assert native_segmented.video_result_mode.value == "segmented"
+    assert native_segmented.result_policy.value == "action6_video_segments_v1"
+    assert freeze("camera_timelapse", native_single)["video_result_mode"] == "single_file"
+    assert freeze("camera_timelapse", native_segmented)["video_result_mode"] == "segmented"
+    native_segmented_spec = freeze("camera_timelapse", native_segmented)
+    assert native_segmented_spec["result_policy"] == "action6_video_segments_v1"
+    assert [rule["kind"] for rule in native_segmented_spec["product_rules"]] == ["video", "photo"]
+
+    osmo_record_single = build("osmo-single", "camera_record", "osmo360ii_record",
+                               {"type": "osmo360ii_record", "duration_s": 12})
+    osmo_record_segmented = build("osmo-segmented", "camera_record", "osmo360ii_record",
+                                  {"type": "osmo360ii_record", "duration_s": 12})
+    osmo_native_single = build("osmo-single", "camera_timelapse", "osmo360ii_timelapse",
+                               {"type": "osmo360ii_timelapse", "duration_s": 300})
+    osmo_native_segmented = build("osmo-segmented", "camera_timelapse", "osmo360ii_timelapse",
+                                  {"type": "osmo360ii_timelapse", "duration_s": 300})
+    assert osmo_record_single.result_policy is None
+    assert osmo_native_single.result_policy is None
+    assert osmo_record_segmented.result_policy.value == "osmo360ii_record_segments_v1"
+    assert osmo_native_segmented.result_policy.value == "osmo_empty_tail_classification_v1"
+    assert "result_policy" not in freeze("camera_record", osmo_record_single)
+    assert "result_policy" not in freeze("camera_timelapse", osmo_native_single)
+    assert freeze("camera_timelapse", osmo_native_single)["video_result_mode"] == "single_file"
+    assert freeze("camera_record", osmo_record_segmented)["result_policy"] == \
+        "osmo360ii_record_segments_v1"
+    assert freeze("camera_timelapse", osmo_native_segmented)["result_policy"] == \
+        "osmo_empty_tail_classification_v1"
+
+    descriptions = catalog.describe_document()["devices"]
+    by_device = {device["device_id"]: device for device in descriptions}
+    action6_record_description = by_device["action6-single"]["actions"][0]["parameter_types"][0]["description"]
+    action6_segmented_description = by_device["action6-segmented"]["actions"][0]["parameter_types"][0]["description"]
+    assert "单文件视频结果模式" in action6_record_description
+    assert "分段视频结果模式" in action6_segmented_description
+
+
 def test_conflicting_hasselblad_entry_is_rejected_before_definition_registration():
     from camctl.acceptance.schema import RuleError
     from camctl.devices.definitions_runtime import current_driver_definitions

@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
+from camctl.devices.tasks import VideoResultMode
 
 __all__ = [
     "ConfigDefaults",
@@ -550,9 +551,22 @@ def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
             raise ConfigError(f"设备身份必须是非空字符串: {device_id!r}")
         if not isinstance(declaration, Mapping):
             raise ConfigError(f"devices.{device_id} 必须是表: {declaration!r}")
-        _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
+        kind = _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
         driver_id = _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
         normalized = dict(declaration)
+        if kind == "camera":
+            video = _take(normalized.get("video", {}),
+                          f"devices.{device_id}.video", ("result_mode",))
+            try:
+                result_mode = VideoResultMode(
+                    video.get("result_mode", VideoResultMode.SINGLE_FILE.value))
+            except (TypeError, ValueError) as error:
+                raise ConfigError(
+                    f"devices.{device_id}.video.result_mode 必须是 single_file 或 segmented"
+                ) from error
+            normalized["video"] = {"result_mode": result_mode.value}
+        elif "video" in normalized:
+            raise ConfigError(f"devices.{device_id}.video 只能用于相机设备")
         if driver_id == DRIVER_ID:
             try:
                 camera = read_camera_config(normalized)

@@ -30,6 +30,7 @@ from camctl.devices.tasks import (
     CompletionMode,
     EndControl,
     StartReturn,
+    VideoResultMode,
 )
 from camctl.operations.models import ErrorValue
 from camctl.operations.attempts import AttemptConfig
@@ -134,6 +135,7 @@ class CaptureDefinition:
     action_type: str
     target_duration_ms: int | None
     completion: CaptureCompletion
+    video_result_mode: VideoResultMode | None = None
     result_policy: CaptureResultPolicy | None = None
 
     @classmethod
@@ -144,6 +146,8 @@ class CaptureDefinition:
             action_type=source.action_type,
             target_duration_ms=spec.get("target_duration_ms"),
             completion=CaptureCompletion(spec["completion_mode"]) if source.action_type == "camera_timelapse" else CaptureCompletion.DEVICE_EVIDENCE,
+            video_result_mode=(VideoResultMode(spec["video_result_mode"])
+                if source.action_type in {"camera_record", "camera_timelapse"} else None),
             result_policy=(CaptureResultPolicy(spec["result_policy"])
                 if "result_policy" in spec else None),
         )
@@ -158,28 +162,51 @@ def _integer(value, minimum=0):
 _OWNERSHIP_FIELDS = frozenset({"ownership_mode", "output_scope"})
 
 
-def _result_policy(action_type: str, spec: dict, products: dict) -> dict:
+def _video_result_mode(action_type: str, spec: dict) -> VideoResultMode:
+    if action_type not in {"camera_record", "camera_timelapse"}:
+        raise ValueError("视频结果模式只适用于普通录像和原生延时")
+    if "video_result_mode" not in spec:
+        raise ValueError("视频执行定义缺少必需的视频结果模式")
+    try:
+        return VideoResultMode(spec["video_result_mode"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("视频结果模式必须是 single_file 或 segmented") from error
+
+
+def _result_policy(action_type: str, spec: dict, products: dict,
+                   result_mode: VideoResultMode) -> dict:
     """验证驱动显式声明的处理策略及其必要原片规则。"""
     if "result_policy" not in spec:
+        if result_mode is VideoResultMode.SEGMENTED:
+            raise ValueError("分段视频定义必须保存设备结果策略")
         return {}
+    if result_mode is not VideoResultMode.SEGMENTED:
+        raise ValueError("分段结果策略只适用于 segmented 视频结果模式")
     try:
         policy = CaptureResultPolicy(spec["result_policy"])
     except (TypeError, ValueError) as error:
         raise ValueError("拍摄结果策略未登记") from error
-    if policy is CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1:
-        if action_type != "camera_record":
-            raise ValueError("普通录像分段策略只适用于 camera_record")
-    elif policy is CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1:
-        if action_type != "camera_timelapse":
-            raise ValueError("OSMO 空尾分类策略只适用于 camera_timelapse")
     rules = products.get("product_rules", [])
-    osv_rules = [rule for rule in rules
-        if rule.get("kind") == "video" and rule.get("format_id") == "osv"]
-    if (len(osv_rules) != 1 or osv_rules[0]["min_count"] != 1
-            or osv_rules[0]["exact_count"] is not None
-            or osv_rules[0]["min_size_bytes"] != 1
-            or osv_rules[0]["require_pairing"]):
-        raise ValueError("OSMO 分段策略必须要求至少一份非零 OSV，且不得限制段数")
+    policy_contracts = {
+        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1: (
+            {"camera_record", "camera_timelapse"}, "mp4", "Action6"),
+        CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1: (
+            {"camera_record"}, "osv", "OSMO 普通录像"),
+        CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1: (
+            {"camera_timelapse"}, "osv", "OSMO 原生延时"),
+    }
+    allowed_actions, format_id, policy_name = policy_contracts[policy]
+    if action_type not in allowed_actions:
+        expected = "或".join(sorted(allowed_actions))
+        raise ValueError(f"{policy_name} 分段策略只适用于 {expected}")
+    video_rules = [rule for rule in rules
+        if rule.get("kind") == "video" and rule.get("format_id") == format_id]
+    if (len(video_rules) != 1 or video_rules[0]["min_count"] != 1
+            or video_rules[0]["exact_count"] is not None
+            or video_rules[0]["min_size_bytes"] != 1
+            or video_rules[0]["require_pairing"]):
+        raise ValueError(
+            f"{policy_name} 分段策略必须要求至少一份非空 {format_id.upper()}，且不得限制段数")
     return {"result_policy": policy.value}
 
 
@@ -236,13 +263,14 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
             "output_storage": storage.value,
             "start_call_timeout_s": AttemptConfig(1, timeout_s=timeout).timeout_s,
         }
+    result_mode = _video_result_mode(action_type, spec)
     products = {}
     if "product_rules" in spec:
         from camctl.capture.results import ProductRule
         if not isinstance(spec["product_rules"], list):
             raise ValueError("必要产物规则必须保存为 JSON 数组")
         products = {"product_rules": [ProductRule.from_json(value).as_json() for value in spec["product_rules"]]}
-    policy = _result_policy(action_type, spec, products)
+    policy = _result_policy(action_type, spec, products, result_mode)
     if action_type == "camera_record":
         ownership = _ownership(spec)
         completion_wait = ({"file_completion_wait_ms": _integer(spec["file_completion_wait_ms"], 1)}
@@ -255,13 +283,17 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
                 raise ValueError("启动余量要求录像使用可靠 SENT")
             startup = {"start_return_meaning": int(StartReturn.SENT),
                        "startup_margin_ms": _integer(spec["startup_margin_ms"])}
-        if set(spec) != {"target_duration_ms", *ownership, *products, *completion_wait, *startup, *policy}:
+        expected = {"target_duration_ms", "video_result_mode", *ownership,
+                    *products, *completion_wait, *startup, *policy}
+        if set(spec) != expected:
             raise ValueError("录像定义必须保存目标时长及适用的归属声明")
         return {"target_duration_ms": _integer(spec["target_duration_ms"], 1),
+                "video_result_mode": result_mode.value,
                 **ownership, **products, **completion_wait, **startup, **policy}
     if action_type != "camera_timelapse":
         raise ValueError("动作类型不是拍摄动作")
-    required = {"duration_based", "wait_after_send", "end_control", "stop_supported", "start_return_meaning", "completion_mode"}
+    required = {"video_result_mode", "duration_based", "wait_after_send", "end_control",
+                "stop_supported", "start_return_meaning", "completion_mode"}
     if not required <= set(spec):
         raise ValueError("延时定义缺少固定任务依据")
     for key in ("duration_based", "wait_after_send", "stop_supported"):
@@ -274,6 +306,7 @@ def validate_capture_spec(action_type: str, spec: Any) -> dict:
     completion = CompletionMode(_integer(spec["completion_mode"], 1))
     result.update(end_control=int(end), start_return_meaning=int(start), completion_mode=int(completion))
     expected = set(required) | set(ownership) | set(products) | set(policy)
+    result["video_result_mode"] = result_mode.value
     if "startup_margin_ms" in spec:
         if not spec["duration_based"] or start is not StartReturn.SENT:
             raise ValueError("启动余量只适用于有限 SENT 任务")
@@ -339,6 +372,7 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
                 "ownership_mode",
                 "output_scope",
                 "product_rules",
+                "video_result_mode",
                 "result_policy",
                 "file_completion_wait_s",
                 "cancel_completion_policy",
@@ -365,6 +399,13 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
     if task.ownership_mode is not None or task.output_scope is not None:
         ownership = {"ownership_mode": task.ownership_mode, "output_scope": task.output_scope}
     products = {} if task.product_rules is None else {"product_rules": deepcopy(list(task.product_rules))}
+    try:
+        result_mode = VideoResultMode(
+            task.video_result_mode if task.video_result_mode is not None
+            else VideoResultMode.SINGLE_FILE)
+    except (TypeError, ValueError) as error:
+        raise ValueError("驱动视频结果模式未登记") from error
+    mode = {"video_result_mode": result_mode.value}
     policy = {} if task.result_policy is None else {"result_policy": getattr(task.result_policy, "value", task.result_policy)}
     if action_type == "camera_record":
         if task.cancel_completion_policy is not None:
@@ -378,11 +419,11 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
             "start_return_meaning": task.start_return_meaning})
         return validate_capture_spec(action_type, {
             "target_duration_ms": seconds_to_duration_ms(task.target_duration_s),
-            **ownership, **products, **completion_wait, **startup, **policy})
+            **mode, **ownership, **products, **completion_wait, **startup, **policy})
     spec = {"duration_based": task.duration_based, "wait_after_send": task.wait_after_send,
             "end_control":task.end_control, "stop_supported":task.stop_supported,
             "start_return_meaning":task.start_return_meaning, "completion_mode":task.completion_mode,
-            **ownership, **products, **policy}
+            **mode, **ownership, **products, **policy}
     if task.startup_margin_ms is not None:
         spec["startup_margin_ms"] = task.startup_margin_ms
     if task.target_duration_s is not None:

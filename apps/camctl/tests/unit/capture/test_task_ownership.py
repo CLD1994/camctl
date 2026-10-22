@@ -58,4 +58,5 @@ def test_invalid_or_incomplete_ownership_declaration_is_rejected(ownership, scop
 ])
 def test_saved_definition_validates_same_declaration_and_rejects_runtime_facts(changes):
     with pytest.raises(ValueError):
-        validate_capture_spec("camera_record", {"target_duration_ms": 10000, **changes})
+        validate_capture_spec("camera_record", {
+            "target_duration_ms": 10000, "video_result_mode": "single_file", **changes})

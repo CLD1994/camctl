@@ -5,7 +5,8 @@ from dataclasses import replace
 import pytest
 
 from camctl.capture.models import CaptureDefinition, CaptureInput, build_capture_spec, validate_capture_spec
-from camctl.devices.tasks import CaptureTask, CompletionMode, EndControl, StartReturn
+from camctl.devices.tasks import (CaptureTask, CompletionMode, EndControl,
+                                  StartReturn, VideoResultMode)
 
 
 def _task(**changes):
@@ -22,7 +23,7 @@ def test_photo_spec_has_no_device_parameter_copy():
 
 
 def _completed_spec():
-    return {"duration_based": True, "wait_after_send": False,
+    return {"video_result_mode": "single_file", "duration_based": True, "wait_after_send": False,
         "stop_supported": True, "end_control": 1, "start_return_meaning": 3,
         "completion_mode": 1, "target_duration_ms": 1234}
 
@@ -64,7 +65,7 @@ def test_short_control_return_rejects_full_native_call_timeout(meaning):
 def test_record_duration_is_exact_and_bounded(seconds, milliseconds):
     with localcontext() as context:
         context.prec = 3
-        assert build_capture_spec("camera_record", CaptureTask("camera_record", target_duration_s=seconds, stop_supported=True)) == {"target_duration_ms": milliseconds}
+        assert build_capture_spec("camera_record", CaptureTask("camera_record", target_duration_s=seconds, stop_supported=True)) == {"target_duration_ms": milliseconds, "video_result_mode": "single_file"}
 
 
 @pytest.mark.parametrize("duration", [None, True, "1", Decimal("1.0005"), 0, -1, Decimal("9223372036854775.808")])
@@ -88,7 +89,8 @@ def test_record_file_completion_wait_is_fixed_without_decimal_rounding(seconds, 
     with localcontext() as context:
         context.prec = 3
         spec = build_capture_spec("camera_record", task)
-    assert spec == {"target_duration_ms": 1000, "file_completion_wait_ms": milliseconds}
+    assert spec == {"target_duration_ms": 1000, "video_result_mode": "single_file",
+                    "file_completion_wait_ms": milliseconds}
     assert validate_capture_spec("camera_record", spec) == spec
 
 
@@ -110,16 +112,18 @@ def test_saved_record_rejects_invalid_explicit_file_completion_wait(wait):
 
 
 def test_record_without_file_completion_wait_preserves_stop_completion_contract():
-    assert validate_capture_spec("camera_record", {"target_duration_ms": 1000}) == {
-        "target_duration_ms": 1000}
+    assert validate_capture_spec("camera_record", {
+        "target_duration_ms": 1000, "video_result_mode": "single_file"}) == {
+        "target_duration_ms": 1000, "video_result_mode": "single_file"}
     assert build_capture_spec("camera_record", CaptureTask("camera_record",
         target_duration_s=1, stop_supported=True, file_completion_wait_s=None)) == {
-            "target_duration_ms": 1000}
+            "target_duration_ms": 1000, "video_result_mode": "single_file"}
 
 
 def test_timelapse_spec_records_applicability_and_integer_enums():
     assert build_capture_spec("camera_timelapse", _task()) == {
-        "target_duration_ms":1234, "duration_based":True, "wait_after_send":True,
+        "target_duration_ms":1234, "video_result_mode":"single_file",
+        "duration_based":True, "wait_after_send":True,
         "stop_supported":False, "end_control":1, "start_return_meaning":1,
         "completion_mode":2, "result_wait_margin_ms":5,
     }
@@ -192,7 +196,8 @@ def test_wait_margin_can_be_zero_or_the_exact_upper_bound(margin):
     {"wait_after_send":False},
 ])
 def test_saved_wait_conditions_cannot_contradict_each_other(change):
-    spec = {"duration_based":True,"wait_after_send":True,"stop_supported":False,
+    spec = {"video_result_mode":"single_file","duration_based":True,
+        "wait_after_send":True,"stop_supported":False,
         "end_control":1,"start_return_meaning":1,"completion_mode":2,
         "target_duration_ms":1234,"result_wait_margin_ms":0}
     with pytest.raises(ValueError):
@@ -245,10 +250,13 @@ def test_photo_cannot_ignore_native_cancel_policy():
 @pytest.mark.parametrize('margin_ms', [0, 1000])
 def test_new_record_freezes_sent_and_startup_margin_together(margin_ms):
     from camctl.capture.models import activity_capabilities
-    spec = {"target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": margin_ms}
+    spec = {"target_duration_ms": 10000, "video_result_mode": "single_file",
+            "start_return_meaning": 1, "startup_margin_ms": margin_ms}
     assert validate_capture_spec("camera_record", spec) == spec
     assert activity_capabilities("camera_record", spec).start_return_meaning == 1
-    assert activity_capabilities("camera_record", {"target_duration_ms": 10000}).start_return_meaning == 2
+    assert activity_capabilities("camera_record", {
+        "target_duration_ms": 10000, "video_result_mode": "single_file"
+    }).start_return_meaning == 2
 
 
 @pytest.mark.parametrize("changes", [
@@ -259,7 +267,8 @@ def test_new_record_freezes_sent_and_startup_margin_together(margin_ms):
 ])
 def test_new_record_rejects_partial_or_invalid_startup_contract(changes):
     with pytest.raises(ValueError):
-        validate_capture_spec("camera_record", {"target_duration_ms": 10000, **changes})
+        validate_capture_spec("camera_record", {
+            "target_duration_ms": 10000, "video_result_mode": "single_file", **changes})
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])
@@ -282,7 +291,8 @@ def test_task_factory_can_freeze_startup_margin(margin_ms):
     task = CaptureTask("camera_record", target_duration_s=10, stop_supported=True,
         start_return_meaning=StartReturn.SENT, startup_margin_ms=margin_ms)
     assert build_capture_spec("camera_record", task) == {
-        "target_duration_ms": 10000, "start_return_meaning": 1, "startup_margin_ms": margin_ms}
+        "target_duration_ms": 10000, "video_result_mode": "single_file",
+        "start_return_meaning": 1, "startup_margin_ms": margin_ms}
 
 
 @pytest.mark.parametrize(("parameter_type", "action_type", "policy"), [
@@ -294,7 +304,8 @@ def test_osmo_result_policy_survives_task_build_acceptance_and_saved_definition_
 ):
     from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
 
-    task = osmo360ii_contract().task_factories[parameter_type]({"duration_s": 12})
+    task = osmo360ii_contract().task_factories[parameter_type]({"duration_s": 12},
+        result_mode=VideoResultMode.SEGMENTED)
     spec = build_capture_spec(action_type, task)
     assert task.result_policy.value == policy
     assert spec["result_policy"] == policy
@@ -306,7 +317,8 @@ def test_osmo_result_policy_survives_task_build_acceptance_and_saved_definition_
 def test_capture_result_policy_rejects_unknown_policy_and_fixed_segment_count():
     from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
 
-    task = osmo360ii_contract().task_factories["osmo360ii_record"]({"duration_s": 12})
+    task = osmo360ii_contract().task_factories["osmo360ii_record"]({"duration_s": 12},
+        result_mode=VideoResultMode.SEGMENTED)
     spec = build_capture_spec("camera_record", task)
     invalid_policy = {**spec, "result_policy": "unregistered_policy"}
     with pytest.raises(ValueError, match="策略未登记"):
@@ -322,7 +334,8 @@ def test_capture_result_policy_rejects_unknown_policy_and_fixed_segment_count():
 def test_capture_result_policy_cannot_be_reused_for_another_capture_action():
     from camctl.devices.drivers.adb_cameras.osmo360ii_capture import osmo360ii_contract
 
-    task = osmo360ii_contract().task_factories["osmo360ii_timelapse"]({"duration_s": 12})
+    task = osmo360ii_contract().task_factories["osmo360ii_timelapse"]({"duration_s": 12},
+        result_mode=VideoResultMode.SEGMENTED)
     spec = build_capture_spec("camera_timelapse", task)
     with pytest.raises(ValueError, match="只适用于 camera_record"):
         validate_capture_spec("camera_timelapse", {

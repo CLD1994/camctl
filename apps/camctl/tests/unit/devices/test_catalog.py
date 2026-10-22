@@ -366,6 +366,23 @@ def test_deployment_binding_must_return_a_callable_task_factory():
         build_catalog(_config({"cam-1": {"kind": "camera", "driver": "camctl-adb"}}), definitions)
 
 
+def test_catalog_rejects_segmented_mode_without_a_deployment_video_binding():
+    from camctl.acceptance.schema import RuleError
+
+    capability = record_capability(None)
+    definition = DriverDefinition(
+        "synthetic-camera",
+        {"camera_record": (capability,)},
+        declaration=synthetic_driver_declaration(),
+        source_storage_resolver=synthetic_source_storage_resolver,
+    )
+    config = _config({"camera": {"kind": "camera", "driver": "synthetic-camera",
+                                 "video": {"result_mode": "segmented"}}})
+
+    with pytest.raises(RuleError, match="未绑定 segmented"):
+        build_catalog(config, DriverDefinitions({"synthetic-camera": definition}))
+
+
 class TestApplyDefaults:
     def test_defaults_preserve_raw_input(self) -> None:
         raw = {"type": "single_shot"}

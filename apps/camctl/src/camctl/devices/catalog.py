@@ -10,12 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from copy import deepcopy
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.schema import RuleError
 from camctl.bootstrap.config import ConfigSnapshot
-from camctl.devices.tasks import CaptureStorage, CaptureStorageResolver, CaptureTaskFactory, DeploymentTaskFactory
+from camctl.devices.tasks import (CaptureStorage, CaptureStorageResolver, CaptureTaskFactory,
+                                  DeploymentTaskFactory, VideoResultMode,
+                                  video_result_mode_for_declaration)
 from camctl.devices.parameter_schemas import validate_parameter_schema, schema_with_defaults
 from camctl.devices.ports import DriverDeclaration
 from camctl.host_files.declarations import HOST_FILE_DECLARATION
@@ -50,6 +52,7 @@ class ActionCapability:
     task_factory: CaptureTaskFactory | None = None
     video_size_estimate: Mapping[str, Any] | None = None
     deployment_task_factory: DeploymentTaskFactory | None = None
+    deployment_description_factory: Callable[[Mapping[str, object]], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -147,15 +150,29 @@ class Catalog:
                 raise RuleError(f"设备 {device_id} 的正式源不受支持: {source_storage!r}")
             kind = declaration.get("kind")
             declared = _KIND_ACTION_TYPES.get(kind, frozenset())
+            video_result_mode = video_result_mode_for_declaration(declaration)
             try:
-                actions = {
-                    action_type: tuple(
-                        replace(capability, task_factory=capability.deployment_task_factory(declaration))
-                        if capability.deployment_task_factory is not None else capability
-                        for capability in capabilities
-                    )
-                    for action_type, capabilities in definition.actions.items()
-                }
+                actions = {}
+                for action_type, capabilities in definition.actions.items():
+                    bound = []
+                    for capability in capabilities:
+                        updates = {}
+                        if capability.deployment_task_factory is not None:
+                            updates["task_factory"] = capability.deployment_task_factory(declaration)
+                        if capability.deployment_description_factory is not None:
+                            addition = capability.deployment_description_factory(declaration)
+                            if not isinstance(addition, str):
+                                raise ValueError("部署能力说明必须返回字符串")
+                            updates["description"] = capability.description + addition
+                        if (video_result_mode is VideoResultMode.SEGMENTED
+                                and action_type in {"camera_record", "camera_timelapse"}
+                                and callable(capability.task_factory)
+                                and capability.deployment_task_factory is None):
+                            raise ValueError(
+                                f"驱动 {driver_id!r} 未绑定 segmented 视频结果处理"
+                            )
+                        bound.append(replace(capability, **updates) if updates else capability)
+                    actions[action_type] = tuple(bound)
             except (TypeError, ValueError) as error:
                 raise RuleError(f"设备 {device_id} 的部署任务定义无法绑定: {error}") from error
             if any(capability.deployment_task_factory is not None and not callable(capability.task_factory)

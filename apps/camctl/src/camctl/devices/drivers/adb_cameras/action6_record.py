@@ -6,8 +6,9 @@ import shlex
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry, RESULT_PAGE_CONTRACT
-from camctl.devices.tasks import (CancelCompletionPolicy, CaptureTask, CompletionMode,
-                                  EndControl, StartReturn)
+from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, CaptureTask, CompletionMode,
+                                  EndControl, StartReturn, VideoResultMode,
+                                  video_result_mode_for_declaration)
 from .action6_formats import product_rules_for_output
 from .commands import ACTION_APERTURE, ACTION_BITRATE, CameraModel
 from .contracts import CameraCall, CameraContract
@@ -33,21 +34,61 @@ ACTION6_TIMELAPSE_TASK_METADATA = CaptureTask(
     startup_margin_ms=0)
 
 
-def _task(params):
+def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
+    result_mode = VideoResultMode(result_mode)
     return CaptureTask("camera_record", target_duration_s=params["duration_s"], stop_supported=True,
         start_return_meaning=StartReturn.SENT, startup_margin_ms=STARTUP_MARGIN_MS,
         file_completion_wait_s=FILE_COMPLETION_WAIT_S, ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "mp4", "min_count": 1,
-                        "exact_count": 1, "require_pairing": False},))
+                        "exact_count": (1 if result_mode is VideoResultMode.SINGLE_FILE else None),
+                        "require_pairing": False,
+                        **({} if result_mode is VideoResultMode.SINGLE_FILE
+                           else {"min_size_bytes": 1})},), video_result_mode=result_mode,
+        result_policy=(CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1
+            if result_mode is VideoResultMode.SEGMENTED else None))
 
 
-def _timelapse_task(params):
+def _timelapse_task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
+    result_mode = VideoResultMode(result_mode)
     if "outputs" not in params:
         raise ValueError("Action6 原生延时任务必须明确提供 outputs")
     return replace(ACTION6_TIMELAPSE_TASK_METADATA,
         target_duration_s=params["duration_s"],
-        product_rules=product_rules_for_output(params["outputs"]))
+        product_rules=product_rules_for_output(params["outputs"]),
+        video_result_mode=result_mode,
+        result_policy=(CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1
+            if result_mode is VideoResultMode.SEGMENTED else None))
+
+
+def _deployment_task_factory(task_factory):
+    def bind(declaration):
+        result_mode = video_result_mode_for_declaration(declaration)
+        return lambda params: task_factory(params, result_mode=result_mode)
+    return bind
+
+
+def _deployment_description_factory(action_type):
+    def describe(declaration):
+        result_mode = video_result_mode_for_declaration(declaration)
+        if action_type == "camera_record":
+            if result_mode is VideoResultMode.SINGLE_FILE:
+                return "当前部署使用单文件视频结果模式，普通录像要求恰好一份 MP4 原片。"
+            return "当前部署使用分段视频结果模式，普通录像至少要求一份非空 MP4 原片。"
+        if result_mode is VideoResultMode.SINGLE_FILE:
+            return "当前部署使用单文件视频结果模式；原生延时视频和所选独立照片仍按各自原有最低产物规则处理。"
+        return "当前部署使用分段视频结果模式；原生延时视频分段与所选独立照片仍分别按各自规则处理。"
+    return describe
+
+
+_ACTION6_DEPLOYMENT_TASK_FACTORIES = {
+    "action6_record": _deployment_task_factory(_task),
+    "action6_timelapse": _deployment_task_factory(_timelapse_task),
+}
+_ACTION6_DEPLOYMENT_DESCRIPTION_FACTORIES = {
+    action_type: _deployment_description_factory(action_type)
+    for action_type in ("camera_record", "camera_timelapse")
+}
 
 
 def _digest_timeout(size):
@@ -59,6 +100,10 @@ def _digest_timeout(size):
 class _Action6Contract(CameraContract):
     def capabilities(self):
         return tuple(replace(cap, preview_supported=True,
+            deployment_task_factory=(_ACTION6_DEPLOYMENT_TASK_FACTORIES.get(cap.parameter_type)
+                if callable(cap.task_factory) else None),
+            deployment_description_factory=(_ACTION6_DEPLOYMENT_DESCRIPTION_FACTORIES.get(cap.action_type)
+                if callable(cap.task_factory) else None),
             description=cap.description + "MP4 为视频原片，唯一同目录、同 stem 的 LRF 为可选视频预览；"
                 "JPG、DNG 为独立照片原片，不生成照片预览。"
                 + ("完成判断采用正常设备执行有限目标后自行结束的运行假设；"
