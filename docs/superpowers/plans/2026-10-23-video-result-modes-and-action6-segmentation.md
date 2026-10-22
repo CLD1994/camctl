@@ -185,9 +185,9 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 
 **输入／交付：** 消费 V1—V3，增加 Action6 特化，并同时启用对应部署工厂与正常处理器。交付两类动作从真实 RESULTS 页、来源终态到默认／预览／明确 ID 取回及报告的路径；异常内容检查由 V8 完成。
 
-- [ ] **步骤 1：写解析和目标绑定失败测试。** 建议 `apps/camctl/tests/unit/devices/test_action6_segments.py`：DJI 目录与十四位时间、`0999 → 下一目录0001`、大小写配对原字节、不同 datetime、冲突键、非法名和孤立 LRF；不得用编号替代归属。原生延时目标使用冻结采集时长和间隔，不改变照片最低要求。
-- [ ] **步骤 2：写正常纵向集成失败测试并运行。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_normal.py`，同时覆盖普通和 native；观察原页、全部合格 MP4／LRF／照片、默认范围、产物及终态，拷贝和媒体调用次数为零。单独运行该文件确认当前不能闭合多段。
-- [ ] **步骤 3：实现 Action6 文件特化及普通／native 绑定。** 视频和 LRF 具有序列位置，照片独立分类；普通多段为至少一份非空 MP4，不再要求精确一份。`coverage_target()` 从受理时生效参数生成精确时长或 `floor(D/I)+1` 整数帧，随执行定义固定；正常报告与之后异常检查读取同一目标，不另算一份。native 的 `outputs` 继续读取同一驱动格式映射，单文件路径不改变。
+- [x] **步骤 1：写解析和目标绑定失败测试。** 建议 `apps/camctl/tests/unit/devices/test_action6_segments.py`：DJI 目录与十四位时间、`0999 → 下一目录0001`、大小写配对原字节、不同 datetime、冲突键、非法名和孤立 LRF；不得用编号替代归属。原生延时目标使用冻结采集时长和间隔，不改变照片最低要求。
+- [x] **步骤 2：写正常纵向集成失败测试并运行。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_normal.py`，同时覆盖普通和 native；观察原页、全部合格 MP4／LRF／照片、默认范围、产物及终态，拷贝和媒体调用次数为零。单独运行该文件确认当前不能闭合多段。
+- [x] **步骤 3：实现 Action6 文件特化及普通／native 绑定。** 视频和 LRF 具有序列位置，照片独立分类；普通多段为至少一份非空 MP4，不再要求精确一份。`coverage_target()` 从受理时生效参数生成精确时长或 `floor(D/I)+1` 整数帧，随执行定义固定；正常报告与之后异常检查读取同一目标，不另算一份。native 的 `outputs` 继续读取同一驱动格式映射，单文件路径不改变。
 - [ ] **步骤 4：接通正常、取消及有限失败的公共发布。** 两类动作共用公共结果集合，保留原控制、等待与取消资格。普通取消放弃；native 取消默认全部合格完成视频及照片。基准／START 失败、文件完成未知和必要格式缺失保持真实失败或未知，不调用 OSMO 下界或 native 专属入口。
 - [ ] **步骤 5：接通混合产物默认选择。** 建议 `apps/camctl/tests/integration/outputs/test_video_scope_photos.py`，验证默认视频范围加独立照片、配对预览用相同视频范围、范围外明确 ID、视频空／未知时照片继续及其他来源继续。保留实际查询、清理及逐项授权规则。
 - [ ] **步骤 6：接通正常覆盖的实际报告投影。** 正常实际内容策略输出未执行检查，实际量保持未知；范围及各产物来自同一提交。同步本步实际使用的存储字段、报告依赖及生成路由。新增 `apps/camctl/tests/integration/reporting/test_action6_normal_coverage.py`，经根 Schema 和客户端 V3 消费，不以单个错误头代替成功动作的覆盖。V9 再完成实际检查产生的增长关系展开和跨层重建。
@@ -201,7 +201,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_action6_normal_coverage.py -q
 ```
 
-- [ ] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V5：提供可靠主视频指标及纯覆盖算法
 
@@ -426,6 +426,12 @@ apps/camctl/.venv311/bin/python -m unittest discover -s tests/integration -p 'te
 已取得的验证包括：模式及设备定向单元、主视频与覆盖定向单元329项、真实本地媒体2项及媒体历史2项；客户端相关单元513项、TypeScript 编译和根协议校验。主分支新增前缀规则及 OSMO 模式单元组合53项通过；原 Action6 单文件自然完成与取消／恢复装配6项通过（日志 `/tmp/camctl-video-single-file-bootstrap.log`，退出码0）。未重复运行全部组件集成目录。模式冻结装配4项通过（`/tmp/camctl-video-mode-binding.log`，退出码0），验证两设备、两动作、同驱动两台相机独立配置、重开连接、旧请求重送和新请求。OSMO 完成／范围恢复原运行28项通过、2项因公共解析适配失败；修正未知顺序键保存后，仅重跑受影响的4项全部通过（`/tmp/camctl-video-osmo-unknown-order.log`，退出码0）。
 
 V7 采用已有来源 `published_event_id` 所属完整事务边界，恢复该边界下真正已运行且等待来源的取回，而不另建一套等待者清单。它必须保留与来源提交时固定关联相同的行为；仅已受理的后续取回不具备复用资格。检查副本建档后本地读取失败，再切回设备源的持久化换源流程列为本版待完善项；首次授权前副本不可用时仍直接选设备源。
+
+V4 已集成为 `0a65861`：Action6 普通与 native 的实际处理器、原页 MP4/LRF 配对、照片、有限结论和共同提交已接通。两个正常混合产物测试通过，验证3份MP4、2份LRF、JPEG及仅含3份视频的默认范围，复制和探测为零；另通过OSMO native6项、原Action6 native单文件1项及有限头30项。主分支增加默认／预览照片选择2项通过（`/tmp/camctl-video-scope-photos.log`）。空／未知视频范围与照片的异常组合继续V8验证。
+
+V7 已集成为 `0e40c84`，有界读取与受管哈希修正为 `290dc82`。检查副本授权前两等待者、后到设备直读、独立交付及实际文件清理集成2项通过，相关单元5项通过；源和目标均受文件执行器保护，来源清理限制仍适用。原默认范围／查询定向回归17项通过，最小SQLite排序夹具补齐策略后1项复测通过。
+
+完整Python单元门槛在包含V4的隔离工作区仅运行一次：Python3.11.16，7046 passed、1 skipped、2 warnings，45.21秒，退出码0。原日志与命令已复制到主工作区 `.local/verification/action6-video-mode-v11/`；警告来自两个同步测试被标记asyncio。后续V8/V9新增改动继续按影响定向验证，不重复整套单元门槛。
 
 V6 独立检查链已集成为 `584099a`：新增检查作为 action 子记录，copy 有独立 inspection 所有权，完整校验后按需探测；新检查端口两项实际读取／完整副本／指标保存／重入测试通过，既有输入拷贝与 native 完成12项通过，数据库结构3857项断言和事件登记通过。V7 正在闭合副本复用及释放，V8 正在组合真实异常处理器，V9 正在组合覆盖报告；来源终态后的部分检查与取消收场须经这些后续接缝验证。
 
