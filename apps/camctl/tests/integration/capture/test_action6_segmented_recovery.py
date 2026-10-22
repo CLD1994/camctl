@@ -14,6 +14,7 @@ from camctl.capture.handlers import _stop_call, capture_handler
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.capture.models import HostTimerStopSave
+from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.host_files.models import BoundDirectories
@@ -22,6 +23,11 @@ from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.outputs.copy import SourceDigest
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
+from camctl.operations.attempts import AttemptConfig
+from camctl.persistence.repositories.segment_selections import (
+    FixSegmentSelection,
+    fix_segment_selection,
+)
 from camctl.reporting.generation import generate_report_file
 from ..reporting.test_generation import _freeze, _spec
 
@@ -39,6 +45,7 @@ from .test_record_file_completion_wait import (
     _result_port,
     _stop_context,
 )
+from ..outputs.test_segment_default_scope import _obtain
 
 pytestmark = pytest.mark.asyncio
 
@@ -508,5 +515,215 @@ async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, m
         ).fetchone() == (3,)
         assert runtime.action(action_id)["status"] == 3
         driver.list_results.assert_awaited_once()
+    finally:
+        owned.connection.close()
+
+
+async def _native_action6_recovery_with_unknown_video_scope(
+    tmp_path, monkeypatch, *, start_unknown: bool, probe_values
+):
+    owned, runtime, action_id, handler = await consumer_world(
+        tmp_path,
+        "timelapse",
+        catalog=_Action6Native151Catalog(0),
+        start=False,
+    )
+    (activity_id,) = owned.connection.execute(
+        "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
+    ).fetchone()
+    fixed = runtime.capture.fix_baseline(
+        BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
+    )
+    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
+    from camctl.capture.handlers import _control_call
+
+    await _control_call(
+        runtime,
+        runtime.action(action_id),
+        "start_timelapse",
+        "timelapse_sent",
+        activity_facts={"sent_at": _NOW},
+    )
+    tools = _attach_media(runtime, owned, tmp_path, probe_values)
+    wall, mono = [_NOW], [5_000_000_000]
+    runtime.wall_us = lambda: wall[0]
+    runtime.monotonic_ns = lambda: mono[0]
+    runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
+    runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
+    await capture_handler(handler)(action_id, runtime)
+
+    async def read(request, batch):
+        from .test_result_page_history import _actual
+
+        entries = _entries(3, photo=True)
+        if start_unknown:
+            entries.append(_entry("DJI_001/unkeyed_D.MP4"))
+        entries.sort(key=lambda entry: entry["identity"])
+        return DeviceCallResult.from_outcome(
+            _actual(request.ticket, entries=entries, finalized=True)
+        )
+
+    driver = _result_port(runtime, read)
+    wall[0] = _NOW + 300_200_000
+    mono[0] += 300_200_000_000
+    from camctl.capture import action6_completion
+    from camctl.capture.action6_recovery import advance_action6_recovery
+
+    async def inspect_saved_native_result(
+        runtime, requested_action_id, *, canceled=False
+    ):
+        action = runtime.action(requested_action_id)
+        ref = await action6_completion.prepare_action6_segment_set(
+            runtime, action, None, canceled=canceled
+        )
+        assert ref is not None
+        await advance_action6_recovery(runtime, action)
+
+    monkeypatch.setattr(
+        action6_completion,
+        "advance_action6_native_result",
+        inspect_saved_native_result,
+    )
+    await capture_handler(handler)(action_id, runtime)
+    assert driver.list_results.await_count == 1
+    assert runtime.action(action_id)["status"] == 3
+    return owned, runtime, action_id, tools
+
+
+async def _select_native_outputs(
+    owned, runtime, source_action_id, photo_id, mode, request_id
+):
+    _, selection_id = _obtain(
+        owned, runtime, source_action_id, mode, request_id
+    )
+    saved = fix_segment_selection(
+        FixSegmentSelection(selection_id, runtime.wall_us()),
+        new_operation_key(),
+        owned,
+    )
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    rows = owned.connection.execute(
+        "SELECT i.output_id,o.kind,json_extract(d.identity_key,'$[2]')"
+        " FROM obtain_items i"
+        " JOIN outputs o ON o.id=i.output_id"
+        " JOIN device_files d ON d.id=o.device_file_id"
+        " WHERE i.selection_id=? ORDER BY i.id",
+        (selection_id,),
+    ).fetchall()
+    assert len(rows) == 1
+    output_id, kind, identity = rows[0]
+    assert output_id == photo_id
+    assert kind == 1
+    assert identity.endswith(".JPG")
+    return output_id
+
+
+async def _select_explicit_native_video(
+    owned, runtime, source_action_id, video_id, request_id
+):
+    _, selection_id = _obtain(
+        owned, runtime, source_action_id, [video_id], request_id
+    )
+    saved = fix_segment_selection(
+        FixSegmentSelection(selection_id, runtime.wall_us()),
+        new_operation_key(),
+        owned,
+    )
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    rows = owned.connection.execute(
+        "SELECT i.output_id,o.kind FROM obtain_items i"
+        " JOIN outputs o ON o.id=i.output_id WHERE i.selection_id=? ORDER BY i.id",
+        (selection_id,),
+    ).fetchall()
+    assert rows == [(video_id, 1)]
+
+
+@pytest.mark.parametrize(
+    ("start_unknown", "probe_values", "scope_state", "member_count", "reason"),
+    [
+        (False, (RuntimeError("ffprobe unavailable"),), "empty", 0, "probe_failed"),
+        (True, (), "unknown", None, "start_unknown"),
+    ],
+    ids=("first-probe-unknown-empty", "unknown-start"),
+)
+async def test_action6_native_empty_or_unknown_video_scope_keeps_photo_selectable(
+    tmp_path,
+    monkeypatch,
+    start_unknown,
+    probe_values,
+    scope_state,
+    member_count,
+    reason,
+):
+    owned, runtime, action_id, tools = (
+        await _native_action6_recovery_with_unknown_video_scope(
+            tmp_path,
+            monkeypatch,
+            start_unknown=start_unknown,
+            probe_values=probe_values,
+        )
+    )
+    try:
+        outputs = owned.connection.execute(
+            "SELECT o.id,o.kind,json_extract(d.identity_key,'$[2]')"
+            " FROM outputs o JOIN device_files d ON d.id=o.device_file_id"
+            " WHERE o.source_action_id=? ORDER BY o.id",
+            (action_id,),
+        ).fetchall()
+        photo_ids = [
+            output_id
+            for output_id, kind, identity in outputs
+            if kind == 1 and identity.endswith(".JPG")
+        ]
+        video_ids = [
+            output_id
+            for output_id, kind, identity in outputs
+            if kind == 1 and identity.endswith(".MP4")
+        ]
+        assert len(photo_ids) == 1
+        assert len(video_ids) == (4 if start_unknown else 3)
+
+        ref = SegmentRepository().read_active_set(action_id, owned)
+        assert ref is not None
+        decision = SegmentRepository().read_decision(ref, owned)
+        assert decision.status.value == "succeeded"
+        assert decision.coverage_status.value == "unconfirmed"
+        assert decision.checked_count == 0
+        assert decision.default_scope.state.value == scope_state
+        assert decision.default_scope.member_count == member_count
+        assert decision.reason == reason
+
+        coverage = _reported_coverage(tmp_path, owned, action_id)
+        assert coverage["metric"] == "frames" and coverage["target"] == 151
+        assert coverage["status"] == "unconfirmed"
+        assert coverage["confirmed"] == 0
+        assert coverage["reason"] == {"code": reason}
+        assert coverage["checked_output_ids"] == []
+        assert coverage["default_scope"] == {
+            "state": scope_state,
+            "member_count": member_count,
+            "output_ids": [],
+        }
+        coverage_ids = (
+            coverage["checked_output_ids"]
+            + coverage["default_scope"]["output_ids"]
+        )
+        assert set(coverage_ids).issubset(set(map(str, video_ids)))
+        assert str(photo_ids[0]) not in coverage_ids
+
+        for mode, request_id in (("default", 101), ("preview", 102)):
+            await _select_native_outputs(
+                owned, runtime, action_id, photo_ids[0], mode, request_id
+            )
+        explicit_video = next(
+            output_id
+            for output_id, kind, identity in outputs
+            if kind == 1 and identity.endswith("_0009_D.MP4")
+        )
+        await _select_explicit_native_video(
+            owned, runtime, action_id, explicit_video, 103
+        )
+        assert len(tools.calls) == (0 if start_unknown else 1)
+        assert all(count_frames for _, count_frames in tools.calls)
     finally:
         owned.connection.close()
