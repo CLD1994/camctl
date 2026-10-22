@@ -4,7 +4,7 @@ from .action6_formats import ACTION6_FILE_FORMATS
 from .bounded_result_reading import ResultFormat, ResultProfile, list_declared_results
 
 
-_ACTION6_RESULT_PROFILE = ResultProfile(
+ACTION6_RESULT_PROFILE = ResultProfile(
     evidence_version=2,
     formats=tuple(ResultFormat(file_format.suffix, file_format.kind, file_format.format_id)
         for file_format in ACTION6_FILE_FORMATS.values()),
@@ -18,4 +18,4 @@ _ACTION6_RESULT_PROFILE = ResultProfile(
 
 async def list_action6_results(driver, request, batch):
     """列举 Action6 主页原片，并保留可选 LRF 配对诊断。"""
-    return await list_declared_results(driver, request, batch, _ACTION6_RESULT_PROFILE)
+    return await list_declared_results(driver, request, batch, ACTION6_RESULT_PROFILE)

@@ -95,10 +95,34 @@ def _proof(connection, request, *, current_boundary=None):
         raise ConsistencyError('原差集文件没有唯一实际观察')
     entry = entries[0]
     suffix = entry.identity.rpartition('.')[2].lower()
-    if (suffix not in {'osv', 'lrf'} or not isinstance(entry.format_id, str)
-            or entry.format_id.lower() != suffix):
-        raise ConsistencyError('原观察格式与 OSV/LRF 文件后缀不一致')
-    role = int(_ROLE.ORIGINAL if suffix == 'osv' else _ROLE.PREVIEW)
+    action6 = action['execution_spec_json'].get('result_policy') == (
+        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    )
+    if action6:
+        from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
+        from camctl.devices.drivers.adb_cameras.action6_formats import format_for_suffix
+
+        profile = profile_for_policy(action['execution_spec_json']['result_policy'])
+        kind = profile.classify_file(entry.identity).kind
+        photo_format = format_for_suffix("." + suffix)
+        expected_format = (
+            "mp4" if kind is SegmentFileKind.VIDEO
+            else "lrf" if kind is SegmentFileKind.PREVIEW
+            else None if photo_format is None else photo_format.format_id
+        )
+        if (expected_format is None or not isinstance(entry.format_id, str)
+                or entry.format_id.casefold() != expected_format):
+            raise ConsistencyError('Action6 原观察格式与冻结文件类别不一致')
+        role = int(
+            _ROLE.PREVIEW
+            if kind is SegmentFileKind.PREVIEW
+            else _ROLE.ORIGINAL
+        )
+    else:
+        if (suffix not in {'osv', 'lrf'} or not isinstance(entry.format_id, str)
+                or entry.format_id.lower() != suffix):
+            raise ConsistencyError('原观察格式与 OSV/LRF 文件后缀不一致')
+        role = int(_ROLE.ORIGINAL if suffix == 'osv' else _ROLE.PREVIEW)
     file = row_facts(connection, 'device_files', request.file_id)
     if (file is None or file['identity_key'] != file_identity_key(
             action['device_id'], action['driver_id'], entry.identity)):

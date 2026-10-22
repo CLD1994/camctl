@@ -26,6 +26,7 @@ class CoverageMetric(StrEnum):
 
 
 class CoverageStatus(StrEnum):
+    NOT_PERFORMED = "not_performed"
     REACHED = "reached"
     CONFIRMED_SHORT = "confirmed_short"
     UNCONFIRMED = "unconfirmed"

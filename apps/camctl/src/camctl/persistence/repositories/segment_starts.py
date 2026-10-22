@@ -76,12 +76,12 @@ def segment_start_from_set(connection, setrow):
         if action_id != setrow["action_id"] or page_id <= fixed[0]:
             raise ConsistencyError("起点观察没有沿用同一原基准和动作")
         file = _file_at(connection, file_id, boundary)
-        if file["source_action_id"] != action_id or file["role"] != role:
-            order_unknown = True
         identity = parse_exact_json(file["identity_key"])[2]
         parsed = profile_for_action(connection, setrow["action_id"]).classify_file(identity)
         if parsed.kind is SegmentFileKind.PHOTO:
             continue
+        if file["source_action_id"] != action_id or file["role"] != role:
+            order_unknown = True
         if parsed.key is None:
             order_unknown = True
             continue

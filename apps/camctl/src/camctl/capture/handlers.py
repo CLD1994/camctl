@@ -2534,6 +2534,13 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     from camctl.devices.tasks import CaptureResultPolicy
 
     policy = runtime.action(action_id)["execution_spec_json"].get("result_policy")
+    if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
+        from camctl.capture.action6_recovery import finalize_pending_action6_inspections
+
+        if not finalize_pending_action6_inspections(
+            runtime, action_id, reason="source_canceled"
+        ):
+            return
     if (
         policy == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
         or unstarted
@@ -3955,6 +3962,14 @@ async def _advance_recording_outcome(
 
     if (
         action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    ):
+        from camctl.capture.action6_completion import advance_action6_segmented_recording
+
+        await advance_action6_segmented_recording(context, action, decision)
+        return
+    if (
+        action["execution_spec_json"].get("result_policy")
         == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
     ):
         from camctl.capture.segment_completion import advance_segmented_recording
@@ -4430,6 +4445,14 @@ async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> No
 
         await advance_native_result(context, action_id)
         return
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    ):
+        from camctl.capture.action6_completion import advance_action6_native_result
+
+        await advance_action6_native_result(context, action_id)
+        return
     listing = await _listing_round(context, action_id)
     if context.action(action_id)["cancel_requested"]:
         # 原页及调用结果由 listing 拥有者保留，取消收场复用原轮次。
@@ -4440,8 +4463,11 @@ async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> No
         # 在途、本轮列举失败或责任已闭合：等待收尾轮次，不提交新意图。
         return
     if listing.phase is ListingPhase.EXHAUSTED:
-        # 有限轮次用尽：核实责任与无法确认结论同事务收场。
-        _close_check_unconfirmed(context, action_id)
+        # Action6 分段由公共结果来源事务接管耗尽，不先单独关闭原 RESULTS。
+        # 其他合同沿用原结论收场。
+        if (context.action(action_id)["execution_spec_json"].get("result_policy")
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+            _close_check_unconfirmed(context, action_id)
         await _finish_timelapse_conclusion(context, action_id)
         return
     registered = _register_listing(context, action_id, listing)
@@ -4543,6 +4569,14 @@ async def _close_canceled_timelapse(
     """
     from camctl.devices.tasks import CaptureResultPolicy
 
+    if (
+        context.action(action_id)["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    ):
+        from camctl.capture.action6_completion import advance_action6_native_result
+
+        await advance_action6_native_result(context, action_id, canceled=True)
+        return
     if (
         context.action(action_id)["execution_spec_json"].get("result_policy")
         == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
@@ -4764,9 +4798,9 @@ def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingR
     """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
     from camctl.devices.tasks import CaptureResultPolicy
 
-    if (
-        runtime.action(action_id)["execution_spec_json"].get("result_policy")
-        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    if runtime.action(action_id)["execution_spec_json"].get("result_policy") in (
+        CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
     ):
         from camctl.capture.segment_completion import register_segment_observations
 
@@ -5205,6 +5239,14 @@ async def _finish_timelapse_conclusion(
     """
     from camctl.devices.tasks import CaptureResultPolicy
 
+    if (
+        runtime.action(action_id)["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    ):
+        from camctl.capture.action6_completion import advance_action6_native_result
+
+        await advance_action6_native_result(runtime, action_id)
+        return
     if (
         runtime.action(action_id)["execution_spec_json"].get("result_policy")
         == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value

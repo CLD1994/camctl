@@ -88,7 +88,18 @@ def _check_write_kind(db,setrow,kind):
     from camctl.capture.segment_storage import SegmentSourceKind,PublicationKind
     if (setrow['source_kind']!=encode_enum(SegmentSourceKind.COMPLETE_SCAN)
             or setrow['publication_kind']!=encode_enum(PublicationKind.RESULT)):
-        raise ConsistencyError('普通完整扫描写入不适用于该结果来源或发布处置')
+        action=row_facts(db,'actions',setrow['action_id'])
+        from camctl.devices.tasks import CaptureResultPolicy
+        action6=(action is not None and action['execution_spec_json'].get('result_policy')
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
+        allowed=(action6 and kind in ('MEMBERS','FIX_MEMBERS','ASSESS','SCOPE','ACTIVATE')
+            and setrow['source_kind'] in tuple(encode_enum(value) for value in (
+                SegmentSourceKind.COMPLETE_SCAN, SegmentSourceKind.RETAINED_SOURCES,
+                SegmentSourceKind.NO_RESULTS))
+            and setrow['publication_kind'] in tuple(encode_enum(value) for value in (
+                PublicationKind.RESULT, PublicationKind.CANCELED)))
+        if not allowed:
+            raise ConsistencyError('普通完整扫描写入不适用于该结果来源或发布处置')
     if kind in ('MEMBERS','FIX_MEMBERS'):
         reason=_one(db,"SELECT json_extract(body_json,'$.reason') FROM history_events WHERE id=?",
             (setrow['created_event_id'],))[0]
@@ -174,7 +185,12 @@ def _output_candidate(db,setrow,stored):
     paired=_read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity))
     if stored.pairing_fact_id is not None:
         from .result_pages import _family_fields
-        left, right = _family_fields(member.identity), _family_fields(paired.member.identity)
+        action = row_facts(db, 'actions', setrow['action_id'])
+        result_policy = action['execution_spec_json'].get('result_policy')
+        left, right = (
+            _family_fields(member.identity, result_policy=result_policy),
+            _family_fields(paired.member.identity, result_policy=result_policy),
+        )
         same_family = (left[0] is not None and left[:2] == right[:2]
                        and left[2] == int(_FAMILY_ROLE.PREVIEW)
                        and right[2] == int(_FAMILY_ROLE.ORIGINAL))
@@ -340,6 +356,10 @@ def _stored_gaps(ref,owned):
 
 def _verify_assessment(db,setrow,facts,assessment):
     _check_write_kind(db,setrow,'ASSESS')
+    from camctl.capture.segment_models import SegmentDecision
+    if isinstance(assessment, SegmentDecision):
+        _verify_action6_decision(db, setrow, assessment)
+        return
     if setrow["source_kind"] != int(enum_for("segment_sets.source_kind").COMPLETE_SCAN):
         raise ConsistencyError("普通完整扫描判断不能替代跨轮保留来源")
     action,*_=_source(db,_ref(setrow))
@@ -387,6 +407,131 @@ def _verify_assessment(db,setrow,facts,assessment):
         if first is None:first=saved
     if count!=actual.gap_count or first!=actual.first_gap:
         raise ConsistencyError('两遍缺口数量或首项不一致')
+
+
+def _verify_action6_decision(db, setrow, decision):
+    """独立复核 Action6 公共正常判断、冻结目标和非照片视频范围。"""
+    from camctl.capture.segment_models import (
+        CoverageMetric, CoverageStatus, DefaultScopeState, SegmentDecisionStatus,
+    )
+    from camctl.devices.segment_profiles import profile_for_policy
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    action = row_facts(db, 'actions', setrow['action_id'])
+    spec = action['execution_spec_json']
+    if spec.get('result_policy') != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
+        raise ConsistencyError('公共 Action6 决策不适用于冻结的其他分段策略')
+    if decision.set_ref != _ref(setrow):
+        raise ConsistencyError('Action6 决策改变原冻结集合')
+    from camctl.contracts.json_values import parse_exact_json
+    params = action['effective_params_json']
+    if isinstance(params, str):
+        params = parse_exact_json(params)
+    action_type = enum_for('actions.type')(action['type']).name.lower()
+    target = profile_for_policy(spec['result_policy']).coverage_target(
+        params, spec, action_type)
+    if target is None:
+        raise ConsistencyError('Action6 冻结特化没有提供覆盖目标')
+    if (decision.metric, decision.target) != (target.metric, target.value):
+        raise ConsistencyError('Action6 覆盖目标与受理时冻结参数不同')
+    if decision.coverage_status is CoverageStatus.NOT_PERFORMED:
+        if decision.confirmed is not None or decision.checked_count != 0:
+            raise ConsistencyError('未执行 Action6 媒体检查不得携带实测值或检查计数')
+    elif decision.coverage_status is CoverageStatus.REACHED:
+        if decision.confirmed is None or decision.confirmed < decision.target:
+            raise ConsistencyError('Action6 达标结论低于冻结目标')
+    elif decision.coverage_status is CoverageStatus.CONFIRMED_SHORT:
+        if decision.confirmed is None or decision.confirmed >= decision.target:
+            raise ConsistencyError('Action6 不足结论未低于冻结目标')
+
+    original_count = 0
+    first_cursor = None
+    last_cursor = None
+    cursor_at_checked_count = None
+    prefix_count = 0
+    prefix_first_cursor = None
+    prefix_last_cursor = None
+    prefix_open = True
+    ordered = True
+    known_gap = False
+    previous_key = None
+    cursor = None
+    Reader = type('Reader', (), {'connection': db})
+    while True:
+        page = read_segment_members(_ref(setrow), cursor, 128, Reader)
+        for stored in page.items:
+            member = stored.member
+            if not _eligible_original(member):
+                continue
+            if member.cursor is None:
+                ordered = False
+                continue
+            original_count += 1
+            first_cursor = member.cursor if first_cursor is None else min(first_cursor, member.cursor)
+            last_cursor = member.cursor if last_cursor is None else max(last_cursor, member.cursor)
+            if previous_key is not None:
+                if member.key <= previous_key:
+                    ordered = False
+                else:
+                    try:
+                        if previous_key.successor() != member.key:
+                            known_gap = True
+                            prefix_open = False
+                    except ValueError:
+                        known_gap = True
+                        prefix_open = False
+            previous_key = member.key
+            if prefix_open:
+                prefix_count += 1
+                if prefix_first_cursor is None:
+                    prefix_first_cursor = member.cursor
+                prefix_last_cursor = member.cursor
+            if original_count == decision.checked_count:
+                cursor_at_checked_count = member.cursor
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    selected = decision.default_scope
+    if selected.state is DefaultScopeState.EMPTY:
+        expected_empty = (
+            prefix_count == 0
+            if decision.coverage_status is CoverageStatus.NOT_PERFORMED
+            or decision.status is SegmentDecisionStatus.CANCELED
+            else decision.checked_count == 0
+        )
+        if not expected_empty:
+            raise ConsistencyError('Action6 空视频范围仍存在应纳入的合格原片')
+    elif selected.state is DefaultScopeState.NONEMPTY:
+        full_scope = (decision.coverage_status is CoverageStatus.NOT_PERFORMED
+            or decision.status is SegmentDecisionStatus.CANCELED)
+        expected_count = (
+            (prefix_count if known_gap else original_count)
+            if full_scope else decision.checked_count
+        )
+        expected_first = (
+            (prefix_first_cursor if known_gap else first_cursor)
+            if full_scope else first_cursor
+        )
+        expected_last = (
+            (prefix_last_cursor if known_gap else last_cursor)
+            if full_scope else cursor_at_checked_count
+        )
+        if (not ordered or expected_count != selected.member_count
+                or expected_first != selected.first_cursor
+                or expected_last != selected.last_cursor):
+            raise ConsistencyError('Action6 默认范围必须是有序合格视频的完整范围或已检查前缀')
+    elif selected.state is not DefaultScopeState.UNKNOWN:
+        raise ConsistencyError('Action6 默认范围状态无效')
+    if decision.status is SegmentDecisionStatus.SUCCEEDED:
+        if (setrow['source_kind'] != int(enum_for('segment_sets.source_kind').COMPLETE_SCAN)
+                or selected.state is not DefaultScopeState.NONEMPTY
+                or decision.coverage_status is CoverageStatus.NOT_PERFORMED and known_gap):
+            raise ConsistencyError('Action6 正常成功缺少完整扫描或已知默认视频范围')
+    if decision.status is SegmentDecisionStatus.CANCELED:
+        if setrow['publication_kind'] != int(enum_for('segment_sets.publication_kind').CANCELED):
+            raise ConsistencyError('Action6 取消必须使用原取消发布类型')
+    elif setrow['publication_kind'] == int(enum_for('segment_sets.publication_kind').CANCELED):
+        raise ConsistencyError('Action6 取消发布必须保存取消决策')
 
 
 def _fixed_file(db,file_id,file_event_id):
@@ -769,9 +914,19 @@ class _Command:
             elif kind=='ASSESS':
                 if setrow['state']!=_STATE.MEMBERS_FIXED:raise ConsistencyError('判断只能在固定成员后保存一次')
                 facts,assessment=payload
+                from camctl.capture.segment_models import SegmentDecision
+                if isinstance(assessment, SegmentDecision):
+                    if facts is not None:
+                        raise ConsistencyError('公共分段判断不得伪造 OSMO 完成事实')
+                elif facts is None:
+                    raise ConsistencyError('OSMO 分段判断必须保存原完成事实')
                 _verify_assessment(db,setrow,facts,assessment)
+                from camctl.capture.segment_storage import facts_document
+
                 rows=[update_change('segment_sets',sid,{'state':setrow['state'],'facts_json':None,'assessment_json':None},
-                    {'state':int(_STATE.ASSESSED),'facts_json':document(facts),'assessment_json':assessment_document(assessment)})]
+                    {'state':int(_STATE.ASSESSED),'facts_json':facts_document(
+                        facts, public_decision=isinstance(assessment, SegmentDecision)
+                    ),'assessment_json':assessment_document(assessment)})]
             elif kind=='SCOPE':
                 if setrow['state']!=_STATE.ASSESSED:raise ConsistencyError('默认范围需要原已保存判断')
                 assessment=assessment_from_document(setrow['assessment_json']);selected=assessment.default_scope
@@ -1103,6 +1258,12 @@ class SegmentRepository:
         if not isinstance(facts,CompletionFacts) or not isinstance(assessment,SegmentAssessment):raise TypeError('判断需要 P1 事实和摘要')
         return self._save('ASSESS',ref,(facts,assessment),occurred_at,key,owned)
 
+    def save_decision(self, ref, decision, occurred_at, key, owned):
+        from camctl.capture.segment_models import SegmentDecision
+        if not isinstance(decision, SegmentDecision):
+            raise TypeError('公共分段判断需要 SegmentDecision')
+        return self._save('ASSESS', ref, (None, decision), occurred_at, key, owned)
+
     def append_scope(self,ref,member_ids,occurred_at,key,owned):
         _batch(member_ids)
         for identity in member_ids:ObjectId(identity)
@@ -1125,3 +1286,9 @@ class SegmentRepository:
         row=_set(owned.connection,ref,fixed=True)
         if row['state']!=_STATE.ASSESSED:raise ConsistencyError('原集合判断尚未保存')
         return assessment_from_document(row['assessment_json'])
+    def read_decision(self, ref, owned):
+        from camctl.capture.segment_models import SegmentDecision
+        decision = self.read_assessment(ref, owned)
+        if not isinstance(decision, SegmentDecision):
+            raise ConsistencyError('原集合保存的不是公共分段判断')
+        return decision

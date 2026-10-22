@@ -65,11 +65,15 @@ def retained_disposition(ref, db):
         raise ConsistencyError("跨轮保留发布不能声明可靠当前扫描或普通完整判断")
     if _fixed_count(db, setrow) != setrow["member_count"]:
         raise ConsistencyError("保留发布遗漏原 H0 的实际成员")
+    action = row_facts(db, "actions", ref.action_id)
+    from camctl.devices.tasks import CaptureResultPolicy
+    action6 = (action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
     from .segment_current import current_gaps
     from .segments import _stored_gaps
     from itertools import zip_longest
 
-    expected_gaps = () if canceled or external or native else current_gaps(db, setrow)
+    expected_gaps = () if canceled or external or native or action6 else current_gaps(db, setrow)
     for actual, saved in zip_longest(expected_gaps, _stored_gaps(ref, reader)):
         if actual is None or saved is None or actual != saved:
             raise ConsistencyError("跨轮保留结果遗漏或改变当前明确缺口")

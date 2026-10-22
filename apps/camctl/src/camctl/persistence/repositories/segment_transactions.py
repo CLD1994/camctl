@@ -46,7 +46,11 @@ def _candidates(request,reader,batch=128):
     if setrow["publication_kind"] == int(
         enum_for("segment_sets.publication_kind").CANCELED
     ):
-        return
+        action = row_facts(reader.connection, "actions", request.ref.action_id)
+        from camctl.devices.tasks import CaptureResultPolicy
+        if (action["execution_spec_json"].get("result_policy")
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+            return
     cursor=None
     while True:
         page=storage.read_segment_output_candidates(request.ref,cursor,batch,reader)
@@ -95,7 +99,39 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
         from .segment_dispositions import retained_failure
 
         return retained_failure(request, setrow, db)
-    from camctl.capture.segment_models import SegmentAssessmentReason
+    from camctl.capture.segment_models import SegmentAssessmentReason, SegmentDecision, SegmentDecisionStatus
+    if isinstance(assessment, SegmentDecision):
+        if assessment.status is SegmentDecisionStatus.SUCCEEDED:
+            if request.failure is not None:
+                raise ConsistencyError("Action6 成功判断不能携带失败申请")
+            return 3, None, None
+        if assessment.status is SegmentDecisionStatus.CANCELED:
+            if request.failure is not None or not _canceled_result(db, request.ref):
+                raise ConsistencyError("Action6 取消判断必须引用实际取消结果且不带失败")
+            return 6, None, None
+        if request.failure is None:
+            raise ConsistencyError("Action6 失败或未确认判断必须保存原实际失败")
+        if assessment.failure_code != request.failure.code:
+            raise ConsistencyError("Action6 完成失败改变了冻结决策错误代码")
+        if assessment.status is SegmentDecisionStatus.FAILED:
+            expected = {
+                "activity_id": str(request.activity_id),
+                "reason": assessment.reason
+                if assessment.reason in ("no_outputs", "invalid_outputs")
+                else "invalid_outputs",
+            }
+            if request.failure.code != "capture_failed" or not json_equal(request.failure.details, expected):
+                raise ConsistencyError("Action6 明确产物失败与冻结决策不同")
+        elif assessment.status is SegmentDecisionStatus.UNCONFIRMED:
+            expected = {
+                "activity_id": str(request.activity_id),
+                "reason": "completion_unknown"
+                if assessment.reason == "completion_unknown"
+                else "outputs_unknown",
+            }
+            if request.failure.code != "capture_result_unconfirmed" or not json_equal(request.failure.details, expected):
+                raise ConsistencyError("Action6 未确认失败与冻结决策不同")
+        return 4, registered_error(request.failure.code)["action_error_id"], request.failure.details
     facts=facts_from_document(setrow['facts_json'])
     failure=request.failure
     if assessment.status is SegmentAssessmentStatus.SUCCEEDED:
@@ -211,6 +247,83 @@ def verify_completion_proof(request,reader):
         retained_disposition(request.ref, reader.connection)
         return SavedSegmentCompletionProof(
             storage._set(reader.connection, request.ref)["source_event_id"]
+        )
+    setrow = storage._set(reader.connection, request.ref, fixed=True)
+    action = row_facts(reader.connection, "actions", request.ref.action_id)
+    from camctl.devices.tasks import CaptureResultPolicy
+    if (action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+        from .result_sources import ResultSourceKind, load_result_source
+        from camctl.devices.recording_completion import completed_file_wait_source
+        from .result_pages import _at
+
+        _, activity, run, attempt, saved = storage._source(
+            reader.connection, request.ref
+        )
+        source = load_result_source(reader.connection, saved.ref.ticket)
+        canceled = _canceled_result(reader.connection, request.ref)
+        spec = action["execution_spec_json"]
+        if action["type"] == int(enum_for("actions.type").CAMERA_RECORD):
+            if source.kind is not ResultSourceKind.STOP:
+                raise ConsistencyError("Action6 普通录像完成缺少同一活动的可靠STOP来源")
+        elif canceled:
+            if source.kind not in (ResultSourceKind.STOP, ResultSourceKind.NATURAL):
+                raise ConsistencyError("Action6 原生延时取消缺少可靠结束来源")
+        elif source.kind is not ResultSourceKind.NATURAL or source.context is None:
+            raise ConsistencyError("Action6 原生延时正常完成缺少可靠自然等待来源")
+        if source.kind is ResultSourceKind.STOP:
+            required_wait_ms = spec.get("file_completion_wait_ms")
+            if (not source.requires_file_wait or source.context is None
+                    or type(required_wait_ms) is not int or required_wait_ms <= 0):
+                raise ConsistencyError("Action6 STOP 来源没有冻结的正文件等待规则")
+            final, _ = _at(reader.connection, setrow["current_final_page_event_id"])
+            settlement = final.page.outcome.settlement
+            data = (
+                None
+                if settlement is None
+                else settlement.evidence.data
+            )
+            source_page = None
+            source_page_id = None if data is None else data.get(
+                "file_completion_source_page_event_id"
+            )
+            if source_page_id is not None:
+                if type(source_page_id) is not int or source_page_id >= final.ref.event_id:
+                    raise ConsistencyError("Action6 文件等待复用页不是更早的原结果页")
+                previous, _ = _at(reader.connection, source_page_id)
+                if previous.ref.ticket.run_id != saved.ref.ticket.run_id:
+                    raise ConsistencyError("Action6 文件等待复用页不属于相同 RESULTS 责任")
+                previous_settlement = previous.page.outcome.settlement
+                source_page = {
+                    "event_id": source_page_id,
+                    "activity_id": str(activity["id"]),
+                    "data": (
+                        None
+                        if previous_settlement is None
+                        else previous_settlement.evidence.data
+                    ),
+                }
+            try:
+                completed_file_wait_source(
+                    data,
+                    page_event_id=final.ref.event_id,
+                    activity_id=str(activity["id"]),
+                    stop_result_event_id=source.context["stop_result_event_id"],
+                    required_wait_ms=required_wait_ms,
+                    source_page=source_page,
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("Action6 STOP 来源缺少真实完成的文件等待") from error
+        elif source.kind is ResultSourceKind.NATURAL:
+            if (source.context is None
+                    or source.context.get("wait_completed_event_id")
+                    != activity["wait_completed_event_id"]
+                    or source.context.get("wait_completed_event_id") is None):
+                raise ConsistencyError("Action6 自然完成缺少同一活动的可靠有限等待")
+        return SavedSegmentCompletionProof(
+            attempt["intent_event_id"],
+            None if source.context is None else source.context.get("stop_result_event_id"),
+            None if source.context is None else source.context.get("wait_completed_event_id"),
         )
     from camctl.capture.segment_models import EvidenceState
     from camctl.devices.capture_timing import CaptureTiming
@@ -507,6 +620,7 @@ def verify_finish_request_event(db,event,context,action_id):
     ) in (
         CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
         CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value,
+        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
     )
     changed=next(row for row in event.rows if row.table=='actions' and row.row_id==action_id)
     status=changed.after.values.get('status')
@@ -672,10 +786,17 @@ def verify_publication(db,ref,event,context):
     header = accepted.evidence.get("segment_finish_request")
     request = _header_request(header)
     _, _, _, assessment = _identity(request, db)
-    if action['status']==3 and assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
-        raise ConsistencyError('来源成功与冻结判断不同')
-    if assessment.gap_count is None and (action['status']==3 or assessment.default_scope.state is not DefaultScopeState.UNKNOWN):
-        raise ConsistencyError('缺口未知不能提升成功或默认范围')
+    from camctl.capture.segment_models import SegmentDecision, SegmentDecisionStatus
+    if isinstance(assessment, SegmentDecision):
+        if action['status'] == 3 and assessment.status is not SegmentDecisionStatus.SUCCEEDED:
+            raise ConsistencyError('Action6 来源成功与冻结判断不同')
+        if action['status'] == 6 and assessment.status is not SegmentDecisionStatus.CANCELED:
+            raise ConsistencyError('Action6 来源取消与冻结判断不同')
+    else:
+        if action['status']==3 and assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
+            raise ConsistencyError('来源成功与冻结判断不同')
+        if assessment.gap_count is None and (action['status']==3 or assessment.default_scope.state is not DefaultScopeState.UNKNOWN):
+            raise ConsistencyError('缺口未知不能提升成功或默认范围')
     for changed in event.rows:
         if changed.table=='segment_scope_members':
             scope=row_facts(db,'segment_scope_members',changed.row_id)

@@ -235,6 +235,14 @@ def _prepare(db,request):
         return _prepare_external(db, request, setrow)
     if request.reason in _NATIVE_REASONS:
         return _prepare_native(db, request, setrow)
+    action = row_facts(db, 'actions', request.ref.action_id)
+    from camctl.devices.tasks import CaptureResultPolicy
+    action6_assessed = (
+        action['execution_spec_json'].get('result_policy')
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+        and setrow['source_kind'] == encode_enum(SegmentSourceKind.COMPLETE_SCAN)
+        and setrow['state'] == int(enum_for('segment_sets.state').ASSESSED)
+    )
     if (
         request.reason not in _CURRENT_REASONS
         or setrow["source_kind"]
@@ -244,6 +252,7 @@ def _prepare(db,request):
         )
         or setrow["publication_kind"] != encode_enum(PublicationKind.RESULT)
         or setrow["state"] != int(enum_for("segment_sets.state").MEMBERS_FIXED)
+        and not action6_assessed
         or request.prior_run_end_event_id is not None
         or request.binding_failure is not None
         or request.prior_conclusion_id is not None
@@ -528,9 +537,41 @@ def _verify_saved_prefix(db,request,saved,conclusion):
     from .segment_current import current_decision
     from .segment_native import native_classification
 
-    classified = native_classification(db, setrow) if native else None
+    action = row_facts(db, "actions", setrow["action_id"])
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    action6_native = (
+        native
+        and action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    )
+    if action6_native:
+        from camctl.capture.action6_completion import action6_decision_failure
+        from camctl.capture.segment_models import SegmentDecision, SegmentDecisionStatus
+        from camctl.capture.segment_storage import assessment_from_document
+
+        assessment = (
+            None
+            if setrow["assessment_json"] is None
+            else assessment_from_document(setrow["assessment_json"])
+        )
+        if not isinstance(assessment, SegmentDecision):
+            raise ConsistencyError("Action6 原生有限结论缺少已保存的 SegmentDecision")
+        current_result = (
+            CurrentSegmentResult.SUFFICIENT
+            if assessment.status is SegmentDecisionStatus.SUCCEEDED
+            else CurrentSegmentResult.UNMET
+            if assessment.status is SegmentDecisionStatus.FAILED
+            else CurrentSegmentResult.UNCONFIRMED
+        )
+        current_failure = action6_decision_failure(setrow["activity_id"], assessment)
+        classified = None
+    else:
+        classified = native_classification(db, setrow) if native else None
     reason, current_result, current_failure = (
-        (request.reason, classified.current_result, classified.failure)
+        (request.reason, current_result, current_failure)
+        if action6_native
+        else (request.reason, classified.current_result, classified.failure)
         if native
         else (
             request.reason,
@@ -881,6 +922,130 @@ def _prepare_native(db, request, setrow):
 
     action = row_facts(db, "actions", setrow["action_id"])
     canceled = request.reason is ResultCheckEndReason.NATIVE_FINITE_CANCEL_END
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+    ):
+        if (
+            action["type"] != int(enum_for("actions.type").CAMERA_TIMELAPSE)
+            or request.reason is not ResultCheckEndReason.NATIVE_RESULT_DECIDED
+            or action["status"] != 2
+            or action["cancel_requested"]
+            or setrow["source_kind"]
+            != encode_enum(SegmentSourceKind.COMPLETE_SCAN)
+            or setrow["publication_kind"] != encode_enum(PublicationKind.RESULT)
+            or setrow["state"] not in (2, int(enum_for("segment_sets.state").ASSESSED))
+            or request.check_config is None
+            or any(
+                value is not None
+                for value in (
+                    request.prior_run_end_event_id,
+                    request.prior_conclusion_id,
+                    request.binding_failure,
+                )
+            )
+        ):
+            raise ConsistencyError("Action6 原生结果决定必须沿完整自然来源和活动资格保存")
+        run = row_facts(db, "operation_runs", setrow["run_id"])
+        last = _ended_attempts(
+            db,
+            run,
+            HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"]),
+        )
+        activity = row_facts(db, "device_activities", setrow["activity_id"])
+        config = request.check_config
+        if (
+            run["status"] not in (1, 2)
+            or request.anchor_event_id != last
+            or config.timeout_s is None
+            or config.retry_interval_s is None
+            or activity["wait_completed_event_id"] is None
+        ):
+            raise ConsistencyError("Action6 原生结果缺少实际 RESULTS 结束票或有限等待")
+        from camctl.capture.action6_completion import (
+            action6_decision_failure,
+            classify_action6_segment_set,
+        )
+        from camctl.capture.segment_storage import SegmentResultRef
+        from .segment_result_sets import read_current_segment_ref
+        from .segments import SegmentRepository
+        from camctl.capture.segment_models import SegmentDecision, SegmentDecisionStatus
+        from camctl.capture.segment_storage import assessment_from_document
+        from types import SimpleNamespace
+
+        result_ref = SegmentResultRef(
+            setrow["action_id"], setrow["id"], setrow["version"]
+        )
+        reader = SimpleNamespace(connection=db)
+        ref = read_current_segment_ref(result_ref, reader)
+        if ref is None:
+            raise ConsistencyError("Action6 原生完整扫描缺少当前冻结结果引用")
+        stored = (
+            None
+            if setrow["assessment_json"] is None
+            else assessment_from_document(setrow["assessment_json"])
+        )
+        decision = stored if isinstance(stored, SegmentDecision) else None
+        if decision is None:
+            decision = classify_action6_segment_set(
+                action, ref, SegmentRepository(), reader
+            ).decision
+        status = decision.status
+        current_result = (
+            CurrentSegmentResult.SUFFICIENT
+            if status is SegmentDecisionStatus.SUCCEEDED
+            else CurrentSegmentResult.UNMET
+            if status is SegmentDecisionStatus.FAILED
+            else CurrentSegmentResult.UNCONFIRMED
+        )
+        failure = action6_decision_failure(setrow["activity_id"], decision)
+        desired = dict(
+            zip(
+                _CONFIG_COLUMNS,
+                (config.max_attempts, config.timeout_s, config.retry_interval_s),
+            )
+        )
+        changed = {
+            name: value
+            for name, value in desired.items()
+            if not json_equal(run[name], value)
+        }
+        prefix = []
+        if changed:
+            prefix.append(
+                (
+                    _CONFIGURE,
+                    update_change(
+                        "operation_runs",
+                        run["id"],
+                        {name: run[name] for name in changed},
+                        changed,
+                    ),
+                )
+            )
+        else:
+            config_event = _adopted_config_event(db, run)
+        from .capture import result_run_close_row
+
+        run_status, error = _close_values(
+            run, failure, request.reason, current_result
+        )
+        prefix.append(
+            (_FINISH, result_run_close_row(run, run_status, error))
+        )
+        values = dict(
+            set_id=setrow["id"],
+            reason=encode_enum(request.reason),
+            anchor_event_id=last,
+            prior_run_end_event_id=None,
+            prior_conclusion_id=None,
+            config_event_id=None if changed else config_event,
+            current_result=encode_enum(current_result),
+            current_failure_json=None
+            if failure is None
+            else {"code": failure.code, "details": failure.details},
+        )
+        return setrow, run, tuple(prefix), values
     if (
         action["type"] != 3
         or action["execution_spec_json"].get("result_policy")

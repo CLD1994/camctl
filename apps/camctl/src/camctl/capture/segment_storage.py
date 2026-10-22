@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from camctl.capture import segment_models as models
 from camctl.capture.segment_models import (
     SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind,
+    SegmentDecision, SegmentDecisionScope, SegmentDecisionStatus, CoverageMetric, CoverageStatus,
     ResultCheckEndReason,CurrentSegmentResult)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.segment_values import decode_text_enum
@@ -42,6 +43,20 @@ _ENUM_COLUMNS = {
     models.SegmentGapKind: 'segment_gaps.kind',
     models.SegmentGapNeighborState: 'segment_gaps.neighbors_json.state',
 }
+
+# segment_sets.state 的既有 ASSESS 转换要求 facts_json 从 NULL 推进一次。
+# 公共视频覆盖决策没有 OSMO CompletionFacts，因此用固定哨兵表达“无旧式
+# 完成事实”；事件输入仍解码为 None，不会把设备控制事实伪装成 OSMO 模型。
+_NO_COMPLETION_FACTS = {"kind": "no_completion_facts", "version": 1}
+
+
+def facts_document(value, *, public_decision=False):
+    """编码旧式完成事实列；公共决策使用无 OSMO 事实哨兵推进现有转换。"""
+    if public_decision:
+        if value is not None:
+            raise TypeError("公共分段决策不能携带 OSMO 完成事实")
+        return dict(_NO_COMPLETION_FACTS)
+    return document(value)
 
 
 @dataclass(frozen=True)
@@ -148,7 +163,7 @@ def document(value):
         validate_error_details(value.code, value.details)
         return {"code": value.code, "details": dict(value.details)}
     if isinstance(value, StrEnum):
-        return encode_enum(value)
+        return encode_enum(value) if type(value) in _ENUM_COLUMNS else value.value
     if is_dataclass(value):
         return {field.name: document(getattr(value, field.name)) for field in fields(value)}
     if value is None or type(value) in (str, int, bool):
@@ -179,6 +194,10 @@ def gap_from_document(value):
 
 
 def facts_from_document(value):
+    if value is None:
+        return None
+    if value == _NO_COMPLETION_FACTS:
+        return None
     raw = dict(value)
     for name in ('stop','file_wait','scan','start','control_completion','control_overrun'):
         raw[name] = decode_enum(models.EvidenceState, raw[name])
@@ -192,6 +211,8 @@ def facts_from_document(value):
 
 def assessment_document(value):
     raw = document(value)
+    if isinstance(value, SegmentDecision):
+        return {"decision_type": "video_coverage_v1", **raw}
     # 下界可能超过 SQLite 整数，规范文本保持精确，None 保持未知。
     raw['lower_bound_ms'] = None if value.lower_bound_ms is None else str(value.lower_bound_ms)
     return raw
@@ -199,6 +220,10 @@ def assessment_document(value):
 
 def assessment_from_document(value):
     raw = dict(value)
+    if raw.get("decision_type") == "video_coverage_v1":
+        return decision_from_document(raw)
+    if "decision_type" in raw:
+        raise ValueError("分段决策判别类型未登记")
     for name, kind in [('status',models.SegmentAssessmentStatus),('reason',models.SegmentAssessmentReason),('basis',models.CompletionBasis),('overrecord',models.OverrecordStatus)]:
         raw[name] = decode_enum(kind,raw[name])
     lower = raw['lower_bound_ms']
@@ -219,6 +244,28 @@ def assessment_from_document(value):
         scope[name] = cursor(scope[name])
     raw['default_scope'] = models.DefaultSegmentScope(**scope)
     return SegmentAssessment(**raw)
+
+
+def decision_from_document(value):
+    """只解码 Action6 的公共有限头，不尝试解释为 OSMO 判断。"""
+    raw = dict(value)
+    if raw.pop("decision_type", None) != "video_coverage_v1":
+        raise ValueError("公共分段决策类型未登记")
+    raw["set_ref"] = SegmentSetRef(**raw["set_ref"])
+    raw["status"] = SegmentDecisionStatus(raw["status"])
+    raw["metric"] = CoverageMetric(raw["metric"])
+    raw["coverage_status"] = CoverageStatus(raw["coverage_status"])
+    if raw["metric"] is CoverageMetric.DURATION_S:
+        raw["target"] = Decimal(raw["target"])
+        if raw["confirmed"] is not None:
+            raw["confirmed"] = Decimal(raw["confirmed"])
+    scope = dict(raw["default_scope"])
+    scope["state"] = decode_enum(models.DefaultScopeState, scope["state"])
+    scope["set_ref"] = SegmentSetRef(**scope["set_ref"])
+    for name in ("first_cursor", "last_cursor"):
+        scope[name] = cursor(scope[name])
+    raw["default_scope"] = SegmentDecisionScope(**scope)
+    return SegmentDecision(**raw)
 
 
 @dataclass(frozen=True)

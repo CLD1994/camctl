@@ -252,8 +252,8 @@ def _decode(event):
         raise ConsistencyError("结果页原历史不可解释") from error
 
 
-def _family_fields(identity):
-    """保留原路径与主干码点，只按OSV/LRF后缀派生有限族字段。"""
+def _family_fields(identity, *, result_policy=None):
+    """按冻结结果策略保留原路径主干，并标记配对原片和预览。"""
     directory, separator, name = identity.rpartition("/")
     if separator and not directory:
         directory = "/"
@@ -261,7 +261,24 @@ def _family_fields(identity):
     if not separator or not directory or not dot or not stem:
         return None, None, None
     suffix = suffix.lower()
-    if suffix == "osv":
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if result_policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
+        from camctl.devices.drivers.adb_cameras.action6_results import ACTION6_RESULT_PROFILE
+
+        profile = ACTION6_RESULT_PROFILE
+        original_suffixes = frozenset(
+            item.suffix.lstrip(".").casefold()
+            for item in profile.formats
+            if item.format_id == profile.paired_original_format_id
+        )
+        if suffix in original_suffixes:
+            role = int(_FAMILY_ROLE.ORIGINAL)
+        elif suffix == profile.preview_format.suffix.lstrip(".").casefold():
+            role = int(_FAMILY_ROLE.PREVIEW)
+        else:
+            return None, None, None
+    elif suffix == "osv":
         role = int(_FAMILY_ROLE.ORIGINAL)
     elif suffix == "lrf":
         role = int(_FAMILY_ROLE.PREVIEW)
@@ -271,8 +288,8 @@ def _family_fields(identity):
 
 
 def _relation_values(*, created_event_id, action_id, run_id, attempt_id,
-                     page_event_id, file_id, identity):
-    directory, stem, role = _family_fields(identity)
+                     page_event_id, file_id, identity, result_policy=None):
+    directory, stem, role = _family_fields(identity, result_policy=result_policy)
     return {
         "created_event_id": created_event_id,
         "action_id": action_id,
@@ -412,7 +429,9 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
         identity, file_id = pair
         expected_rows.append((
             index.event_id, action_id, run_id, attempt_id, append_id,
-            file_id, identity, *_family_fields(identity)))
+            file_id, identity, *_family_fields(
+                identity, result_policy=action["execution_spec_json"].get("result_policy")
+            )))
     relation_shape = [row[1:] for row in relations]
     if relation_shape != expected_rows:
         raise ConsistencyError("原页关系与实际APPEND差集身份、文件或族字段不符")
@@ -988,7 +1007,8 @@ class SaveResultPageCommand:
             for identity, file_id in file_ids:
                 values = _relation_values(created_event_id=index_event_id,
                     action_id=action["id"], run_id=run["id"], attempt_id=attempt["id"],
-                    page_event_id=event_id, file_id=file_id, identity=identity)
+                    page_event_id=event_id, file_id=file_id, identity=identity,
+                    result_policy=action["execution_spec_json"].get("result_policy"))
                 relation_rows.append(row_change("result_page_files", relation_id, values))
                 owners[("result_page_files", relation_id)] = owner
                 relation_id += 1
@@ -1158,7 +1178,8 @@ def _verify_append_difference(event, context, page, raw, reads, action, activity
                            else relation_ids[offset])
             values = _relation_values(created_event_id=index_id,
                 action_id=action["id"], run_id=run["id"], attempt_id=attempt["id"],
-                page_event_id=event.event_id, file_id=file_id, identity=identity)
+                page_event_id=event.event_id, file_id=file_id, identity=identity,
+                result_policy=action["execution_spec_json"].get("result_policy"))
             rows.append(row_change("result_page_files", relation_id, values))
         expected_index = event_envelope(index_id, context.transaction.txn_id, _TYPE,
             _INDEX_FILES, rows, event.occurred_at,

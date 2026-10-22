@@ -199,6 +199,66 @@ def current_decision(db, setrow):
                 {"activity_id": str(setrow["activity_id"]), "reason": "device_failed"},
             ),
         )
+    action = row_facts(db, "actions", setrow["action_id"])
+    from camctl.devices.tasks import CaptureResultPolicy
+    if (action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+        # 未完成 Action6 RESULTS 不能送入 OSMO 的 OSV 下界分类器；完整
+        # 原扫描则按 Action6 的实际产品与视频顺序分类，供有限结论复核。
+        from camctl.capture.segment_models import (
+            SegmentDecision,
+            SegmentDecisionStatus,
+        )
+        from camctl.capture.segment_storage import SegmentResultRef
+
+        if setrow["source_kind"] == int(
+            enum_for("segment_sets.source_kind").COMPLETE_SCAN
+        ):
+            from .segment_result_sets import read_current_segment_ref
+            from .segments import SegmentRepository
+            from camctl.capture.action6_completion import (
+                action6_decision_failure,
+                classify_action6_segment_set,
+            )
+
+            result_ref = SegmentResultRef(
+                setrow["action_id"], setrow["id"], setrow["version"]
+            )
+            reader = SimpleNamespace(connection=db)
+            ref = read_current_segment_ref(result_ref, reader)
+            if ref is None:
+                raise ConsistencyError("Action6 完整扫描缺少当前冻结结果引用")
+            from camctl.capture.segment_storage import assessment_from_document
+
+            stored = (
+                None
+                if setrow["assessment_json"] is None
+                else assessment_from_document(setrow["assessment_json"])
+            )
+            decision = stored if isinstance(stored, SegmentDecision) else None
+            if decision is None:
+                facts = classify_action6_segment_set(
+                    action, ref, SegmentRepository(), reader
+                )
+                decision = facts.decision
+            status = decision.status
+            result = (
+                CurrentSegmentResult.SUFFICIENT
+                if status is SegmentDecisionStatus.SUCCEEDED
+                else CurrentSegmentResult.UNMET
+                if status is SegmentDecisionStatus.FAILED
+                else CurrentSegmentResult.UNCONFIRMED
+            )
+            return (
+                ResultCheckEndReason.SEGMENTS_SUFFICIENT,
+                result,
+                action6_decision_failure(setrow["activity_id"], decision),
+            )
+        return (
+            ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED,
+            CurrentSegmentResult.UNCONFIRMED,
+            None,
+        )
     assessment = current_assessment(db, setrow)
     if assessment is None:
         return (

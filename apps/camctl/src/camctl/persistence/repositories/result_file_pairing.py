@@ -137,7 +137,10 @@ def _classify(connection, request, *, current_boundary=None):
             if len(entries) != 1 or (identity, file_id) not in current_page.file_ids:
                 raise ConsistencyError('族关系不属于实际原页差集')
             entry = entries[0]
-            if pages._family_fields(entry.identity) != (directory, stem, family_role):
+            if pages._family_fields(
+                entry.identity,
+                result_policy=action["execution_spec_json"].get("result_policy"),
+            ) != (directory, stem, family_role):
                 raise ConsistencyError('族字段与原观察身份不符')
             member = load_completion_input(connection, current_page.ref, file_id,
                 request.source_boundary, current_boundary=current_boundary)

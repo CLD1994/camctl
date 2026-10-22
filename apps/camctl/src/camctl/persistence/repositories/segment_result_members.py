@@ -36,10 +36,11 @@ def _member_values(db,setrow,item):
     file=_fixed_file(db,item.file_id,item.file_event_id)
     identity=parse_exact_json(file['identity_key'])[2]
     parsed=profile_for_action(db,setrow['action_id']).classify_file(identity)
+    key=None if parsed is None else parsed.key
     return dict(set_id=setrow['id'],file_id=item.file_id,page_event_id=item.page_event_id,
         file_event_id=item.file_event_id,identity=identity,
-        directory_number=None if parsed.key is None else parsed.key.directory_number,
-        segment_index=None if parsed.key is None else parsed.key.index,
+        directory_number=None if key is None else key.directory_number,
+        segment_index=None if key is None else key.index,
         role=encode_enum(item.role),ownership=encode_enum(item.ownership),completion=encode_enum(item.completion),
         pairing_state=encode_enum(item.pairing_state),pairing_identity=item.pairing_identity,
         pairing_fact_id=item.pairing_fact_id)
