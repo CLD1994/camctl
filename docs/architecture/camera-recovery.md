@@ -4,7 +4,7 @@
 
 正常录像按[相机录像流程](camera-recording.md#正常录像流程)完成。主机断电、停止未确认或计时证据不足时，再按本页判断如何停止、保留原片、检查时长和修复。动作的成功标准、终态提交和取消规则仍在[相机拍摄](camera-recording.md)。
 
-停止、占用、取消及有限收场是共同规则。Action6 普通录像与原生延时的分段内容检查、实际覆盖、默认前缀及检查副本复用由[视频分段设计](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)维护。OSMO 360 II 普通录像的完成依据、异常多录的整段选择、缺口和恢复由[分段产物设计规格](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)维护；本页的主机原片检查与裁剪规则适用于声明采用单原片媒体处理的任务。
+停止、占用、取消及有限收场是共同规则。Action6 与 OSMO 360 II 都按[视频结果模式与公共分段处理](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md)选择单文件或多段流程；模式及特化在受理时固定。多段的集合、默认范围、副本复用和恢复由公共设计维护，设备判定由各自特化提供；本页的单原片检查与裁剪规则用于单文件流程。
 
 **阅读提示：** 先确定中断后相机是否仍在录制本次视频，再判断计时是否可靠；需要主机检查或修复时再进入对应章节。相机已经停止，不一定表示录像动作的所有处理都已结束。
 
@@ -171,7 +171,7 @@ min(duration_s, recovery_wait_cap_s)
 
 ## 内部异常多录修复
 
-本节定义声明采用单原片媒体处理的任务如何检查和裁剪。OSMO 360 II 普通录像的异常多录使用[分段默认范围](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#默认交付范围)，按完整分段交付。
+本节定义单文件流程如何检查和裁剪，适用于 Action6 与 OSMO 360 II 声明采用该媒体处理的任务。多段流程按[公共规则及设备特化](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#正常流程与策略判定)确定完整分段的默认交付范围。
 
 视频裁剪由录像动作内部处理，客户端不能把它作为独立动作提交。
 
@@ -248,7 +248,7 @@ min(duration_s, recovery_wait_cap_s)
 
 ### 修复内容与文件处理
 
-适用任务的媒体输入、保留流和输出格式由相应驱动契约定义。OSMO 360 II 普通录像的运行时处理和实机媒体核验分别见[分段产物设计规格](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#时长短缺容限与验收时机)。
+适用任务的媒体输入、保留流和输出格式由相应驱动契约定义。OSMO 360 II 的单文件 OSV 媒体处理保留必要主视频流；多段模式的运行时判定和独立实机核验见[设备特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#时长短缺容限与验收时机)。
 
 不允许调用方通过 `obtain_action_outputs` 主动指定：
 
@@ -294,7 +294,7 @@ repair_failed
 
 camctl 为原片检查或内部修复准备的输入副本、处理临时文件和未登记输出，由所属录像处理流程管理。这些文件不构成普通 delivery。相机原片及已经登记的修复成品继续遵守各自的正式产物或取消规则，不纳入本节的中间文件自动清理。
 
-Action6 分段检查副本的后续用途包括已经绑定的等待取回，保留与清理按[检查副本复用](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#检查副本与等待取回的复用)核对；来源终态本身不表示这些用途已经结束。
+公共分段检查副本的后续用途包括已经绑定的等待取回，保留与清理按[检查副本复用](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#检查副本与等待取回的复用)核对；来源终态本身不表示这些用途已经结束。
 
 camctl 保存中间文件与原录像处理的关联，并根据可靠的处理结果确定文件是否仍有用途。先可靠保存处理结果或取消决定，再清理无用文件；删除前必须确认相关读取、写入及修复进程实际结束。取消等待不代表文件操作已经停止，文件所在目录也不能单独证明文件已经无用。
 

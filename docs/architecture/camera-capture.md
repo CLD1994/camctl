@@ -54,7 +54,7 @@ Hasselblad CFV 100C 接入的拍摄能力仅为单张拍照，使用驱动 `hass
 
 Action6 使用正式参数类型 `action6_timelapse` 执行有限原生延时任务。该任务沿用 Action6 自身的 `6c` 完整模板、时间参数和曝光定义；用户选择 `outputs` 后，执行规则按同一格式映射确定本次必须取得的原片。任务使用的格式标识及文件后缀来自一份驱动映射，规则构造和结果读取共用该映射。
 
-视频分段、异常主视频帧数检查、目标覆盖及默认范围由[Action6 视频分段设计](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)定义；RAW/JPEG 保持本节的独立照片规则，采集时长和间隔不转化为必需照片数量。已经冻结的任务继续使用原结果策略。
+设备的[视频结果模式](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#部署配置与受理)统一作用于普通录像及原生延时。单文件模式保留原有限任务与产物数量合同；多段模式的 MP4 度量及采样目标由[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)提供，公共层负责异常检查及范围。RAW/JPEG 保持本节的独立照片规则，采集时长和间隔不转化为必需照片数量。任务始终使用受理时冻结的模式与结果合同。
 
 Action6 原生延时的启动响应只记录 `timelapse_sent`，表示本地命令调用取得严格成功响应；它不表示相机已独立确认开始或完成。Action6 的延时设置、START 和 STOP 都要求调用正常收场、退出状态为零、stderr 为空，并且 stdout 含有唯一一条完整响应，其声明长度为 1、数据恰为 `00`。`e3`、`ee`、`df`、其他数据、缺失或多条响应、格式错误及调用错误都不建立对应确认事实。该任务的 STOP 操作为：
 
@@ -394,7 +394,7 @@ OSMO 360 II 原生延时的低功耗取消收场规则见[完成与正式业务�
 
 ## 拍摄结果报告
 
-两种动作通过动作 `status`、适用的 `error` 和正式产物表达业务结果。Action6 分段延时另按[整体覆盖报告](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#整体覆盖结果)提供 `result.coverage`，其他未声明该结果的任务省略 `result`。动作尚在执行时，缺少产物不表示最终没有产物；取消或失败后保留符合登记条件的实际产物。
+两种动作通过动作 `status`、适用的 `error` 和正式产物表达业务结果。采用公共实际内容策略的分段延时另按[整体覆盖报告](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#整体覆盖结果)提供 `result.coverage`，其他未声明该结果的任务省略 `result`。动作尚在执行时，缺少产物不表示最终没有产物；取消或失败后保留符合登记条件的实际产物。
 
 动作已经结束而设备仍在执行、或尚未确认执行结束时，提供公共字段 `device_execution`，含义和分类遵守[设备执行情况](report-format.md#动作结束后设备是否仍在执行)。后续可靠确认原任务结束时清除提示，原动作终态保持。没有执行停止命令时，不能补造停止成功。
 

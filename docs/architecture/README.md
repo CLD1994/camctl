@@ -61,7 +61,7 @@ ready：等待主程序领取
 processing：主程序传输，完成后删除传输副本
 ```
 
-主机断电时，相机可能继续录像，导致原视频明显长于计划要求。后续恢复按驱动契约处理：Action6 按[实际内容覆盖](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#异常分段检查与范围选择)选择完整视频分段；OSMO 360 II 保留分段原片并按[默认范围](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#默认交付范围)选择整段交付；采用单原片媒体处理的任务对符合条件的视频裁剪多录部分，另存修复成品并保留原视频。具体触发条件由相应分段规格及[异常录像恢复与修复](camera-recovery.md#内部异常多录修复)维护。
+主机断电时，相机可能继续录像，导致原视频明显长于计划要求。Action6 与 OSMO 360 II 均按每台相机的部署配置选择[单文件或多段结果流程](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#部署配置与受理)，默认使用单文件流程。单文件任务沿用检查及适用的裁剪修复；多段任务由公共层保留各段原片并确定整段交付范围，其中 Action6 按实际内容覆盖选段，OSMO 按设备下界保守选段。具体规则由公共设计、设备特化及[异常录像恢复与修复](camera-recovery.md#内部异常多录修复)维护。
 
 这三个目录表示文件现在由谁处理。`staging` 中还保留主机正式源文件，包括修复后的视频、驱动直接生成的原图和配对预览；每次取回都为它们准备独立交付文件。正式源的分类及路径见[正式产物](outputs.md)。主程序不会读取 `staging` 中的半成品，camctl 也不能撤回已经进入 `processing` 的普通交付文件。具体权限、原子移动和失败情况见[文件交接](file-handoff.md)。
 

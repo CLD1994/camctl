@@ -65,7 +65,7 @@ record_stop
 
 ### 当前相机的原片文件
 
-Action6 普通录像的分段集合、实际内容检查及默认范围由[视频分段设计](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)定义。OSMO 360 II 普通录像的分段集合、必要原片、逐段登记及验收由[分段产物设计规格](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)定义。每份源文件分别关联和保留，默认取回遵守所属规格的范围，范围外文件可通过明确 ID 取回。已经冻结为其他结果策略的任务继续原定义；采用内部媒体修复的任务将成品登记为独立派生产物。
+Action6 与 OSMO 360 II 普通录像均按[视频结果模式](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#两种处理流程)选择独立流程。单文件模式保留一份必要视频及原异常媒体处理，多段模式由公共层管理有序集合、逐段登记和默认范围；[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)与[OSMO 特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)提供各自文件与判定规则。每份源文件分别关联和保留，范围外原片可通过明确 ID 取回；内部媒体修复成品仍登记为独立派生产物。受理后始终沿本动作冻结的模式及任务合同执行。
 
 Action6 普通录像驱动在正常设备、普通录像模式及受管输出范围内，将本次拍摄生成的 `.MP4` 原片声明为 MP4 容器，按原目录基准识别本次文件并提供 `format_id=mp4`。这项格式保证不推导编码、实际帧率或媒体时长。目录及长度接口没有提供 MIME 内容类型，因此 `media_type` 保持未知；唯一同目录、同 stem 的 LRF 作为可选视频预览独立登记；临时文件不登记为正式产物。配对与有界扫描规则见[Action6 结果读取](camera-capture.md#action6-原生有限延时任务)。
 
@@ -305,7 +305,7 @@ START 成功响应与实际开始按[启动设计](../superpowers/specs/2026-10-
 
 ### 录像成功标准
 
-Action6 普通录像按[动作终态与覆盖结论](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#动作终态与覆盖结论)判定。OSMO 360 II 普通录像按[分段结果决策表](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#结果决策表)判定；可靠控制完成与其声明的分段下界均可提供独立成功依据。下文的主机时长检查与裁剪规则适用于声明采用单原片媒体处理的任务。
+单文件模式沿用下文的控制完成、主机时长检查与适用裁剪规则。多段模式按[公共动作结果规则](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#动作结果与默认取回)及设备特化判定：Action6 使用可靠控制或实际内容覆盖，OSMO 使用[分段结果决策表](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#结果决策表)中的可靠控制或设备分段下界。分段下界不代替实测时长。
 
 正常录像的 `succeeded` 表示已按要求完成录像控制流程。未取消、未发现提前停止等录像异常时，须同时具备以下事实：
 
@@ -341,7 +341,7 @@ Action6 普通录像按[动作终态与覆盖结论](../superpowers/specs/2026-1
 
 ### 录像动作的结束时点
 
-OSMO 360 II 普通录像在停止、文件核实及分段结果确定后，按[分段持久化与恢复规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#持久化与恢复)共同提交全部保留产物、默认范围和动作终态。
+多段模式在停止、文件核实及策略结果确定后，按[公共持久化与恢复规则](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#持久化共同提交与恢复)共同提交全部保留产物、默认范围、适用覆盖和动作终态。
 
 正常录像在控制流程完成后结束；异常录像继续完成适用的核验和必要内部修复。各自需要的处理取得最终结果后，在同一数据库事务中登记应保留的全部正式产物并提交动作终态。原片与修复成品均在该事务成功提交后成为可供取回选择的正式产物，正常录像不因未执行媒体核验而延迟结束。
 
@@ -409,7 +409,7 @@ OSMO 360 II 普通录像在停止、文件核实及分段结果确定后，按[�
 
 `clock.recovery_wait_cap_s` 是异常恢复等待上限，默认 **60 秒**，允许通过本地配置设置为有限的非负秒数；设为 0 时不额外等待。异常时等待 `min(duration_s, recovery_wait_cap_s)` 后尝试停止，它不限制正常录像的 `duration_s`，采用本次运行的配置。
 
-`devices.<id>.recording.repair_margin_s` 是采用单原片媒体处理的录像任务允许的异常多录余量，默认 **10 秒**，允许本地配置为有限、非负的秒数。设为 0 时，已确认异常录像严格超过目标时长即达到多录修复条件。尚未作出修复决定时，采用本次运行的余量；修复决定与当时采用的余量共同保存，后续配置变化不改写已保存的决定。OSMO 360 II 普通录像按[异常多录与保守选段](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#异常多录与保守选段)确定范围。
+`devices.<id>.recording.repair_margin_s` 是采用单原片媒体处理的录像任务允许的异常多录余量，默认 **10 秒**，允许本地配置为有限、非负的秒数。设为 0 时，已确认异常录像严格超过目标时长即达到多录修复条件。尚未作出修复决定时，采用本次运行的余量；修复决定与当时采用的余量共同保存，后续配置变化不改写已保存的决定。多段模式按公共流程及设备特化确定整段范围，不使用该裁剪余量。
 
 该参数只决定异常多录的修复门槛，不推迟正常停止目标，也不改变异常恢复等待上限；执行计划不提供裁剪或修复门槛覆盖参数。正常轻微多录及修复资格判断继续遵守[自动修复的多录门槛](camera-recovery.md#自动修复的多录门槛)。
 

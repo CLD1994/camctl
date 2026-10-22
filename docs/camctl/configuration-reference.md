@@ -124,6 +124,12 @@ level = "INFO"
 
 设备声明外层允许驱动扩展字段，并不保证未识别字段会产生作用；下面列出的已定义子表会校验结构及未知键。ADB serial 在加载器中仅在提供 `adb` 子表时检查，部署时仍须为两个 ADB 驱动填写该表。每个驱动能执行哪些动作，以相同配置导出的 `camctl describe` 为准；内建能力存在不表示具体设备和目标主机已经完成验收。
 
+### 视频结果模式的设计合同
+
+[公共视频结果设计](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#部署配置与受理)定义 `devices.<id>.video.result_mode` 的值、默认值及错误边界。Action6 与 OSMO 360 II 均按每台相机统一选择模式，同时作用于普通录像及原生延时；受理后的任务使用自身冻结选择。
+
+该配置及公共层重构属于待实施设计。部署时须核对相应实施交付及安装版能力说明；已有 OSMO 分段软件验证不证明部署模式切换已经实现。
+
 ### 控制、查询与结果核实
 
 以下字段位于每台设备的子表中。所有整数次数至少为 1，包含第一次；重试间隔和修复余量允许 0，调用时限必须大于 0。秒数均须有限。共用拍摄流程采用 `recording` 子表中的启动配置，是否需要停止、查询或结果列举由具体驱动和任务决定。
@@ -136,7 +142,7 @@ level = "INFO"
 `devices.<id>.recording.stop_timeout_s`|正秒数；`10`|一次停止控制调用的等待上限。
 `devices.<id>.recording.start_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次启动前的等待。
 `devices.<id>.recording.stop_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次停止前的等待。
-`devices.<id>.recording.repair_margin_s`|非负秒数；`10`|采用单原片媒体处理的任务判断多录修复的余量；OSMO 360 II 普通录像按[分段范围规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#默认交付范围)选择。
+`devices.<id>.recording.repair_margin_s`|非负秒数；`10`|采用单原片媒体处理的任务判断多录修复的余量；多段模式按公共流程及设备特化选择整段，不使用该裁剪余量。
 `devices.<id>.query.max_attempts`|整数；`3` 次|每项设备状态查询责任的累计次数。
 `devices.<id>.query.retry_interval_s`|非负秒数；`3`|同一状态查询责任的再次查询间隔。
 `devices.<id>.query.timeout_s`|正秒数；`10`|一次设备状态查询调用的等待上限。

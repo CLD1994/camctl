@@ -1,6 +1,14 @@
 # 分段集合、判断与默认范围
 
-[数据库入口](../database-schema.md) · [分段行为规格](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)
+[数据库入口](../database-schema.md) · [公共分段设计](../../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md) · [OSMO 特化](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)
+
+## 公共层重构边界
+
+公共分段层负责集合、默认视频范围、来源发布和历史边界；设备特化提供顺序、完成及范围判定。单文件与多段流程均按动作中显式冻结的结果合同分派。具体行为及检查副本责任由公共设计维护。
+
+下文记录已交付的 OSMO 存储与端口，作为公共层重构的现有接缝。设备名称解析、OSV 资格及下界重算须按冻结特化组织；公共仓储和取回依赖公共合同。实际内容检查及其副本复用关系须补充独立、可分页的归属记录，保持来源共同提交与同一历史边界读取，不能仅扩展 OSMO 的有限判断 JSON。
+
+## 现有集合与成员存储
 
 `segment_sets` 保存原拍摄动作、来源完整边界 H0、来源种类、发布处置、适用活动及 RESULTS 流程、当前可靠扫描、判断版本和原目标毫秒。`SegmentResultRef(action_id,set_id,version)` 表达实际集合身份；原 `SegmentSetRef` 只表达可靠完整扫描，其中 `scan_id` 是实际 `operation_attempts.id`，不使用尝试序号替代。状态依次为 COLLECTING、MEMBERS_FIXED 和 ASSESSED；成员固定后不再增减，判断版本通过新集合版本表达。正常运行永久保留全部关系，编号在写事务中按已提交最大值加一分配。
 
@@ -73,7 +81,7 @@ RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明�
 
 完整 `SegmentAssessment` 保存及独立重算仅适用于 `osmo360ii_record_segments_v1`。原生延时 `osmo_empty_tail_classification_v1` 由 `capture/native_completion.py` 和 `segment_native.py` 使用专属空尾分类，沿原自然完成或取消依据发布合格文件。两种策略复用固定集合的 action/activity/run/实际 attempt、末页、版本、创建事件及成员 file/page/file_event 引用；普通录像下界和 N 范围只适用于普通分段策略。
 
-处理器按动作中冻结的 `result_policy` 选择独立完成模块。`None` 继续使用单原片流程，Action6 以及声明该策略的后续 OSMO 任务均可使用；既有任务恢复时沿原冻结定义执行。分段模块保存可靠扫描的范围结束事实，再申请释放目录占用；仓储仍独立核对控制完成、在途调用及范围结束等释放条件。保存回执未知时保留原完整申请和操作键，核实后才继续发布。
+公共层重构后，处理器按动作中显式冻结的单文件或多段结果合同选择独立模块。Action6 与 OSMO 360 II 都保留两种流程，各恢复入口消费同一选择。分段模块保存可靠扫描的范围结束事实，再申请释放目录占用；仓储仍独立核对控制完成、在途调用及范围结束等释放条件。保存回执未知时保留原完整申请和操作键，核实后才继续发布。
 
 ACTIVATE 的独立守卫只接受原完成事务中已经验证的 ACTION_FINISHED、OUTPUT_REGISTERED、output_origins 及范围 PUBLISH 事实，核对实际来源/文件身份和完整数量。当前 action 已终态不能替代同组证明；已有正式集合时拒绝新键再次发布。UNKNOWN/EMPTY 的零范围关系仍有正式集合引用。发布事件可经原 SegmentReadScope 或已验证为同计划的 PlanReadScope 进入守卫；该端口只读取内核已有已验证事件，不复制增长事件数组。完整原申请、终态、产物、origin、范围和标记由同一有界整组执行器提交，原 key 的未知回执核实读取原完整申请；既有 FinishCaptureCommand 的整对象重用入口不能替代分段完成申请。
 
