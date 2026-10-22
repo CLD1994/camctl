@@ -47,6 +47,8 @@ async def inspect_continuous_prefix(
             member = stored.member
             if member.role is not SegmentMemberRole.ORIGINAL:
                 continue
+            if member.ownership is OwnershipState.NOT_OWNED:
+                continue
             if member.key != expected:
                 reason = "order_unknown" if member.key is None else "segment_gap"
                 break
@@ -76,6 +78,58 @@ async def inspect_continuous_prefix(
         interruption_reason=reason,
     ))
     return CheckedPrefix(decision, first, last)
+
+
+def finalize_pending_action6_inspections(runtime, action_id: int, *, reason: str) -> bool:
+    """在来源取消或已终态时结束尚未完成的检查责任，不继续读取设备。"""
+    from camctl.capture.segment_inspections import InspectionResultSave
+    from camctl.capture.segment_inspections import SegmentInspectionRepository
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.contracts.enums import enum_for
+    from camctl.contracts.values import ConsistencyError
+
+    owned = runtime.owned
+    flow = getattr(runtime, "media", None)
+    pending = (None if flow is None else flow.pending_segment_inspection_results)
+    repository = SegmentInspectionRepository()
+    state = enum_for("segment_inspections.state").UNCONFIRMED
+    rows = owned.connection.execute(
+        "SELECT id FROM segment_inspections WHERE action_id=? AND state=? ORDER BY id",
+        (action_id, int(enum_for("segment_inspections.state").PENDING)),
+    ).fetchall()
+    for (inspection_id,) in rows:
+        held = None if pending is None else pending.get(inspection_id)
+        if held is not None:
+            request, key = held
+        else:
+            inspection = repository.read(inspection_id, owned)
+            metric = inspection.target_json.get("metric")
+            if not isinstance(metric, str) or not metric:
+                raise ConsistencyError("未结束的 Action6 检查缺少原冻结量纲")
+            request = InspectionResultSave(
+                inspection_id=inspection_id,
+                state=int(state),
+                result_json={
+                    "metric": {"metric": metric, "value": None, "reason": reason},
+                    "probe": None,
+                    "tool": {"ran": False, "error": None},
+                    "failure": {"code": "inspection_unconfirmed", "reason": reason},
+                },
+                occurred_at=runtime.wall_us(),
+            )
+            key = new_operation_key()
+        outcome = repository.save_result(request, key, owned)
+        if outcome.kind is DbOutcomeKind.COMPLETED:
+            if pending is not None:
+                pending.pop(inspection_id, None)
+            continue
+        if outcome.kind is DbOutcomeKind.UNKNOWN:
+            if pending is not None:
+                pending[inspection_id] = (request, key)
+            return False
+        raise ConsistencyError(f"Action6 未结束检查收场被拒绝: {outcome.error}")
+    return True
 
 
 async def advance_action6_recovery(runtime, action, decision=None):
@@ -108,8 +162,13 @@ async def advance_action6_recovery(runtime, action, decision=None):
     resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
     action = runtime.action(action_id)
     if action["status"] in common._ACTION_TERMINAL:
+        finalize_pending_action6_inspections(runtime, action_id, reason="source_terminal")
         return
     if action["cancel_requested"]:
+        if not finalize_pending_action6_inspections(
+            runtime, action_id, reason="inspection_canceled"
+        ):
+            return
         await advance_action6_segmented_recording(runtime, action, decision)
         return
     # 受限时钟会话只保存控制和文件进度；媒体检查由正常会话执行。

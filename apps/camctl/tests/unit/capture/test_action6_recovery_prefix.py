@@ -72,6 +72,28 @@ async def test_pending_copy_keeps_source_action_open():
 
 
 @pytest.mark.asyncio
+async def test_foreign_original_with_unknown_key_does_not_interrupt_prefix():
+    foreign = SimpleNamespace(member_id=0, member=SegmentMember(
+        "foreign-video", None, SegmentMemberRole.ORIGINAL,
+        OwnershipState.NOT_OWNED, FileCompletionState.UNKNOWN, None,
+    ))
+    source = members(1)[0]
+    calls = []
+
+    async def inspect(stored):
+        calls.append(stored.member_id)
+        return VideoMetric(CoverageMetric.FRAMES, 151)
+
+    result = await inspect_continuous_prefix((foreign, source),
+        CoverageTarget(CoverageMetric.FRAMES, 151), start=SegmentKey(1, 1),
+        collection_complete=True, inspect=inspect)
+
+    assert result.coverage.status.value == "reached"
+    assert result.coverage.confirmed_segments == 1
+    assert calls == [source.member_id]
+
+
+@pytest.mark.asyncio
 async def test_incomplete_collection_is_not_confirmed_short():
     async def inspect(stored):
         return VideoMetric(CoverageMetric.FRAMES, 60)
