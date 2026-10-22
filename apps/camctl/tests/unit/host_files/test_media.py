@@ -133,7 +133,7 @@ def _stream_fact_values(probe: MediaProbe) -> tuple[tuple[object, ...], ...]:
     return tuple(
         tuple(getattr(stream, name, None) for name in (
             "index", "codec_type", "codec_name", "width", "height",
-            "duration_s", "attached_pic",
+            "duration_s", "attached_pic", "frame_count", "fps",
         ))
         for stream in getattr(probe, "streams", ())
     )
@@ -227,6 +227,68 @@ async def test_probe_duration_keeps_full_precision(fake: FakeMedia) -> None:
     assert probe.duration_s != Decimal("3.017")
 
 
+async def test_probe_reads_stream_duration_frames_and_rate_without_container_fallback(
+    fake: FakeMedia,
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"index":0,"codec_type":"video",'
+                b'"duration":"2.125","avg_frame_rate":"30000/1001",'
+                b'"nb_read_frames":"64","disposition":{"attached_pic":0}}],'
+                b'"format":{"duration":"2.5"}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(
+        _input_ref(), _roots(), ProbeRequest(count_frames=True)
+    )
+
+    assert probe.error is None
+    assert probe.duration_s == Decimal("2.5")
+    assert len(probe.streams) == 1
+    stream = probe.streams[0]
+    assert stream.duration_s == Decimal("2.125")
+    assert stream.frame_count == 64
+    assert stream.fps == Decimal("29.97002997002997002997002997")
+    assert "-count_frames" in fake.argvs[0]
+    select_main_video_stream = getattr(media, "select_main_video_stream", None)
+    assert callable(select_main_video_stream)
+    assert select_main_video_stream(probe) is stream
+
+
+async def test_missing_container_duration_keeps_reliable_main_stream_metrics(
+    fake: FakeMedia,
+) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"index":0,"codec_type":"video",'
+                b'"duration":"2","avg_frame_rate":"3/1",'
+                b'"nb_read_frames":"6","disposition":{"attached_pic":0}}],'
+                b'"format":{}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(
+        _input_ref(), _roots(), ProbeRequest(count_frames=True)
+    )
+
+    assert probe.duration_s is None
+    assert probe.error is not None and probe.error.startswith("missing_duration:")
+    assert len(probe.streams) == 1
+    stream = probe.streams[0]
+    assert stream.duration_s == Decimal("2")
+    assert stream.frame_count == 6
+    assert media.select_main_video_stream(probe) is stream
+
+
+async def test_default_probe_does_not_count_frames(fake: FakeMedia) -> None:
+    await probe_media(_input_ref(), _roots(), ProbeRequest())
+
+    assert "-count_frames" not in fake.argvs[0]
+
+
 async def test_media_probe_keeps_its_two_positional_arguments() -> None:
     probe = MediaProbe(Decimal("1.25"), "legacy error")
 
@@ -259,7 +321,7 @@ async def test_media_stream_is_an_exported_frozen_fact_type() -> None:
     assert "MediaStream" in media.__all__
     assert tuple(field.name for field in fields(stream_type)) == (
         "index", "codec_type", "codec_name", "width", "height",
-        "duration_s", "attached_pic",
+        "duration_s", "attached_pic", "frame_count", "fps",
     )
     hints = get_type_hints(stream_type)
     assert hints == {
@@ -270,8 +332,12 @@ async def test_media_stream_is_an_exported_frozen_fact_type() -> None:
         "height": int | None,
         "duration_s": Decimal | None,
         "attached_pic": bool | None,
+        "frame_count": int | None,
+        "fps": Decimal | None,
     }
-    stream = stream_type(0, "video", "h264", 32, 24, Decimal("1"), False)
+    stream = stream_type(
+        0, "video", "h264", 32, 24, Decimal("1"), False, 30, Decimal("30")
+    )
     with pytest.raises(FrozenInstanceError):
         stream.index = 1
 
@@ -304,10 +370,10 @@ async def test_probe_parses_two_videos_audio_and_attached_cover(fake: FakeMedia)
     assert probe.duration_s == Decimal("6.2500000000000001")
     assert getattr(probe, "format_name", None) == "mov,mp4,m4a,3gp,3g2,mj2"
     assert _stream_fact_values(probe) == (
-        (0, "video", "h264", 3840, 1920, Decimal("6.25"), False),
-        (1, "video", "hevc", 1920, 960, Decimal("6.25000000000000001"), False),
-        (2, "audio", "aac", None, None, Decimal("6.25"), False),
-        (3, "video", "mjpeg", 320, 180, Decimal("0.04"), True),
+        (0, "video", "h264", 3840, 1920, Decimal("6.25"), False, None, None),
+        (1, "video", "hevc", 1920, 960, Decimal("6.25000000000000001"), False, None, None),
+        (2, "audio", "aac", None, None, Decimal("6.25"), False, None, None),
+        (3, "video", "mjpeg", 320, 180, Decimal("0.04"), True, None, None),
     )
 
 
@@ -328,7 +394,7 @@ async def test_probe_keeps_new_facts_unknown_for_legacy_stream_json(
     assert probe.duration_s == Decimal("6")
     assert getattr(probe, "format_name", None) is None
     assert _stream_fact_values(probe) == (
-        (None, "video", None, None, None, None, None),
+        (None, "video", None, None, None, None, None, None, None),
     )
 
 
@@ -345,8 +411,49 @@ async def test_probe_keeps_missing_attached_pic_unknown(fake: FakeMedia) -> None
 
     assert probe.error is None
     assert _stream_fact_values(probe) == (
-        (4, "video", None, None, None, None, None),
+        (4, "video", None, None, None, None, None, None, None),
     )
+
+
+async def test_probe_keeps_unavailable_frame_metrics_unknown(fake: FakeMedia) -> None:
+    fake.outcome = RawToolOutcome(
+        exit=LocalExit(exit_code=0),
+        output=(b'{"streams":[{"index":0,"codec_type":"video",'
+                b'"avg_frame_rate":"0/0","nb_read_frames":"N/A",'
+                b'"disposition":{"attached_pic":0}}],'
+                b'"format":{"duration":"1"}}'),
+        error=None,
+        used_grace_s=None,
+    )
+
+    probe = await probe_media(_input_ref(), _roots(), ProbeRequest(count_frames=True))
+
+    assert probe.error is None
+    assert probe.streams[0].fps is None
+    assert probe.streams[0].frame_count is None
+
+
+async def test_main_video_selection_rejects_ambiguous_streams() -> None:
+    select_main_video_stream = getattr(media, "select_main_video_stream", None)
+    assert callable(select_main_video_stream)
+    main = media.MediaStream(0, "video", "h264", 32, 24, Decimal("1"), False)
+    audio = media.MediaStream(1, "audio", "aac", None, None, Decimal("1"), False)
+    cover = media.MediaStream(2, "video", "mjpeg", 16, 16, Decimal("0.04"), True)
+    unknown_disposition = media.MediaStream(
+        3, "video", "h264", 32, 24, Decimal("1"), None
+    )
+
+    assert select_main_video_stream(
+        MediaProbe(Decimal("5"), None, (main, audio, cover))
+    ) is main
+    assert select_main_video_stream(
+        MediaProbe(Decimal("5"), None, (main, audio, cover, unknown_disposition))
+    ) is None
+    assert select_main_video_stream(
+        MediaProbe(Decimal("5"), None, (main, media.MediaStream(
+            4, "video", "hevc", 32, 24, Decimal("1"), False
+        )))
+    ) is None
 
 
 @pytest.mark.parametrize(
@@ -364,6 +471,11 @@ async def test_probe_keeps_missing_attached_pic_unknown(fake: FakeMedia) -> None
         '[{"codec_type":"video","duration":"NaN"}]',
         '[{"codec_type":"video","duration":"-0.1"}]',
         '[{"codec_type":"video","duration":true}]',
+        '[{"codec_type":"video","nb_read_frames":true}]',
+        '[{"codec_type":"video","nb_read_frames":-1}]',
+        '[{"codec_type":"video","nb_read_frames":"2.5"}]',
+        '[{"codec_type":"video","avg_frame_rate":"30/0"}]',
+        '[{"codec_type":"video","avg_frame_rate":"wrong"}]',
         '[{"codec_type":"video","disposition":null}]',
         '[{"codec_type":"video","disposition":{"attached_pic":2}}]',
         '[{"codec_type":"video","disposition":{"attached_pic":true}}]',
@@ -574,7 +686,8 @@ async def test_probe_argv_uses_managed_prefix(fake: FakeMedia) -> None:
     assert argv[0] == "C:\\tools\\ffprobe.exe"
     assert "-of" in argv and "json" in argv
     assert argv[argv.index("-show_entries") + 1] == (
-        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration:"
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration,"
+        "avg_frame_rate,nb_read_frames:"
         "stream_disposition=attached_pic"
     )
     assert argv[-1] == str(_ROOT / "staging" / "recording-inputs" / "11.mp4")

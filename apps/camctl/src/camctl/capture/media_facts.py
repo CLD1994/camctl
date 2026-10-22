@@ -21,6 +21,7 @@ def probe_document(probe: MediaProbe) -> dict[str, Any]:
             "index": s.index, "codec_type": s.codec_type,
             "codec_name": s.codec_name, "width": s.width, "height": s.height,
             "duration_s": s.duration_s, "attached_pic": s.attached_pic,
+            "frame_count": s.frame_count, "fps": s.fps,
         } for s in probe.streams],
     }
 
@@ -49,6 +50,16 @@ def read_probe(document: Mapping[str, Any]) -> MediaProbe:
             raise ValueError("探测索引或尺寸不合法")
         return value
 
+    def fps(value):
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+            raise ValueError("探测帧率必须为精确正数或未知")
+        value = Decimal(value)
+        if not value.is_finite() or value <= 0:
+            raise ValueError("探测帧率必须为正有限数")
+        return value
+
     if not isinstance(document, Mapping) or set(document) != {
             "duration_s", "error", "format_name", "streams"}:
         raise ValueError("原探测事实结构不完整")
@@ -56,16 +67,21 @@ def read_probe(document: Mapping[str, Any]) -> MediaProbe:
         raise ValueError("逐流事实必须是列表")
     streams = []
     for s in document["streams"]:
-        if not isinstance(s, Mapping) or set(s) != {
+        legacy_stream_fields = {
                 "index", "codec_type", "codec_name", "width", "height",
-                "duration_s", "attached_pic"}:
+                "duration_s", "attached_pic"}
+        new_stream_fields = {"frame_count", "fps"}
+        if (not isinstance(s, Mapping)
+                or not legacy_stream_fields <= set(s)
+                or not set(s) <= legacy_stream_fields | new_stream_fields):
             raise ValueError("原逐流事实结构不完整")
         if s["attached_pic"] is not None and type(s["attached_pic"]) is not bool:
             raise ValueError("附加图片标记必须为布尔或未知")
         streams.append(MediaStream(integer(s["index"], 0),
             text(s["codec_type"], optional=False), text(s["codec_name"]),
             integer(s["width"], 1), integer(s["height"], 1),
-            seconds(s["duration_s"]), s["attached_pic"]))
+            seconds(s["duration_s"]), s["attached_pic"],
+            integer(s.get("frame_count"), 0), fps(s.get("fps"))))
     return MediaProbe(seconds(document["duration_s"]), text(document["error"]),
         tuple(streams), text(document["format_name"]))
 

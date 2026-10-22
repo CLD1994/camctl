@@ -42,11 +42,13 @@ __all__ = [
     "RepairRequest",
     "probe_media",
     "repair_media",
+    "select_main_video_stream",
 ]
 
 #: 媒体工具终止宽限；正常调用无期限，仅由取消终止。
 _MEDIA_TERMINATE_GRACE_S = Decimal("5")
 _SAFE_CONTAINER_FORMAT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+_FRAME_RATE = re.compile(r"([0-9]+)/([0-9]+)\Z")
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,11 @@ class ProbeRequest:
 
     ffprobe: str = "ffprobe"
     extra_args: tuple[str, ...] = ()
+    count_frames: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.count_frames) is not bool:
+            raise ValueError("count_frames 必须为布尔值")
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,8 @@ class MediaStream:
     height: int | None
     duration_s: Decimal | None
     attached_pic: bool | None
+    frame_count: int | None = None
+    fps: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +229,42 @@ def _stream_string(stream: dict, name: str) -> str | None:
     return value
 
 
+def _stream_frame_count(stream: dict) -> int | None:
+    """解析 ffprobe 的实际读取帧数；不从时长和帧率估算。"""
+    if "nb_read_frames" not in stream:
+        return None
+    value = stream["nb_read_frames"]
+    if value == "N/A":
+        return None
+    if type(value) is int and value >= 0:
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        return int(value)
+    raise ValueError("流字段 nb_read_frames 不是合法非负整数")
+
+
+def _stream_fps(stream: dict) -> Decimal | None:
+    """把 ffprobe 的 avg_frame_rate 有理数转为 Decimal 帧率事实。"""
+    if "avg_frame_rate" not in stream:
+        return None
+    value = stream["avg_frame_rate"]
+    if value == "N/A":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("流字段 avg_frame_rate 不是字符串")
+    match = _FRAME_RATE.fullmatch(value)
+    if match is None:
+        raise ValueError("流字段 avg_frame_rate 不是分子/分母")
+    numerator, denominator = (int(part) for part in match.groups())
+    if denominator == 0:
+        if numerator == 0:
+            return None
+        raise ValueError("流字段 avg_frame_rate 分母为零")
+    if numerator == 0:
+        return None
+    return Decimal(numerator) / Decimal(denominator)
+
+
 def _parse_streams(value: object) -> tuple[MediaStream, ...]:
     if not isinstance(value, list):
         raise ValueError("输出缺少流信息段")
@@ -243,6 +288,8 @@ def _parse_streams(value: object) -> tuple[MediaStream, ...]:
             _media_duration(stream["duration"])
             if "duration" in stream else None
         )
+        frame_count = _stream_frame_count(stream)
+        fps = _stream_fps(stream)
 
         disposition = stream.get("disposition")
         attached_pic = None
@@ -267,8 +314,24 @@ def _parse_streams(value: object) -> tuple[MediaStream, ...]:
             height=height,
             duration_s=duration,
             attached_pic=attached_pic,
+            frame_count=frame_count,
+            fps=fps,
         ))
     return tuple(parsed)
+
+
+def select_main_video_stream(probe: MediaProbe) -> MediaStream | None:
+    """仅在主视频唯一且所有视频流用途明确时返回主视频流。
+
+    封面图不计入主视频；未标明用途的视频流和多路主视频均保持未知，
+    调用者不得改用容器时长或把多路时长相加。主流选择与容器时长
+    错误独立，调用者按所需逐流字段判断指标是否可靠。
+    """
+    videos = tuple(stream for stream in probe.streams if stream.codec_type == "video")
+    if any(stream.attached_pic is None for stream in videos):
+        return None
+    primary = tuple(stream for stream in videos if stream.attached_pic is False)
+    return primary[0] if len(primary) == 1 else None
 
 
 async def probe_media(
@@ -299,16 +362,17 @@ async def _probe(
 
     新增逐流字段缺失时保留未知；存在但类型、数值或索引非法时拒绝
     整份事实。工具不可用、退出失败、输出结构非法与必需字段缺失
-    分别分类。视频时长事实取容器时长（format.duration，含估算值，
-    误差几秒可接受）；无视频流的容器不提供视频时长，明确分类不
-    补造。
+    分别分类。容器时长仍作为独立事实保存；视频覆盖使用唯一主视频
+    流的逐流时长。仅在请求时，`-count_frames` 提供实际帧数。
     """
     host = resolve_file(input, roots)
     argv = (
         (request.ffprobe, "-v", "error")
         + request.extra_args
+        + (("-count_frames",) if request.count_frames else ())
         + ("-show_entries",
-           "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration:"
+           "format=duration,format_name:stream=index,codec_type,codec_name,width,height,duration,"
+           "avg_frame_rate,nb_read_frames:"
            "stream_disposition=attached_pic",
            "-of", "json", str(host.path))
     )
@@ -324,16 +388,33 @@ async def _probe(
     if not isinstance(payload, dict) or not isinstance(payload.get("format"), dict):
         return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
     format_facts = payload["format"]
-    if "duration" not in format_facts:
-        return MediaProbe(duration_s=None, error="missing_duration: 缺少时长字段")
     try:
-        duration = _media_duration(format_facts["duration"])
         format_name = None
         if "format_name" in format_facts:
             format_name = format_facts["format_name"]
             if not isinstance(format_name, str) or not format_name:
                 raise ValueError("format_name 不是非空字符串")
+        if "duration" not in format_facts and "streams" not in payload:
+            # 保留原单文件检查对旧版最小 ffprobe 输出的错误分类。
+            return MediaProbe(
+                duration_s=None,
+                error="missing_duration: 缺少时长字段",
+                format_name=format_name,
+            )
         streams = _parse_streams(payload.get("streams"))
+    except ValueError as error:
+        return MediaProbe(
+            duration_s=None, error=f"invalid_structure: {error}"
+        )
+    if "duration" not in format_facts:
+        return MediaProbe(
+            duration_s=None,
+            error="missing_duration: 缺少时长字段",
+            streams=streams,
+            format_name=format_name,
+        )
+    try:
+        duration = _media_duration(format_facts["duration"])
     except ValueError as error:
         return MediaProbe(
             duration_s=None, error=f"invalid_structure: {error}"
