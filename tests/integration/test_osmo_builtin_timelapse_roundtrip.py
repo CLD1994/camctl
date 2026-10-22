@@ -989,7 +989,11 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             expected_listed.add((_LRF_PATH, "video", "lrf", None))
         assert {(entry["identity"], entry["kind"], entry["format_id"], entry["paired_identity"])
                 for entry in listed} == expected_listed
-        assert len(listed) == len(expected_listed)
+        assert len(listed) == len(expected_listed) * len(result_rows)
+        if action_type == "camera_record":
+            assert query_state(deployment.state_db,
+                "SELECT attempts_used=max_attempts_used FROM operation_runs WHERE action_id=? AND kind=?",
+                (action_id, int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) == [(1,)]
 
         demo.claim()
         saved = deployment.import_reports_with_client(deployment.processing)
