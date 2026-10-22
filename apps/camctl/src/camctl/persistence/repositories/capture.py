@@ -2493,6 +2493,15 @@ class CaptureRepository:
             return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(DbOutcomeKind.UNKNOWN, error=receipt.error)
 
+    def save_baseline_read_unconfirmed(self,request,key,owned):
+        from .baseline_reads import SaveBaselineReadUnconfirmed
+        receipt=commit_operation(SaveBaselineReadUnconfirmed(request,key),key,owned)
+        if receipt.kind=='completed':
+            return DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result)
+        if receipt.kind=='rolled_back':
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK,error=receipt.error)
+        return DbOutcome(DbOutcomeKind.UNKNOWN,error=receipt.error)
+
     def finish_capture_stop(self, finish, key, owned):
         """停止确认保存实际结束；文件范围和采集目标分别核实。"""
         receipt = commit_operation(_CaptureStopCommand(finish, None, key), key, owned)

@@ -170,3 +170,218 @@ async def test_clock_failure_keeps_actual_return_without_repeating_the_call(owne
         owned=owned,wall_us=failing_clock,can_read=lambda:True) is None
     assert calls==[1] and len(directory.calls)==1
     assert owned.connection.execute('SELECT state,result_event_id FROM baseline_read_calls').fetchone()==(1,None)
+
+
+@pytest.mark.parametrize('boundary_name,horizon,qualified',[
+    ('HOST_LOCAL_SETTLED','equal',True),('HOST_POWER_CYCLE','equal',True),
+    ('HOST_LOCAL_SETTLED','later',True),('HOST_LOCAL_SETTLED','before',False),
+    ('HOST_LOCAL_SETTLED','none',False),('UNCONFIRMED','equal',False)])
+async def test_cold_recovery_uses_original_fixed_host_boundary(owned,tmp_path,boundary_name,horizon,qualified):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    owners={intent.activity_id:owner}
+    maximum={'equal':first.value.intent_event_id,'later':first.value.intent_event_id+1,
+        'before':first.value.intent_event_id-1,'none':None}[horizon]
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,owners,
+        RecoveryBoundary[boundary_name],maximum)
+    calls=[]
+    def clock():
+        calls.append(1)
+        return _SCHEDULED+5
+    result=reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+        reader=owned,wall_us=clock)
+    if qualified:
+        assert result.state.name=='UNCONFIRMED' and result.returned_at is None and calls==[1]
+        assert reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+            reader=owned,wall_us=clock)==result and calls==[1]
+    else:
+        assert result is None and calls==[]
+        assert owned.connection.execute('SELECT state FROM baseline_read_calls').fetchone()==(1,)
+
+
+async def test_current_task_prevents_cold_recovery_until_actual_handoff(owned,tmp_path):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    owner=reads.PendingBaselineRead(intent)
+    directory=BlockingDirectory()
+    task=asyncio.create_task(reads.advance_baseline_read(owner,directory=directory,capture=capture,
+        owned=owned,wall_us=lambda:_SCHEDULED+1,can_read=lambda:True))
+    try:
+        await directory.started.wait()
+        context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,owner.intent_view,
+            {intent.activity_id:owner},RecoveryBoundary.HOST_POWER_CYCLE,owner.intent_view.intent_event_id)
+        def no_clock():
+            pytest.fail('在途责任不能取得未知结果时刻')
+        assert reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+            reader=owned,wall_us=no_clock) is None
+        directory.release.set()
+        result=await task
+        assert result.state.name=='RETURNED'
+    finally:
+        directory.release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+
+
+@pytest.mark.parametrize('kind',['empty','nonempty','error','unknown'])
+async def test_cold_recovery_prefers_committed_return_even_with_no_cold_qualification(owned,tmp_path,kind):
+    from camctl.capture import baseline_reads as reads
+    from camctl.capture.baseline_models import BaselineReadReturn,BaselineReadUnconfirmedSave
+    from camctl.operations.models import ErrorValue
+    from camctl.operations.recovery import RecoveryBoundary
+    from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
+    from .test_baseline_history import _entries
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    error=ErrorValue('transport_timeout','directory unavailable') if kind=='error' else None
+    returned=BaselineReadReturn(first.value.call_id,_SCHEDULED+1,error,DirectoryRead(None,error,
+        None if error else Page(_entries('a.OSV') if kind=='nonempty' else (),
+            DirectoryCursor(intent.binding,intent.directories,1,None))))
+    saved=(capture.save_baseline_read_unconfirmed(
+        BaselineReadUnconfirmedSave(first.value.call_id,_SCHEDULED+2),intent.result_save_key,owned)
+        if kind=='unknown' else capture.save_baseline_read_return(returned,intent.result_save_key,owned))
+    assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
+        {intent.activity_id:owner},RecoveryBoundary.UNCONFIRMED,None)
+    def no_clock():
+        pytest.fail('已有实际返回不能取新的未知时刻')
+    fresh=open_existing(tmp_path/'state.db',DbOpenMode.EXISTING_RW,DbConfig())
+    try:
+        assert reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+            reader=fresh,wall_us=no_clock)==saved.value
+    finally:
+        fresh.connection.close()
+
+
+async def test_unconfirmed_save_retry_keeps_original_settlement_time(owned,tmp_path):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
+        {intent.activity_id:owner},RecoveryBoundary.HOST_LOCAL_SETTLED,first.value.intent_event_id)
+    requests=[]
+    class Repository(CaptureRepository):
+        def save_baseline_read_unconfirmed(self,request,key,owned):
+            requests.append((request,key))
+            receipt=super().save_baseline_read_unconfirmed(request,key,owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED,receipt.error
+            return DbOutcome(DbOutcomeKind.UNKNOWN,error=OSError('lost receipt')) if len(requests)==1 else receipt
+    clock=[]
+    def wall_us():
+        clock.append(1)
+        return _SCHEDULED+5
+    repository=Repository()
+    assert reads.resume_baseline_read_call(owner,context,capture=repository,owned=owned,
+        reader=owned,wall_us=wall_us) is None
+    result=reads.resume_baseline_read_call(owner,context,capture=repository,owned=owned,
+        reader=owned,wall_us=wall_us)
+    assert result.state.name=='UNCONFIRMED' and clock==[1] and requests[0]==requests[1]
+
+
+async def test_same_session_cancelled_actual_task_can_save_unknown_without_cold_boundary(owned,tmp_path):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    owner=reads.PendingBaselineRead(intent)
+    capture=CaptureRepository()
+    started=asyncio.Event()
+    class Directory:
+        async def read_directory(self,request,*,stop):
+            started.set()
+            await asyncio.Event().wait()
+    task=asyncio.create_task(reads.advance_baseline_read(owner,directory=Directory(),capture=capture,
+        owned=owned,wall_us=lambda:_SCHEDULED+1,can_read=lambda:True))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert owner.task.cancelled() and owner.actual_return is None
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,owner.intent_view,
+        {intent.activity_id:owner},RecoveryBoundary.UNCONFIRMED,None)
+    result=reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+        reader=owned,wall_us=lambda:_SCHEDULED+5)
+    assert result.state.name=='UNCONFIRMED'
+
+
+async def test_failed_result_lookup_keeps_recovery_responsibility(owned,tmp_path):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
+        {intent.activity_id:owner},RecoveryBoundary.HOST_LOCAL_SETTLED,first.value.intent_event_id)
+    class Repository(CaptureRepository):
+        def read_baseline_call_result(self,*args,**kwargs):
+            raise OSError('read unavailable')
+    def no_clock():
+        pytest.fail('读取失败不能解释为可靠缺键')
+    with pytest.raises(OSError):
+        reads.resume_baseline_read_call(owner,context,capture=Repository(),owned=owned,
+            reader=owned,wall_us=no_clock)
+    assert owner.unconfirmed_request is None and owner.result is None
+    assert owned.connection.execute('SELECT state FROM baseline_read_calls').fetchone()==(1,)
+
+
+@pytest.mark.parametrize('failure',['clock','encoding'])
+async def test_unknown_clock_or_encoding_failure_keeps_one_actual_attempt(owned,tmp_path,failure):
+    from camctl.capture import baseline_reads as reads
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
+        {intent.activity_id:owner},RecoveryBoundary.HOST_LOCAL_SETTLED,first.value.intent_event_id)
+    calls=[]
+    def clock():
+        calls.append(1)
+        if failure=='clock':
+            raise OSError('clock unavailable')
+        return True
+    with pytest.raises((OSError,TypeError,ValueError)):
+        reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+            reader=owned,wall_us=clock)
+    assert owner.diagnostic is not None and owner.unconfirmed_request is None
+    assert owner.settlement_at is (None if failure=='clock' else True)
+    assert reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,
+        reader=owned,wall_us=clock) is None
+    assert calls==[1] and owner.result is None
+    assert owned.connection.execute('SELECT state FROM baseline_read_calls').fetchone()==(1,)
+
+
+@pytest.mark.parametrize('changed',['instance','owner','intent'])
+async def test_recovery_rejects_context_from_another_original_responsibility(owned,tmp_path,changed):
+    from dataclasses import replace
+    from camctl.capture import baseline_reads as reads
+    from camctl.contracts.values import ConsistencyError
+    from camctl.operations.recovery import RecoveryBoundary
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    owner=reads.PendingBaselineRead(intent,intent_view=first.value)
+    context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
+        {intent.activity_id:owner},RecoveryBoundary.HOST_LOCAL_SETTLED,first.value.intent_event_id)
+    if changed=='instance':
+        context=replace(context,instance_id='f'*32)
+    elif changed=='owner':
+        context=replace(context,local_owners={intent.activity_id:reads.PendingBaselineRead(intent,intent_view=first.value)})
+    else:
+        bad=replace(first.value,request=replace(intent,occurred_at=_SCHEDULED+7))
+        context=replace(context,intent_view=bad)
+    with pytest.raises(ConsistencyError):
+        reads.resume_baseline_read_call(owner,context,capture=capture,owned=owned,reader=owned,
+            wall_us=lambda:pytest.fail('错责任不能取新的收场时刻'))

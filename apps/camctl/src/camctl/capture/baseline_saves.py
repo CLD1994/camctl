@@ -3,14 +3,14 @@ from dataclasses import dataclass, replace
 
 from camctl.capture.baseline_models import (BaselineChunkResult, BaselineChunkSave,
     BaselineFixSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
-    BaselineReadState, BaselineRef, BaselineState)
+    BaselineReadState, BaselineReadUnconfirmedSave, BaselineRef, BaselineState)
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
 
 @dataclass(frozen=True)
 class PendingBaselineSave:
-    request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn
+    request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave
     key: OperationKey
     response: BaselineChunkResult | BaselineRef | BaselineReadCallView | None = None
 
@@ -21,15 +21,16 @@ class BaselineSaveOwner:
     def __init__(self):
         self.pending: PendingBaselineSave | None = None
 
-    def begin(self, request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn,
+    def begin(self, request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave,
               *, key: OperationKey | None = None) -> PendingBaselineSave:
-        if not isinstance(request, (BaselineChunkSave, BaselineFixSave, BaselineReadIntent, BaselineReadReturn)):
+        if not isinstance(request, (BaselineChunkSave, BaselineFixSave, BaselineReadIntent,
+                                    BaselineReadReturn,BaselineReadUnconfirmedSave)):
             raise TypeError("基准拥有者需要完整的原始保存申请")
         if isinstance(request,BaselineReadIntent):
             if key is not None and key != request.call_key:
                 raise ConsistencyError('基准意图必须保留原调用键')
             key=request.call_key
-        elif isinstance(request,BaselineReadReturn) and key is None:
+        elif isinstance(request,(BaselineReadReturn,BaselineReadUnconfirmedSave)) and key is None:
             raise ConsistencyError('基准返回必须显式使用原结果保存键')
         if self.pending is not None:
             if self.pending.request != request or (key is not None and self.pending.key != key):
@@ -48,13 +49,15 @@ class BaselineSaveOwner:
             method=repository.save_baseline_read_intent
         elif isinstance(pending.request,BaselineReadReturn):
             method=repository.save_baseline_read_return
+        elif isinstance(pending.request,BaselineReadUnconfirmedSave):
+            method=repository.save_baseline_read_unconfirmed
         else:
             method = (repository.append_baseline if isinstance(pending.request, BaselineChunkSave)
                       else repository.fix_baseline)
         receipt = method(pending.request, pending.key, owned)
         if receipt.kind is DbOutcomeKind.COMPLETED:
             response = receipt.value
-            if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn)):
+            if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)):
                 self._check_call_response(pending.request,response)
                 self.pending=replace(pending,response=response)
                 return receipt
@@ -82,6 +85,9 @@ class BaselineSaveOwner:
         if isinstance(request,BaselineReadIntent):
             if response.request != request or response.state is not BaselineReadState.INTENDED:
                 raise ConsistencyError('基准调用意图回执不属于原完整输入')
+        elif isinstance(request,BaselineReadUnconfirmedSave):
+            if response.call_id != request.call_id or response.state is not BaselineReadState.UNCONFIRMED:
+                raise ConsistencyError('基准返回未知回执不属于原调用')
         elif (response.call_id != request.call_id or response.state is not BaselineReadState.RETURNED
                 or response.returned_at != request.returned_at or response.error != request.error
                 or response.next_cursor != (None if request.returned.page is None else request.returned.page.next_cursor)):

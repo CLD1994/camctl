@@ -2,11 +2,13 @@
 import asyncio
 from dataclasses import dataclass,field
 
-from camctl.capture.baseline_models import BaselineReadCallView,BaselineReadIntent,BaselineReadReturn
+from camctl.capture.baseline_models import (
+    BaselineReadCallView,BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)
 from camctl.capture.baseline_saves import BaselineSaveOwner
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryRead
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.models import DbOutcomeKind
 
 
@@ -27,6 +29,9 @@ class PendingBaselineRead:
     clock_attempted: bool=False
     result: BaselineReadCallView|None=None
     diagnostic: BaseException|None=None
+    unconfirmed_request: BaselineReadUnconfirmedSave|None=None
+    settlement_at: int|None=None
+    settlement_clock_attempted: bool=False
 
 
 def resume_baseline_read_save(owner,*,capture,owned):
@@ -108,3 +113,56 @@ async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read
     if call_error is not None:
         raise call_error
     return result
+
+
+@dataclass(frozen=True)
+class BaselineReadRecoveryContext:
+    instance_id: str
+    intent_view: BaselineReadCallView
+    local_owners: object
+    recovery_boundary: RecoveryBoundary
+    startup_max_event_id: int|None
+
+
+def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
+    """先接手原返回或原结果键，再依据既有主机边界处理不可恢复返回。"""
+    intent=context.intent_view
+    if (context.instance_id != owned.metadata.instance_id or context.instance_id != reader.metadata.instance_id
+            or context.local_owners.get(intent.request.activity_id) is not owner
+            or owner.intent != intent.request or owner.intent_view != intent):
+        raise ConsistencyError('基准恢复上下文不属于原数据库和实际调用拥有者')
+    actual=capture.read_baseline_call(intent.call_id,intent.boundary,reader)
+    if actual != intent:
+        raise ConsistencyError('基准恢复上下文不是原完整意图事实')
+    if owner.task is not None and not owner.task.done():
+        return None
+    if owner.return_request is not None:
+        if owner.saves.pending is None and owner.result is None:
+            owner.saves.begin(owner.return_request,key=owner.intent.result_save_key)
+        return resume_baseline_read_save(owner,capture=capture,owned=owned)
+    if owner.actual_return is not None:
+        return None
+    if owner.unconfirmed_request is not None:
+        if owner.saves.pending is None and owner.result is None:
+            owner.saves.begin(owner.unconfirmed_request,key=owner.intent.result_save_key)
+        return resume_baseline_read_save(owner,capture=capture,owned=owned)
+    saved=capture.read_baseline_call_result(intent.call_id,reader)
+    if saved is not None:
+        owner.result=saved
+        return saved
+    local_settled=owner.task is not None and owner.task.cancelled()
+    cold_settled=(owner.task is None
+        and context.recovery_boundary in (RecoveryBoundary.HOST_LOCAL_SETTLED,RecoveryBoundary.HOST_POWER_CYCLE)
+        and context.startup_max_event_id is not None
+        and intent.intent_event_id<=context.startup_max_event_id)
+    if not (local_settled or cold_settled) or owner.settlement_clock_attempted:
+        return None
+    owner.settlement_clock_attempted=True
+    try:
+        owner.settlement_at=wall_us()
+        owner.unconfirmed_request=BaselineReadUnconfirmedSave(intent.call_id,owner.settlement_at)
+        owner.saves.begin(owner.unconfirmed_request,key=owner.intent.result_save_key)
+    except Exception as error:
+        owner.diagnostic=error
+        raise
+    return resume_baseline_read_save(owner,capture=capture,owned=owned)

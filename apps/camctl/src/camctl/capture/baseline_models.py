@@ -186,3 +186,13 @@ class BaselineCallsCursor:
     action_id: int
     boundary: HistoryBoundary
     after_call_id: int
+
+
+@dataclass(frozen=True)
+class BaselineReadUnconfirmedSave:
+    call_id: int
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.call_id)
+        UtcMicros(self.occurred_at)

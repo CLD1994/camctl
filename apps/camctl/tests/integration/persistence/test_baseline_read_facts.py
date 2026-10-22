@@ -431,3 +431,91 @@ async def test_call_discovery_uses_fixed_boundary_and_cursor(owned,tmp_path):
     for limit in (2,128):
         complete=capture.read_baseline_calls(intent.action_id,second.value.boundary,None,limit,owned)
         assert complete.items==(saved.value,second.value) and complete.next_cursor is None
+
+
+@pytest.mark.parametrize('bounded',[False,True])
+async def test_unknown_result_preserves_original_inputs_and_has_no_return_time(owned,tmp_path,bounded):
+    from camctl.capture import baseline_models as models
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    request=models.BaselineReadUnconfirmedSave(first.value.call_id,_SCHEDULED+5)
+    if bounded:
+        from camctl.persistence.repositories.baseline_reads import SaveBaselineReadUnconfirmed
+        class Command:
+            def plan(self,scope):
+                plan=SaveBaselineReadUnconfirmed(request,intent.result_save_key).plan(scope)
+                return BoundedCommandPlan(plan.events,
+                    lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows),
+                    plan.result,lambda connection:None,baseline_read_write_scope=plan.baseline_read_write_scope)
+        receipt=commit_operation(Command(),intent.result_save_key,owned)
+        assert receipt.kind=='completed',receipt.error
+        view=receipt.result
+    else:
+        saved=capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+        view=saved.value
+    assert view.state.name=='UNCONFIRMED' and view.request==intent
+    assert (view.returned_at,view.error,view.next_cursor,view.chunk_event_id)==(None,None,None,None)
+    assert capture.read_baseline_call_result(view.call_id,owned)==view
+    assert capture.read_baseline_failure_anchor(intent.action_id,view.call_id,view.boundary,owned)==view
+    assert capture.verify_baseline_read_write(request,intent.result_save_key,owned)==view
+    assert capture.read_baseline_call(view.call_id,first.value.boundary,owned)==first.value
+    assert capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned).value==view
+    assert capture.save_baseline_read_unconfirmed(replace(request,occurred_at=_SCHEDULED+6),
+        intent.result_save_key,owned).kind is DbOutcomeKind.ROLLED_BACK
+    assert owned.connection.execute('SELECT status FROM actions WHERE id=?',(intent.action_id,)).fetchone()==(2,)
+
+
+async def test_unknown_cannot_replace_an_actual_return(owned,tmp_path):
+    from camctl.capture import baseline_models as models
+    from camctl.contracts.pages import Page
+    from camctl.devices.directory import DirectoryCursor,DirectoryRead
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    returned=models.BaselineReadReturn(first.value.call_id,_SCHEDULED+1,None,
+        DirectoryRead(None,None,Page((),DirectoryCursor(intent.binding,intent.directories,1,None))))
+    saved=capture.save_baseline_read_return(returned,intent.result_save_key,owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+    request=models.BaselineReadUnconfirmedSave(first.value.call_id,_SCHEDULED+5)
+    assert capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned).kind is DbOutcomeKind.ROLLED_BACK
+    assert capture.read_baseline_call_result(first.value.call_id,owned)==saved.value
+
+
+async def test_unknown_history_restores_intent_and_result_across_snapshot(owned,tmp_path):
+    from camctl.capture import baseline_models as models
+    from camctl.contracts.values import ConsistencyError
+    from camctl.history.snapshots import SnapshotRef,prepare_snapshot
+    from camctl.persistence.executor import DbExecutor
+    from camctl.persistence.repositories.history import HistoryRepository,SqliteSnapshotStore
+    from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
+    intent=await _intent(owned,tmp_path)
+    capture=CaptureRepository()
+    first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
+    history=HistoryRepository(tmp_path/'state.db')
+    identity=('baseline_read_calls',first.value.call_id)
+    original=history.restore_entity('action',intent.action_id,first.value.boundary)[identity]
+    executor=DbExecutor(lambda:open_existing(tmp_path/'state.db',DbOpenMode.EXISTING_RW,DbConfig()),
+        capacity=4,enqueue_timeout_seconds=9)
+    try:
+        store=SqliteSnapshotStore(tmp_path/'state.db',executor)
+        image=(await store.load_entity_images((SnapshotRef(1,intent.action_id),)))[0]
+        await store.save_snapshots((prepare_snapshot(image),))
+    finally:
+        await executor.close()
+    request=models.BaselineReadUnconfirmedSave(first.value.call_id,_SCHEDULED+5)
+    result=capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned)
+    assert result.kind is DbOutcomeKind.COMPLETED,result.error
+    unknown=history.restore_entity('action',intent.action_id,result.value.boundary)[identity]
+    assert unknown['state']==3 and unknown['returned_at'] is None
+    # 后来事件不改变原完整边界；两处边界均由实际快照与历史恢复取得。
+    await _activity(owned,tmp_path,request_id='43',device_id='cam-2')
+    assert history.restore_entity('action',intent.action_id,first.value.boundary)[identity]==original
+    assert history.restore_entity('action',intent.action_id,result.value.boundary)[identity]==unknown
+    assert capture.read_baseline_failure_anchor(intent.action_id,first.value.call_id,
+        first.value.boundary,owned) is None
+    assert capture.read_baseline_failure_anchor(intent.action_id,first.value.call_id,
+        result.value.boundary,owned)==result.value
+    with pytest.raises(ConsistencyError):
+        capture.read_baseline_failure_anchor(999,first.value.call_id,result.value.boundary,owned)
