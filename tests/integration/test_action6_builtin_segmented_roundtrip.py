@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from pathlib import Path
 from decimal import Decimal, ROUND_FLOOR
 
 import pytest
@@ -63,6 +64,13 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             cwd=deployment.root,
             env=environment,
         )
+    origin_result = _run(
+        [str(package.python), "-c", "import camctl; print(camctl.__file__)"],
+        cwd=deployment.root,
+        env=environment,
+    )
+    package_origin = Path(origin_result.stdout.strip())
+    assert package.python.parent.parent in package_origin.parents
     store = deployment.root / "client-store"
     store.mkdir()
     (store / "device-capabilities.json").write_text(
@@ -198,6 +206,8 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
         ]
         final_report = report
         all_delivery_ids = []
+        delivery_evidence = []
+        imported_report_ids = list(saved_source["saved_report_ids"])
         for name, selection, expected_ids in selections:
             instant = format_utc(read_clock(clock_file)["utc_us"])
             obtain_plan, _ = deployment.export_plan_with_client({
@@ -228,6 +238,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             demo.claim()
             saved = deployment.import_reports_with_client(deployment.processing)
             assert final_report["report_id"] in saved["saved_report_ids"]
+            imported_report_ids.extend(saved["saved_report_ids"])
             for delivery in deliveries:
                 path = next(
                     candidate for candidate, row in by_path.items()
@@ -240,17 +251,26 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
                 assert data == expected
                 assert delivery["size"] == len(expected)
                 assert delivery["sha256"] == digest
+                media_path = deployment.root / f"client-media-{delivery['delivery_id']}.json"
                 media = deployment.run_client_driver(
                     "import-media",
                     str(store),
                     str(claimed),
-                    output=deployment.root / f"client-media-{delivery['delivery_id']}.json",
+                    output=media_path,
                 )
                 assert media["delivery_id"] == delivery["delivery_id"]
                 assert media["output_id"] == delivery["output_id"]
                 assert media["video"]["status"] == "verified"
                 assert media["video"]["sha256"] == digest
                 all_delivery_ids.append(delivery["delivery_id"])
+                delivery_evidence.append({
+                    "output_id": delivery["output_id"],
+                    "delivery_id": delivery["delivery_id"],
+                    "file_name": delivery["file_name"],
+                    "size": delivery["size"],
+                    "sha256": delivery["sha256"],
+                    "client_import_receipt": str(media_path),
+                })
 
         assert len(set(all_delivery_ids)) == len(all_delivery_ids)
         for path, expected in contents.items():
@@ -273,6 +293,46 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             ) == [(int(final_report["report_id"]), final_report["to_wm"])],
             120,
             "客户端累计 ACK 未吸收",
+        )
+        ack_state = query_state(
+            deployment.state_db,
+            "SELECT acknowledged_report_id,acknowledged_wm FROM runtime_state",
+        )[0]
+        wheel_root = package.python.parent.parent.parent
+        wheels = sorted((wheel_root / "dist").glob("camctl-*.whl"))
+        assert len(wheels) == 1
+        wheel = wheels[0]
+        evidence = {
+            "result_mode": "segmented",
+            "action_type": action_type,
+            "action_id": str(action_id),
+            "source_report_id": report["report_id"],
+            "coverage": coverage,
+            "outputs": [
+                {
+                    "output_id": str(row[3]),
+                    "device_path": row[1],
+                    "kind": "preview" if row[4] == preview_kind else "original",
+                }
+                for row in rows
+            ],
+            "deliveries": delivery_evidence,
+            "client_imported_report_ids": sorted(set(imported_report_ids)),
+            "client_ack": receipt,
+            "acknowledged_state": {
+                "report_id": ack_state[0],
+                "watermark": ack_state[1],
+            },
+            "wheel": {
+                "path": str(wheel),
+                "size_bytes": wheel.stat().st_size,
+                "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+                "installed_package_origin": str(package_origin),
+            },
+        }
+        (deployment.root / "action6-segmented-evidence.json").write_text(
+            json.dumps(evidence, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
         )
     finally:
         demo.stop()
