@@ -200,6 +200,13 @@ function validateVideoCoverage(action: ReportAction): void {
     Array.isArray(scope.output_ids),
     "覆盖默认视频范围必须完整展开产物身份",
   );
+  requireFact(
+    coverage.checked_output_ids.length <= scope.output_ids.length &&
+      coverage.checked_output_ids.every(
+        (id, index) => id === scope.output_ids[index],
+      ),
+    "已检查视频产物必须是默认视频范围的连续前缀",
+  );
   if (scope.state === "unknown")
     requireFact(
       scope.member_count === null && scope.output_ids.length === 0,

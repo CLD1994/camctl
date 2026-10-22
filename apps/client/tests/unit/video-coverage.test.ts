@@ -240,6 +240,56 @@ describe("视频覆盖报告", () => {
     expect(() => validateReport(wrongScopeCount)).toThrow(/数量/);
   });
 
+  it("未确认检查只能引用默认视频范围的连续前缀，且可保留较短前缀", () => {
+    const checkedPrefix = coverage({
+      confirmed: 30,
+      status: "unconfirmed",
+      checked_output_ids: ["11"],
+      default_scope: {
+        state: "nonempty",
+        member_count: 2,
+        output_ids: ["11", "12"],
+      },
+    });
+    expect(() =>
+      validateReport(
+        report(checkedPrefix, "camera_record", [
+          original("11"),
+          original("12"),
+        ]),
+      ),
+    ).not.toThrow();
+
+    const outOfOrder = {
+      ...checkedPrefix,
+      checked_output_ids: ["12"],
+    };
+    expect(() =>
+      validateReport(
+        report(outOfOrder, "camera_record", [
+          original("11"),
+          original("12"),
+        ]),
+      ),
+    ).toThrow(/连续前缀/);
+  });
+
+  const invalidScopes: Array<[string, Coverage["default_scope"]]> = [
+    ["unknown", { state: "unknown", member_count: null, output_ids: [] }],
+    ["empty", { state: "empty", member_count: 0, output_ids: [] }],
+  ];
+  it.each(invalidScopes)(
+    "%s 默认范围不能携带已检查产物",
+    (_label, default_scope) => {
+      const value = coverage({
+        status: "unconfirmed",
+        checked_output_ids: ["11"],
+        default_scope,
+      });
+      expect(() => validateReport(report(value))).toThrow(/连续前缀/);
+    },
+  );
+
   it("精确比较时长词元，不把小数舍入成达到目标", () => {
     const value = report(
       coverage({
