@@ -55,7 +55,7 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 
 此清理模块中的 OSMO 来源由测试入口显式声明 `result_policy=null` 和精确一份 OSV，并核对实际冻结值，继续验证单原片修复、修复成品与清理链。正式分段任务由下方独立模块验证。
 
-此模块与原 OSMO 模块在同一命令顺序运行，合计 14 个用例。需要部署版 Python 3.11、uv 缓存及构建依赖、客户端 Node.js 依赖、C 构建工具和可用的 ffmpeg／ffprobe；缺少媒体工具会明确跳过，不能据此宣称完整验收。执行命令为：
+此模块与原 OSMO 模块可以在同一命令中顺序运行。需要部署版 Python 3.11、uv 缓存及构建依赖、客户端 Node.js 依赖、C 构建工具和可用的 ffmpeg／ffprobe；缺少媒体工具会明确跳过，不能据此宣称完整验收。执行命令为：
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest \

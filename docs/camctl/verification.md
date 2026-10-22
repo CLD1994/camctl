@@ -59,6 +59,10 @@ P5 的 `segment-scope-cleanup-cold-165720` 完整文件为 10 passed、233.45 �
 
 配置变化测试现从实际事件涉及的全部当前行建立逆向种子，并按各表权威登记保留业务列；四表裁剪仅用于本场景的业务比较。`bootstrap-projection-seed-fixed-181544` 完整文件为 4 passed。启动失败测试按既定无 RESULTS 发布契约核对唯一零成员来源、实际发布标记、无正式产物、无 RESULTS 流程及唯一 START 调用；`persistence-start-contract-fixed-181636` 为 1 passed。两项修正均为测试预期维护，生产行为保持原契约，完整目录另行验证。
 
+在提交 `5d87469` 上，`scheduling-complete-final-181848` 为 136 passed，`session-complete-final-181859` 为 194 passed，均为完整目录且退出 0。`installed-action6-regression-final-181751` 的普通录像及原生有限延时两个安装版联合用例均通过，78.95 秒、退出 0；分别经实际 wheel、C host、CLI、持久化、取回、客户端导入和 ACK，继续使用各自原有计时与单原片规则。bootstrap、persistence 的完整复验使用两个独立工作区，实际命令及退出结果继续保留。
+
+发行物审计 `release-wheel-audit-182318` 核对实际安装链归档的 `tmp/osmo-installed-chain-archive-81825/dist/camctl-0.1.0-py3-none-any.whl`：290 份生产 Python 文件与当前源码逐字节一致，27 份资源与唯一权威映射中的仓库来源逐字节一致，且无额外资源或生产 Python 文件。wheel 的 SHA-256 为 `176e3418a4ff02ca58f5de365039af269b6d6967e25d477fbcf24b3394f27bd9`。包资源只读同步检查退出 0；现场计划生成入口及独立媒体验收工具部署入口由[演示说明](../hardware/camera-demo-validation.md#osmo-正式计划与分段验收)维护。
+
 ## OSMO 分段原页、事务接缝与文件证明（2026-10-22 UTC）
 
 按[分段实施计划](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md)继续软件实现。环境为 Linux x86_64、Python 3.11.16、SQLite 3.53.1。主线已接入原始设备结果页、逐页文件索引及其历史核实，并将结果页、来源解析和原分段完成的事务读取范围及封口共同保留。文件归属提交为 `db24903`；批内原页证明复用提交为 `cd80f4f`。
