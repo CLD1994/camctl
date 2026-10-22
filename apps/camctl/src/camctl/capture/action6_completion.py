@@ -756,7 +756,7 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
         ):
             return
     from camctl.capture import handlers as common
-    from camctl.capture.segment_completion import release_segment_occupancy
+    from camctl.capture.segment_completion import _save, release_segment_occupancy
 
     ref = await prepare_action6_segment_set(runtime, action, None, canceled=canceled)
     if ref is None:
@@ -774,7 +774,6 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
     facts = classify_action6_segment_set(
         action, ref, repository, runtime.owned, canceled=canceled
     )
-    release_segment_occupancy(runtime, action_id)
     activity = row_facts(
         runtime.owned.connection,
         "device_activities",
@@ -785,7 +784,57 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
     normal_completion = common._natural_file_completion_context(
         runtime, action_id
     ) is not None
-    if canceled or normal_completion and facts.decision.status is SegmentDecisionStatus.SUCCEEDED:
+    if (
+        not canceled
+        and normal_completion
+        and facts.decision.status is SegmentDecisionStatus.SUCCEEDED
+        and activity["result_set_state"] not in (3, 4)
+    ):
+        from camctl.capture.result_scans import SavedResultEntries
+        from camctl.capture.segment_storage import SegmentResultRef
+
+        result_ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+        if not isinstance(result_ref, SegmentResultRef):
+            raise ConsistencyError("Action6 自然完成缺少已准备的原 RESULTS 集合")
+        listing = common._saved_result_listing(runtime, action_id)
+        if not isinstance(listing.entries, SavedResultEntries):
+            raise ConsistencyError("Action6 自然完成缺少可靠的原 RESULTS 页")
+        first = next(listing.entries.pages()).ref
+        result_set = repository.read_result_set(result_ref, runtime.owned)
+        observation = {
+            "first_page_event_id": first.event_id,
+            "last_page_event_id": listing.entries.last_ref.event_id,
+            "file_count": result_set["member_count"],
+        }
+        completion = runtime.capture.read_result_completion(
+            action_id, runtime.owned
+        )
+        if completion is None:
+            completion = {
+                "method": common._TIME_AND_OUTPUTS_METHOD,
+                "wait_completed_event_id": activity["wait_completed_event_id"],
+                "observation": observation,
+            }
+        _save(
+            runtime,
+            action_id,
+            runtime.capture,
+            "confirm_result_set",
+            common.ResultSetSave(
+                action_id,
+                runtime.wall_us(),
+                common.ResultSetPhase.COMPLETE,
+                "result_files_listed/v2",
+                observation,
+                {"status": "completed"},
+                completion,
+            ),
+        )
+    release_segment_occupancy(runtime, action_id)
+    if canceled or (
+        normal_completion
+        and facts.decision.status is SegmentDecisionStatus.SUCCEEDED
+    ):
         publish_action6_segment_result(runtime, action, ref, facts.decision)
         return
     from dataclasses import replace

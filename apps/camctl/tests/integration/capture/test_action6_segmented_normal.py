@@ -236,6 +236,11 @@ async def test_action6_native_normal_publishes_all_video_and_required_photo_sepa
 
         assert runtime.action(action_id)["status"] == 3
         assert owned.connection.execute(
+            "SELECT completion_basis,occupancy_state,result_set_state FROM device_activities"
+            " WHERE action_id=?",
+            (action_id,),
+        ).fetchone() == (3, 2, 3)
+        assert owned.connection.execute(
             "SELECT kind,COUNT(*) FROM outputs GROUP BY kind ORDER BY kind"
         ).fetchall() == [(1, 4), (3, 2)]
         assert owned.connection.execute(
