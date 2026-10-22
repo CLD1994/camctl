@@ -124,11 +124,20 @@ level = "INFO"
 
 设备声明外层允许驱动扩展字段，并不保证未识别字段会产生作用；下面列出的已定义子表会校验结构及未知键。ADB serial 在加载器中仅在提供 `adb` 子表时检查，部署时仍须为两个 ADB 驱动填写该表。每个驱动能执行哪些动作，以相同配置导出的 `camctl describe` 为准；内建能力存在不表示具体设备和目标主机已经完成验收。
 
-### 视频结果模式的设计合同
+### 视频结果模式
 
 [公共视频结果设计](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#部署配置与受理)定义 `devices.<id>.video.result_mode` 的值、默认值及错误边界。Action6 与 OSMO 360 II 均按每台相机统一选择模式，同时作用于普通录像及原生延时；受理后的任务使用自身冻结选择。
 
-该配置及公共层重构属于待实施设计。部署时须核对相应实施交付及安装版能力说明；已有 OSMO 分段软件验证不证明部署模式切换已经实现。
+配置加载器校验 `video` 子表及其字段，能力目录按每台设备绑定任务工厂和结果说明。受理后修改配置只影响新任务，已有任务仍按冻结模式执行。安装版与设备验证的实际范围见[执行计划](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#当前进度与交接记录)。
+
+例如，为采用分段固件的 Action6 声明：
+
+```toml
+[devices.action6.video]
+result_mode = "segmented"
+```
+
+将该子表合入下方对应相机的部署示例。模式不是拍摄参数，不能放进计划的 `params` 中。
 
 ### 控制、查询与结果核实
 

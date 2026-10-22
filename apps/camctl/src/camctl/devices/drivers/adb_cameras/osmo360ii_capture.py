@@ -28,7 +28,8 @@ def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
         file_completion_wait_s=Decimal("30"), ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "osv", "min_count": 1,
-            "exact_count": None, "require_pairing": False, "min_size_bytes": 1},),
+            "exact_count": (1 if not timelapse and result_mode is VideoResultMode.SINGLE_FILE else None),
+            "require_pairing": False, "min_size_bytes": 1},),
         video_result_mode=result_mode,
         result_policy=((CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1 if timelapse
             else CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1)

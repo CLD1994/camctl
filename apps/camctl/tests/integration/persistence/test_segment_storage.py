@@ -20,6 +20,7 @@ from dataclasses import replace
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.capture.files import OwnershipSave, FileCompletionSave
 from camctl.capture.models import CaptureTask
+from camctl.devices.tasks import VideoResultMode
 from camctl.capture.segment_models import *
 from camctl.capture.segment_storage import SegmentSetCreate, SegmentMemberInput
 from camctl.capture.segments import advance_segment_assessment, finish_segment_assessment, iter_segment_gaps
@@ -40,7 +41,7 @@ class SegmentedCatalog(ResultCatalog):
             factory=definition.task_factory
             def task(params):
                 original=factory(params)
-                return replace(original,result_policy='osmo360ii_record_segments_v1' if args[1]=='camera_record' else 'osmo_empty_tail_classification_v1',product_rules=(ProductRule(FileKind.VIDEO,'osv',min_size_bytes=1).as_json(),))
+                return replace(original,video_result_mode=VideoResultMode.SEGMENTED,result_policy='osmo360ii_record_segments_v1' if args[1]=='camera_record' else 'osmo_empty_tail_classification_v1',product_rules=(ProductRule(FileKind.VIDEO,'osv',min_size_bytes=1).as_json(),))
             return replace(definition,task_factory=task)
         return definition
 

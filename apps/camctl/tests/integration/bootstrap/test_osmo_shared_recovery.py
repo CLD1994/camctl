@@ -87,21 +87,12 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
     monkeypatch.setattr(drivers_runtime, "_entries", {})
     cfg = load_config({"paths": {name: str(tmp_path / name) for name in ("staging", "ready", "processing")},
         "devices": {"cam-1": {"kind": "camera", "driver": binding.driver_id,
+            "video": {"result_mode": "segmented" if binding == BINDING and not single_original else "single_file"},
             "adb": {"serial": "serial-1"}, "recording": {"start_retry_interval_s": "0"},
             "result_check": {"max_attempts": 1, "retry_interval_s": "0"},
             "copy": {"retry_interval_s": "0"}}}}, ConfigDefaults())
     from camctl.persistence.initialization import _prepare_directories
     _prepare_directories(tmp_path / "state.db", Path(cfg.paths.staging), Path(cfg.paths.ready), Path(cfg.paths.processing))
-    if single_original:
-        from camctl.devices.drivers.adb_cameras import osmo360ii_capture
-        original_task = osmo360ii_capture._task
-
-        def task(params):
-            declared = original_task(params)
-            return replace(declared, result_policy=None,
-                product_rules=tuple({**rule, "exact_count": 1} for rule in declared.product_rules))
-
-        monkeypatch.setattr(osmo360ii_capture, "_task", task)
     register_builtin_camera_drivers(cfg)
     registry = drivers_runtime.current_registry()
     entry = registry.entry(binding.driver_id)

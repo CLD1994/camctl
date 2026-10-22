@@ -12,7 +12,7 @@ from camctl.capture.handlers import capture_handler
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import new_operation_key
-from camctl.devices.tasks import CaptureResultPolicy
+from camctl.devices.tasks import CaptureResultPolicy, VideoResultMode
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import (
@@ -50,6 +50,7 @@ class NativeSegmentCatalog(SmallNativeCatalog):
                     ownership_mode=2,
                     output_scope={"directories": ["/DCIM"]},
                     result_policy=CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1,
+                    video_result_mode=VideoResultMode.SEGMENTED,
                 ),
             )
         return definition
