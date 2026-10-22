@@ -125,7 +125,7 @@ V1、V2、V4 都须取得实际业务结果，不能以基础类型或仓储测�
 - [x] **步骤 3：实现配置解析及部署绑定。** 在加载器校验闭合 `video` 表，经内建驱动注册和目录绑定形成模式工厂；非法配置与设备不支持按所属错误结束，拍摄调用为零。由同一部署定义生成现有能力 `description` 中的模式和必要产物说明，不新增拍摄参数；核对 `Catalog.describe_document()` 与客户端 `loadCapabilities()` 的实际消费，不能只替换 task factory 而保留静态说明。
 - [x] **步骤 4：实现冻结、读取及显式分派。** 修改 `CaptureTask`、`build_capture_spec()`、`validate_capture_spec()` 和受理入口，保存本次模式及特化；更新相应事件／历史解码。普通录像及原生延时的恢复读取只消费已保存合同。
 - [ ] **步骤 5：保留并验证现有完整路径。** 两设备的单文件普通录像要求恰好一份必要视频，原生延时保留最低数量合同；单文件异常继续 `run_recording_media()` 及适用修复。OSMO 分段仍由现有完成模块执行，先用适配器消费新合同。按模式更新正常、失败、取消和恢复入口，不以“存在策略”等价于“使用 OSMO”。
-- [ ] **步骤 6：增加真实装配和受理集成测试。** 建议 `apps/camctl/tests/integration/bootstrap/test_video_result_mode_binding.py`：使用实际 `_default_catalog`，同驱动两台设备选择不同模式；受理后切换配置再重启，旧定义不变、新请求改变；原请求重送不重建定义。核对 START、STOP 等控制合同不随模式改变。
+- [x] **步骤 6：增加真实装配和受理集成测试。** 建议 `apps/camctl/tests/integration/bootstrap/test_video_result_mode_binding.py`：使用实际 `_default_catalog`，同驱动两台设备选择不同模式；受理后切换配置再重启，旧定义不变、新请求改变；原请求重送不重建定义。核对 START、STOP 等控制合同不随模式改变。
 - [ ] **步骤 7：运行最窄门槛。** 单元同步骤 2；集成命令如下，成功标准是实际执行和恢复走正确流程，既有 OSMO 分段夹具显式选择该模式。提交前按全局方式审查并记录进度。
 
 ```bash
@@ -214,7 +214,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reportin
 - [x] **步骤 3：实现受管主视频指标读取和事实编码。** 扩展 `MediaStream`／`MediaProbe` 及 `probe_document()`／`read_probe()`；使用已有工具从完整本地文件取得可靠帧计数，按所选主视频流保存计数依据。工具配置及结果跟随原操作保存，时长保持精度，帧数为整数。
 - [x] **步骤 4：实现纯累计与结束判定。** `advance_coverage()` 只累计同量纲可靠值；`finish_coverage()` 明确处理达到、完整不足、中断未确认和范围未知。缺口、不合格或未知位置结束连续前缀；后段不能补位。函数不执行文件或数据库操作。
 - [x] **步骤 5：以真实本地媒体工具验证度量端口。** 建议 `apps/camctl/tests/integration/host_files/test_video_metrics.py`，按既有工具环境生成小型已知帧数媒体，经真实受管端口读取。验证持续时间、实际帧数、工具收场及 OSMO 单文件必要流保留，不使用真实相机。缺工具须列出缺失，不能跳过后声称该门槛通过。
-- [ ] **步骤 6：运行上述单元和独立 host_files 集成文件，更新媒体事实文档。** 指标本身尚未证明拍摄恢复已接入，该结果交给 V6、V8。
+- [x] **步骤 6：运行上述单元和独立 host_files 集成文件，更新媒体事实文档。** 指标本身尚未证明拍摄恢复已接入，该结果交给 V6、V8。
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/host_files/test_media.py apps/camctl/tests/unit/capture/test_video_coverage.py -q
@@ -423,7 +423,7 @@ apps/camctl/.venv311/bin/python -m unittest discover -s tests/integration -p 'te
 
 2026-10-23：主分支已集成部署绑定（`bf008ea`）、公共文件身份（`1c1a7f8`）、媒体指标（`4008615`）、覆盖协议与客户端（`fb9c3e5`）、实际内容前缀规则（`f1ea3b3`）。`eda8826` 保留 OSMO 普通单文件的精确一份合同，并让组件分段夹具显式选择模式。公共模式、目标与结果头的完整业务接线仍在 V4、V6—V9 推进，不以这些基础提交表示 Action6 已完成。
 
-已取得的验证包括：模式及设备定向单元、主视频与覆盖定向单元329项、真实本地媒体2项及媒体历史2项；客户端相关单元513项、TypeScript 编译和根协议校验。主分支新增前缀规则及 OSMO 模式单元组合53项通过；原 Action6 单文件自然完成与取消／恢复装配6项通过（日志 `/tmp/camctl-video-single-file-bootstrap.log`，退出码0）。未重复运行全部组件集成目录。
+已取得的验证包括：模式及设备定向单元、主视频与覆盖定向单元329项、真实本地媒体2项及媒体历史2项；客户端相关单元513项、TypeScript 编译和根协议校验。主分支新增前缀规则及 OSMO 模式单元组合53项通过；原 Action6 单文件自然完成与取消／恢复装配6项通过（日志 `/tmp/camctl-video-single-file-bootstrap.log`，退出码0）。未重复运行全部组件集成目录。模式冻结装配4项通过（`/tmp/camctl-video-mode-binding.log`，退出码0），验证两设备、两动作、同驱动两台相机独立配置、重开连接、旧请求重送和新请求。OSMO 完成／范围恢复原运行28项通过、2项因公共解析适配失败；修正未知顺序键保存后，仅重跑受影响的4项全部通过（`/tmp/camctl-video-osmo-unknown-order.log`，退出码0）。
 
 V7 采用已有来源 `published_event_id` 所属完整事务边界，恢复该边界下真正已运行且等待来源的取回，而不另建一套等待者清单。它必须保留与来源提交时固定关联相同的行为；仅已受理的后续取回不具备复用资格。检查副本建档后本地读取失败，再切回设备源的持久化换源流程列为本版待完善项；首次授权前副本不可用时仍直接选设备源。
 
