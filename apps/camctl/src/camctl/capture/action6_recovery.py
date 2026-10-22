@@ -76,3 +76,120 @@ async def inspect_continuous_prefix(
         interruption_reason=reason,
     ))
     return CheckedPrefix(decision, first, last)
+
+
+async def advance_action6_recovery(runtime, action, decision=None):
+    """实际处理器的异常入口；检查事实可跨推进和会话恢复。"""
+    from dataclasses import replace
+
+    from camctl.capture import handlers as common
+    from camctl.capture.action6_completion import (
+        advance_action6_segmented_recording, classify_action6_segment_set,
+        prepare_action6_segment_set, publish_action6_segment_result,
+    )
+    from camctl.capture.segment_completion import (
+        _control_facts, _members, release_segment_occupancy, resume_segment_writes,
+    )
+    from camctl.capture.segment_inspections import (
+        SegmentInspectionPhase, SegmentInspectionRequest, inspect_segment,
+    )
+    from camctl.capture.segment_models import (
+        CoverageStatus, DefaultScopeState, EvidenceState, SegmentDecisionScope,
+        SegmentDecisionStatus,
+    )
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.segment_profiles import profile_for_policy
+    from camctl.outputs.qualification import OperationConfig
+    from camctl.persistence.repositories.segments import SegmentRepository
+    from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
+    from camctl.persistence.transaction import row_facts
+
+    action_id = action["id"]
+    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+    action = runtime.action(action_id)
+    if action["status"] in common._ACTION_TERMINAL:
+        return
+    if action["cancel_requested"]:
+        await advance_action6_segmented_recording(runtime, action, decision)
+        return
+    # 受限时钟会话只保存控制和文件进度；媒体检查由正常会话执行。
+    if runtime.media is None:
+        return
+    repository = SegmentRepository()
+    ref = await prepare_action6_segment_set(runtime, action, None)
+    if ref is None:
+        return
+    release_segment_occupancy(runtime, action_id)
+    setrow = repository.read_result_set(ref, runtime.owned)
+    prior = repository.read_assessment(ref, runtime.owned)
+    if prior is not None:
+        publish_action6_segment_result(runtime, action, ref, prior)
+        return
+    activity = row_facts(runtime.owned.connection, "device_activities", setrow["activity_id"])
+    spec = action["execution_spec_json"]
+    target = profile_for_policy(spec["result_policy"]).coverage_target(
+        action["effective_params_json"], spec,
+        enum_for("actions.type")(action["type"]).name.lower(),
+    )
+    flow = runtime.media
+    budget = OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
+                             flow.retry_interval_s)
+    explicit_media_failure = False
+
+    async def inspect(stored):
+        nonlocal explicit_media_failure
+        existing = read_inspection_for_member(action_id, stored.member_id, runtime.owned)
+        saved = existing.inspection
+        adopted_budget = budget if saved is None else OperationConfig(**saved.budget_json)
+        step = await inspect_segment(flow, SegmentInspectionRequest(
+            action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
+        ))
+        if step.phase is SegmentInspectionPhase.WAITING:
+            return None
+        if step.phase is SegmentInspectionPhase.FAILED:
+            explicit_media_failure = True
+        return step.metric or VideoMetric(target.metric, None,
+                                         step.reason or "inspection_unconfirmed")
+
+    prefix = await inspect_continuous_prefix(
+        _members(repository, ref, runtime), target,
+        start=repository.read_start(ref, runtime.owned).key,
+        collection_complete=setrow["source_kind"] == int(
+            enum_for("segment_sets.source_kind").COMPLETE_SCAN),
+        inspect=inspect,
+    )
+    if prefix is None:
+        return
+    coverage = prefix.coverage
+    scope = SegmentDecisionScope(
+        DefaultScopeState.NONEMPTY if coverage.confirmed_segments else DefaultScopeState.EMPTY,
+        ref, prefix.first_cursor, prefix.last_cursor, coverage.confirmed_segments,
+    )
+    facts = classify_action6_segment_set(
+        action, ref, repository, runtime.owned,
+        coverage_status=CoverageStatus(coverage.status.value),
+        confirmed=coverage.confirmed, checked_count=coverage.confirmed_segments,
+        default_scope=scope,
+    )
+    result = facts.decision
+    native = action["type"] == int(enum_for("actions.type").CAMERA_TIMELAPSE)
+    if native:
+        control_complete = common._natural_file_completion_context(runtime, action_id) is not None
+    else:
+        control_complete = _control_facts(runtime, action, activity)[0] is EvidenceState.CONFIRMED
+    explicit_failure = (
+        result.status is SegmentDecisionStatus.FAILED
+        or explicit_media_failure
+        or coverage.reason in ("segment_gap", "empty_original")
+    )
+    if explicit_failure:
+        result = replace(result, status=SegmentDecisionStatus.FAILED,
+                         failure_code="capture_failed", reason="invalid_outputs")
+    elif control_complete or coverage.status.value == "reached":
+        result = replace(result, status=SegmentDecisionStatus.SUCCEEDED,
+                         failure_code=None, reason=coverage.reason)
+    else:
+        result = replace(result, status=SegmentDecisionStatus.UNCONFIRMED,
+                         failure_code="capture_result_unconfirmed",
+                         reason=coverage.reason or "completion_unknown")
+    publish_action6_segment_result(runtime, action, ref, result)
