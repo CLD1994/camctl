@@ -174,3 +174,16 @@ class ObtainInitializationReadScope(SourceResolutionReadScope):
 @dataclass(frozen=True)
 class AdmissionSourceReadScope(PlanReadScope):
     """原受理事务真实前序创建的来源 owner。"""
+
+
+@dataclass(frozen=True)
+class BaselineReadWriteScope:
+    """原基准调用返回与适用批次的共同写入范围。"""
+
+    action_id: int
+    activity_id: int
+    call_id: int
+
+    def __post_init__(self):
+        for value in (self.action_id, self.activity_id, self.call_id):
+            ObjectId(value)

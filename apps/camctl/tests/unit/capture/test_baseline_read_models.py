@@ -88,3 +88,23 @@ def test_cursor_cannot_change_original_binding_or_scope():
     for cursor in (foreign, narrow):
         with pytest.raises(ValueError):
             _intent(read_no=2, cursor=cursor)
+
+
+def test_actual_return_freezes_error_details_without_tool_diagnostics():
+    from camctl.devices.directory import DirectoryRead
+    from camctl.operations.models import ErrorValue
+    details={'command':{'path':'/data/A'}}
+    error=ErrorValue('directory_failed','baseline',details)
+    request=models.BaselineReadReturn(1,2,error,DirectoryRead(None,error,None))
+    details['command']['path']='/different'
+    assert request.error.details=={'command':{'path':'/data/A'}}
+    assert request.returned.error==request.error
+    assert request.returned.outcome is None
+
+
+def test_actual_return_rejects_a_different_error_from_same_read():
+    from camctl.devices.directory import DirectoryRead
+    from camctl.operations.models import ErrorValue
+    error=ErrorValue('directory_failed','baseline',{})
+    with pytest.raises(ValueError):
+        models.BaselineReadReturn(1,2,None,DirectoryRead(None,error,None))

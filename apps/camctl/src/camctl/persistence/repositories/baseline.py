@@ -247,6 +247,20 @@ def read_chunks(ref, cursor, batch, owned):
     return Page(chunks[:batch], chunks[batch - 1].event_id)
 
 
+def append_event(request, activity, event_id, transaction_id):
+    """形成一条原APPEND；调用者负责分配并共同提交完整事务。"""
+    after = {'baseline_last_event_id': event_id}
+    if request.chunk_no == 1:
+        after['baseline_first_event_id'] = event_id
+    before = {name: activity[name] for name in after}
+    changed = {name: value for name, value in after.items() if not json_equal(before[name], value)}
+    return event_envelope(event_id, transaction_id, _TYPE, _APPEND,
+        (update_change('device_activities', request.activity_id,
+            {name: before[name] for name in changed}, changed),), request.occurred_at,
+        {'activity_id': request.activity_id, 'chunk_no': request.chunk_no,
+         'entries': [entry.as_json() for entry in request.entries]})
+
+
 class _BaselineCommand:
     def __init__(self, request, key):
         self.request, self.key = request, key
@@ -279,10 +293,10 @@ class _BaselineCommand:
     def _save(self, scope, reason, before, after, evidence, stats, result):
         allocation = scope.allocate(1)
         if reason == _APPEND:
-            after = {**after, "baseline_last_event_id": allocation.first_event_id}
-            if self.request.chunk_no == 1:
-                after["baseline_first_event_id"] = allocation.first_event_id
             result = BaselineChunkResult(self.request.activity_id, self.request.chunk_no, allocation.first_event_id)
+            event = append_event(self.request, self.activity, allocation.first_event_id, allocation.txn_id)
+            return CommandPlan((event,), self.owners, self.state, result=result,
+                               baseline_reads={self.request.activity_id: stats})
         changed = {key: value for key, value in after.items() if not json_equal(before[key], value)}
         old = {key: before[key] for key in changed}
         event = event_envelope(allocation.first_event_id, allocation.txn_id, _TYPE, reason,

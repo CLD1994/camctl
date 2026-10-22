@@ -40,6 +40,7 @@ from camctl.history.events import (
 from camctl.history.reads import (
     AdmissionSourceReadScope,
     BaselineRangeRead,
+    BaselineReadWriteScope,
     CaptureResultReadScope,
     PlanReadScope,
     ProductReadScope,
@@ -100,6 +101,7 @@ class CommandPlan:
     segment_read_scope: SegmentReadScope | None = None
     source_read_scope: SourceResolutionReadScope | AdmissionSourceReadScope | None = None
     result_page_write_scope: ResultPageWriteScope | None = None
+    baseline_read_write_scope: BaselineReadWriteScope | None = None
 
 
 class TransactionScope:
@@ -150,18 +152,22 @@ class BoundedCommandPlan:
     result: Any
     complete: Callable[[sqlite3.Connection], None]
     result_page_write_scope: ResultPageWriteScope | None = None
+    baseline_read_write_scope: BaselineReadWriteScope | None = None
 
 
 def _bind_event_reads(context, event, transaction, segment_guard_state,
                       source_guard_state, connection, operation_key,
                       result_page_write_scope=None, result_page_guard_state=None,
-                      *, validated=(), planned_events=(), bounded=False):
+                      *, validated=(), planned_events=(), bounded=False,
+                      baseline_read_group=None):
     """分别绑定分段、来源和结果页进度，返回有效上下文及读取端口。"""
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.repositories.obtain_check_reads import bind as bind_obtain_check
     context = bind_obtain_check(context, event, transaction, connection)
     from camctl.persistence.repositories.baseline_reads import bind_intent
     context = bind_intent(context, event, transaction, connection, operation_key)
+    if baseline_read_group is not None:
+        context = baseline_read_group.bind(context, event)
     reads=context.current_reads
     if result_page_write_scope is not None:
         if reads is not None:
@@ -192,7 +198,9 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     return context,reads
 
 
-def _seal_event_reads(reads,validated,source_guard_state):
+def _seal_event_reads(reads,validated,source_guard_state,baseline_read_group=None):
+    if baseline_read_group is not None:
+        baseline_read_group.seal(validated)
     if reads is not None:
         from camctl.persistence.event_reads import SqlEventReads
         SqlEventReads.seal_segment_finish(reads,validated)
@@ -216,6 +224,20 @@ def _finalize_result_page_write(state,scope,transaction,connection):
     SqlEventReads.finalize_result_page_write(state,scope,transaction,connection)
 
 
+def _baseline_read_group(plan, transaction, connection, operation_key):
+    if plan.baseline_read_write_scope is None:
+        return None
+    if plan.result_page_write_scope is not None:
+        raise TransactionError('基准调用返回不能混用结果页写入范围')
+    from camctl.persistence.repositories.baseline_reads import BaselineReturnGroup
+    return BaselineReturnGroup(plan.baseline_read_write_scope, transaction, connection, operation_key)
+
+
+def _finish_baseline_read_group(group):
+    if group is not None:
+        group.finish()
+
+
 def _write_bounded_plan(plan, scope, operation_key):
     connection = scope.connection
     allocation = scope.allocation
@@ -230,6 +252,7 @@ def _write_bounded_plan(plan, scope, operation_key):
     segment_guard_state = {}
     source_guard_state = {}
     result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction,connection)
+    baseline_read_group = _baseline_read_group(plan,transaction,connection,operation_key)
     for proposed in plan.events:
         if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
             raise TransactionError("实际有界事件与预分配完整范围不符")
@@ -239,7 +262,8 @@ def _write_bounded_plan(plan, scope, operation_key):
         context, reads = _bind_event_reads(
             context, proposed, transaction, segment_guard_state,
             source_guard_state, connection, operation_key,
-            plan.result_page_write_scope, result_page_guard_state, bounded=True)
+            plan.result_page_write_scope, result_page_guard_state, bounded=True,
+            baseline_read_group=baseline_read_group)
         targets = event_report_targets(proposed, context.state_rows)
         if targets:
             sequence += 1
@@ -247,7 +271,7 @@ def _write_bounded_plan(plan, scope, operation_key):
             ObjectId(sequence)
         event = replace(proposed,change_seq=sequence if targets else None)
         validated = validate_event(event,context)
-        _seal_event_reads(reads, validated, source_guard_state)
+        _seal_event_reads(reads, validated, source_guard_state,baseline_read_group)
         refs = set(validated.row_owners.values())
         before_counts = {}
         for ref in refs:
@@ -282,12 +306,14 @@ def _write_bounded_plan(plan, scope, operation_key):
         expected += 1
     if expected != allocation.last_event_id+1:
         raise TransactionError("实际有界事件少于预分配完整范围")
+    _finish_baseline_read_group(baseline_read_group)
     _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     from camctl.persistence.repositories.source_transactions import finish_stream
     finish_stream(source_guard_state)
     from camctl.persistence.repositories.admission_sources import finish as finish_admission
     finish_admission(connection, transaction, None, source_guard_state)
     plan.complete(connection)
+    _finish_baseline_read_group(baseline_read_group)
     _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
         connection.execute("COMMIT")
@@ -645,12 +671,12 @@ def commit_operation(
             plan.capture_result_read_scope, plan.segment_read_scope,
             plan.source_read_scope, plan.result_page_write_scope,
         )
-        if sum(value is not None for value in scopes) > 1:
+        if sum(value is not None for value in (*scopes, plan.baseline_read_write_scope)) > 1:
             raise TransactionError("同一命令不能混用结果页写范围与其他事实读取范围")
         if len(events) == 0:
             if not plan.read_only:
                 raise TransactionError("写事务没有权威事件")
-            if plan.result_page_write_scope is not None:
+            if plan.result_page_write_scope is not None or plan.baseline_read_write_scope is not None:
                 raise TransactionError("结果页写入范围不能用于只读命令")
             try:
                 result = (
@@ -720,6 +746,7 @@ def commit_operation(
         segment_guard_state = {}
         source_guard_state = {}
         result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction_range,connection)
+        baseline_read_group = _baseline_read_group(plan,transaction_range,connection,operation_key)
         for event in sequenced:
             context = EventContext(
                 transaction=transaction_range,
@@ -735,12 +762,14 @@ def commit_operation(
                 context, event, transaction_range, segment_guard_state,
                 source_guard_state, connection, operation_key,
                 plan.result_page_write_scope, result_page_guard_state,
-                validated=validated, planned_events=sequenced)
+                validated=validated, planned_events=sequenced,
+                baseline_read_group=baseline_read_group)
             accepted = validate_event(event, context)
-            _seal_event_reads(reads, accepted, source_guard_state)
+            _seal_event_reads(reads, accepted, source_guard_state,baseline_read_group)
             validated.append(accepted)
             _apply_rows(validation_state, (event,))
 
+        _finish_baseline_read_group(baseline_read_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         from camctl.persistence.repositories.source_transactions import finish_stream
         finish_stream(source_guard_state)
@@ -833,6 +862,7 @@ def commit_operation(
             raise
         except Exception as error:
             return rollback_error(error)
+        _finish_baseline_read_group(baseline_read_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         committing = True
         connection.execute("COMMIT")

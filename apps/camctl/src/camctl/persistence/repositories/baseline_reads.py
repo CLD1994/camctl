@@ -4,7 +4,8 @@ from dataclasses import replace
 from decimal import Decimal
 
 from camctl.capture.baseline_models import (
-    BaselineReadCallView, BaselineReadIntent, BaselineRef, BaselineState)
+    BaselineChunkSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
+    BaselineRef, BaselineState)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY
 from camctl.contracts.json_values import json_equal
@@ -12,13 +13,17 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRequest
 from camctl.history.events import load_event_registry
+from camctl.history.reads import BaselineReadWriteScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
     CommandPlan, row_change, event_envelope, read_transaction_range,
-    row_facts, saved_transaction_events)
+    row_facts, saved_transaction_events, update_change)
+from camctl.operations.models import ErrorValue
+from camctl.operations.result_format import error_document
 
-from .baseline import _activity, _directories, _event_at
+from .baseline import (_activity, _check_entries, _chunk_at, _decode_chunk,
+    _directories, _event_at, _tail_read, append_event)
 
 _EVENT = load_event_registry()['events']['BASELINE_READ']
 _STATE = enum_for('baseline_read_calls.state')
@@ -82,12 +87,26 @@ def _check_intent(connection, request, transaction_id=None):
         raise ConsistencyError('基准调用不属于原动作正在占用的未派发收集活动')
     previous = _one(connection, 'SELECT id FROM baseline_read_calls WHERE activity_id=?'
         ' ORDER BY read_no DESC LIMIT 1', (request.activity_id,))
-    if previous is not None or request.read_no != 1:
-        raise ConsistencyError('首次基准调用必须建立新链，后续调用须沿实际返回继续')
-    if (activity['baseline_first_event_id'] is not None or activity['baseline_last_event_id'] is not None
-            or request.baseline_ref != BaselineRef(request.activity_id, BaselineState.COLLECTING,
-                                                 None, None, 0, 0)):
-        raise ConsistencyError('首次基准调用必须引用原活动的空基准前缀')
+    if previous is None:
+        if (request.read_no != 1 or activity['baseline_first_event_id'] is not None
+                or activity['baseline_last_event_id'] is not None
+                or request.baseline_ref != BaselineRef(request.activity_id,
+                    BaselineState.COLLECTING, None, None, 0, 0)):
+            raise ConsistencyError('首次基准调用必须引用原活动的空基准前缀')
+    else:
+        view = _read_call(connection, previous[0], _current_boundary(connection))
+        if (view.state is not _STATE.RETURNED or view.error is not None or view.next_cursor is None
+                or request.read_no != view.request.read_no + 1 or request.cursor != view.next_cursor):
+            raise ConsistencyError('后续基准调用必须沿原成功返回的继续游标及连续序号')
+        ref = view.request.baseline_ref
+        if view.chunk_event_id is not None:
+            chunk = _chunk_at(connection, view.chunk_event_id, request.activity_id)
+            ref = BaselineRef(request.activity_id, BaselineState.COLLECTING,
+                ref.first_event_id or chunk.event_id, chunk.event_id,
+                ref.chunk_count + 1, ref.entry_count + len(chunk.entries))
+        if (request.baseline_ref != ref or (activity['baseline_first_event_id'],
+                activity['baseline_last_event_id']) != (ref.first_event_id, ref.last_event_id)):
+            raise ConsistencyError('后续基准调用没有保留上一实际返回形成的原前缀')
     for key in (request.call_key, request.result_save_key):
         if (_one(connection, 'SELECT id FROM baseline_read_calls WHERE call_key=? OR result_save_key=?',
                  (str(key), str(key))) is not None
@@ -98,7 +117,8 @@ def _check_intent(connection, request, transaction_id=None):
 
 
 def _current_boundary(connection):
-    row = _one(connection, 'SELECT id,last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1')
+    row = _one(connection, 'SELECT t.id,t.last_event_id FROM history_transactions t'
+        ' JOIN history_events h ON h.id=t.last_event_id ORDER BY t.id DESC LIMIT 1')
     return INITIAL_BOUNDARY if row is None else HistoryBoundary(*row)
 
 
@@ -132,10 +152,45 @@ def _read_call(connection, call_id, boundary):
     if any(not json_equal(values[name], original[name])
            for name in load_event_registry()['tables']['baseline_read_calls']['immutable']):
         raise ConsistencyError('基准调用当前固定输入与原意图不一致')
-    if _STATE(values['state']) is not _STATE.INTENDED:
-        raise ConsistencyError('基准调用实际结果须由返回读取入口解释')
-    return BaselineReadCallView(call_id, event.event_id, _STATE.INTENDED, request,
-        None, None, None, None, None, HistoryBoundary(transaction.txn_id, transaction.last_event_id))
+    state = _STATE(values['state'])
+    if state is _STATE.INTENDED:
+        if any(values[name] is not None for name in ('result_event_id','returned_at',
+                                                   'error_json','next_cursor_json','chunk_event_id')):
+            raise ConsistencyError('基准意图包含尚未返回的结果')
+        return BaselineReadCallView(call_id, event.event_id, state, request,
+            None, None, None, None, None, HistoryBoundary(transaction.txn_id, transaction.last_event_id))
+    if state is not _STATE.RETURNED:
+        raise ConsistencyError('基准未知结果的读取尚未接通')
+    result = _event_at(connection, values['result_event_id'])
+    result_tx = read_transaction_range(connection, result.transaction_id)
+    if (validate_event_structure(result)[:2] != ('BASELINE_READ','RETURN')
+            or result_tx.last_event_id != result.event_id or result.occurred_at != values['returned_at']
+            or len(result.rows) != 1 or result.rows[0].row_id != call_id):
+        raise ConsistencyError('基准实际返回没有完整原结果组')
+    raw = {'call_id':call_id,'returned_at':values['returned_at'],'error':values['error_json'],
+           'next_cursor':values['next_cursor_json'],'chunk_event_id':values['chunk_event_id']}
+    if not json_equal(result.evidence, {'baseline_read_request':raw}):
+        raise ConsistencyError('基准实际返回与原结果证据不同')
+    expected = {'state':int(_STATE.RETURNED),'result_event_id':result.event_id,
+        **{name:values[name] for name in ('returned_at','error_json','next_cursor_json','chunk_event_id')}}
+    before = {name:original[name] for name in expected if not json_equal(original[name],expected[name])}
+    after = {name:expected[name] for name in before}
+    if (not json_equal(result.rows[0].before.values,before)
+            or not json_equal(result.rows[0].after.values,after)):
+        raise ConsistencyError('基准实际返回没有从原意图一次固定结果')
+    error = None if values['error_json'] is None else ErrorValue(**values['error_json'])
+    cursor = None if values['next_cursor_json'] is None else DirectoryCursor.from_json(values['next_cursor_json'])
+    if values['chunk_event_id'] is None:
+        if result_tx.first_event_id != result.event_id:
+            raise ConsistencyError('空页或错误返回不能包含额外基准批次')
+    else:
+        chunk = _chunk_at(connection,values['chunk_event_id'],request.activity_id)
+        if (error is not None or chunk.event_id != result_tx.first_event_id
+                or result.event_id != chunk.event_id + 1 or chunk.chunk_no != request.baseline_ref.chunk_count + 1):
+            raise ConsistencyError('基准非空返回没有同组原批次')
+    return BaselineReadCallView(call_id,event.event_id,state,request,result.event_id,
+        values['returned_at'],error,cursor,values['chunk_event_id'],
+        HistoryBoundary(result_tx.txn_id,result_tx.last_event_id))
 
 
 def read_call(call_id, boundary, owned):
@@ -220,12 +275,203 @@ def bind_intent(context, event, transaction, connection, operation_key):
 
 def baseline_read_guard(event, context):
     try:
-        if event.reason != 1 or type(context.baseline_read_reads) is not _IntentReads:
-            raise ConsistencyError('基准调用意图缺少同连接独立读取')
-        context.baseline_read_reads.validate(event, context)
+        reads = context.baseline_read_reads
+        if event.reason == 1 and type(reads) is _IntentReads:
+            reads.validate(event, context)
+        elif event.reason == 2 and type(reads) is BaselineReturnGroup:
+            reads.validate_return(event)
+        else:
+            raise ConsistencyError('基准调用事实缺少同连接独立读取')
     except (KeyError, TypeError, ValueError) as error:
         raise EventValidationError(f'基准调用事实不符合原始输入: {error}') from error
 
 
 def register_baseline_read_guard():
     register_guard('baseline_read', baseline_read_guard)
+
+
+def _return_raw(call_id, returned_at, error, cursor, chunk_event_id):
+    return {'call_id':call_id,'returned_at':returned_at,'error':error_document(error),
+        'next_cursor':None if cursor is None else cursor.as_json(),'chunk_event_id':chunk_event_id}
+
+
+def _return_event(view, raw, event_id, transaction_id):
+    before = {'state':int(_STATE.INTENDED),'returned_at':None,'result_event_id':None,
+              'error_json':None,'next_cursor_json':None,'chunk_event_id':None}
+    after = {'state':int(_STATE.RETURNED),'returned_at':raw['returned_at'],'result_event_id':event_id,
+             'error_json':raw['error'],'next_cursor_json':raw['next_cursor'],'chunk_event_id':raw['chunk_event_id']}
+    return event_envelope(event_id,transaction_id,_EVENT['id'],2,
+        (update_change('baseline_read_calls',view.call_id,before,after),),raw['returned_at'],
+        {'baseline_read_request':raw})
+
+
+def _check_return_page(view, request, connection):
+    page = request.returned.page
+    if page is None:
+        return
+    intent = view.request
+    activity, action = _activity(connection,intent.activity_id)
+    _check_entries(page.items,activity,action)
+    index = 0 if intent.cursor is None else intent.cursor.directory_index
+    previous = None if intent.cursor is None else intent.cursor.after_path
+    if (any(not item.path.startswith(intent.directories[index]+'/') for item in page.items)
+            or any(a.sort_key >= b.sort_key for a,b in zip(page.items,page.items[1:]))
+            or page.items and previous is not None and page.items[0].path <= previous):
+        raise ConsistencyError('基准返回没有沿原输入目录及游标有序推进')
+    cursor = page.next_cursor
+    if cursor is not None:
+        if cursor.binding != intent.binding or cursor.directories != intent.directories:
+            raise ConsistencyError('基准返回游标改变原绑定或完整目录')
+        same = cursor.directory_index == index and page.items and cursor.after_path == page.items[-1].path
+        following = cursor.directory_index == index+1 and cursor.after_path is None
+        if not (same or following):
+            raise ConsistencyError('基准返回游标不是本目录进度或下一目录')
+    elif index+1 != len(intent.directories):
+        raise ConsistencyError('基准返回尚有目录但提前结束')
+
+
+def _pending_prefix(view,connection):
+    activity,action=_activity(connection,view.request.activity_id)
+    stats=_tail_read(connection,activity)
+    ref=view.request.baseline_ref
+    if (activity['baseline_state'] != BaselineState.COLLECTING
+            or activity['dispatch_state'] != enum_for('device_activities.dispatch_state').NOT_DISPATCHED
+            or activity['occupancy_state'] != enum_for('device_activities.occupancy_state').HELD
+            or (stats.first_event_id,stats.last_event_id,stats.chunk_count) !=
+               (ref.first_event_id,ref.last_event_id,ref.chunk_count)):
+        raise ConsistencyError('基准实际返回没有保留原调用的准备活动和前缀')
+    return activity,action,stats
+
+
+class SaveBaselineReadReturn:
+    def __init__(self, request, key):
+        if not isinstance(request,BaselineReadReturn):
+            raise TypeError('基准实际返回需要冻结的完整申请')
+        self.request,self.key=request,OperationKey(key)
+
+    def plan(self, scope):
+        request=self.request
+        view=_read_call(scope.connection,request.call_id,_current_boundary(scope.connection))
+        if view is None or self.key != view.request.result_save_key:
+            raise ConsistencyError('基准返回不属于原调用和冻结结果键')
+        _check_return_page(view,request,scope.connection)
+        page=request.returned.page
+        saved=saved_transaction_events(scope.connection,self.key)
+        if saved is not None:
+            raw=_return_raw(view.call_id,request.returned_at,request.error,
+                None if page is None else page.next_cursor,view.chunk_event_id)
+            if (view.state is not _STATE.RETURNED or saved[-1]['event_id'] != view.result_event_id
+                    or not json_equal(saved[-1]['body']['evidence'],{'baseline_read_request':raw})):
+                raise ConsistencyError('基准返回原键与完整实际申请不同')
+            entries=() if page is None else page.items
+            old=() if view.chunk_event_id is None else _chunk_at(
+                scope.connection,view.chunk_event_id,view.request.activity_id).entries
+            if entries != old:
+                raise ConsistencyError('基准返回原键的原批次内容不同')
+            return CommandPlan((),{}, {},result=view,read_only=True)
+        if view.state is not _STATE.INTENDED:
+            raise ConsistencyError('基准调用已经保存其他结果')
+        activity,action,stats=_pending_prefix(view,scope.connection)
+        ref=view.request.baseline_ref
+        nonempty=page is not None and bool(page.items)
+        allocation=scope.allocate(2 if nonempty else 1)
+        chunk_id=allocation.first_event_id if nonempty else None
+        events=[]
+        if nonempty:
+            chunk=BaselineChunkSave(activity['id'],ref.chunk_count+1,page.items,request.returned_at)
+            events.append(append_event(chunk,activity,chunk_id,allocation.txn_id))
+        raw=_return_raw(view.call_id,request.returned_at,request.error,
+            None if page is None else page.next_cursor,chunk_id)
+        event=_return_event(view,raw,allocation.last_event_id,allocation.txn_id)
+        events.append(event)
+        result=BaselineReadCallView(view.call_id,view.intent_event_id,_STATE.RETURNED,view.request,
+            event.event_id,request.returned_at,request.error,None if page is None else page.next_cursor,
+            chunk_id,HistoryBoundary(event.transaction_id,event.event_id))
+        owners={(table,identity):('action',action['id']) for table,identity in
+                [('baseline_read_calls',view.call_id),('device_activities',activity['id'])]}
+        state={'actions':{action['id']:action},'device_activities':{activity['id']:activity},
+               'baseline_read_calls':{view.call_id:row_facts(scope.connection,'baseline_read_calls',view.call_id)}}
+        return CommandPlan(tuple(events),owners,state,result=result,
+            baseline_reads={activity['id']:stats},baseline_read_write_scope=BaselineReadWriteScope(
+                action['id'],activity['id'],view.call_id))
+
+
+class BaselineReturnGroup:
+    """原内核持有的至多两事件组：实际APPEND后唯一RETURN。"""
+    def __init__(self,scope,transaction,connection,operation_key):
+        if not isinstance(scope,BaselineReadWriteScope):
+            raise ConsistencyError('基准返回必须声明原调用写入范围')
+        self.scope,self.transaction,self.connection=scope,transaction,connection
+        self.view=_read_call(connection,scope.call_id,_current_boundary(connection))
+        if (self.view is None or self.view.state is not _STATE.INTENDED
+                or self.view.request.action_id != scope.action_id
+                or self.view.request.activity_id != scope.activity_id
+                or self.view.request.result_save_key != operation_key):
+            raise ConsistencyError('基准返回组不属于原调用和结果键')
+        self.activity,_,self.stats=_pending_prefix(self.view,connection)
+        self.chunk=None
+        self.chunk_returned_at=None
+        self.result=None
+        self.pending=None
+
+    def bind(self,context,event):
+        if context.baseline_read_reads is not None or self.result is not None:
+            raise ConsistencyError('基准返回组不能替换读取端口或追加结果后事件')
+        if event.event_type == load_event_registry()['events']['BASELINE_CHUNK']['id']:
+            _,chunk=_decode_chunk(event)
+            if (self.chunk is not None or chunk.chunk_no != self.view.request.baseline_ref.chunk_count+1
+                    or chunk.event_id != self.transaction.first_event_id
+                    or event.event_id+1 != self.transaction.last_event_id):
+                raise ConsistencyError('基准返回只接受一个前序实际批次')
+            self.pending=event
+        elif event.event_type != _EVENT['id'] or event.reason != 2:
+            raise ConsistencyError('基准返回组包含其他业务事件')
+        return replace(context,baseline_read_reads=self,
+            baseline_reads={self.scope.activity_id:self.stats})
+
+    def validate_return(self,event):
+        from camctl.devices.directory import DirectoryRead
+        from camctl.contracts.pages import Page
+        raw=event.evidence['baseline_read_request']
+        expected_chunk=None if self.chunk is None else self.chunk.event_id
+        if (event.event_id != self.transaction.last_event_id
+                or raw['call_id'] != self.scope.call_id or raw['returned_at'] != event.occurred_at
+                or raw['chunk_event_id'] != expected_chunk
+                or self.chunk is not None and self.chunk_returned_at != event.occurred_at
+                or self.transaction.first_event_id != event.event_id-int(self.chunk is not None)):
+            raise ConsistencyError('基准返回不是原调用完整组末事件')
+        error=None if raw['error'] is None else ErrorValue(**raw['error'])
+        cursor=None if raw['next_cursor'] is None else DirectoryCursor.from_json(raw['next_cursor'])
+        entries=() if self.chunk is None else self.chunk.entries
+        returned=DirectoryRead(None,error,None if error is not None else Page(entries,cursor))
+        request=BaselineReadReturn(self.scope.call_id,event.occurred_at,error,returned)
+        _check_return_page(self.view,request,self.connection)
+        expected=_return_event(self.view,_return_raw(request.call_id,request.returned_at,error,cursor,expected_chunk),
+            event.event_id,event.transaction_id)
+        if replace(event,change_seq=None) != expected:
+            raise ConsistencyError('基准返回没有精确固定原意图及实际批次')
+        if self.chunk is not None:
+            from camctl.history.decoding import decode_event_row
+            row=_one(self.connection,'SELECT id,transaction_id,event_type,event_version,'
+                'occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',
+                (self.chunk.event_id,))
+            actual=None if row is None else decode_event_row(row)
+            if actual is not None and (actual.transaction_id != self.transaction.txn_id
+                    or _decode_chunk(actual)[1] != self.chunk):
+                raise ConsistencyError('基准返回与同连接已写前序批次不一致')
+        self.pending=event
+
+    def seal(self,validated):
+        event=validated.envelope
+        if self.pending is None or replace(event,change_seq=None) != replace(self.pending,change_seq=None):
+            raise ConsistencyError('基准返回组没有经独立守卫核同的实际事件')
+        if event.event_type == _EVENT['id']:
+            self.result=event
+        else:
+            self.chunk=_decode_chunk(event)[1]
+            self.chunk_returned_at=event.occurred_at
+        self.pending=None
+
+    def finish(self):
+        if self.result is None or self.pending is not None:
+            raise ConsistencyError('基准实际返回组缺少唯一结果，不能提交部分批次')

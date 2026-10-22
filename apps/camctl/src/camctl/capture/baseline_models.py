@@ -1,4 +1,5 @@
 """完整目录基准的分批保存与固定输入。"""
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -6,7 +7,8 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ObjectId, OperationKey, UtcMicros
 from camctl.devices.bindings import DeviceBinding
-from camctl.devices.directory import DirectoryCursor, DirectoryRequest
+from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest
+from camctl.contracts.pages import Page
 from camctl.devices.file_identity import FileIdentity
 from camctl.operations.models import ErrorValue
 
@@ -153,3 +155,27 @@ class BaselineReadCallView:
     next_cursor: DirectoryCursor | None
     chunk_event_id: int | None
     boundary: HistoryBoundary
+
+
+@dataclass(frozen=True)
+class BaselineReadReturn:
+    """一次实际目录返回的基准语义输入；工具诊断由原调用负责。"""
+
+    call_id: int
+    returned_at: int
+    error: ErrorValue | None
+    returned: DirectoryRead
+
+    def __post_init__(self):
+        ObjectId(self.call_id)
+        UtcMicros(self.returned_at)
+        if not isinstance(self.returned, DirectoryRead) or self.error != self.returned.error:
+            raise ValueError('基准返回必须保留同一次实际目录读取及错误')
+        error = deepcopy(self.error)
+        page = self.returned.page
+        if page is not None:
+            if len(page.items) > 128 or any(not isinstance(item, FileIdentity) for item in page.items):
+                raise ValueError('基准返回必须是至多128份实际稳定文件身份')
+            page = Page(tuple(page.items), page.next_cursor)
+        object.__setattr__(self, 'error', error)
+        object.__setattr__(self, 'returned', DirectoryRead(None, error, page))
