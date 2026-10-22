@@ -371,7 +371,8 @@ async def _delivery_candidate(
                 owned=runtime.owned)
         if (bound is not None and runtime.file_executor is not None
                 and await check_copy_is_locally_usable(
-                    bound.copy, runtime.directories.staging)):
+                    bound.copy, runtime.directories.staging,
+                    runtime.file_executor)):
             stem = _original_stem(original_name)
             extension = _extension_of(original_name)
             return FileCandidate(

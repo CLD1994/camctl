@@ -11,13 +11,16 @@ import asyncio
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Generator, Iterator
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.values import ConsistencyError, ObjectId
+from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
 from camctl.host_files.io import HashResult, hash_target
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.tasks import (
+    AsyncFileTask, FileTaskError, FileTaskExecutor, FileTaskId,
+)
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import read_transaction_range, row_facts
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
@@ -128,7 +131,7 @@ def _publication_boundary(connection, published_event_id: int) -> HistoryBoundar
 
 def bound_waiters_at_publication(
         source_action_id: int, published_event_id: int, owned,
-) -> tuple[BoundObtainWaiter, ...]:
+) -> Generator[BoundObtainWaiter, None, None]:
     """从不可变历史 H 重建当时实际等待该来源的正式取回集合。"""
     ObjectId(source_action_id)
     ObjectId(published_event_id)
@@ -138,7 +141,6 @@ def bound_waiters_at_publication(
         current = _current_boundary(connection)
         if boundary.txn_id > current.txn_id:
             raise ConsistencyError("分段来源发布截点晚于当前完整历史")
-        result: list[BoundObtainWaiter] = []
         after_action_id = after_selection_id = 0
         while True:
             with closing(connection.execute(
@@ -174,11 +176,9 @@ def bound_waiters_at_publication(
                 if waiter_was_pending_at_boundary(
                         action_status=action_at_h["status"],
                         selection_status=selection_at_h["status"]):
-                    result.append(BoundObtainWaiter(
-                        int(action_id), int(selection_id)))
+                    yield BoundObtainWaiter(int(action_id), int(selection_id))
             after_action_id = int(rows[-1][0])
             after_selection_id = int(rows[-1][2])
-        return tuple(result)
 
 
 def _selection_is_bound_at_publication(
@@ -280,8 +280,9 @@ def read_bound_check_copy(
             selection_id, boundary, facts.inspection, facts.copy)
 
 
-async def check_copy_is_locally_usable(copy, staging: Path) -> bool:
-    """在授予前实际核对检查副本仍是已登记完整长度与摘要的文件。"""
+async def check_copy_is_locally_usable(
+        copy, staging: Path, executor: FileTaskExecutor) -> bool:
+    """在受管文件任务持有源文件期间，核对副本长度与登记摘要。"""
     if not copy_is_reusable(copy):
         return False
     ref = FileRef(
@@ -290,8 +291,18 @@ async def check_copy_is_locally_usable(copy, staging: Path) -> bool:
         relative_path=copy.input_relative_path,
         root=staging,
     )
-    observed: HashResult = await asyncio.to_thread(
-        hash_target, ref, BoundDirectories(staging=staging))
+    async def hash_file(_control) -> HashResult:
+        return await asyncio.to_thread(
+            hash_target, ref, BoundDirectories(staging=staging))
+
+    try:
+        observed: HashResult = await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"segment_copy_hash/{new_operation_key()}"),
+            (copy.target_file_id,), "segment_copy_hash", "取回来源资格校验", hash_file))
+    except FileTaskError:
+        # 文件已有受管操作时，不能证明本次可安全复用；维持原设备源
+        # 候选，避免资格冲突让整个取回推进中断。
+        return False
     return (
         observed.error is None
         and observed.size_bytes == copy.source_size
@@ -309,13 +320,16 @@ def all_bound_waiters_terminal(
         int(_ACTION_STATUS.SUCCEEDED), int(_ACTION_STATUS.FAILED),
         int(_ACTION_STATUS.EXPIRED), int(_ACTION_STATUS.CANCELED),
     }
-    for waiter in waiters:
-        with closing(owned.connection.execute(
-            "SELECT status FROM actions WHERE id=?", (waiter.action_id,),
-        )) as cursor:
-            row = cursor.fetchone()
-        if row is None:
-            raise ConsistencyError(f"已绑定的取回动作缺失: {waiter.action_id}")
-        if row[0] not in terminal:
-            return False
-    return True
+    try:
+        for waiter in waiters:
+            with closing(owned.connection.execute(
+                "SELECT status FROM actions WHERE id=?", (waiter.action_id,),
+            )) as cursor:
+                row = cursor.fetchone()
+            if row is None:
+                raise ConsistencyError(f"已绑定的取回动作缺失: {waiter.action_id}")
+            if row[0] not in terminal:
+                return False
+        return True
+    finally:
+        waiters.close()
