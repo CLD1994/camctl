@@ -1,6 +1,7 @@
 """分段关系的有限保存请求与确定编码；不保存增长成员数组。"""
 from __future__ import annotations
 from dataclasses import dataclass, fields, is_dataclass
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -143,6 +144,8 @@ def document(value):
     if is_dataclass(value):
         return {field.name: document(getattr(value, field.name)) for field in fields(value)}
     if value is None or type(value) in (str, int, bool):
+        return value
+    if isinstance(value,Decimal) and value.is_finite():
         return value
     raise ValueError('分段保存只接受固定大小模型')
 

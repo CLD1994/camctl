@@ -199,7 +199,8 @@ async def test_decision_guard_rechecks_actual_source_and_fields(tmp_path,bounded
                     return BoundedCommandPlan((event,),
                         lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
                             current_reads=None if damage=='no_scope' else SqlEventReads(
-                                scope.connection,plan.segment_read_scope)),None,lambda connection:None)
+                                scope.connection,plan.segment_read_scope)),None,lambda connection:None,
+                        result_check_write_scope=plan.result_check_write_scope)
                 return replace(plan,events=(event,),segment_read_scope=None if damage=='no_scope' else plan.segment_read_scope)
         receipt=commit_operation(Command(),key,owned)
         assert receipt.kind=='rolled_back',receipt.error
@@ -293,7 +294,7 @@ async def test_decision_commit_unknown_recovers_original_only_after_save_closes(
                 return BoundedCommandPlan(plan.events,
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
                         current_reads=SqlEventReads(scope.connection,plan.segment_read_scope)),
-                    plan.result,lambda connection:None)
+                    plan.result,lambda connection:None,result_check_write_scope=plan.result_check_write_scope)
         def hook(stage,statement,parameters):
             if statement=='COMMIT' and stage==cut:raise sqlite3.OperationalError('有限决定提交回执未知')
         outcome=commit_operation(Command(),key,replace(owned,connection=ConnectionProbe(owned.connection,hook)))

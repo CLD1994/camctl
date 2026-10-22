@@ -5677,6 +5677,13 @@ class _FinishRecordingResultsCommand:
             read_only=True, result=capture_plan.result)
 
 
+def result_run_close_row(run,status,error):
+    """共同形成原RESULTS的关闭行；采用资格由各责任入口核对。"""
+    return _update('operation_runs',run['id'],
+        {name:run[name] for name in ('status','retry_wait_required','error_json')},
+        {'status':status,'retry_wait_required':0,'error_json':error})
+
+
 class _ResultRunCloseCommand:
     """预算耗尽时仅收场结果核实流程的事务命令（不携带集合结论）。
 
@@ -5703,20 +5710,8 @@ class _ResultRunCloseCommand:
         if run_facts["status"] not in (1, 2):
             raise ConsistencyError("已结束的核实流程不能再次收场")
         self._state["operation_runs"] = {run_facts["id"]: run_facts}
-        run_row = _update(
-            "operation_runs",
-            run_facts["id"],
-            {
-                "status": run_facts["status"],
-                "retry_wait_required": run_facts["retry_wait_required"],
-                "error_json": run_facts["error_json"],
-            },
-            {
-                "status": int(_RUN_STATUS.UNCONFIRMED),
-                "retry_wait_required": 0,
-                "error_json": _unconfirmed_run_error(run_facts["activity_id"]),
-            },
-        )
+        run_row = result_run_close_row(run_facts,int(_RUN_STATUS.UNCONFIRMED),
+            _unconfirmed_run_error(run_facts['activity_id']))
         self._owners[("operation_runs", run_facts["id"])] = (
             "action", run_facts["action_id"])
         allocation = scope.allocate(1)

@@ -77,7 +77,7 @@ def _commit(command,key,owned,bounded):
             return BoundedCommandPlan(plan.events,
                 lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
                     current_reads=SqlEventReads(scope.connection,plan.segment_read_scope)),
-                plan.result,lambda connection:None)
+                plan.result,lambda connection:None,result_check_write_scope=plan.result_check_write_scope)
     receipt=commit_operation(Command(),key,owned)
     assert receipt.kind=='completed',receipt.error
     return receipt.result

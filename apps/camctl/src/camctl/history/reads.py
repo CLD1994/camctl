@@ -159,6 +159,17 @@ class SegmentReadScope:
 
 
 @dataclass(frozen=True)
+class ResultCheckWriteScope:
+    """原有限决定及适用配置、关闭的共同申请。"""
+    request: object
+
+    def __post_init__(self):
+        from camctl.capture.segment_storage import ResultCheckConclusionSave
+        if not isinstance(self.request,ResultCheckConclusionSave):
+            raise TypeError('有限决定写入范围必须保留完整原申请')
+
+
+@dataclass(frozen=True)
 class SourceResolutionReadScope(PlanReadScope):
     """原产物动作的来源解析及所属计划聚合。"""
     action_id: int

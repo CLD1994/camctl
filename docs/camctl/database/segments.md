@@ -49,6 +49,8 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 有限结束的全部分区与配置／流程关闭顺序遵守[拍摄完成规格](../../superpowers/specs/2026-10-18-osmo360ii-capture-completion-design.md)及[分段规格](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)。存储决定不等同于来源终态或正式发布。
 
+RESULTS采用配置、适用关闭和决定通过`ResultCheckWriteScope`声明同一原申请，由既有事务内核逐事件核对实际来源及完整组。变化配置先保存既有配置事件，再关闭原流程并保存决定；不变化时引用最后一次实际采用配置的原事件。原尝试次数、结果和错误保持原记录；原键核实读取整组，不能用后来配置解释当时的预算。历史读取在同一H同时恢复配置、流程与决定。
+
 ## 生产端口与后续分工
 
 `create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。
