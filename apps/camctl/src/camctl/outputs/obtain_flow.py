@@ -119,6 +119,8 @@ class DeviceReadAssembly:
     max_read_attempts: int = _READ_MAX_ATTEMPTS
     read_idle_timeout_s: Decimal = _READ_TIMEOUT_S
     max_recopies: int = 1
+    query_driver: Any = None
+    query_config: AttemptConfig | None = None
 
 
 @dataclass
@@ -145,6 +147,8 @@ class ObtainRuntime:
     file_executor: FileTaskExecutor | None = None
     pending_read_business: dict = field(default_factory=dict)
     pending_read_ends: dict = field(default_factory=dict)
+    pending_segment_selections: dict = field(default_factory=dict)
+    pending_segment_queries: dict = field(default_factory=dict)
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
 
 
@@ -165,6 +169,9 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
         action = _action_facts(runtime.owned.connection, action_id)
         _resolve_sources(runtime, action, now)
     _fix_pending_selections(runtime, now)
+    from camctl.outputs.segment_query import advance_segment_queries
+
+    await advance_segment_queries(runtime, now)
     _qualify_selected_items(runtime, now)
     publish_remaining = runtime.discovery.batch_size
     for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "finish", now,
@@ -236,6 +243,21 @@ def _fix_pending_selections(
     from camctl.outputs.definitions import read_selection_request
 
     connection = runtime.owned.connection
+    from camctl.persistence.repositories.segment_selections import (
+        FixSegmentSelection,
+        fix_segment_selection,
+        is_segmented_source,
+    )
+
+    for identity, (request, key) in tuple(runtime.pending_segment_selections.items()):
+        if connection.in_transaction:
+            connection.rollback()
+        receipt = fix_segment_selection(request, key, runtime.owned)
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            if receipt.kind is DbOutcomeKind.ROLLED_BACK:
+                del runtime.pending_segment_selections[identity]
+            raise ConsistencyError(f"原分段选择尚未核实: {receipt.error}")
+        del runtime.pending_segment_selections[identity]
     page = runtime.discovery.rows(connection, "selections", now,
         "SELECT s.id,d.depends_on_action_id,d.action_id FROM obtain_source_selections s"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
@@ -243,6 +265,19 @@ def _fix_pending_selections(
         " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
         " AND s.status=?", (int(_SELECTION_STATUS.PENDING),), identity="s.id")
     for selection_id, member_id, action_id in page.items:
+        if is_segmented_source(connection, int(member_id)):
+            request, key = (
+                FixSegmentSelection(int(selection_id), now),
+                new_operation_key(),
+            )
+            runtime.pending_segment_selections[int(selection_id)] = (request, key)
+            receipt = fix_segment_selection(request, key, runtime.owned)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                if receipt.kind is DbOutcomeKind.ROLLED_BACK:
+                    del runtime.pending_segment_selections[int(selection_id)]
+                raise ConsistencyError(f"分段选择尚未可靠固定: {receipt.error}")
+            del runtime.pending_segment_selections[int(selection_id)]
+            continue
         action = _action_facts(connection, action_id)
         mode, requested = read_selection_request(
             parse_exact_json(action["execution_spec_json"]),

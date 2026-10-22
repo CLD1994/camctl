@@ -204,10 +204,23 @@ class ReadDiscoveryOwner:
     查询结束后下一轮重新观察仍未完成的责任，不把查空当业务结束。
     """
 
-    _KINDS = frozenset((
-        "start", "actions", "selections", "items", "finish", "reads", "local",
-        "failed", "capture", "residual", "attempts", "queries",
-    ))
+    _KINDS = frozenset(
+        (
+            "start",
+            "actions",
+            "selections",
+            "items",
+            "finish",
+            "reads",
+            "local",
+            "failed",
+            "capture",
+            "residual",
+            "attempts",
+            "queries",
+            "segment_queries",
+        )
+    )
 
     def __init__(self, batch_size=DEFAULT_BATCH_SIZE):
         self.batch_size = positive_limit(batch_size)

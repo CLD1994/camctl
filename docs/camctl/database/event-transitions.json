@@ -1375,6 +1375,16 @@
       "rule": "纯文件交接只引用原终态成员已可靠保存的精确 DELETE 或 QUERY 缺席结果，产物观察核对原结果与唯一承载文件关联及前序文件完成事实；保存命令约束完整实际变化事件组，原键核实完整事务、来源、目标与时刻。原成员、动作、流程及调用事实保持。",
       "scope": "transaction"
     },
+    "segment_query_observation": {
+      "contract": "operation-fields.md#显式分段来源的文件核实",
+      "rule": "产物观察携带 obtain_check_source 时，核对原 obtain-exists 责任、原完整尝试结果和 file_presence/v2；文件存在性先可靠保存，产物只从未知更新为相应可用或缺失。其他观察按自身契约处理。",
+      "scope": "transaction"
+    },
+    "segment_query_resolution": {
+      "contract": "operation-fields.md#显式分段来源的文件核实",
+      "rule": "显式未知项核对原冻结来源、执行中未取消的取回及真实产物；在场结果解析为 SELECTED，缺席、有限未确认或绑定失败保存逐项失败和已确认产物身份。obtain_check_source 只能引用同一项的可靠 v2 在场或缺席结果。",
+      "scope": "transaction"
+    },
     "segments": {
       "contract": "segments.md",
       "rule": "分段引用必须属于原扫描和动作；有限批次、固定成员、两遍判断及范围成员分别校验，正式 output 关联只在终态事务发布。",
@@ -3609,7 +3619,8 @@
           "from": 2,
           "to": 3,
           "by": [
-            "SEGMENT_FACTS.ASSESS"
+            "SEGMENT_FACTS.ASSESS",
+            "SEGMENT_FACTS.DECIDE_RESULT"
           ],
           "id": "transition_2"
         }
@@ -3962,7 +3973,9 @@
             "report_impact",
             "source_selection"
           ],
-          "evidence": []
+          "evidence": [
+            "segment_selection_request"
+          ]
         },
         "CLEANUP": {
           "reason": 2,
@@ -4673,7 +4686,8 @@
             "output"
           ],
           "evidence": [
-            "preparation_resolved"
+            "preparation_resolved",
+            "segment_finish_request"
           ]
         }
       }
@@ -6642,10 +6656,12 @@
             "report_impact",
             "output",
             "cleanup_aggregate",
-            "cleanup_result_source"
+            "cleanup_result_source",
+            "segment_query_observation"
           ],
           "evidence": [
-            "cleanup_result_source"
+            "cleanup_result_source",
+            "obtain_check_source"
           ]
         }
       }
@@ -6717,6 +6733,7 @@
               "table": "obtain_items",
               "op": "update",
               "columns": [
+                "output_id",
                 "status",
                 "error_code",
                 "error_details_json"
@@ -6751,9 +6768,10 @@
             "ownership",
             "report_impact",
             "read_permission",
-            "obtain_member"
+            "obtain_member",
+            "segment_query_resolution"
           ],
-          "evidence": []
+          "evidence": ["obtain_check_source"]
         },
         "RELEASE": {
           "reason": 3,
@@ -6840,9 +6858,10 @@
             "transaction",
             "ownership",
             "report_impact",
-            "obtain_member"
+            "obtain_member",
+            "segment_query_resolution"
           ],
-          "evidence": []
+          "evidence": ["obtain_check_source"]
         },
         "CANCEL": {
           "reason": 5,
@@ -9972,6 +9991,47 @@
               "transitions": {
                 "state": [
                   "transition_1"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "DECIDE_RESULT": {
+          "reason": 12,
+          "title": "固定已结束核实的结果处置",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "update",
+              "columns": [
+                "state"
+              ],
+              "before": {
+                "state": [
+                  2
+                ]
+              },
+              "after": {
+                "state": [
+                  3
+                ]
+              },
+              "required": [
+                "state"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_2"
                 ]
               }
             }

@@ -80,6 +80,22 @@ def _fixed_count(db,setrow):
 def verify_result_member_event(db,ref,event,context):
     from .segments import _member_input_from_row
     setrow=read_result_set(ref,context.current_reads)
+    if event.reason == _EVENT["branches"]["GAPS"]["reason"]:
+        from .segments import _gap
+
+        payload = tuple(_gap(db, dict(row.after.values)) for row in event.rows)
+        expected = _current_gap_rows(db, setrow, payload, event.event_id)
+        if event.rows != expected or not json_equal(
+            event.evidence,
+            {
+                "segment_request": {
+                    "ref": document(ref),
+                    "input": [document(gap) for gap in payload],
+                }
+            },
+        ):
+            raise ConsistencyError("当前扫描缺口与原实际有序成员不同")
+        return
     if setrow['state']!=_STATE.COLLECTING:
         raise ConsistencyError('统一结果成员只能在收集阶段追加或固定')
     if event.reason==_EVENT['branches']['MEMBERS']['reason']:
@@ -113,8 +129,11 @@ def verify_result_member_event(db,ref,event,context):
 class ResultMembersCommand:
     def __init__(self,kind,ref,payload,occurred_at,key):
         if not isinstance(ref,SegmentResultRef):raise TypeError('统一成员需要实际集合引用')
-        if kind not in ('MEMBERS','FIX_RESULT_MEMBERS'):raise ValueError('未登记的统一成员操作')
-        if kind=='MEMBERS' and (not isinstance(payload,tuple) or not 1<=len(payload)<=128):
+        if kind not in ("MEMBERS", "FIX_RESULT_MEMBERS", "GAPS"):
+            raise ValueError("未登记的统一成员操作")
+        if kind in ("MEMBERS", "GAPS") and (
+            not isinstance(payload, tuple) or not 1 <= len(payload) <= 128
+        ):
             raise ValueError('结果成员批次必须为1—128项元组')
         UtcMicros(occurred_at)
         self.kind,self.ref,self.payload,self.at,self.key=kind,ref,payload,occurred_at,OperationKey(key)
@@ -137,6 +156,30 @@ class ResultMembersCommand:
                         for name,value in change['after']['values'].items() if name!='state'):
                     raise ConsistencyError('原成员保存的实际行与原事务不同')
             return CommandPlan((),{},{},ref,True)
+        if self.kind == "GAPS":
+            allocation = scope.allocate(1)
+            rows = _current_gap_rows(
+                db, setrow, self.payload, allocation.first_event_id
+            )
+            event = event_envelope(
+                allocation.first_event_id,
+                allocation.txn_id,
+                _EVENT["id"],
+                _EVENT["branches"]["GAPS"]["reason"],
+                rows,
+                self.at,
+                evidence,
+            )
+            return CommandPlan(
+                (event,),
+                {(row.table, row.row_id): ("action", ref.action_id) for row in rows},
+                {
+                    "actions": {ref.action_id: row_facts(db, "actions", ref.action_id)},
+                    "segment_sets": {ref.set_id: setrow},
+                },
+                ref,
+                segment_read_scope=SegmentReadScope(ref),
+            )
         if setrow['state']!=_STATE.COLLECTING:
             raise ConsistencyError('统一结果成员已固定')
         allocation=scope.allocate(1)
@@ -153,3 +196,35 @@ class ResultMembersCommand:
         return CommandPlan((event,),{(row.table,row.row_id):('action',ref.action_id) for row in rows},
             {'actions':{ref.action_id:row_facts(db,'actions',ref.action_id)},'segment_sets':{ref.set_id:setrow},
                 'segment_members':{}},ref,segment_read_scope=SegmentReadScope(ref))
+
+
+def _current_gap_rows(db, setrow, gaps, event_id):
+    from itertools import islice
+    from .segment_current import current_gaps
+    from .segments import _gap_row
+
+    if (
+        setrow["state"] != _STATE.MEMBERS_FIXED
+        or setrow["source_kind"]
+        != int(enum_for("segment_sets.source_kind").RETAINED_SOURCES)
+        or not 1 <= len(gaps) <= 128
+    ):
+        raise ConsistencyError("当前扫描缺口只能追加到未处置的跨轮保留集合")
+    number = _one(
+        db, "SELECT COUNT(*) FROM segment_gaps WHERE set_id=?", (setrow["id"],)
+    )[0]
+    expected = tuple(islice(current_gaps(db, setrow), number, number + len(gaps)))
+    if expected != gaps:
+        raise ConsistencyError("当前缺口必须完整延续最后扫描的原有次序")
+    first = next_row_id(db, "segment_gaps")
+    return tuple(
+        row_change(
+            "segment_gaps",
+            first + offset,
+            {
+                **_gap_row(db, setrow, number + offset + 1, gap),
+                "created_event_id": event_id,
+            },
+        )
+        for offset, gap in enumerate(gaps)
+    )

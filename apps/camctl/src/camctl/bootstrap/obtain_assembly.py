@@ -27,7 +27,7 @@ from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recove
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError, DriverRegistry, port_for,
 )
-from camctl.operations.attempts import RetryWaitGate
+from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.handoff import DeliveryDirectories
 from camctl.outputs.obtain_flow import (
@@ -58,6 +58,7 @@ def session_obtain_assembly(
     on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None,
     file_executor: FileTaskExecutor | None = None,
     read_discovery_batch_size: int = DEFAULT_BATCH_SIZE,
+    max_query_attempts: int = 3,
 ) -> Callable[[Any], ObtainRuntime]:
     """构造会话级取回推进工厂：解析各设备读取协作者并组装运行时。
 
@@ -75,6 +76,8 @@ def session_obtain_assembly(
     pending_read_results: dict = {}
     pending_read_business: dict = {}
     pending_read_ends: dict = {}
+    pending_segment_selections: dict = {}
+    pending_segment_queries: dict = {}
     discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     def factory(owned: Any) -> ObtainRuntime:
@@ -91,6 +94,10 @@ def session_obtain_assembly(
                 read_port = port_for(entry, "read")
             except CapabilityNotDeclaredError:
                 continue
+            try:
+                query_port = port_for(entry, "file_query")
+            except CapabilityNotDeclaredError:
+                query_port = None
             binding = DeviceBinding(
                 device_id=device_id, driver_id=str(driver_id))
             digest_supported = bool(entry.declaration.digest_supported)
@@ -100,17 +107,40 @@ def session_obtain_assembly(
                 evidence=entry.evidence,
                 digest_supported=digest_supported,
                 digest_for=(
-                    _digest_reader_factory(
-                        owned, entry.driver, binding, entry.evidence)
-                    if digest_supported else None),
+                    _digest_reader_factory(owned, entry.driver, binding, entry.evidence)
+                    if digest_supported
+                    else None
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "copy", "retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S),
+                    declaration, "copy", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S
+                ),
                 capture_read_parallel=bool(
-                    entry.declaration.capture_read_parallel_supported),
-                max_read_attempts=_device_attempts(declaration, "copy", 3, "max_read_attempts"),
-                read_idle_timeout_s=_device_seconds(declaration, "copy", "read_idle_timeout_s", Decimal("10")),
+                    entry.declaration.capture_read_parallel_supported
+                ),
+                max_read_attempts=_device_attempts(
+                    declaration, "copy", 3, "max_read_attempts"
+                ),
+                read_idle_timeout_s=_device_seconds(
+                    declaration, "copy", "read_idle_timeout_s", Decimal("10")
+                ),
                 max_recopies=_device_attempts(declaration, "copy", 1, "max_recopies"),
+                query_driver=query_port,
+                query_config=(
+                    None
+                    if query_port is None
+                    else AttemptConfig(
+                        max_query_attempts,
+                        _device_seconds(
+                            declaration, "cleanup", "query_timeout_s", Decimal("10")
+                        ),
+                        _device_seconds(
+                            declaration,
+                            "cleanup",
+                            "query_retry_interval_s",
+                            _DEFAULT_RETRY_INTERVAL_S,
+                        ),
+                    )
+                ),
             )
         return ObtainRuntime(
             owned=owned,
@@ -122,15 +152,23 @@ def session_obtain_assembly(
             occurred_at=wall,
             outputs=OutputsRepository(read_discovery_batch_size),
             operations=OperationRepository(),
-            binding_check=lambda saved: check_binding(saved, SimpleNamespace(devices=devices)),
+            binding_check=lambda saved: check_binding(
+                saved, SimpleNamespace(devices=devices)
+            ),
             recovery_boundary=recovery_boundary,
-            recovery_max_event_id=None if recovery_max_event_id is None else recovery_max_event_id(),
-            recovery_evidence_for=lambda saved, operation: recovery_registry(drivers.entry(saved.driver_id), operation),
+            recovery_max_event_id=None
+            if recovery_max_event_id is None
+            else recovery_max_event_id(),
+            recovery_evidence_for=lambda saved, operation: recovery_registry(
+                drivers.entry(saved.driver_id), operation
+            ),
             on_recovery_diagnostic=on_recovery_diagnostic,
             continuing_read_tickets=continuing_read_tickets,
             pending_read_results=pending_read_results,
             pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends,
+            pending_segment_selections=pending_segment_selections,
+            pending_segment_queries=pending_segment_queries,
             file_executor=file_executor,
             discovery=discovery,
         )

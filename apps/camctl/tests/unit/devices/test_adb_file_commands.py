@@ -51,6 +51,29 @@ def test_complete_frame_proves_only_original_file_presence(kind, present):
     assert facts.effect is (EffectState.UNKNOWN if kind is CameraCall.DELETE and present else EffectState.CONFIRMED)
 
 
+@pytest.mark.parametrize("present", [True, False])
+def test_obtain_query_reports_version_two_with_its_original_owner(present):
+    request = _request(CameraCall.FILE_QUERY)
+    request = replace(
+        request,
+        params={
+            key: value
+            for key, value in request.params.items()
+            if key != "cleanup_item_id"
+        }
+        | {"obtain_item_id": "7"},
+        ticket=replace(request.ticket, responsibility_key="obtain-exists/7"),
+    )
+    facts = _command(request=request).interpreter.interpret(
+        _raw(_frame(present=b"1" if present else b"0"))
+    )
+    assert facts.observations == (
+        DeviceObservation(
+            "file_presence", 2, {"obtain_item_id": "7", "present": present}
+        ),
+    )
+
+
 @pytest.mark.parametrize("data", [b"", _frame()[:-1], _frame() + _frame(), _frame(path="/DCIM/another.OSV"),
     _frame(present=b"2"), _frame().replace(b"query\0", b"delete\0"),
     _frame().replace(b"END\0", b"END\0suffix"), _frame(rm=b"0"),

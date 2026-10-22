@@ -172,7 +172,12 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     if baseline_read_group is not None:
         context = baseline_read_group.bind(context, event)
     from camctl.persistence.repositories.segment_check_conclusions import requires_check_group
-    if result_check_group is None and requires_check_group(connection,event):
+
+    if (
+        result_check_group is None
+        and not segment_guard_state
+        and requires_check_group(connection, event)
+    ):
         raise TransactionError('统一结果的配置、关闭及有限决定必须声明完整决定写入范围')
     reads=context.current_reads
     if result_page_write_scope is not None:
@@ -202,6 +207,11 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
         result_check_group.bind(context,event)
     from camctl.persistence.repositories.source_transactions import bind_stream
     bind_stream(connection,event,transaction,reads,source_guard_state,operation_key,context)
+    from camctl.persistence.repositories.segment_selections import (
+        bind as bind_selection,
+    )
+
+    bind_selection(connection, event, transaction, reads, source_guard_state)
     from camctl.persistence.repositories.admission_sources import bind as bind_admission
     bind_admission(connection,event,transaction,reads,source_guard_state)
     return context,reads
@@ -218,6 +228,11 @@ def _seal_event_reads(reads,validated,source_guard_state,baseline_read_group=Non
         SqlEventReads.seal_result_page_event(reads,validated)
         from camctl.persistence.repositories.source_transactions import seal_stream
         seal_stream(reads,validated,source_guard_state)
+        from camctl.persistence.repositories.segment_selections import (
+            seal as seal_selection,
+        )
+
+        seal_selection(reads, validated, source_guard_state)
 
 
 def _new_result_page_guard_state(scope,transaction,connection):
@@ -335,6 +350,11 @@ def _write_bounded_plan(plan, scope, operation_key):
     _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     from camctl.persistence.repositories.source_transactions import finish_stream
     finish_stream(source_guard_state)
+    from camctl.persistence.repositories.segment_selections import (
+        finish as finish_selection,
+    )
+
+    finish_selection(source_guard_state)
     from camctl.persistence.repositories.admission_sources import finish as finish_admission
     finish_admission(connection, transaction, None, source_guard_state)
     plan.complete(connection)
@@ -802,6 +822,11 @@ def commit_operation(
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         from camctl.persistence.repositories.source_transactions import finish_stream
         finish_stream(source_guard_state)
+        from camctl.persistence.repositories.segment_selections import (
+            finish as finish_selection,
+        )
+
+        finish_selection(source_guard_state)
         from camctl.persistence.repositories.admission_sources import finish as finish_admission
         finish_admission(connection, transaction_range, validated, source_guard_state)
 

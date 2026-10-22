@@ -299,7 +299,9 @@ class SqlEventReads:
         if isinstance(self.scope, SegmentReadScope):
             ref = self.scope.ref
         elif isinstance(self.scope, PlanReadScope):
-            ref = SegmentSetRef(**event.evidence['segment_request']['ref'])
+            from camctl.capture.segment_finish import result_ref_from_document
+
+            ref = result_ref_from_document(event.evidence["segment_request"]["ref"])
             action = row_facts(self.connection,'actions',ref.action_id)
             if action is None or action['plan_id'] != self.scope.plan_id:
                 raise ConsistencyError('共同发布集合不属于原计划')

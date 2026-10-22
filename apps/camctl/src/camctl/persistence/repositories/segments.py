@@ -4,9 +4,20 @@ from itertools import zip_longest
 
 from camctl.capture.segment_models import *
 from camctl.capture.segment_storage import (
-    SegmentSetCreate, SegmentMemberInput, SegmentMemberCursor, SegmentGapCursor, SegmentScopeCursor, StoredSegmentMember, SegmentOutputCandidate,
-    document, encode_enum, decode_enum, assessment_document, assessment_from_document,
+    SegmentSetCreate,
+    SegmentMemberInput,
+    SegmentMemberCursor,
+    SegmentGapCursor,
+    SegmentScopeCursor,
+    StoredSegmentMember,
+    SegmentOutputCandidate,
+    document,
+    encode_enum,
+    decode_enum,
+    assessment_document,
+    assessment_from_document,
     facts_from_document,
+    SegmentResultRef,
 )
 from camctl.capture.segments import advance_segment_assessment, finish_segment_assessment, iter_segment_gaps
 from camctl.contracts.enums import enum_for
@@ -47,10 +58,20 @@ def _batch(values):
 
 
 def _ref(row):
+    if row["current_attempt_id"] is None:
+        return SegmentResultRef(row["action_id"], row["id"], row["version"])
     return SegmentSetRef(row['action_id'],row['current_attempt_id'],row['current_final_page_event_id'],row['version'])
 
 
 def _set(db,ref, *, fixed=False):
+    if isinstance(ref, SegmentResultRef):
+        from .segment_result_sets import read_result_set
+        from types import SimpleNamespace
+
+        row = read_result_set(ref, SimpleNamespace(connection=db))
+        if fixed and row["state"] == _STATE.COLLECTING:
+            raise ConsistencyError("原结果成员尚未可靠固定")
+        return row
     if not isinstance(ref,SegmentSetRef):
         raise TypeError('必须使用冻结分段集合引用')
     found = _one(db,'SELECT id FROM segment_sets WHERE action_id=? AND version=?',(ref.action_id,ref.version))
@@ -311,6 +332,8 @@ def _stored_gaps(ref,owned):
 
 def _verify_assessment(db,setrow,facts,assessment):
     _check_write_kind(db,setrow,'ASSESS')
+    if setrow["source_kind"] != int(enum_for("segment_sets.source_kind").COMPLETE_SCAN):
+        raise ConsistencyError("普通完整扫描判断不能替代跨轮保留来源")
     action,*_=_source(db,_ref(setrow))
     if action['execution_spec_json'].get('result_policy')!=CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value:
         raise ConsistencyError('完整分段判断仅适用于普通录像，不用于原生延时采集目标')
@@ -319,6 +342,23 @@ def _verify_assessment(db,setrow,facts,assessment):
     ref=_ref(setrow)
     if assessment.set_ref!=ref or assessment.target_duration_ms!=setrow['target_duration_ms']:
         raise ConsistencyError('判断改变原冻结集合或原目标')
+    created_reason = _one(
+        db,
+        "SELECT json_extract(body_json,'$.reason') FROM history_events WHERE id=?",
+        (setrow["created_event_id"],),
+    )[0]
+    if (
+        facts.start_observation is not None
+        or created_reason == _EVENT["branches"]["CREATE_RESULT"]["reason"]
+    ):
+        from .segment_starts import segment_start_from_set
+
+        actual_start = segment_start_from_set(db, setrow)
+        if (facts.start_key, facts.start_observation) != (
+            actual_start.key,
+            actual_start.observation,
+        ):
+            raise ConsistencyError("分段起点或原始观察引用与原基准和实际扫描不同")
     state=SegmentAccumulator(ref,setrow['target_duration_ms'],facts.start_key)
     for member in iter_segment_members(ref,Reader):
         state=advance_segment_assessment(state,member)
@@ -562,6 +602,15 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
         raise ConsistencyError('分段事件超过有限行数')
     from camctl.capture.segment_storage import SegmentResultRef
     if isinstance(ref,SegmentResultRef):
+        if event.reason == _EVENT["branches"]["DECIDE_RESULT"]["reason"]:
+            from .segment_dispositions import verify_disposition_event
+
+            return verify_disposition_event(db, ref, event)
+        if event.reason == _EVENT["branches"]["ACTIVATE"]["reason"]:
+            from .segment_transactions import verify_publication
+
+            _verify_request(event, ref, context, db)
+            return verify_publication(db, ref, event, context)
         if event.reason==_EVENT['branches']['CONCLUDE_CHECK']['reason']:
             from .segment_check_conclusions import verify_conclusion_event
             return verify_conclusion_event(db,ref,event,context)
@@ -756,8 +805,9 @@ def segment_activation_rows(ref,event_id,owned):
     """P3 完成组中的唯一正式集合标记；本函数不提交。"""
     ObjectId(event_id)
     row=_set(owned.connection,ref,fixed=True)
-    _check_write_kind(owned.connection,row,'ACTIVATE')
-    if row['state']!=_STATE.ASSESSED or row['published_event_id'] is not None:
+    if not isinstance(ref, SegmentResultRef):
+        _check_write_kind(owned.connection, row, "ACTIVATE")
+    if row["state"] != _STATE.ASSESSED or row["published_event_id"] is not None:
         raise ConsistencyError('正式分段集合只能发布一次已保存判断')
     return (update_change('segment_sets',row['id'],{'published_event_id':None},{'published_event_id':event_id}),)
 
@@ -952,6 +1002,17 @@ class SegmentRepository:
             else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
                 error=receipt.error))
 
+    def decide_result(self, ref, occurred_at, key, owned):
+        from .segment_dispositions import DecideResultCommand
+
+        register_segment_guards()
+        receipt = commit_operation(
+            DecideResultCommand(ref, occurred_at, key), key, owned
+        )
+        return DbOutcome(
+            DbOutcomeKind(receipt.kind), value=receipt.result, error=receipt.error
+        )
+
     def conclude_result_check(self,request,key,owned):
         from .segment_check_conclusions import ConcludeResultCheckCommand
         register_segment_guards()
@@ -969,6 +1030,21 @@ class SegmentRepository:
     def read_current_segment_ref(self,ref,owned):
         from .segment_result_sets import read_current_segment_ref
         return read_current_segment_ref(ref,owned)
+
+    def read_prepared_result_ref(self, action_id, owned):
+        from .segment_result_sets import read_prepared_result_ref
+
+        return read_prepared_result_ref(action_id, owned)
+
+    def prepare_result_set(self, action_id, occurred_at, owned):
+        from .segment_result_sets import prepare_result_set
+
+        return prepare_result_set(action_id, occurred_at, owned)
+
+    def read_start(self, ref, owned):
+        from .segment_starts import read_segment_start
+
+        return read_segment_start(ref, owned)
 
     def read_result_member_inputs(self,ref,cursor,limit,owned):
         from .segment_result_sets import read_result_member_inputs
@@ -1007,6 +1083,10 @@ class SegmentRepository:
         return self._save('FIX_MEMBERS',ref,None,occurred_at,key,owned)
 
     def append_gaps(self,ref,gaps,occurred_at,key,owned):
+        if isinstance(ref, SegmentResultRef):
+            return self._save_result_members(
+                "GAPS", ref, _batch(gaps), occurred_at, key, owned
+            )
         return self._save('GAPS',ref,_batch(gaps),occurred_at,key,owned)
 
     def save_assessment(self,ref,facts,assessment,occurred_at,key,owned):

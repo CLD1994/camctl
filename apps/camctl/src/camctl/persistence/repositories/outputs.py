@@ -645,6 +645,10 @@ class _FixSelectionCommand:
                 f" {selection['status']!r}"
             )
         reads = _CatalogReads(connection)
+        from .segment_selections import is_segmented_source
+
+        if is_segmented_source(connection, source_action_id):
+            raise ConsistencyError("分段来源须按已发布范围逐项固定选择")
         reads.require_empty_selection(command.selection_id)
         snapshot = command.snapshot
         if not snapshot.is_fixed:
@@ -5172,17 +5176,27 @@ class _FinishObtainCommand:
 def load_obtain_facts(connection, action_id: int) -> ObtainAggregate:
     """SQLite 折叠完整来源与条目范围，Python 只保留固定数量的计数。"""
     ObjectId(action_id)
-    with closing(connection.execute(
-        "SELECT COUNT(*) FILTER (WHERE s.status<>?),"
-        "(SELECT COUNT(*) FROM obtain_items i"
-        " JOIN obtain_source_selections os ON os.id=i.selection_id"
-        " JOIN action_dependencies dep ON dep.id=os.dependency_id"
-        " WHERE dep.action_id=? AND i.status=?)"
-        " FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id"
-        " WHERE d.action_id=?",
-        (int(_SELECTION_STATUS.FIXED), action_id, int(_ITEM_STATUS.UNRESOLVED), action_id),
-    )) as cursor:
-        waiting, unresolved = cursor.fetchone()
+    with closing(
+        connection.execute(
+            "SELECT COUNT(*) FILTER (WHERE s.status<>?),"
+            "COUNT(*) FILTER (WHERE s.status=? AND s.error_code IS NOT NULL"
+            " AND NOT EXISTS (SELECT 1 FROM obtain_items i WHERE i.selection_id=s.id)),"
+            "(SELECT COUNT(*) FROM obtain_items i"
+            " JOIN obtain_source_selections os ON os.id=i.selection_id"
+            " JOIN action_dependencies dep ON dep.id=os.dependency_id"
+            " WHERE dep.action_id=? AND i.status=?)"
+            " FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id"
+            " WHERE d.action_id=?",
+            (
+                int(_SELECTION_STATUS.FIXED),
+                int(_SELECTION_STATUS.FIXED),
+                action_id,
+                int(_ITEM_STATUS.UNRESOLVED),
+                action_id,
+            ),
+        )
+    ) as cursor:
+        waiting, failed_sources, unresolved = cursor.fetchone()
     total = prepared = failed = 0
     # 状态分组的数量由登记枚举限制；不加载全部条目正文或交付行。
     with closing(connection.execute(
@@ -5198,7 +5212,7 @@ def load_obtain_facts(connection, action_id: int) -> ObtainAggregate:
             total += row[2]
             prepared += row[2] if stage is ObtainItemStage.PREPARED else 0
             failed += row[2] if stage is ObtainItemStage.FAILED else 0
-    return ObtainAggregate(waiting, unresolved, total, prepared, failed)
+    return ObtainAggregate(waiting, unresolved, total, prepared, failed, failed_sources)
 
 
 def plan_complete(siblings, current_action_id: int) -> bool:
@@ -5595,6 +5609,13 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
     owner = reads.required("actions", dependency["action_id"])
     source = reads.required("actions", dependency["depends_on_action_id"])
     source_id = int(source["id"])
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        source.get("execution_spec_json", {}).get("result_policy")
+        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    ):
+        raise EventValidationError("分段来源选择须核对原完整范围事务")
     for facts, columns in (
         (owner, ("type", "status", "source_resolution_state", "resolved_source_plan_id")),
         (source, ("type", "status", "plan_id")),
@@ -5645,6 +5666,11 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
 def _source_selection_guard(event, context) -> None:
     """逐来源选择守卫：按保存请求核对完整结果及条目 ID 对应的顺序。"""
     if event.event_type != _TARGETS_FIXED_EVENT or event.reason != _OBTAIN_REASON:
+        return
+    if "segment_selection_request" in event.evidence:
+        from .segment_selections import verify_guard
+
+        verify_guard(event, context)
         return
     selection_updates = [
         row
@@ -6123,7 +6149,11 @@ def _obtain_member_guard(event, context) -> None:
             raise EventValidationError("显式核实只能推进原 UNRESOLVED 项")
         output_id = row.after.values.get("output_id")
     else:
-        output_id = item.get("output_id")
+        output_id = row.after.values.get("output_id", item.get("output_id"))
+        if "output_id" in row.after.values and (not unresolved or not explicit):
+            raise EventValidationError(
+                "只有显式未解析项可以在拒绝时保存已确认的产物关联"
+            )
     if output_id is None:
         if event.reason == _RESOLVE_REASON or not unresolved:
             raise EventValidationError("已选中或核实成功的成员必须关联真实产物")
@@ -9022,3 +9052,8 @@ def register_outputs_guards() -> None:
     register_guard("cleanup", _cleanup_guard)
     from camctl.persistence.repositories.cleanup_absence import cleanup_result_source_guard
     register_guard("cleanup_result_source", cleanup_result_source_guard)
+    from camctl.persistence.repositories.segment_queries import (
+        register_segment_query_guards,
+    )
+
+    register_segment_query_guards()

@@ -20,6 +20,22 @@ _RUN_EVENT=load_event_registry()['events']['OPERATION_CONFIGURED']
 _CONFIGURE=_RUN_EVENT['branches']['CONFIGURE']['reason']
 _FINISH=_RUN_EVENT['branches']['FINISH']['reason']
 _CONFIG_COLUMNS=('max_attempts_used','timeout_s_json','retry_interval_s_json')
+_CURRENT_REASONS = frozenset(
+    (
+        ResultCheckEndReason.CONTROL_SUFFICIENT,
+        ResultCheckEndReason.SEGMENTS_SUFFICIENT,
+        ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED,
+        ResultCheckEndReason.EXPLICIT_RESULT_ERROR,
+        ResultCheckEndReason.GAP_CONFIRMED,
+        ResultCheckEndReason.ORIGINAL_ABSENT,
+    )
+)
+_NATIVE_REASONS = frozenset(
+    (
+        ResultCheckEndReason.NATIVE_RESULT_DECIDED,
+        ResultCheckEndReason.NATIVE_FINITE_CANCEL_END,
+    )
+)
 
 
 def _values(db,request,setrow):
@@ -33,14 +49,44 @@ def _values(db,request,setrow):
         raise ConsistencyError('该申请不是无RESULTS的原基准结束决定')
     action=row_facts(db,'actions',request.ref.action_id)
     activity=row_facts(db,'device_activities',setrow['activity_id'])
-    if (action['status']!=int(enum_for('actions.status').RUNNING) or action['execution_started']!=1
-            or action['cancel_requested'] or activity is None
-            or activity['dispatch_state']!=int(enum_for('device_activities.dispatch_state').NOT_DISPATCHED)):
-        raise ConsistencyError('基准结束决定缺少原运行中未派发资格')
+    if (
+        action["status"] != int(enum_for("actions.status").RUNNING)
+        or action["execution_started"] != 1
+        or action["cancel_requested"]
+        or activity is None
+    ):
+        raise ConsistencyError("无RESULTS结束决定缺少原运行中活动资格")
     kinds=enum_for('operation_runs.kind')
-    if _one(db,'SELECT id FROM operation_runs WHERE action_id=? AND kind IN (?,?) LIMIT 1',
-            (request.ref.action_id,int(kinds.START),int(kinds.CHECK_CAPTURE_RESULTS))) is not None:
-        raise ConsistencyError('已有START或RESULTS责任，不能采用基准结束分区')
+    if (
+        _one(
+            db,
+            "SELECT id FROM operation_runs WHERE action_id=? AND kind=? LIMIT 1",
+            (request.ref.action_id, int(kinds.CHECK_CAPTURE_RESULTS)),
+        )
+        is not None
+    ):
+        raise ConsistencyError("已有RESULTS责任，不能采用无RESULTS结束分区")
+    start = _one(
+        db,
+        "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
+        (request.ref.action_id, int(kinds.START)),
+    )
+    if start is not None:
+        failure = no_result_start_failure(db, setrow, request.anchor_event_id)
+        return dict(
+            set_id=request.ref.set_id,
+            reason=encode_enum(request.reason),
+            anchor_event_id=request.anchor_event_id,
+            prior_run_end_event_id=None,
+            config_event_id=None,
+            prior_conclusion_id=None,
+            current_result=encode_enum(CurrentSegmentResult.NONE),
+            current_failure_json={"code": failure.code, "details": failure.details},
+        )
+    if activity["dispatch_state"] != int(
+        enum_for("device_activities.dispatch_state").NOT_DISPATCHED
+    ):
+        raise ConsistencyError("基准结束决定缺少原未派发资格")
     call=_one(db,'SELECT id FROM baseline_read_calls WHERE action_id=? AND activity_id=? AND result_event_id=?',
         (request.ref.action_id,setrow['activity_id'],request.anchor_event_id))
     if call is None:raise ConsistencyError('基准决定缺少同动作实际结果依据')
@@ -55,12 +101,68 @@ def _values(db,request,setrow):
         prior_conclusion_id=None,current_result=encode_enum(CurrentSegmentResult.NONE),current_failure_json=None)
 
 
+def no_result_start_failure(db, setrow, anchor):
+    """从原已结束 START 的实际结果恢复既定失败，不补造结果核实。"""
+    from camctl.capture.media import RecordingFailure
+
+    found = _one(
+        db,
+        "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
+        (setrow["action_id"], int(enum_for("operation_runs.kind").START)),
+    )
+    run = None if found is None else row_facts(db, "operation_runs", found[0])
+    if (
+        run is None
+        or run["status"] not in (4, 6)
+        or run["activity_id"] != setrow["activity_id"]
+        or setrow["run_id"] is not None
+        or setrow["member_count"] != 0
+        or _ended_attempts(
+            db, run, HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"])
+        )
+        != anchor
+    ):
+        raise ConsistencyError("无RESULTS启动失败缺少原全部尝试及实际关闭")
+    raw = run["error_json"]
+    if raw is None:
+        raise ConsistencyError("原已关闭 START 没有实际失败")
+    if raw["code"] in (
+        "device_start_failed",
+        "start_attempts_exhausted",
+        "capture_result_unconfirmed",
+        "capture_failed",
+    ):
+        failure = RecordingFailure(raw["code"], raw["details"])
+    elif raw["code"] == "result_unconfirmed":
+        failure = RecordingFailure(
+            "capture_result_unconfirmed",
+            {"activity_id": str(setrow["activity_id"]), "reason": "start_unknown"},
+        )
+    else:
+        raise ConsistencyError("原 START 关闭错误不属于既定启动失败")
+    from camctl.contracts.workflow_errors import validate_error_details
+
+    validate_error_details(failure.code, failure.details)
+    return failure
+
+
 def _request(raw):
     from camctl.operations.attempts import AttemptConfig
+    from camctl.capture.media import RecordingFailure
+
     config=None if raw['check_config'] is None else AttemptConfig(**raw['check_config'])
-    request=ResultCheckConclusionSave(SegmentResultRef(**raw['ref']),
-        decode_enum(ResultCheckEndReason,raw['reason']),raw['anchor_event_id'],raw['prior_run_end_event_id'],
-        config,raw['binding_failure'],raw['prior_conclusion_id'],raw['occurred_at'])
+    request = ResultCheckConclusionSave(
+        SegmentResultRef(**raw["ref"]),
+        decode_enum(ResultCheckEndReason, raw["reason"]),
+        raw["anchor_event_id"],
+        raw["prior_run_end_event_id"],
+        config,
+        None
+        if raw["binding_failure"] is None
+        else RecordingFailure(**raw["binding_failure"]),
+        raw["prior_conclusion_id"],
+        raw["occurred_at"],
+    )
     if not json_equal(document(request),raw):raise ConsistencyError('有限决定证据不是完整规范申请')
     return request
 
@@ -124,13 +226,29 @@ def _prepare(db,request):
     setrow=read_result_set(request.ref,Reader)
     if request.reason is ResultCheckEndReason.NO_RESULT_WORK:
         return setrow,None,(),_values(db,request,setrow)
-    if (request.reason is not ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED
-            or setrow['source_kind']!=encode_enum(SegmentSourceKind.RETAINED_SOURCES)
-            or setrow['publication_kind']!=encode_enum(PublicationKind.RESULT)
-            or setrow['state']!=int(enum_for('segment_sets.state').MEMBERS_FIXED)
-            or setrow['current_attempt_id'] is not None or setrow['current_final_page_event_id'] is not None
-            or request.prior_run_end_event_id is not None or request.binding_failure is not None
-            or request.prior_conclusion_id is not None or request.check_config is None):
+    if request.reason is ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION:
+        return _prepare_canceled(db, request, setrow)
+    if request.reason in (
+        ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
+        ResultCheckEndReason.BINDING_UNAVAILABLE,
+    ):
+        return _prepare_external(db, request, setrow)
+    if request.reason in _NATIVE_REASONS:
+        return _prepare_native(db, request, setrow)
+    if (
+        request.reason not in _CURRENT_REASONS
+        or setrow["source_kind"]
+        not in (
+            encode_enum(SegmentSourceKind.RETAINED_SOURCES),
+            encode_enum(SegmentSourceKind.COMPLETE_SCAN),
+        )
+        or setrow["publication_kind"] != encode_enum(PublicationKind.RESULT)
+        or setrow["state"] != int(enum_for("segment_sets.state").MEMBERS_FIXED)
+        or request.prior_run_end_event_id is not None
+        or request.binding_failure is not None
+        or request.prior_conclusion_id is not None
+        or request.check_config is None
+    ):
         raise ConsistencyError('该有限决定不属于已实现的原RESULTS无可靠当前扫描耗尽分区')
     action=row_facts(db,'actions',request.ref.action_id)
     run=row_facts(db,'operation_runs',setrow['run_id'])
@@ -141,21 +259,41 @@ def _prepare(db,request):
             or run['status'] not in (int(enum_for('operation_runs.status').ACTIVE),int(enum_for('operation_runs.status').PENDING))):
         raise ConsistencyError('原RESULTS不具备运行中且可有限收场的责任')
     last=_ended_attempts(db,run,HistoryBoundary(setrow['source_txn_id'],setrow['source_event_id']))
+    from .segment_current import current_decision
+
+    reason, current_result, current_failure = current_decision(db, setrow)
+    if request.reason is not reason:
+        raise ConsistencyError("结束原因与最后实际扫描的独立结论不同")
     config=request.check_config
-    if (request.anchor_event_id!=last or config.timeout_s is None or config.retry_interval_s is None
-            or run['attempts_used']<config.max_attempts):
+    if (
+        request.anchor_event_id != last
+        or config.timeout_s is None
+        or config.retry_interval_s is None
+        or reason is ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED
+        and run["attempts_used"] < config.max_attempts
+    ):
         raise ConsistencyError('实际最后结果、完整采用配置或耗尽资格不成立')
     desired=dict(zip(_CONFIG_COLUMNS,(config.max_attempts,config.timeout_s,config.retry_interval_s)))
     changed={name:value for name,value in desired.items() if not json_equal(run[name],value)}
     prefix=[]
     if changed:prefix.append((_CONFIGURE,update_change('operation_runs',run['id'],
         {name:run[name] for name in changed},changed)))
-    from .capture import result_run_close_row,_unconfirmed_run_error
-    prefix.append((_FINISH,result_run_close_row(run,int(enum_for('operation_runs.status').UNCONFIRMED),
-        _unconfirmed_run_error(run['activity_id']))))
-    values=dict(set_id=request.ref.set_id,reason=encode_enum(request.reason),anchor_event_id=last,
-        prior_run_end_event_id=None,config_event_id=None if changed else _adopted_config_event(db,run),
-        prior_conclusion_id=None,current_result=encode_enum(CurrentSegmentResult.NONE),current_failure_json=None)
+    from .capture import result_run_close_row
+
+    status, error = _close_values(run, current_failure, reason)
+    prefix.append((_FINISH, result_run_close_row(run, status, error)))
+    values = dict(
+        set_id=request.ref.set_id,
+        reason=encode_enum(request.reason),
+        anchor_event_id=last,
+        prior_run_end_event_id=None,
+        config_event_id=None if changed else _adopted_config_event(db, run),
+        prior_conclusion_id=None,
+        current_result=encode_enum(current_result),
+        current_failure_json=None
+        if current_failure is None
+        else {"code": current_failure.code, "details": current_failure.details},
+    )
     return setrow,run,tuple(prefix),values
 
 
@@ -225,6 +363,34 @@ def verify_result_check_conclusion(request,key,owned,*,execution_finished=True):
         return plan.result
 
 
+def read_verified_conclusion(db, setrow):
+    """按决定的原完整申请核实配置、真实轮次及责任关闭。"""
+    from types import SimpleNamespace
+    from camctl.history.decoding import decode_event_row
+    from .result_pages import _COLUMNS
+
+    found = _one(
+        db,
+        "SELECT id,created_event_id FROM segment_check_conclusions WHERE set_id=?",
+        (setrow["id"],),
+    )
+    if found is None:
+        raise ConsistencyError("结果发布缺少原有限核实结束决定")
+    raw = _one(db, f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (found[1],))
+    event = decode_event_row(raw)
+    (key,) = _one(
+        db,
+        "SELECT operation_key FROM history_transactions WHERE id=?",
+        (event.transaction_id,),
+    )
+    verify_result_check_conclusion(
+        _request(event.evidence["result_check_decision"]),
+        key,
+        SimpleNamespace(connection=db),
+    )
+    return row_facts(db, "segment_check_conclusions", found[0])
+
+
 class ConcludeResultCheckCommand:
     def __init__(self,request,key):
         if not isinstance(request,ResultCheckConclusionSave):raise TypeError('有限决定需要完整原申请')
@@ -273,9 +439,56 @@ def _verify_saved_prefix(db,request,saved,conclusion):
     setrow=read_result_set(request.ref,Reader)
     if request.reason is ResultCheckEndReason.NO_RESULT_WORK:
         if prefix:raise ConsistencyError('原无RESULTS基准决定不能混入其他事件')
+        if conclusion["current_failure_json"] is not None:
+            failure = no_result_start_failure(db, setrow, request.anchor_event_id)
+            if not json_equal(
+                conclusion["current_failure_json"],
+                {"code": failure.code, "details": failure.details},
+            ):
+                raise ConsistencyError("原无RESULTS决定改变了实际启动失败")
         return
-    if (request.reason is not ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED or len(prefix) not in (1,2)
-            or request.check_config is None):
+    if request.reason in (
+        ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
+        ResultCheckEndReason.BINDING_UNAVAILABLE,
+    ):
+        failure = _external_failure(db, request, setrow)
+        expected = {"code": failure.code, "details": failure.details}
+        if not json_equal(conclusion["current_failure_json"], expected):
+            raise ConsistencyError("原外部失败决定改变实际失败输入")
+        if not prefix:
+            if setrow["run_id"] is not None:
+                raise ConsistencyError("已有 RESULTS 的外部失败决定缺少完整关闭")
+            return
+    if request.reason is ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION:
+        _check_canceled_request(db, request, setrow)
+        if not prefix:
+            run = (
+                None
+                if setrow["run_id"] is None
+                else row_facts(db, "operation_runs", setrow["run_id"])
+            )
+            if run is not None and (
+                run["status"] in (1, 2) or request.prior_run_end_event_id is None
+            ):
+                raise ConsistencyError("取消决定缺少原已关闭 RESULTS 引用")
+            return
+    external = request.reason in (
+        ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
+        ResultCheckEndReason.BINDING_UNAVAILABLE,
+    )
+    native = request.reason in _NATIVE_REASONS
+    if (
+        request.reason
+        not in _CURRENT_REASONS
+        | _NATIVE_REASONS
+        | {
+            ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION,
+            ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
+            ResultCheckEndReason.BINDING_UNAVAILABLE,
+        }
+        or len(prefix) not in (1, 2)
+        or request.check_config is None
+    ):
         raise ConsistencyError('原有限决定不是已实现的完整组')
     run=row_facts(db,'operation_runs',setrow['run_id'])
     config=request.check_config
@@ -299,14 +512,449 @@ def _verify_saved_prefix(db,request,saved,conclusion):
     elif (conclusion['config_event_id'] is None or conclusion['config_event_id']>=prefix[0]['event_id']
             or conclusion['config_event_id']!=_adopted_config_event(db,run)):
         raise ConsistencyError('复用配置缺少原先实际采用事件')
-    if (_ended_attempts(db,run,HistoryBoundary(setrow['source_txn_id'],setrow['source_event_id']))!=request.anchor_event_id
-            or run['attempts_used']<config.max_attempts or conclusion['anchor_event_id']!=request.anchor_event_id):
+    if (
+        not external
+        and request.reason is not ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION
+        and _ended_attempts(
+            db, run, HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"])
+        )
+        != request.anchor_event_id
+        or request.reason is ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED
+        and run["attempts_used"] < config.max_attempts
+        or conclusion["anchor_event_id"] != request.anchor_event_id
+    ):
         raise ConsistencyError('原有限决定的实际结果或已采用耗尽资格不同')
     event=prefix[-1];row=event['body']['rows'][0]
-    from .capture import _unconfirmed_run_error
-    expected={'status':int(enum_for('operation_runs.status').UNCONFIRMED),'retry_wait_required':0,
-        'error_json':_unconfirmed_run_error(run['activity_id'])}
-    if (event['reason']!=_FINISH or set(row['before']['values'])!=set(expected)
-            or row['before']['values']['status'] not in (1,2) or not json_equal(row['after']['values'],expected)
-            or any(not json_equal(run[name],value) for name,value in expected.items())):
+    from .segment_current import current_decision
+    from .segment_native import native_classification
+
+    classified = native_classification(db, setrow) if native else None
+    reason, current_result, current_failure = (
+        (request.reason, classified.current_result, classified.failure)
+        if native
+        else (
+            request.reason,
+            CurrentSegmentResult.UNCONFIRMED,
+            _external_failure(db, request, setrow),
+        )
+        if external
+        else (
+            ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION,
+            CurrentSegmentResult.NONE,
+            None,
+        )
+        if request.reason is ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION
+        else current_decision(db, setrow)
+    )
+    if (
+        reason is not request.reason
+        or conclusion["current_result"] != encode_enum(current_result)
+        or not json_equal(
+            conclusion["current_failure_json"],
+            None
+            if current_failure is None
+            else {"code": current_failure.code, "details": current_failure.details},
+        )
+    ):
+        raise ConsistencyError("原当前扫描结论或明确错误已改变")
+    status, error = _close_values(run, current_failure, reason, current_result)
+    expected = {"status": status, "retry_wait_required": 0, "error_json": error}
+    before, after = row["before"]["values"], row["after"]["values"]
+    if (
+        event["reason"] != _FINISH
+        or set(before) != set(after)
+        or not {"status"} <= set(after) <= set(expected)
+        or row["before"]["values"]["status"] not in (1, 2)
+        or any(
+            not json_equal(value, expected[name]) or json_equal(value, before[name])
+            for name, value in after.items()
+        )
+        or any(not json_equal(run[name], value) for name, value in expected.items())
+    ):
         raise ConsistencyError('原有限决定缺少原RESULTS的可靠完整关闭')
+
+
+def _close_values(run, failure, reason, current_result=None):
+    if reason is ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION or (
+        reason is ResultCheckEndReason.NATIVE_FINITE_CANCEL_END
+        and current_result is not CurrentSegmentResult.SUFFICIENT
+    ):
+        return int(enum_for("operation_runs.status").CANCELED), None
+    if (
+        reason
+        in (
+            ResultCheckEndReason.CONTROL_SUFFICIENT,
+            ResultCheckEndReason.SEGMENTS_SUFFICIENT,
+        )
+        or reason in _NATIVE_REASONS
+        and current_result is CurrentSegmentResult.SUFFICIENT
+    ):
+        return int(enum_for("operation_runs.status").SUCCEEDED), None
+    if failure is None:
+        from .capture import _unconfirmed_run_error
+
+        return int(
+            enum_for("operation_runs.status").UNCONFIRMED
+        ), _unconfirmed_run_error(run["activity_id"])
+    from camctl.contracts.workflow_errors import registered_error
+
+    return int(enum_for("operation_runs.status").FAILED), {
+        "code": failure.code,
+        "stage": registered_error(failure.code)["stage"],
+        "details": failure.details,
+    }
+
+
+def _check_canceled_request(db, request, setrow):
+    from camctl.history.decoding import decode_event_row
+    from .result_pages import _COLUMNS
+
+    if (
+        setrow["publication_kind"] != encode_enum(PublicationKind.CANCELED)
+        or request.anchor_event_id != setrow["cancel_event_id"]
+        or request.binding_failure is not None
+    ):
+        raise ConsistencyError("取消决定必须引用原取消版本及实际请求")
+    event = decode_event_row(
+        _one(
+            db,
+            f"SELECT {_COLUMNS} FROM history_events WHERE id=?",
+            (request.anchor_event_id,),
+        )
+    )
+    if not any(
+        row.table == "actions"
+        and row.row_id == setrow["action_id"]
+        and row.before.values.get("cancel_requested") == 0
+        and row.after.values.get("cancel_requested") == 1
+        for row in event.rows
+    ):
+        raise ConsistencyError("取消决定缺少原动作实际取消事件")
+    if request.prior_run_end_event_id is not None:
+        prior = decode_event_row(
+            _one(
+                db,
+                f"SELECT {_COLUMNS} FROM history_events WHERE id=?",
+                (request.prior_run_end_event_id,),
+            )
+        )
+        if not any(
+            row.table == "operation_runs"
+            and row.row_id == setrow["run_id"]
+            and row.before.values.get("status") in (1, 2)
+            and row.after.values.get("status") in (3, 4, 5, 6, 7)
+            for row in prior.rows
+        ):
+            raise ConsistencyError("取消复用的 RESULTS 关闭不是原实际结束事件")
+    if request.prior_conclusion_id is not None:
+        previous = row_facts(
+            db, "segment_check_conclusions", request.prior_conclusion_id
+        )
+        if previous is None or previous["set_id"] != setrow["predecessor_set_id"]:
+            raise ConsistencyError("取消决定未引用实际前版决定")
+
+
+def _prepare_canceled(db, request, setrow):
+    _check_canceled_request(db, request, setrow)
+    action = row_facts(db, "actions", setrow["action_id"])
+    if (
+        action["status"] != 2
+        or not action["cancel_requested"]
+        or setrow["state"] != 2
+        or _one(
+            db,
+            "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id WHERE r.action_id=? AND t.status=1 LIMIT 1",
+            (action["id"],),
+        )
+    ):
+        raise ConsistencyError("取消决定须等待所有实际调用可靠结束并固定原成员")
+    run = (
+        None
+        if setrow["run_id"] is None
+        else row_facts(db, "operation_runs", setrow["run_id"])
+    )
+    prefix = []
+    config_event = None
+    if run is not None:
+        if run["status"] in (1, 2):
+            if (
+                request.prior_run_end_event_id is not None
+                or request.check_config is None
+            ):
+                raise ConsistencyError(
+                    "运行中 RESULTS 取消须采用完整配置且不能声称已结束"
+                )
+            config = request.check_config
+            desired = dict(
+                zip(
+                    _CONFIG_COLUMNS,
+                    (config.max_attempts, config.timeout_s, config.retry_interval_s),
+                )
+            )
+            if config.timeout_s is None or config.retry_interval_s is None:
+                raise ConsistencyError("取消结果核实缺少完整采用配置")
+            changed = {
+                name: value
+                for name, value in desired.items()
+                if not json_equal(run[name], value)
+            }
+            if changed:
+                prefix.append(
+                    (
+                        _CONFIGURE,
+                        update_change(
+                            "operation_runs",
+                            run["id"],
+                            {name: run[name] for name in changed},
+                            changed,
+                        ),
+                    )
+                )
+            else:
+                config_event = _adopted_config_event(db, run)
+            from .capture import result_run_close_row
+
+            prefix.append(
+                (
+                    _FINISH,
+                    result_run_close_row(
+                        run, int(enum_for("operation_runs.status").CANCELED), None
+                    ),
+                )
+            )
+        elif request.prior_run_end_event_id is None:
+            raise ConsistencyError("原 RESULTS 已结束时须引用实际关闭事件")
+    elif request.check_config is not None or request.prior_run_end_event_id is not None:
+        raise ConsistencyError("无 RESULTS 的取消不能伪造配置或关闭")
+    values = dict(
+        set_id=request.ref.set_id,
+        reason=encode_enum(request.reason),
+        anchor_event_id=request.anchor_event_id,
+        prior_run_end_event_id=request.prior_run_end_event_id,
+        config_event_id=config_event,
+        prior_conclusion_id=request.prior_conclusion_id,
+        current_result=encode_enum(CurrentSegmentResult.NONE),
+        current_failure_json=None,
+    )
+    return setrow, run, tuple(prefix), values
+
+
+def _external_failure(db, request, setrow):
+    """核对实际 STOP 关闭或原绑定失败输入；不改写原设备返回。"""
+    from camctl.capture.media import RecordingFailure
+
+    if (
+        setrow["publication_kind"] != encode_enum(PublicationKind.RESULT)
+        or request.prior_run_end_event_id is not None
+        or request.prior_conclusion_id is not None
+    ):
+        raise ConsistencyError("外部收场决定不能伪造取消或前次 RESULTS 结束")
+    action = row_facts(db, "actions", setrow["action_id"])
+    if request.reason is ResultCheckEndReason.BINDING_UNAVAILABLE:
+        failure = request.binding_failure
+        if (
+            failure is None
+            or failure.code != "device_binding_unavailable"
+            or failure.details.get("device_id") != action["device_id"]
+            or failure.details.get("expected_driver_id") != action["driver_id"]
+            or request.anchor_event_id is not None
+        ):
+            raise ConsistencyError("绑定失败输入必须保留原动作的设备及预期驱动身份")
+        from camctl.contracts.workflow_errors import validate_error_details
+
+        validate_error_details(failure.code, failure.details)
+        return failure
+    if request.binding_failure is not None or request.anchor_event_id is None:
+        raise ConsistencyError("STOP 未确认须引用实际关闭事件")
+    stop = _one(
+        db,
+        "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
+        (action["id"], int(enum_for("operation_runs.kind").STOP)),
+    )
+    if stop is None:
+        raise ConsistencyError("STOP 未确认缺少原责任")
+    run = row_facts(db, "operation_runs", stop[0])
+    from camctl.history.decoding import decode_event_row
+    from .result_pages import _COLUMNS
+
+    raw = _one(
+        db,
+        f"SELECT {_COLUMNS} FROM history_events WHERE id=?",
+        (request.anchor_event_id,),
+    )
+    event = None if raw is None else decode_event_row(raw)
+    error = run["error_json"]
+    if (
+        run["activity_id"] != setrow["activity_id"]
+        or run["status"] != int(enum_for("operation_runs.status").UNCONFIRMED)
+        or error is None
+        or error["code"] != "recording_stop_failed"
+        or event is None
+        or not any(
+            row.table == "operation_runs"
+            and row.row_id == run["id"]
+            and row.before.values.get("status") in (1, 2)
+            and row.after.values.get("status") == run["status"]
+            for row in event.rows
+        )
+    ):
+        raise ConsistencyError("STOP 决定与原预算耗尽的实际未确认关闭不同")
+    return RecordingFailure(error["code"], error["details"])
+
+
+def _prepare_external(db, request, setrow):
+    failure = _external_failure(db, request, setrow)
+    action = row_facts(db, "actions", setrow["action_id"])
+    if (
+        action["status"] != 2
+        or not action["execution_started"]
+        or action["cancel_requested"]
+        or setrow["state"] != 2
+        or _one(
+            db,
+            "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+            " WHERE r.action_id=? AND t.status=1 LIMIT 1",
+            (action["id"],),
+        )
+    ):
+        raise ConsistencyError("外部收场必须等待原实际调用可靠结束并固定原观察")
+    run = (
+        None
+        if setrow["run_id"] is None
+        else row_facts(db, "operation_runs", setrow["run_id"])
+    )
+    prefix = []
+    config_event = None
+    if run is not None:
+        if run["status"] not in (1, 2) or request.check_config is None:
+            raise ConsistencyError("外部收场须接手原仍开放的 RESULTS 责任")
+        config = request.check_config
+        if config.timeout_s is None or config.retry_interval_s is None:
+            raise ConsistencyError("外部结果收场缺少完整采用配置")
+        desired = dict(
+            zip(
+                _CONFIG_COLUMNS,
+                (config.max_attempts, config.timeout_s, config.retry_interval_s),
+            )
+        )
+        changed = {
+            name: value
+            for name, value in desired.items()
+            if not json_equal(run[name], value)
+        }
+        if changed:
+            prefix.append(
+                (
+                    _CONFIGURE,
+                    update_change(
+                        "operation_runs",
+                        run["id"],
+                        {name: run[name] for name in changed},
+                        changed,
+                    ),
+                )
+            )
+        else:
+            config_event = _adopted_config_event(db, run)
+        from .capture import result_run_close_row
+
+        status, error = _close_values(run, failure, request.reason)
+        prefix.append((_FINISH, result_run_close_row(run, status, error)))
+    elif request.check_config is not None:
+        raise ConsistencyError("没有 RESULTS 时不能补造配置")
+    values = dict(
+        set_id=setrow["id"],
+        reason=encode_enum(request.reason),
+        anchor_event_id=request.anchor_event_id,
+        prior_run_end_event_id=None,
+        config_event_id=config_event,
+        prior_conclusion_id=None,
+        current_result=encode_enum(CurrentSegmentResult.UNCONFIRMED),
+        current_failure_json={"code": failure.code, "details": failure.details},
+    )
+    return setrow, run, tuple(prefix), values
+
+
+def _prepare_native(db, request, setrow):
+    from camctl.devices.tasks import CaptureResultPolicy
+    from .segment_native import native_classification
+
+    action = row_facts(db, "actions", setrow["action_id"])
+    canceled = request.reason is ResultCheckEndReason.NATIVE_FINITE_CANCEL_END
+    if (
+        action["type"] != 3
+        or action["execution_spec_json"].get("result_policy")
+        != CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+        or action["status"] != 2
+        or bool(action["cancel_requested"]) != canceled
+        or setrow["publication_kind"] != encode_enum(PublicationKind.RESULT)
+        or setrow["state"] != 2
+        or request.check_config is None
+        or any(
+            value is not None
+            for value in (
+                request.prior_run_end_event_id,
+                request.prior_conclusion_id,
+                request.binding_failure,
+            )
+        )
+    ):
+        raise ConsistencyError("原生决定必须沿原策略、实际取消资格和完整 RESULTS 责任")
+    run = row_facts(db, "operation_runs", setrow["run_id"])
+    last = _ended_attempts(
+        db, run, HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"])
+    )
+    classified = native_classification(db, setrow)
+    config = request.check_config
+    if (
+        run["status"] not in (1, 2)
+        or request.anchor_event_id != last
+        or config.timeout_s is None
+        or config.retry_interval_s is None
+        or classified.current_result is CurrentSegmentResult.UNCONFIRMED
+        and run["attempts_used"] < config.max_attempts
+    ):
+        raise ConsistencyError("原生核实须取得可靠分类或用尽原有限预算")
+    desired = dict(
+        zip(
+            _CONFIG_COLUMNS,
+            (config.max_attempts, config.timeout_s, config.retry_interval_s),
+        )
+    )
+    changed = {
+        name: value
+        for name, value in desired.items()
+        if not json_equal(run[name], value)
+    }
+    prefix = []
+    if changed:
+        prefix.append(
+            (
+                _CONFIGURE,
+                update_change(
+                    "operation_runs",
+                    run["id"],
+                    {name: run[name] for name in changed},
+                    changed,
+                ),
+            )
+        )
+    from .capture import result_run_close_row
+
+    status, error = _close_values(
+        run, classified.failure, request.reason, classified.current_result
+    )
+    prefix.append((_FINISH, result_run_close_row(run, status, error)))
+    values = dict(
+        set_id=setrow["id"],
+        reason=encode_enum(request.reason),
+        anchor_event_id=last,
+        prior_run_end_event_id=None,
+        prior_conclusion_id=None,
+        config_event_id=None if changed else _adopted_config_event(db, run),
+        current_result=encode_enum(classified.current_result),
+        current_failure_json=None
+        if classified.failure is None
+        else {"code": classified.failure.code, "details": classified.failure.details},
+    )
+    return setrow, run, tuple(prefix), values

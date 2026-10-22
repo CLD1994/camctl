@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from camctl.contracts.values import MAX_OBJECT_ID
+from camctl.contracts.values import MAX_OBJECT_ID, ObjectId
 from camctl.contracts.enums import enum_for
 from camctl.devices.segments import SegmentKey
 
@@ -145,6 +145,39 @@ class SegmentMember:
 
 
 @dataclass(frozen=True, slots=True)
+class SegmentStartObservation:
+    """可信起点引用原固定基准及实际观察，不复制文件属性。"""
+
+    baseline_fixed_event_id: int
+    page_event_id: int
+    file_id: int
+
+    def __post_init__(self) -> None:
+        for value in (self.baseline_fixed_event_id, self.page_event_id, self.file_id):
+            ObjectId(value)
+        if self.baseline_fixed_event_id >= self.page_event_id:
+            raise ValueError("起点观察必须发生在原基准可靠固定之后")
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentStart:
+    """实际目录事实推导出的起点；未知时不携带猜测位置。"""
+
+    key: SegmentKey | None = None
+    observation: SegmentStartObservation | None = None
+
+    def __post_init__(self) -> None:
+        if (self.key is None) != (self.observation is None):
+            raise ValueError("起点位置和原始观察引用必须共同存在或共同未知")
+        if self.key is not None and not isinstance(self.key, SegmentKey):
+            raise TypeError("起点位置必须使用设备分段顺序键")
+        if self.observation is not None and not isinstance(
+            self.observation, SegmentStartObservation
+        ):
+            raise TypeError("起点必须引用实际目录观察")
+
+
+@dataclass(frozen=True, slots=True)
 class CompletionFacts:
     """完成判定所需的控制、扫描、起点和有限核实事实。"""
 
@@ -157,6 +190,7 @@ class CompletionFacts:
     control_overrun: EvidenceState
     finite_check_complete: bool
     explicit_error: bool
+    start_observation: SegmentStartObservation | None = None
 
     def __post_init__(self) -> None:
         for name in ("stop", "file_wait", "scan", "start",
@@ -167,6 +201,11 @@ class CompletionFacts:
             raise ValueError("可靠起点必须使用分段顺序键")
         if (self.start is EvidenceState.CONFIRMED) != (self.start_key is not None):
             raise ValueError("可靠起点状态与起点顺序键必须共同表达")
+        if self.start_observation is not None and (
+            not isinstance(self.start_observation, SegmentStartObservation)
+            or self.start is not EvidenceState.CONFIRMED
+        ):
+            raise ValueError("起点观察只用于已确认起点")
         if type(self.finite_check_complete) is not bool or type(self.explicit_error) is not bool:
             raise ValueError("有限核实与明确错误必须是布尔值")
 

@@ -9,7 +9,7 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.history import validators
 from camctl.history.events import business_columns
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
@@ -151,7 +151,17 @@ def test_derived_registration_and_origin_take_effect_together(
         original(event, current)
 
     monkeypatch.setitem(validators.NAMED_GUARDS, "source_selection", inspect)
-    receipt = commit_operation(_Sequence(events, context), new_operation_key(), selection_database)
+    receipt = commit_operation(
+        _Sequence(
+            events,
+            context,
+            plan_read_scope=PlanReadScope(
+                context.state_rows["actions"][11]["plan_id"], 2
+            ),
+        ),
+        new_operation_key(),
+        selection_database,
+    )
     assert seen == [(registration_first, registration_first)], receipt.error
     if registration_first != select_changed and _changes_selection(case, mode):
         assert receipt.kind == "rolled_back", receipt.error
@@ -192,7 +202,17 @@ def test_derived_registration_and_selection_rollback_together(selection_database
     _, selection, registrations, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind)
     before = tuple(selection_database.connection.iterdump())
     target = replace(selection_database, connection=_FaultConnection(selection_database.connection, failure))
-    receipt = commit_operation(_Sequence((*registrations, selection), context), new_operation_key(), target)
+    receipt = commit_operation(
+        _Sequence(
+            (*registrations, selection),
+            context,
+            plan_read_scope=PlanReadScope(
+                context.state_rows["actions"][11]["plan_id"], 2
+            ),
+        ),
+        new_operation_key(),
+        target,
+    )
     assert receipt.kind == "rolled_back", receipt.error
     assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
     assert tuple(selection_database.connection.iterdump()) == before

@@ -22,16 +22,22 @@ from ..operations.test_result_reuse import _FaultConnection
 
 
 class _Sequence:
-    def __init__(self, events, context):
+    def __init__(self, events, context, *, plan_read_scope=None):
         self.events, self.context = events, context
+        self.plan_read_scope = plan_read_scope
 
     def plan(self, scope):
         allocation = scope.allocate(len(self.events))
         events = tuple(replace(event, event_id=allocation.first_event_id + index,
                                transaction_id=allocation.txn_id) for index, event in enumerate(self.events))
-        return CommandPlan(events, self.context.owners, self.context.state_rows,
-                           read_coverage=self.context.read_coverage,
-                           product_read_scope=getattr(self.context, "product_read_scope", None))
+        return CommandPlan(
+            events,
+            self.context.owners,
+            self.context.state_rows,
+            read_coverage=self.context.read_coverage,
+            plan_read_scope=self.plan_read_scope,
+            product_read_scope=getattr(self.context, "product_read_scope", None),
+        )
 
 
 def _scenarios(owned, mode, change):

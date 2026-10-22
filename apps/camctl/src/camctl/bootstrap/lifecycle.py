@@ -101,6 +101,7 @@ class RuntimeDeps:
     capture_baselines: dict = field(default_factory=dict)
     #: 原结果页保存申请由普通、残留和受限工厂共享。
     capture_result_scans: dict = field(default_factory=dict)
+    capture_segment_writes: dict = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
@@ -154,6 +155,9 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
             raise ConsistencyError(f"原基准保存仍未可靠完成: {result.database_error}")
 
     resume_result_page_saves(owned, pending_scans=deps.capture_result_scans, repository=runtime.capture)
+    from camctl.capture.segment_completion import resume_segment_writes
+
+    resume_segment_writes(owned, deps.capture_segment_writes)
 
     resume_result_check_closes(owned,
         pending_result_closes=deps.capture_result_closes,
@@ -752,114 +756,139 @@ def _report_assembly(
             history=deps.config.history,
             database=deps.config.database,
             supervisor=supervisor,
-            on_recovered=(_recovery_callback(
-                deps, failure_log, logging_owner)
-                          if failure_log is not None else None),
+            on_recovered=(
+                _recovery_callback(deps, failure_log, logging_owner)
+                if failure_log is not None
+                else None
+            ),
             on_failure=_trigger_failure_log,
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
-        "cancel": cancel_flow(ready=ready, processing=processing, start_entries=deps.start_entries,
-                              motor_permits=deps.motor_permits,
-                              work_files=deps.work_files,
-                              resume_media_results=deps.work_files.resume_media_results,
-                              resume_file_observations=resume_files,
-                              resume_capture_completions=partial(_resume_capture_requests, deps),
-                              cleanup_pending=partial(_cleanup_pending_for_action, deps)),
+        "cancel": cancel_flow(
+            ready=ready,
+            processing=processing,
+            start_entries=deps.start_entries,
+            motor_permits=deps.motor_permits,
+            work_files=deps.work_files,
+            resume_media_results=deps.work_files.resume_media_results,
+            resume_file_observations=resume_files,
+            resume_capture_completions=partial(_resume_capture_requests, deps),
+            cleanup_pending=partial(_cleanup_pending_for_action, deps),
+        ),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
-        "scheduling": capture_flow(session_capture_assembly(
-            start_entries=deps.start_entries,
-            devices=deps.config.devices,
-            drivers=drivers,
-            staging=staging,
-            wait_config=execution_wait_config,
-            pending_call_results=deps.capture_call_results,
-            pending_capture_completions=deps.capture_completions,
-            pending_result_closes=deps.capture_result_closes,
-            pending_baselines=deps.capture_baselines,
-            pending_result_scans=deps.capture_result_scans,
-            pending_file_observations=deps.capture_file_observations,
-            pending_media_results=deps.capture_media_results,
-            pending_read_results=deps.capture_read_results,
-            pending_read_business=deps.capture_read_business,
-            pending_read_ends=deps.capture_read_ends,
-            continuing_read_tickets=deps.capture_continuing_reads,
-            recording_anchors=deps.capture_recording_anchors,
-            retry_wait_gate=deps.capture_retry_gate,
-            recovery_boundary=deps.recovery_boundary,
-            recovery_max_event_id=lambda: deps.recovery_max_event_id,
-            on_recovery_diagnostic=recovery_logger,
-            file_executor=deps.work_files.executor,
-            segment_size=deps.config.copy.segment_size_bytes,
+        "scheduling": capture_flow(
+            session_capture_assembly(
+                start_entries=deps.start_entries,
+                devices=deps.config.devices,
+                drivers=drivers,
+                staging=staging,
+                wait_config=execution_wait_config,
+                pending_call_results=deps.capture_call_results,
+                pending_capture_completions=deps.capture_completions,
+                pending_result_closes=deps.capture_result_closes,
+                pending_baselines=deps.capture_baselines,
+                pending_result_scans=deps.capture_result_scans,
+                pending_segment_writes=deps.capture_segment_writes,
+                pending_file_observations=deps.capture_file_observations,
+                pending_media_results=deps.capture_media_results,
+                pending_read_results=deps.capture_read_results,
+                pending_read_business=deps.capture_read_business,
+                pending_read_ends=deps.capture_read_ends,
+                continuing_read_tickets=deps.capture_continuing_reads,
+                recording_anchors=deps.capture_recording_anchors,
+                retry_wait_gate=deps.capture_retry_gate,
+                recovery_boundary=deps.recovery_boundary,
+                recovery_max_event_id=lambda: deps.recovery_max_event_id,
+                on_recovery_diagnostic=recovery_logger,
+                file_executor=deps.work_files.executor,
+                segment_size=deps.config.copy.segment_size_bytes,
+                read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+            ),
             read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
-        ), read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
-           resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files, resume_read_results=resume_reads),
+            resume_media_results=deps.work_files.resume_media_results,
+            resume_file_observations=resume_files,
+            resume_read_results=resume_reads,
+        ),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
-        "residual": residual_flow(session_capture_assembly(
-            start_entries=deps.start_entries,
-            devices=deps.config.devices,
-            drivers=drivers,
-            staging=staging,
-            wait_config=execution_wait_config,
-            pending_call_results=deps.capture_call_results,
-            pending_capture_completions=deps.capture_completions,
-            pending_result_closes=deps.capture_result_closes,
-            pending_baselines=deps.capture_baselines,
-            pending_result_scans=deps.capture_result_scans,
-            pending_file_observations=deps.capture_file_observations,
-            pending_media_results=deps.capture_media_results,
-            pending_read_results=deps.capture_read_results,
-            pending_read_business=deps.capture_read_business,
-            pending_read_ends=deps.capture_read_ends,
-            continuing_read_tickets=deps.capture_continuing_reads,
-            recording_anchors=deps.capture_recording_anchors,
-            retry_wait_gate=deps.capture_retry_gate,
-            recovery_boundary=deps.recovery_boundary,
-            recovery_max_event_id=lambda: deps.recovery_max_event_id,
-            on_recovery_diagnostic=recovery_logger,
-            file_executor=deps.work_files.executor,
-            segment_size=deps.config.copy.segment_size_bytes,
+        "residual": residual_flow(
+            session_capture_assembly(
+                start_entries=deps.start_entries,
+                devices=deps.config.devices,
+                drivers=drivers,
+                staging=staging,
+                wait_config=execution_wait_config,
+                pending_call_results=deps.capture_call_results,
+                pending_capture_completions=deps.capture_completions,
+                pending_result_closes=deps.capture_result_closes,
+                pending_baselines=deps.capture_baselines,
+                pending_result_scans=deps.capture_result_scans,
+                pending_segment_writes=deps.capture_segment_writes,
+                pending_file_observations=deps.capture_file_observations,
+                pending_media_results=deps.capture_media_results,
+                pending_read_results=deps.capture_read_results,
+                pending_read_business=deps.capture_read_business,
+                pending_read_ends=deps.capture_read_ends,
+                continuing_read_tickets=deps.capture_continuing_reads,
+                recording_anchors=deps.capture_recording_anchors,
+                retry_wait_gate=deps.capture_retry_gate,
+                recovery_boundary=deps.recovery_boundary,
+                recovery_max_event_id=lambda: deps.recovery_max_event_id,
+                on_recovery_diagnostic=recovery_logger,
+                file_executor=deps.work_files.executor,
+                segment_size=deps.config.copy.segment_size_bytes,
+                read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+            ),
             read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
-        ), read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
-           resume_media_results=deps.work_files.resume_media_results,
-           resume_file_observations=resume_files, resume_read_results=resume_reads,
-           owns_device=lambda device: capture_owner.owns_device(device)),
+            resume_media_results=deps.work_files.resume_media_results,
+            resume_file_observations=resume_files,
+            resume_read_results=resume_reads,
+            owns_device=lambda device: capture_owner.owns_device(device),
+        ),
         # 取回推进：与拍摄共用统一设备工作计划，读取在拍摄空闲轮次
         # 推进；拷贝段大小取自 copy 配置。
-        "obtain": obtain_flow(session_obtain_assembly(
-            devices=deps.config.devices,
-            drivers=drivers,
-            staging=staging,
-            ready=ready,
-            processing=processing,
-            segment_size=deps.config.copy.segment_size_bytes,
-            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
-            recovery_boundary=deps.recovery_boundary,
-            recovery_max_event_id=lambda: deps.recovery_max_event_id,
-            on_recovery_diagnostic=recovery_logger,
-            file_executor=deps.work_files.executor,
-        )),
+        "obtain": obtain_flow(
+            session_obtain_assembly(
+                devices=deps.config.devices,
+                drivers=drivers,
+                max_query_attempts=deps.config.cleanup.max_query_attempts,
+                staging=staging,
+                ready=ready,
+                processing=processing,
+                segment_size=deps.config.copy.segment_size_bytes,
+                read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
+                recovery_boundary=deps.recovery_boundary,
+                recovery_max_event_id=lambda: deps.recovery_max_event_id,
+                on_recovery_diagnostic=recovery_logger,
+                file_executor=deps.work_files.executor,
+            )
+        ),
         # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
         # cleanup 配置；主机派生成品经 staging 工作根本地删除。
-        "cleanup": cleanup_flow(session_cleanup_assembly(
-            devices=deps.config.devices,
-            drivers=drivers,
-            max_delete_attempts=deps.config.cleanup.max_delete_attempts,
-            max_query_attempts=deps.config.cleanup.max_query_attempts,
-            staging=staging,
-            file_executor=deps.work_files.executor,
-            pending_intents=deps.cleanup_intents, pending_deletes=deps.cleanup_deletes,
-            pending_queries=deps.cleanup_queries, pending_companions=deps.cleanup_companions,
-            pending_saves=deps.cleanup_saves, consumed_queries=deps.cleanup_consumed_queries,
-            active_calls=deps.cleanup_active_calls,
-            recovery_boundary=deps.recovery_boundary,
-            recovery_max_event_id=lambda: deps.recovery_max_event_id,
-            on_recovery_diagnostic=recovery_logger,
-            discovery_batch_size=deps.config.session.read_discovery_batch_size,
-        ), state_db_errors=True),
+        "cleanup": cleanup_flow(
+            session_cleanup_assembly(
+                devices=deps.config.devices,
+                drivers=drivers,
+                max_delete_attempts=deps.config.cleanup.max_delete_attempts,
+                max_query_attempts=deps.config.cleanup.max_query_attempts,
+                staging=staging,
+                file_executor=deps.work_files.executor,
+                pending_intents=deps.cleanup_intents,
+                pending_deletes=deps.cleanup_deletes,
+                pending_queries=deps.cleanup_queries,
+                pending_companions=deps.cleanup_companions,
+                pending_saves=deps.cleanup_saves,
+                consumed_queries=deps.cleanup_consumed_queries,
+                active_calls=deps.cleanup_active_calls,
+                recovery_boundary=deps.recovery_boundary,
+                recovery_max_event_id=lambda: deps.recovery_max_event_id,
+                on_recovery_diagnostic=recovery_logger,
+                discovery_batch_size=deps.config.session.read_discovery_batch_size,
+            ),
+            state_db_errors=True,
+        ),
         "work_files": deps.work_files.flow,
     }
     from camctl.bootstrap.background_flow import BackgroundFlow
@@ -973,11 +1002,15 @@ async def execute_command(
             restricted_flows={
                 "cancel": cancel_flow(
                     start_entries=deps.start_entries,
-                    ready=ready, processing=processing, unscheduled_only=True,
-                    motor_permits=deps.motor_permits, work_files=deps.work_files,
+                    ready=ready,
+                    processing=processing,
+                    unscheduled_only=True,
+                    motor_permits=deps.motor_permits,
+                    work_files=deps.work_files,
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
-                    resume_capture_completions=partial(_resume_capture_requests, deps)),
+                    resume_capture_completions=partial(_resume_capture_requests, deps),
+                ),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
                     capture_factory=session_capture_assembly(
@@ -991,6 +1024,7 @@ async def execute_command(
                         pending_result_closes=deps.capture_result_closes,
                         pending_baselines=deps.capture_baselines,
                         pending_result_scans=deps.capture_result_scans,
+                        pending_segment_writes=deps.capture_segment_writes,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,
@@ -1003,12 +1037,17 @@ async def execute_command(
                         file_executor=deps.work_files.executor,
                         recovery_boundary=deps.recovery_boundary,
                         recovery_max_event_id=lambda: deps.recovery_max_event_id,
-                        on_recovery_diagnostic=(None if deps.log_runtime is None else
-                            recovery_diagnostics_logger(
+                        on_recovery_diagnostic=(
+                            None
+                            if deps.log_runtime is None
+                            else recovery_diagnostics_logger(
                                 deps.log_runtime.channel,
                                 path_unsafe=lambda: deps.log_path_unsafe,
                                 fallback=lambda message: _write_stderr_diagnostic(
-                                    deps, message))),
+                                    deps, message
+                                ),
+                            )
+                        ),
                     ),
                     wait_cap_s=deps.config.clock.recovery_wait_cap_s,
                     resume_media_results=deps.work_files.resume_media_results,
@@ -1026,9 +1065,11 @@ async def execute_command(
                 database=deps.config.database,
                 supervisor=restricted_supervisor,
                 start_actions=False,
-                on_recovered=(_recovery_callback(
-                    deps, failure_log, logging_owner)
-                              if failure_log is not None else None),
+                on_recovered=(
+                    _recovery_callback(deps, failure_log, logging_owner)
+                    if failure_log is not None
+                    else None
+                ),
                 on_failure=_trigger_failure_log,
             ),
         )

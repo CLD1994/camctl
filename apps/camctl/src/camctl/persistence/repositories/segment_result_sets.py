@@ -82,6 +82,62 @@ def read_current_segment_ref(ref,owned):
         row['current_final_page_event_id'],ref.version)
 
 
+def read_prepared_result_ref(action_id, owned):
+    """恢复尚未发布的普通结果；公开消费者仍只读取明确发布的集合。"""
+    ObjectId(action_id)
+    row = _one(
+        owned.connection,
+        "SELECT id,version FROM segment_sets WHERE action_id=? AND publication_kind=?"
+        " AND published_event_id IS NULL ORDER BY version DESC LIMIT 1",
+        (action_id, encode_enum(PublicationKind.RESULT)),
+    )
+    return None if row is None else SegmentResultRef(action_id, *row)
+
+
+def prepare_result_set(action_id, occurred_at, owned):
+    """从同一实际读取边界形成有限来源申请，写守卫独立重算。"""
+    with _read_transaction(owned) as db:
+        boundary = _boundary(db)
+        activity = _one(
+            db, "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
+        )
+        run = _one(
+            db,
+            "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
+            (action_id, int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)),
+        )
+        current = None
+        source = SegmentSourceKind.NO_RESULTS
+        if run is not None:
+            runrow = row_facts(db, "operation_runs", run[0])
+            latest = _one(
+                db,
+                "SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
+                run,
+            )
+            if latest is not None:
+                attempt = row_facts(db, "operation_attempts", latest[0])
+                current = _current_scan(db, runrow, attempt, boundary)
+            source = (
+                SegmentSourceKind.COMPLETE_SCAN
+                if current is not None
+                and _same_current_files(db, runrow, attempt, current, boundary)
+                else SegmentSourceKind.RETAINED_SOURCES
+            )
+        return ResultSetCreate(
+            action_id,
+            None if activity is None else activity[0],
+            None if run is None else run[0],
+            source,
+            boundary,
+            current,
+            PublicationKind.RESULT,
+            None,
+            None,
+            occurred_at,
+        )
+
+
 @contextmanager
 def _read_transaction(owned):
     db=owned.connection
@@ -249,11 +305,11 @@ def _source(db,request):
             raise ConsistencyError('原H0之后已有本run的新实际页')
         last=_one(db,'SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1',
             (run['id'],))
-        if last is None:
-            raise ConsistencyError('有RESULTS集合缺少原实际轮次')
         _check_fixed_qualifications(db,run['id'],boundary)
-        attempt=row_facts(db,'operation_attempts',last[0])
-        current=_current_scan(db,run,attempt,boundary)
+        current = None
+        if last is not None:
+            attempt = row_facts(db, "operation_attempts", last[0])
+            current = _current_scan(db, run, attempt, boundary)
         source=(SegmentSourceKind.COMPLETE_SCAN if current is not None
             and _same_current_files(db,run,attempt,current,boundary) else SegmentSourceKind.RETAINED_SOURCES)
     if request.source_kind is not source or request.current_scan!=current:

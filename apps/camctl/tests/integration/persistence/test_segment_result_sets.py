@@ -832,6 +832,27 @@ async def test_unified_complete_result_keeps_h0_member_writer_and_ordinary_asses
         assert fixed.kind is DbOutcomeKind.COMPLETED,fixed.error
         facts,assessment,gaps=_assessment(strict,(),owned)
         assert not gaps
+        from camctl.capture.segment_models import EvidenceState, SegmentAccumulator
+        from camctl.capture.segments import (
+            advance_segment_assessment,
+            finish_segment_assessment,
+        )
+        from camctl.persistence.repositories.segments import iter_segment_members
+        from dataclasses import replace
+
+        start = repository.read_start(ref, owned)
+        facts = replace(
+            facts,
+            start=EvidenceState.UNKNOWN
+            if start.key is None
+            else EvidenceState.CONFIRMED,
+            start_key=start.key,
+            start_observation=start.observation,
+        )
+        state = SegmentAccumulator(strict, 60000, start.key)
+        for member in iter_segment_members(strict, owned):
+            state = advance_segment_assessment(state, member)
+        assessment = finish_segment_assessment(state, facts)
         assessed=repository.save_assessment(strict,facts,assessment,runtime.wall_us(),new_operation_key(),owned)
         assert assessed.kind is DbOutcomeKind.COMPLETED,assessed.error
         assert repository.read_result_set(ref,owned)['assessment_json'] is not None

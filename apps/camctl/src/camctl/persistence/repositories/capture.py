@@ -715,11 +715,17 @@ def _action_finish_guard(event, context) -> None:
     for row in event.rows:
         if row.table == "actions" and row.before.exists:
             after = row.after.values
-            if after.get('status') in (3,4):
+            if after.get("status") in (3, 4, 6):
                 facts=_guard_facts(context,'actions',row.row_id)
                 from camctl.devices.tasks import CaptureResultPolicy
-                segmented=(facts.get('type')==_ACTION_TYPE.CAMERA_RECORD and
-                    facts.get('execution_spec_json',{}).get('result_policy')==CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value)
+
+                segmented = (
+                    facts.get("execution_started") == 1
+                    and facts.get("type")
+                    in (_ACTION_TYPE.CAMERA_RECORD, _ACTION_TYPE.CAMERA_TIMELAPSE)
+                    and facts.get("execution_spec_json", {}).get("result_policy")
+                    in {policy.value for policy in CaptureResultPolicy}
+                )
                 if segmented or 'segment_finish_request' in event.evidence:
                     if context.current_reads is None:
                         raise EventValidationError('分段终态缺少原保存事实读取端口')

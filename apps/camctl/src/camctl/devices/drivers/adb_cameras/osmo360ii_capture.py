@@ -37,17 +37,27 @@ def _task(params):
 
 class _Osmo360IIContract(CameraContract):
     def capabilities(self):
-        return tuple(replace(cap, preview_supported=True,
-            description=cap.description.replace("参数合法不表示已有完整命令映射；", "")
+        return tuple(
+            replace(
+                cap,
+                preview_supported=True,
+                description=cap.description.replace(
+                    "参数合法不表示已有完整命令映射；", ""
+                )
                 + "OSV 为原始视频，LRF 为可选配对预览。"
                 + "相机在本会话首次拍摄准备时跳过时间设置并选择仅充电；固定设置按需执行，码率按每个动作动态设置。"
-                + ("完成判断采用正常设备运行与停止确认后固定 30 秒文件等待假设。"
-                "普通取回优先交付已登记的修复 MP4，原 OSV 可用明确产物 ID 取回；"
-                "修复保留双路视频及音频内容，不声明厂商原生编辑兼容。"
-                if cap.action_type == "camera_record" else
-                "完成判断采用正常设备执行有限目标后自行结束的运行假设，"
-                "目标后等待固定 30 秒结果余量再核实原片；设备采集目标保持原值。"))
-            for cap in super().capabilities())
+                + (
+                    "完成判断采用正常设备运行与停止确认后固定 30 秒文件等待假设。"
+                    "普通录像按实际分段保留全部合格 OSV，逐段登记可选配对 LRF。"
+                    "普通取回按已保存范围交付整段原文件，明确产物 ID 可取回范围外原片；"
+                    "运行时不测量或裁剪媒体时长，浏览器播放能力由实际格式和解码支持决定。"
+                    if cap.action_type == "camera_record"
+                    else "完成判断采用正常设备执行有限目标后自行结束的运行假设，"
+                    "目标后等待固定 30 秒结果余量再核实原片；设备采集目标保持原值。"
+                ),
+            )
+            for cap in super().capabilities()
+        )
 
 
 def osmo360ii_contract():

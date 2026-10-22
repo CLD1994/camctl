@@ -51,6 +51,8 @@ class PendingBaseline:
     error: ErrorValue | None = None
     saves: BaselineSaveOwner = field(default_factory=BaselineSaveOwner)
     release: tuple[ActivityReleaseSave, OperationKey] | None = None
+    read_owner: object | None = None
+    read_no: int = 0
 
 
 def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
@@ -58,6 +60,13 @@ def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
+    if pending.read_owner is not None:
+        from camctl.capture.segment_baseline import consume_read
+
+        if not consume_read(pending, runtime):
+            return BaselinePreparation(
+                PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
+            )
     if pending.release is not None:
         from camctl.persistence.repositories.capture import ReleaseOutcome
         request, key = pending.release

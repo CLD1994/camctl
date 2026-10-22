@@ -100,8 +100,17 @@ def complete_natural_wait(runtime, action_id):
     return event_id
 
 
-async def consumer_world(tmp_path, consumer, *, independent_activity=False, catalog=None, start=True,
-                         record_control_elapsed_ns=None, invalid_sibling=False):
+async def consumer_world(
+    tmp_path,
+    consumer,
+    *,
+    independent_activity=False,
+    catalog=None,
+    start=True,
+    record_control_elapsed_ns=None,
+    invalid_sibling=False,
+    pending_capture_group=None,
+):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
     path = Path(cfg.paths.state_db)
@@ -118,6 +127,11 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False, cata
     action_id = len(actions) + 1
     actions.append({"name": "拍摄", "type": handler, "device_id": "cam-1", "scheduled_at": instant,
                     "params": {"type": parameter_type}, "policy": {"max_delay_ms": 5000}})
+    if pending_capture_group is not None:
+        actions[-1]["group"] = pending_capture_group
+        actions.append(
+            {**actions[-1], "name": "待完成拍摄", "policy": {"max_delay_ms": 60000}}
+        )
     if consumer == "cancel":
         actions.append({"name": "取消", "type": "cancel_task", "params": {
             "target": {"action_instance_id": str(action_id)}}})
@@ -140,6 +154,13 @@ async def consumer_world(tmp_path, consumer, *, independent_activity=False, cata
         runtime = _runtime(owned, driver=control)
         runtime.evidence = RESULT_EVIDENCE
         runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
+        from camctl.contracts.pages import Page
+        from camctl.devices.directory import DirectoryRead
+        from .test_baseline_prepare import Directory
+
+        runtime.baseline_directory = Directory(
+            [lambda request: DirectoryRead(None, None, Page((), None))]
+        )
         if not start:
             return owned, runtime, action_id, handler
         if handler == "camera_record":

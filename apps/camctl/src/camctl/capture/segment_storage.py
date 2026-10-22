@@ -139,6 +139,15 @@ def decode_enum(kind, value):
 
 def document(value):
     """只编码有限模型；调用者不得传增长集合。"""
+    from camctl.capture.media import RecordingFailure
+
+    if isinstance(value, RecordingFailure):
+        from camctl.contracts.workflow_errors import validate_error_details
+
+        if value.code != "device_binding_unavailable":
+            raise ValueError("有限决定只接收已登记的绑定失败输入")
+        validate_error_details(value.code, value.details)
+        return {"code": value.code, "details": dict(value.details)}
     if isinstance(value, StrEnum):
         return encode_enum(value)
     if is_dataclass(value):
@@ -175,6 +184,10 @@ def facts_from_document(value):
     for name in ('stop','file_wait','scan','start','control_completion','control_overrun'):
         raw[name] = decode_enum(models.EvidenceState, raw[name])
     raw['start_key'] = key(raw['start_key'])
+    if raw.get("start_observation") is not None:
+        raw["start_observation"] = models.SegmentStartObservation(
+            **raw["start_observation"]
+        )
     return CompletionFacts(**raw)
 
 
@@ -252,11 +265,14 @@ class SegmentMemberInput:
 
 @dataclass(frozen=True)
 class SegmentPageCursor:
-    ref: SegmentSetRef
+    ref: SegmentSetRef | SegmentResultRef
     position: tuple
 
     def __post_init__(self):
-        if not isinstance(self.ref,SegmentSetRef) or type(self.position) is not tuple:
+        if (
+            not isinstance(self.ref, (SegmentSetRef, SegmentResultRef))
+            or type(self.position) is not tuple
+        ):
             raise ValueError('分页位置必须绑定冻结集合并使用元组')
 
 

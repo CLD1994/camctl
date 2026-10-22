@@ -181,6 +181,33 @@ def _assess_files(reader, action, request):
     """按页复核全部候选，拒绝空集合、缺件、零长及尚未完成文件。"""
     if reader is None or reader.scope != _read_scope(request):
         raise ConsistencyError('有限取消结束缺少原有界文件事实读取范围')
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+    ):
+        from .segment_native import native_classification
+
+        found = reader.connection.execute(
+            "SELECT id FROM segment_sets WHERE action_id=? AND current_final_page_event_id=? ORDER BY version DESC LIMIT 1",
+            (action["id"], request.page.event_id),
+        ).fetchone()
+        if found is not None:
+            from types import SimpleNamespace
+
+            classified = native_classification(
+                reader.connection,
+                row_facts(reader.connection, "segment_sets", found[0]),
+            )
+            from camctl.capture.segment_models import CurrentSegmentResult
+
+            return SimpleNamespace(
+                is_complete=classified.current_result
+                is CurrentSegmentResult.SUFFICIENT,
+                explicitly_unmet=classified.current_result
+                is CurrentSegmentResult.UNMET,
+            )
     rules = tuple(ProductRule.from_json(value) for value in action['execution_spec_json'].get('product_rules', ()))
     from .result_pages import iter_result_file_facts
     def files():

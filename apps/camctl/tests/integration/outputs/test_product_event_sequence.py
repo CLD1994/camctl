@@ -9,10 +9,11 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.history import validators
 from camctl.history.events import business_columns
-from camctl.history.reads import ReadCoverage
+from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
+from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.transaction import (
     TransactionScope, commit_operation, event_envelope, row_change, row_facts, update_change,
 )
@@ -21,6 +22,40 @@ from .test_product_competition import competition_database, _static_product_fact
 from .test_qualification import qualification_environment, _NOW, _Seedling, _candidate, _seed_output
 from .test_selection_event_sequence import _Sequence
 from ..operations.test_result_reuse import _FaultConnection
+
+
+def _register_sequence_capture_guards(owned, monkeypatch):
+    """组合序列分别提供媒体的原计划范围和授予的原产物范围。"""
+    register_capture_guards()
+    for name in ("action_finish", "output"):
+        original = validators.NAMED_GUARDS[name]
+
+        def scoped(event, context, guard=original):
+            row = next(
+                row
+                for row in event.rows
+                if row.table in ("actions", "outputs", "intermediate_files")
+            )
+            if row.table == "actions":
+                source = row.row_id
+            elif row.table == "outputs":
+                source = (
+                    row.after.values.get("source_action_id")
+                    or context.state_rows["outputs"][row.row_id]["source_action_id"]
+                )
+            else:
+                source = context.state_rows["intermediate_files"][row.row_id][
+                    "owner_action_id"
+                ]
+            plan_id = context.state_rows["actions"][source]["plan_id"]
+            reads = SqlEventReads(
+                owned.connection,
+                PlanReadScope(plan_id, 2),
+                getattr(context.current_reads, "_validated", ()),
+            )
+            guard(event, replace(context, current_reads=reads))
+
+        monkeypatch.setitem(validators.NAMED_GUARDS, name, scoped)
 
 
 def _repair_file(connection, identity):
@@ -139,7 +174,7 @@ def _scenario(owned, case):
 @pytest.mark.parametrize("change_first", [False, True])
 def test_grant_uses_only_preceding_business_events(competition_database, monkeypatch, case, change_first):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_capture_guards()
+    _register_sequence_capture_guards(competition_database, monkeypatch)
     plan, changes = _scenario(competition_database, case)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     original = validators.NAMED_GUARDS["read_permission"]
@@ -180,7 +215,7 @@ def test_later_write_failure_rolls_back_business_event_and_preparation(
     competition_database, monkeypatch, case, change_first, prefix,
 ):
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
-    register_capture_guards()
+    _register_sequence_capture_guards(competition_database, monkeypatch)
     plan, changes = _scenario(competition_database, case)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     before = tuple(competition_database.connection.iterdump())

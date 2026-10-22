@@ -524,13 +524,15 @@ def session_capture_assembly(
     recording_anchors: dict[int, tuple[int, int]] | None = None,
     retry_wait_gate: RetryWaitGate | None = None,
     pending_media_results: dict | None = None,
-    pending_file_observations: dict[tuple[int, str], PendingFileObservation] | None = None,
+    pending_file_observations: dict[tuple[int, str], PendingFileObservation]
+    | None = None,
     continuing_read_tickets: dict | None = None,
     pending_read_results: dict | None = None,
     pending_read_business: dict | None = None,
     pending_read_ends: dict | None = None,
     pending_baselines: dict | None = None,
     pending_result_scans: dict | None = None,
+    pending_segment_writes: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
     pending_host_photo_completions: dict[int, Any] | None = None,
     start_entries=None,
@@ -574,6 +576,7 @@ def session_capture_assembly(
     file_observations = {} if pending_file_observations is None else pending_file_observations
     baselines = {} if pending_baselines is None else pending_baselines
     result_scans = {} if pending_result_scans is None else pending_result_scans
+    segment_writes = {} if pending_segment_writes is None else pending_segment_writes
     host_photo_prepares = ({} if pending_host_photo_prepares is None
                            else pending_host_photo_prepares)
     host_photo_completions = ({} if pending_host_photo_completions is None
@@ -603,17 +606,26 @@ def session_capture_assembly(
     def binding_only_runtime(owned: Any) -> CaptureRuntime:
         """缺少设备声明仍装配局部失败责任，不取得设备端口。"""
         return CaptureRuntime(
-            owned=owned, scheduling=SchedulingRepository(),
-            operations=OperationRepository(), capture=CaptureRepository(),
-            timelapse=TimelapseRepository(), driver=None, results=None,
-            roots=roots, host_capture=HostCaptureRepository(),
+            owned=owned,
+            scheduling=SchedulingRepository(),
+            operations=OperationRepository(),
+            capture=CaptureRepository(),
+            timelapse=TimelapseRepository(),
+            driver=None,
+            results=None,
+            roots=roots,
+            host_capture=HostCaptureRepository(),
             host_photo_operation_verifier=_host_photo_operation_verifier(owned),
-            evidence=None, wall_us=wall, monotonic_ns=monotonic,
-            window_of=_window_of, wait_config=wait_config,
+            evidence=None,
+            wall_us=wall,
+            monotonic_ns=monotonic,
+            window_of=_window_of,
+            wait_config=wait_config,
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
-            pending_start_results=pending_start_results, start_entries=start_entries,
+            pending_start_results=pending_start_results,
+            start_entries=start_entries,
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
@@ -621,12 +633,17 @@ def session_capture_assembly(
             pending_file_observations=file_observations,
             pending_baselines=baselines,
             pending_result_scans=result_scans,
+            pending_segment_writes=segment_writes,
             retry_gate=retry_gate,
-            pending_read_results=pending_read_results, pending_read_business=pending_read_business,
-            pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+            pending_read_results=pending_read_results,
+            pending_read_business=pending_read_business,
+            pending_read_ends=pending_read_ends,
+            continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,
-            pending_media_results=media_results, file_executor=executor,
-            binding_check=lambda saved: check_binding(saved, current_config))
+            pending_media_results=media_results,
+            file_executor=executor,
+            binding_check=lambda saved: check_binding(saved, current_config),
+        )
 
     def factory(owned: Any, device_id: str) -> CaptureRuntime | None:
         declaration = devices.get(device_id)
@@ -711,18 +728,24 @@ def session_capture_assembly(
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,
-            pending_start_results=pending_start_results, start_entries=start_entries,
+            pending_start_results=pending_start_results,
+            start_entries=start_entries,
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
             pending_result_closes=result_closes,
             pending_file_observations=file_observations,
-            pending_baselines=baselines, baseline_directory=directory_port,
+            pending_baselines=baselines,
+            baseline_directory=directory_port,
             pending_result_scans=result_scans,
-            pending_read_results=pending_read_results, pending_read_business=pending_read_business,
-            pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+            pending_segment_writes=segment_writes,
+            pending_read_results=pending_read_results,
+            pending_read_business=pending_read_business,
+            pending_read_ends=pending_read_ends,
+            continuing_read_tickets=continuing_read_tickets,
             on_recovery_diagnostic=on_recovery_diagnostic,
-            pending_media_results=media_results, file_executor=executor,
+            pending_media_results=media_results,
+            file_executor=executor,
             stopper=stop_port,
             state_query=query_port,
             media=media,
@@ -733,41 +756,65 @@ def session_capture_assembly(
             retry_gate=retry_gate,
             start_config=AttemptConfig(
                 max_attempts=_device_attempts(
-                    declaration, "recording", 3, "max_start_attempts"),
+                    declaration, "recording", 3, "max_start_attempts"
+                ),
                 timeout_s=_device_seconds(
-                    declaration, "recording", "start_timeout_s", Decimal("10")),
+                    declaration, "recording", "start_timeout_s", Decimal("10")
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "recording", "start_retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S)),
+                    declaration,
+                    "recording",
+                    "start_retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S,
+                ),
+            ),
             stop_config=AttemptConfig(
                 max_attempts=_device_attempts(
-                    declaration, "recording", 3, "max_stop_attempts"),
+                    declaration, "recording", 3, "max_stop_attempts"
+                ),
                 timeout_s=_device_seconds(
-                    declaration, "recording", "stop_timeout_s", Decimal("10")),
+                    declaration, "recording", "stop_timeout_s", Decimal("10")
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "recording", "stop_retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S)),
+                    declaration,
+                    "recording",
+                    "stop_retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S,
+                ),
+            ),
             query_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "query", 3),
                 timeout_s=_device_seconds(
-                    declaration, "query", "timeout_s", Decimal("10")),
+                    declaration, "query", "timeout_s", Decimal("10")
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "query", "retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S)),
+                    declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S
+                ),
+            ),
             residual_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "residual_stop", 3),
                 timeout_s=_device_seconds(
-                    declaration, "residual_stop", "timeout_s", Decimal("10")),
+                    declaration, "residual_stop", "timeout_s", Decimal("10")
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "residual_stop", "retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S)),
+                    declaration,
+                    "residual_stop",
+                    "retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S,
+                ),
+            ),
             check_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "result_check", 3),
                 timeout_s=_device_seconds(
-                    declaration, "result_check", "call_timeout_s", Decimal("10")),
+                    declaration, "result_check", "call_timeout_s", Decimal("10")
+                ),
                 retry_interval_s=_device_seconds(
-                    declaration, "result_check", "retry_interval_s",
-                    _DEFAULT_RETRY_INTERVAL_S)),
+                    declaration,
+                    "result_check",
+                    "retry_interval_s",
+                    _DEFAULT_RETRY_INTERVAL_S,
+                ),
+            ),
         )
         runtime.recording_state = SessionRecordingState(runtime, anchors)
         return runtime

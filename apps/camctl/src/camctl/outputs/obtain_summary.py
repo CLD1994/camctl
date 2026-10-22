@@ -88,15 +88,19 @@ class ObtainSourceFacts:
     """一个固定来源的汇总事实。
 
     selection_fixed 表达来源已结束且产物判定已固定；显式 ID 的待
-    判定条目数独立计数，判定完成前不进入发布。
+    判定条目数独立计数，判定完成前不进入发布。source_failed 表达
+    没有逐项条目承载的来源失败，不为汇总虚构条目或交付。
     """
 
     selection_fixed: bool
     unresolved_items: int = 0
+    source_failed: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.selection_fixed, bool):
             raise TypeError(f"选择固定性必须是布尔值: {self.selection_fixed!r}")
+        if not isinstance(self.source_failed, bool):
+            raise TypeError("来源失败事实必须是布尔值")
         if (isinstance(self.unresolved_items, bool)
                 or not isinstance(self.unresolved_items, int)
                 or self.unresolved_items < 0):
@@ -131,16 +135,28 @@ class ObtainPhase(Enum):
 
 @dataclass(frozen=True)
 class ObtainAggregate:
-    """完整范围的计数汇总，不保留逐来源或逐条目详情。"""
+    """完整范围的计数汇总，不保留逐来源或逐条目详情。
+
+    total/prepared/failed 只计真实条目；failed_sources 计没有条目的
+    来源失败，避免把既有逐项失败重复计算为来源失败。
+    """
 
     waiting_sources: int
     unresolved: int
     total: int
     prepared: int
     failed: int
+    failed_sources: int = 0
 
     def __post_init__(self):
-        for value in (self.waiting_sources, self.unresolved, self.total, self.prepared, self.failed):
+        for value in (
+            self.waiting_sources,
+            self.unresolved,
+            self.total,
+            self.prepared,
+            self.failed,
+            self.failed_sources,
+        ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError("取回汇总计数必须为非负整数")
         if self.prepared + self.failed > self.total:
@@ -174,7 +190,11 @@ def decide_obtain_finish(facts: ObtainFacts | ObtainAggregate) -> ObtainDecision
             return ObtainDecision(ObtainPhase.WAIT_ITEMS)
         if facts.prepared + facts.failed != facts.total:
             return ObtainDecision(ObtainPhase.WAIT_PREPARATION)
-        return ObtainDecision(ObtainPhase.READY_TO_PUBLISH, facts.prepared, facts.failed)
+        return ObtainDecision(
+            ObtainPhase.READY_TO_PUBLISH,
+            facts.prepared,
+            facts.failed + facts.failed_sources,
+        )
     if not isinstance(facts, ObtainFacts):
         raise TypeError(f"汇总事实必须使用 ObtainFacts: {facts!r}")
     if any(not source.selection_fixed for source in facts.sources):
@@ -186,4 +206,7 @@ def decide_obtain_finish(facts: ObtainFacts | ObtainAggregate) -> ObtainDecision
     if prepared + failed != len(facts.items):
         return ObtainDecision(ObtainPhase.WAIT_PREPARATION)
     return ObtainDecision(
-        ObtainPhase.READY_TO_PUBLISH, prepared=prepared, failed=failed)
+        ObtainPhase.READY_TO_PUBLISH,
+        prepared=prepared,
+        failed=failed + sum(source.source_failed for source in facts.sources),
+    )

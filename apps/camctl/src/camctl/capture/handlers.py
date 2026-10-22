@@ -64,7 +64,7 @@ from camctl.capture.result_scans import (
     ObservedResultEntries, TerminalResultEntries, RegisteredSourceFiles, advance_result_scan,
     completed_wait_from_page, resume_result_page_saves,
 )
-from camctl.capture.result_pages import ResultPageRef, OutputSetFinalizationSave
+from camctl.capture.result_pages import ResultPageRef, OutputSetFinalizationSave, page_from_outcome
 from camctl.capture.photo import (
     CaptureAssessment,
     PhotoCompletion,
@@ -890,6 +890,8 @@ class CaptureRuntime(_FileObservationSaves):
     pending_baselines: dict = field(default_factory=dict)
     #: 同一 RESULTS 尝试的原页交接；保存未知时不读下一页。
     pending_result_scans: dict[tuple[int, int], PendingResultScan] = field(default_factory=dict)
+    #: 分段模块持有每个动作至多一份未决有限申请，与单原片媒体责任独立。
+    pending_segment_writes: dict = field(default_factory=dict)
     baseline_directory: DirectoryReader | None = None
     start_entries: Any = field(default_factory=StartEntryCoordinator)
 
@@ -899,6 +901,15 @@ class CaptureRuntime(_FileObservationSaves):
 
     async def prepare_baseline(self, action_id):
         """通过共同准备边界取得原基准，完成后仍由授予事务核验。"""
+        if (
+            self.action(action_id)["execution_spec_json"].get("result_policy")
+            is not None
+        ):
+            from camctl.capture.segment_baseline import prepare_segment_baseline
+
+            return await prepare_segment_baseline(
+                action_id, _activity_id_of(self, action_id), self
+            )
         from camctl.capture.baseline import prepare_baseline
         return await prepare_baseline(action_id, _activity_id_of(self, action_id), runtime=self)
 
@@ -929,6 +940,13 @@ class CaptureRuntime(_FileObservationSaves):
 
     def resume_capture_completions(self, action_id: int) -> None:
         """先核原完整收场申请，动作已有终态也不跳过原事务。"""
+        if (
+            self.action(action_id)["execution_spec_json"].get("result_policy")
+            is not None
+        ):
+            from camctl.capture.segment_completion import resume_segment_writes
+
+            resume_segment_writes(self.owned, self.pending_segment_writes, action_id)
         resume_capture_completions(self.owned,
             pending_capture_completions=self.pending_capture_completions,
             action_id=action_id, capture=self.capture, retry_gate=self.retry_gate,
@@ -1108,10 +1126,36 @@ class CaptureRuntime(_FileObservationSaves):
         if pending.canceled_unstarted:
             action_finish = FinishCanceledCapture(
                 run["action_id"], pending.finish.occurred_at, unstarted=True)
-        return self.capture.finish_start_result(
-            pending.finish, pending.observation, pending.key, self.owned,
-            start_finish=pending.start_finish, action_finish=action_finish,
-            expiration=pending.expiration)
+        segmented = (
+            self.action(run["action_id"])["execution_spec_json"].get("result_policy")
+            is not None
+        )
+        receipt = self.capture.finish_start_result(
+            pending.finish,
+            pending.observation,
+            pending.key,
+            self.owned,
+            start_finish=pending.start_finish,
+            action_finish=None if segmented else action_finish,
+            expiration=pending.expiration,
+        )
+        if (
+            segmented
+            and action_finish is not None
+            and receipt.kind is DbOutcomeKind.COMPLETED
+        ):
+            if (
+                pending.canceled_unstarted
+                or self.action(run["action_id"])["cancel_requested"]
+            ):
+                _finish_canceled_capture(self, run["action_id"], unstarted=True)
+            else:
+                from camctl.capture.segment_completion import (
+                    finish_segmented_start_failure,
+                )
+
+                finish_segmented_start_failure(self, run["action_id"])
+        return receipt
 
     def hold_call_result(
         self, ticket: AttemptTicket, outcome: CallOutcome, *,
@@ -1805,11 +1849,33 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
         return HandlerOutcome("not_granted", "canceled")
     if result.phase is PreparationPhase.FAILED:
         activity_id = _activity_id_of(runtime, action["id"])
-        runtime.save_capture_completion(FinishCapture(action["id"], (),
-            OutputCatalogFacts(action["id"], True), runtime.wall_us(),
-            RecordingFailure("capture_failed", {"activity_id": str(activity_id),
-                                                 "reason": "baseline_read_failed"}),
-            baseline_error=result.error))
+        from camctl.devices.tasks import CaptureResultPolicy
+
+        if action["execution_spec_json"].get("result_policy") in {
+            policy.value for policy in CaptureResultPolicy
+        }:
+            from camctl.capture.segment_completion import (
+                finish_segmented_baseline_failure,
+            )
+
+            finish_segmented_baseline_failure(runtime, action["id"])
+        else:
+            runtime.save_capture_completion(
+                FinishCapture(
+                    action["id"],
+                    (),
+                    OutputCatalogFacts(action["id"], True),
+                    runtime.wall_us(),
+                    RecordingFailure(
+                        "capture_failed",
+                        {
+                            "activity_id": str(activity_id),
+                            "reason": "baseline_read_failed",
+                        },
+                    ),
+                    baseline_error=result.error,
+                )
+            )
         runtime.pending_baselines.pop(action["id"], None)
         return HandlerOutcome("call_failed", "baseline_read_failed")
     now = runtime.wall_us()
@@ -2173,7 +2239,31 @@ def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
     触发的残留收场或取消收场处理（camera-recovery.md#停止预算
     耗尽后的收场责任）。幂等：动作终态后重入走处理器终态分支。
     """
-    _close_stop_exhausted(runtime, action, finish_action=True)
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    ):
+        failure = _close_stop_exhausted(runtime, action)
+        from camctl.capture.segment_completion import finish_segmented_external_failure
+        from camctl.capture.segment_models import ResultCheckEndReason
+
+        (anchor,) = runtime.owned.connection.execute(
+            "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
+            "WHERE json_extract(r.value,'$.table')='operation_runs' AND json_extract(r.value,'$.id')=? "
+            "AND json_extract(r.value,'$.after.values.status')=? ORDER BY e.id DESC LIMIT 1",
+            (_stop_run_id(runtime, action["id"]), int(_RUN_STATUS.UNCONFIRMED)),
+        ).fetchone()
+        finish_segmented_external_failure(
+            runtime,
+            action["id"],
+            ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
+            failure,
+            anchor,
+        )
+    else:
+        _close_stop_exhausted(runtime, action, finish_action=True)
 
 
 def _recording_port(context: CaptureRuntime) -> RecordingStatePort:
@@ -2251,6 +2341,25 @@ async def _stop_call(runtime: CaptureRuntime, action,
     try:
         if confirmed:
             host_stop = None
+            from camctl.devices.tasks import CaptureResultPolicy
+
+            if (
+                action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+                and action["execution_spec_json"].get("result_policy")
+                == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+            ):
+                state = _recording_port(runtime).recording_state(action["id"])
+                elapsed = None
+                if (
+                    state.anchor_from_current_session
+                    and state.stop_target_ns is not None
+                ):
+                    duration_ns = (
+                        _target_duration_ms(action)
+                        + action["execution_spec_json"].get("startup_margin_ms", 0)
+                    ) * 1_000_000
+                    elapsed = returned_ns - (state.stop_target_ns - duration_ns)
+                host_stop = HostTimerStopSave(elapsed)
             if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
                     and action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
                 deadline = runtime.timelapse_deadlines.get(action["id"])
@@ -2422,6 +2531,20 @@ async def _observe_activity_for_reconcile(runtime: CaptureRuntime, action) -> bo
 def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
                              unstarted: bool = False) -> None:
     """取消终态：放弃内容，不登记正式产物。"""
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    policy = runtime.action(action_id)["execution_spec_json"].get("result_policy")
+    if (
+        policy == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        or unstarted
+        and policy == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+    ) and runtime.action(action_id)["execution_started"]:
+        from camctl.capture.segment_completion import finish_segmented_cancellation
+
+        finish_segmented_cancellation(runtime, action_id)
+        if unstarted:
+            runtime.resume_baselines(action_id)
+        return
     pending = runtime.pending_baselines.get(action_id)
     preparation_resolved = (unstarted and (pending is None
                             or (not pending.in_call and pending.saves.pending is None and pending.error is None)))
@@ -2510,6 +2633,43 @@ def _finish_capture(
     registered 传入已登记的观察结果避免重复登记；repair_file_id
     携带修复成功的成品时与原片同事务登记为 REPAIRED 产物。
     """
+    if (
+        runtime.action(action_id)["execution_spec_json"].get("result_policy")
+        is not None
+    ):
+        if failure is None:
+            raise ConsistencyError("结果策略任务的正式产物须由其独立结果模块发布")
+        from camctl.capture.segment_completion import (
+            finish_segmented_start_failure,
+            _save,
+        )
+        from camctl.persistence.transaction import row_facts
+
+        run_id = runtime.owned.connection.execute(
+            "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
+            (action_id, int(_RUN_KIND.START)),
+        ).fetchone()
+        if run_id is not None and row_facts(
+            runtime.owned.connection, "operation_runs", run_id[0]
+        )["status"] in (1, 2):
+            _save(
+                runtime,
+                action_id,
+                runtime.operations,
+                "finish_stale_runs",
+                StaleRunFinish(
+                    (f"start/{action_id}",),
+                    RunOutcome.FAILED,
+                    runtime.wall_us(),
+                    ErrorValue(
+                        failure.code,
+                        registered_error(failure.code)["stage"],
+                        failure.details,
+                    ),
+                ),
+            )
+        finish_segmented_start_failure(runtime, action_id)
+        return HandlerOutcome("terminal", "failed")
     if isinstance(registered, RegisteredSourceFiles):
         entries = registered.entries
     if registered is None:
@@ -2784,6 +2944,50 @@ def _handle_binding_failure(
             return False
     from camctl.outputs.read_attempts import save_read_business
 
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if action["execution_spec_json"].get("result_policy") in {
+        policy.value for policy in CaptureResultPolicy
+    }:
+        from camctl.capture.segment_completion import (
+            finish_segmented_external_failure,
+            _save,
+            resume_segment_writes,
+        )
+        from camctl.capture.segment_models import ResultCheckEndReason
+
+        resume_segment_writes(
+            runtime.owned, runtime.pending_segment_writes, action["id"]
+        )
+        responsibilities = tuple(
+            row[0]
+            for row in runtime.owned.connection.execute(
+                "SELECT responsibility_key FROM operation_runs WHERE action_id=? AND kind!=? AND status IN (1,2) ORDER BY id",
+                (action["id"], int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
+            )
+        )
+        failure = RecordingFailure("device_binding_unavailable", details)
+        if responsibilities:
+            _save(
+                runtime,
+                action["id"],
+                runtime.operations,
+                "finish_stale_runs",
+                StaleRunFinish(
+                    responsibilities,
+                    RunOutcome.FAILED,
+                    runtime.wall_us(),
+                    ErrorValue(failure.code, "execution", details),
+                ),
+            )
+        if action["cancel_requested"]:
+            _finish_canceled_capture(runtime, action["id"])
+        else:
+            finish_segmented_external_failure(
+                runtime, action["id"], ResultCheckEndReason.BINDING_UNAVAILABLE, failure
+            )
+        return True
+
     request = _binding_failure_request(runtime, action, details)
     internal_read = runtime.owned.connection.execute(
         "SELECT 1 FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id"
@@ -3021,6 +3225,30 @@ def _close_record_start(runtime, action, *, exhausted: bool, query_key: str | No
         final = RunOutcome.UNCONFIRMED
     keys = (f"start/{action['id']}",) + (() if query_key is None else (query_key,))
     now = runtime.wall_us()
+    if action["execution_spec_json"].get("result_policy") is not None:
+        from camctl.capture.segment_completion import (
+            finish_segmented_start_failure,
+            _save,
+        )
+
+        _save(
+            runtime,
+            action["id"],
+            runtime.operations,
+            "finish_stale_runs",
+            StaleRunFinish(
+                keys,
+                final,
+                now,
+                ErrorValue(
+                    failure.code,
+                    registered_error(failure.code)["stage"],
+                    failure.details,
+                ),
+            ),
+        )
+        finish_segmented_start_failure(runtime, action["id"])
+        return
     runtime.save_capture_completion(StartCloseRequest(
         StaleRunFinish(responsibility_keys=keys, status=final, occurred_at=now, error=ErrorValue(
             failure.code, registered_error(failure.code)["stage"], failure.details)),
@@ -3147,6 +3375,11 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
         if context.on_recording_deadline is not None:
             context.on_recording_deadline(action_id, None)
         return
+    if action["execution_spec_json"].get("result_policy") is not None:
+        from camctl.capture.segment_completion import resume_closed_start
+
+        if resume_closed_start(context, action):
+            return
     if _handle_binding_failure(context, action):
         return
     open_start = context.last_attempt(f"start/{action_id}")
@@ -3588,6 +3821,13 @@ async def _save_winddown_progress(
         entries = registered.entries
     # 保守收场只保存待检查进度；核实与处理尚未终局，沿原责任保留等待。
     _finish_listing_result(runtime, listing, retry_wait=True)
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    ):
+        return True
     media_source = _record_media_source(registered, entries, source_file_id=row[6])
     source_file_id = None if media_source is None else media_source[0]
     if source_file_id is None:
@@ -3711,6 +3951,16 @@ async def _advance_recording_outcome(
     推进，会话内已观察的列举事实直接复用；判定装载已保存的检查
     时长与媒体问题，修复成功的成品与原片同事务登记。
     """
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    ):
+        from camctl.capture.segment_completion import advance_segmented_recording
+
+        await advance_segmented_recording(context, action, decision)
+        return
     action_id = action["id"]
     row = _load_processing_row(context, action_id)
     if row is None:
@@ -4092,6 +4342,11 @@ async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> No
         context.timelapse_deadlines.pop(action_id, None)
         context.natural_wait_states.pop(action_id, None)
         return
+    if action["execution_spec_json"].get("result_policy") is not None:
+        from camctl.capture.segment_completion import resume_closed_start
+
+        if resume_closed_start(context, action):
+            return
     if _handle_binding_failure(context, action):
         return
     attempt = context.last_attempt(f"start/{action_id}")
@@ -4164,6 +4419,16 @@ async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> No
     if concluded:
         # 中断后已有可靠结论：用原结果完成收尾，不重开核实责任。
         await _finish_timelapse_conclusion(context, action_id)
+        return
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        action["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+    ):
+        from camctl.capture.native_completion import advance_native_result
+
+        await advance_native_result(context, action_id)
         return
     listing = await _listing_round(context, action_id)
     if context.action(action_id)["cancel_requested"]:
@@ -4276,6 +4541,16 @@ async def _close_canceled_timelapse(
     与重试等待并保留取消待收场事实；预算耗尽时集合结论按无法确
     认收场。已经可靠归属且写入完成的文件仍与取消终态共同登记。
     """
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        context.action(action_id)["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+    ):
+        from camctl.capture.native_completion import advance_native_result
+
+        await advance_native_result(context, action_id, canceled=True)
+        return
     listing = await _listing_round(context, action_id)
     if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
         # 在途或本轮列举失败：取消待收场事实保持，下一轮重新核实。
@@ -4487,6 +4762,23 @@ def _retained_result_files(runtime, listing, registered):
 
 def _register_listing(runtime: CaptureRuntime, action_id: int, listing: ListingRound):
     """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        runtime.action(action_id)["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+    ):
+        from camctl.capture.segment_completion import register_segment_observations
+
+        register_segment_observations(runtime, action_id, listing)
+        return RegisteredSourceFiles(
+            SourceResultEntries(
+                runtime.capture,
+                runtime.owned,
+                listing.ticket,
+                current_entries=listing.entries,
+            )
+        )
     collection_valid, _ = _natural_listing_time(runtime, action_id, listing)
     source = None if listing.ticket is None else _result_source(runtime, listing.ticket)
     bound = _natural_source_lower_bound(runtime, action_id, listing.ticket)
@@ -4911,6 +5203,20 @@ async def _finish_timelapse_conclusion(
     核实责任终态保持，不重开轮次；产物登记只消费原保存输入，
     输入缺失或不可解释时保留诊断，不访问设备补写。
     """
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (
+        runtime.action(action_id)["execution_spec_json"].get("result_policy")
+        == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
+    ):
+        from camctl.capture.native_completion import advance_native_result
+
+        await advance_native_result(
+            runtime,
+            action_id,
+            canceled=bool(runtime.action(action_id)["cancel_requested"]),
+        )
+        return
     with closing(runtime.owned.connection.execute(
         "SELECT result_set_state, completion_basis, capture_json, activity_state FROM device_activities"
         " WHERE action_id = ?", (action_id,),

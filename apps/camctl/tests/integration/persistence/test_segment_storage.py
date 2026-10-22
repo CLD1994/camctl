@@ -864,6 +864,9 @@ def _segment_guard_scope(monkeypatch,ref):
     def segment(event,context):
         source=context.current_reads
         reads=SqlEventReads(source.connection,SegmentReadScope(ref),source._validated,source._planned_events)
+        SqlEventReads.bind_segment_finish_state(
+            reads, source._segment_guard_state, source._segment_guard_transaction
+        )
         original(event,replace(context,current_reads=reads))
     monkeypatch.setitem(NAMED_GUARDS,'segments',segment)
 

@@ -31,7 +31,13 @@ def _other():
 
 
 def _pages(owned):
-    return owned.connection.execute("SELECT id,occurred_at,body_json FROM history_events WHERE event_type=(SELECT event_type FROM history_events WHERE json_extract(body_json,'$.evidence.result_page') IS NOT NULL LIMIT 1) ORDER BY id").fetchall()
+    from camctl.history.events import load_event_registry
+
+    contract = load_event_registry()["events"]["RESULT_PAGE"]
+    return owned.connection.execute(
+        "SELECT id,occurred_at,body_json FROM history_events WHERE event_type=? AND json_extract(body_json,'$.reason')=? ORDER BY id",
+        (contract["id"], contract["branches"]["APPEND"]["reason"]),
+    ).fetchall()
 
 
 def _retained(owned, action_id):

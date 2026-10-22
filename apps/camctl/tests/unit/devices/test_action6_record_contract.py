@@ -46,6 +46,7 @@ def test_action6_task_freezes_internal_scope_and_five_second_completion_rule():
     assert task.target_duration_s == 10
     assert task.stop_supported is True
     assert task.file_completion_wait_s == Decimal("5")
+    assert task.result_policy is None
     assert task.ownership_mode == 2
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     assert task.product_rules == ({"kind": "video", "format_id": "mp4", "min_count": 1,

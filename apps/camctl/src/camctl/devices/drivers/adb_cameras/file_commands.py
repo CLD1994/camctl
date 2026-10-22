@@ -14,14 +14,40 @@ from .transport import shell_argv
 
 
 FILE_COMMAND_EVIDENCE = (
-    *(EvidenceContract(operation + "_returned", 1, operation, frozenset())
-      for operation in ("query", "delete")),
-    *(EvidenceContract(operation + "_foreground_recovery", 1, operation,
-                      frozenset({"terminate_grace_s"})) for operation in ("query", "delete")),
-    EvidenceContract("file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}),
-                     identity_field="cleanup_item_id"),
-    EvidenceContract("file_delete_presence", 1, "delete", frozenset({"cleanup_item_id", "present"}),
-                     identity_field="cleanup_item_id"),
+    *(
+        EvidenceContract(operation + "_returned", 1, operation, frozenset())
+        for operation in ("query", "delete")
+    ),
+    *(
+        EvidenceContract(
+            operation + "_foreground_recovery",
+            1,
+            operation,
+            frozenset({"terminate_grace_s"}),
+        )
+        for operation in ("query", "delete")
+    ),
+    EvidenceContract(
+        "file_presence",
+        1,
+        "query",
+        frozenset({"cleanup_item_id", "present"}),
+        identity_field="cleanup_item_id",
+    ),
+    EvidenceContract(
+        "file_presence",
+        2,
+        "query",
+        frozenset({"obtain_item_id", "present"}),
+        identity_field="obtain_item_id",
+    ),
+    EvidenceContract(
+        "file_delete_presence",
+        1,
+        "delete",
+        frozenset({"cleanup_item_id", "present"}),
+        identity_field="cleanup_item_id",
+    ),
 )
 _EXIT_CODE = re.compile(rb"(?:0|[1-9][0-9]{0,2})\Z")
 
@@ -37,6 +63,7 @@ class FileResponseInterpreter:
     operation: str
     target_id: str
     path: str
+    obtain: bool = False
 
     def interpret(self, raw):
         observations = ()
@@ -64,8 +91,18 @@ class FileResponseInterpreter:
                 raise ValueError("未知扫描状态缺少失败依据")
             if state in (b"0", b"1"):
                 observation_type = "file_delete_presence" if self.operation == "delete" else "file_presence"
-                observations = (DeviceObservation(observation_type, 1, {
-                    "cleanup_item_id": self.target_id, "present": state == b"1"}),)
+                observations = (
+                    DeviceObservation(
+                        observation_type,
+                        2 if self.obtain else 1,
+                        {
+                            "obtain_item_id"
+                            if self.obtain
+                            else "cleanup_item_id": self.target_id,
+                            "present": state == b"1",
+                        },
+                    ),
+                )
             else:
                 details["reason"] = state.decode("ascii")
         except ValueError as error:
@@ -99,17 +136,36 @@ def file_command_factory(kind, *, tools, evidence):
         identity = FileIdentity.from_source(request.params["identity_key"], request.params["locator"])
         if identity.binding != request.binding:
             raise ValueError("文件调用改变原设备绑定")
-        parse_object_id(request.params["cleanup_item_id"])
-        if request.params["cleanup_item_id"] != request.ticket.target_id:
-            raise ValueError("文件调用改变原清理成员")
+        obtain = request.ticket.responsibility_key.startswith("obtain-exists/")
+        owner = "obtain_item_id" if obtain else "cleanup_item_id"
+        parse_object_id(request.params[owner])
+        if request.params[owner] != request.ticket.target_id or (
+            obtain
+            and (
+                operation != "query"
+                or request.ticket.responsibility_key
+                != f"obtain-exists/{request.ticket.target_id}"
+            )
+        ):
+            raise ValueError("文件调用改变原成员或操作责任")
         if batch is not None:
             raise ValueError("单文件调用不接受批次")
         expected = shell_argv(serial, tools.file_presence_script(identity.path, delete=kind is CameraCall.DELETE))
         if argv is not None and argv != expected:
             raise ValueError("文件调用改变原精确命令")
-        return DeviceCommand(operation, expected, request.binding, request.timeout_s, Decimal("1"), evidence,
+        return DeviceCommand(
+            operation,
+            expected,
+            request.binding,
+            request.timeout_s,
+            Decimal("1"),
+            evidence,
             evidence.contract(operation + "_returned", 1),
             evidence.contract(operation + "_foreground_recovery", 1),
-            FileResponseInterpreter(operation, request.ticket.target_id, identity.path), kind.value)
+            FileResponseInterpreter(
+                operation, request.ticket.target_id, identity.path, obtain
+            ),
+            kind.value,
+        )
 
     return build
