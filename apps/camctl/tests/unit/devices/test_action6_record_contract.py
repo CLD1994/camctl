@@ -50,7 +50,23 @@ def test_action6_task_freezes_internal_scope_and_five_second_completion_rule():
     assert task.ownership_mode == 2
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     assert task.product_rules == ({"kind": "video", "format_id": "mp4", "min_count": 1,
-                                  "exact_count": 1, "require_pairing": False},)
+                                  "exact_count": 1, "require_pairing": False, "min_size_bytes": 1},)
+
+
+def test_action6_single_file_contract_rejects_an_empty_mp4():
+    from camctl.capture.results import (
+        CaptureFile, CaptureFileSet, FileKind, ProductRequirements, ProductRule,
+        assess_capture_files,
+    )
+
+    task = _contract(CameraModel.ACTION6).task_factories["action6_record"](_params())
+    assessment = assess_capture_files(
+        CaptureFileSet(files=(CaptureFile("empty", FileKind.VIDEO, True, True,
+                                         format_id="mp4", size_bytes=0),), set_finalized=True),
+        ProductRequirements(frozenset({FileKind.VIDEO}),
+                            tuple(ProductRule.from_json(rule) for rule in task.product_rules)),
+    )
+    assert assessment.explicitly_unmet
 
 
 @pytest.mark.parametrize("outputs,exposure,photo_format", [

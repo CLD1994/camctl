@@ -42,9 +42,7 @@ def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "mp4", "min_count": 1,
                         "exact_count": (1 if result_mode is VideoResultMode.SINGLE_FILE else None),
-                        "require_pairing": False,
-                        **({} if result_mode is VideoResultMode.SINGLE_FILE
-                           else {"min_size_bytes": 1})},), video_result_mode=result_mode,
+                        "require_pairing": False, "min_size_bytes": 1},), video_result_mode=result_mode,
         result_policy=(CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1
             if result_mode is VideoResultMode.SEGMENTED else None))
 
