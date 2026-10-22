@@ -157,6 +157,7 @@ async def advance_action6_recovery(runtime, action, decision=None):
     from camctl.persistence.repositories.segments import SegmentRepository
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from camctl.persistence.transaction import row_facts
+    from camctl.host_files.media import select_main_video_stream
 
     action_id = action["id"]
     resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
@@ -179,9 +180,9 @@ async def advance_action6_recovery(runtime, action, decision=None):
     if ref is None:
         return
     release_segment_occupancy(runtime, action_id)
-    setrow = repository.read_result_set(ref, runtime.owned)
-    prior = repository.read_assessment(ref, runtime.owned)
-    if prior is not None:
+    setrow = repository.read_set(ref, runtime.owned)
+    if setrow["state"] == int(enum_for("segment_sets.state").ASSESSED):
+        prior = repository.read_decision(ref, runtime.owned)
         publish_action6_segment_result(runtime, action, ref, prior)
         return
     activity = row_facts(runtime.owned.connection, "device_activities", setrow["activity_id"])
@@ -205,7 +206,12 @@ async def advance_action6_recovery(runtime, action, decision=None):
         ))
         if step.phase is SegmentInspectionPhase.WAITING:
             return None
-        if step.phase is SegmentInspectionPhase.FAILED:
+        # FAILED 还包括读次数耗尽和媒体工具异常；它们只让覆盖前缀
+        # 未确认。只有解析器成功解析后明确报告无主视频流才是已知媒体缺陷。
+        probe = step.probe
+        if (probe is not None and probe.error is not None
+                and probe.error.split(":", 1)[0].strip() == "no_video_stream"
+                and select_main_video_stream(probe) is None):
             explicit_media_failure = True
         return step.metric or VideoMetric(target.metric, None,
                                          step.reason or "inspection_unconfirmed")
@@ -220,9 +226,18 @@ async def advance_action6_recovery(runtime, action, decision=None):
     if prefix is None:
         return
     coverage = prefix.coverage
+    unknown_scope = (
+        coverage.confirmed_segments == 0
+        and coverage.reason in ("start_unknown", "order_unknown")
+    )
     scope = SegmentDecisionScope(
-        DefaultScopeState.NONEMPTY if coverage.confirmed_segments else DefaultScopeState.EMPTY,
-        ref, prefix.first_cursor, prefix.last_cursor, coverage.confirmed_segments,
+        (DefaultScopeState.UNKNOWN if unknown_scope else
+         DefaultScopeState.NONEMPTY if coverage.confirmed_segments else
+         DefaultScopeState.EMPTY),
+        ref,
+        None if unknown_scope else prefix.first_cursor,
+        None if unknown_scope else prefix.last_cursor,
+        None if unknown_scope else coverage.confirmed_segments,
     )
     facts = classify_action6_segment_set(
         action, ref, repository, runtime.owned,

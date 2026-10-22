@@ -250,7 +250,13 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
 
 
 def _metric_from_probe(target: CoverageTarget, probe: MediaProbe) -> VideoMetric:
-    if probe.error is not None:
+    error_code = (probe.error.split(":", 1)[0].strip()
+                  if probe.error is not None else None)
+    # 容器时长字段缺失不影响已成功解析的逐流事实；覆盖使用主视频
+    # 流时长或显式请求的实际读取帧数，不使用容器时长。
+    if probe.error is not None and error_code != "missing_duration":
+        if error_code == "no_video_stream":
+            return VideoMetric(target.metric, None, "no_video_stream")
         return VideoMetric(target.metric, None, "probe_error")
     stream = select_main_video_stream(probe)
     if stream is None:

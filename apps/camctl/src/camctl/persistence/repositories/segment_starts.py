@@ -105,10 +105,10 @@ def segment_start_from_set(connection, setrow):
 
 
 def read_segment_start(ref, owned):
-    from .segment_result_sets import read_result_set
+    from .segments import SegmentRepository
 
-    with _read_transaction(owned) as connection:
-        setrow = read_result_set(ref, owned)
+    with _read_transaction(owned):
+        setrow = SegmentRepository().read_set(ref, owned)
         if setrow["state"] == int(enum_for("segment_sets.state").COLLECTING):
             raise ConsistencyError("可信起点只能从已固定的完整成员范围取得")
-        return segment_start_from_set(connection, setrow)
+        return segment_start_from_set(owned.connection, setrow)

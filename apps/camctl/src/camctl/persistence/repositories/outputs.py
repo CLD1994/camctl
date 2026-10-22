@@ -1730,10 +1730,18 @@ class _GrantFileCommand:
                 inspection = self._required(connection, "segment_inspections", command.inspection_id)
                 member = self._required(connection, "segment_members", inspection["member_id"])
                 segment_set = self._required(connection, "segment_sets", inspection["set_id"])
+                from camctl.devices.tasks import CaptureResultPolicy
+
                 budget = {"max_attempts": command.config.max_attempts,
                           "timeout_s": command.config.timeout_s,
                           "retry_interval_s": command.config.retry_interval_s}
-                if (action["type"] != int(_ACTION_TYPE.CAMERA_RECORD)
+                action6_type = action["type"] in (
+                    int(_ACTION_TYPE.CAMERA_RECORD),
+                    int(_ACTION_TYPE.CAMERA_TIMELAPSE),
+                )
+                if (not action6_type
+                        or action["execution_spec_json"].get("result_policy")
+                        != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
                         or inspection["action_id"] != command.action_id
                         or inspection["state"] != int(_SEGMENT_INSPECTION_STATE.PENDING)
                         or inspection["source_device_file_id"] != command.source_device_file_id
