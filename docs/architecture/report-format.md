@@ -158,7 +158,7 @@ OSMO 360 II 的缺段位置、默认范围及范围无法确认等事实按[分�
 
 ### 录像、检查与修复
 
-`camera_record.result` 按已取得的事实提供 `check`、`repair` 和 `discard_cleanup`。尚未取得其中任何结果时省略整个对象。
+`camera_record.result` 按已取得的事实提供 `check`、`repair` 和 `discard_cleanup`。Action6 分段任务另提供下文的整体覆盖结果。尚未取得任何适用结果时省略整个对象。
 
 OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体时长或媒体检查。仅取得该依据时，产物的媒体检查仍为未执行、时长未知，不能据此生成 `check` 的已完成结论。
 
@@ -168,6 +168,10 @@ OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体�
 | `repair` | 已确定无需修复，或修复已经成功、失败、取消，分别使用 `not_needed`、`succeeded`、`failed`、`canceled`。未决定或仍在执行时省略；失败必须有错误。 |
 | `discard_cleanup` | 取消要求涉及的拍摄内容处理结果，使用 `not_needed`、`pending`、`running`、`completed`、`failed` 或 `unknown`；失败和未知必须保留错误。它不提供内部文件的数量或路径清单。 |
 修复失败与录像最终结果分别按业务契约判断。取消内容的处理范围遵守[录像取消](camera-recording.md#camera_record-取消)，其进展变化不改写原录像的取消结果。
+
+### 分段目标覆盖
+
+Action6 普通录像及原生延时的 `result.coverage` 按[整体覆盖报告](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#整体覆盖结果)表达目标、实际已确认的连续内容量、覆盖结论及固定视频范围。它独立于动作终态、逐文件媒体检查和取回结果；正常未执行检查不表达媒体已达标。准确机器字段及约束由根 `protocol` 维护，分段覆盖扩展须同步生产端、安装资源与客户端消费。
 
 ### 媒体检查与摘要
 
@@ -239,7 +243,7 @@ OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体�
 
 ### 单张拍摄与延时摄影结果
 
-`camera_take_photo`、`camera_timelapse` 使用动作状态、适用错误、正式产物及动作结束后的 `device_execution` 表达结果，省略 `result`。原始输入和生效参数各自保留，既有设备说明变化不重解释历史结果。完成依据及产物登记遵守[拍摄结果报告](camera-capture.md#拍摄结果报告)。
+`camera_take_photo`、`camera_timelapse` 使用动作状态、适用错误、正式产物及动作结束后的 `device_execution` 表达结果。Action6 分段延时提供[整体覆盖结果](#分段目标覆盖)，其他未声明该结果的任务省略 `result`。原始输入和生效参数各自保留，既有设备说明变化不重解释历史结果。完成依据及产物登记遵守[拍摄结果报告](camera-capture.md#拍摄结果报告)。
 
 ## 正式产物
 

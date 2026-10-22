@@ -27,6 +27,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | 历史快照何时生成，是否影响会话退出？ | [快照维护](history-snapshots.md)：对象范围、累计次数、候选发现、分批处理和退出 |
 | 驱动返回什么证据，文件如何分段处理？ | [设备驱动与文件执行](file-runtime.md)：结果分类、线程池、流式传输、取消和文件所有权 |
 | Action6 与 OSMO 延时参数怎样生成候选命令？ | [延时摄影候选编码](timelapse-command-encoding.md)：完整模板、时间字节替换、历史解释及设备保障边界 |
+| Action6 的不等长视频分段怎样登记、检查和交付？ | [视频分段产物与异常恢复设计](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)：普通录像与原生延时的目标覆盖、固定前缀、照片选择、检查副本复用及报告 |
 | Hasselblad 如何设置参数并执行单张拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用及正式源部署选择；[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义格式、曝光、白平衡及对焦；公共生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |
 | 日志满载时怎么办，怎样安全写同一文件？ | [日志执行与适配](logging-runtime.md)：入口、队列水位、采样、取消、多进程轮换及持锁复制 |
 | 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |

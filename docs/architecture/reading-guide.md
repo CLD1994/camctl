@@ -83,6 +83,7 @@ camctl 与驱动开发者|全部行为规格，重点核对持久化、会话接
 [取消计划与动作](task-cancellation.md)|取消目标、结果与有限处理完成时机|请求与会话
 [拍摄能力与参数类型](camera-capabilities.md)|能力扩展、参数类型、预设、同源 Schema 与说明交接|相机
 [异常录像恢复与修复](camera-recovery.md)|停止与计时证据、原片保留、检查、修复及空间不足|相机
+[Action6 视频分段与异常恢复](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)|普通录像与原生延时的不等长视频集合、实际覆盖、默认前缀、检查副本复用及报告|相机与产物
 [取回正式产物](obtaining-outputs.md)|来源选择、等待、逐项结果、发布条件、半成品及取消|产物
 [文件拷贝、校验与断点续传](file-copy.md)|拷贝调度、进度、续传、读取重试与摘要校验|产物
 [清理正式产物](output-cleanup.md)|删除范围、旧取回保护、恢复与取消|产物

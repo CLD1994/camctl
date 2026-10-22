@@ -65,7 +65,7 @@ record_stop
 
 ### 当前相机的原片文件
 
-Action6 普通录像采用单个源视频契约。OSMO 360 II 普通录像的分段集合、必要原片、逐段登记及验收由[分段产物设计规格](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)定义。每份源文件分别关联和保留，默认取回遵守该规格的范围，范围外文件可通过明确 ID 取回。采用内部媒体修复的任务将成品登记为独立派生产物。
+Action6 普通录像的分段集合、实际内容检查及默认范围由[视频分段设计](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)定义。OSMO 360 II 普通录像的分段集合、必要原片、逐段登记及验收由[分段产物设计规格](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)定义。每份源文件分别关联和保留，默认取回遵守所属规格的范围，范围外文件可通过明确 ID 取回。已经冻结为其他结果策略的任务继续原定义；采用内部媒体修复的任务将成品登记为独立派生产物。
 
 Action6 普通录像驱动在正常设备、普通录像模式及受管输出范围内，将本次拍摄生成的 `.MP4` 原片声明为 MP4 容器，按原目录基准识别本次文件并提供 `format_id=mp4`。这项格式保证不推导编码、实际帧率或媒体时长。目录及长度接口没有提供 MIME 内容类型，因此 `media_type` 保持未知；唯一同目录、同 stem 的 LRF 作为可选视频预览独立登记；临时文件不登记为正式产物。配对与有界扫描规则见[Action6 结果读取](camera-capture.md#action6-原生有限延时任务)。
 
@@ -305,7 +305,7 @@ START 成功响应与实际开始按[启动设计](../superpowers/specs/2026-10-
 
 ### 录像成功标准
 
-OSMO 360 II 普通录像按[分段结果决策表](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#结果决策表)判定；可靠控制完成与其声明的分段下界均可提供独立成功依据。下文的主机时长检查与裁剪规则适用于声明采用单原片媒体处理的任务。
+Action6 普通录像按[动作终态与覆盖结论](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md#动作终态与覆盖结论)判定。OSMO 360 II 普通录像按[分段结果决策表](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#结果决策表)判定；可靠控制完成与其声明的分段下界均可提供独立成功依据。下文的主机时长检查与裁剪规则适用于声明采用单原片媒体处理的任务。
 
 正常录像的 `succeeded` 表示已按要求完成录像控制流程。未取消、未发现提前停止等录像异常时，须同时具备以下事实：
 
