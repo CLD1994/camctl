@@ -12,7 +12,7 @@
 
 ## 如何使用本计划
 
-本文跟踪 OSMO 专用分段实现及其既有验收。按相机选择单文件或多段、抽离公共分段层及接入 Action6，由[公共视频结果设计](../specs/2026-10-23-video-result-modes-and-segmentation-design.md)规定，另行编制实施计划；这些重构事项不计入本文已完成步骤。
+本文跟踪 OSMO 专用分段实现及其既有验收。按相机选择单文件或多段、抽离公共分段层及接入 Action6，由[公共视频结果设计](../specs/2026-10-23-video-result-modes-and-segmentation-design.md)规定，并由[公共视频结果与 Action6 执行计划](2026-10-23-video-result-modes-and-action6-segmentation.md)跟踪；这些重构事项不计入本文已完成步骤。
 
 当前执行范围为 P1—P8 的软件实现与安装版联合验收。P9 的 ARM 部署、真机拍摄和现场媒体核验待用户另行安排；这些项目保持未完成状态，软件测试不替代现场证据。
 

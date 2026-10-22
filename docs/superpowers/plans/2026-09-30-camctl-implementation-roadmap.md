@@ -62,6 +62,8 @@ Hasselblad CFV 100C 仅接入单张拍照，既有主机原图与预览登记、
 
 OSMO 360 II 的分段登记、异常整段选择、默认取回范围、历史恢复及联合验收，由[分段录像执行计划的当前执行位置](2026-10-21-osmo360ii-record-segmentation.md#当前执行位置与继续顺序)及原步骤独立跟踪；对应行为以该计划引用的正式规格为准。
 
+两相机的单文件／多段部署选择、公共分段层重构及 Action6 实际内容恢复，由[视频结果模式与 Action6 分段计划](2026-10-23-video-result-modes-and-action6-segmentation.md)跟踪。该计划先保留并接通现有模式，再推广公共层和 Action6 正常／异常链；软件、安装版及目标设备验收分别推进，不改写原 OSMO 已有交付记录。
+
 ## 电机控制与主程序通知接入
 
 行为依据：[电机控制动作](../../architecture/motor-control.md)、[主程序通知协议](../../../protocol/host-notifications.md)、[按消息类型注册回调](../../host-demo/implementation.md#按消息类型注册回调)。这些专题分别维护动作语义、机器格式和 C 接口；下表只跟踪接入，不另行定义行为。
