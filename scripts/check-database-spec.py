@@ -195,20 +195,26 @@ def check_integer_definitions(db: sqlite3.Connection, write_doc: bool) -> None:
         add(name, {'FIXED': rule['value']})
 
     # 分段公共字面量由整数登记的成员名生成，不另维护完整值清单。
-    public_path = ROOT / 'protocol/errors/workflow-codes.json'
-    public = read_unique_json(public_path)
+    public_paths = {
+        'workflow': ROOT / 'protocol/errors/workflow-codes.json',
+        'status': ROOT / 'protocol/schemas/status-report.schema.json',
+    }
+    public = {name: read_unique_json(path) for name, path in public_paths.items()}
     generated_public = json.loads(json.dumps(public))
-    for definition, field, source in (
-        ('segment_error_header', 'default_scope', 'segment_sets.assessment_json.scope_state'),
-        ('segment_neighbor', 'state', 'segment_gaps.neighbors_json.state'),
-        ('segment_gap', 'kind', 'segment_gaps.kind'),
+    scope_ref = public['workflow']['$defs']['segment_error_header']['properties']['default_scope']['$ref']
+    verify(scope_ref == 'status-report.schema.json#/$defs/default_video_scope',
+           '分段错误头复用状态报告的默认视频范围定义')
+    for document, definition, field, source in (
+        ('status', 'default_video_scope', 'state', 'segment_sets.assessment_json.scope_state'),
+        ('workflow', 'segment_neighbor', 'state', 'segment_gaps.neighbors_json.state'),
+        ('workflow', 'segment_gap', 'kind', 'segment_gaps.kind'),
     ):
-        properties = generated_public['$defs'][definition]['properties']
-        target = properties[field]['properties']['state'] if field == 'default_scope' else properties[field]
+        target = generated_public[document]['$defs'][definition]['properties'][field]
         rule = definitions['json_enums'].get(source) or definitions['enums'][source]
         target['enum'] = [name.lower() for name in rule['members']]
     if write_doc:
-        public_path.write_text(json.dumps(generated_public, ensure_ascii=False, indent=2) + '\n')
+        for name, path in public_paths.items():
+            path.write_text(json.dumps(generated_public[name], ensure_ascii=False, indent=2) + '\n')
     verify(write_doc or public == generated_public, '分段公共枚举等于权威整数登记生成值')
 
     # 公共错误按所属列分别核对，组间相同编号合法；本文件不再保存另一份完整编号表。
