@@ -3578,7 +3578,8 @@
           "from": 1,
           "to": 2,
           "by": [
-            "SEGMENT_FACTS.FIX_MEMBERS"
+            "SEGMENT_FACTS.FIX_MEMBERS",
+            "SEGMENT_FACTS.FIX_RESULT_MEMBERS"
           ],
           "id": "transition_1"
         },
@@ -9887,6 +9888,49 @@
               "table": "segment_sets",
               "op": "create",
               "after": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "segments"
+          ],
+          "evidence": [
+            "segment_request"
+          ]
+        },
+        "FIX_RESULT_MEMBERS": {
+          "reason": 10,
+          "title": "固定原H0的完整结果成员",
+          "rows": [
+            {
+              "table": "segment_sets",
+              "op": "update",
+              "columns": [
+                "state",
+                "member_count"
+              ],
+              "before": {
+                "state": [
+                  1
+                ]
+              },
+              "after": {
+                "state": [
+                  2
+                ]
+              },
+              "required": [
+                "state",
+                "member_count"
+              ],
+              "transitions": {
+                "state": [
+                  "transition_1"
+                ]
+              }
             }
           ],
           "guards": [

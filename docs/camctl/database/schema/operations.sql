@@ -264,6 +264,8 @@ CREATE INDEX segment_sets_action ON segment_sets(action_id, version, id);
 CREATE INDEX segment_sets_run_source ON segment_sets(run_id, source_event_id, id);
 CREATE UNIQUE INDEX segment_sets_cancellation ON segment_sets(predecessor_set_id, cancel_event_id)
     WHERE predecessor_set_id IS NOT NULL;
+CREATE UNIQUE INDEX segment_sets_initial_cancellation ON segment_sets(action_id, cancel_event_id)
+    WHERE publication_kind = 2 AND predecessor_set_id IS NULL;
 
 CREATE TABLE segment_members (
     id INTEGER PRIMARY KEY CHECK (id > 0),

@@ -45,7 +45,9 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 `create_result_set(ResultSetCreate,key,owned)` 保存统一集合，版本及实际集合 ID 由事务分配；原键比较完整原申请并恢复原 ref。`read_result_set(ref,owned)` 返回有限元信息；`read_current_segment_ref(ref,owned)` 只在原集合确有当前完整扫描时返回严格扫描引用。`read_result_member_inputs(ref,cursor,limit,owned)` 从原页索引按 file_id 去重续读，游标绑定原 ref，每页最多128项；文件资格固定在 H0，可靠完成引用原证明页，其他观察引用 H0 前最后实际页。它不产生正式产物或默认范围。
 
-统一成员固定、有限结论、原生摘要和完成发布由后续对应阶段接通。下述完整扫描模型端口保留其原有职责；它们不能用于把跨轮保留或无 RESULTS 集合转换成完整扫描。
+`append_result_members(ref,items,occurred_at,key,owned)` 只保存1—128项实际来源引用，独立核对原H0中的完整文件、原页和分类；`fix_result_members(ref,occurred_at,key,owned)` 按file_id双向比较全部实际来源与已保存成员，遗漏、替换、错误固定事件或分类均拒绝。成员来源仍覆盖早轮已可靠取得文件；后轮负向配对事实不会抹去保留文件的首次正向关联。当前扫描分类继续采用最后实际轮次自身的事实，不能借用保留资格补足当前集合。
+
+取消版本绑定实际取消请求及适用原未发布版本，同前版／取消事件唯一；没有前版时按动作／取消事件唯一。版本准备不登记正式outputs或scope。有限结论、原生摘要和完成发布由后续对应阶段接通。下述完整扫描模型端口保留其原有职责；它们不能用于把跨轮保留或无 RESULTS 集合转换成完整扫描。
 
 `SegmentRepository.create(SegmentSetCreate, key, owned)` 建立原扫描集合。`append_members(ref, inputs, occurred_at, key, owned)`、`append_gaps(ref, gaps, occurred_at, key, owned)`、`append_scope(ref, member_ids, occurred_at, key, owned)` 只接受 1—128 项元组；回执只返回原 `SegmentSetRef`。`fix_members(ref, occurred_at, key, owned)` 核对完整原页覆盖后固定成员。`save_assessment(ref, facts, assessment, occurred_at, key, owned)` 在可靠成员上重跑 P1 首遍及完整第二遍，并逐项对比保存缺口；缺项、多项、末游标、首缺口或数量不同均回滚。
 

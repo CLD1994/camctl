@@ -117,8 +117,11 @@ def _run_files(db,run_id,boundary):
 
 
 def _retained_input(db,file_id,page_event_id,boundary):
-    from .result_file_proofs import load_strict_result_file_input
+    from .result_file_proofs import _file_at,load_strict_result_file_input
     saved,_=_at(db,page_event_id)
+    file=_file_at(db,file_id,boundary)
+    if file['original_device_file_id'] is not None:
+        return load_strict_result_file_input(db,saved.ref,file_id,boundary)
     fact=_one(db,'SELECT f.id FROM device_file_pairing_facts f JOIN operation_attempts a ON a.id=f.attempt_id'
         ' WHERE f.preview_file_id=? AND a.run_id=? AND f.created_event_id<=?'
         ' ORDER BY f.created_event_id DESC LIMIT 1',(file_id,saved.ref.ticket.run_id,boundary.last_event_id))

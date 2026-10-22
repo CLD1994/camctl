@@ -549,8 +549,11 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
         raise ConsistencyError('分段事件超过有限行数')
     from camctl.capture.segment_storage import SegmentResultRef
     if isinstance(ref,SegmentResultRef):
-        from .segment_result_sets import verify_create_event
-        return verify_create_event(db,ref,event,context)
+        if event.reason==_EVENT['branches']['CREATE_RESULT']['reason']:
+            from .segment_result_sets import verify_create_event
+            return verify_create_event(db,ref,event,context)
+        from .segment_result_members import verify_result_member_event
+        return verify_result_member_event(db,ref,event,context)
     _verify_request(event,ref,context,db)
     if event.reason in (_EVENT['branches']['PUBLISH']['reason'],_EVENT['branches']['ACTIVATE']['reason']):
         _verify_publication(db,ref,event,context,prior_events)
@@ -938,6 +941,20 @@ class SegmentRepository:
     def read_result_member_inputs(self,ref,cursor,limit,owned):
         from .segment_result_sets import read_result_member_inputs
         return read_result_member_inputs(ref,cursor,limit,owned)
+
+    def _save_result_members(self,kind,ref,payload,occurred_at,key,owned):
+        from .segment_result_members import ResultMembersCommand
+        register_segment_guards()
+        receipt=commit_operation(ResultMembersCommand(kind,ref,payload,occurred_at,key),key,owned)
+        return (DbOutcome(DbOutcomeKind.COMPLETED,value=receipt.result) if receipt.kind=='completed'
+            else DbOutcome(DbOutcomeKind.ROLLED_BACK if receipt.kind=='rolled_back' else DbOutcomeKind.UNKNOWN,
+                error=receipt.error))
+
+    def append_result_members(self,ref,items,occurred_at,key,owned):
+        return self._save_result_members('MEMBERS',ref,items,occurred_at,key,owned)
+
+    def fix_result_members(self,ref,occurred_at,key,owned):
+        return self._save_result_members('FIX_RESULT_MEMBERS',ref,None,occurred_at,key,owned)
     def _save(self,kind,ref,payload,occurred_at,key,owned):
         register_segment_guards()
         receipt=commit_operation(_Command(kind,ref,payload,occurred_at,key),key,owned)
