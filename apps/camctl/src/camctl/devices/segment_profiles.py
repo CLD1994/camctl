@@ -72,6 +72,6 @@ def profile_for_policy(policy: str) -> SegmentProfile:
     if policy in (CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1,
                   CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1):
         return _OSMO
-    if policy == "action6_video_segments_v1":
+    if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1:
         return _ACTION6
     raise ValueError(f"未登记的视频分段特化: {policy!r}")
