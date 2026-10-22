@@ -73,8 +73,10 @@ def is_segmented_source(db, action_id):
     action = row_facts(db, "actions", action_id)
     return (
         action is not None
-        and action["execution_spec_json"].get("result_policy")
-        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        and action["execution_spec_json"].get("result_policy") in (
+            CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+            CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+        )
     )
 
 
@@ -191,10 +193,12 @@ def qualify(db, request, *, saved=None, batch=128):
             else "default_segment_scope_unconfirmed"
         )
         error = item_error_id("obtain_source_selections", code)
-        retained = _one(
+        retained = 0 if setrow is None else _one(
             db,
-            "SELECT COUNT(*) FROM outputs WHERE source_action_id=? AND kind=?",
-            (source["id"], int(enum_for("outputs.kind").ORIGINAL)),
+            "SELECT COUNT(*) FROM outputs o JOIN segment_members m ON m.file_id=o.device_file_id"
+            " WHERE o.source_action_id=? AND o.kind=? AND m.set_id=? AND m.role=?",
+            (source["id"], int(enum_for("outputs.kind").ORIGINAL), setrow["id"],
+             int(enum_for("segment_members.role").ORIGINAL)),
         )[0]
         assessment = (
             None
@@ -215,7 +219,7 @@ def qualify(db, request, *, saved=None, batch=128):
         )
         details = SegmentErrorHeader(
             source["id"],
-            assessment.gap_count
+            getattr(assessment, "gap_count", None)
             if assessment is not None
             else None
             if current is None
@@ -223,7 +227,7 @@ def qualify(db, request, *, saved=None, batch=128):
             scope,
             0 if scope is DefaultScopeState.EMPTY else None,
             retained,
-            assessment.first_gap
+            getattr(assessment, "first_gap", None)
             if assessment is not None
             else None
             if current is None
@@ -266,9 +270,31 @@ def qualify(db, request, *, saved=None, batch=128):
     return q
 
 
-def items(db, q):
-    if q["error"] is not None:
+def _photo_items(db, q):
+    """独立照片沿原片规则选择，不接受视频范围或预览意图过滤。"""
+    if q["setrow"] is None:
         return
+    after = 0
+    while True:
+        with closing(db.execute(
+            "SELECT o.id FROM outputs o JOIN segment_members m ON m.file_id=o.device_file_id"
+            " WHERE o.source_action_id=? AND o.kind=? AND m.set_id=? AND m.role=?"
+            " AND o.id>? ORDER BY o.id LIMIT ?",
+            (q["source"]["id"], int(enum_for("outputs.kind").ORIGINAL),
+             q["setrow"]["id"], int(enum_for("segment_members.role").OTHER),
+             after, q["batch"]),
+        )) as cursor:
+            page = cursor.fetchmany(q["batch"])
+        if not page:
+            return
+        for (output_id,) in page:
+            original = next(member.entry for member in _family(db, output_id, q["saved"])
+                            if member.entry.kind is OutputKind.ORIGINAL)
+            yield select_for_original(q["source"]["id"], original, SelectionMode.DEFAULT)
+        after = page[-1][0]
+
+
+def items(db, q):
     source_id = q["source"]["id"]
     mode = q["mode"]
     if mode is SelectionMode.EXPLICIT_IDS:
@@ -296,6 +322,9 @@ def items(db, q):
                 mode,
                 (identity,),
             ).items
+        return
+    yield from _photo_items(db, q)
+    if q["error"] is not None:
         return
     after = 0
     while True:

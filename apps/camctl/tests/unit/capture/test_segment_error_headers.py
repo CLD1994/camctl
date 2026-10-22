@@ -96,13 +96,14 @@ def test_header_json_validation_rejects_growth_and_cross_field_count_mismatch():
         with pytest.raises(ValueError):validate_segment_error_header('capture_segment_gap',changed)
 
 
-def test_unknown_gap_header_remains_null_and_cannot_be_capture_gap_error():
+def test_unknown_gap_header_remains_independent_of_checked_prefix_scope():
     header=SegmentErrorHeader(7,None,DefaultScopeState.UNKNOWN,None,2)
     raw=header.details('default_segment_scope_unconfirmed')
     assert raw['gap_count'] is None and 'first_gap' not in raw
     assert 'None' not in raw['description']
     with pytest.raises(ValueError):header.details('capture_segment_gap')
-    with pytest.raises(ValueError):replace(header,scope_state=DefaultScopeState.EMPTY,scope_count=0)
+    empty = replace(header,scope_state=DefaultScopeState.EMPTY,scope_count=0)
+    assert empty.details('default_segment_scope_empty')['gap_count'] is None
 
 
 def test_unknown_gap_assessment_cannot_claim_reliable_duration_or_scope():

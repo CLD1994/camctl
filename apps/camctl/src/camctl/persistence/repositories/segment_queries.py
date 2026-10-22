@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, ObjectId, UtcMicros
 from camctl.contracts.workflow_errors import item_error_id, validate_error_details
-from camctl.devices.tasks import CaptureResultPolicy
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.reads import PlanReadScope
@@ -20,7 +19,7 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change,
 )
-from .segment_selections import _at
+from .segment_selections import _at, is_segmented_source
 
 _EVENTS = load_event_registry()["events"]
 _OUTPUT_EVENT = _EVENTS["OUTPUT_REGISTERED"]["id"]
@@ -114,8 +113,7 @@ def _query_presence(connection, item_id, result_event_id):
         or dependency is None
         or dependency[0] != owner_id
         or source is None
-        or source["execution_spec_json"].get("result_policy")
-        != CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        or not is_segmented_source(connection, source["id"])
     ):
         raise ConsistencyError("QUERY v2 责任不属于原分段来源取回")
     attempt = _one(
@@ -289,8 +287,7 @@ def _facts(connection, item_id, saved):
         or owner["cancel_requested"]
         or output is None
         or output["source_action_id"] != source_id
-        or source["execution_spec_json"].get("result_policy")
-        != CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        or not is_segmented_source(connection, source["id"])
     ):
         raise ConsistencyError("QUERY 结算要求执行中显式未解析项和原分段产物")
     state = {

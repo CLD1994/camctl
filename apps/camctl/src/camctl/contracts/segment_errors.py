@@ -41,8 +41,6 @@ class SegmentErrorHeader:
                 raise ValueError('错误头计数必须是非负整数')
         if self.gap_count is not None and (type(self.gap_count) is not int or self.gap_count < 0):
             raise ValueError('缺口计数必须是非负整数或未知')
-        if self.gap_count is None and self.scope_state is not DefaultScopeState.UNKNOWN:
-            raise ValueError('缺口分类未知不能具有可靠默认范围')
         if not isinstance(self.scope_state,DefaultScopeState):
             raise ValueError('错误头范围状态未登记')
         if ((self.scope_state is DefaultScopeState.UNKNOWN and self.scope_count is not None)
@@ -61,7 +59,7 @@ class SegmentErrorHeader:
         description = f'来源动作 {self.source_action_id}：{gap_text}；默认范围{scope_text}。'
         if self.first_gap is not None:
             start,end=self.first_gap.start_key,self.first_gap.end_key
-            description += f'首个缺口位于 CAM_{start.directory_number:03d}/{start.index:04d} 至 CAM_{end.directory_number:03d}/{end.index:04d}。'
+            description += f'首个缺口位于目录 {start.directory_number} 的索引 {start.index:04d} 至目录 {end.directory_number} 的索引 {end.index:04d}。'
         raw = {'source_action_instance_id':str(self.source_action_id),'description':description,
             'gap_count':self.gap_count,'default_scope':{'state':self.scope_state.value,'member_count':self.scope_count},
             'retained_original_count':self.retained_original_count}
