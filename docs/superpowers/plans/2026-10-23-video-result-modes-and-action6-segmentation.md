@@ -122,8 +122,8 @@ V1、V2、V4 都须取得实际业务结果，不能以基础类型或仓储测�
 
 - [ ] **步骤 1：增加配置与合同失败测试。** 建议新增 `apps/camctl/tests/unit/bootstrap/test_video_result_configuration.py` 和 `apps/camctl/tests/unit/capture/test_video_result_contract.py`。省略表、空表、显式两值、非法类型／值／子键及不支持模式分别断言；已受理视频定义缺必需模式为无效定义，不能默认为单文件；单张拍照及不生成视频的任务保留原结构。
 - [ ] **步骤 2：运行上述两份单元测试，确认失败来自缺少新合同。** 命令为 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/bootstrap/test_video_result_configuration.py apps/camctl/tests/unit/capture/test_video_result_contract.py -q`。
-- [ ] **步骤 3：实现配置解析及部署绑定。** 在加载器校验闭合 `video` 表，经内建驱动注册和目录绑定形成模式工厂；非法配置与设备不支持按所属错误结束，拍摄调用为零。由同一部署定义生成现有能力 `description` 中的模式和必要产物说明，不新增拍摄参数；核对 `Catalog.describe_document()` 与客户端 `loadCapabilities()` 的实际消费，不能只替换 task factory 而保留静态说明。
-- [ ] **步骤 4：实现冻结、读取及显式分派。** 修改 `CaptureTask`、`build_capture_spec()`、`validate_capture_spec()` 和受理入口，保存本次模式及特化；更新相应事件／历史解码。普通录像及原生延时的恢复读取只消费已保存合同。
+- [x] **步骤 3：实现配置解析及部署绑定。** 在加载器校验闭合 `video` 表，经内建驱动注册和目录绑定形成模式工厂；非法配置与设备不支持按所属错误结束，拍摄调用为零。由同一部署定义生成现有能力 `description` 中的模式和必要产物说明，不新增拍摄参数；核对 `Catalog.describe_document()` 与客户端 `loadCapabilities()` 的实际消费，不能只替换 task factory 而保留静态说明。
+- [x] **步骤 4：实现冻结、读取及显式分派。** 修改 `CaptureTask`、`build_capture_spec()`、`validate_capture_spec()` 和受理入口，保存本次模式及特化；更新相应事件／历史解码。普通录像及原生延时的恢复读取只消费已保存合同。
 - [ ] **步骤 5：保留并验证现有完整路径。** 两设备的单文件普通录像要求恰好一份必要视频，原生延时保留最低数量合同；单文件异常继续 `run_recording_media()` 及适用修复。OSMO 分段仍由现有完成模块执行，先用适配器消费新合同。按模式更新正常、失败、取消和恢复入口，不以“存在策略”等价于“使用 OSMO”。
 - [ ] **步骤 6：增加真实装配和受理集成测试。** 建议 `apps/camctl/tests/integration/bootstrap/test_video_result_mode_binding.py`：使用实际 `_default_catalog`，同驱动两台设备选择不同模式；受理后切换配置再重启，旧定义不变、新请求改变；原请求重送不重建定义。核对 START、STOP 等控制合同不随模式改变。
 - [ ] **步骤 7：运行最窄门槛。** 单元同步骤 2；集成命令如下，成功标准是实际执行和恢复走正确流程，既有 OSMO 分段夹具显式选择该模式。提交前按全局方式审查并记录进度。
@@ -167,17 +167,17 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 
 **输入／交付：** 消费公共规格的四种覆盖结论和 V2 的范围语义；交付准确根协议、生成类型和消费者，供 V4、V9 输出。此步不要求尚未建立的检查记录作为事实来源，也不把 Schema 通过记为生产报告已接入。
 
-- [ ] **步骤 1：增加协议和客户端失败样例。** 建议 `tests/integration/video-coverage-protocol.test.mjs` 及客户端 `tests/unit/video-coverage.test.ts`。覆盖普通／延时、秒数／整数帧、正常未检查、空／未知范围、成功动作但覆盖未知、非法交叉组合、未知与零，以及照片不属于视频数组。
+- [x] **步骤 1：增加协议和客户端失败样例。** 建议 `tests/integration/video-coverage-protocol.test.mjs` 及客户端 `tests/unit/video-coverage.test.ts`。覆盖普通／延时、秒数／整数帧、正常未检查、空／未知范围、成功动作但覆盖未知、非法交叉组合、未知与零，以及照片不属于视频数组。
 - [ ] **步骤 2：运行新样例并确认被当前 Schema 或导入器拒绝。** 根执行 `node --test tests/integration/video-coverage-protocol.test.mjs`；客户端执行 `pnpm --dir apps/client exec vitest run tests/unit/video-coverage.test.ts`。
-- [ ] **步骤 3：在根 Schema 定义 `result.coverage` 及引用条件。** 建议表示包含量纲、目标、已确认连续量、结论、已检查产物引用、默认视频范围与原因；约束单位对应的数值类型和范围状态。复用既有实体 ID 与错误类型，移除实际内容策略原生延时不能带 `result` 的结构限制，保持单文件及其他策略的出现条件。扩展缺口错误的动作适用范围和引用校验，不能继续限制为普通录像。参数未生效或未形成决定时不补造结果。
-- [ ] **步骤 4：统一设备位置表示及客户端文案来源。** 解除客户端 `segmentIssueText` 等固定 CAM 展示，按公共位置事实及相应格式描述显示 DJI／CAM。保持缺失位置没有路径或 `output_id`；公共错误编号仍由权威登记提供，不能维护第二套清单。
+- [x] **步骤 3：在根 Schema 定义 `result.coverage` 及引用条件。** 建议表示包含量纲、目标、已确认连续量、结论、已检查产物引用、默认视频范围与原因；约束单位对应的数值类型和范围状态。复用既有实体 ID 与错误类型，移除实际内容策略原生延时不能带 `result` 的结构限制，保持单文件及其他策略的出现条件。扩展缺口错误的动作适用范围和引用校验，不能继续限制为普通录像。参数未生效或未形成决定时不补造结果。
+- [x] **步骤 4：统一设备位置表示及客户端文案来源。** 解除客户端 `segmentIssueText` 等固定 CAM 展示，按公共位置事实及相应格式描述显示 DJI／CAM。保持缺失位置没有路径或 `output_id`；公共错误编号仍由权威登记提供，不能维护第二套清单。
 - [ ] **步骤 5：接通导入、跨报告知识及结果展示。** 修改 Schema 校验、`parseReport`、`validateReportAgainstHistory`、`ownFacts` 和实际结果历史合并；展示目标、覆盖、固定范围和各文件结果。完整及增量报告的已知／未知处理遵守同一历史合同；媒体先到、报告先到均不提前确认 ACK。
-- [ ] **步骤 6：生成公共类型及同步说明。** 客户端目录执行 `node --import tsx src/domain/generate-report-types.ts`，生成类型与根 Schema 一致；同步协议字段说明。
-- [ ] **步骤 7：运行协议与客户端门槛。** 根执行 `node scripts/check-protocol.mjs`、本任务步骤 2 的协议测试；客户端执行步骤 2 的新单元测试及相关 segment 报告／结果模型测试、`pnpm --dir apps/client run typecheck`。全部预期通过，非法组合仍被拒绝。
+- [x] **步骤 6：生成公共类型及同步说明。** 客户端目录执行 `node --import tsx src/domain/generate-report-types.ts`，生成类型与根 Schema 一致；同步协议字段说明。
+- [x] **步骤 7：运行协议与客户端门槛。** 根执行 `node scripts/check-protocol.mjs`、本任务步骤 2 的协议测试；客户端执行步骤 2 的新单元测试及相关 segment 报告／结果模型测试、`pnpm --dir apps/client run typecheck`。全部预期通过，非法组合仍被拒绝。
 
 建议将业务语义固定到下面的精确结构，再从根 Schema 生成类型；可调整字段组织，但须在本步同步全部消费者。`coverage` 的建议字段为 `metric`、`target`、`confirmed`、`status`、`checked_output_ids`、`default_scope` 和可省略的结构化 `reason`。`metric` 区分 `duration_s` 与 `frames`；`status` 区分 `not_performed`、`reached`、`confirmed_short`、`unconfirmed`；目标与已确认量分别采用精确秒数或整数帧，未知实际量为 `null`。正常未检查时 `confirmed=null`、已检查列表为空，默认范围仍为全部合格视频。范围复用已有公共状态与 ID 结构，已检查列表和范围列表分别从自身关系生成，不能塞进动作的小型 JSON。枚举以权威登记／Schema 为源，后续任务不再定义第二套值。
 
-- [ ] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V4：闭合 Action6 正常分段及照片的默认取回
 
@@ -209,11 +209,11 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reportin
 
 **输入／交付：** 消费目标解释与文件特化，提供逐流可靠时长、实际整数帧数及 V5 接口表中的纯覆盖类型；V6、V8 消费。此步是可独立验证的媒体操作和纯判定，不创建来源终态或交付。
 
-- [ ] **步骤 1：写精确指标失败测试。** 扩展 `apps/camctl/tests/unit/host_files/test_media.py`，覆盖主视频／容器时长不同、封面与音频、多个不能解释的主视频、指标缺失或非法、整数帧数、工具错误与媒体错误分别保存。未知帧数不以时长乘帧率补值。
-- [ ] **步骤 2：写纯覆盖边界失败测试并运行。** 建议 `apps/camctl/tests/unit/capture/test_video_coverage.py`：60 秒目标下 `18+27+22=67` 选三段；恰好目标立即停止；300 秒／2 秒目标151帧，`60+60+45=165`；非整倍间隔不虚构终点；可靠完整不足与未知尾部不同；首段未知形成空前缀。
-- [ ] **步骤 3：实现受管主视频指标读取和事实编码。** 扩展 `MediaStream`／`MediaProbe` 及 `probe_document()`／`read_probe()`；使用已有工具从完整本地文件取得可靠帧计数，按所选主视频流保存计数依据。工具配置及结果跟随原操作保存，时长保持精度，帧数为整数。
-- [ ] **步骤 4：实现纯累计与结束判定。** `advance_coverage()` 只累计同量纲可靠值；`finish_coverage()` 明确处理达到、完整不足、中断未确认和范围未知。缺口、不合格或未知位置结束连续前缀；后段不能补位。函数不执行文件或数据库操作。
-- [ ] **步骤 5：以真实本地媒体工具验证度量端口。** 建议 `apps/camctl/tests/integration/host_files/test_video_metrics.py`，按既有工具环境生成小型已知帧数媒体，经真实受管端口读取。验证持续时间、实际帧数、工具收场及 OSMO 单文件必要流保留，不使用真实相机。缺工具须列出缺失，不能跳过后声称该门槛通过。
+- [x] **步骤 1：写精确指标失败测试。** 扩展 `apps/camctl/tests/unit/host_files/test_media.py`，覆盖主视频／容器时长不同、封面与音频、多个不能解释的主视频、指标缺失或非法、整数帧数、工具错误与媒体错误分别保存。未知帧数不以时长乘帧率补值。
+- [x] **步骤 2：写纯覆盖边界失败测试并运行。** 建议 `apps/camctl/tests/unit/capture/test_video_coverage.py`：60 秒目标下 `18+27+22=67` 选三段；恰好目标立即停止；300 秒／2 秒目标151帧，`60+60+45=165`；非整倍间隔不虚构终点；可靠完整不足与未知尾部不同；首段未知形成空前缀。
+- [x] **步骤 3：实现受管主视频指标读取和事实编码。** 扩展 `MediaStream`／`MediaProbe` 及 `probe_document()`／`read_probe()`；使用已有工具从完整本地文件取得可靠帧计数，按所选主视频流保存计数依据。工具配置及结果跟随原操作保存，时长保持精度，帧数为整数。
+- [x] **步骤 4：实现纯累计与结束判定。** `advance_coverage()` 只累计同量纲可靠值；`finish_coverage()` 明确处理达到、完整不足、中断未确认和范围未知。缺口、不合格或未知位置结束连续前缀；后段不能补位。函数不执行文件或数据库操作。
+- [x] **步骤 5：以真实本地媒体工具验证度量端口。** 建议 `apps/camctl/tests/integration/host_files/test_video_metrics.py`，按既有工具环境生成小型已知帧数媒体，经真实受管端口读取。验证持续时间、实际帧数、工具收场及 OSMO 单文件必要流保留，不使用真实相机。缺工具须列出缺失，不能跳过后声称该门槛通过。
 - [ ] **步骤 6：运行上述单元和独立 host_files 集成文件，更新媒体事实文档。** 指标本身尚未证明拍摄恢复已接入，该结果交给 V6、V8。
 
 ```bash
@@ -221,7 +221,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/host_files/test
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/host_files/test_video_metrics.py -q
 ```
 
-- [ ] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V6：建立每段独立的检查、输入拷贝与恢复责任
 
@@ -421,4 +421,10 @@ apps/camctl/.venv311/bin/python -m unittest discover -s tests/integration -p 'te
 
 ## 当前进度与交接记录
 
-V1、V3、V5 在各自隔离工作区实施，主工作区推进 V2 的公共文件特化和原存储接缝。尚未完成的步骤保持未勾选；定向验证与提交完成后更新各自原步骤。V12 按本版执行安排留待设备准备后进行。
+2026-10-23：主分支已集成部署绑定（`bf008ea`）、公共文件身份（`1c1a7f8`）、媒体指标（`4008615`）、覆盖协议与客户端（`fb9c3e5`）、实际内容前缀规则（`f1ea3b3`）。`eda8826` 保留 OSMO 普通单文件的精确一份合同，并让组件分段夹具显式选择模式。公共模式、目标与结果头的完整业务接线仍在 V4、V6—V9 推进，不以这些基础提交表示 Action6 已完成。
+
+已取得的验证包括：模式及设备定向单元、主视频与覆盖定向单元329项、真实本地媒体2项及媒体历史2项；客户端相关单元513项、TypeScript 编译和根协议校验。主分支新增前缀规则及 OSMO 模式单元组合53项通过；原 Action6 单文件自然完成与取消／恢复装配6项通过（日志 `/tmp/camctl-video-single-file-bootstrap.log`，退出码0）。未重复运行全部组件集成目录。
+
+V7 采用已有来源 `published_event_id` 所属完整事务边界，恢复该边界下真正已运行且等待来源的取回，而不另建一套等待者清单。它必须保留与来源提交时固定关联相同的行为；仅已受理的后续取回不具备复用资格。检查副本建档后本地读取失败，再切回设备源的持久化换源流程列为本版待完善项；首次授权前副本不可用时仍直接选设备源。
+
+V10 的安装版组合用例正在隔离工作区准备，须在实际运行接口稳定后验证。V12 按本版执行安排留待设备准备后进行。未勾选的原步骤仍需继续完成；未执行的故障矩阵和验证不记为通过。
