@@ -113,7 +113,7 @@ it("来源缺段、成功前缀取回、本地缺片与错误副本分别展示"
   await files.upload(f.id, Readable.from([bytes]));
   await files.idle();
   let card = await view();
-  await check(card.locator(".action-summary")).toContainText("CAM_1/3");
+  await check(card.locator(".action-summary")).toContainText("目录 1/索引 3");
   await check(card.locator(".action-summary")).toContainText("observed-left");
   await check(card.locator(".action-summary")).toContainText("observed-right");
   await check(card.locator(".action-summary")).toContainText("1 / 4");
@@ -179,7 +179,7 @@ it("大目录号经真实HTTP与React的摘要和技术详情及后端重启保�
   for (let round = 0; round < 2; round++) {
     const card = await view();
     await check(card.locator(".action-summary")).toContainText(
-      "CAM_9007199254740993/3",
+      "目录 9007199254740993/索引 3",
     );
     await card.getByText("执行技术详情", { exact: true }).click();
     const technical = card.locator(":scope > div > details.advanced");
