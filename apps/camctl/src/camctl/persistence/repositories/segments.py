@@ -62,6 +62,18 @@ def _set(db,ref, *, fixed=False):
     return row
 
 
+def _check_write_kind(db,setrow,kind):
+    from camctl.capture.segment_storage import SegmentSourceKind,PublicationKind
+    if (setrow['source_kind']!=encode_enum(SegmentSourceKind.COMPLETE_SCAN)
+            or setrow['publication_kind']!=encode_enum(PublicationKind.RESULT)):
+        raise ConsistencyError('普通完整扫描写入不适用于该结果来源或发布处置')
+    if kind in ('MEMBERS','FIX_MEMBERS'):
+        reason=_one(db,"SELECT json_extract(body_json,'$.reason') FROM history_events WHERE id=?",
+            (setrow['created_event_id'],))[0]
+        if reason!=_EVENT['branches']['CREATE']['reason']:
+            raise ConsistencyError('统一结果成员必须按原H0保存和双向固定，不能使用原完整扫描成员写入')
+
+
 def _source(db,ref):
     saved,raw = _at(db,ref.final_page_event_id)
     attempt = row_facts(db,'operation_attempts',ref.scan_id)
@@ -298,6 +310,7 @@ def _stored_gaps(ref,owned):
 
 
 def _verify_assessment(db,setrow,facts,assessment):
+    _check_write_kind(db,setrow,'ASSESS')
     action,*_=_source(db,_ref(setrow))
     if action['execution_spec_json'].get('result_policy')!=CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value:
         raise ConsistencyError('完整分段判断仅适用于普通录像，不用于原生延时采集目标')
@@ -555,6 +568,9 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
         from .segment_result_members import verify_result_member_event
         return verify_result_member_event(db,ref,event,context)
     _verify_request(event,ref,context,db)
+    branch=next(name for name,value in _EVENT['branches'].items() if value['reason']==event.reason)
+    if branch!='CREATE':
+        _check_write_kind(db,_set(db,ref),branch)
     if event.reason in (_EVENT['branches']['PUBLISH']['reason'],_EVENT['branches']['ACTIVATE']['reason']):
         _verify_publication(db,ref,event,context,prior_events)
     if any(not change.before.exists and change.after.values.get('created_event_id')!=event.event_id for change in event.rows):
@@ -666,6 +682,7 @@ class _Command:
                 facts_json=None,assessment_json=None,published_event_id=None))]
         else:
             setrow=_set(db,ref);sid=setrow['id'];state['segment_sets'][sid]=setrow
+            _check_write_kind(db,setrow,kind)
             if kind=='MEMBERS':
                 if setrow['state']!=_STATE.COLLECTING:raise ConsistencyError('已固定集合不能追加成员')
                 start=next_row_id(db,'segment_members');_capacity(start,len(payload))
@@ -736,6 +753,7 @@ def segment_activation_rows(ref,event_id,owned):
     """P3 完成组中的唯一正式集合标记；本函数不提交。"""
     ObjectId(event_id)
     row=_set(owned.connection,ref,fixed=True)
+    _check_write_kind(owned.connection,row,'ACTIVATE')
     if row['state']!=_STATE.ASSESSED or row['published_event_id'] is not None:
         raise ConsistencyError('正式分段集合只能发布一次已保存判断')
     return (update_change('segment_sets',row['id'],{'published_event_id':None},{'published_event_id':event_id}),)
@@ -902,6 +920,7 @@ def segment_scope_publication_rows(ref,bindings,owned):
     """供 P3 终态事务形成一批 output 关联；不独立提交，不生成身份。"""
     _batch(bindings)
     setrow=_set(owned.connection,ref,fixed=True)
+    _check_write_kind(owned.connection,setrow,'PUBLISH')
     rows=[]
     for scope_member_id,output_id in bindings:
         ObjectId(scope_member_id);ObjectId(output_id)

@@ -147,6 +147,7 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
 def _identity(request,db):
     action,activity,run,attempt,_=storage._source(db,request.ref)
     setrow=storage._set(db,request.ref,fixed=True)
+    storage._check_write_kind(db,setrow,'ACTIVATE')
     if activity['id']!=request.activity_id or run['id']!=request.run_id or setrow['activity_id']!=request.activity_id or setrow['run_id']!=request.run_id:
         raise ConsistencyError('完成申请改变原活动或RESULTS流程身份')
     if setrow['assessment_json'] is None:

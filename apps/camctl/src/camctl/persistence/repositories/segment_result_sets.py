@@ -169,8 +169,10 @@ def _current_scan(db,run,attempt,boundary):
     while True:
         page=read_pages(last.ref.ticket,cursor,1,Reader)
         for saved in page.items:
+            difference={identity for identity,_ in saved.file_ids}
             if (saved.ref.event_id>boundary.last_event_id or saved.page.outcome.error is not None
-                    or any(entry.size_bytes is None or not entry.complete for entry in saved.page.entries)):
+                    or any(entry.identity in difference and (entry.size_bytes is None or not entry.complete)
+                        for entry in saved.page.entries)):
                 return None
         if page.next_cursor is None:break
         cursor=page.next_cursor

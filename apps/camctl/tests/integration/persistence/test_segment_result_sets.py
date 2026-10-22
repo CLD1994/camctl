@@ -584,8 +584,9 @@ async def test_canceled_version_has_unique_original_request_and_preserves_source
         owned.connection.close()
 
 
-async def test_later_missing_pair_does_not_demote_reliable_retained_preview(tmp_path):
-    from camctl.capture.files import PairResultFilesSave
+@pytest.mark.parametrize('later',['missing','ambiguous','conflict'])
+async def test_later_pair_fact_does_not_demote_reliable_retained_preview(tmp_path,later):
+    from camctl.capture.files import PairResultFilesSave,OwnershipFromResultPageSave,FileCompletionSave
     from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
     from camctl.capture.handlers import _begin_check_round
     from camctl.capture.result_pages import ResultPageSave
@@ -605,15 +606,32 @@ async def test_later_missing_pair_does_not_demote_reliable_retained_preview(tmp_
         source=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
             (first.ref.ticket.run_id,)).fetchone()[0]
         ticket=_begin_check_round(runtime,source).ticket
-        actual=replace(_actual(ticket,entries=[_entry('raw.LRF')],finalized=True),
+        names=['raw.LRF']+(['raw.OSV','raw.osv'] if later=='ambiguous' else ['raw.osv'] if later=='conflict' else [])
+        actual=replace(_actual(ticket,entries=[_entry(name) for name in names],finalized=True),
             settlement=Settlement(SettlementBasis.OBSERVED,EvidenceValue('results_returned',1,
                 {'file_completion':_completion(context),'file_completion_source_page_event_id':None})))
         last=runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
             validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned)
         assert last.kind is DbOutcomeKind.COMPLETED,last.error
+        saved=runtime.capture.read_result_page(last.value,owned)
+        for entry in saved.page.entries:
+            fid=dict(saved.file_ids)[entry.identity]
+            if fid in ids.values():continue
+            proof=runtime.capture.save_ownership_from_result_page(
+                OwnershipFromResultPageSave(saved.ref,fid,runtime.wall_us()),new_operation_key(),owned)
+            assert proof.kind is DbOutcomeKind.COMPLETED,proof.error
+            proof=runtime.capture.save_file_completion(FileCompletionSave(fid,3,runtime.wall_us(),basis=3,
+                observation=entry.evidence,size_bytes=10,activity_id=int(context['activity_id']),
+                result_page_event_id=saved.ref.event_id,stop_result_event_id=context['stop_result_event_id']),
+                new_operation_key(),owned)
+            assert proof.kind is DbOutcomeKind.COMPLETED,proof.error
         negative=runtime.capture.save_result_file_pairing(PairResultFilesSave(preview,last.value,
             _boundary(owned),runtime.wall_us()),new_operation_key(),owned)
         assert negative.kind is DbOutcomeKind.COMPLETED,negative.error
+        reason=owned.connection.execute('SELECT reason FROM device_file_pairing_facts WHERE id=?',
+            (negative.value,)).fetchone()[0]
+        from camctl.contracts.enums import enum_for
+        assert reason==int(enum_for('device_file_pairing_facts.reason')[later.upper()])
         _finish_scan(owned,runtime,runtime.capture.read_result_page(last.value,owned))
         request=ResultSetCreate(source,int(ticket.target_id),ticket.run_id,
             SegmentSourceKind.RETAINED_SOURCES,_boundary(owned),last.value,
@@ -624,5 +642,198 @@ async def test_later_missing_pair_does_not_demote_reliable_retained_preview(tmp_
         page=repository.read_result_member_inputs(ref.value,None,128,owned)
         retained=next(item for item in page.items if item.file_id==preview)
         assert retained.pairing_state.name=='PAIRED' and retained.pairing_fact_id==paired.value
+    finally:
+        owned.connection.close()
+
+
+async def _two_scan_result(tmp_path):
+    from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
+    from camctl.capture.handlers import _begin_check_round
+    from camctl.capture.result_pages import ResultPageSave
+    from camctl.operations.validation import validate_outcome
+    from .test_segment_scan_pairing import _ready
+    from .test_segment_file_pairing import _entry
+    from ..capture.test_record_file_completion_wait import _REGISTRY
+    from ..capture.test_result_page_history import _actual
+    owned,runtime,first,_,_=await _ready(tmp_path,[_entry('CAM001/CAM_20261021090000_0001_D.OSV')])
+    try:
+        _finish_scan(owned,runtime,first,retry_wait=True)
+        action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
+            (first.ref.ticket.run_id,)).fetchone()[0]
+        ticket=_begin_check_round(runtime,action_id).ticket
+        actual=_actual(ticket,entries=[_entry('CAM001/CAM_20261021090000_0002_D.OSV')],finalized=True)
+        saved=runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
+            validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+        _finish_scan(owned,runtime,runtime.capture.read_result_page(saved.value,owned))
+        repository=SegmentRepository()
+        request=ResultSetCreate(action_id,int(ticket.target_id),ticket.run_id,
+            SegmentSourceKind.RETAINED_SOURCES,_boundary(owned),saved.value,
+            PublicationKind.RESULT,None,None,runtime.wall_us())
+        result=repository.create_result_set(request,new_operation_key(),owned)
+        assert result.kind is DbOutcomeKind.COMPLETED,result.error
+        return owned,runtime,repository,result.value
+    except BaseException:
+        owned.connection.close()
+        raise
+
+
+@pytest.mark.parametrize('bounded',[False,True])
+@pytest.mark.parametrize('kind',['MEMBERS','FIX_MEMBERS','ASSESS'])
+@pytest.mark.parametrize('bypass',[False,True])
+async def test_complete_scan_writer_cannot_replace_retained_result(tmp_path,monkeypatch,bounded,kind,bypass):
+    from camctl.persistence.repositories import segments
+    from camctl.persistence.event_reads import SqlEventReads
+    from .test_segment_storage import _assessment
+    owned,runtime,repository,ref=await _two_scan_result(tmp_path)
+    try:
+        strict=repository.read_current_segment_ref(ref,owned)
+        inputs=repository.read_result_member_inputs(ref,None,128,owned).items
+        late=next(item for item in inputs if item.page_event_id==strict.final_page_event_id)
+        payload=(late,) if kind=='MEMBERS' else None
+        if kind!='MEMBERS':
+            items=(late,) if kind=='FIX_MEMBERS' else inputs
+            appended=repository.append_result_members(ref,items,runtime.wall_us(),new_operation_key(),owned)
+            assert appended.kind is DbOutcomeKind.COMPLETED,appended.error
+        if kind=='ASSESS':
+            fixed=repository.fix_result_members(ref,runtime.wall_us(),new_operation_key(),owned)
+            assert fixed.kind is DbOutcomeKind.COMPLETED,fixed.error
+            facts,assessment,gaps=_assessment(strict,(),owned)
+            assert not gaps
+            payload=(facts,assessment)
+        before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+        key=new_operation_key()
+        class Command:
+            def plan(self,scope):
+                with monkeypatch.context() as patch:
+                    if bypass:
+                        patch.setattr(segments,'_check_write_kind',lambda *args:None,raising=False)
+                    plan=segments._Command(kind,strict,payload,runtime.wall_us(),key).plan(scope)
+                if bounded:
+                    return BoundedCommandPlan(plan.events,
+                        lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
+                            current_reads=SqlEventReads(scope.connection,plan.segment_read_scope)),
+                        None,lambda connection:None)
+                return plan
+        saved=commit_operation(Command(),key,owned)
+        assert saved.kind=='rolled_back' and '完整扫描' in str(saved.error),saved.error
+        assert owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()==before
+        assert repository.read_result_set(ref,owned)['source_kind']==2
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('layout',['same_page','old_page','old_only'])
+@pytest.mark.parametrize('new_complete',[False,True])
+async def test_current_scan_checks_metadata_only_for_actual_difference(tmp_path,layout,new_complete):
+    from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
+    from camctl.capture.handlers import _begin_check_round,capture_handler
+    from camctl.capture.result_pages import ResultPageSave
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.directory import DirectoryCursor
+    from camctl.devices.file_identity import FileIdentity
+    from camctl.operations.validation import validate_outcome
+    from ..capture.test_baseline_history import _append,_fix
+    from ..capture.test_result_page_history import _actual,_REGISTRY
+    class BaselineCatalog(SegmentedCatalog):
+        def parameter_definition(self,*args):
+            definition=super().parameter_definition(*args)
+            if args[1]!='camera_record':return definition
+            factory=definition.task_factory
+            return replace(definition,task_factory=lambda params:replace(factory(params),
+                ownership_mode=2,output_scope={'directories':['/DCIM']}))
+    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=BaselineCatalog(),start=False)
+    try:
+        activity=owned.connection.execute('SELECT id FROM device_activities').fetchone()[0]
+        binding=DeviceBinding('cam-1',runtime.action(action_id)['driver_id'])
+        assert _append(owned,activity,(FileIdentity(binding,'/DCIM/old.OSV'),)).kind is DbOutcomeKind.COMPLETED
+        assert _fix(owned,activity,chunks=1,entries=1).kind is DbOutcomeKind.COMPLETED
+        await capture_handler('camera_record')(action_id,runtime)
+        ticket=_begin_check_round(runtime,action_id).ticket
+        old={'identity':'/DCIM/old.OSV','locator':{'path':'/DCIM/old.OSV'},
+            'complete':False,'size_bytes':None,'kind':'video','format_id':'osv'}
+        new={**old,'identity':'/DCIM/recent.OSV','locator':{'path':'/DCIM/recent.OSV'},
+            'complete':new_complete,'size_bytes':10 if new_complete else None}
+        cursor=DirectoryCursor(binding,('/DCIM',),0,old['identity'])
+        batches=([old,new],) if layout=='same_page' else ([old],[new]) if layout=='old_page' else ([old],)
+        previous=None
+        for number,entries in enumerate(batches,1):
+            following=cursor if number<len(batches) else None
+            actual=_actual(ticket,entries=entries,cursor=previous,next_cursor=following,
+                finalized=following is None)
+            saved=runtime.capture.save_result_page(ResultPageSave(ticket,number,previous,
+                validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+            previous=following
+        final=runtime.capture.read_result_page(saved.value,owned)
+        _finish_scan(owned,runtime,final)
+        has_scan=new_complete or layout=='old_only'
+        request=ResultSetCreate(action_id,activity,ticket.run_id,
+            SegmentSourceKind.COMPLETE_SCAN if layout=='old_only' else SegmentSourceKind.RETAINED_SOURCES,
+            _boundary(owned),saved.value if has_scan else None,
+            PublicationKind.RESULT,None,None,runtime.wall_us())
+        repository=SegmentRepository()
+        created=repository.create_result_set(request,new_operation_key(),owned)
+        assert created.kind is DbOutcomeKind.COMPLETED,created.error
+        current=repository.read_current_segment_ref(created.value,owned)
+        assert (current is not None)==has_scan
+        inputs=repository.read_result_member_inputs(created.value,None,128,owned).items
+        assert len(inputs)==(0 if layout=='old_only' else 1)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('bounded',[False,True])
+@pytest.mark.parametrize('kind',['MEMBERS','FIX_MEMBERS'])
+async def test_unified_complete_result_keeps_h0_member_writer_and_ordinary_assessment(tmp_path,monkeypatch,bounded,kind):
+    from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind
+    from camctl.persistence.repositories import segments
+    from camctl.persistence.event_reads import SqlEventReads
+    from .test_segment_scan_pairing import _ready
+    from .test_segment_file_pairing import _entry
+    from .test_segment_storage import _assessment
+    owned,runtime,saved,_,_=await _ready(tmp_path,[_entry('CAM001/CAM_20261021090000_0001_D.OSV')])
+    try:
+        _finish_scan(owned,runtime,saved)
+        action_id=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',
+            (saved.ref.ticket.run_id,)).fetchone()[0]
+        repository=SegmentRepository()
+        created=repository.create_result_set(ResultSetCreate(action_id,int(saved.ref.ticket.target_id),
+            saved.ref.ticket.run_id,SegmentSourceKind.COMPLETE_SCAN,_boundary(owned),saved.ref,
+            PublicationKind.RESULT,None,None,runtime.wall_us()),new_operation_key(),owned)
+        assert created.kind is DbOutcomeKind.COMPLETED,created.error
+        ref=created.value
+        strict=repository.read_current_segment_ref(ref,owned)
+        inputs=repository.read_result_member_inputs(ref,None,128,owned).items
+        if kind=='FIX_MEMBERS':
+            appended=repository.append_result_members(ref,inputs,runtime.wall_us(),new_operation_key(),owned)
+            assert appended.kind is DbOutcomeKind.COMPLETED,appended.error
+        before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+        key=new_operation_key()
+        class Command:
+            def plan(self,scope):
+                with monkeypatch.context() as patch:
+                    patch.setattr(segments,'_check_write_kind',lambda *args:None)
+                    plan=segments._Command(kind,strict,inputs if kind=='MEMBERS' else None,
+                        runtime.wall_us(),key).plan(scope)
+                if bounded:
+                    return BoundedCommandPlan(plan.events,
+                        lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
+                            current_reads=SqlEventReads(scope.connection,plan.segment_read_scope)),
+                        None,lambda connection:None)
+                return plan
+        rejected=commit_operation(Command(),key,owned)
+        assert rejected.kind=='rolled_back' and '原H0' in str(rejected.error),rejected.error
+        assert owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()==before
+        if kind=='MEMBERS':
+            appended=repository.append_result_members(ref,inputs,runtime.wall_us(),new_operation_key(),owned)
+            assert appended.kind is DbOutcomeKind.COMPLETED,appended.error
+        fixed=repository.fix_result_members(ref,runtime.wall_us(),new_operation_key(),owned)
+        assert fixed.kind is DbOutcomeKind.COMPLETED,fixed.error
+        facts,assessment,gaps=_assessment(strict,(),owned)
+        assert not gaps
+        assessed=repository.save_assessment(strict,facts,assessment,runtime.wall_us(),new_operation_key(),owned)
+        assert assessed.kind is DbOutcomeKind.COMPLETED,assessed.error
+        assert repository.read_result_set(ref,owned)['assessment_json'] is not None
     finally:
         owned.connection.close()
