@@ -36,36 +36,43 @@ class _BaselineCatalog(SegmentedCatalog):
             ownership_mode=2,output_scope={'directories':['/DCIM']}))
 
 
-async def _baseline_end_world(tmp_path,*,unconfirmed=False,success=False,early_boundary=False):
-    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=_BaselineCatalog(),start=False)
+async def _baseline_end_world(tmp_path,*,unconfirmed=False,success=False,early_boundary=False,catalog=None):
+    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',
+        catalog=_BaselineCatalog() if catalog is None else catalog,start=False)
     try:
-        activity=owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?',
-            (action_id,)).fetchone()[0]
-        request=BaselineReadIntent(action_id,activity,DeviceBinding('cam-1',runtime.action(action_id)['driver_id']),
-            ('/DCIM',),None,Decimal('1.25'),runtime.capture.baseline_ref(activity,owned),1,
-            new_operation_key(),new_operation_key(),runtime.wall_us())
-        intent=_ok(runtime.capture.save_baseline_read_intent(request,request.call_key,owned))
-        repository=SegmentRepository()
-        def freeze():
-            return _ok(repository.create_result_set(models.ResultSetCreate(action_id,activity,None,
-                models.SegmentSourceKind.NO_RESULTS,_boundary(owned),None,models.PublicationKind.RESULT,
-                None,None,runtime.wall_us()),new_operation_key(),owned))
-        if early_boundary:ref=freeze()
-        if unconfirmed:
-            actual=_ok(runtime.capture.save_baseline_read_unconfirmed(
-                BaselineReadUnconfirmedSave(intent.call_id,runtime.wall_us()),request.result_save_key,owned))
-        else:
-            from camctl.contracts.pages import Page
-            error=None if success else ErrorValue('adb_directory_failed','device_file_access',{'reason':'actual_read_failure'})
-            actual=_ok(runtime.capture.save_baseline_read_return(BaselineReadReturn(intent.call_id,
-                runtime.wall_us(),error,DirectoryRead(None,error,Page((),None) if success else None)),
-                request.result_save_key,owned))
-        if not early_boundary:ref=freeze()
-        _ok(repository.fix_result_members(ref,runtime.wall_us(),new_operation_key(),owned))
-        return owned,runtime,repository,ref,actual
+        return _save_baseline_end(owned,runtime,action_id,unconfirmed=unconfirmed,success=success,
+            early_boundary=early_boundary)
     except BaseException:
         owned.connection.close()
         raise
+
+
+def _save_baseline_end(owned,runtime,action_id,*,unconfirmed=False,success=False,early_boundary=False):
+    activity=owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?',
+        (action_id,)).fetchone()[0]
+    action=runtime.action(action_id)
+    request=BaselineReadIntent(action_id,activity,DeviceBinding(action['device_id'],action['driver_id']),
+        ('/DCIM',),None,Decimal('1.25'),runtime.capture.baseline_ref(activity,owned),1,
+        new_operation_key(),new_operation_key(),runtime.wall_us())
+    intent=_ok(runtime.capture.save_baseline_read_intent(request,request.call_key,owned))
+    repository=SegmentRepository()
+    def freeze():
+        return _ok(repository.create_result_set(models.ResultSetCreate(action_id,activity,None,
+            models.SegmentSourceKind.NO_RESULTS,_boundary(owned),None,models.PublicationKind.RESULT,
+            None,None,runtime.wall_us()),new_operation_key(),owned))
+    if early_boundary:ref=freeze()
+    if unconfirmed:
+        actual=_ok(runtime.capture.save_baseline_read_unconfirmed(
+            BaselineReadUnconfirmedSave(intent.call_id,runtime.wall_us()),request.result_save_key,owned))
+    else:
+        from camctl.contracts.pages import Page
+        error=None if success else ErrorValue('adb_directory_failed','device_file_access',{'reason':'actual_read_failure'})
+        actual=_ok(runtime.capture.save_baseline_read_return(BaselineReadReturn(intent.call_id,
+            runtime.wall_us(),error,DirectoryRead(None,error,Page((),None) if success else None)),
+            request.result_save_key,owned))
+    if not early_boundary:ref=freeze()
+    _ok(repository.fix_result_members(ref,runtime.wall_us(),new_operation_key(),owned))
+    return owned,runtime,repository,ref,actual
 
 
 @pytest.mark.parametrize('bounded',[False,True])
@@ -94,6 +101,69 @@ async def test_no_result_decision_anchors_saved_baseline_end_and_keeps_action_ru
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()==(0,)
         assert owned.connection.execute('SELECT COUNT(*) FROM operation_runs').fetchone()==(0,)
         assert runtime.driver.control.await_count==0
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('self_reported_singleton',[False,True])
+async def test_decision_cannot_share_actual_transaction_with_another_legal_decision(tmp_path,self_reported_singleton):
+    from datetime import datetime,timezone
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.service import CommandMode,ProcessInput
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.scheduling import ObserveWindowRequest,SchedulingRepository,StartActionRequest
+    from camctl.history.validators import EventContext
+    from camctl.persistence.event_reads import SqlEventReads
+    from camctl.persistence.transaction import BoundedCommandPlan,TransactionScope,commit_operation
+    from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
+    from .test_segment_transaction_batches import _fingerprint
+    class Catalog(_BaselineCatalog):
+        def device_exists(self,device_id):return device_id in ('cam-1','cam-2')
+        def driver_id(self,device_id):return 'camctl-adb' if self.device_exists(device_id) else None
+    catalog=Catalog()
+    owned,runtime,repository,ref,actual=await _baseline_end_world(tmp_path,catalog=catalog)
+    try:
+        at=runtime.wall_us()
+        instant=datetime.fromtimestamp(at/1_000_000,timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        _ok(AcceptanceRepository().process_input(ProcessInput(ParsedInput('second.json',{
+            'request_id':'2','created_at':instant,'name':'第二独立录像','actions':[
+                {'name':'拍摄','type':'camera_record','device_id':'cam-2','scheduled_at':instant,
+                    'params':{'type':'video'},'policy':{'max_delay_ms':5000}}],
+        }),catalog,CommandMode.RUN,at),new_operation_key(),owned))
+        action_id=owned.connection.execute('SELECT MAX(id) FROM actions').fetchone()[0]
+        scheduling=SchedulingRepository()
+        _ok(scheduling.observe_window(ObserveWindowRequest(action_id,at,at),new_operation_key(),owned))
+        _ok(scheduling.start_action(StartActionRequest(action_id,at,at),new_operation_key(),owned))
+        _,_,_,other,other_actual=_save_baseline_end(owned,runtime,action_id)
+        requests=tuple(models.ResultCheckConclusionSave(candidate,models.ResultCheckEndReason.NO_RESULT_WORK,
+            source.result_event_id,None,None,None,None,runtime.wall_us())
+            for candidate,source in ((ref,actual),(other,other_actual)))
+        key=new_operation_key()
+        before=_fingerprint(owned.connection)
+        class Command:
+            def plan(self,scope):
+                allocation=scope.allocate(2)
+                plans=tuple(ConcludeResultCheckCommand(request,key).plan(TransactionScope(
+                    scope.connection,scope.max_txn_id,scope.max_event_id)) for request in requests)
+                events=[]
+                for index,plan in enumerate(plans):
+                    event=plan.events[0];row=event.rows[0]
+                    event_id=allocation.first_event_id+index
+                    row=replace(row,row_id=row.row_id+index,after=replace(row.after,
+                        values={**row.after.values,'created_event_id':event_id}))
+                    events.append(replace(event,event_id=event_id,rows=(row,)))
+                def context(event,transaction):
+                    plan=plans[event.event_id-allocation.first_event_id]
+                    if self_reported_singleton:
+                        transaction=replace(transaction,first_event_id=event.event_id,last_event_id=event.event_id)
+                    return EventContext(transaction,
+                        {('segment_check_conclusions',event.rows[0].row_id):('action',plan.segment_read_scope.ref.action_id)},
+                        plan.state_rows,current_reads=SqlEventReads(scope.connection,plan.segment_read_scope))
+                return BoundedCommandPlan(tuple(events),context,None,lambda connection:None)
+        receipt=commit_operation(Command(),key,owned)
+        assert receipt.kind=='rolled_back',receipt.error
+        assert owned.connection.execute('SELECT COUNT(*) FROM segment_check_conclusions').fetchone()==(0,)
+        assert _fingerprint(owned.connection)==before
     finally:
         owned.connection.close()
 

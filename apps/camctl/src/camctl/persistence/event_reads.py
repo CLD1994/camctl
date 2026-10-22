@@ -293,6 +293,9 @@ class SqlEventReads:
         from camctl.persistence.transaction import row_facts
         if not self.connection.in_transaction:
             raise ConsistencyError('分段守卫只能复核原写事务集合')
+        if (self._segment_guard_transaction is None
+                or context.transaction != self._segment_guard_transaction):
+            raise ConsistencyError('分段守卫必须使用内核绑定的实际完整事务范围')
         if isinstance(self.scope, SegmentReadScope):
             ref = self.scope.ref
         elif isinstance(self.scope, PlanReadScope):
