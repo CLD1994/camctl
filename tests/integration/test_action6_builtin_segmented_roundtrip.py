@@ -145,8 +145,9 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
         }
         preview_paths = {path for path in contents if path.endswith(".LRF")}
         photo_paths = {path for path in contents if path.endswith(".JPG")}
+        photo_ids = {str(by_path[path][3]) for path in photo_paths}
         assert len(video_ids) == 2 and len(preview_ids) == 2
-        assert original_ids == video_ids | {str(by_path[path][3]) for path in photo_paths}
+        assert original_ids == video_ids | photo_ids
         assert preview_ids == {str(by_path[path][3]) for path in preview_paths}
         for path in preview_paths:
             paired_video = path.removesuffix(".LRF") + ".MP4"
@@ -202,7 +203,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
         assert report["report_id"] in saved_source["saved_report_ids"]
         selections = [
             ("obtain-default", {"filter": "default"}, original_ids),
-            ("obtain-preview", {"filter": "preview"}, preview_ids),
+            ("obtain-preview", {"filter": "preview"}, preview_ids | photo_ids),
         ]
         final_report = report
         all_delivery_ids = []
