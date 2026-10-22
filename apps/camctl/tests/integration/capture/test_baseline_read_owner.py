@@ -315,7 +315,8 @@ async def test_same_session_cancelled_actual_task_can_save_unknown_without_cold_
     assert result.state.name=='UNCONFIRMED'
 
 
-async def test_failed_result_lookup_keeps_recovery_responsibility(owned,tmp_path):
+@pytest.mark.parametrize('lookup',['intent','result'])
+async def test_failed_result_lookup_keeps_recovery_responsibility(owned,tmp_path,lookup):
     from camctl.capture import baseline_reads as reads
     from camctl.operations.recovery import RecoveryBoundary
     intent=await _intent(owned,tmp_path)
@@ -325,13 +326,18 @@ async def test_failed_result_lookup_keeps_recovery_responsibility(owned,tmp_path
     context=reads.BaselineReadRecoveryContext(owned.metadata.instance_id,first.value,
         {intent.activity_id:owner},RecoveryBoundary.HOST_LOCAL_SETTLED,first.value.intent_event_id)
     class Repository(CaptureRepository):
+        def read_baseline_call(self,*args,**kwargs):
+            if lookup=='intent':
+                raise OSError('intent unavailable')
+            return super().read_baseline_call(*args,**kwargs)
         def read_baseline_call_result(self,*args,**kwargs):
             raise OSError('read unavailable')
     def no_clock():
         pytest.fail('读取失败不能解释为可靠缺键')
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as caught:
         reads.resume_baseline_read_call(owner,context,capture=Repository(),owned=owned,
             reader=owned,wall_us=no_clock)
+    assert owner.diagnostic is caught.value
     assert owner.unconfirmed_request is None and owner.result is None
     assert owned.connection.execute('SELECT state FROM baseline_read_calls').fetchone()==(1,)
 

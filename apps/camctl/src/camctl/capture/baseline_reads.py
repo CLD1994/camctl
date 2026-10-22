@@ -131,7 +131,11 @@ def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
             or context.local_owners.get(intent.request.activity_id) is not owner
             or owner.intent != intent.request or owner.intent_view != intent):
         raise ConsistencyError('基准恢复上下文不属于原数据库和实际调用拥有者')
-    actual=capture.read_baseline_call(intent.call_id,intent.boundary,reader)
+    try:
+        actual=capture.read_baseline_call(intent.call_id,intent.boundary,reader)
+    except Exception as error:
+        owner.diagnostic=error
+        raise
     if actual != intent:
         raise ConsistencyError('基准恢复上下文不是原完整意图事实')
     if owner.task is not None and not owner.task.done():
@@ -146,7 +150,11 @@ def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
         if owner.saves.pending is None and owner.result is None:
             owner.saves.begin(owner.unconfirmed_request,key=owner.intent.result_save_key)
         return resume_baseline_read_save(owner,capture=capture,owned=owned)
-    saved=capture.read_baseline_call_result(intent.call_id,reader)
+    try:
+        saved=capture.read_baseline_call_result(intent.call_id,reader)
+    except Exception as error:
+        owner.diagnostic=error
+        raise
     if saved is not None:
         owner.result=saved
         return saved
