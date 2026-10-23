@@ -293,11 +293,14 @@ def _seed_action(connection, action_id: int, action_type: int) -> None:
         if action_type == 1 else {}
     )
     effective_params = {"type": "legacy_photo"} if action_type == 1 else {}
-    spec = '{"target_duration_ms": 60000}' if action_type == 2 else '{}'
+    spec = '{}'
+    if action_type == 2:
+        spec = json.dumps({"video_result_mode": "single_file", "target_duration_ms": 60000})
     if action_type == 3:
         spec = json.dumps({"duration_based": True, "wait_after_send": True,
             "end_control": 1, "stop_supported": True, "start_return_meaning": 1,
-            "completion_mode": 2, "target_duration_ms": 600000, "result_wait_margin_ms": 0})
+            "completion_mode": 2, "target_duration_ms": 600000, "result_wait_margin_ms": 0,
+            "video_result_mode": "single_file"})
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
