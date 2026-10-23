@@ -72,6 +72,7 @@ def _read_rows(internal=False):
         }),
         row_change("file_copies", 51, {
             "delivery_id": delivery_id, "processing_id": processing_id,
+            "inspection_id": None,
             "source_device_file_id": 501, "source_intermediate_file_id": None,
             "target_file_id": 602 if internal else 601, "round": 1, "recopies_used": 0,
             "max_recopies_used": 0, "source_size": 4096, "source_sha256": None,
