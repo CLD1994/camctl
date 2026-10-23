@@ -825,10 +825,11 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         assert len(coverage["checked_output_ids"]) == checked_count
         assert coverage["default_scope"]["member_count"] == checked_count
         assert coverage["default_scope"]["output_ids"] == coverage["checked_output_ids"]
-        if case == "unknown":
-            assert coverage["reason"] == {"code": "probe_error"}
-        else:
-            assert coverage.get("reason") is None
+        expected_reason = {
+            "unknown": {"code": "probe_error"},
+            "short": {"code": "invalid_outputs"},
+        }.get(case)
+        assert coverage.get("reason") == expected_reason
 
         output_rows = _source_rows(deployment, source_id)
         expected_sha_by_output_id = _assert_source_manifest_facts(scenario, output_rows)
