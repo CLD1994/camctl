@@ -1255,7 +1255,7 @@ def _begin_local_attempt(
         runtime: ObtainRuntime, facts: Mapping, now: int,
         config: AttemptConfig,
 ):
-    """按已保存 READ_FILE 流程配置提交主机源尝试意图。"""
+    """按已保存 READ_FILE 流程配置开始或续接主机源尝试。"""
     intent = AttemptIntent(
         operation="read",
         action_id=facts["action_id"],
@@ -1265,14 +1265,10 @@ def _begin_local_attempt(
         config=config,
         occurred_at=now,
         copy_round=facts["round"])
-    outcome = runtime.operations.begin_attempt(
-        intent, new_operation_key(), runtime.owned)
-    if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"读取意图事务未完成（{outcome.kind.value}）: {outcome.error}")
-    if outcome.value.disposition is BeginDisposition.GRANTED:
-        return outcome.value.ticket
-    if outcome.value.reason == "budget_exhausted":
+    ticket, reason = acquire_read_attempt(runtime, intent)
+    if ticket is not None:
+        return ticket
+    if reason == "budget_exhausted":
         _fail_local_delivery(runtime, facts, now)
     return None
 
@@ -1291,7 +1287,17 @@ def _fail_local_delivery(runtime: ObtainRuntime, facts: Mapping, now: int) -> No
 def _finish_local_attempt(
         runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep) -> None:
     """先保存本地读取结果，再按同一 READ_FILE 预算续接或换源。"""
-    succeeded = step.phase is InputPhase.INPUT_READY
+    from camctl.outputs.read_attempts import require_preparation_settled
+
+    if not require_preparation_settled(step):
+        return
+    if step.phase is InputPhase.RECOPY_PENDING:
+        # 新轮次已登记且本地文件任务已收场；原 READ_FILE attempt 继续负责。
+        runtime.continuing_read_tickets[facts["id"]] = ticket
+        runtime.retry_gate.cleared(f"read/{facts['id']}")
+        return
+    checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
+    succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
     exhausted = _attempts_exhausted(runtime, facts["id"])
     fallback_after_source_failure = step.source_failed and not exhausted
     outcome = CallOutcome(
@@ -1317,7 +1323,11 @@ def _finish_local_attempt(
             outcome=validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE),
             occurred_at=runtime.occurred_at(),
             retry_wait=(not succeeded) and not exhausted,
-            run_finish=_run_finish(succeeded, exhausted)))
+            run_finish=(RunFinish(RunOutcome.FAILED, ErrorValue(
+                "checksum_mismatch", "source_read", {
+                    "max_recopies": step.error.max_recopies,
+                    "recopies_used": step.error.recopies_used}))
+                if checksum_failed else _run_finish(succeeded, exhausted))))
     _save_read_result_and_settle(runtime, pending, facts)
     if succeeded:
         runtime.retry_gate.cleared(f"read/{facts['id']}")
