@@ -101,11 +101,13 @@ def _facts(
     *,
     source_action_id: int = 11,
     source_completed: bool = True,
+    source_failed: bool = False,
     checked: dict[int, int | None] | None = None,
 ) -> SelectionFacts:
     return SelectionFacts(
         source_action_id=source_action_id,
         source_completed=source_completed,
+        source_failed=source_failed,
         outputs=entries,
         checked_output_sources={} if checked is None else checked,
     )
@@ -289,6 +291,68 @@ def test_empty_selection_is_fixed() -> None:
     )
     assert pending.is_fixed is False
     assert pending.items == ()
+
+
+@pytest.mark.parametrize("mode", [SelectionMode.DEFAULT, SelectionMode.PREVIEW])
+def test_failed_source_with_complete_empty_catalog_uses_source_error(mode) -> None:
+    selection = select_outputs(
+        SourceResolution(
+            state=ResolutionState.FIXED,
+            member_action_ids=(11,),
+            source_plan_id=1,
+        ),
+        _facts((), source_failed=True),
+        mode,
+    )
+    assert selection.is_fixed is True
+    assert selection.items == ()
+    assert selection.source_error_code == 5  # source_action_failed
+
+
+@pytest.mark.parametrize("mode", [SelectionMode.DEFAULT, SelectionMode.PREVIEW])
+def test_failed_source_with_formal_output_keeps_existing_selection(mode) -> None:
+    selection = select_outputs(
+        SourceResolution(
+            state=ResolutionState.FIXED,
+            member_action_ids=(11,),
+            source_plan_id=1,
+        ),
+        _facts((_entry(101, OutputKind.ORIGINAL),), source_failed=True),
+        mode,
+    )
+    assert selection.source_error_code == (None if mode is SelectionMode.DEFAULT else 2)
+    if mode is SelectionMode.DEFAULT:
+        assert selection.selected_output_ids == (101,)
+    else:
+        assert [(item.output_id, item.error_code) for item in selection.items] == [
+            (None, 8)
+        ]
+
+
+def test_failed_source_waits_for_complete_catalog_and_explicit_ids_keep_item_errors() -> None:
+    source = SourceResolution(
+        state=ResolutionState.FIXED,
+        member_action_ids=(11,),
+        source_plan_id=1,
+    )
+    pending = select_outputs(
+        source,
+        _facts((), source_completed=False, source_failed=True),
+        SelectionMode.DEFAULT,
+    )
+    assert pending.is_fixed is False
+    assert pending.source_error_code is None
+
+    explicit = select_outputs(
+        source,
+        _facts((), source_failed=True, checked={202: None}),
+        SelectionMode.EXPLICIT_IDS,
+        (202,),
+    )
+    assert explicit.source_error_code is None
+    assert [
+        (item.requested_output_id, item.error_code) for item in explicit.items
+    ] == [(202, 1)]
 
 
 def test_default_selection_prefers_repaired_and_excludes_previews() -> None:

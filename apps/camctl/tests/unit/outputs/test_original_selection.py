@@ -34,6 +34,7 @@ def _isolated_sources():
         ("obtain_items", "output_cleanup_started"): 4,
         ("obtain_items", "source_file_unconfirmed"): 6,
         ("obtain_items", "preview_missing"): 8,
+        ("obtain_source_selections", "source_action_failed"): 5,
         ("obtain_source_selections", "no_outputs"): 1,
         ("obtain_source_selections", "preview_missing"): 2,
     }

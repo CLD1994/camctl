@@ -13,7 +13,10 @@ import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.workflow_errors import item_error_id, registered_error
 from camctl.outputs.sources import (
     ResolutionState,
     SelectionMode,
@@ -549,6 +552,155 @@ def test_fix_selection_legal_empty_selection(tmp_path: Path) -> None:
         assert selection[1] == 1  # no_outputs
         assert json.loads(selection[2]) == {}
         assert _value(owned, "SELECT COUNT(*) FROM obtain_items")[0] == 0
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("mode", [SelectionMode.DEFAULT, SelectionMode.PREVIEW])
+def test_failed_source_without_formal_outputs_saves_source_action_error(
+    tmp_path: Path, mode: SelectionMode,
+) -> None:
+    """失败来源的完整空目录只生成来源级错误，显式失败诊断不泄漏。"""
+    _, owned, repository, selection_id = _prepared_selection(tmp_path)
+    connection = owned.connection
+    try:
+        capture_error = registered_error("capture_failed")
+        source_error = {"activity_id": "1", "reason": "no_outputs"}
+        connection.execute(
+            "UPDATE actions SET status=4,error_code=?,error_details_json=? WHERE id=21",
+            (capture_error["action_error_id"], json.dumps(source_error)),
+        )
+        connection.commit()
+        _set_selection_request(connection, mode)
+
+        facts = load_selection_facts(connection, 21)
+        assert facts.source_completed is True
+        assert facts.source_failed is True
+        assert facts.outputs == ()
+        snapshot = select_outputs(_fixed_resolution((21,)), facts, mode)
+        key = new_operation_key()
+        outcome = repository.fix_selection(
+            FixSelection(selection_id, snapshot, _NOW), key, owned
+        )
+
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert outcome.value.snapshot.source_error_code == item_error_id(
+            "obtain_source_selections", "source_action_failed"
+        )
+        row = _value(
+            owned,
+            "SELECT status,error_code,error_details_json"
+            " FROM obtain_source_selections WHERE id=?",
+            selection_id,
+        )
+        assert row[:2] == (
+            2,
+            item_error_id("obtain_source_selections", "source_action_failed"),
+        )
+        assert json.loads(row[2]) == {"source_action_instance_id": "21"}
+        assert _value(
+            owned,
+            "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?",
+            selection_id,
+        ) == (0,)
+        source_row = _value(
+            owned, "SELECT error_code,error_details_json FROM actions WHERE id=21"
+        )
+        assert source_row[0] == capture_error["action_error_id"]
+        assert json.loads(source_row[1]) == source_error
+
+        connection.execute(
+            "UPDATE actions SET status=3,error_code=NULL,error_details_json=NULL WHERE id=21"
+        )
+        connection.commit()
+        repeated = repository.fix_selection(
+            FixSelection(selection_id, snapshot, _NOW), key, owned
+        )
+        assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+        assert repeated.value.snapshot == outcome.value.snapshot
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("mode", [SelectionMode.DEFAULT, SelectionMode.PREVIEW])
+def test_failed_source_with_registered_photo_keeps_existing_selection_rules(
+    tmp_path: Path, mode: SelectionMode,
+) -> None:
+    """正式照片仍是正式产物，不会触发失败来源的空目录错误。"""
+    _, owned, repository, selection_id = _prepared_selection(tmp_path)
+    connection = owned.connection
+    try:
+        _seed_output(connection, 501, 21, 1, file_id=601)
+        connection.execute(
+            "UPDATE outputs SET original_name='photo.jpg',media_type='image/jpeg' WHERE id=501"
+        )
+        connection.execute(
+            "UPDATE device_files SET original_name='photo.jpg',media_type='image/jpeg' WHERE id=601"
+        )
+        capture_error = registered_error("capture_failed")
+        connection.execute(
+            "UPDATE actions SET status=4,error_code=?,error_details_json=? WHERE id=21",
+            (capture_error["action_error_id"], '{"activity_id":"1","reason":"device_failed"}'),
+        )
+        connection.commit()
+        _set_selection_request(connection, mode)
+
+        facts = load_selection_facts(connection, 21)
+        assert facts.source_failed is True
+        assert tuple(entry.output_id for entry in facts.outputs) == (501,)
+        snapshot = select_outputs(_fixed_resolution((21,)), facts, mode)
+        result = repository.fix_selection(
+            FixSelection(selection_id, snapshot, _NOW), new_operation_key(), owned
+        )
+
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        if mode is SelectionMode.DEFAULT:
+            assert result.value.snapshot.source_error_code is None
+            assert result.value.snapshot.selected_output_ids == (501,)
+        else:
+            assert result.value.snapshot.source_error_code == item_error_id(
+                "obtain_source_selections", "preview_missing"
+            )
+            assert result.value.snapshot.selected_output_ids == ()
+            assert result.value.snapshot.items[0].error_code == item_error_id(
+                "obtain_items", "preview_missing"
+            )
+    finally:
+        connection.close()
+
+
+def test_failed_source_explicit_id_keeps_per_item_not_found_error(
+    tmp_path: Path,
+) -> None:
+    _, owned, repository, selection_id = _prepared_selection(tmp_path)
+    connection = owned.connection
+    try:
+        capture_error = registered_error("capture_failed")
+        connection.execute(
+            "UPDATE actions SET status=4,error_code=?,error_details_json=? WHERE id=21",
+            (capture_error["action_error_id"], '{"activity_id":"1","reason":"no_outputs"}'),
+        )
+        connection.commit()
+        requested = (999,)
+        _set_selection_request(connection, SelectionMode.EXPLICIT_IDS, requested)
+        facts = load_selection_facts(
+            connection, 21, requested_output_ids=requested
+        )
+        snapshot = select_outputs(
+            _fixed_resolution((21,)),
+            facts,
+            SelectionMode.EXPLICIT_IDS,
+            requested,
+        )
+        result = repository.fix_selection(
+            FixSelection(selection_id, snapshot, _NOW), new_operation_key(), owned
+        )
+
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert result.value.snapshot.source_error_code is None
+        item, = result.value.snapshot.items
+        assert (item.requested_output_id, item.error_code) == (999, 1)
+        assert item.error_details == {"requested_output_id": "999"}
     finally:
         connection.close()
 

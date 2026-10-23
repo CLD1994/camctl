@@ -58,6 +58,9 @@ _ITEM_SOURCE_FILE_UNCONFIRMED = item_error_id("obtain_items", "source_file_uncon
 _ITEM_PREVIEW_MISSING = item_error_id("obtain_items", "preview_missing")
 
 #: 来源级选择错误编号。
+SELECTION_SOURCE_ACTION_FAILED = item_error_id(
+    "obtain_source_selections", "source_action_failed"
+)
 SELECTION_NO_OUTPUTS = item_error_id("obtain_source_selections", "no_outputs")
 _SELECTION_PREVIEW_MISSING = item_error_id(
     "obtain_source_selections", "preview_missing"
@@ -378,7 +381,7 @@ class SelectionFacts:
     补充查询不能重复目录成员，也不能声称遗漏的记录属于本来源。
     previously_confirmed_ids 是此前已可靠确认存在的产物身份，其
     记录缺失属于状态库矛盾。source_completed 表示来源已终态且
-    适用产物处理完成。
+    适用产物处理完成；source_failed 仅表示来源动作状态为 FAILED。
     """
 
     source_action_id: int
@@ -386,6 +389,7 @@ class SelectionFacts:
     outputs: tuple[CatalogEntry, ...]
     checked_output_sources: Mapping[int, int | None] = field(default_factory=dict)
     previously_confirmed_ids: frozenset[int] = field(default=frozenset())
+    source_failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -425,8 +429,8 @@ class SelectionSnapshot:
     """一个来源的完整选择结果。
 
     is_fixed 为假表示尚未选定（来源未完成或选择未保存）；合法空
-    选择是已固定且没有条目。source_error_code 为来源级错误（没
-    有产物、预览缺失），逐目标失败仍在 items 中逐项表达。
+    选择是已固定且没有条目。source_error_code 为来源级错误（无可
+    选产物、失败来源或预览缺失），逐目标失败仍在 items 中逐项表达。
     """
 
     is_fixed: bool
@@ -477,6 +481,11 @@ def select_outputs(
     if not facts.source_completed:
         return SelectionSnapshot(is_fixed=False)
     if mode in (SelectionMode.DEFAULT, SelectionMode.PREVIEW):
+        if not facts.outputs and facts.source_failed:
+            return SelectionSnapshot(
+                is_fixed=True,
+                source_error_code=SELECTION_SOURCE_ACTION_FAILED,
+            )
         return _select_families(facts, SelectionMode(mode))
     return _select_explicit(facts, requested_output_ids, by_id)
 

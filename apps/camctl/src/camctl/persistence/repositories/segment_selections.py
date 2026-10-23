@@ -71,9 +71,10 @@ class _SelectionProof:
 
 def is_segmented_source(db, action_id):
     action = row_facts(db, "actions", action_id)
+    if action is None or action["execution_spec_json"] is None:
+        return False
     return (
-        action is not None
-        and action["execution_spec_json"].get("result_policy") in (
+        action["execution_spec_json"].get("result_policy") in (
             CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
             CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
         )
@@ -123,6 +124,17 @@ def _family(db, output_id, transaction=None):
             return row
 
     return _family_members(FamilyReads(db), output_id)
+
+
+def _has_formal_output_at(db, source_action_id, saved):
+    """只查询边界内是否存在一个正式产物，避免枚举整个目录。"""
+    query = "SELECT 1 FROM outputs WHERE source_action_id=?"
+    params = [source_action_id]
+    if saved is not None:
+        query += " AND created_event_id<?"
+        params.append(saved.first_event_id)
+    with closing(db.execute(query + " LIMIT 1", tuple(params))) as cursor:
+        return cursor.fetchone() is not None
 
 
 def qualify(db, request, *, saved=None, batch=128):
@@ -183,8 +195,18 @@ def qualify(db, request, *, saved=None, batch=128):
     if setrow is not None and setrow["assessment_json"] is not None:
         scope = assessment_from_document(setrow["assessment_json"]).default_scope.state
     error = details = None
+    if mode is not SelectionMode.EXPLICIT_IDS:
+        if (
+            source["status"] == int(enum_for("actions.status").FAILED)
+            and not _has_formal_output_at(db, source["id"], saved)
+        ):
+            error = item_error_id(
+                "obtain_source_selections", "source_action_failed"
+            )
+            details = {"source_action_instance_id": str(source["id"])}
     if (
-        mode is not SelectionMode.EXPLICIT_IDS
+        error is None
+        and mode is not SelectionMode.EXPLICIT_IDS
         and scope is not DefaultScopeState.NONEMPTY
     ):
         code = (
@@ -318,7 +340,14 @@ def items(db, q):
                     member_action_ids=(source_id,),
                 ),
                 SelectionFacts(
-                    source_id, True, entries, checked_output_sources=checked
+                    source_id,
+                    True,
+                    entries,
+                    checked_output_sources=checked,
+                    source_failed=(
+                        q["source"]["status"]
+                        == int(enum_for("actions.status").FAILED)
+                    ),
                 ),
                 mode,
                 (identity,),

@@ -1,13 +1,16 @@
 """真实拍摄发布、来源解析与有界默认选择共同使用冻结范围。"""
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.contracts.values import new_operation_key
+from camctl.contracts.workflow_errors import item_error_id
 from camctl.capture.handlers import capture_handler
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import (
@@ -36,6 +39,7 @@ from ..capture.test_record_file_completion_wait import (
     _stop_context,
 )
 from ..persistence.test_segment_file_pairing import _entry
+from .test_sources import _seed_output
 
 pytestmark = pytest.mark.asyncio
 
@@ -401,6 +405,126 @@ async def test_failed_source_uses_confirmed_prefix_or_source_failure(
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?", (selection,)
         ).fetchone() == (items if code is None else 0,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("mode", ["default", "preview"])
+async def test_failed_segment_source_with_complete_empty_catalog_saves_source_error(
+    tmp_path, mode, monkeypatch
+):
+    owned, runtime, aid = await _source(tmp_path, indexes=(), known=False)
+    try:
+        from camctl.persistence.repositories import outputs as outputs_repository
+
+        monkeypatch.setattr(
+            outputs_repository,
+            "_catalog_members",
+            lambda *_args: pytest.fail(
+                "有界失败来源判定不能枚举完整产物目录"
+            ),
+        )
+        assert row_facts(owned.connection, "actions", aid)["status"] == 4
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (aid,)
+        ).fetchone() == (0,)
+        _, selection = _obtain(owned, runtime, aid, mode, 2)
+        request = FixSegmentSelection(selection, runtime.wall_us())
+        key = new_operation_key()
+        receipt = fix_segment_selection(request, key, owned)
+
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        row = row_facts(owned.connection, "obtain_source_selections", selection)
+        assert row["status"] == 2
+        assert row["error_code"] == item_error_id(
+            "obtain_source_selections", "source_action_failed"
+        )
+        assert row["error_details_json"] == {"source_action_instance_id": str(aid)}
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?", (selection,)
+        ).fetchone() == (0,)
+
+        db_path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
+        owned.connection.close()
+        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+        owned = open_existing(Path(db_path), DbOpenMode.EXISTING_RW, DbConfig())
+        before = owned.connection.execute(
+            "SELECT COUNT(*) FROM history_events"
+        ).fetchone()
+        repeated = fix_segment_selection(request, key, owned)
+        assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
+        assert repeated.value == receipt.value
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_events"
+        ).fetchone() == before
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("mode", ["default", "preview"])
+async def test_failed_segment_source_with_only_formal_photo_keeps_scope_error(
+    tmp_path, mode,
+):
+    owned, runtime, aid = await _source(tmp_path, indexes=(), known=False)
+    try:
+        _seed_output(owned.connection, 9901, aid, 1, file_id=9902)
+        owned.connection.execute(
+            "UPDATE outputs SET original_name='photo.jpg',media_type='image/jpeg' WHERE id=9901"
+        )
+        owned.connection.execute(
+            "UPDATE device_files SET original_name='photo.jpg',media_type='image/jpeg' WHERE id=9902"
+        )
+        owned.connection.commit()
+        assert row_facts(owned.connection, "actions", aid)["status"] == 4
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (aid,)
+        ).fetchone() == (1,)
+        _, selection = _obtain(owned, runtime, aid, mode, 2)
+        receipt = fix_segment_selection(
+            FixSegmentSelection(selection, runtime.wall_us()),
+            new_operation_key(),
+            owned,
+        )
+
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        row = row_facts(owned.connection, "obtain_source_selections", selection)
+        assert row["error_code"] == item_error_id(
+            "obtain_source_selections", "default_segment_scope_unconfirmed"
+        )
+        assert row["error_code"] != item_error_id(
+            "obtain_source_selections", "source_action_failed"
+        )
+    finally:
+        owned.connection.close()
+
+
+async def test_failed_segment_explicit_id_keeps_item_not_found_error(tmp_path):
+    owned, runtime, aid = await _source(tmp_path, indexes=(), known=False)
+    try:
+        _, selection = _obtain(owned, runtime, aid, [9909], 2)
+        receipt = fix_segment_selection(
+            FixSegmentSelection(selection, runtime.wall_us()),
+            new_operation_key(),
+            owned,
+        )
+
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        saved_selection = row_facts(
+            owned.connection, "obtain_source_selections", selection
+        )
+        assert saved_selection["error_code"] is None
+        rows = owned.connection.execute(
+            "SELECT requested_output_id,error_code,error_details_json FROM obtain_items"
+            " WHERE selection_id=? ORDER BY id",
+            (selection,),
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][:2] == (
+            9909,
+            item_error_id("obtain_items", "output_not_found"),
+        )
+        assert json.loads(rows[0][2]) == {"requested_output_id": "9909"}
     finally:
         owned.connection.close()
 

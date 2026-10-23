@@ -684,8 +684,13 @@ class _FixSelectionCommand:
             raise ConsistencyError("已保存的取回选择定义或原请求无法解释") from error
         members = reads.catalog(source_action_id)
         entries = tuple(member.entry for member in members)
-        facts = SelectionFacts(source_action_id, True, entries,
-                               checked_output_sources=reads.checked_sources(entries, requested))
+        facts = SelectionFacts(
+            source_action_id,
+            True,
+            entries,
+            checked_output_sources=reads.checked_sources(entries, requested),
+            source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
+        )
         expected = select_outputs(
             SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_action_id,),
                              source_plan_id=source["plan_id"]), facts, mode, requested)
@@ -1390,6 +1395,7 @@ def load_selection_facts(
         outputs=entries,
         checked_output_sources=_checked_output_sources(connection, entries, requested | previous),
         previously_confirmed_ids=previous,
+        source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
     )
 
 
@@ -6136,10 +6142,10 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
     source_id = int(source["id"])
     from camctl.devices.tasks import CaptureResultPolicy
 
-    if (
-        source.get("execution_spec_json", {}).get("result_policy")
-        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
-    ):
+    source_spec = source.get("execution_spec_json")
+    if (source_spec is not None
+            and source_spec.get("result_policy")
+            == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value):
         raise EventValidationError("分段来源选择须核对原完整范围事务")
     for facts, columns in (
         (owner, ("type", "status", "source_resolution_state", "resolved_source_plan_id")),
@@ -6184,7 +6190,13 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
     expected = select_outputs(
         SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_id,),
                          source_plan_id=source_plan_id),
-        SelectionFacts(source_id, True, entries, checked_output_sources=checked), mode, requested)
+        SelectionFacts(
+            source_id,
+            True,
+            entries,
+            checked_output_sources=checked,
+            source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
+        ), mode, requested)
     return source_id, expected
 
 
