@@ -6,6 +6,29 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 手工验证启动失败收场修复（2026-10-24）
+
+Action6 原生延时在拍摄设置阶段返回 `action6_response_unconfirmed`，原因是 `simulation_service_unavailable`；原 START 尝试已经保存为 `NO_EFFECT`，但分段流程未将该驱动错误归一化为业务失败，导致执行会话退出，动作及预览仍保持运行中，最后报告未覆盖失败结果。
+
+公共分段的无结果启动失败决定现按原已关闭 START 和冻结边界内全部已结束尝试分类：既有业务错误沿原语义处理；原流程失败且全部尝试可靠无效果时，动作以 `capture_failed/device_failed` 结束；其余原始驱动错误以 `capture_result_unconfirmed/start_unknown` 结束，并保留未知活动占用。原流程和尝试中的驱动错误、次数与结果事件均保留。该决定由首次收场、冷恢复及原结论核验共同使用，不依赖终态后的活动投影，也不重新授予启动资格。普通录像仍按原启动窗口与次数预算决定重试或耗尽。
+
+回归覆盖 Action6 与 OSMO 分段普通录像、原生延时、原始驱动错误、既有业务错误，以及终态写入回滚后的恢复；未知效果用例单独核对占用保留。真实失败快照分别由原安装版与修复源码只读核实，前者重现一致性异常，后者得到 `capture_failed/device_failed`。原始快照与诊断位于 `.local/diagnostics/manual-timelapse-20261023T210151Z/`；软件命令及结果位于 `.local/verification/start-failure-settlement-20261024/`。本次不增加新的实拍验收结论。
+
+以下命令均在仓库根执行，使用 Python 3.11.16；对应日志保存命令结果，执行记录保留实际退出码：
+
+| 命令范围 | 结果 |
+| --- | --- |
+| `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q` | 7132 passed、1 skipped、2 warnings，40.02 秒，退出 0；警告为既有同步测试的 asyncio 标记。 |
+| `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_segment_start_failures.py -q` | 最终 20 passed，3.88 秒，退出 0；修复前六项原始驱动失败用例重现原异常。 |
+| `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_check_conclusions.py -q` | 24 passed，3.83 秒，退出 0。 |
+| `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_result_conclusion_groups.py apps/camctl/tests/integration/persistence/test_segment_result_versions.py -q` | 49 passed，13.78 秒，退出 0。 |
+
+扩展拍摄组合中 59 项通过，`test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy` 在首次打开读取流次数断言失败，实际偏移为 `[0, 0]`，期望为 `[0]`；该轮退出 1。独立归档原 `f987be1` 源码后，同一用例也在相同位置失败，尚未进入状态库冷重开或预算解码。因此保留该既有失败及基线对照，不将其记录为本次修复的通过证据；本次没有更改该用例或其读取流程。
+
+修复 wheel 的 SHA-256 为 `4d5bd0ef5158c9d483830df33f80c85d67458c2cd32a71fe0b9bb93619c97188`，305 个生产 Python 文件及 27 份权威资源与源码、独立安装版逐字节一致；依赖检查通过，导出能力说明与用户客户端包相同。当前手工验证目录 `/home/zsm1695/.camctl/manual-validation-20261024` 已更新该安装包，host-demo 与客户端包沿用原交付物。
+
+更新前备份原库、配置、日志和交接文件后，通过安装版 `camctl run --config <原配置>` 恢复请求 `5933339839340923781`。恢复入口的外部相机工具由独立包装程序禁止派发，实际工具调用为 0，CLI 退出 0。原延时及预览分别以 `capture_failed/device_failed`、`obtain_items_failed` 结束，报告 6 已发布，覆盖水位为 `(0,24]`，摘要为 `7cfd493194b86ad8cfb0c020102aba63ed697280a198152e625ff2b61e002af2`。原 67 条历史事件、原 START 流程和唯一一次启动尝试均逐字节保持；状态库快速检查通过，外键错误为 0。完整安装、前后库快照、命令与恢复审核位于 `.local/deployments/20261024-start-failure-fix/`。本次只恢复原任务的软件收场，不证明相机控制服务已恢复。
+
 ## 容器与真机分段验证（2026-10-23）
 
 本次执行对应 [OSMO 分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成容器与实机验收)及 [Action6 联合计划 V12](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#v12容器与实机媒体验收)。环境为 Linux x86_64 开发容器，通过 `ADB_SERVER_SOCKET=tcp:host.docker.internal:5037` 访问 Windows 主机 ADB 服务。两台当前固件均仅支持分段视频，单文件真机矩阵不适用；软件中的单文件能力与原验证范围保持。

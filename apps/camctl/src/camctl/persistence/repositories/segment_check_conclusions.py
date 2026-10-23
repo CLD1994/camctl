@@ -139,7 +139,24 @@ def no_result_start_failure(db, setrow, anchor):
             {"activity_id": str(setrow["activity_id"]), "reason": "start_unknown"},
         )
     else:
-        raise ConsistencyError("原 START 关闭错误不属于既定启动失败")
+        # 驱动错误保留在原 run/attempt；公开动作结果只采用业务失败码。
+        # 使用原全部已结束尝试的效果，终态发布后仍可核实同一决定。
+        uncertain = _one(
+            db,
+            "SELECT 1 FROM operation_attempts WHERE run_id=? AND effect_state!=? LIMIT 1",
+            (run["id"], int(enum_for("operation_attempts.effect_state").NO_EFFECT)),
+        )
+        if (uncertain is None
+                and run["status"] == int(enum_for("operation_runs.status").FAILED)):
+            failure = RecordingFailure(
+                "capture_failed",
+                {"activity_id": str(setrow["activity_id"]), "reason": "device_failed"},
+            )
+        else:
+            failure = RecordingFailure(
+                "capture_result_unconfirmed",
+                {"activity_id": str(setrow["activity_id"]), "reason": "start_unknown"},
+            )
     from camctl.contracts.workflow_errors import validate_error_details
 
     validate_error_details(failure.code, failure.details)
