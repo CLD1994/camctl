@@ -308,7 +308,8 @@ output_ids = []
 
 | 来源及处理情况 | 失败项中的身份 | 处理与报告 |
 | --- | --- | --- |
-| 默认范围取回的来源动作或组成员已确认且进入终态，可靠确认没有正式产物 | `source_action_instance_id` | 记录无产物失败；错误码为 `no_outputs`，阶段为 `output_selection`，不创建产物或交付身份 |
+| 默认或预览取回的来源动作已失败、适用处理已结束，可靠确认正式产物目录为空 | `source_action_instance_id` | 使用 `source_action_failed`，阶段为 `output_selection`；详情引用同一来源动作，不创建产物或交付身份。完整优先级见[来源失败错误设计](../superpowers/specs/2026-10-24-source-action-failed-design.md)。 |
+| 其他默认范围取回的来源动作或组成员已确认且进入终态，可靠确认没有正式产物 | `source_action_instance_id` | 记录无产物失败；错误码为 `no_outputs`，阶段为 `output_selection`，不创建产物或交付身份；分段来源继续适用其范围规则。 |
 | 指定来源动作已确认，显式 ID 可靠确认不存在 | 仅关联指定的 `source_action_instance_id` | 通过 `error` 的结构化细节保留请求中的 ID 及不存在原因；不填写指向虚构产物的 `output_id`，不创建 delivery |
 | 指定来源动作已确认，显式 ID 指向其他来源的产物 | 仅关联指定的 `source_action_instance_id` | 通过 `error` 的结构化细节保留请求中的 ID 及归属不匹配原因；不将其他来源的产物关联到本次指定来源，不创建 delivery |
 | 来源及正式产物已确认，该产物处理最终失败，尚未创建 delivery | `source_action_instance_id`、`output_id` | 记录该产物的具体失败原因，不为报告错误而创建 delivery |

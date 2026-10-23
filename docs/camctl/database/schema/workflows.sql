@@ -25,7 +25,7 @@ CREATE TABLE obtain_source_selections (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     dependency_id INTEGER NOT NULL UNIQUE REFERENCES action_dependencies(id) DEFERRABLE INITIALLY DEFERRED,
     status INTEGER NOT NULL CHECK (status IN (1,2)),
-    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4)),
+    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,5)),
     error_details_json TEXT CHECK (error_details_json IS NULL OR (json_valid(error_details_json) AND json_type(error_details_json) = 'object')),
     CHECK ((error_code IS NULL) = (error_details_json IS NULL)),
     CHECK (status = 2 OR error_code IS NULL)

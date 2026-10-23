@@ -1032,6 +1032,7 @@
 | 2 | `preview_missing` | `output_selection` |
 | 3 | `default_segment_scope_empty` | `output_selection` |
 | 4 | `default_segment_scope_unconfirmed` | `output_selection` |
+| 5 | `source_action_failed` | `output_selection` |
 
 ## 其他编号来源
 

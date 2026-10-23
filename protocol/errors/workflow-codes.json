@@ -680,6 +680,25 @@
       },
       "action_error_id": 26
     },
+    "source_action_failed": {
+      "stage": "output_selection",
+      "description": "来源拍摄动作已失败且没有登记任何正式产物，默认或预览取回无法执行；已有产物和显式 ID 仍按实际选择结果处理。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "source_action_instance_id": {
+            "$ref": "status-report.schema.json#/$defs/entity_id"
+          }
+        },
+        "required": [
+          "source_action_instance_id"
+        ],
+        "additionalProperties": false
+      },
+      "item_error_ids": {
+        "obtain_source_selections": 5
+      }
+    },
     "no_outputs": {
       "stage": "output_selection",
       "description": "来源已经结束且没有可选正式产物。",
@@ -1198,7 +1217,7 @@
             "null"
           ],
           "minimum": 0,
-        "description": "缺口记录或区间的数量，不是缺失文件总数。正式公开报告中，null 表示缺口分类尚未确认，此时 gaps 为 [] 且 first_gap 省略；它不表示已确认无缺口。默认视频范围由冻结的范围事实独立决定，不由 gap_count 推导。0 表示已确认无缺口，此时 gaps 为 [] 且 first_gap 省略。正整数必须与完整 gaps 长度相同。"
+          "description": "缺口记录或区间的数量，不是缺失文件总数。正式公开报告中，null 表示缺口分类尚未确认，此时 gaps 为 [] 且 first_gap 省略；它不表示已确认无缺口。默认视频范围由冻结的范围事实独立决定，不由 gap_count 推导。0 表示已确认无缺口，此时 gaps 为 [] 且 first_gap 省略。正整数必须与完整 gaps 长度相同。"
         },
         "default_scope": {
           "$ref": "status-report.schema.json#/$defs/default_video_scope",
