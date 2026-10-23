@@ -9,7 +9,7 @@ from camctl.devices.evidence import DeviceObservation, EvidenceContract
 from camctl.devices.tasks import StartReturn
 from camctl.operations.models import EffectState, ErrorValue
 from .contracts import CameraCall
-from .responses import _call_details, _call_failure
+from .responses import _call_details, _call_failure, _simulation_call_failure
 
 
 _FIELDS = frozenset({"activity_id", "response_payload", "confirmation_basis"})
@@ -104,7 +104,7 @@ class Osmo360IISimulationInterpreter:
 
     def interpret(self, raw):
         details = _call_details(raw)
-        failure = _call_failure(raw)
+        failure = _simulation_call_failure(raw)
         if failure is not None:
             return _failure(details, failure.value, stage="device_settings")
         observation = DeviceObservation("setting_command_accepted", 1, {"activity_id": self.activity_id,

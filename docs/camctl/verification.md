@@ -6,6 +6,58 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 容器与真机分段验证（2026-10-23）
+
+本次执行对应 [OSMO 分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成容器与实机验收)及 [Action6 联合计划 V12](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#v12容器与实机媒体验收)。环境为 Linux x86_64 开发容器，通过 `ADB_SERVER_SOCKET=tcp:host.docker.internal:5037` 访问 Windows 主机 ADB 服务。两台当前固件均仅支持分段视频，单文件真机矩阵不适用；软件中的单文件能力与原验证范围保持。
+
+原始证据根为仓库内 `.local/acceptance/video-real-20261023T062816Z/`。每个场景使用独立配置、状态库、客户端存储和交接目录，保存实际请求、安装版 `describe`、C host 命令、CLI 工具启动记录、报告、媒体导入凭据及 ACK。原相机文件和失败记录保留，后续独立取回不改写原拍摄结果。
+
+### 安装与定向软件验证
+
+当前相机会话准备及响应修复的安装环境为 `/tmp/camctl-video-real-settings-v2-20261023/venv`，Python 3.11.16、SQLite 3.53.1、ffprobe／ffmpeg 6.1.1。wheel 位于证据根 `session-settings-runtime-v2/dist/camctl-0.1.0-py3-none-any.whl`，SHA-256 为 `3c5e80e31ade0d5fad5e3addac0886ebc67aed9d66ffb079aabd43f9ee791fa7`。同目录 `source-wheel-install-manifest.json` 核对 298 个生产 Python 文件与 27 个权威资源，325 项源码、wheel、安装文件逐字节一致；`uv pip check` 和安装版静态能力导出均退出 0。Action6 设备读数为固件 `v10.00.39.16`；OSMO 系统构建读数为 `eagle4_oq102-userdebug`、增量 `38390`，不是商品固件版本号。早期场景使用各自归档的发行物；修复后继续原任务的记录保留实际版本边界。
+
+本次修复包括：预览取回不再误用原片检查副本；Action6 结果读取按冻结模式选择原始分段页，完整扫描结束标记在保存页替换后仍保留；保留产物的完成判定使用已登记状态及原明确失败；OSMO 验收工具只对原片要求两路主视频。另将[相机会话准备](../architecture/camera-parameters.md#相机会话准备)接入两型号的普通录像和原生延时。已观察到的 `simulate_device` 服务不存在／查找失败诊断，即使伴随退出 0，也不再记录为设置接受或进入会话缓存。
+
+以下命令均在仓库根执行，使用 `apps/camctl/.venv311/bin/python`。源码测试设置 `PYTHONPATH=$PWD/apps/camctl/src`；安装版测试设置 `UV_PYTHON=$PWD/apps/camctl/.venv311/bin/python` 和 `UV_PROJECT_ENVIRONMENT=$PWD/apps/camctl/.venv311`。
+
+| 范围与 pytest 目标 | 实际结果 | 证据根下日志 |
+| --- | --- | --- |
+| `apps/camctl/tests/unit/devices` | 1598 passed，24.23 秒，退出 0；保留一条既有的同步测试误标 asyncio 警告 | `session-settings-service-unit.log` |
+| `apps/camctl/tests/integration/devices/test_adb_camera_registration.py` | 30 passed，1.52 秒，退出 0；覆盖两型号正式会话入口复位 | `session-settings-registration.log` |
+| `tests/integration/test_action6_builtin_segmented_roundtrip.py` | 2 passed，69.13 秒，退出 0；安装版普通录像、原生延时经 C host、CLI、文件及客户端交付 | `session-settings-v2-installed-chain.log` |
+| `apps/camctl/tests/integration/devices/test_action6_result_pages.py` | 9 passed，1.97 秒，退出 0；正式结果适配器及跨页配对 | `action6-result-pages-final.log` |
+| `apps/camctl/tests/integration/capture/test_action6_segmented_normal.py` | 4 passed，14.00 秒，退出 0；正常发布及部分结果耗尽后的有限失败 | `action6-segmented-completion-final.log` |
+| `apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py`、`test_segment_local_integrity.py` | 9 passed，25.65 秒，退出 0；同一 outputs 目录顺序执行 | `segment-copy-reuse-final.log` |
+| `docs/hardware/tests/unit/test_validate_osmo_segments.py` | 54 passed，0.06 秒，退出 0 | `media-tool-final-unit.log` |
+
+新增服务错误分类的 6 项测试在修复前全部失败；修复后与设备目录一同通过。软件替身不承担真实固件、媒体时长或设备状态证据。
+
+### 已观察的设备与交付结果
+
+| 场景目录 | 控制、文件和客户端事实 | 证据边界 |
+| --- | --- | --- |
+| `osmo360ii-segmented-record-auto-063507` | 唯一 START、STOP 正常；3 份 OSV 和 3 份 LRF 分别交付并由客户端导入，ACK 12、水位 65 | 预览复用修复后沿原状态库完成，没有重拍。 |
+| `osmo360ii-segmented-record-manual-080632` | 包含新会话设置的安装版完成手动曝光 12 秒录像；3 份 OSV、3 份 LRF 的独立取回及客户端导入成功，ACK 11、水位 65 | 本轮完整业务链成功；媒体结论单独说明。 |
+| `osmo360ii-segmented-timelapse-auto-064635` | 2 秒间隔、300 秒目标自然完成；唯一 START，无 STOP；1 份非零 OSV 和配对 LRF 交付，零字节尾部保持观察；ACK 8、水位 39 | 采样端点及预期播放帧率尚未独立核实。 |
+| `osmo360ii-segmented-record-auto-082757` | 8 秒目标在唯一 START 保存后中断本次主机执行进程，等待 18 秒，再沿原状态库恢复；唯一 STOP 正常。5 份 OSV 和 5 份 LRF 保留，默认前 2 份原片及配对预览交付，ACK 10；新取回明确选择范围外 3 份原片及其预览，导入并 ACK 21 | 原执行恢复及后到取回前后冻结定义、集合、默认范围和控制记录相同；没有重拍、相机重启或删除文件。 |
+| `action6-segmented-record-auto-080425` | 四项会话设置、唯一 START 和唯一 STOP 均取得正常返回；两份 MP4 及两份 LRF 文件事实已观察，但三次结果读取因文件长度响应无效而失败；原拍摄错误 13，默认原片及预览取回均为错误 21，失败报告 ACK 7、水位 25 | 原拍摄和默认范围保持失败／未知。新显式 ID 取回动作 5 单独交付两份已登记 MP4，客户端导入成功并 ACK 14；没有成功的预览交付。 |
+
+Action6 在首次设置时，工具退出 0，却在 stdout 明确报告 `server not exist`。相机进程和画面管线日志显示异常；一次相机服务重启请求后仍无法设置。随后整机重启，取得新的 boot ID，四条设置均返回服务连接及注册成功；后续 12 秒录像的控制命令没有再次出现 `-1002`。这证明上述执行顺序后的观察结果，不把服务异常解释为此前 STOP 失败的已证实原因。原始设置、服务及重启记录保存在 `session-settings-device/`。
+
+Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现：旧 DNG 文件的长度命令退出 0、stdout 和 stderr 均为空。容器原 ADB 34.0.4 的标准输入选项对照、官方 ADB 37.0.1 客户端、shell 变量收集后打印、独立版本帧调用均有单独归档；这些对照仍分别出现空响应、退出 255 或超时，尚未证明可稳定替代当前查询。新版客户端来自 [Android 官方发布入口](https://developer.android.com/tools/releases/platform-tools)，只用于独立探针，没有替换任务使用的客户端。原因尚未确定。读取器继续拒绝空长度，不将错误当作空目录、完整扫描或默认范围。已终态的原任务没有重新开放、重拍或补发控制命令。
+
+### 媒体与独立源摘要
+
+相机端另行执行摘要命令取得上述五场景的 26 份已交付源文件 SHA-256，逐项与读取、交付和本地副本核对，26／26 一致。原始输出和对照位于 `independent-source-digests/`；不依赖 `device_files.sha256` 是否已填写来声称取得设备端独立摘要。
+
+OSMO 普通自动与手动两轮的 P7 报告分别位于 `media-osmo-auto-v2/`、`media-osmo-manual-v2/`。目标均为 12000 毫秒，默认短缺容限 100 毫秒；默认范围和全部保留集合的两路主视频分别累计约 12345.667、12145.467 毫秒，短缺均为 0。自动轮首个非尾段为 5505.5 毫秒，保留其比 5.5 秒多 5.5 毫秒的观察，不将聚合通过表述为逐段上界均满足。手动轮前两非尾段约 5438.767、5005 毫秒。全部主视频及音频逐流解码退出 0，timescale、帧率估计及私有流 codec 诊断均保留；段间连续性未由聚合时长证明。
+
+OSMO 原生延时的 `media-osmo-native-v2/` 报告测得两路各 150 帧、5005 毫秒；因缺少独立采样端点和预期帧率依据，预期播放时长保持未知，不套用 Action6 的 151 帧规则。
+
+OSMO 异常多录的 `media-osmo-overrun-v2/` 报告分别测量全部 5 段和默认 2 段。两路全部保留集合各约 24991.633 毫秒，默认范围各约 10443.767 毫秒，8 秒目标的短缺均为 0；范围外原片不参与默认覆盖。`scope-comparison.json` 核对主机恢复、后到的明确 ID 取回前后默认范围及唯一控制不变。完整视频和音频解码均退出 0，保留与正常轮相同类别的诊断，段间连续性仍未单独证明。
+
+Action6 的 `media-action6-record-explicit-v2/` 报告只分析两份显式交付原片：主视频约 10844.167 毫秒／325 帧、1801.8 毫秒／54 帧，完整解码均退出 0 并保留 timescale 诊断。其和为已取回文件的实测总和，不能代替失败来源的完整扫描或默认范围结论；音频未单独枚举，不能据此断言不存在。
+
 ## OSMO 分段目录命名的软件验证
 
 OSMO 目录、分段解析及错误位置使用[命名契约](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#设备分段与命名契约)中的 `CAM_001`、`CAM_002`。相关组件、安装版联合链和媒体验收清单使用同一目录形式；文件名中的 datetime 保持十四位。目录内索引与跨目录数值顺序、完整主干配对及独立产物身份遵守原契约。
@@ -30,7 +82,7 @@ OSMO 目录、分段解析及错误位置使用[命名契约](../superpowers/spe
 | 分段错误报告与历史重建 | 2 passed，30.31 秒，退出 0；覆盖缺口详情、保留原片、默认前缀及清理后的同边界原字节重建。 |
 | 历史实机路径离线复核 | 使用既有自动录像归档中的两份 OSV 及对应 LRF，四条实际路径均取得正确目录号、索引及后缀。 |
 
-独立只读审查未发现阻塞项。收尾检查通过 5264 个本地文件链接，新增引用锚点已按实际标题核对，`git diff --check` 通过。本节提供软件及历史路径离线证据，不表示重新完成 ARM 部署、相机拍摄或现场媒体核验；设备验收继续按[分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成-arm-与实机验收)取得各自证据。
+独立只读审查未发现阻塞项。收尾检查通过 5264 个本地文件链接，新增引用锚点已按实际标题核对，`git diff --check` 通过。本节提供软件及历史路径离线证据，不表示重新完成 ARM 部署、相机拍摄或现场媒体核验；设备验收继续按[分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成容器与实机验收)取得各自证据。
 
 ## OSMO 分段生产接入与联合验收（2026-10-22 UTC）
 

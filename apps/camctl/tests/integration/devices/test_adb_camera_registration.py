@@ -143,13 +143,15 @@ def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_
 
 
 @pytest.mark.asyncio
-async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, environment):
+@pytest.mark.parametrize("model", [CameraModel.ACTION6, CameraModel.OSMO360II])
+async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, environment, model):
     from camctl.bootstrap.lifecycle import _initialize_recovery
+    from camctl.devices.drivers.adb_cameras.commands import OSMO_RECORD_FORMAT
 
-    config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": CameraModel.OSMO360II,
+    config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": model,
                            "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
     registration.register_builtin_camera_drivers(config)
-    driver = drivers_runtime.current_registry().entry(CameraModel.OSMO360II).driver
+    driver = drivers_runtime.current_registry().entry(model).driver
     commands = []
 
     class Transport:
@@ -160,8 +162,8 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
             return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
 
     driver.transport = Transport()
-    request = ControlRequest("start_recording", DeviceBinding("cam-1", CameraModel.OSMO360II),
-        _params(CameraModel.OSMO360II, "camera_record"),
+    request = ControlRequest("start_recording", DeviceBinding("cam-1", model),
+        _params(model, "camera_record"),
         AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), lambda: None)
     assert (await driver.control(request)).error is None
     before = len(commands)
@@ -169,8 +171,9 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
     build_catalog(config, definitions_runtime.current_driver_definitions()).describe_document()
     assert len(commands) == before
     assert (await driver.control(request)).error is None
-    fixed = ("simulate_device -n DualGuiCmd 12", "simulate_device -s 0xa13cdabe 3",
-             "simulate_device -s BaseFormat 6 69 0")
+    fixed = tuple(shlex.join(command) for command in driver.contract.session_setup_commands)
+    if model is CameraModel.OSMO360II:
+        fixed = (*fixed, shlex.join(OSMO_RECORD_FORMAT))
     assert all(commands.count(command) == 1 for command in fixed)
     _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
     assert (await driver.control(request)).error is None

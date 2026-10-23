@@ -1,7 +1,7 @@
 """Action6 的 ADB 进程替身；控制响应沿真实格式，文件脚本实际执行。
 
-此脚本复制到独立部署目录并从 PATH 调用。它不导入 camctl，也不
-替换驱动工厂、响应解析器或时钟。相机绝对路径映射到临时文件树。
+此脚本复制到独立部署目录并从 PATH 调用。设置命令从安装包声明读取，
+不替换驱动工厂、响应解析器或时钟。相机绝对路径映射到临时文件树。
 """
 
 from __future__ import annotations
@@ -184,13 +184,14 @@ def main():
               "pid": os.getpid(), "cli_pid": os.getppid(), **_clock_fields("started")}
     words = shlex.split(script)
     if words and words[0] == "simulate_device":
-        if len(words) != 4 or words[:3] != ["simulate_device", "-s", "bitrate"] or words[3] not in {"1", "2"}:
+        from camctl.devices.drivers.adb_cameras.commands import ACTION6_SESSION_SETUP, ACTION_BITRATE
+        if tuple(words) not in (*ACTION6_SESSION_SETUP, *ACTION_BITRATE.values()):
             raise ValueError(f"未声明的模拟设置调用: {words!r}")
         record.update(kind="setting", command=words)
         record["returned_ns"] = time.monotonic_ns()
         record.update(**_clock_fields("returned"), exitcode=0)
         _append(calls, record)
-        sys.stdout.write("name [bitrate]\nlink to server rlt 0\nregister to server successs\n")
+        sys.stdout.write("link to server rlt 0\nregister to server successs\n")
         return 0
     if words and words[0] == "dji_mb_ctrl":
         if words[:words.index("-c") + 1] not in (

@@ -140,8 +140,7 @@ class Action6ContractTransport:
         if command in self.overrides:
             return self.overrides[command]
         if command[0] == "simulate_device":
-            output = (b"name [DeviceRecordRecSettingBitRate]\n"
-                      b"link to server rlt 0\nregister to server successs\n")
+            output = b"link to server rlt 0\nregister to server successs\n"
         else:
             payload = (self.aperture_payload if command[-3:-1] == ("-c", "0x26")
                        else "00")
@@ -284,7 +283,7 @@ async def test_action6_record_simulate_device_zero_exit_accepts_bitrate_command(
 
     scripts = [shlex.split(shlex.split(call.argv[5])[2]) for call in transport.calls]
     start = ["dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "02", "01"]
-    assert [script for script in scripts if script[0] == "simulate_device"] == [
+    assert [script for script in scripts if script[:3] == ["simulate_device", "-s", "bitrate"]] == [
         ["simulate_device", "-s", "bitrate", value]
     ]
     assert scripts.count(start) == 1
@@ -595,7 +594,7 @@ async def test_action6_cancel_after_a_settled_setting_returns_its_call_history(m
     scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
     video_mode = ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2",
                   "-c", "0xe1", "01")
-    assert scripts == [video_mode]
+    assert scripts == [*camera_commands.ACTION6_SESSION_SETUP, video_mode]
     assert result.outcome.error.code == "transport_cancelled"
     assert result.outcome.observations == ()
     assert _attached_call(result, video_mode)["stdout_hex"] == (
@@ -611,7 +610,7 @@ async def test_action6_aperture_result_survives_dispatch_loss_before_next_comman
 
     scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
     assert transport.aperture_seen
-    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[:3] == ("simulate_device", "-s", "bitrate") for command in scripts)
     assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
     assert result.outcome.error.code == "window_closed"
     assert result.outcome.observations == ()
@@ -633,7 +632,7 @@ async def test_action6_aperture_result_survives_full_start_deadline_expiry():
 
     scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
     assert transport.aperture_seen
-    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[:3] == ("simulate_device", "-s", "bitrate") for command in scripts)
     assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
     assert result.outcome.error.code == "start_preparation_timeout"
     assert result.outcome.observations == ()
@@ -658,7 +657,7 @@ async def test_action6_aperture_result_survives_cancellation_after_settled_call(
 
     scripts = [tuple(shlex.split(shlex.split(call.argv[5])[2])) for call in transport.calls]
     assert transport.aperture_seen
-    assert not any(command[0] == "simulate_device" for command in scripts)
+    assert not any(command[:3] == ("simulate_device", "-s", "bitrate") for command in scripts)
     assert not any(command[-3:] == ("-c", "02", "01") for command in scripts)
     assert result.outcome.error.code == "transport_cancelled"
     assert result.outcome.observations == ()

@@ -5,14 +5,12 @@ from dataclasses import replace
 import pytest
 
 from camctl.devices.bindings import DeviceBinding
+from camctl.devices.drivers.adb_cameras.commands import OSMO_SESSION_SETUP
 from camctl.operations.models import AttemptStatus, AttemptTicket
 from .test_osmo360ii_capture import Transport, _driver, _request
 
 
-INITIAL_SETTINGS = [
-    ["simulate_device", "-n", "DualGuiCmd", "12"],
-    ["simulate_device", "-s", "0xa13cdabe", "3"],
-]
+INITIAL_SETTINGS = [list(command) for command in OSMO_SESSION_SETUP]
 FORMAT = ["simulate_device", "-s", "BaseFormat", "6", "69", "0"]
 
 
@@ -35,7 +33,7 @@ async def test_fixed_settings_once_but_bitrate_for_each_capture(first):
         actual = transport.commands[before:]
         assert actual[-2] == ["simulate_device", "-s", "DeviceRecordRecSettingBitRate", value]
         assert actual[-1][-2:] == (["02", "01"] if kind == "record" else ["01", "01"])
-    assert transport.commands[:2] == INITIAL_SETTINGS
+    assert transport.commands[:len(INITIAL_SETTINGS)] == INITIAL_SETTINGS
     assert all(transport.commands.count(command) == 1 for command in (*INITIAL_SETTINGS, FORMAT))
 
 
@@ -49,7 +47,7 @@ async def test_each_device_has_its_own_fixed_settings():
     for serial in ("serial-1", "serial-2"):
         commands = [command for command, spec in zip(transport.commands, transport.specs)
                     if spec.argv[2] == serial]
-        assert commands[:2] == INITIAL_SETTINGS
+        assert commands[:len(INITIAL_SETTINGS)] == INITIAL_SETTINGS
         assert all(commands.count(command) == 1 for command in (*INITIAL_SETTINGS, FORMAT))
 
 
@@ -61,7 +59,7 @@ async def test_new_session_repeats_fixed_settings():
     driver.begin_session()
     before = len(transport.commands)
     await driver.control(request("record"))
-    assert transport.commands[before:before + 2] == INITIAL_SETTINGS
+    assert transport.commands[before:before + len(INITIAL_SETTINGS)] == INITIAL_SETTINGS
     assert all(transport.commands.count(command) == 2 for command in (*INITIAL_SETTINGS, FORMAT))
 
 
@@ -71,7 +69,7 @@ async def test_partial_setup_keeps_only_reliably_accepted_settings():
     driver = _driver(transport)
     result = await driver.control(request("record"))
     assert result.outcome.status is AttemptStatus.FAILED
-    assert transport.commands == INITIAL_SETTINGS
+    assert transport.commands == INITIAL_SETTINGS[:2]
     transport.fail_at = None
     assert (await driver.control(request("record"))).error is None
     assert transport.commands.count(INITIAL_SETTINGS[0]) == 1
@@ -80,7 +78,8 @@ async def test_partial_setup_keeps_only_reliably_accepted_settings():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", [{"stderr": b"setting failed"}, {"output_failure": "truncated"},
-                                  {"error": "timeout"}])
+                                  {"error": "timeout"},
+                                  {"output": b"SimuDev: when send control set data, server not exist!\n"}])
 async def test_unknown_initial_setting_is_not_skipped_on_next_authorized_start(fault):
     class FaultTransport(Transport):
         async def run(self, spec, stop):
@@ -99,7 +98,8 @@ async def test_unknown_initial_setting_is_not_skipped_on_next_authorized_start(f
 async def test_cancellation_after_fixed_setup_prevents_start_and_preserves_accepted_settings():
     transport = Transport()
     driver = _driver(transport)
-    selected = replace(request("record"), dispatch_check=lambda: "canceled" if len(transport.commands) >= 2 else None)
+    selected = replace(request("record"), dispatch_check=lambda: "canceled"
+                       if len(transport.commands) >= len(INITIAL_SETTINGS) else None)
     assert (await driver.control(selected)).error is not None
     assert transport.commands == INITIAL_SETTINGS
     assert (await driver.control(request("record"))).error is None
@@ -126,4 +126,4 @@ async def test_stop_does_not_initialize_or_mark_the_camera_as_initialized():
     assert (await driver.stop(selected)).error is None
     assert len(transport.commands) == 1 and transport.commands[0][-2:] == ["02", "00"]
     await driver.control(request("record"))
-    assert transport.commands[1:3] == INITIAL_SETTINGS
+    assert transport.commands[1:1 + len(INITIAL_SETTINGS)] == INITIAL_SETTINGS

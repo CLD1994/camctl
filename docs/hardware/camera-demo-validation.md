@@ -400,7 +400,7 @@ PY
 
 ## OSMO 正式计划与分段验收
 
-OSMO 的现场安排和分层验收项见[分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成-arm-与实机验收)。使用上节从安装包提取的资源，将 OSMO 绑定合并到实际部署配置，初始化、能力导出和 host 使用同一配置及状态库。以下示例采用提取出的 `osmo360ii-config.toml`；已有部署使用实际配置路径。
+OSMO 的现场安排和分层验收项见[分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成容器与实机验收)。使用上节从安装包提取的资源，将 OSMO 绑定合并到实际部署配置，初始化、能力导出和 host 使用同一配置及状态库。以下示例采用提取出的 `osmo360ii-config.toml`；已有部署使用实际配置路径。
 
 在终端 B 导出能力，再生成普通录像计划：
 

@@ -29,7 +29,10 @@ from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.io import LocalSourceReader
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskId, FileTaskResult, FileTaskExecutor
-from camctl.outputs.segment_copy_reuse import bound_waiters_at_publication
+from camctl.outputs.segment_copy_reuse import (
+    bound_waiters_at_publication,
+    read_bound_check_copy,
+)
 from camctl.outputs.obtain_flow import (
     DeviceReadAssembly,
     ObtainRuntime,
@@ -161,13 +164,14 @@ async def _stopped_segmented_world(tmp_path):
     return owned, runtime, action_id, handler
 
 
-async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound(tmp_path):
+@pytest.mark.parametrize("mode", ["default", "preview"])
+async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound(tmp_path, mode):
     owned, runtime, source_action_id, handler = await _stopped_segmented_world(tmp_path)
     try:
         runtime.check_config = type(runtime.check_config)(
             1, Decimal("1"), Decimal(0))
         early_action_id, early_selection_id = _obtain(
-            owned, runtime, source_action_id, "default", 2)
+            owned, runtime, source_action_id, mode, 2)
 
         context = _stop_context(owned, source_action_id)
 
@@ -198,6 +202,20 @@ async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound
             (early_action_id, early_selection_id)]
         assert (late_action_id, late_selection_id) not in {
             (item.action_id, item.selection_id) for item in waiters}
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM segment_inspections").fetchone()[0] == 0
+        kind = enum_for("outputs.kind")
+        selected_kind = kind.PREVIEW if mode == "preview" else kind.ORIGINAL
+        (source_file_id,) = owned.connection.execute(
+            "SELECT device_file_id FROM outputs WHERE source_action_id=? AND kind=?"
+            " ORDER BY id LIMIT 1", (source_action_id, int(selected_kind)),
+        ).fetchone()
+        assert read_bound_check_copy(
+            source_action_id=source_action_id,
+            source_device_file_id=source_file_id,
+            obtain_action_id=early_action_id,
+            selection_id=early_selection_id,
+            owned=owned) is None
     finally:
         owned.connection.close()
 

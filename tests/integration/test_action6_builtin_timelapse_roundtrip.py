@@ -140,7 +140,8 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
         assert not [c for c in calls if c["kind"] == "stop"]
         preset = [c for c in calls if c.get("code") == "6c"]
         assert len(preset) == 1 and preset[0]["payload"] == "0400020a002c0100000000000000000000"
-        assert not [c for c in calls if c.get("code") in {"26"} or c["script"].startswith("simulate_device ")]
+        assert not [c for c in calls if c.get("code") in {"26"}
+                    or c["script"].startswith("simulate_device -s bitrate ")]
         listing = [c for c in calls if c.get("file_kind") == "directory" and c.get("started_epoch") == release["epoch"]]
         assert listing and listing[0]["started_clock_ns"] >= initial["monotonic_ns"] + 330_000_000_000
         files = query_state(deployment.state_db,

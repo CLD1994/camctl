@@ -1782,7 +1782,7 @@ def _append_file_findings(
                 },
             )
     main_video_count = len(media.get("main_videos", []))
-    if main_video_count != EXPECTED_MAIN_VIDEO_STREAMS:
+    if file_result["role"] == "original" and main_video_count != EXPECTED_MAIN_VIDEO_STREAMS:
         _append_finding(
             connection,
             {

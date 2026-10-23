@@ -48,6 +48,7 @@ class _FailureReason(StrEnum):
     RESPONSE_LENGTH_MISMATCH = "response_length_mismatch"
     RESPONSE_PAYLOAD_UNCONFIRMED = "response_payload_unconfirmed"
     CONFIRMATION_UNAVAILABLE = "confirmation_unavailable"
+    SIMULATION_SERVICE_UNAVAILABLE = "simulation_service_unavailable"
 
 
 def _call_details(raw: RawToolOutcome) -> dict[str, JsonValue]:
@@ -77,6 +78,20 @@ def _call_failure(raw: RawToolOutcome) -> _FailureReason | None:
         return _FailureReason.STDERR_PRESENT
     if raw.output is None:
         return _FailureReason.STDOUT_UNAVAILABLE
+    return None
+
+
+def _simulation_call_failure(raw: RawToolOutcome) -> _FailureReason | None:
+    failure = _call_failure(raw)
+    if failure is not None:
+        return failure
+    # 工具可能退出 0，却在 stdout 明确报告没有服务可接收设置。
+    if any(message in raw.output for message in (
+        b"SimuDev: get correct server service failed",
+        b"SimuDev: when send control set data, server not exist!",
+        b"SimuDev: when send control notify data, server not exist!",
+    )):
+        return _FailureReason.SIMULATION_SERVICE_UNAVAILABLE
     return None
 
 
@@ -158,7 +173,7 @@ class Action6DjiInterpreter:
 
 @dataclass(frozen=True)
 class Action6SimulationSettingInterpreter:
-    """`simulate_device` 的本地成功只确认码率命令已接受，不确认实际码率。"""
+    """`simulate_device` 的本地成功只确认设置命令已接受，不确认相机实际状态。"""
 
     activity_id: str
 
@@ -167,7 +182,7 @@ class Action6SimulationSettingInterpreter:
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
-        failure = _call_failure(raw)
+        failure = _simulation_call_failure(raw)
         if failure is not None:
             details["reason"] = failure.value
             return InterpretedFacts((), ErrorValue(

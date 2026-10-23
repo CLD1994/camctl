@@ -29,7 +29,7 @@ Hasselblad 完整参数及 RAW／JPEG 的安装版软件证据见[联合续验�
 | 设置类别 | 调用时机 | 客户端处理 |
 | --- | --- | --- |
 | 用户可选择的设置，例如码率档位 | 每个拍摄动作执行准备时，按该动作携带的参数动态发送相应设置命令 | 从设备声明的允许值中选择，并随动作保存到计划 |
-| 驱动固定的设置，包括下文两项 OSMO 会话设置 | 本次会话首次使用对应相机时执行一次，后续使用不重复发送 | 由驱动管理，不提供用户调整选项 |
+| 驱动固定的设置，包括下文相机会话设置 | 本次会话首次使用对应相机时执行一次，后续使用不重复发送 | 由驱动管理，不提供用户调整选项 |
 
 调用时机按每台相机分别管理。固定设置按需执行，程序启动本身不触发相机设置；用户可选择的设置继续服从各拍摄动作的参数要求。
 
@@ -227,16 +227,26 @@ dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00
 
 ![Action6 30 分钟任务原图](assets/camera-control/action-timelapse-30min.jpeg)
 
-## OSMO 360 / 360 II 会话设置
+## 相机会话设置
 
-以下两条命令由用户于 2026-10-19 转交，来自官方新增接口。命令在相机内的 shell 执行，按[固定设置的调用时机](#相机设置命令的调用时机)由驱动管理。
+下表命令在相机内的 shell 执行。驱动按[相机会话准备](../architecture/camera-parameters.md#相机会话准备)管理调用时机和失败语义。
+
+| 适用设备 | 设置用途 | 相机内命令 |
+| --- | --- | --- |
+| Action6、OSMO 360 / 360 II | 跳过时间设置 | `simulate_device -n DualGuiCmd 12` |
+| Action6、OSMO 360 / 360 II | 关闭自动休眠 | `simulate_device -s DevicePowerUserIdleControlAutoShutdownTime 0` |
+| Action6 | 关闭主屏幕实时画面 | `simulate_device -s DeviceSystemLiveviewStream 0 0` |
+| Action6 | 关闭前置屏幕实时画面 | `simulate_device -s DeviceSystemLiveviewStream 1 0` |
+
+用户于 2026-10-23 提供以上适用范围，并说明 Action6 未接两块屏幕时，需要关闭这两路实时画面来解决 `duss_event_send_sync_v2() error: -1002`。命令接受结果、相机实际运行及该错误是否消失分别由实机验证记录说明。
+
+### OSMO 360 / 360 II 会话设置
+
+OSMO 360 / 360 II 在上述通用设置之外还请求仅充电。此命令由用户于 2026-10-19 转交，来自官方新增接口。
 
 | 设置用途 | 相机内命令 |
 | --- | --- |
-| 跳过时间设置 | `simulate_device -n DualGuiCmd 12` |
 | 选择仅充电 | `simulate_device -s 0xa13cdabe 3` |
-
-本次资料同步未执行这两条命令，尚无实际返回、连接状态变化及设备效果的验证记录。
 
 ## OSMO 360 / 360 II 全景录像
 

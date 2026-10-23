@@ -1,7 +1,12 @@
 """从 Action6 格式声明建立结果页读取器配置。"""
 
+from dataclasses import replace
+
+from camctl.devices.tasks import VideoResultMode
 from .action6_formats import ACTION6_FILE_FORMATS
-from .bounded_result_reading import ResultFormat, ResultProfile, list_declared_results
+from .bounded_result_reading import (
+    PreviewReadMode, ResultFormat, ResultProfile, list_declared_results,
+)
 
 
 ACTION6_RESULT_PROFILE = ResultProfile(
@@ -17,5 +22,11 @@ ACTION6_RESULT_PROFILE = ResultProfile(
 
 
 async def list_action6_results(driver, request, batch):
-    """列举 Action6 主页原片，并保留可选 LRF 配对诊断。"""
-    return await list_declared_results(driver, request, batch, ACTION6_RESULT_PROFILE)
+    """按冻结模式列举原始分段文件，或读取单文件的可选配对。"""
+    try:
+        result_mode = VideoResultMode(request.params.get("video_result_mode"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Action6 结果读取需要明确有效的视频结果模式") from error
+    profile = (replace(ACTION6_RESULT_PROFILE, preview_read_mode=PreviewReadMode.RAW_PAGE_FILES)
+               if result_mode is VideoResultMode.SEGMENTED else ACTION6_RESULT_PROFILE)
+    return await list_declared_results(driver, request, batch, profile)

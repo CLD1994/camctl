@@ -10,7 +10,7 @@ from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, C
                                   EndControl, StartReturn, VideoResultMode,
                                   video_result_mode_for_declaration)
 from .action6_formats import product_rules_for_output
-from .commands import ACTION_APERTURE, ACTION_BITRATE, CameraModel
+from .commands import ACTION_APERTURE, ACTION_BITRATE, ACTION6_SESSION_SETUP, CameraModel
 from .contracts import CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
@@ -104,6 +104,8 @@ class _Action6Contract(CameraContract):
                 if callable(cap.task_factory) else None),
             description=cap.description + "MP4 为视频原片，唯一同目录、同 stem 的 LRF 为可选视频预览；"
                 "JPG、DNG 为独立照片原片，不生成照片预览。"
+                "本会话首次拍摄准备时跳过时间设置、关闭自动休眠，并关闭两路屏幕实时画面；"
+                "本地设置命令被接受不表示已读回相机实际状态。"
                 + ("完成判断采用正常设备执行有限目标后自行结束的运行假设；"
                    "目标后结果余量和提前停止后的文件等待各为 30 秒，均非实测保证。"
                    if cap.action_type == "camera_timelapse" else
@@ -142,8 +144,10 @@ def action6_record_contract():
             script = shlex.split(argv[5])[2]
             command = tuple(shlex.split(script))
             interpreter = (Action6SimulationSettingInterpreter(request.ticket.target_id)
-                if (kind is CameraCall.SETTING and request.operation == "start_recording"
-                    and command in ACTION_BITRATE.values())
+                if (kind is CameraCall.SETTING
+                    and request.operation in {"start_recording", "start_timelapse"}
+                    and (command in ACTION6_SESSION_SETUP
+                         or (request.operation == "start_recording" and command in ACTION_BITRATE.values())))
                 else Action6DjiInterpreter(kind, request.operation, request.ticket.target_id,
                     start_return_meaning=request.start_return_meaning))
             operation = request.ticket.operation
@@ -158,6 +162,8 @@ def action6_record_contract():
             **{kind: file_command_factory(kind, tools=tools, evidence=evidence)
                for kind in (CameraCall.FILE_QUERY, CameraCall.DELETE)}},
         file_tools=tools, digest_timeout_s=_digest_timeout, evidence=evidence,
+        session_setup_commands=ACTION6_SESSION_SETUP,
+        session_once_commands=frozenset(ACTION6_SESSION_SETUP),
         non_blocking_setting_commands=frozenset(
             ("start_recording", command) for command in ACTION_APERTURE.values()),
         setting_call_history_operations=frozenset({"start_recording"}),

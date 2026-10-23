@@ -103,7 +103,8 @@ def _evidence(result):
 
 async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40"),
                 params=None, prior_result_entries=None):
-    request_params = {"activity_id": "7", "output_scope": {"directories": [ROOT]}, "cursor": cursor}
+    request_params = {"activity_id": "7", "output_scope": {"directories": [ROOT]}, "cursor": cursor,
+                      "video_result_mode": "single_file"}
     if context is not None:
         request_params["completion_context"] = context
     if params is not None:
@@ -118,6 +119,36 @@ async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=D
 def _validate(result):
     from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
     return validate_outcome(TICKET, result.outcome, action6_record_contract().evidence)
+
+
+@pytest.mark.asyncio
+async def test_segmented_results_return_raw_preview_and_photos_without_pair_rescan():
+    jpeg = ROOT + "/folder/frame.JPG"
+    fs = Filesystem([LRF, MP4, jpeg], sizes={LRF: 0}, pair_scan_error=True)
+    result = await _list(fs, context=_natural(), batch=1,
+                         params={"video_result_mode": "segmented"})
+    assert result.error is None
+    assert len(fs.directory_calls) == 1
+    assert fs.metadata_paths == [LRF]
+    assert [(entry["identity"], entry["size_bytes"], entry["paired_identity"])
+            for entry in _page(result)["entries"]] == [(LRF, 0, None)]
+    assert _page(result)["next_cursor"] == DirectoryCursor(BINDING, (ROOT,), 0, LRF).as_json()
+    _validate(result)
+
+    photo_fs = Filesystem([jpeg])
+    photo = await _list(photo_fs, context=_natural(),
+                        params={"video_result_mode": "segmented"})
+    assert _page(photo)["entries"][0]["format_id"] == "jpeg"
+    assert _page(photo)["set_finalized"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "invalid", 1])
+async def test_result_reader_rejects_invalid_frozen_mode_before_file_access(mode):
+    fs = Filesystem([MP4])
+    with pytest.raises(ValueError, match="模式"):
+        await _list(fs, context=_natural(), params={"video_result_mode": mode})
+    assert fs.directory_calls == []
 
 
 @pytest.mark.asyncio

@@ -312,11 +312,12 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
             listing = await common._listing_round(runtime, action_id)
         if listing.phase in (common.ListingPhase.IN_FLIGHT, common.ListingPhase.RETRY_WAIT):
             return None
-        if listing.phase is common.ListingPhase.EXHAUSTED:
+        exhausted = listing.phase is common.ListingPhase.EXHAUSTED
+        if exhausted:
             listing = common._saved_result_listing(runtime, action_id)
         register_segment_observations(runtime, action_id, listing)
         finalized = common._listing_finalized(listing)
-        if not finalized and not (listing.phase is common.ListingPhase.EXHAUSTED or canceled):
+        if not finalized and not (exhausted or canceled):
             common._finish_listing_result(runtime, listing, retry_wait=True)
             return None
         if finalized:
@@ -420,9 +421,13 @@ def finish_action6_retained_unconfirmed(runtime, action, ref):
             )
         _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
         row = repository.read_result_set(ref, runtime.owned)
-    if row["state"] != int(enum_for("segment_sets.state").DECIDED):
+    if row["state"] != int(enum_for("segment_sets.state").ASSESSED):
         raise ConsistencyError("Action6 保留来源缺少可靠的有限未知结论")
-    failure = RecordingFailure(
+    from camctl.persistence.repositories.segment_check_conclusions import read_verified_conclusion
+
+    conclusion = read_verified_conclusion(runtime.owned.connection, row)
+    actual_failure = conclusion["current_failure_json"]
+    failure = (None if actual_failure is None else RecordingFailure(**actual_failure)) or RecordingFailure(
         "capture_result_unconfirmed",
         {"activity_id": str(row["activity_id"]), "reason": "outputs_unknown"},
     )

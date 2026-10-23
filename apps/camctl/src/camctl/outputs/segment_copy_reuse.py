@@ -30,6 +30,7 @@ _ACTION_STATUS = enum_for("actions.status")
 _SELECTION_STATUS = enum_for("obtain_source_selections.status")
 _ACTION_TYPE = enum_for("actions.type")
 _RESULT_PUBLICATION = enum_for("segment_sets.publication_kind")
+_MEMBER_ROLE = enum_for("segment_members.role")
 _COPY_VERIFICATION = enum_for("file_copies.verification_state")
 _FILE_RETENTION = enum_for("intermediate_files.retention_state")
 _FILE_CLEANUP = enum_for("intermediate_files.cleanup_state")
@@ -248,9 +249,10 @@ def read_bound_check_copy(
             "SELECT m.id,s.published_event_id FROM segment_members m"
             " JOIN segment_sets s ON s.id=m.set_id"
             " WHERE s.action_id=? AND s.publication_kind=?"
-            " AND m.file_id=? AND s.published_event_id IS NOT NULL LIMIT 2",
+            " AND m.file_id=? AND m.role=?"
+            " AND s.published_event_id IS NOT NULL LIMIT 2",
             (source_action_id, int(_RESULT_PUBLICATION.RESULT),
-             source_device_file_id),
+             source_device_file_id, int(_MEMBER_ROLE.ORIGINAL)),
         )) as cursor:
             rows = cursor.fetchall()
         if len(rows) > 1:

@@ -13,6 +13,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.devices.tasks import CaptureResultPolicy, VideoResultMode
 from camctl.operations.attempts import AttemptConfig
+from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 
@@ -140,6 +141,57 @@ async def _stopped_action6_record(tmp_path):
     runtime.wall_us = lambda: _NOW + 17_000_000
     runtime.monotonic_ns = lambda: 22_000_000_000
     return owned, runtime, action_id, handler, stopper
+
+
+@pytest.mark.parametrize("explicit_error", [False, True])
+async def test_action6_partial_result_exhaustion_finishes_without_another_device_read(
+    tmp_path, explicit_error,
+):
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.directory import DirectoryCursor
+
+    owned, runtime, action_id, handler, stopper = await _stopped_action6_record(tmp_path)
+    runtime.check_config = AttemptConfig(3, Decimal("1"), Decimal(0))
+    try:
+        context = _stop_context(owned, action_id)
+        entry = _entry("DJI_001/DJI_20261022100000_0007_D.MP4")
+        action = runtime.action(action_id)
+        cursor = DirectoryCursor(
+            DeviceBinding(action["device_id"], action["driver_id"]),
+            tuple(action["execution_spec_json"]["output_scope"]["directories"]),
+            0, entry["identity"])
+
+        async def read(request, batch):
+            return _completed_result(
+                request.ticket, context, entries=[entry],
+                next_cursor=cursor if explicit_error else None,
+                finalized=False,
+                error=ErrorValue("adb_metadata_failed", "device_file_access", {
+                    "reason": "metadata_response_invalid"}) if explicit_error else None)
+
+        driver = _result_port(runtime, read)
+        for _ in range(4):
+            await capture_handler(handler)(action_id, runtime)
+
+        assert driver.list_results.await_count == 3
+        assert runtime.action(action_id)["status"] == int(enum_for("actions.status").FAILED)
+        run_status = enum_for("operation_runs.status")
+        expected_run = run_status.FAILED if explicit_error else run_status.UNCONFIRMED
+        assert owned.connection.execute(
+            "SELECT status,attempts_used,retry_wait_required FROM operation_runs"
+            " WHERE responsibility_key LIKE 'results/%'"
+        ).fetchone() == (int(expected_run), 3, 0)
+        reasons = enum_for("segment_check_conclusions.reason")
+        expected_reason = reasons.EXPLICIT_RESULT_ERROR if explicit_error else reasons.RESULT_BUDGET_EXHAUSTED
+        assert owned.connection.execute(
+            "SELECT reason FROM segment_check_conclusions"
+        ).fetchone() == (int(expected_reason),)
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM file_copies").fetchone() == (0,)
+        stopper.stop.assert_awaited_once()
+    finally:
+        owned.connection.close()
 
 
 async def test_action6_ordinary_normal_publishes_all_mp4_lrf_and_photo_without_media(

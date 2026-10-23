@@ -83,7 +83,7 @@ def _driver(monkeypatch, responses, *, wait_error=False):
 
 
 async def _list(driver, *, context=None, cursor=None, timeout_s=Decimal("10")):
-    params = {"activity_id": "7", "output_scope": {"directories": [ROOT]}}
+    params = {"activity_id": "7", "video_result_mode": "single_file", "output_scope": {"directories": [ROOT]}}
     if context is not None:
         params["completion_context"] = context
     if cursor is not None:

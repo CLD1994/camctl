@@ -22,6 +22,20 @@ def load_subject():
     return module
 
 
+@pytest.mark.parametrize("role", ["original", "preview"])
+def test_main_video_count_is_checked_only_for_originals(monkeypatch, role):
+    subject = load_subject()
+    findings = []
+    monkeypatch.setattr(subject, "_append_finding", lambda connection, value: findings.append(value))
+    subject._append_file_findings(None, {
+        "file_id": "file-1", "role": role,
+        "local_copy": {"identity_status": "unknown", "identity_unknown_reasons": ["source_digest_missing"]},
+        "media": {"probe_stderr": "", "decode_checks": [], "main_videos": []},
+    })
+    assert any(finding["category"] == "source_copy_identity" for finding in findings)
+    assert any(finding["category"] == "main_video_stream_count" for finding in findings) is (role == "original")
+
+
 def valid_manifest():
     return {
         "manifest_version": 1,

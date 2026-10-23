@@ -345,7 +345,7 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         assert sum(call["kind"] == "stop" for call in calls) == 1
         aperture_commands = [call for call in calls if call.get("code") == "26"]
         assert len(aperture_commands) == 1 and aperture_commands[0]["payload"] == "1801"
-        bitrate_commands = [call for call in calls if call["script"].startswith("simulate_device ")]
+        bitrate_commands = [call for call in calls if call["script"].startswith("simulate_device -s bitrate ")]
         assert len(bitrate_commands) == 1
         assert bitrate_commands[0]["command"] == ["simulate_device", "-s", "bitrate", "2"]
         directory_after_stop = [call for call in calls if call["kind"] == "file"

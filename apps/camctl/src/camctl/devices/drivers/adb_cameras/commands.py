@@ -107,8 +107,17 @@ OSMO_BITRATE = {
     "standard": BitrateSetting(120, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "1")),
     "high": BitrateSetting(170, ("simulate_device", "-s", "DeviceRecordRecSettingBitRate", "2")),
 }
-OSMO_SESSION_SETUP = (
+COMMON_SESSION_SETUP = (
     ("simulate_device", "-n", "DualGuiCmd", "12"),
+    ("simulate_device", "-s", "DevicePowerUserIdleControlAutoShutdownTime", "0"),
+)
+ACTION6_SESSION_SETUP = (
+    *COMMON_SESSION_SETUP,
+    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
+    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
+)
+OSMO_SESSION_SETUP = (
+    *COMMON_SESSION_SETUP,
     ("simulate_device", "-s", "0xa13cdabe", "3"),
 )
 OSMO_RECORD_FORMAT = ("simulate_device", "-s", "BaseFormat", "6", "69", "0")

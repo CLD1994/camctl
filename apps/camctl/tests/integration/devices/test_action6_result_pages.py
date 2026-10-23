@@ -72,13 +72,13 @@ class Transport:
             None, None, stderr=b"")
 
 
-async def _world(owned, tmp_path, monkeypatch, outputs, baseline=()):
+async def _world(owned, tmp_path, monkeypatch, outputs, baseline=(), result_mode="single_file"):
     contract = action6_record_contract()
     driver_id = CameraModel.ACTION6
     params = {"type": "action6_timelapse", "interval_s": 8, "duration_s": 1800,
         "outputs": outputs, "exposure": {"mode": "auto"}}
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": driver_id,
-        "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
+        "adb": {"serial": "serial-1"}, "video": {"result_mode": result_mode}}}}, ConfigDefaults())
     catalog = build_catalog(config, DriverDefinitions({driver_id: DriverDefinition(driver_id,
         {cap.action_type: (cap,) for cap in contract.capabilities()}, contract.declaration,
         source_storage_resolver=contract.source_storage_resolver)}))
@@ -142,6 +142,7 @@ async def _save_pages(contract, driver, runtime, ticket, context, filesystem, ba
             "output_scope": {"directories": [ROOT]},
             "cursor": None if cursor is None else cursor.as_json(),
             "completion_context": context,
+            "video_result_mode": runtime.action(1)["execution_spec_json"]["video_result_mode"],
         }, ticket, Decimal("40"))
         result = await driver.list_results(request, batch)
         assert result.error is None, result.error
@@ -215,6 +216,52 @@ async def test_action6_pages_register_many_jpegs_and_cross_page_mp4_lrf_pair(
     assert _assess_saved_pages(runtime, pages).is_complete is True
 
 
+async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan(
+        owned, tmp_path, monkeypatch):
+    from camctl.capture.handlers import ListingPhase, ListingRound
+    from camctl.capture.result_scans import SavedResultEntries
+    from camctl.capture.segment_completion import register_segment_observations
+
+    baseline = tuple(ROOT + f"/A/{index:03}.JPG" for index in range(31))
+    stem = ROOT + "/DJI_001/DJI_20261022100000_0001_D."
+    preview, video = stem + "LRF", stem + "MP4"
+    contract, driver, runtime, ticket, context, _ = await _world(
+        owned, tmp_path, monkeypatch, outputs="video", baseline=baseline,
+        result_mode="segmented")
+    filesystem = Filesystem([*baseline, preview, video])
+    monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
+    adapter = DriverResultListing(driver, BINDING, contract.evidence,
+        capture_repository=runtime.capture, owned=owned)
+    mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
+    first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
+        output_scope={"directories": [ROOT]}, completion_context=context,
+        video_result_mode=mode)
+    saved = runtime.capture.save_result_page(ResultPageSave(
+        ticket, 1, None, validate_outcome(ticket, first.outcome, contract.evidence),
+        _SCHEDULED + 3), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    context["prior_completion"] = {"result_page_event_id": saved.value.event_id,
+        "evidence": first.outcome.settlement.evidence.data["file_completion"]}
+    second = await adapter.list_page(ticket, cursor=first.next_cursor,
+        timeout_s=Decimal("40"), output_scope={"directories": [ROOT]},
+        completion_context=context, video_result_mode=mode)
+    final = runtime.capture.save_result_page(ResultPageSave(
+        ticket, 2, first.next_cursor,
+        validate_outcome(ticket, second.outcome, contract.evidence), _SCHEDULED + 4),
+        new_operation_key(), owned)
+    assert final.kind is DbOutcomeKind.COMPLETED, final.error
+    register_segment_observations(runtime, 1, ListingRound(
+        ListingPhase.LISTED, SavedResultEntries(runtime.capture, owned, final.value),
+        ticket, second.outcome, _SCHEDULED + 4, scan_complete=True, set_finalized=True))
+    assert len(filesystem.directory_calls) == 2
+    assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (2,)
+    assert owned.connection.execute(
+        "SELECT p.original_name,o.original_name FROM device_file_pairing_facts f"
+        " JOIN device_files p ON p.id=f.preview_file_id"
+        " JOIN device_files o ON o.id=f.original_file_id"
+    ).fetchall() == [(preview.rsplit("/", 1)[1], video.rsplit("/", 1)[1])]
+
+
 async def test_action6_dng_stays_dng_and_missing_frozen_jpeg_rule_is_explicit(
         owned, tmp_path, monkeypatch):
     contract, driver, runtime, ticket, context, waits = await _world(
@@ -250,7 +297,8 @@ async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears
     output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
 
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=output_scope, completion_context=context)
+        output_scope=output_scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     first_save = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, first.outcome, contract.evidence), _SCHEDULED + 3),
         new_operation_key(), owned)
@@ -268,7 +316,8 @@ async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears
         adapter = DriverResultListing(driver, BINDING, contract.evidence,
             capture_repository=runtime.capture, owned=reopened)
         second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-            output_scope=output_scope, completion_context=context)
+            output_scope=output_scope, completion_context=context,
+            video_result_mode="single_file")
 
         page = next(value.data for value in second.outcome.observations
             if value.type == "result_files_listed")
@@ -304,7 +353,8 @@ async def test_formal_result_adapter_does_not_treat_baseline_original_as_new_his
         capture_repository=runtime.capture, owned=owned)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=scope, completion_context=context)
+        output_scope=scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     saved = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, first.outcome, contract.evidence), _SCHEDULED + 3),
         new_operation_key(), owned)
@@ -318,7 +368,8 @@ async def test_formal_result_adapter_does_not_treat_baseline_original_as_new_his
 
     filesystem.paths = sorted([*photos, preview, tail_photo])
     second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-        output_scope=scope, completion_context=context)
+        output_scope=scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
 
     observation = second.outcome.settlement.evidence.data["optional_preview_observations"][0]
     page = next(value.data for value in second.outcome.observations
@@ -341,7 +392,8 @@ async def test_formal_result_adapter_rejects_a_forged_cursor_before_device_dispa
         capture_repository=runtime.capture, owned=owned)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=scope, completion_context=context)
+        output_scope=scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     saved = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, first.outcome, contract.evidence), _SCHEDULED + 3),
         new_operation_key(), owned)
@@ -350,20 +402,24 @@ async def test_formal_result_adapter_rejects_a_forged_cursor_before_device_dispa
 
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     forged = DirectoryCursor(BINDING, (ROOT,), 0, ROOT + "/z/Other.MP4")
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=forged, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     foreign_binding = DirectoryCursor(DeviceBinding("cam-1", "other-driver"),
         (ROOT,), 0, ROOT + "/z/Clip.MP4")
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=foreign_binding, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     foreign_scope = {"directories": [ROOT + "/other"]}
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-            output_scope=foreign_scope, completion_context=context)
+            output_scope=foreign_scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
 
     assert len(filesystem.directory_calls) == calls_before
 
@@ -381,7 +437,8 @@ async def test_formal_result_adapter_rejects_later_cursor_without_saved_history(
 
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=cursor, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
 
     assert filesystem.directory_calls == []
 
@@ -398,7 +455,8 @@ async def test_formal_result_adapter_does_not_read_previous_attempt_history(
         capture_repository=runtime.capture, owned=owned)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(first_ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=scope, completion_context=context)
+        output_scope=scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     saved = runtime.capture.save_result_page(ResultPageSave(first_ticket, 1, None,
         validate_outcome(first_ticket, first.outcome, contract.evidence), _SCHEDULED + 3),
         new_operation_key(), owned)
@@ -414,7 +472,8 @@ async def test_formal_result_adapter_does_not_read_previous_attempt_history(
 
     with pytest.raises(ConsistencyError):
         await adapter.list_page(second_ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
 
     assert len(filesystem.directory_calls) == calls_before
 
@@ -433,7 +492,8 @@ async def test_formal_result_adapter_rejects_continuation_after_failed_saved_pag
         capture_repository=runtime.capture, owned=owned)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=scope, completion_context=context)
+        output_scope=scope, completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     assert first.outcome.error.code == "metadata_failed"
     assert first.next_cursor == DirectoryCursor(BINDING, (ROOT,), 0, video)
     saved = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
@@ -444,6 +504,7 @@ async def test_formal_result_adapter_rejects_continuation_after_failed_saved_pag
 
     with pytest.raises(ConsistencyError):
         await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-            output_scope=scope, completion_context=context)
+            output_scope=scope, completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
 
     assert len(filesystem.directory_calls) == calls_before
