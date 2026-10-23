@@ -62,9 +62,10 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import (
-    FailReadBinding, FailReadDelivery, FinishObtain, FixSelection, OutputsRepository,
+    FailReadBinding, FailReadDelivery, FinishObtain, FixSelection,
+    OutputsRepository, ReadSourceFallback,
     ResolveSources, StartObtainAction, load_obtain_facts,
-    load_selection_facts)
+    load_selection_facts, read_source_fallback_key)
 
 __all__ = [
     "DeviceReadAssembly",
@@ -79,6 +80,8 @@ _ITEM_STATUS = enum_for("obtain_items.status")
 _DELIVERY_STATUS = enum_for("deliveries.status")
 _VERIFICATION = enum_for("file_copies.verification_state")
 _OUTPUT_KIND = enum_for("outputs.kind")
+_RUN_STATUS = enum_for("operation_runs.status")
+_ATTEMPT_STATUS = enum_for("operation_attempts.status")
 
 #: 已完成副本校验的固定事实组合（与拷贝收尾口径一致）。
 _VERIFICATION_DONE = (3, 5)
@@ -383,7 +386,8 @@ async def _delivery_candidate(
                 target_extension="part", delivery_extension=extension,
                 delivery_display_name=(
                     f"{stem}-{plan_name}-{source_action_name}.{extension}"),
-                config=None, occurred_at=now,
+                config=_inspection_copy_read_config(runtime, int(device_file_id)),
+                occurred_at=now,
                 reuse_inspection_id=bound.inspection.inspection_id)
         return _device_source_candidate(
             runtime, action, item_id, output_id, device_file_id, now,
@@ -432,6 +436,28 @@ def _device_source_candidate(
             timeout_s=assembly.read_idle_timeout_s,
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now, binding_result=binding_result)
+
+
+def _inspection_copy_read_config(
+        runtime: ObtainRuntime, device_file_id: int) -> OperationConfig | None:
+    """把可用原设备装配配置冻结到检查副本的正式取回流程。"""
+    with closing(runtime.owned.connection.execute(
+        "SELECT a.device_id FROM device_files f"
+        " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?",
+        (device_file_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"检查副本的原设备文件缺失: {device_file_id}")
+    assembly = runtime.devices.get(row[0])
+    if assembly is None:
+        # 本地检查副本仍能独立完成取回；缺少设备读取装配时，不凭空
+        # 扩大其已保存为单次的本地读取预算。
+        return None
+    return OperationConfig(
+        max_attempts=assembly.max_read_attempts,
+        timeout_s=assembly.read_idle_timeout_s,
+        retry_interval_s=assembly.retry_interval_s)
 
 
 def _host_source_candidate(
@@ -985,12 +1011,13 @@ def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) ->
         forget_read_result(runtime, pending)
         return
     if succeeded:
-        released = runtime.outputs.release_read_slot(
-            SlotRequest(copy_id=facts["id"],
-                        occurred_at=runtime.occurred_at()),
-            new_operation_key(), runtime.owned)
-        if released.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
+        if facts["source_device_file_id"] is not None:
+            released = runtime.outputs.release_read_slot(
+                SlotRequest(copy_id=facts["id"],
+                            occurred_at=runtime.occurred_at()),
+                new_operation_key(), runtime.owned)
+            if released.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         forget_read_result(runtime, pending)
         return
@@ -1103,7 +1130,7 @@ async def _advance_local_reads(runtime: ObtainRuntime, now: int) -> None:
 async def _advance_local_read(
         runtime: ObtainRuntime, sessions: LocalReadSessions,
         copy_id: int, now: int) -> None:
-    """在单次尝试预算内推进一份主机源交付拷贝到准备完成。"""
+    """在原 READ_FILE 流程预算内推进一份主机源交付拷贝。"""
     connection = runtime.owned.connection
     facts = _read_facts(connection, copy_id)
     if facts is None:
@@ -1111,29 +1138,131 @@ async def _advance_local_read(
     if facts["verification_state"] in _VERIFICATION_DONE:
         # 已完成校验的副本只余发布；读取责任已完成。
         return
-    if _read_wait_remaining(runtime, copy_id, None) is not None:
+
+    is_inspection_source = _is_inspection_copy_source(connection, facts)
+    if is_inspection_source and _retry_failed_local_source_fallback(runtime, facts):
         return
-    ticket = _begin_local_attempt(runtime, facts, now)
-    if ticket is None:
+    if is_inspection_source and runtime.file_executor is None:
+        # 检查副本的正式取回必须把源与目标交给统一文件任务持有；
+        # 缺少执行器时等装配恢复，不在无 pin 下开始实际读取。
         return
-    step = await _copy_delivery(runtime, sessions, facts, None)
-    _finish_local_attempt(runtime, facts, ticket, step)
+
+    config = _stored_read_attempt_config(connection, copy_id)
+    if _read_wait_remaining(runtime, copy_id, config.retry_interval_s) is not None:
+        return
+
+    async def body():
+        current = _read_facts(connection, copy_id)
+        if current is None:
+            return
+        ticket = _begin_local_attempt(runtime, current, now, config)
+        if ticket is None:
+            return
+        step = await _copy_delivery(runtime, sessions, current, None)
+        _finish_local_attempt(runtime, current, ticket, step)
+
+    from camctl.outputs.read_attempts import run_owned_read
+
+    await run_owned_read(runtime, copy_id, body)
 
 
-def _begin_local_attempt(runtime: ObtainRuntime, facts: Mapping, now: int):
-    """提交主机源读取意图；本地预算单次，耗尽即终局失败交付。
+def _is_inspection_copy_source(connection, facts: Mapping) -> bool:
+    """当前主机源是否来自已登记检查副本，而不是普通本地产物。"""
+    source_id = facts["source_intermediate_file_id"]
+    if source_id is None:
+        return False
+    with closing(connection.execute(
+        "SELECT inspection_id FROM file_copies WHERE target_file_id=? LIMIT 2",
+        (source_id,),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) > 1:
+        raise ConsistencyError(f"检查输入文件存在重复读取拷贝: {source_id}")
+    return bool(rows and rows[0][0] is not None)
 
-    预算与期限随授予拷贝时保存的本地配置（一次、无时限、无定时
-    重试），不套用设备源默认值。
-    """
+
+def _stored_read_attempt_config(connection, copy_id: int) -> AttemptConfig:
+    """读取正式授予时冻结的 READ_FILE 预算与时限。"""
+    with closing(connection.execute(
+        "SELECT max_attempts_used,timeout_s_json,retry_interval_s_json"
+        " FROM operation_runs WHERE responsibility_key=?",
+        (f"read/{copy_id}",),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"读取流程缺失: read/{copy_id}")
+    timeout = None if row[1] is None else Decimal(str(row[1]))
+    retry_interval = None if row[2] is None else Decimal(str(row[2]))
+    return AttemptConfig(int(row[0]), timeout, retry_interval)
+
+
+def _failed_inspection_read_request(connection, facts: Mapping):
+    """恢复已有的本地源失败事实；只返回仍有预算的可靠终态尝试。"""
+    with closing(connection.execute(
+        "SELECT r.status,r.attempts_used,r.max_attempts_used,r.retry_wait_required,"
+        " a.id,a.attempt_no,a.status,a.error_json,a.result_event_id,a.copy_round,"
+        " h.occurred_at FROM operation_runs r"
+        " LEFT JOIN operation_attempts a ON a.run_id=r.id"
+        " LEFT JOIN history_events h ON h.id=a.result_event_id"
+        " WHERE r.responsibility_key=? ORDER BY a.attempt_no DESC LIMIT 1",
+        (f"read/{facts['id']}",),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None or row[4] is None:
+        return None
+    (run_status, attempts_used, max_attempts, retry_wait_required,
+     attempt_id, attempt_no, attempt_status, error_json,
+     result_event_id, copy_round, occurred_at) = row
+    if (run_status != int(_RUN_STATUS.ACTIVE)
+            or attempts_used != attempt_no
+            or attempts_used >= max_attempts
+            or retry_wait_required != 1
+            or attempt_status != int(_ATTEMPT_STATUS.FAILED)
+            or error_json is None or result_event_id is None
+            or copy_round != facts["round"] or occurred_at is None):
+        return None
+    error = error_json if isinstance(error_json, Mapping) else parse_exact_json(error_json)
+    details = error.get("details")
+    if (error.get("code") != "local_read_failed"
+            or error.get("stage") != "source_read"
+            or not isinstance(details, Mapping)
+            or details.get("source_failed") is not True):
+        return None
+    return ReadSourceFallback(
+        copy_id=int(facts["id"]), failed_attempt_id=int(attempt_id),
+        occurred_at=int(occurred_at))
+
+
+def _retry_failed_local_source_fallback(
+        runtime: ObtainRuntime, facts: Mapping) -> bool:
+    """用稳定事务键重开已落库的失败换源申请。"""
+    request = _failed_inspection_read_request(
+        runtime.owned.connection, facts)
+    if request is None:
+        return False
+    outcome = runtime.outputs.fallback_read_source(
+        request, read_source_fallback_key(request.copy_id), runtime.owned)
+    if outcome.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(
+            f"原读取源切换事务未可靠确认（{outcome.kind.value}）: {outcome.error}")
+    from camctl.persistence.repositories.outputs import (
+        ReadSourceFallbackDisposition,
+    )
+    return outcome.value.disposition is ReadSourceFallbackDisposition.SWITCHED
+
+
+def _begin_local_attempt(
+        runtime: ObtainRuntime, facts: Mapping, now: int,
+        config: AttemptConfig,
+):
+    """按已保存 READ_FILE 流程配置提交主机源尝试意图。"""
     intent = AttemptIntent(
         operation="read",
         action_id=facts["action_id"],
         kind=OperationKind.READ_FILE,
         target=AttemptTarget(copy_id=facts["id"]),
         query_purpose=None,
-        config=AttemptConfig(max_attempts=1, timeout_s=None,
-                             retry_interval_s=None),
+        config=config,
         occurred_at=now,
         copy_round=facts["round"])
     outcome = runtime.operations.begin_attempt(
@@ -1161,9 +1290,10 @@ def _fail_local_delivery(runtime: ObtainRuntime, facts: Mapping, now: int) -> No
 
 def _finish_local_attempt(
         runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep) -> None:
-    """保存主机源读取尝试结果；失败即预算耗尽并终局失败交付。"""
+    """先保存本地读取结果，再按同一 READ_FILE 预算续接或换源。"""
     succeeded = step.phase is InputPhase.INPUT_READY
     exhausted = _attempts_exhausted(runtime, facts["id"])
+    fallback_after_source_failure = step.source_failed and not exhausted
     outcome = CallOutcome(
         status=(AttemptStatus.SUCCEEDED if succeeded
                 else AttemptStatus.FAILED),
@@ -1171,6 +1301,7 @@ def _finish_local_attempt(
             code="local_read_failed", stage="source_read",
             details={
                 "phase": step.phase.value,
+                "source_failed": step.source_failed,
                 "reason": (
                     str(step.error) if step.error is not None else None)}),
         effect=EffectState.UNKNOWN,
@@ -1179,22 +1310,24 @@ def _finish_local_attempt(
             evidence=EvidenceValue(
                 type="read_returned", version=1, data={})),
         observations=())
-    finish = runtime.operations.finish_attempt(
-        AttemptFinish(
+    from camctl.outputs.read_attempts import hold_read_result
+
+    pending = hold_read_result(runtime, AttemptFinish(
             ticket=ticket,
             outcome=validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE),
             occurred_at=runtime.occurred_at(),
-            retry_wait=False,
-            run_finish=_run_finish(succeeded, exhausted)),
-        new_operation_key(), runtime.owned)
-    if finish.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"读取尝试收尾事务未完成（{finish.kind.value}）:"
-            f" {finish.error}")
+            retry_wait=(not succeeded) and not exhausted,
+            run_finish=_run_finish(succeeded, exhausted)))
+    _save_read_result_and_settle(runtime, pending, facts)
     if succeeded:
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
-    _fail_local_delivery(runtime, facts, runtime.occurred_at())
+    if exhausted:
+        _fail_local_delivery(runtime, facts, runtime.occurred_at())
+        return
+    if fallback_after_source_failure and _is_inspection_copy_source(
+            runtime.owned.connection, facts):
+        _retry_failed_local_source_fallback(runtime, facts)
 
 
 def _ensure_checksum_support(

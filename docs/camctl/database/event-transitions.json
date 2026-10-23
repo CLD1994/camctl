@@ -435,12 +435,12 @@
         "delivery_id",
         "processing_id",
         "inspection_id",
-        "source_device_file_id",
-        "source_intermediate_file_id",
         "target_file_id",
         "source_size"
       ],
       "mutable": [
+        "source_device_file_id",
+        "source_intermediate_file_id",
         "round",
         "recopies_used",
         "max_recopies_used",
@@ -7278,6 +7278,37 @@
             "copy"
           ],
           "evidence": []
+        },
+        "SOURCE_FALLBACK": {
+          "reason": 8,
+          "title": "保存正式取回读取源切换",
+          "rows": [
+            {
+              "table": "file_copies",
+              "op": "update",
+              "columns": [
+                "source_device_file_id",
+                "source_intermediate_file_id"
+              ],
+              "before": {},
+              "after": {},
+              "required": [
+                "source_device_file_id",
+                "source_intermediate_file_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "copy"
+          ],
+          "evidence": [
+            "attempt_id"
+          ]
         }
       }
     },

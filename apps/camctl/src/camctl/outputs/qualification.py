@@ -85,8 +85,8 @@ class FileCandidate:
 
     取回路径携带 item_id（已固定取回项，首次建档须为 SELECTED）；单原片处理携带
     processing_id，分段检查携带 inspection_id，两类内部路径都共用设备单文件读取机会且不
-    创建交付。主机产物使用 source_intermediate_file_id，config 为
-    None 表示不适用设备配置；本地读取的次数上限固定为 1。
+    创建交付。一般主机产物使用 source_intermediate_file_id 且不采用设备配置；正式取回
+    可复用的检查副本时，允许把原设备读取配置冻结到同一 READ_FILE 流程，供失败回退沿用。
     调用方只提供扩展名，事务分配身份后生成目标路径及交付文件名；
     delivery_display_name 仅用于取回交付的可读名称。
     occurred_at 是正常执行入口实际取得的 UTC 微秒读数，用于核对
@@ -138,15 +138,19 @@ class FileCandidate:
                 raise ValueError("设备读取候选必须使用已校验的读取配置")
             if self.binding_result is not None and self.binding_result.status is BindingStatus.UNAVAILABLE:
                 raise ValueError("无法可靠取得的配置不能作为普通设备绑定异常")
-        elif (self.config is not None or self.processing_id is not None
-              or self.inspection_id is not None or self.binding_result is not None):
-            raise ValueError("主机产物取回不采用设备配置，内部原片必须来自设备")
+        elif (self.processing_id is not None or self.inspection_id is not None
+              or self.binding_result is not None):
+            raise ValueError("内部原片必须来自设备，不能携带取回绑定失败")
         if self.reuse_inspection_id is not None and (
                 self.item_id is None or self.output_id is None
                 or self.source_device_file_id is not None
                 or self.source_intermediate_file_id is None
                 or self.processing_id is not None or self.inspection_id is not None):
             raise ValueError("检查副本复用只适用于主机源的正式取回项")
+        if (self.source_intermediate_file_id is not None and self.config is not None
+                and (self.reuse_inspection_id is None
+                     or not isinstance(self.config, OperationConfig))):
+            raise ValueError("设备读取配置只可冻结在正式取回的检查副本复用流程")
         validate_file_extension(self.target_extension)
         if self.item_id is not None:
             validate_file_extension(self.delivery_extension, required=True)

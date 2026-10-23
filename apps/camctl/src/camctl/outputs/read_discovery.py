@@ -131,11 +131,24 @@ def device_holder(connection, device_id):
     return rows[0][0] if rows else None
 
 
-def first_eligible_read(connection, device_id, now_us):
+def first_eligible_read(connection, device_id, now_us, *, retry_wait_copy_id=None):
     validate_read_basis(connection, device_id)
+    eligibility = _ELIGIBLE
+    parameters = [device_id, now_us]
+    if retry_wait_copy_id is not None:
+        ObjectId(retry_wait_copy_id)
+        # A caller may include only the one persisted local-to-device
+        # fallback whose retry interval it has already observed as elapsed.
+        # All other retry-wait rows remain ineligible; the ordinary ordering
+        # still decides whether this candidate may acquire the device slot.
+        eligibility = eligibility.replace(
+            " AND r.retry_wait_required=0",
+            " AND (r.retry_wait_required=0 OR fc.id=?)",
+        )
+        parameters.append(retry_wait_copy_id)
     with closing(connection.execute(
-        "SELECT fc.id" + _READ_FROM + " WHERE ob.device_id=? AND " + _ELIGIBLE
-        + " ORDER BY " + _READ_ORDER + " LIMIT 1", (device_id, now_us),
+        "SELECT fc.id" + _READ_FROM + " WHERE ob.device_id=? AND " + eligibility
+        + " ORDER BY " + _READ_ORDER + " LIMIT 1", parameters,
     )) as cursor:
         row = cursor.fetchone()
     return None if row is None else row[0]

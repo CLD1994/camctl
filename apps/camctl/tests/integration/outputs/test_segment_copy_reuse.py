@@ -1,6 +1,5 @@
 """检查副本复用的取回等待集合固定在来源发布事务 H。"""
 
-from dataclasses import replace
 from decimal import Decimal
 import hashlib
 from types import SimpleNamespace
@@ -20,19 +19,24 @@ from camctl.capture.segment_inspections import (
 )
 from camctl.capture.video_coverage import CoverageMetric, CoverageTarget
 from camctl.contracts.values import new_operation_key
-from camctl.devices.tasks import VideoResultMode
+from camctl.devices.bindings import DeviceBinding
+from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult, StopDriver
+from camctl.devices.read_session import ReadChunk
 from camctl.devices.read_session import ReadSession
 from camctl.host_files.media import MediaProbe, MediaStream
+from camctl.host_files.io import LocalSourceReader
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskId, FileTaskResult, FileTaskExecutor
 from camctl.outputs.segment_copy_reuse import bound_waiters_at_publication
 from camctl.outputs.obtain_flow import (
+    DeviceReadAssembly,
     ObtainRuntime,
     _action_facts,
     _delivery_candidate,
     advance_obtain,
 )
+import camctl.outputs.obtain_flow as obtain_flow
 from camctl.outputs.handoff import DeliveryDirectories
 from camctl.operations.attempts import RetryWaitGate
 from camctl.outputs.work_files import (
@@ -52,9 +56,6 @@ from camctl.persistence.repositories.segment_selections import (
 )
 from camctl.session.supervision import Supervisor
 
-from ..capture.test_record_segment_scope_recovery import (
-    SegmentWaitCatalog,
-)
 from ..capture.result_consumer_fixtures import consumer_world, returned
 from ..capture.test_record_file_completion_wait import (
     _completed_result,
@@ -62,6 +63,7 @@ from ..capture.test_record_file_completion_wait import (
     _stop_context,
 )
 from ..capture.test_capture_contract import _NOW
+from ..capture.test_action6_segmented_normal import Action6RecordCatalog
 from ..persistence.test_segment_file_pairing import _entry
 from .test_segment_default_scope import _obtain
 
@@ -94,8 +96,10 @@ class _ReadStream:
 class _ReadDriver:
     def __init__(self, content: bytes) -> None:
         self.content = content
+        self.offsets = []
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        self.offsets.append(offset)
         return ReadSession(
             source, offset, _ReadStream(self.content[offset:]), idle_timeout_s)
 
@@ -132,19 +136,9 @@ class _InspectionTools:
         raise AssertionError("逐段检查不调用修复工具")
 
 
-class _SegmentedReuseCatalog(SegmentWaitCatalog):
-    def parameter_definition(self, *args):
-        definition = super().parameter_definition(*args)
-        if args[1] != "camera_record":
-            return definition
-        factory = definition.task_factory
-        return replace(definition, task_factory=lambda params: replace(
-            factory(params), video_result_mode=VideoResultMode.SEGMENTED))
-
-
 async def _stopped_segmented_world(tmp_path):
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=_SegmentedReuseCatalog(), start=False)
+        tmp_path, "record", catalog=Action6RecordCatalog(), start=False)
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone()
@@ -176,8 +170,8 @@ async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound
         async def read(request, _batch):
             entries = []
             for index in (1, 2):
-                stem = f"CAM_001/CAM_20261022100000_{index:04d}_D."
-                entries.extend((_entry(stem + "OSV"), _entry(stem + "LRF")))
+                stem = f"DJI_001/DJI_20261022100000_{index:04d}_D."
+                entries.extend((_entry(stem + "MP4"), _entry(stem + "LRF")))
             return _completed_result(
                 request.ticket, context,
                 entries=sorted(entries, key=lambda item: item["identity"]),
@@ -204,7 +198,7 @@ async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound
         owned.connection.close()
 
 
-async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tmp_path):
+async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_failure(tmp_path, monkeypatch):
     owned, capture_runtime, source_action_id, handler = \
         await _stopped_segmented_world(tmp_path)
     try:
@@ -219,8 +213,8 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
         context = _stop_context(owned, source_action_id)
 
         async def read(request, _batch):
-            stem = "CAM_001/CAM_20261022100000_0001_D."
-            entries = [_entry(stem + "OSV"), _entry(stem + "LRF")]
+            stem = "DJI_001/DJI_20261022100000_0001_D."
+            entries = [_entry(stem + "MP4"), _entry(stem + "LRF")]
             return _completed_result(
                 request.ticket, context,
                 entries=sorted(entries, key=lambda item: item["identity"]),
@@ -276,7 +270,11 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
                 action_id=source_action_id,
                 member_id=member_id,
                 target=CoverageTarget(CoverageMetric.DURATION_S, 60),
-                budget=OperationConfig(3, Decimal("10"), Decimal("0")),
+                budget=OperationConfig(
+                    inspection_flow.max_read_attempts,
+                    inspection_flow.read_idle_timeout_s,
+                    inspection_flow.retry_interval_s,
+                ),
                 occurred_at=_NOW + 20_000_000,
             ),
         )
@@ -314,9 +312,27 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
         directories.ready.mkdir(exist_ok=True)
         directories.processing.mkdir(exist_ok=True)
         executor = FileTaskExecutor(Supervisor())
+        source_binding = owned.connection.execute(
+            "SELECT device_id,driver_id FROM actions WHERE id=?",
+            (source_action_id,),
+        ).fetchone()
+        device_reader = _ReadDriver(_CONTENT)
+        read_evidence = EvidenceRegistry(contracts=(EvidenceContract(
+            type="read_returned", version=1, operation="read",
+            fields=frozenset()),))
         obtain_runtime = ObtainRuntime(
             owned=owned,
-            devices={},
+            devices={source_binding[0]: DeviceReadAssembly(
+                driver=device_reader,
+                binding=DeviceBinding(*source_binding),
+                evidence=read_evidence,
+                digest_supported=True,
+                digest_for=lambda _file_id: _Digest(
+                    hashlib.sha256(_CONTENT).hexdigest()),
+                    retry_interval_s=Decimal("5"),
+                max_read_attempts=3,
+                read_idle_timeout_s=Decimal("10"),
+            )},
             directories=directories,
             segment_size=4,
             retry_gate=RetryWaitGate(),
@@ -329,6 +345,43 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
 
         assert not OutputsRepository().load_work_file_state(
             input_file_id, owned).owner_finished
+
+        # Keep the physical local read paused until both independently
+        # authorized deliveries have their own target and READ_FILE identity.
+        async def defer_local_reads(_runtime, _now):
+            return None
+
+        with monkeypatch.context() as patch:
+            patch.setattr(obtain_flow, "_advance_local_reads", defer_local_reads)
+            await advance_obtain(obtain_runtime)
+        granted = owned.connection.execute(
+            "SELECT c.id,c.source_intermediate_file_id,c.source_device_file_id,"
+            " c.target_file_id,d.id FROM file_copies c"
+            " JOIN deliveries d ON d.id=c.delivery_id"
+            " WHERE d.action_id IN (?,?) ORDER BY d.action_id",
+            (early[0][0], early[1][0]),
+        ).fetchall()
+        assert len(granted) == 2
+        assert all(row[1] == input_file_id and row[2] is None for row in granted)
+        assert len({row[3] for row in granted}) == 2
+        assert len({row[4] for row in granted}) == 2
+
+        original_read_chunk = LocalSourceReader.read_chunk
+        failed_reader = None
+
+        def fail_after_one_local_chunk(reader, limit):
+            nonlocal failed_reader
+            if failed_reader is None:
+                failed_reader = reader
+                reader._test_chunks_read = 0
+            if reader is failed_reader and reader._test_chunks_read >= 1:
+                return ReadChunk(data=None, error="injected local source failure")
+            result = original_read_chunk(reader, limit)
+            if reader is failed_reader and result.data is not None:
+                reader._test_chunks_read += 1
+            return result
+
+        monkeypatch.setattr(LocalSourceReader, "read_chunk", fail_after_one_local_chunk)
         for _ in range(4):
             await advance_obtain(obtain_runtime)
             statuses = [owned.connection.execute(
@@ -336,7 +389,29 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
             ).fetchone()[0] for action_id, _selection_id in early]
             if all(status != 2 for status in statuses):
                 break
-        assert all(status == 3 for status in statuses), statuses
+        assert device_reader.offsets == []
+        switched_copy = owned.connection.execute(
+            "SELECT source_intermediate_file_id,source_device_file_id,committed_bytes"
+            " FROM file_copies WHERE id=?", (granted[0][0],),
+        ).fetchone()
+        assert switched_copy == (None, source_file_id, 4)
+        retry_run = owned.connection.execute(
+            "SELECT attempts_used,max_attempts_used,retry_wait_required"
+            " FROM operation_runs WHERE copy_id=? AND kind=3", (granted[0][0],),
+        ).fetchone()
+        assert retry_run == (1, 3, 1)
+
+        # The same READ_FILE retry interval still applies after the source
+        # switch. Once it elapses, the existing slot/attempt flow resumes.
+        obtain_runtime.monotonic_ns = lambda: 25_000_000_000
+        for _ in range(4):
+            await advance_obtain(obtain_runtime)
+            statuses = [owned.connection.execute(
+                "SELECT status FROM actions WHERE id=?", (action_id,),
+            ).fetchone()[0] for action_id, _selection_id in early]
+            if all(status == 3 for status in statuses):
+                break
+        assert all(status == 3 for status in statuses)
 
         deliveries = owned.connection.execute(
             "SELECT i.id,d.id,c.id,c.source_intermediate_file_id,"
@@ -349,8 +424,28 @@ async def test_bound_obtains_copy_inspection_input_independently_then_cleanup(tm
         assert len(deliveries) == 2
         assert len({row[1] for row in deliveries}) == 2
         assert len({row[2] for row in deliveries}) == 2
-        assert all(row[3] == input_file_id and row[4] is None for row in deliveries)
+        assert deliveries[0][3] is None and deliveries[0][4] == source_file_id
+        assert deliveries[1][3] == input_file_id and deliveries[1][4] is None
         assert len({row[5] for row in deliveries}) == 2
+        assert device_reader.offsets == [4]
+        resumed_run = owned.connection.execute(
+            "SELECT r.status,r.attempts_used,r.max_attempts_used,r.retry_wait_required"
+            " FROM operation_runs r WHERE r.copy_id=? AND r.kind=3",
+            (deliveries[0][2],),
+        ).fetchone()
+        assert resumed_run == (3, 2, 3, 0)
+        device_delivery_name, = owned.connection.execute(
+            "SELECT file_name FROM deliveries WHERE id=?",
+            (deliveries[0][1],),
+        ).fetchone()
+        assert (directories.ready / device_delivery_name).read_bytes() == _CONTENT
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r"
+            " ON r.id=a.run_id JOIN file_copies c ON c.id=r.copy_id"
+            " JOIN deliveries d ON d.id=c.delivery_id"
+            " WHERE d.id=? AND a.status=3",
+            (deliveries[0][1],),
+        ).fetchone()[0] == 1
 
         late_action_id, late_selection_id = _obtain(
             owned, capture_runtime, source_action_id, "default", 22)

@@ -10,6 +10,7 @@ FIXED 状态同一事务保存。已固定的来源与选择不因重送、重�
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import closing
 from decimal import Decimal
 from dataclasses import dataclass, fields, replace
@@ -26,7 +27,7 @@ from camctl.contracts.values import (
 )
 from camctl.devices.bindings import BindingResult, binding_failure_details
 from camctl.history.reads import PlanReadScope, ReadCoverage
-from camctl.history.events import business_columns
+from camctl.history.events import business_columns, reason_for_branch
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.host_files.models import FilePurpose
 from camctl.host_files.paths import (
@@ -165,6 +166,8 @@ _CLEANUP_OUTCOME = enum_for("cleanup_items.outcome")
 _ACTION_STARTED_EVENT = 5
 _READ_PERMISSION_EVENT = 21
 _COPY_CHANGED_EVENT = 22
+_COPY_SOURCE_FALLBACK_REASON = reason_for_branch(
+    "COPY_CHANGED", "SOURCE_FALLBACK")
 _DELIVERY_CHANGED_EVENT = 23
 _INTERMEDIATE_FILE_EVENT = 26
 _CLEANUP_CURSOR_EVENT = 32
@@ -1577,6 +1580,30 @@ def _source_error_details(code: int, source_action_id: int) -> dict[str, Any]:
     return {"source_action_instance_id": str(source_action_id)}
 
 
+def _output_cleanup_phase(connection, output_id):
+    """汇总同产物仍有效的读取限制；已解除限制的历史不参与判断。"""
+    # 受登记约束的枚举常量内联，使 SQLite 能匹配有效限制的部分索引。
+    restrictions = ",".join(str(value) for value in _ACTIVE_RESTRICTIONS)
+    with closing(connection.execute(
+        "SELECT COUNT(*), MAX(status = ?), MAX(status = ?), MAX(status = ?)"
+        f" FROM cleanup_items WHERE output_id = ? AND restriction_state IN ({restrictions})",
+        (
+            int(_CLEANUP_STATUS.SUCCEEDED), int(_CLEANUP_STATUS.DELETING),
+            int(_CLEANUP_STATUS.PENDING_DELETE), output_id,
+        ),
+    )) as cursor:
+        count, completed, deleting, pending = cursor.fetchone()
+    if count == 0:
+        return None
+    if completed:
+        return _OUTPUT_CLEANUP_STATUS.COMPLETED
+    if deleting:
+        return _OUTPUT_CLEANUP_STATUS.RUNNING
+    if pending:
+        return _OUTPUT_CLEANUP_STATUS.PENDING
+    return _OUTPUT_CLEANUP_STATUS.INCOMPLETE
+
+
 class _GrantFileCommand:
     """读取资格授予的完整事务命令。
 
@@ -1902,26 +1929,7 @@ class _GrantFileCommand:
 
     def _cleanup_phase(self, connection, output_id):
         """汇总同产物有效限制和成功优先级，不重建已解除限制的历史。"""
-        # 受登记约束的枚举常量内联，使 SQLite 能匹配有效限制的部分索引。
-        restrictions = ",".join(str(value) for value in _ACTIVE_RESTRICTIONS)
-        with closing(connection.execute(
-            "SELECT COUNT(*), MAX(status = ?), MAX(status = ?), MAX(status = ?)"
-            f" FROM cleanup_items WHERE output_id = ? AND restriction_state IN ({restrictions})",
-            (
-                int(_CLEANUP_STATUS.SUCCEEDED), int(_CLEANUP_STATUS.DELETING),
-                int(_CLEANUP_STATUS.PENDING_DELETE), output_id,
-            ),
-        )) as cursor:
-            count, completed, deleting, pending = cursor.fetchone()
-        if count == 0:
-            return None
-        if completed:
-            return _OUTPUT_CLEANUP_STATUS.COMPLETED
-        if deleting:
-            return _OUTPUT_CLEANUP_STATUS.RUNNING
-        if pending:
-            return _OUTPUT_CLEANUP_STATUS.PENDING
-        return _OUTPUT_CLEANUP_STATUS.INCOMPLETE
+        return _output_cleanup_phase(connection, output_id)
 
     def _source_device(self, connection, device_file) -> str:
         observer = self._required(connection, "actions", device_file["observer_action_id"])
@@ -2531,20 +2539,53 @@ class _SlotChangeCommand:
             return self._decision(SlotOutcome.FINISHED)
         if not _read_is_due(action, self._request.occurred_at):
             return self._decision(SlotOutcome.WAIT, "not_due")
-        if run["retry_wait_required"] == 1:
+        retrying_source_fallback = (
+            run["retry_wait_required"] == 1
+            and self._is_source_fallback_retry(scope.connection, copy, run))
+        if run["retry_wait_required"] == 1 and not retrying_source_fallback:
             return self._decision(SlotOutcome.WAIT, "retry_wait")
         if holder is not None:
             return self._decision(SlotOutcome.WAIT, "device_busy")
-        eligible, reason = self._first_candidate(scope.connection, device_id)
+        eligible, reason = self._first_candidate(
+            scope.connection, device_id,
+            retry_wait_copy_id=copy["id"] if retrying_source_fallback else None,
+        )
         if not eligible:
             return self._decision(SlotOutcome.WAIT, reason)
         return self._save(scope, copy, None, device_id, SlotOutcome.GRANTED)
 
+    def _is_source_fallback_retry(self, connection, copy, run) -> bool:
+        """只为有原始 SOURCE_FALLBACK 历史的失败本地读取续接机会。"""
+        self._load_attempts(connection, run["id"])
+        attempt = _source_fallback_retry_attempt(
+            copy, run, self._state["operation_attempts"])
+        if attempt is None:
+            return False
+        with closing(connection.execute(
+            "SELECT 1 FROM history_events e, json_each(e.body_json,'$.rows') r"
+            " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+            " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
+            " AND json_extract(r.value,'$.table')='file_copies'"
+            " AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.before.values.source_device_file_id') IS NULL"
+            " AND json_extract(r.value,'$.before.values.source_intermediate_file_id') IS NOT NULL"
+            " AND json_extract(r.value,'$.after.values.source_device_file_id')=?"
+            " AND json_extract(r.value,'$.after.values.source_intermediate_file_id') IS NULL"
+            " LIMIT 1",
+            (_COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON,
+             attempt["id"], copy["id"], copy["source_device_file_id"]),
+        )) as cursor:
+            return cursor.fetchone() is not None
+
     def _device_holder(self, connection, device_id: str) -> int | None:
         return device_holder(connection, device_id)
 
-    def _first_candidate(self, connection, device_id: str) -> tuple[bool, str]:
-        first = first_eligible_read(connection, device_id, self._request.occurred_at)
+    def _first_candidate(
+            self, connection, device_id: str, *, retry_wait_copy_id=None,
+    ) -> tuple[bool, str]:
+        first = first_eligible_read(
+            connection, device_id, self._request.occurred_at,
+            retry_wait_copy_id=retry_wait_copy_id)
         if first == self._request.copy_id:
             return True, ""
         return False, "predecessor" if first is not None else "source_not_ready"
@@ -3825,6 +3866,286 @@ class FailReadBinding:
             raise TypeError("读取绑定失败必须携带 BindingResult")
         if binding_failure_details(self.binding_result) is None:
             raise ValueError("匹配绑定不能作为读取绑定失败")
+
+
+@dataclass(frozen=True)
+class ReadSourceFallback:
+    """一次本地检查副本读取失败后的原源切换申请。"""
+
+    copy_id: int
+    failed_attempt_id: int
+    occurred_at: int
+
+    def __post_init__(self) -> None:
+        ObjectId(self.copy_id)
+        ObjectId(self.failed_attempt_id)
+        UtcMicros(self.occurred_at)
+
+
+class ReadSourceFallbackDisposition(Enum):
+    """正式取回检查副本回退到原设备文件的处理结果。"""
+
+    SWITCHED = "switched"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class ReadSourceFallbackOutcome:
+    disposition: ReadSourceFallbackDisposition
+
+
+def read_source_fallback_key(copy_id: int) -> OperationKey:
+    """为一份交付拷贝生成跨重启稳定的唯一换源操作身份。"""
+    ObjectId(copy_id)
+    identity = hashlib.sha256(
+        f"camctl.output.read-source-fallback.v1/{copy_id}".encode("ascii")
+    ).hexdigest()[:32]
+    return OperationKey(identity)
+
+
+class _ReadSourceFallbackCommand:
+    """在原 READ_FILE 预算未耗尽时把同一交付拷贝单向换回原设备源。"""
+
+    def __init__(self, request: ReadSourceFallback, key: OperationKey, owned):
+        if not isinstance(request, ReadSourceFallback):
+            raise TypeError("读取换源申请必须使用 ReadSourceFallback")
+        self._request = request
+        self._key = key
+        self._owned = owned
+        self._owners: dict[tuple[str, int], tuple[str, int]] = {}
+        self._state: dict[str, dict[int, dict[str, Any]]] = {}
+
+    def plan(self, scope) -> CommandPlan:
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(saved)
+
+        request = self._request
+        copy = row_facts(connection, "file_copies", request.copy_id)
+        if copy is None:
+            raise ConsistencyError(f"正式取回拷贝不存在: {request.copy_id}")
+        self._state.setdefault("file_copies", {})[copy["id"]] = copy
+        _copy_owner_of(connection, copy, self._state, self._owners)
+        if (copy["delivery_id"] is None or copy["processing_id"] is not None
+                or copy.get("inspection_id") is not None):
+            raise TransactionError("读取换源只适用于正式取回交付拷贝")
+        if copy["source_device_file_id"] is not None:
+            return self._decision(ReadSourceFallbackDisposition.BLOCKED)
+        if copy["source_intermediate_file_id"] is None:
+            raise ConsistencyError("正式取回拷贝缺少当前读取源")
+
+        delivery = self._required(connection, "deliveries", copy["delivery_id"])
+        items = self._find_rows(
+            connection, "obtain_items", "delivery_id=?", (delivery["id"],))
+        if len(items) != 1:
+            raise ConsistencyError("读取换源要求交付唯一关联原取回项")
+        item = self._required(connection, "obtain_items", int(items[0][0]))
+        output = self._required(connection, "outputs", delivery["output_id"])
+        selection = self._required(
+            connection, "obtain_source_selections", item["selection_id"])
+        dependency = self._required(
+            connection, "action_dependencies", selection["dependency_id"])
+        action = self._required(connection, "actions", delivery["action_id"])
+
+        if (item["delivery_id"] != delivery["id"]
+                or item["output_id"] != output["id"]
+                or item["source_dependency"] != 1
+                or delivery["action_id"] != action["id"]
+                or dependency["action_id"] != action["id"]
+                or dependency["depends_on_action_id"] != output["source_action_id"]
+                or output["kind"] != int(_OUTPUT_KIND.ORIGINAL)
+                or output["device_file_id"] is None
+                or output["intermediate_file_id"] is not None):
+            raise ConsistencyError("读取换源的交付、固定项、来源或原片身份不一致")
+
+        current_file_id = int(copy["source_intermediate_file_id"])
+        input_file = self._required(
+            connection, "intermediate_files", current_file_id)
+        check_copies = self._find_rows(
+            connection, "file_copies", "target_file_id=?", (current_file_id,))
+        if len(check_copies) != 1:
+            raise ConsistencyError("读取换源的主机来源不是唯一检查副本")
+        check_copy = self._required(
+            connection, "file_copies", int(check_copies[0][0]))
+        if check_copy.get("inspection_id") is None:
+            raise ConsistencyError("读取换源的主机来源不是检查副本")
+        inspection = self._required(
+            connection, "segment_inspections", int(check_copy["inspection_id"]))
+        from camctl.persistence.repositories.segment_inspections import (
+            read_inspection_for_member,
+        )
+
+        bound = read_inspection_for_member(
+            int(inspection["action_id"]), int(inspection["member_id"]), self._owned)
+        if (bound.inspection is None or bound.copy is None
+                or bound.inspection.inspection_id != inspection["id"]
+                or bound.copy.copy_id != check_copy["id"]
+                or bound.copy.target_file_id != current_file_id
+                or bound.copy.source_device_file_id != output["device_file_id"]
+                or bound.copy.inspection_state != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
+                or bound.copy.verification_state not in (
+                    int(_VERIFICATION.MATCHED),
+                    int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))
+                or bound.copy.retention_state != int(_RETENTION.REQUIRED)
+                or bound.copy.cleanup_state != int(_FILE_CLEANUP.NOT_NEEDED)):
+            raise ConsistencyError("读取换源没有完整、已校验且仍受保留保护的检查副本事实")
+
+        source = self._required(
+            connection, "device_files", int(output["device_file_id"]))
+        source_action = self._required(
+            connection, "actions", int(output["source_action_id"]))
+        from camctl.devices.tasks import CaptureResultPolicy
+
+        if (source["source_action_id"] != output["source_action_id"]
+                or source["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or source["completion_state"] != int(_COMPLETION.COMPLETE)
+                or source_action["type"] not in (
+                    int(_ACTION_TYPE.CAMERA_RECORD),
+                    int(_ACTION_TYPE.CAMERA_TIMELAPSE))
+                or source_action["execution_spec_json"].get("result_policy")
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+                or input_file["owner_action_id"] != output["source_action_id"]
+                or input_file["owner_delivery_id"] is not None
+                or input_file["purpose"] != int(_PURPOSE.RECORDING_INPUT)
+                or input_file["retention_state"] != int(_RETENTION.REQUIRED)
+                or input_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
+                or input_file["relative_path"] != bound.copy.input_relative_path
+                or input_file["size_bytes"] != bound.copy.source_size
+                or input_file["sha256"] != bound.copy.target_sha256
+                or bound.copy.source_size != copy["source_size"]):
+            raise ConsistencyError("读取换源的设备文件不是检查副本所属完整原片")
+
+        run_rows = self._find_rows(
+            connection, "operation_runs", "copy_id=? AND kind=?",
+            (copy["id"], int(_RUN_KIND.READ_FILE)))
+        if len(run_rows) != 1:
+            raise ConsistencyError("读取换源的正式取回拷贝缺少唯一 READ_FILE 流程")
+        run = self._required(connection, "operation_runs", int(run_rows[0][0]))
+        attempts = self._find_rows(
+            connection, "operation_attempts", "run_id=? ORDER BY attempt_no DESC LIMIT 1",
+            (run["id"],))
+        if len(attempts) != 1:
+            raise ConsistencyError("读取换源缺少原本地读取失败尝试")
+        attempt = self._required(
+            connection, "operation_attempts", int(attempts[0][0]))
+        if (attempt["id"] != request.failed_attempt_id
+                or attempt["run_id"] != run["id"]
+                or attempt["attempt_no"] != run["attempts_used"]
+                or attempt["copy_round"] != copy["round"]
+                or attempt["status"] != int(_ATTEMPT_STATUS.FAILED)
+                or attempt["result_json"] is None
+                or not isinstance(attempt["error_json"], Mapping)
+                or attempt["error_json"].get("code") != "local_read_failed"
+                or attempt["error_json"].get("stage") != "source_read"
+                or not isinstance(attempt["error_json"].get("details"), Mapping)
+                or attempt["error_json"]["details"].get("source_failed") is not True
+                or attempt["result_event_id"] is None):
+            raise ConsistencyError("读取换源没有可确认的原本地读取失败结果")
+        with closing(connection.execute(
+            "SELECT occurred_at FROM history_events WHERE id=?",
+            (attempt["result_event_id"],),
+        )) as cursor:
+            result_event = cursor.fetchone()
+        if result_event is None or result_event[0] != request.occurred_at:
+            raise TransactionError("读取换源时间必须固定为原本地失败结果时间")
+
+        if (run["responsibility_key"] != f"read/{copy['id']}"
+                or run["action_id"] != action["id"]
+                or run["delivery_id"] != delivery["id"]
+                or run["status"] != int(_RUN_STATUS.ACTIVE)
+                or run["retry_wait_required"] != 1
+                or run["attempts_used"] >= run["max_attempts_used"]):
+            return self._decision(ReadSourceFallbackDisposition.BLOCKED)
+        if not _read_owner_eligible(action):
+            return self._decision(ReadSourceFallbackDisposition.BLOCKED)
+
+        if (not self._output_is_available(connection, output)
+                or source["presence_state"] != int(_PRESENCE.PRESENT)):
+            return self._decision(ReadSourceFallbackDisposition.BLOCKED)
+
+        row = _update(
+            "file_copies", copy["id"],
+            {"source_device_file_id": copy["source_device_file_id"],
+             "source_intermediate_file_id": copy["source_intermediate_file_id"]},
+            {"source_device_file_id": source["id"],
+             "source_intermediate_file_id": None},
+        )
+        allocation = scope.allocate(1)
+        event = _envelope(
+            allocation.first_event_id, allocation.txn_id,
+            _COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON, (row,),
+            request.occurred_at, evidence={"attempt_id": attempt["id"]},
+        )
+        return CommandPlan(
+            events=(event,), owners=self._owners, state_rows=self._state,
+            result=ReadSourceFallbackOutcome(ReadSourceFallbackDisposition.SWITCHED),
+        )
+
+    def _required(self, connection, table, identity):
+        facts = row_facts(connection, table, identity)
+        if facts is None:
+            raise ConsistencyError(f"读取换源关联事实缺失: {table}#{identity}")
+        self._state.setdefault(table, {})[identity] = facts
+        return facts
+
+    def _find_rows(self, connection, table, condition, parameters):
+        with closing(connection.execute(
+            f"SELECT id FROM {table} WHERE {condition}", parameters,
+        )) as cursor:
+            return cursor.fetchall()
+
+    def _output_is_available(self, connection, output):
+        phase = _output_cleanup_phase(connection, output["id"])
+        availability = output["availability"]
+        if phase is not None:
+            expected = (_AVAILABILITY.CLEANED
+                        if phase == _OUTPUT_CLEANUP_STATUS.COMPLETED
+                        else _AVAILABILITY.RESTRICTED)
+            if (availability != int(expected)
+                    or output["cleanup_status"] != int(phase)):
+                raise ConsistencyError("读取换源时产物清理投影与有效限制不一致")
+            return False
+        if availability in (int(_AVAILABILITY.CLEANED), int(_AVAILABILITY.RESTRICTED)):
+            raise ConsistencyError("读取换源时产物清理投影缺少有效限制事实")
+        if output["cleanup_status"] not in (
+                int(_OUTPUT_CLEANUP_STATUS.NOT_REQUESTED),
+                int(_OUTPUT_CLEANUP_STATUS.CANCELED)):
+            raise ConsistencyError("读取换源时产物清理终态与限制状态不一致")
+        return availability == int(_AVAILABILITY.AVAILABLE)
+
+    def _decision(self, disposition):
+        return CommandPlan(
+            events=(), owners=self._owners, state_rows=self._state,
+            read_only=True,
+            result=ReadSourceFallbackOutcome(disposition),
+        )
+
+    def _reuse(self, saved):
+        request = self._request
+        if (len(saved) != 1
+                or saved[0]["type"] != _COPY_CHANGED_EVENT
+                or saved[0]["reason"] != _COPY_SOURCE_FALLBACK_REASON
+                or saved[0]["occurred_at"] != request.occurred_at
+                or saved[0]["body"].get("evidence") != {
+                    "attempt_id": request.failed_attempt_id}):
+            raise TransactionError("读取换源原键已经用于其他事实")
+        rows = saved[0]["body"].get("rows")
+        if (not isinstance(rows, list) or len(rows) != 1
+                or rows[0].get("table") != "file_copies"
+                or rows[0].get("id") != request.copy_id):
+            raise TransactionError("原读取换源的拷贝身份与请求不同")
+        before, after = rows[0].get("before", {}).get("values"), rows[0].get(
+            "after", {}).get("values")
+        if (not isinstance(before, dict) or not isinstance(after, dict)
+                or set(before) != {"source_device_file_id", "source_intermediate_file_id"}
+                or set(after) != set(before)
+                or before["source_device_file_id"] is not None
+                or before["source_intermediate_file_id"] is None
+                or after["source_device_file_id"] is None
+                or after["source_intermediate_file_id"] is not None):
+            raise TransactionError("原读取换源不是本地检查副本到设备原片的单向切换")
+        return self._decision(ReadSourceFallbackDisposition.SWITCHED)
 
 
 @dataclass(frozen=True)
@@ -5450,6 +5771,14 @@ class OutputsRepository:
         receipt = commit_operation(_GrantFileCommand(command, key, self.read_batch_size), key, owned)
         return _outcome_of(receipt)
 
+    def fallback_read_source(
+        self, request: ReadSourceFallback, key: OperationKey,
+        owned: OwnedConnection,
+    ) -> DbOutcome[ReadSourceFallbackOutcome]:
+        receipt = commit_operation(
+            _ReadSourceFallbackCommand(request, key, owned), key, owned)
+        return _outcome_of(receipt)
+
     def grant_read_slot(
         self, request: SlotRequest, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[SlotDecision]:
@@ -6068,6 +6397,115 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
 
 def _copy_guard(event, context) -> None:
     """拷贝建档、进度段、目标重置、校验与重拷守卫。"""
+    if (event.event_type == _COPY_CHANGED_EVENT
+            and event.reason == _COPY_SOURCE_FALLBACK_REASON):
+        if len(event.rows) != 1 or event.rows[0].table != "file_copies":
+            raise EventValidationError("读取换源只能更新一份正式取回拷贝")
+        row = event.rows[0]
+        copy = context.state_rows.get("file_copies", {}).get(row.row_id)
+        before, after = row.before.values, row.after.values
+        source_columns = {
+            "source_device_file_id", "source_intermediate_file_id"}
+        if (copy is None or set(before) != source_columns
+                or set(after) != source_columns
+                or copy.get("source_device_file_id") is not None
+                or copy.get("source_intermediate_file_id") is None
+                or not all(json_equal(copy.get(name), value)
+                           for name, value in before.items())
+                or before["source_device_file_id"] is not None
+                or before["source_intermediate_file_id"] is None
+                or after["source_device_file_id"] is None
+                or after["source_intermediate_file_id"] is not None
+                or copy.get("delivery_id") is None
+                or copy.get("processing_id") is not None
+                or copy.get("inspection_id") is not None):
+            raise EventValidationError("读取换源必须是同一交付拷贝从检查副本单向回到设备源")
+
+        delivery = context.state_rows.get("deliveries", {}).get(
+            copy["delivery_id"])
+        attempt_id = event.evidence.get("attempt_id")
+        attempt = context.state_rows.get("operation_attempts", {}).get(attempt_id)
+        run_rows = [
+            facts for facts in context.state_rows.get("operation_runs", {}).values()
+            if facts.get("copy_id") == row.row_id
+            and facts.get("kind") == int(_RUN_KIND.READ_FILE)]
+        if (delivery is None or len(run_rows) != 1 or attempt is None):
+            raise EventValidationError("读取换源缺少原交付、尝试或 READ_FILE 流程")
+        run = run_rows[0]
+        if (attempt.get("run_id") != run.get("id")
+                or attempt.get("attempt_no") != run.get("attempts_used")
+                or attempt.get("copy_round") != copy.get("round")
+                or attempt.get("status") != int(_ATTEMPT_STATUS.FAILED)
+                or not isinstance(attempt.get("error_json"), Mapping)
+                or attempt["error_json"].get("code") != "local_read_failed"
+                or not isinstance(attempt["error_json"].get("details"), Mapping)
+                or attempt["error_json"]["details"].get("source_failed") is not True
+                or run.get("responsibility_key") != f"read/{row.row_id}"
+                or run.get("delivery_id") != delivery.get("id")
+                or run.get("status") != int(_RUN_STATUS.ACTIVE)
+                or run.get("retry_wait_required") != 1
+                or run.get("attempts_used", 0) >= run.get("max_attempts_used", 0)):
+            raise EventValidationError("读取换源必须沿用仍有余量的原本地失败读取预算")
+
+        item_rows = [
+            facts for facts in context.state_rows.get("obtain_items", {}).values()
+            if facts.get("delivery_id") == delivery.get("id")]
+        if len(item_rows) != 1:
+            raise EventValidationError("读取换源的交付必须属于唯一正式取回项")
+        item = item_rows[0]
+        output = context.state_rows.get("outputs", {}).get(delivery.get("output_id"))
+        source = context.state_rows.get("device_files", {}).get(
+            after["source_device_file_id"])
+        if (output is None or source is None
+                or output.get("id") != item.get("output_id")
+                or output.get("kind") != int(_OUTPUT_KIND.ORIGINAL)
+                or output.get("device_file_id") != source.get("id")
+                or source.get("source_action_id") != output.get("source_action_id")
+                or source.get("role") != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or source.get("completion_state") != int(_COMPLETION.COMPLETE)
+                or source.get("presence_state") != int(_PRESENCE.PRESENT)
+                or output.get("availability") != int(_AVAILABILITY.AVAILABLE)):
+            raise EventValidationError("读取换源必须回到同一产物仍可读取的完整原片")
+
+        original_action = context.state_rows.get("actions", {}).get(
+            output.get("source_action_id"))
+        from camctl.devices.tasks import CaptureResultPolicy
+
+        check_copies = [
+            facts for facts in context.state_rows.get("file_copies", {}).values()
+            if facts.get("target_file_id") == before["source_intermediate_file_id"]
+            and facts.get("inspection_id") is not None]
+        if len(check_copies) != 1:
+            raise EventValidationError("读取换源的本地来源必须是唯一分段检查副本")
+        check_copy = check_copies[0]
+        inspection = context.state_rows.get("segment_inspections", {}).get(
+            check_copy["inspection_id"])
+        input_file = context.state_rows.get("intermediate_files", {}).get(
+            before["source_intermediate_file_id"])
+        if (inspection is None or input_file is None
+                or inspection.get("action_id") != output.get("source_action_id")
+                or inspection.get("source_device_file_id") != source.get("id")
+                or inspection.get("state") != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
+                or check_copy.get("source_device_file_id") != source.get("id")
+                or check_copy.get("verification_state") not in (
+                    int(_VERIFICATION.MATCHED),
+                    int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))
+                or input_file.get("owner_action_id") != output.get("source_action_id")
+                or input_file.get("owner_delivery_id") is not None
+                or input_file.get("purpose") != int(_PURPOSE.RECORDING_INPUT)
+                or input_file.get("retention_state") != int(_RETENTION.REQUIRED)
+                or input_file.get("cleanup_state") != int(_FILE_CLEANUP.NOT_NEEDED)
+                or input_file.get("size_bytes") != copy.get("source_size")
+                or input_file.get("sha256") != check_copy.get("target_sha256")):
+            raise EventValidationError("读取换源的检查副本与固定 Action6 原片不一致")
+        if (original_action is None
+                or original_action.get("type") not in (
+                    int(_ACTION_TYPE.CAMERA_RECORD),
+                    int(_ACTION_TYPE.CAMERA_TIMELAPSE))
+                or original_action.get("execution_spec_json", {}).get("result_policy")
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+            raise EventValidationError("读取换源仅适用于 Action6 分段视频")
+        return
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RESET_REASON:
         for row in event.rows:
             if row.table != "file_copies":
@@ -6365,6 +6803,40 @@ def _slot_run(context, copy_id: int) -> dict[str, Any]:
     return run
 
 
+def _source_fallback_retry_attempt(copy, run, attempts):
+    """返回同一拷贝当前等待重试的本地源失败尝试。"""
+    if (run.get("status") != int(_RUN_STATUS.ACTIVE)
+            or run.get("retry_wait_required") != 1
+            or run.get("attempts_used", 0) < 1
+            or copy.get("source_device_file_id") is None
+            or copy.get("source_intermediate_file_id") is not None):
+        return None
+    matches = [
+        attempt for attempt in attempts.values()
+        if attempt.get("run_id") == run.get("id")
+        and attempt.get("attempt_no") == run.get("attempts_used")
+    ]
+    if len(matches) != 1:
+        return None
+    attempt = matches[0]
+    if (attempt.get("copy_round") != copy.get("round")
+            or attempt.get("status") != int(_ATTEMPT_STATUS.FAILED)
+            or attempt.get("result_event_id") is None):
+        return None
+    error = attempt.get("error_json")
+    if isinstance(error, str):
+        error = parse_exact_json(error)
+    if not isinstance(error, Mapping):
+        return None
+    details = error.get("details")
+    if (error.get("code") != "local_read_failed"
+            or error.get("stage") != "source_read"
+            or not isinstance(details, Mapping)
+            or details.get("source_failed") is not True):
+        return None
+    return attempt
+
+
 def _slot_owner_action(context, copy) -> dict[str, Any]:
     action_id = None
     if copy.get("delivery_id") is not None:
@@ -6413,7 +6885,10 @@ def _read_slot_guard(event, context) -> None:
             if run["status"] in _RUN_TERMINAL:
                 raise EventValidationError("读取责任已结束，不能再授予机会")
             if run["retry_wait_required"] != 0:
-                raise EventValidationError("重试等待期间不授予新的读取机会")
+                attempts = context.complete_rows(
+                    "operation_attempts", "run_id", run["id"])
+                if _source_fallback_retry_attempt(copy, run, attempts) is None:
+                    raise EventValidationError("重试等待期间不授予新的读取机会")
             action = _slot_owner_action(context, copy)
             try:
                 if not _read_owner_eligible(action):
