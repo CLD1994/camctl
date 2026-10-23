@@ -658,21 +658,33 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             )
             read = json.loads(gate_marker.read_text(encoding="utf-8"))
             assert read["bytes_read"] > 0 and read["position"] >= read["bytes_read"]
+            assert read["initial_offset"] == 0 and Path(read["source_path"]).is_file()
             boundary_pgid = read["pgid"]
-            one_done_one_running = wait_for(
-                lambda: states if len(states := query_state(
+            delivery_created = int(enum_for("obtain_items.status").DELIVERY_CREATED)
+            delivery_prepared = int(enum_for("deliveries.status").PREPARED)
+            first_complete_one_waiting = wait_for(
+                lambda: rows if len(rows := query_state(
                     deployment.state_db,
-                    "SELECT name,status FROM actions WHERE id IN (?,?) ORDER BY name",
-                    tuple(waiter_ids),
-                )) == 2 and sum(
-                    row[1] == int(enum_for("actions.status").SUCCEEDED) for row in states
-                ) == 1 and sum(
-                    row[1] == int(enum_for("actions.status").RUNNING) for row in states
-                ) == 1 else None,
+                    "SELECT d.action_id,COUNT(i.id),"
+                    "SUM(CASE WHEN i.status=? THEN 1 ELSE 0 END),"
+                    "SUM(CASE WHEN d.status=? THEN 1 ELSE 0 END),"
+                    "SUM(CASE WHEN c.committed_bytes=c.source_size THEN 1 ELSE 0 END) "
+                    "FROM action_dependencies a "
+                    "JOIN obtain_source_selections s ON s.dependency_id=a.id "
+                    "JOIN obtain_items i ON i.selection_id=s.id "
+                    "JOIN deliveries d ON d.id=i.delivery_id "
+                    "JOIN file_copies c ON c.delivery_id=d.id "
+                    "WHERE a.depends_on_action_id=? AND a.action_id IN (?,?) "
+                    "GROUP BY d.action_id ORDER BY d.action_id",
+                    (delivery_created, delivery_prepared, source_id, *waiter_ids),
+                )) == 2 and rows[0][0] == waiter_ids[0]
+                and rows[0][1:] == (checked_count, checked_count, checked_count, checked_count)
+                and rows[1][0] == waiter_ids[1]
+                and rows[1][1:] == (checked_count, checked_count, 0, 0) else None,
                 120,
-                "一个绑定取回未能完成、另一个仍在本地读取",
+                "一组绑定取回的副本未全部准备、另一组仍未开始本地读取",
             )
-            assert len(one_done_one_running) == 2
+            assert len(first_complete_one_waiting) == 2
             required = int(enum_for("intermediate_files.retention_state").REQUIRED)
             not_needed = int(enum_for("intermediate_files.cleanup_state").NOT_NEEDED)
             held = query_state(
@@ -683,6 +695,9 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             )
             assert held and all(row[1:] == (required, not_needed) for row in held)
             assert all((deployment.staging / row[0]).is_file() for row in held)
+            assert Path(read["source_path"]).resolve() in {
+                (deployment.staging / row[0]).resolve() for row in held
+            }
 
         if boundary != "none":
             assert boundary_pgid is not None

@@ -101,11 +101,23 @@ def install() -> None:
         gate = Path(os.environ["CAMCTL_ACTION6_TEST_LOCAL_READ_GATE_DIR"])
         marker = gate / "local-read-entered.json"
         release = gate / "release-local-read"
+        original_init = LocalSourceReader.__init__
         original = LocalSourceReader.read_chunk
+        initial_source_paths = set()
+
+        def observe_init(self, path, offset):
+            original_init(self, path, offset)
+            self._action6_test_source_path = str(Path(path).resolve())
+            self._action6_test_initial_offset = offset
 
         def observe(self, limit):
+            position_before = self.position()
             result = original(self, limit)
-            if result.data is None or marker.exists():
+            if result.data is None or position_before != 0 or marker.exists():
+                return result
+            source_path = self._action6_test_source_path
+            if source_path not in initial_source_paths:
+                initial_source_paths.add(source_path)
                 return result
             try:
                 claim_fd = os.open(gate / "local-read.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -120,6 +132,8 @@ def install() -> None:
                 "pgid": os.getpgrp(),
                 "position": self.position(),
                 "bytes_read": len(result.data),
+                "source_path": source_path,
+                "initial_offset": self._action6_test_initial_offset,
                 "utc_ns": time.time_ns(),
             }
             temporary = marker.with_suffix(".new")
@@ -129,6 +143,7 @@ def install() -> None:
                 time.sleep(0.05)
             return result
 
+        LocalSourceReader.__init__ = observe_init
         LocalSourceReader.read_chunk = observe
     else:
         raise ValueError(f"未登记的 Action6 同步点: {stage}")
