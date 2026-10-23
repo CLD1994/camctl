@@ -2349,7 +2349,10 @@ async def _stop_call(runtime: CaptureRuntime, action,
             if (
                 action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
                 and action["execution_spec_json"].get("result_policy")
-                == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+                in (
+                    CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+                    CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+                )
             ):
                 state = _recording_port(runtime).recording_state(action["id"])
                 elapsed = None
