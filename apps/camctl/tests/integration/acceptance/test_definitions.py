@@ -62,9 +62,10 @@ def _obtain(params):
 
 
 @pytest.mark.parametrize("action_type, expected", [
-    ("camera_take_photo", {}), ("camera_record", {"target_duration_ms":1234}),
+    ("camera_take_photo", {}), ("camera_record", {"target_duration_ms":1234, "video_result_mode":"single_file"}),
     ("camera_timelapse", {"target_duration_ms":1234, "duration_based":True, "wait_after_send":True,
-        "stop_supported":False,"end_control":1,"start_return_meaning":1,"completion_mode":2,"result_wait_margin_ms":5}),
+        "stop_supported":False,"end_control":1,"start_return_meaning":1,"completion_mode":2,"result_wait_margin_ms":5,
+        "video_result_mode":"single_file"}),
 ])
 async def test_capture_specs_match_owned_contracts(environment, tmp_path, action_type, expected):
     connection, context = environment
@@ -181,7 +182,7 @@ async def test_history_and_retry_keep_first_definition_after_default_changes(env
     assert reused.plan_disposition is PlanDisposition.REUSED
     repository = HistoryRepository(tmp_path / "state.db")
     row = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
-    assert read_action_spec(row) == {"target_duration_ms":1234}
+    assert read_action_spec(row) == {"target_duration_ms":1234, "video_result_mode":"single_file"}
 
 
 @pytest.mark.parametrize("spec", [None, "null", "[]", "{}", '{"target_duration_ms":true}', '{"target_duration_ms":0}', '{"action_type":"camera_record","target_duration_ms":1}'])
@@ -235,7 +236,7 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
         validated.append(ValidatedEvent(envelope, event_type_name(envelope.event_type),
             branch_of(envelope.event_type,envelope.reason)[0], tuple(set(references)),
             {(row.table,row.row_id):owner for row in envelope.rows}))
-    specs = ({"target_duration_ms":1234}, {"selection_mode":1}, {})
+    specs = ({"target_duration_ms":1234, "video_result_mode":"single_file"}, {"selection_mode":1}, {})
     for index, expected in enumerate(specs,1):
         seed = RestoreSeed(EntityImage(1,index,False,{},0,0), INITIAL_BOUNDARY)
         image = restore(seed,validated,boundary)
@@ -255,7 +256,7 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
         reused = await accept_input(ParsedInput("retry.json",{"request_id":"42"}),context,new_operation_key(),reopened)
         assert reused.plan_disposition is PlanDisposition.REUSED
         saved = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
-        assert read_action_spec(saved) == {"target_duration_ms":1234}
+        assert read_action_spec(saved) == {"target_duration_ms":1234, "video_result_mode":"single_file"}
         assert reconstruct_action_input(saved)["params"]["fraction"] == Decimal("0.12345678901234567890123456789")
     finally:
         reopened.connection.close()
