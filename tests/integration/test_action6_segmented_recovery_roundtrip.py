@@ -586,6 +586,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         post_h_waiter_id = None
         post_h_waiter_name = None
         post_h_submit_ns = None
+        post_h_dependency = None
         if boundary == "copy_progress":
             gate_marker = wait_for(
                 lambda: adb_gate / "read-entered.json"
@@ -635,7 +636,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 published = [row for row in snapshot["state"]["sets"] if row[4] is not None]
                 assert len(published) == 1
                 at_commit = snapshot["state"]["waiters"]
-                assert set(waiter_ids).issubset({row[0] for row in at_commit})
+                assert {row[0] for row in at_commit} == set(waiter_ids)
                 assert all(
                     row[1] == int(enum_for("actions.status").RUNNING)
                     and row[3] == int(enum_for("obtain_source_selections.status").PENDING)
@@ -648,14 +649,6 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                     source_id=source_id, selection={"filter": "default"},
                 )
                 assert post_h_waiter_id not in {row[0] for row in at_commit}
-                current_post_h = query_state(
-                    deployment.state_db,
-                    "SELECT d.action_id,s.id FROM action_dependencies d "
-                    "JOIN obtain_source_selections s ON s.dependency_id=d.id "
-                    "WHERE d.action_id=? AND d.depends_on_action_id=?",
-                    (post_h_waiter_id, source_id),
-                )
-                assert len(current_post_h) == 1
         elif boundary == "local_read":
             marker = local_gate / "local-read-entered.json"
             gate_marker = wait_for(
@@ -708,6 +701,20 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             monkeypatch.chdir(package.python.parents[2])
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
+            if post_h_waiter_id is not None:
+                post_h_dependency = wait_for(
+                    lambda: rows if len(rows := query_state(
+                        deployment.state_db,
+                        "SELECT d.action_id,d.depends_on_action_id,s.id,s.status "
+                        "FROM action_dependencies d "
+                        "JOIN obtain_source_selections s ON s.dependency_id=d.id "
+                        "WHERE d.action_id=? AND d.depends_on_action_id=?",
+                        (post_h_waiter_id, source_id),
+                    )) == 1 else None,
+                    120,
+                    "重启调度后 post-H 取回未保存来源依赖与选择行",
+                )
+                assert post_h_dependency[0][:2] == (post_h_waiter_id, source_id)
             if boundary == "copy_progress":
                 assert resume_path_argument is not None and resume_copy_before is not None
                 assert resume_call_count is not None and resume_after_ns is not None
@@ -837,6 +844,50 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             delivery_evidence.extend(_assert_client_delivery_files(
                 deployment, scenario["store"], report, waiter_name, delivery_map
             ))
+        verified = {
+            int(enum_for("file_copies.verification_state").MATCHED),
+            int(enum_for("file_copies.verification_state").SOURCE_CHECKSUM_UNAVAILABLE),
+        }
+        post_h_evidence = []
+        if post_h_waiter_id is not None:
+            assert post_h_waiter_name is not None and post_h_submit_ns is not None
+            assert post_h_dependency is not None
+            post_h_evidence = _assert_client_delivery_files(
+                deployment, scenario["store"], report,
+                post_h_waiter_name, delivery_map,
+            )
+            post_h_copies = query_state(
+                deployment.state_db,
+                "SELECT d.output_id,d.id,c.source_device_file_id,c.source_intermediate_file_id,"
+                "c.verification_state,c.committed_bytes,c.source_size,c.target_sha256 "
+                "FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id "
+                "WHERE d.action_id=? ORDER BY d.output_id",
+                (post_h_waiter_id,),
+            )
+            expected_post_h = {
+                output_rows[path]["output_id"]: output_rows[path]["device_file_id"]
+                for path in video_paths[:checked_count]
+            }
+            assert len(post_h_copies) == len(expected_post_h) == checked_count
+            assert len({row[1] for row in post_h_copies}) == checked_count
+            assert {str(row[0]): row[2] for row in post_h_copies} == expected_post_h
+            assert all(
+                row[3] is None
+                and row[4] in verified
+                and row[5] == row[6] == expected_size_by_output_id[str(row[0])]
+                and row[7] == expected_sha_by_output_id[str(row[0])]
+                for row in post_h_copies
+            )
+            post_h_reads = [
+                call for call in _records(deployment.root / "adb-calls.jsonl")
+                if call.get("kind") == "file"
+                and call.get("file_kind") == "read"
+                and call.get("started_ns", 0) >= post_h_submit_ns
+            ]
+            assert all(
+                any(path in call.get("script", "") for call in post_h_reads)
+                for path in video_paths[:checked_count]
+            )
 
         bound_copies = query_state(
             deployment.state_db,
@@ -848,10 +899,6 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         )
         assert len(bound_copies) == checked_count * 2
         assert all(row[3] is None and row[4] is not None for row in bound_copies)
-        verified = {
-            int(enum_for("file_copies.verification_state").MATCHED),
-            int(enum_for("file_copies.verification_state").SOURCE_CHECKSUM_UNAVAILABLE),
-        }
         assert all(
             row[5] in verified
             and row[6] == row[7] == expected_size_by_output_id[str(row[1])]
@@ -865,6 +912,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         late_evidence = []
         late_id = None
         late_name = None
+        late_report_path = source_report_path
         if len(video_paths) > checked_count:
             late_path = video_paths[-1]
             late_name = "late-explicit"
@@ -898,47 +946,6 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 and late_path in call.get("script", "")
                 for call in _records(deployment.root / "adb-calls.jsonl")
             )
-        elif post_h_waiter_id is not None:
-            late_id = post_h_waiter_id
-            late_name = post_h_waiter_name
-            assert late_name is not None and post_h_submit_ns is not None
-            # The report above waits for and imports this post-H action with
-            # the source and original waiters, so do not claim the same report
-            # a second time.
-            late_report_path = source_report_path
-            late_evidence = _assert_client_delivery_files(
-                deployment, scenario["store"], report, late_name, delivery_map
-            )
-            post_h_copies = query_state(
-                deployment.state_db,
-                "SELECT d.output_id,c.source_device_file_id,c.source_intermediate_file_id,"
-                "c.committed_bytes,c.source_size,c.target_sha256 FROM deliveries d "
-                "JOIN file_copies c ON c.delivery_id=d.id WHERE d.action_id=? ORDER BY d.output_id",
-                (late_id,),
-            )
-            expected_post_h = {
-                output_rows[path]["output_id"]: output_rows[path]["device_file_id"]
-                for path in video_paths[:checked_count]
-            }
-            assert len(post_h_copies) == len(expected_post_h)
-            assert {
-                str(row[0]): row[1] for row in post_h_copies
-            } == expected_post_h
-            assert all(row[1] is not None and row[2] is None and row[3] == row[4]
-                       for row in post_h_copies)
-            assert all(
-                row[3] == row[4] == expected_size_by_output_id[str(row[0])]
-                and row[5] == expected_sha_by_output_id[str(row[0])]
-                for row in post_h_copies
-            )
-            post_h_reads = [
-                call for call in _records(deployment.root / "adb-calls.jsonl")
-                if call.get("kind") == "file"
-                and call.get("file_kind") == "read"
-                and call.get("started_ns", 0) >= post_h_submit_ns
-            ]
-            assert all(any(path in call.get("script", "") for call in post_h_reads)
-                       for path in video_paths[:checked_count])
         late_report_receipt = _assert_ack(demo, scenario, final_report)
         evidence = {
             "scenario": f"ordinary-{case}-recovery",
@@ -957,7 +964,12 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 False if post_h_waiter_id is not None else None
             ),
             "resume_copy": resume_evidence,
-            "delivery_evidence": delivery_evidence + late_evidence,
+            "delivery_evidence": delivery_evidence + post_h_evidence + late_evidence,
+            "post_h_waiter_action_id": (
+                None if post_h_waiter_id is None else str(post_h_waiter_id)
+            ),
+            "post_h_dependency": post_h_dependency,
+            "post_h_delivery_evidence": post_h_evidence,
             "ffprobe": probes,
             "ack": late_report_receipt,
         }
