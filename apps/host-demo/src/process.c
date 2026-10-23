@@ -14,12 +14,35 @@ int host_check_reaping_contract(void) {
         return errno;
     return action.sa_handler == SIG_IGN || (action.sa_flags & SA_NOCLDWAIT) ? EINVAL : 0;
 }
-void host_child_init(host_child *c, char *b, size_t n) {
+void host_child_init(host_child *c, char *output, size_t output_capacity, char *stderr_output,
+                     size_t stderr_capacity) {
     memset(c, 0, sizeof(*c));
-    c->output = b;
-    c->capacity = n;
+    c->output = output;
+    c->capacity = output_capacity;
+    c->stderr_output = stderr_output;
+    c->stderr_capacity = stderr_capacity;
     c->out_fd = c->err_fd = c->notification_fd = c->notification_write_fd = -1;
     host_group_scan_init(&c->scan);
+}
+static void reset_attempt(host_child *c) {
+    c->pid = c->pgid = 0;
+    c->out_fd = c->err_fd = -1;
+    c->length = c->stderr_length = 0;
+    c->output_bytes_seen = c->stderr_bytes_seen = 0;
+    c->overflow = c->io_error = c->stderr_overflow = c->stderr_io_error = false;
+    c->ended = c->reaped = c->wait_fault = false;
+    c->termination = HOST_EXIT_UNKNOWN;
+    c->exit_code = 0;
+    c->started = false;
+    c->spawn_errno = 0;
+    c->completed_pid = c->completed_pgid = 0;
+    c->result_kind = HOST_RESULT_ABNORMAL;
+    c->result_needs_run = false;
+    c->submit_completion_pending = false;
+    c->submit_completion_error = 0;
+    c->settlement_error = 0;
+    c->settlement_operation = HOST_GROUP_READ_THREAD;
+    host_group_scan_reset(&c->scan);
 }
 int host_child_prepare_notifications(host_child *c) {
     if (c->notification_fd >= 0)
@@ -42,6 +65,7 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
                      const char *plan) {
     if (c->pid && !host_child_done(c))
         return EBUSY;
+    reset_attempt(c);
     int contract = host_check_reaping_contract();
     if (contract)
         return contract;
@@ -116,20 +140,11 @@ int host_child_spawn(host_child *c, const camctl_host_config *cfg, host_command 
     pid_t pid;
     rc = posix_spawn(&pid, cfg->camctl_path, &actions, &attr, argv, environ);
     if (!rc) {
-        char *buffer = c->output;
-        size_t capacity = c->capacity;
-        uint64_t id = c->id;
-        int notification_fd = c->notification_fd, notification_write_fd = c->notification_write_fd;
-        bool enabled = c->notifications_enabled;
-        host_child_init(c, buffer, capacity);
-        c->id = id;
-        c->notifications_enabled = enabled;
-        c->notification_fd = notification_fd;
-        c->notification_write_fd = notification_write_fd;
         c->pid = pid;
         c->pgid = pid;
         c->out_fd = out[0];
         c->err_fd = err[0];
+        c->started = true;
     }
 attr:
     posix_spawnattr_destroy(&attr);
@@ -158,6 +173,10 @@ static void drain(host_child *c, int *fd, bool output, host_child_log log, void 
             quota += (size_t)n;
             c->execution = HOST_EXEC_OBSERVED;
             if (output) {
+                if ((uint64_t)n > UINT64_MAX - c->output_bytes_seen)
+                    c->output_bytes_seen = UINT64_MAX;
+                else
+                    c->output_bytes_seen += (uint64_t)n;
                 size_t keep = (size_t)n;
                 if (keep > c->capacity - c->length) {
                     keep = c->capacity - c->length;
@@ -165,8 +184,23 @@ static void drain(host_child *c, int *fd, bool output, host_child_log log, void 
                 }
                 memcpy(c->output + c->length, data, keep);
                 c->length += keep;
-            } else if (log)
-                log(p, "stderr", data, (size_t)n);
+            } else {
+                if ((uint64_t)n > UINT64_MAX - c->stderr_bytes_seen)
+                    c->stderr_bytes_seen = UINT64_MAX;
+                else
+                    c->stderr_bytes_seen += (uint64_t)n;
+                size_t keep = (size_t)n;
+                if (keep > c->stderr_capacity - c->stderr_length) {
+                    keep = c->stderr_capacity - c->stderr_length;
+                    c->stderr_overflow = true;
+                }
+                if (keep) {
+                    memcpy(c->stderr_output + c->stderr_length, data, keep);
+                    c->stderr_length += keep;
+                }
+                if (log)
+                    log(p, "stderr", data, (size_t)n);
+            }
         } else if (n == 0) {
             close(*fd);
             *fd = -1;
@@ -177,6 +211,8 @@ static void drain(host_child *c, int *fd, bool output, host_child_log log, void 
             if (c->reaped) {
                 if (output)
                     c->io_error = true;
+                else
+                    c->stderr_io_error = true;
                 if (log) {
                     const char *message = "pipe remained open after group settlement";
                     log(p, output ? "stdout_incomplete" : "stderr_closed_after_exit", message,
@@ -189,6 +225,8 @@ static void drain(host_child *c, int *fd, bool output, host_child_log log, void 
         } else {
             if (output)
                 c->io_error = true;
+            else
+                c->stderr_io_error = true;
             if (log)
                 log(p, output ? "stdout_read_error" : "stderr_read_error", strerror(errno),
                     strlen(strerror(errno)));

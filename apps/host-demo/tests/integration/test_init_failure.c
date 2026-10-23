@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdatomic.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -119,7 +120,7 @@ int main(void) {
     assert(!camctl_host_register_motor_control_callback(motor));
     int *failures[] = {&malloc_failure, &calloc_failure, &pipe_failure, &thread_failure,
                        &mutex_failure,  &cond_failure,   &fcntl_failure};
-    const int counts[] = {5, 3, 2, 3, 4, 2, 3};
+    const int counts[] = {7, 3, 2, 4, 5, 3, 3};
     const int expected[] = {ENOMEM, ENOMEM, EMFILE, EAGAIN, EAGAIN, EAGAIN, EIO};
     for (size_t j = 0; j < sizeof(counts) / sizeof(counts[0]); j++) {
         for (int i = 1; i <= counts[j]; i++) {
@@ -127,7 +128,13 @@ int main(void) {
             assert(camctl_host_init(&c, NULL) == -1);
             assert(errno == expected[j]);
             assert(fd_count() == baseline);
-            assert(directory_count("/proc/self/task") == threads);
+            int actual_threads = directory_count("/proc/self/task");
+            if (actual_threads != threads)
+                fprintf(stderr,
+                        "init failure cleanup thread mismatch: injection_index=%zu occurrence=%d "
+                        "expected_entries=%d actual_entries=%d\n",
+                        j, i, threads, actual_threads);
+            assert(actual_threads == threads);
             assert(atomic_load(&allocations) == 0);
             assert(camctl_host_register_motor_control_callback(motor) == -1 && errno == EALREADY);
             assert(camctl_host_submit("/A") == -1 && errno == ENODEV);

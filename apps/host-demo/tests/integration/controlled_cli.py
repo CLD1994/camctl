@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import pathlib
+import signal
 import sys
 import time
 
@@ -36,6 +37,22 @@ if mode == 'overflow':
 if mode == 'noisy':
     for _ in range(256):
         os.write(2, b'diagnostic ' * 300)
+if mode == 'diagnostic':
+    print(json.dumps({'kind': 'error', 'body': {'reason': 'state_db_error',
+                                                'details': {'message': 'controlled failure'}}}),
+          flush=True)
+    os.write(2, b'controlled stderr diagnostic\x00tail\n')
+    sys.exit(1)
+if mode == 'diagnostic-overflow':
+    os.write(1, b'O' * 4096)
+    os.write(2, b'E' * 4096)
+    sys.exit(9)
+if mode == 'diagnostic-raw':
+    os.write(1, b'raw\x00stdout\xffbytes')
+    os.write(2, b'raw\xff\x00stderr')
+    sys.exit(23)
+if mode == 'signal':
+    os.kill(os.getpid(), signal.SIGTERM)
 if mode == 'error':
     print(json.dumps({'kind': 'error', 'body': {'reason': 'future_error', 'details': {}}}))
     sys.exit(1)

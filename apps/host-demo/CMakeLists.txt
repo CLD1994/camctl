@@ -27,7 +27,9 @@ foreach(entry IN LISTS HOST_VENDOR_FILES)
 endforeach()
 find_package(Threads REQUIRED)
 add_library(camctl_host STATIC src/callbacks.c src/notification.c src/callback_queue.c src/result.c src/scheduler.c src/log_queue.c src/process.c src/process_group.c src/claim.c
-  src/config.c src/input.c src/host.c src/logger.c src/claim_posix.c vendor/yyjson/yyjson.c)
+  src/config.c src/input.c src/host.c src/logger.c src/diagnostic.c src/linux_rename.c
+  src/claim_posix.c
+  vendor/yyjson/yyjson.c)
 target_include_directories(camctl_host PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include> PRIVATE src vendor/yyjson)
 target_compile_definitions(camctl_host PRIVATE _GNU_SOURCE)
@@ -58,6 +60,7 @@ if(HOST_BUILD_TESTS)
   host_unit(result)
   host_unit(scheduler)
   host_unit(log_queue)
+  host_unit(diagnostic)
   host_unit(claim)
   host_unit(input)
   host_unit(home_paths)
@@ -125,7 +128,7 @@ if(HOST_BUILD_TESTS)
   add_executable(host_driver tests/integration/host_driver.c)
   target_include_directories(host_driver PRIVATE src)
   target_link_libraries(host_driver PRIVATE camctl_host)
-  set_property(TARGET host_driver APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=write,--wrap=unlink,--wrap=clock_gettime,--wrap=poll,--wrap=kill,--wrap=host_group_scan_batch,--wrap=host_result_parse,--wrap=posix_spawn")
+  set_property(TARGET host_driver APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--wrap=write,--wrap=unlink,--wrap=host_diagnostic_rename_noreplace,--wrap=clock_gettime,--wrap=poll,--wrap=kill,--wrap=host_group_scan_batch,--wrap=host_result_parse,--wrap=posix_spawn")
   add_test(NAME integration_host COMMAND ${HOST_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/test_host.py
     $<TARGET_FILE:host_driver> ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/controlled_cli.py)
   set_tests_properties(integration_host PROPERTIES LABELS integration TIMEOUT 90)

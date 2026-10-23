@@ -4,6 +4,7 @@
 #include "result.h"
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
 #include <pthread.h>
@@ -108,8 +109,39 @@ static pthread_mutex_t log_gate = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t log_condition = PTHREAD_COND_INITIALIZER;
 static int slow_log, log_entered, slow_cleanup, cleanup_entered;
 static bool deny_cleanup;
+static pthread_mutex_t diagnostic_gate = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t diagnostic_condition = PTHREAD_COND_INITIALIZER;
+static int hold_diagnostic, fail_diagnostic, collide_diagnostic, diagnostic_entered;
 static char cleanup_path[CAMCTL_HOST_PATH_MAX + 32];
+ssize_t __real_write(int, const void *, size_t);
 int __real_unlink(const char *);
+int __real_host_diagnostic_rename_noreplace(int, const char *, int, const char *);
+int __wrap_host_diagnostic_rename_noreplace(int olddirfd, const char *oldpath, int newdirfd,
+                                            const char *newpath) {
+    static const char prefix[] = "camctl-host-diagnostic-";
+    if (!strncmp(newpath, prefix, sizeof(prefix) - 1)) {
+        pthread_mutex_lock(&diagnostic_gate);
+        diagnostic_entered = 1;
+        pthread_cond_broadcast(&diagnostic_condition);
+        while (hold_diagnostic)
+            pthread_cond_wait(&diagnostic_condition, &diagnostic_gate);
+        bool fail = fail_diagnostic;
+        bool collide = collide_diagnostic;
+        pthread_mutex_unlock(&diagnostic_gate);
+        if (fail) {
+            errno = EIO;
+            return -1;
+        }
+        if (collide) {
+            int fd = openat(newdirfd, newpath,
+                            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+            assert(fd >= 0);
+            assert(__real_write(fd, "preserve", 8) == 8);
+            assert(!close(fd));
+        }
+    }
+    return __real_host_diagnostic_rename_noreplace(olddirfd, oldpath, newdirfd, newpath);
+}
 int __wrap_unlink(const char *path) {
     if (!strcmp(path, cleanup_path)) {
         pthread_mutex_lock(&log_gate);
@@ -178,6 +210,9 @@ int main(int argc, char **argv) {
     slow_log = getenv("HOST_TEST_SLOW_LOG") != NULL;
     slow_cleanup = getenv("HOST_TEST_SLOW_ARCHIVE_CLEANUP") != NULL;
     deny_cleanup = getenv("HOST_TEST_DENY_ARCHIVE_CLEANUP") != NULL;
+    hold_diagnostic = getenv("HOST_TEST_HOLD_DIAGNOSTIC_PUBLISH") != NULL;
+    fail_diagnostic = getenv("HOST_TEST_FAIL_DIAGNOSTIC_PUBLISH") != NULL;
+    collide_diagnostic = getenv("HOST_TEST_COLLIDE_DIAGNOSTIC_PUBLISH") != NULL;
     assert(camctl_host_init(&cfg, initial) == 0);
     /* 调用返回后复用参数缓冲区，后台必须持有自己的副本。 */
     for (int i = 1; i <= 5; i++)
@@ -257,6 +292,16 @@ int main(int argc, char **argv) {
             pthread_mutex_lock(&log_gate);
             printf("cleanup-entered %d\n", cleanup_entered);
             pthread_mutex_unlock(&log_gate);
+        } else if (!strcmp(line, "diagnostic-state")) {
+            pthread_mutex_lock(&diagnostic_gate);
+            printf("diagnostic-entered %d\n", diagnostic_entered);
+            pthread_mutex_unlock(&diagnostic_gate);
+        } else if (!strcmp(line, "unblock-diagnostic")) {
+            pthread_mutex_lock(&diagnostic_gate);
+            hold_diagnostic = 0;
+            pthread_cond_signal(&diagnostic_condition);
+            pthread_mutex_unlock(&diagnostic_gate);
+            puts("diagnostic-resumed");
         } else if (!strcmp(line, "block-kill")) {
             atomic_store(&suppress_kill, true);
             puts("kill-blocked");

@@ -4,6 +4,7 @@
 #include "callback_queue.h"
 #include "notification.h"
 #include "config.h"
+#include "diagnostic.h"
 #include "input.h"
 #include "process.h"
 #include "scheduler.h"
@@ -30,10 +31,11 @@ typedef struct {
     host_inputs inputs;
     host_child children[2];
     host_logger logger;
+    host_diagnostic_writer diagnostics;
     pthread_mutex_t inputs_mutex, claim_mutex;
     pthread_t worker;
     int wake[2];
-    uint64_t next_id;
+    uint64_t next_id, next_attempt_id;
     bool clock_failed;
     host_notification_stream notification;
     host_callback_queue callbacks;
@@ -110,7 +112,7 @@ static void notification_diagnostic(void *p, host_notification_error error) {
     host *h = p;
     host_child *c = &h->children[HOST_RUN];
     host_log(&h->logger, "call=%" PRIu64 " command=run pid=%ld notification_rejected reason=%s",
-             c->id, (long)c->pid, host_notification_error_name(error));
+             c->call_id, (long)c->pid, host_notification_error_name(error));
 }
 static void collect_notifications(host *h, host_child *c) {
     if (c->notification_fd < 0)
@@ -137,7 +139,7 @@ static void collect_notifications(host *h, host_child *c) {
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
             return;
         if (n < 0)
-            host_log(&h->logger, "call=%" PRIu64 " notification_read_failed errno=%d", c->id,
+            host_log(&h->logger, "call=%" PRIu64 " notification_read_failed errno=%d", c->call_id,
                      errno);
         host_notification_eof(&h->notification, notification_diagnostic, h);
         close(c->notification_fd);
@@ -166,7 +168,7 @@ typedef struct {
 } child_log_context;
 static void child_log(void *p, const char *stream, const char *data, size_t n) {
     child_log_context *c = p;
-    host_log(&c->h->logger, "call=%" PRIu64 " command=%s pid=%ld stream=%s data=%.*s", c->child->id,
+    host_log(&c->h->logger, "call=%" PRIu64 " command=%s pid=%ld stream=%s data=%.*s", c->child->call_id,
              command_name(c->command), (long)c->child->pid, stream, (int)n, data);
 }
 /* inputs_mutex 保护队列和调用线程持有的完成记录。 */
@@ -204,23 +206,45 @@ static void collect(host *h, host_command command) {
     host_result r = c->overflow || c->io_error ? (host_result){HOST_RESULT_ABNORMAL, false}
                                                : host_result_parse(command, c->output, c->length,
                                                                    c->termination, c->exit_code);
+    c->result_kind = r.kind;
+    c->result_needs_run = r.needs_run;
+    c->completed_pid = c->pid;
+    c->completed_pgid = c->pgid;
     const char *names[] = {"abnormal", "success", "error"};
     host_log(
         &h->logger,
         "call=%" PRIu64
         " command=%s pid=%ld result=%s exit_kind=%d exit=%d needs_run=%d overflow=%d io_error=%d",
-        c->id, command_name(command), (long)c->pid, names[r.kind], c->termination, c->exit_code,
-        r.needs_run, c->overflow, c->io_error);
+        c->call_id, command_name(command), (long)c->pid, names[r.kind], c->termination,
+        c->exit_code, r.needs_run, c->overflow, c->io_error);
     if (r.kind != HOST_RESULT_SUCCESS)
-        host_log(&h->logger, "call=%" PRIu64 " stdout=%.*s", c->id, (int)c->length, c->output);
+        host_log(&h->logger, "call=%" PRIu64 " stdout=%.*s", c->call_id, (int)c->length,
+                 c->output);
     host_schedule_finished(&h->schedule, command, r, now_ms(h));
     c->pid = 0;
-    if (command == HOST_SUBMIT)
-        finish_submit(h, r.kind == HOST_RESULT_SUCCESS ? 0 :
-                         r.kind == HOST_RESULT_ERROR ? EIO : EPROTO);
+    if (r.kind != HOST_RESULT_SUCCESS) {
+        if (command == HOST_SUBMIT) {
+            c->submit_completion_pending = true;
+            c->submit_completion_error = r.kind == HOST_RESULT_ERROR ? EIO : EPROTO;
+        }
+        host_diagnostic_request(&h->diagnostics, c);
+    } else if (command == HOST_SUBMIT) {
+        finish_submit(h, 0);
+    }
+}
+static void complete_diagnostic_submits(host *h) {
+    host_child *c = &h->children[HOST_SUBMIT];
+    if (!c->submit_completion_pending || host_diagnostic_busy(&h->diagnostics, c))
+        return;
+    int error = c->submit_completion_error;
+    c->submit_completion_pending = false;
+    finish_submit(h, error);
 }
 static void launch(host *h, host_command command, uint64_t now) {
     if (h->clock_failed)
+        return;
+    host_child *c = &h->children[command];
+    if (host_diagnostic_busy(&h->diagnostics, c))
         return;
     host_schedule *s = &h->schedule;
     const char *path = NULL;
@@ -255,29 +279,52 @@ static void launch(host *h, host_command command, uint64_t now) {
         id = h->next_id++;
         pthread_mutex_unlock(&h->inputs_mutex);
     }
-    host_child *c = &h->children[command];
-    c->id = id;
+    c->call_id = id;
+    c->attempt_id = h->next_attempt_id++;
+    c->command = command;
+    c->automatic = s->retries_used != retries;
+    c->retries_used = s->retries_used;
+    c->plan_path[0] = 0;
+    if (path)
+        strcpy(c->plan_path, path);
+    c->working_directory[0] = 0;
+    c->working_directory_errno = 0;
+    if (!getcwd(c->working_directory, sizeof(c->working_directory))) {
+        c->working_directory_errno = errno;
+        c->working_directory[0] = 0;
+    }
+    c->spawn_errno = 0;
+    c->result_kind = HOST_RESULT_ABNORMAL;
+    c->submit_completion_pending = false;
+    c->submit_completion_error = 0;
     host_log(&h->logger,
-             "call=%" PRIu64 " command=%s operation=spawn plan=%s automatic=%d retries=%u", id,
-             command_name(command), path ? path : "(none)", s->retries_used != retries,
-             s->retries_used);
+             "call=%" PRIu64 " attempt=%" PRIu64
+             " command=%s operation=spawn plan=%s automatic=%d retries=%u",
+             c->call_id, c->attempt_id, command_name(command), path ? path : "(none)",
+             c->automatic, c->retries_used);
     if (command == HOST_RUN && h->motor) {
         host_notification_reset(&h->notification);
         h->notification_length = h->notification_offset = 0;
     }
     int e = host_child_spawn(c, &h->config, command, path);
     if (e) {
+        c->spawn_errno = e;
         if (command == HOST_SUBMIT)
             h->submit_start_error = e;
-        host_log(&h->logger, "call=%" PRIu64 " command=%s not_started errno=%d detail=%s", id,
-                 command_name(command), e, strerror(e));
+        host_log(&h->logger,
+                 "call=%" PRIu64 " attempt=%" PRIu64
+                 " command=%s not_started errno=%d detail=%s",
+                 c->call_id, c->attempt_id, command_name(command), e, strerror(e));
         host_schedule_spawn_failed(s, command, now_ms(h));
+        host_diagnostic_request(&h->diagnostics, c);
     } else {
         host_schedule_spawned(s, command);
         if (command == HOST_RUN)
             h->paths[5][0] = 0;
-        host_log(&h->logger, "call=%" PRIu64 " command=%s pid=%ld spawned execution=unknown", id,
-                 command_name(command), (long)c->pid);
+        host_log(&h->logger,
+                 "call=%" PRIu64 " attempt=%" PRIu64
+                 " command=%s pid=%ld spawned execution=unknown",
+                 c->call_id, c->attempt_id, command_name(command), (long)c->pid);
     }
 }
 static void *worker_main(void *p) {
@@ -289,6 +336,8 @@ static void *worker_main(void *p) {
         uint64_t now = now_ms(h);
         collect(h, HOST_RUN);
         collect(h, HOST_SUBMIT);
+        host_diagnostic_dispatch_pending(&h->diagnostics, h->children);
+        complete_diagnostic_submits(h);
         if (!h->clock_failed) {
             launch(h, HOST_RUN, now);
             launch(h, HOST_SUBMIT, now);
@@ -356,10 +405,19 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     }
     h->inputs.capacity = config->plan_capacity;
     h->next_id = 1;
+    h->next_attempt_id = 1;
     h->inputs.items = calloc(config->plan_capacity, sizeof(host_input));
-    for (int i = 0; i < 2; i++)
-        host_child_init(&h->children[i], malloc(config->stdout_capacity), config->stdout_capacity);
-    if (!h->inputs.items || !h->children[0].output || !h->children[1].output) {
+    size_t stderr_capacity = config->stdout_capacity < HOST_DIAGNOSTIC_STDERR_CAPTURE_MAX
+                                 ? config->stdout_capacity
+                                 : HOST_DIAGNOSTIC_STDERR_CAPTURE_MAX;
+    for (int i = 0; i < 2; i++) {
+        char *output = malloc(config->stdout_capacity);
+        char *stderr_output = malloc(stderr_capacity);
+        host_child_init(&h->children[i], output, config->stdout_capacity, stderr_output,
+                        stderr_capacity);
+    }
+    if (!h->inputs.items || !h->children[0].output || !h->children[1].output ||
+        !h->children[0].stderr_output || !h->children[1].stderr_output) {
         e = ENOMEM;
         goto memory;
     }
@@ -401,10 +459,14 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     e = host_logger_init(&h->logger, &h->config);
     if (e)
         goto pipe;
+    e = host_diagnostic_init(&h->diagnostics, &h->config, &h->logger, &h->claim_mutex,
+                             h->wake[1], h->children);
+    if (e)
+        goto logger;
     if (h->motor) {
         e = pthread_mutex_init(&h->callback_mutex, NULL);
         if (e)
-            goto logger;
+            goto diagnostics;
         e = pthread_cond_init(&h->callback_ready, NULL);
         if (e)
             goto callback_mutex;
@@ -419,7 +481,7 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
             pthread_cond_destroy(&h->callback_ready);
             pthread_mutex_destroy(&h->callback_mutex);
         }
-        goto logger;
+        goto diagnostics;
     }
     instance = h;
     registrations.initialized = true;
@@ -429,6 +491,8 @@ callback_cond:
     pthread_cond_destroy(&h->callback_ready);
 callback_mutex:
     pthread_mutex_destroy(&h->callback_mutex);
+diagnostics:
+    host_diagnostic_abort(&h->diagnostics);
 logger:
     host_logger_abort(&h->logger);
 pipe:
@@ -447,6 +511,8 @@ memory:
     }
     free(h->children[0].output);
     free(h->children[1].output);
+    free(h->children[0].stderr_output);
+    free(h->children[1].stderr_output);
     free(h->inputs.items);
     free(h);
 unlock:

@@ -26,10 +26,11 @@ static void leftover_contract(camctl_host_config *cfg, const char *mode, bool th
     char record[128];
     snprintf(record, sizeof(record), "%s/pid", root);
     cfg->config_path = record;
-    char run_buffer[1024], submit_buffer[1024];
+    char run_buffer[1024], submit_buffer[1024], run_stderr[1024], submit_stderr[1024];
     host_child run, submit;
-    host_child_init(&run, run_buffer, sizeof(run_buffer));
-    host_child_init(&submit, submit_buffer, sizeof(submit_buffer));
+    host_child_init(&run, run_buffer, sizeof(run_buffer), run_stderr, sizeof(run_stderr));
+    host_child_init(&submit, submit_buffer, sizeof(submit_buffer), submit_stderr,
+                    sizeof(submit_stderr));
     assert(!host_child_spawn(&submit, cfg, HOST_SUBMIT, "/hold"));
     assert(!host_child_spawn(&run, cfg, HOST_RUN, mode));
     assert(run.pgid == run.pid && getpgid(run.pid) == run.pgid);
@@ -88,9 +89,9 @@ int main(int argc, char **argv) {
     /* 测试父进程接管自己的孤儿后代，仅用于测试资源回收。 */
     assert(!prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0));
     camctl_host_config cfg = CAMCTL_HOST_CONFIG_INIT;
-    char buffer[1024];
+    char buffer[1024], stderr_buffer[1024];
     host_child c;
-    host_child_init(&c, buffer, sizeof(buffer));
+    host_child_init(&c, buffer, sizeof(buffer), stderr_buffer, sizeof(stderr_buffer));
     cfg.camctl_path = "/definitely-missing-camctl";
     assert(host_child_spawn(&c, &cfg, HOST_RUN, NULL) == ENOENT);
     assert(c.pid == 0);
@@ -107,6 +108,9 @@ int main(int argc, char **argv) {
     assert(
         host_result_parse(HOST_SUBMIT, c.output, c.length, c.termination, c.exit_code).needs_run);
     assert(err_bytes == 1024 * 1024);
+    assert(c.stderr_length == sizeof(stderr_buffer));
+    assert(c.stderr_bytes_seen == 1024 * 1024);
+    assert(c.stderr_overflow);
     /* 真正执行后退出 127，不能归入“确定未启动”。 */
     assert(host_child_spawn(&c, &cfg, HOST_RUN, "/exit127") == 0);
     for (int i = 0; i < 500 && !host_child_done(&c); i++) {

@@ -69,13 +69,13 @@ int main(int argc, char **argv) {
     assert(result.status == HOST_GROUP_COMPLETE);
     int status;
     assert(waitpid(child, &status, 0) == child);
-    char executable[4096], output[1024], notifications[1024];
+    char executable[4096], output[1024], stderr_output[1024], notifications[1024];
     ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
     assert(length > 0);
     executable[length] = 0;
     config.camctl_path = executable;
     host_child invocation;
-    host_child_init(&invocation, output, sizeof(output));
+    host_child_init(&invocation, output, sizeof(output), stderr_output, sizeof(stderr_output));
     invocation.notifications_enabled = true;
     assert(!host_child_spawn(&invocation, &config, HOST_RUN, NULL));
     size_t bytes = 0;

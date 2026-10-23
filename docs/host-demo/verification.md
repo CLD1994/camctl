@@ -4,6 +4,22 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## host 子进程失败诊断交付验证（2026-10-23 UTC）
+
+本次在 Linux x86_64、Ubuntu 24.04.4、GCC 13.3.0、glibc 2.39、CMake 3.28.3 和 CPython 3.11.16 中，验证 host 对失败 camctl 调用的输出捕获、直接发布至 `processing` 和初始化失败清理。构建目录位于独立 worktree `/workspaces/camctl/.local/worktrees/host-exit-log-20261024`，所有相对命令均从该 worktree 根目录运行；没有连接真实 camctl 部署环境或 ADB。
+
+| 检查 | 命令与结果 | 证据边界 |
+| --- | --- | --- |
+| Debug 配置和构建 | `cmake -S apps/host-demo -B .local/host-exit-log-build -DHOST_BUILD_TESTS=ON -DHOST_TEST_PYTHON=/home/zsm1695/.local/bin/python3.11 -DCMAKE_BUILD_TYPE=Debug`，随后 `cmake --build .local/host-exit-log-build -- -j4`；均退出 0。 | 日志为 `.local/host-exit-configure-final.log` 和 `.local/host-exit-build-final.log`。测试解释器为 CPython 3.11.16。 |
+| 失败诊断 focused CTest | `ctest --test-dir .local/host-exit-log-build -R '^(unit_diagnostic|unit_process_unit|integration_process|integration_init_failure|integration_closed_stdio|integration_host)$' --output-on-failure`；6/6 通过，退出码 0。 | 日志为 `.local/host-exit-focused-rerun.log`。覆盖成功不发布、合法会话错误、协议异常、信号、spawn 失败、原始 NUL/非 UTF-8 字节、输出截断、并发命名、writer 等待时继续 drain、submit 上下文保留、发布故障和 no-replace 目标冲突。 |
+| 首次完整 host CTest | `ctest --test-dir .local/host-exit-log-build --output-on-failure`；34/35 通过，`integration_init_failure` 在 `test_init_failure.c:130` 的 `/proc/self/task` 条目数断言失败，其余 34 项通过，命令返回非零。 | 原始输出保留在 `.local/host-exit-ctest-final.log`。首次工具会话没有保留 shell 数字退出码。原断言没有输出失败矩阵的注入类别/序号或实际条目数，因此现有证据不能确认具体注入点、实际条目数或根因；本记录不将其归因为时序问题。 |
+| 初始化线程清理复测 | `ctest --test-dir .local/host-exit-log-build --repeat until-fail:50 -R '^integration_init_failure$' --output-on-failure`；50/50 通过；后续单项 focused 也通过。 | 日志为 `.local/host-exit-init-repeat.log`。当前测试在未来发生线程条目数不符时打印注入类别序号及 expected/actual；线程创建矩阵覆盖 logger、诊断 writer、callback 和 worker。源码清理路径对 writer 执行 stop、signal、join；这一复测没有恢复首次失败的具体注入与实际计数。 |
+| 后续完整 host CTest | 再次运行 `ctest --test-dir .local/host-exit-log-build --output-on-failure`；35/35 通过，退出码 0。 | 日志为 `.local/host-exit-ctest-rerun.log`。后续通过说明当前快照全套测试通过；它没有解释首次 `integration_init_failure` 的原因。 |
+| Linux no-replace 系统调用 | `nm -u .local/host-exit-log-build/CMakeFiles/camctl_host.dir/src/diagnostic.c.o` 与 `.../src/linux_rename.c.o`；发布封装引用 `syscall`，不引用 glibc `renameat2` 包装符号。 | 集成测试通过在最终候选文件名创建 sentinel 冲突，观察 `RENAME_NOREPLACE` 返回 `EEXIST`，并逐字节确认原文件仍为 `preserve`。这证明当前 Linux 测试内核上的 no-replace 行为；尚未在 Ubuntu 18.04 / ARM64 执行组件 CTest。 |
+| 文档检查 | `node scripts/check-doc-links.mjs` 与 `git diff --check`；5369 个本地文件链接通过，差异格式检查通过，命令退出码均为 0。 | 链接脚本不校验标题锚点；新增锚点另行对照目标标题核对。链接日志为 `.local/host-exit-doc-links-final.log`。 |
+
+最后一次 UTC 时间由 `date -u` 读取，为 2026-10-23 23:00:51 UTC。上述检查只验证软件工作区和可控 CLI；不代表真实 camctl 部署、ADB、ARM64 运行或断电持久性验收。
+
 ## 阻塞递交与原计划文件释放验证（2026-10-21 UTC）
 
 本次在 Linux x86_64、GCC 13.3.0、CMake 3.28.3、Python 3.11.16、SQLite 3.53.1 中，验证[递交调用契约](design.md#对外调用契约)。`camctl_host_submit` 成功返回确认输入处理结果已保存，原文件可删除；业务受理或拒绝及设备动作结果仍通过报告确认。初始化入口的首次计划继续异步处理。

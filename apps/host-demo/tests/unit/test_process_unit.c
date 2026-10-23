@@ -10,7 +10,8 @@
 #include <unistd.h>
 #include "process.h"
 static const char *stdout_data;
-static size_t position;
+static const char *stderr_data;
+static size_t position, stderr_position, stderr_size;
 static bool exited, lost, eof, stderr_stays_open;
 static int close_count, wait_code, reaps, signals, kill_error, scans, observations;
 static int wait_error, reap_error;
@@ -75,6 +76,14 @@ ssize_t __wrap_read(int fd, void *buffer, size_t length) {
         position += n;
         return (ssize_t)n;
     }
+    if (fd == 11 && stderr_position < stderr_size) {
+        size_t n = stderr_size - stderr_position;
+        if (n > 3) n = 3;
+        if (n > length) n = length;
+        memcpy(buffer, stderr_data + stderr_position, n);
+        stderr_position += n;
+        return (ssize_t)n;
+    }
     if (eof && !(fd == 11 && stderr_stays_open)) return 0;
     errno = EAGAIN; return -1;
 }
@@ -85,11 +94,14 @@ ssize_t __wrap___read_chk(int fd, void *buffer, size_t length, size_t available)
 int __wrap_close(int fd) {
     assert_true(fd == 10 || fd == 11); close_count++; return 0;
 }
+static char stderr_capture[128];
 static void prepare(host_child *c, char *buffer, size_t length) {
-    host_child_init(c, buffer, length);
+    host_child_init(c, buffer, length, stderr_capture, sizeof(stderr_capture));
     c->pid = c->pgid = 123; c->out_fd = 10; c->err_fd = 11;
     stdout_data = "{\"kind\":\"succeeded\"}\n";
-    position = 0; exited = lost = eof = stderr_stays_open = false;
+    position = stderr_position = stderr_size = 0;
+    stderr_data = "";
+    exited = lost = eof = stderr_stays_open = false;
     close_count = reaps = signals = kill_error = scans = observations = 0;
     wait_error = reap_error = 0; wait_code = CLD_EXITED;
     current_group = 123; group_state = HOST_GROUP_COMPLETE;
@@ -107,6 +119,31 @@ static void overflow_drains(void **p) {
     exited = eof = true; host_child_collect(&c, NULL, NULL);
     assert_true(c.overflow); assert_int_equal(c.length, 4);
     assert_int_equal(position, strlen(stdout_data)); assert_true(host_child_done(&c));
+}
+static void stderr_capture_is_bounded_and_drained(void **p) {
+    (void)p;
+    char output[128], stderr_output[4];
+    host_child c;
+    host_child_init(&c, output, sizeof(output), stderr_output, sizeof(stderr_output));
+    c.pid = c.pgid = 123;
+    c.out_fd = 10;
+    c.err_fd = 11;
+    stdout_data = "{\"kind\":\"succeeded\"}\n";
+    position = 0;
+    stderr_data = "diagnostic";
+    stderr_position = 0;
+    stderr_size = strlen(stderr_data);
+    exited = eof = true;
+    lost = stderr_stays_open = false;
+    wait_code = CLD_EXITED;
+    current_group = 123;
+    group_state = HOST_GROUP_COMPLETE;
+    host_child_collect(&c, NULL, NULL);
+    assert_true(host_child_done(&c));
+    assert_int_equal(c.stderr_length, sizeof(stderr_output));
+    assert_memory_equal(c.stderr_output, "diag", sizeof(stderr_output));
+    assert_int_equal(c.stderr_bytes_seen, strlen(stderr_data));
+    assert_true(c.stderr_overflow);
 }
 static void lost_wait_is_not_confirmed_exit(void **p) {
     (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
@@ -183,6 +220,7 @@ static void final_reap_failure_keeps_call(void **p) {
 int main(void) {
     const struct CMUnitTest t[] = {
         cmocka_unit_test(final_message_before_exit), cmocka_unit_test(overflow_drains),
+        cmocka_unit_test(stderr_capture_is_bounded_and_drained),
         cmocka_unit_test(lost_wait_is_not_confirmed_exit),
         cmocka_unit_test(inherited_stderr_closes_only_after_settlement),
         cmocka_unit_test(stopped_child_is_not_terminated),

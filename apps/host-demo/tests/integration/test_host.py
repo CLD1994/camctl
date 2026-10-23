@@ -78,6 +78,16 @@ class HostIntegration(unittest.TestCase):
                 pass  # 日志线程可能刚刚轮换此归档；下一次观察继续读取。
         return text
 
+    def diagnostics(self):
+        return sorted(self.processing.glob('camctl-host-diagnostic-*.log'))
+
+    def diagnostic_header(self, path):
+        data = path.read_bytes()
+        header, marker, _ = data.partition(b'\nstdout_begin\n')
+        self.assertTrue(marker, '诊断文件缺少 stdout 字节区段标记')
+        return dict(line.split('=', 1) for line in header.decode('ascii').splitlines()
+                    if '=' in line)
+
     def until(self, condition):
         deadline = time.monotonic()+5
         while time.monotonic() < deadline:
@@ -114,14 +124,194 @@ class HostIntegration(unittest.TestCase):
         self.start()
         self.assertEqual(self.command('submit '+str(self.plan('A', 'error'))), 'submit -1')
 
+    def test_successful_run_does_not_publish_diagnostic(self):
+        self.start(retries=0)
+        self.until(lambda: 'result=success' in self.logs())
+        self.assertEqual(self.diagnostics(), [])
+
+    def test_run_session_error_publishes_actual_stdout_stderr_and_exit(self):
+        (self.root/'run-mode').write_text('diagnostic')
+        self.start(retries=0)
+        self.until(lambda: 'result=error' in self.logs())
+        self.until(lambda: len(self.diagnostics()) == 1)
+        artifact = self.diagnostics()[0].read_bytes()
+        self.assertIn(b'CAMCTL-HOST-DIAGNOSTIC 1\n', artifact)
+        self.assertIn(b'command=run\n', artifact)
+        self.assertIn(b'classification=error\n', artifact)
+        self.assertIn(b'termination=normal\n', artifact)
+        self.assertIn(b'exit_code=1\n', artifact)
+        self.assertIn(f'working_directory_hex={os.getcwd().encode().hex()}\n'.encode(), artifact)
+        self.assertIn(b'"reason": "state_db_error"', artifact)
+        self.assertIn(b'controlled stderr diagnostic\x00tail\n', artifact)
+        self.until(lambda: 'diagnostic_published' in self.logs())
+        self.assertEqual(list(self.processing.glob('.camctl-host-diagnostic-prepare-*')), [],
+                         self.logs())
+
+    def test_signal_exit_publishes_signal_number(self):
+        (self.root/'run-mode').write_text('signal')
+        self.start(retries=0)
+        self.until(lambda: 'result=abnormal' in self.logs())
+        self.until(lambda: len(self.diagnostics()) == 1)
+        header = self.diagnostic_header(self.diagnostics()[0])
+        self.assertEqual(header['classification'], 'abnormal')
+        self.assertEqual(header['termination'], 'signal')
+        self.assertEqual(header['signal_number'], str(signal.SIGTERM))
+
+    def test_protocol_error_publishes_diagnostic(self):
+        self.start()
+        self.assertEqual(self.command('submit '+str(self.plan('empty', 'empty'))), 'submit -1')
+        self.until(lambda: len(self.diagnostics()) == 1)
+        header = self.diagnostic_header(self.diagnostics()[0])
+        self.assertEqual(header['command'], 'submit')
+        self.assertEqual(header['classification'], 'abnormal')
+        self.assertEqual(header['termination'], 'normal')
+        self.assertEqual(header['exit_code'], '0')
+        self.assertEqual(header['stdout_bytes_saved'], '0')
+
+    def test_raw_stream_sections_preserve_lengths_nul_and_non_utf8(self):
+        self.start()
+        self.assertEqual(self.command('submit '+str(self.plan('raw', 'diagnostic-raw'))),
+                         'submit -1')
+        self.until(lambda: len(self.diagnostics()) == 1)
+        artifact = self.diagnostics()[0].read_bytes()
+        header, marker, rest = artifact.partition(b'\nstdout_begin\n')
+        self.assertTrue(marker)
+        fields = dict(line.split('=', 1) for line in header.decode('ascii').splitlines()
+                      if '=' in line)
+        stdout_length = int(fields['stdout_bytes_saved'])
+        stderr_length = int(fields['stderr_bytes_saved'])
+        stdout = rest[:stdout_length]
+        tail = rest[stdout_length:]
+        stderr_marker = b'\nstderr_begin\n'
+        self.assertTrue(tail.startswith(stderr_marker))
+        stderr = tail[len(stderr_marker):len(stderr_marker) + stderr_length]
+        self.assertEqual(stdout, b'raw\x00stdout\xffbytes')
+        self.assertEqual(stderr, b'raw\xff\x00stderr')
+        self.assertEqual(len(rest), stdout_length + len(stderr_marker) + stderr_length)
+
+    def test_pending_diagnostic_keeps_submit_context_until_writer_finishes(self):
+        self.start(retries=0, settings={'HOST_TEST_HOLD_DIAGNOSTIC_PUBLISH': '1'})
+        self.until(lambda: 'result=success' in self.logs())
+        first = self.plan('first', 'diagnostic')
+        self.assertEqual(self.command('start-submit '+str(first)), 'started 0')
+        self.until(lambda: len([event for event in self.events()
+                                if event['command'] == 'submit']) == 1)
+        self.until(lambda: self.command('diagnostic-state') == 'diagnostic-entered 1')
+        self.assertEqual(self.command('submit-result 0'), 'pending')
+        second = self.plan('second', 'true')
+        self.assertEqual(self.command('start-submit '+str(second)), 'started 1')
+        self.until(lambda: f'path={second}' in self.logs())
+        self.assertEqual(len([event for event in self.events()
+                              if event['command'] == 'submit']), 1)
+        self.assertEqual(self.diagnostics(), [])
+        self.assertEqual(self.command('unblock-diagnostic'), 'diagnostic-resumed')
+        self.until(lambda: len(self.diagnostics()) == 1)
+        self.until(lambda: len([event for event in self.events()
+                                if event['command'] == 'submit']) == 2)
+        header = self.diagnostic_header(self.diagnostics()[0])
+        self.assertEqual(header['plan_path_hex'], str(first).encode().hex())
+        self.assertNotEqual(header['plan_path_hex'], str(second).encode().hex())
+        self.until(lambda: self.command('submit-result 0').startswith('submit -1'))
+        self.until(lambda: self.command('submit-result 1') == 'submit 0 errno=0')
+
+    def test_truncated_stdout_and_stderr_are_counted_and_drained(self):
+        (self.root/'run-mode').write_text('diagnostic-overflow')
+        self.start(retries=0)
+        self.until(lambda: 'result=abnormal' in self.logs())
+        self.until(lambda: len(self.diagnostics()) == 1)
+        header = self.diagnostic_header(self.diagnostics()[0])
+        self.assertEqual(header['stdout_bytes_seen'], '4096')
+        self.assertEqual(header['stdout_bytes_saved'], '1024')
+        self.assertEqual(header['stdout_truncated'], '1')
+        self.assertEqual(header['stderr_bytes_seen'], '4096')
+        self.assertEqual(header['stderr_bytes_saved'], '1024')
+        self.assertEqual(header['stderr_truncated'], '1')
+
+    def test_concurrent_run_and_submit_failures_have_unique_attempts(self):
+        (self.root/'hold-run').touch()
+        (self.root/'hold-submit').touch()
+        (self.root/'run-mode').write_text('diagnostic')
+        plan = self.plan('A', 'diagnostic')
+        self.start(retries=0)
+        self.until(lambda: len(self.events()) == 1)
+        self.assertEqual(self.command('start-submit '+str(plan)), 'started 0')
+        self.until(lambda: len(self.events()) == 2)
+        (self.root/'hold-run').unlink()
+        (self.root/'hold-submit').unlink()
+        self.until(lambda: len(self.diagnostics()) == 2)
+        self.until(lambda: self.command('submit-result 0').startswith('submit -1'))
+        headers = [self.diagnostic_header(path) for path in self.diagnostics()]
+        self.assertEqual({header['command'] for header in headers}, {'run', 'submit'})
+        self.assertEqual(len({header['call_id'] for header in headers}), 2)
+        self.assertEqual(len({header['attempt_id'] for header in headers}), 2)
+        self.assertEqual(len({path.name for path in self.diagnostics()}), 2)
+        self.until(lambda: self.logs().count('diagnostic_published') >= 2)
+        self.assertEqual(list(self.processing.glob('.camctl-host-diagnostic-prepare-*')), [])
+
     def test_submit_returns_failure_for_unknown_result(self):
         self.start()
         self.assertEqual(self.command('submit '+str(self.plan('A', 'empty'))), 'submit -1')
 
     def test_submit_returns_last_start_error_after_retry_exhaustion(self):
-        self.start(program=self.root/'missing', retries=1)
-        self.assertEqual(self.command('start-submit '+str(self.plan('A'))), 'started 0')
-        self.until(lambda: self.command('submit-result 0') == f'submit -1 errno={errno.ENOENT}')
+        self.start(retries=1)
+        self.until(lambda: 'result=success' in self.logs())
+        camctl_script = self.cli.read_bytes()
+        self.cli.unlink()
+        self.assertEqual(self.command('submit '+str(self.plan('A'))), 'submit -1')
+        self.until(lambda: len(self.diagnostics()) == 2)
+        headers = [self.diagnostic_header(path) for path in self.diagnostics()]
+        submit_attempts = [header for header in headers if header['command'] == 'submit']
+        self.assertEqual(len(submit_attempts), 2)
+        self.assertEqual(len({header['call_id'] for header in submit_attempts}), 1)
+        self.assertEqual(len({header['attempt_id'] for header in submit_attempts}), 2)
+        for header in submit_attempts:
+            self.assertEqual(header['classification'], 'not_started')
+            self.assertEqual(header['termination'], 'not_started')
+            self.assertEqual(header['spawn_errno'], str(errno.ENOENT))
+            self.assertEqual(header['stdout_bytes_saved'], '0')
+            self.assertEqual(header['stderr_bytes_saved'], '0')
+        self.until(lambda: 'retry_exhausted' in self.logs())
+        self.cli.write_bytes(camctl_script)
+        self.cli.chmod(0o755)
+        plan = self.plan('B', 'true')
+        self.assertEqual(self.command('submit '+str(plan)), 'submit 0')
+        self.until(lambda: len(self.events()) == 2)
+        self.assertEqual(self.events()[1]['plan'], str(plan))
+
+    def test_diagnostic_writer_does_not_block_other_cli_drain(self):
+        (self.root/'run-mode').write_text('diagnostic')
+        self.start(retries=0, settings={'HOST_TEST_HOLD_DIAGNOSTIC_PUBLISH': '1'})
+        self.until(lambda: self.command('diagnostic-state') == 'diagnostic-entered 1')
+        self.assertEqual(self.diagnostics(), [])
+        self.assertEqual(len(list(self.processing.glob('.camctl-host-diagnostic-prepare-*'))), 1)
+        noisy = self.plan('noisy', 'noisy')
+        self.assertEqual(self.command('submit '+str(noisy)), 'submit 0')
+        self.until(lambda: len(self.events()) == 2)
+        self.assertEqual(self.diagnostics(), [])
+        self.assertEqual(self.command('unblock-diagnostic'), 'diagnostic-resumed')
+        self.until(lambda: len(self.diagnostics()) == 1)
+        self.until(lambda: 'diagnostic_published' in self.logs())
+        self.assertEqual(list(self.processing.glob('.camctl-host-diagnostic-prepare-*')), [])
+
+    def test_publish_failure_keeps_submit_result_and_cleans_preparation(self):
+        self.start(retries=0, settings={'HOST_TEST_FAIL_DIAGNOSTIC_PUBLISH': '1'})
+        plan = self.plan('failure', 'diagnostic')
+        self.assertEqual(self.command('submit '+str(plan)), 'submit -1')
+        self.until(lambda: 'diagnostic_write_failed step=publish_rename' in self.logs())
+        self.assertEqual(self.diagnostics(), [])
+        self.assertEqual(list(self.processing.glob('.camctl-host-diagnostic-prepare-*')), [])
+
+    def test_no_replace_publish_preserves_existing_processing_file(self):
+        self.start(retries=0, settings={'HOST_TEST_COLLIDE_DIAGNOSTIC_PUBLISH': '1'})
+        plan = self.plan('collision', 'diagnostic')
+        self.assertEqual(self.command('submit '+str(plan)), 'submit -1')
+        self.until(lambda: 'diagnostic_write_failed step=publish_rename' in self.logs())
+        files = self.diagnostics()
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].read_bytes(), b'preserve')
+        self.assertIn('errno='+str(errno.EEXIST), self.logs())
+        self.assertIn('published=0', self.logs())
+        self.assertEqual(list(self.processing.glob('.camctl-host-diagnostic-prepare-*')), [])
 
     def test_clock_failure_releases_queued_submit_waiters(self):
         (self.root/'hold-submit').touch()

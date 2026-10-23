@@ -90,8 +90,8 @@ static int launch(void) {
     camctl_host_config cfg = CAMCTL_HOST_CONFIG_INIT;
     cfg.camctl_path = "/camctl";
     host_child child;
-    char output[64];
-    host_child_init(&child, output, sizeof(output));
+    char output[64], stderr_output[64];
+    host_child_init(&child, output, sizeof(output), stderr_output, sizeof(stderr_output));
     child.notifications_enabled = notifications;
     return host_child_spawn(&child, &cfg, command, NULL);
 }
