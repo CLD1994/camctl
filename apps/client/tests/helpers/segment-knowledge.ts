@@ -131,7 +131,7 @@ export function segmentEntitiesOnly(kind: SegmentEntityCase): StatusReport {
         : kind === "timelapse"
           ? "camera_timelapse"
           : "camera_record";
-    source.outputs = [];
+    source.outputs = kind === "timelapse" ? [source.outputs![0]] : [];
   } else {
     source.outputs = [source.outputs![0]];
     const output = source.outputs[0];

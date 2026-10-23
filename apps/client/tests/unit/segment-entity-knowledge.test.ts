@@ -10,23 +10,21 @@ import {
   segmentFactsOnly,
   type SegmentEntityCase,
 } from "../helpers/segment-knowledge";
+import { segmentReport } from "../helpers/segment-reports";
 for (const kind of [
   "photo",
-  "timelapse",
   "preview",
   "repaired",
   "wrong-source",
 ] as SegmentEntityCase[]) {
   const orders = permutations(["F", "bad", "good"] as const);
   it.each(orders.map((order, i) => [i, order] as const))(
-    `${kind} 的每项实体观察均保留，排列 %i`,
+    `${kind} 的非法实体观察持续被拒绝，排列 %i`,
     (_i, order) => {
       const reports = {
         F: segmentFactsOnly(),
         bad: segmentEntitiesOnly(kind),
-        good: segmentEntitiesOnly(
-          kind === "photo" || kind === "timelapse" ? "record" : "original",
-        ),
+        good: segmentEntitiesOnly(kind === "photo" ? "record" : "original"),
       };
       const before = stringifyJson(reports);
       const knowledge = new SegmentReportKnowledge();
@@ -34,11 +32,30 @@ for (const kind of [
         validateReport(reports[name]);
         knowledge.add(reports[name]);
       }
-      expect(() => knowledge.validate()).toThrow(/分段.*(来源|保留产物)/);
+      expect(() => knowledge.validate()).toThrow();
       expect(stringifyJson(reports)).toBe(before);
     },
   );
 }
+it.each(
+  permutations(["F", "native", "good"] as const).map(
+    (order, i) => [i, order] as const,
+  ),
+)("原生延时原片可作为分段视频来源，排列 %i", (_i, order) => {
+  const reports = {
+    F: segmentFactsOnly(),
+    native: segmentEntitiesOnly("timelapse"),
+    good: segmentEntitiesOnly("original"),
+  };
+  const before = stringifyJson(reports);
+  const knowledge = new SegmentReportKnowledge();
+  for (const name of order) {
+    validateReport(reports[name]);
+    knowledge.add(reports[name]);
+  }
+  expect(() => knowledge.validate()).not.toThrow();
+  expect(stringifyJson(reports)).toBe(before);
+});
 it.each([
   "record",
   "source-absent",
@@ -72,7 +89,6 @@ it("未被分段引用的普通实体观察不新增全历史一致性审计", (
 
 it.each([
   "photo",
-  "timelapse",
   "preview",
   "repaired",
   "wrong-source",
@@ -81,7 +97,12 @@ it.each([
   report.plans![0].actions!.push(
     ...segmentEntitiesOnly(kind).plans![0].actions!,
   );
-  expect(() => validateReport(report)).toThrow(/分段.*(来源|保留产物)/);
+  expect(() => validateReport(report)).toThrow();
+});
+it("同份原生延时分段缺口在公开报告入口接受", () => {
+  const report = segmentReport();
+  report.plans![0].actions![0].type = "camera_timelapse";
+  expect(() => validateReport(report)).not.toThrow();
 });
 
 it("已有F时未被分段引用的实体反证仍不触发审计", () => {
