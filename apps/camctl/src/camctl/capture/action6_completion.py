@@ -99,11 +99,17 @@ def classify_action6_members(
     )
     if target is None:
         raise ConsistencyError("Action6 分段策略缺少冻结覆盖目标")
+    native_cancel_all_qualified = (
+        canceled
+        and policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+        and _action_type(action) == "camera_timelapse"
+    )
     rules = tuple(ProductRule.from_json(item) for item in spec.get("product_rules", ()))
     scope_facts = {
         "count": 0,
         "first": None,
         "last": None,
+        "cursor_missing": False,
         "prefix_count": 0,
         "prefix_first": None,
         "prefix_last": None,
@@ -128,6 +134,7 @@ def classify_action6_members(
                 scope_facts["count"] += 1
                 if member.cursor is None:
                     scope_facts["ordered"] = False
+                    scope_facts["cursor_missing"] = True
                 else:
                     previous_key = scope_facts["last_key"]
                     if previous_key is not None:
@@ -178,6 +185,14 @@ def classify_action6_members(
         if scope_facts["count"] == 0:
             scope = SegmentDecisionScope(
                 DefaultScopeState.EMPTY, ref, None, None, 0
+            )
+        elif native_cancel_all_qualified and not scope_facts["cursor_missing"]:
+            scope = SegmentDecisionScope(
+                DefaultScopeState.NONEMPTY,
+                ref,
+                scope_facts["first"],
+                scope_facts["last"],
+                scope_facts["count"],
             )
         elif not scope_facts["ordered"]:
             scope = SegmentDecisionScope(

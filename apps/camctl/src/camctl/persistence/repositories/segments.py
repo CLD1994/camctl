@@ -634,6 +634,10 @@ def _verify_action6_decision(db, setrow, decision):
         raise ConsistencyError('Action6 冻结特化没有提供覆盖目标')
     if (decision.metric, decision.target) != (target.metric, target.value):
         raise ConsistencyError('Action6 覆盖目标与受理时冻结参数不同')
+    native_cancel_all_qualified = (
+        decision.status is SegmentDecisionStatus.CANCELED
+        and action_type == 'camera_timelapse'
+    )
     if decision.coverage_status is CoverageStatus.NOT_PERFORMED:
         if decision.confirmed is not None or decision.checked_count != 0:
             raise ConsistencyError('未执行 Action6 媒体检查不得携带实测值或检查计数')
@@ -645,6 +649,7 @@ def _verify_action6_decision(db, setrow, decision):
             raise ConsistencyError('Action6 不足结论未低于冻结目标')
     _verify_action6_checked_prefix(db, setrow, decision, target)
 
+    eligible_count = 0
     original_count = 0
     first_cursor = None
     last_cursor = None
@@ -654,6 +659,7 @@ def _verify_action6_decision(db, setrow, decision):
     prefix_last_cursor = None
     prefix_open = True
     ordered = True
+    cursor_missing = False
     known_gap = False
     previous_key = None
     cursor = None
@@ -664,8 +670,10 @@ def _verify_action6_decision(db, setrow, decision):
             member = stored.member
             if not _eligible_original(member):
                 continue
+            eligible_count += 1
             if member.cursor is None:
                 ordered = False
+                cursor_missing = True
                 continue
             original_count += 1
             first_cursor = member.cursor if first_cursor is None else min(first_cursor, member.cursor)
@@ -698,28 +706,32 @@ def _verify_action6_decision(db, setrow, decision):
         or decision.status is SegmentDecisionStatus.CANCELED
     )
     if selected.state is DefaultScopeState.EMPTY:
-        expected_empty = (
-            prefix_count == 0
-            if decision.coverage_status is CoverageStatus.NOT_PERFORMED
-            or decision.status is SegmentDecisionStatus.CANCELED
-            else decision.checked_count == 0
-        )
+        if native_cancel_all_qualified:
+            expected_empty = eligible_count == 0
+        elif (decision.coverage_status is CoverageStatus.NOT_PERFORMED
+                or decision.status is SegmentDecisionStatus.CANCELED):
+            expected_empty = prefix_count == 0
+        else:
+            expected_empty = decision.checked_count == 0
         if not expected_empty:
             raise ConsistencyError('Action6 空视频范围仍存在应纳入的合格原片')
     elif selected.state is DefaultScopeState.NONEMPTY:
-        expected_count = (
-            (prefix_count if known_gap else original_count)
-            if full_scope else decision.checked_count
-        )
-        expected_first = (
-            (prefix_first_cursor if known_gap else first_cursor)
-            if full_scope else first_cursor
-        )
-        expected_last = (
-            (prefix_last_cursor if known_gap else last_cursor)
-            if full_scope else cursor_at_checked_count
-        )
-        if ((full_scope and not ordered) or expected_count != selected.member_count
+        if full_scope and native_cancel_all_qualified:
+            expected_count = original_count
+            expected_first = first_cursor
+            expected_last = last_cursor
+        elif full_scope:
+            expected_count = prefix_count if known_gap else original_count
+            expected_first = prefix_first_cursor if known_gap else first_cursor
+            expected_last = prefix_last_cursor if known_gap else last_cursor
+        else:
+            expected_count = decision.checked_count
+            expected_first = first_cursor
+            expected_last = cursor_at_checked_count
+        if (native_cancel_all_qualified and cursor_missing):
+            raise ConsistencyError('Action6 原生取消全量视频范围缺少可排序游标')
+        if ((full_scope and not ordered and not native_cancel_all_qualified)
+                or expected_count != selected.member_count
                 or expected_first != selected.first_cursor
                 or expected_last != selected.last_cursor):
             raise ConsistencyError('Action6 默认范围必须是有序合格视频的完整范围或已检查前缀')
