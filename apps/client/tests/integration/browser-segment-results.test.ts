@@ -5,7 +5,7 @@ import {
   type Browser,
   type Page,
 } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
@@ -59,6 +59,10 @@ afterEach(async () => {
 });
 async function uploadReport(r: StatusReport) {
   const bytes = Buffer.from(stringifyJson(r));
+  return uploadReportBytes(bytes);
+}
+async function uploadReportBytes(bytes: Buffer) {
+  const r = parseJson(bytes.toString("utf8")) as StatusReport;
   const fileName = `status-report-${r.report_id}-${createHash("sha256").update(bytes).digest("hex")}.json`;
   const f = files.createBatch([
     { fileName, size: bytes.length, kind: "report" },
@@ -66,6 +70,15 @@ async function uploadReport(r: StatusReport) {
   await files.upload(f.id, Readable.from([bytes]));
   await files.idle();
   expect(app.coverage()).toBe(r.to_wm);
+  return { imported: app.store.get<any>("imports", f.id), report: r };
+}
+async function uploadMedia(name: string, bytes: Buffer) {
+  const f = files.createBatch([
+    { fileName: name, size: bytes.length, kind: "media" },
+  ]).files[0];
+  await files.upload(f.id, Readable.from([bytes]));
+  await files.idle();
+  return app.store.get<any>("imports", f.id);
 }
 async function view() {
   await page.reload();
@@ -165,6 +178,95 @@ it.each(["empty", "unknown"] as const)(
         "缺口分类未确认",
       );
     expect(app.ackId()).toBe("1");
+  },
+);
+
+it.each(["report-first", "media-first"] as const)(
+  "%s实际报告覆盖不足、已取回媒体并累计ACK，React显示真实报告事实",
+  async (order) => {
+    const reportBytes = readFileSync(
+      new URL(
+        "../fixtures/coverage-report-integration/confirmed-short-report.json",
+        import.meta.url,
+      ),
+    );
+    const mediaBytes = readFileSync(
+      new URL("../fixtures/coverage-report-integration/1.bin", import.meta.url),
+    );
+    const report = parseJson(reportBytes.toString("utf8")) as StatusReport;
+    const plans = report.plans ?? [];
+    const actions = plans.flatMap((plan) => plan.actions ?? []);
+    const source = actions.find((action) => action.type === "camera_record")!;
+    const obtain = actions.find(
+      (action) => action.type === "obtain_action_outputs",
+    )!;
+    const coverage = (source.result as any).coverage;
+    const delivery = obtain.deliveries![0]!;
+
+    expect(source.status).toBe("failed");
+    expect(coverage).toMatchObject({
+      metric: "duration_s",
+      target: 60,
+      confirmed: 18,
+      status: "confirmed_short",
+      checked_output_ids: ["1"],
+      default_scope: { state: "nonempty", member_count: 1, output_ids: ["1"] },
+    });
+    expect(delivery).toMatchObject({
+      output_id: coverage.checked_output_ids[0],
+      source_action_instance_id: source.action_instance_id,
+      file_name: "1.bin",
+      status: "published",
+    });
+
+    if (order === "report-first") {
+      const imported = await uploadReportBytes(reportBytes);
+      expect(imported.imported.status).toBe("accepted");
+      expect(app.ackId()).toBe(report.report_id);
+      await uploadMedia(delivery.file_name, mediaBytes);
+    } else {
+      await uploadMedia(delivery.file_name, mediaBytes);
+      expect(app.ackId()).toBeNull();
+      expect(
+        files.videos().find((video) => video.fileName === delivery.file_name)
+          ?.status,
+      ).toBe("waiting_report");
+      const imported = await uploadReportBytes(reportBytes);
+      expect(imported.imported.status).toBe("accepted");
+    }
+
+    await files.idle();
+    expect(app.coverage()).toBe(report.to_wm);
+    expect(app.ackId()).toBe(report.report_id);
+    expect(app.store.report(report.report_id)).toBeDefined();
+    expect(
+      files.videos().find((video) => video.fileName === delivery.file_name),
+    ).toMatchObject({
+      status: "verified",
+      size: delivery.size,
+      sha256: delivery.sha256,
+    });
+
+    await page.reload();
+    await page.getByTestId("tab-records").click();
+    const sourcePlan = plans.find((plan) =>
+      plan.actions?.some(
+        (action) => action.action_instance_id === source.action_instance_id,
+      ),
+    )!;
+    await page
+      .getByTestId("record-open-button")
+      .filter({ hasText: sourcePlan.name })
+      .click();
+    const sourceCard = page.locator(
+      `[data-action-id="${source.action_instance_id}"]`,
+    );
+    await check(sourceCard).toContainText("视频内容覆盖");
+    await check(sourceCard).toContainText("已确认完整内容不足");
+    await check(sourceCard).toContainText("目标 60秒");
+    await check(sourceCard).toContainText("已确认累计 18秒");
+    await check(sourceCard).toContainText("默认视频范围 1 段");
+    expect(app.ackId()).toBe(report.report_id);
   },
 );
 
