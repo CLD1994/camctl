@@ -18,7 +18,8 @@ from camctl.capture.segment_inspections import (
     inspect_segment,
 )
 from camctl.capture.video_coverage import CoverageMetric, CoverageTarget
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult, StopDriver
@@ -46,7 +47,7 @@ from camctl.outputs.work_files import (
     clean_one_work_file,
 )
 from camctl.outputs.qualification import OperationConfig
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -94,12 +95,15 @@ class _ReadStream:
 
 
 class _ReadDriver:
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes, *, unavailable: bool = False) -> None:
         self.content = content
+        self.unavailable = unavailable
         self.offsets = []
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         self.offsets.append(offset)
+        if self.unavailable:
+            raise OSError("injected device source unavailable")
         return ReadSession(
             source, offset, _ReadStream(self.content[offset:]), idle_timeout_s)
 
@@ -198,7 +202,14 @@ async def test_only_obtains_waiting_at_the_source_publication_boundary_are_bound
         owned.connection.close()
 
 
-async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scenario", [
+    "success",
+    "fallback_unknown_before_commit",
+    "fallback_unknown_after_commit",
+    "device_unavailable",
+])
+async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_failure(
+        tmp_path, monkeypatch, scenario):
     owned, capture_runtime, source_action_id, handler = \
         await _stopped_segmented_world(tmp_path)
     try:
@@ -316,10 +327,30 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             "SELECT device_id,driver_id FROM actions WHERE id=?",
             (source_action_id,),
         ).fetchone()
-        device_reader = _ReadDriver(_CONTENT)
+        device_reader = _ReadDriver(
+            _CONTENT, unavailable=scenario == "device_unavailable")
         read_evidence = EvidenceRegistry(contracts=(EvidenceContract(
             type="read_returned", version=1, operation="read",
             fields=frozenset()),))
+        outputs = OutputsRepository()
+        fallback_keys = []
+        save_fallback = outputs.fallback_read_source
+
+        def fallback_with_unknown_receipt(request, key, connection):
+            fallback_keys.append(key)
+            if (scenario == "fallback_unknown_before_commit"
+                    and len(fallback_keys) == 1):
+                return DbOutcome(
+                    DbOutcomeKind.UNKNOWN, RuntimeError("fallback commit unknown before save"))
+            outcome = save_fallback(request, key, connection)
+            if (scenario == "fallback_unknown_after_commit"
+                    and len(fallback_keys) == 1):
+                assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+                return DbOutcome(
+                    DbOutcomeKind.UNKNOWN, RuntimeError("fallback commit receipt lost"))
+            return outcome
+
+        outputs.fallback_read_source = fallback_with_unknown_receipt
         obtain_runtime = ObtainRuntime(
             owned=owned,
             devices={source_binding[0]: DeviceReadAssembly(
@@ -338,7 +369,7 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             retry_gate=RetryWaitGate(),
             monotonic_ns=lambda: 20_000_000_000,
             occurred_at=lambda: _NOW + 23_000_000,
-            outputs=OutputsRepository(),
+            outputs=outputs,
             operations=OperationRepository(),
             file_executor=executor,
         )
@@ -382,6 +413,31 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             return result
 
         monkeypatch.setattr(LocalSourceReader, "read_chunk", fail_after_one_local_chunk)
+        if scenario.startswith("fallback_unknown"):
+            with pytest.raises(ConsistencyError, match="读取源切换事务"):
+                await advance_obtain(obtain_runtime)
+            assert len(fallback_keys) == 1
+            event_type = 22
+            from camctl.history.events import reason_for_branch
+
+            fallback_reason = reason_for_branch("COPY_CHANGED", "SOURCE_FALLBACK")
+            fallback_events = owned.connection.execute(
+                "SELECT COUNT(*) FROM history_events WHERE event_type=?"
+                " AND json_extract(body_json,'$.reason')=?",
+                (event_type, fallback_reason),
+            ).fetchone()[0]
+            if scenario == "fallback_unknown_before_commit":
+                assert fallback_events == 0
+                assert owned.connection.execute(
+                    "SELECT source_intermediate_file_id,source_device_file_id"
+                    " FROM file_copies WHERE id=?", (granted[0][0],),
+                ).fetchone() == (input_file_id, None)
+            else:
+                assert fallback_events == 1
+                assert owned.connection.execute(
+                    "SELECT source_intermediate_file_id,source_device_file_id"
+                    " FROM file_copies WHERE id=?", (granted[0][0],),
+                ).fetchone() == (None, source_file_id)
         for _ in range(4):
             await advance_obtain(obtain_runtime)
             statuses = [owned.connection.execute(
@@ -400,10 +456,66 @@ async def test_bound_obtains_fall_back_to_same_device_copy_after_local_read_fail
             " FROM operation_runs WHERE copy_id=? AND kind=3", (granted[0][0],),
         ).fetchone()
         assert retry_run == (1, 3, 1)
+        from camctl.history.events import reason_for_branch
+
+        fallback_reason = reason_for_branch("COPY_CHANGED", "SOURCE_FALLBACK")
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_events WHERE event_type=22"
+            " AND json_extract(body_json,'$.reason')=?", (fallback_reason,),
+        ).fetchone()[0] == 1
+        if scenario == "fallback_unknown_before_commit":
+            assert len(fallback_keys) == 2
+            assert fallback_keys[0] == fallback_keys[1]
+        else:
+            assert len(fallback_keys) == 1
 
         # The same READ_FILE retry interval still applies after the source
         # switch. Once it elapses, the existing slot/attempt flow resumes.
         obtain_runtime.monotonic_ns = lambda: 25_000_000_000
+        if scenario == "device_unavailable":
+            for _ in range(4):
+                await advance_obtain(obtain_runtime)
+            assert device_reader.offsets == [4]
+            waiting_run = owned.connection.execute(
+                "SELECT status,attempts_used,max_attempts_used,retry_wait_required"
+                " FROM operation_runs WHERE copy_id=? AND kind=3", (granted[0][0],),
+            ).fetchone()
+            assert waiting_run == (2, 2, 3, 1)
+            obtain_runtime.monotonic_ns = lambda: 30_000_000_000
+            for _ in range(4):
+                await advance_obtain(obtain_runtime)
+                statuses = [owned.connection.execute(
+                    "SELECT status FROM actions WHERE id=?", (action_id,),
+                ).fetchone()[0] for action_id, _selection_id in early]
+                if all(status != 2 for status in statuses):
+                    break
+            action_status = enum_for("actions.status")
+            assert statuses == [
+                int(action_status.FAILED), int(action_status.SUCCEEDED)]
+            run_status = enum_for("operation_runs.status")
+            failed_run = owned.connection.execute(
+                "SELECT status,attempts_used,max_attempts_used,retry_wait_required"
+                " FROM operation_runs WHERE copy_id=? AND kind=3", (granted[0][0],),
+            ).fetchone()
+            assert failed_run == (int(run_status.FAILED), 3, 3, 0)
+            assert device_reader.offsets == [4, 4]
+            attempt_errors = owned.connection.execute(
+                "SELECT a.status,json_extract(a.error_json,'$.code')"
+                " FROM operation_attempts a"
+                " JOIN operation_runs r ON r.id=a.run_id"
+                " WHERE r.copy_id=? ORDER BY a.attempt_no", (granted[0][0],),
+            ).fetchall()
+            assert len(attempt_errors) == 3
+            assert all(row[0] == 3 for row in attempt_errors)
+            assert [row[1] for row in attempt_errors] == [
+                "local_read_failed", "device_error", "device_error"]
+            await advance_obtain(obtain_runtime)
+            assert owned.connection.execute(
+                "SELECT attempts_used FROM operation_runs WHERE copy_id=? AND kind=3",
+                (granted[0][0],),
+            ).fetchone()[0] == 3
+            return
+
         for _ in range(4):
             await advance_obtain(obtain_runtime)
             statuses = [owned.connection.execute(
