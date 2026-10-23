@@ -1599,6 +1599,7 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 | `python -m pytest apps/camctl/tests/unit/capture/test_segment_inspections_metrics.py apps/camctl/tests/unit/capture/test_action6_recovery_prefix.py -q` | 13 passed；流指标可靠性、容器时长缺失、时长与整数帧量纲、连续前缀停止规则通过。 |
 | `python -m pytest apps/camctl/tests/integration/reporting/test_video_coverage_report.py -q` | 2 passed；普通与 native 正常覆盖报告通过根 Schema，并能在同一 H 重建相同报告。异常覆盖报告同时由上述实际恢复链验证。 |
 | 检查副本、取回复用和混合照片的定向集成 | 独立检查端口2项、既有输入／native完成12项、固定等待者与副本复用2项、默认／预览照片选择2项通过。两个已等待取回具有独立交付，后到请求读取设备；来源与读取目标保持文件操作保护。 |
+| `python -m pytest apps/camctl/tests/integration/outputs/test_segment_copy_maintenance.py -q` | 3 passed（6.86秒）；通过真实 Action6 异常处理器建立完整检查副本，验证没有绑定等待者时实际文件任务仍阻止清理、任务结束后删除；删除失败关闭并重开数据库后可重试且不改变来源终态；原等待取回经公开取消及原责任收场后释放副本。实际UTC、命令和退出码位于 `.local/verification/action6-full-plan/copy-maintenance-fixed/`。首次运行2 passed、1 failed，原因是新测试读取了 actions 不存在的列，修正为权威错误列后通过；原日志保留于 `copy-maintenance-first/`。 |
 | 两设备单文件必要产物单元与原 Action6 单文件装配 | 77项单元和6项装配通过；普通录像保持精确一份非空视频，native 保持原最低格式与数量合同。OSMO未知顺序键的受影响4项及 native6项定向回归通过。 |
 | 公共登记、结构与历史 SQL | 协议、报告依赖、事件、配置消费及历史SQL同步检查通过；数据库结构3858项断言、登记接缝115项测试、数据库历史SQL27项测试通过。 |
 | 客户端覆盖消费、上传与浏览器 | 最终关联单元79项和报告／媒体集成13项通过；浏览器5项在公共目录／索引摘要断言同步后定向复测通过。首次组合运行的2项失败是旧浏览器断言仍期待设备专属目录前缀，原日志保留。 |
