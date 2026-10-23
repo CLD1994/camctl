@@ -44,6 +44,10 @@
 | `apps/camctl/tests/integration/devices/test_adb_camera_transport.py`、`test_action6_result_pages.py`、`test_osmo360ii_result_pages.py` | 首轮 41 passed、3.04 秒；补存完整命令的复核为 41 passed、2.91 秒，均退出 0 | `device-integration.log`、`device-integration-recorded.log` |
 | `tests/integration/test_action6_builtin_segmented_roundtrip.py`、`test_osmo_builtin_record_segmentation_roundtrip.py`，筛选 `action6_segmented or normal or native-tail` | 4 passed、6 deselected，212.18 秒，退出 0 | `installed-chains.log` |
 
+普通取回的源摘要失败收场阶段基于提交 `6946e63192a03548b791b95e314843808eda1f41` 构建，安装在 `/tmp/camctl-video-real-recovery-v1-20261023/venv`。wheel 位于证据根 `resume-20261023T145540Z/runtime-recovery-v1/dist/`，SHA-256 为 `4e12e99434be292e321acbc769f22b7bd5b0d6bd6167b0582fbb7034344aa69d`；298份生产 Python 文件及27份权威资源共325项在源码、wheel、安装位置的字节一致。锁定依赖检查、独立临时库初始化与静态能力导出均退出0，实际 Python 3.11.16、SQLite 3.53.1；完整命令与安装清单位于同目录。该阶段包不包含尚在独立复核的分段检查收场或软件重启恢复。
+
+主树在上述固定提交顺序执行普通摘要失败恢复、OSV 输入失败和录像恢复三个组件测试文件，结果分别为7 passed／1.38秒、33 passed／7.13秒、3 passed／0.80秒，均退出0；命令、UTC、源码提交和输出位于 `resume-20261023T145540Z/integrated-source-digest/`。初始化的单事务与 WAL／FULL 读回修复另在 `2dcc6f3` 核对27项初始化测试，以及相同三项清理恢复矩阵；后者实测3.90秒、161次 fsync。记录位于 `initialization-integrated-155346/`，该目录属于同一恢复阶段；不把容器测量解释为目标硬件性能。
+
 ### 已观察的设备与交付结果
 
 | 场景目录 | 控制、文件和客户端事实 | 证据边界 |
@@ -59,7 +63,7 @@
 | 场景目录 | 控制、文件和客户端事实 | 证据边界 |
 | --- | --- | --- |
 | `action6-segmented-record-auto-094948` | 12 秒目标，唯一 START／STOP 均正常；完整结果登记 2 份 MP4 及 2 份 LRF，默认原片、预览分别取回成功，4 份文件经客户端导入并 ACK 8、水位 51 | 首次 RESULTS 的目录调用超时保留，原结果流程第二次尝试成功；没有重拍。 |
-| `action6-segmented-timelapse-auto-095957` | 300 秒目标、2 秒间隔，唯一 START，无 STOP，自然完成；来源与原片取回成功，1 份 MP4 及配对 LRF 已登记 | LRF 字节全部落盘后源摘要调用超时，copy 校验终局失败；CLI 因未闭合的取回状态交接退出，原预览取回仍运行态，客户端完整链尚未完成。 |
+| `action6-segmented-timelapse-auto-095957` | 300秒目标、2秒间隔，唯一 START，无 STOP，自然完成；来源与原片取回成功，1份 MP4 及配对 LRF 已登记。摘要失败修复后沿原库完成旧预览失败收场并 ACK 10；新请求另取回 LRF 成功，ACK 15、水位60 | 原 copy 的源摘要仍为空、校验仍为 FAILED，原失败没有改写。初次超时、原状态备份、恢复与新交付分别保留证据。 |
 | `action6-segmented-timelapse-auto-150650` | 同一批量读取安装物执行新的 `video_jpeg` 任务，300秒目标、2秒间隔；唯一 START，无 STOP，完整结果登记151张 JPEG、1份 MP4 和1份 LRF。来源、原片及预览取回均成功，304份独立交付由客户端导入，ACK 20、水位2000已保存 | 这次合法参数试验正常生成必需照片，检查数量为0，未触发 native 异常选段。它与 `095957` 保持独立身份，不替代原摘要失败的收场验证。 |
 
 `action6-segmented-timelapse-auto-150650/cross-layer-evidence.json` 逐项核对304份已交付文件：实际长度、落盘 SHA-256、原 copy 保存的源摘要和目标摘要全部一致，共381605707字节；报告确认水位从原状态库只读核对。该次审计没有另发相机摘要命令。原执行会话结束后不再可查询，未据此补写 shell 退出码；业务、文件及客户端结果分别由原库、交付字节和客户端凭据证明。
@@ -84,7 +88,11 @@ Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现
 
 早期 OSMO 单文件原生延时任务 `osmo360ii-single_file-timelapse-auto-065733` 的来源因不符合必要产物合同而失败，原库仍保存 `UNKNOWN_HELD` 活动责任。当前驱动无活动查询，公开取消入口保持来源终态且不会为该旧责任新发 STOP；残留处理也没有能确认该未知活动归属的查询。该旧库保留原失败和文件，不用后续独立场景的 STOP 改写它。当前固件的单文件真机矩阵不适用，旧库按该范围冻结归档；旧责任保持原状态。适用机型的自动恢复按[无人值守软件重启规则](../architecture/camera-recovery.md#无人值守的软件重启恢复)处理，当前实现尚未接入，P9 步骤 3 保持未完成。
 
-原生延时预览的状态交接缺口已定位到：源摘要超时先保存 copy 校验 FAILED，完整读取收尾随后返回 `COMPLETION_FAILED`，读取流程将其作为未完成的本地前提抛出 `state_db_error`，原 READ 尝试及动作没有终态。后续会话再次遇到保存的 FAILED 校验，仍退出；没有重读字节或抹除原错误。[源摘要失败收场规则](../architecture/file-copy.md#实际读取结束与所属结果)已确定，当前实现尚未修复，原 READ 及动作状态没有因此改变。直接取消也不能作为已验证恢复：取消候选不再续接读取，而取消收场仍等待 RUNNING 尝试。原库、日志和完整文件均保留，尚未试发取消或新预览请求；用户已恢复实施，该失败收场进入修复与验证，原库在正式恢复前保持原状态。
+原生延时预览最初的状态交接缺口为：源摘要超时先保存 copy 校验 FAILED，完整读取收尾随后返回 `COMPLETION_FAILED`，读取流程将其作为未完成前提抛出 `state_db_error`，原 READ 尝试及动作没有终态。该普通交付路径已按[源摘要失败收场规则](../architecture/file-copy.md#实际读取结束与所属结果)修复并在上述阶段安装包复核。真实恢复前先备份原库、冻结定义和完整失败副本；旧本机拥有者结束后，正式 C host 沿原状态库启动无新计划的 `run`，使用原 READ 尝试续接结束确认。尝试4保存为 SUCCEEDED，流程4以 `source_file_unconfirmed` 结束，旧预览动作失败21，失败报告导入并 ACK 10；没有发送取消。
+
+随后新请求明确选择原输出2，建立动作5及独立交付3，取回4195828字节 LRF 并成功导入客户端，ACK 15、水位60。新源摘要、目标摘要及实际落盘摘要均为 `18a284a329a2641008ba5b4fa40f6468b77389899c654fd21a8ee2389c1899bf`；旧 copy 2仍为校验 FAILED、源摘要为空，校验错误、轮次及已提交字节均未改变。原前三个动作的冻结定义、原 READ 累计次数和唯一拍摄控制也逐项保持。恢复阶段的实际工具记录没有 SHA 调用，新请求有一次 SHA 调用；两阶段均没有新增拍摄控制。恢复读取沿原偏移打开，底层 `dd` 按65536字节块对齐，并由驱动跳过块内余数，不把该设备命令写成按字节精确定位。
+
+原状态与失败副本位于 `resume-20261023T145540Z/digest-failure-before-recovery/`；恢复脚本、原始日志及合并核对位于该阶段的 `resume-old-preview-*`、`new-preview-after-digest-failure.log` 和 `source-digest-real-recovery-audit.json`。新请求、客户端凭据和独立工具记录位于原场景的 `preview-after-digest-failure/`。两次编排命令均退出0；辅助脚本等待 host 关闭超时的观察保留，后续只读进程检查没有发现带本场景配置的 host 或 CLI，不据此补写未取得的 host 正常退出码。当前阶段只证明普通交付收场及独立新取回，分段检查内部消费者另行验证。
 
 无人值守部署已确认没有逐台硬件复位或供电控制，ADB 软件重启作为受支持驱动的恢复兜底。该决定只更新恢复规则及权限边界；独立恢复责任、相关持久化和两机型的自动恢复真机验证均未执行，当前 `UNKNOWN/HELD`、原失败和原文件保持。此前 Action6 诊断中一次人工安排的整机重启及重连设置记录，不替代本项无人值守流程或 OSMO 机型的验收。
 
@@ -92,7 +100,7 @@ Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现
 
 相机端另行执行摘要命令取得上述五场景的 26 份已交付源文件 SHA-256，逐项与读取、交付和本地副本核对，26／26 一致。原始输出和对照位于 `independent-source-digests/`；不依赖 `device_files.sha256` 是否已填写来声称取得设备端独立摘要。
 
-批量读取安装物的新 Action6 两场景另核对 6 份文件：独立设备端 SHA-256 与全部 6 份本地副本、数据库 target 摘要一致；其中普通录像 4 份和 native MP4 的 copy 已可靠保存源摘要。native LRF 的原 copy 源摘要仍为空、校验仍为 FAILED，后续独立查询成功不会更新这次失败。`action6-batch-v1-six-file-comparison.json` 和两份 `*-cross-layer-evidence.json` 分别保存文件、动作、客户端及 ACK 事实；native 尚无客户端导入／ACK。
+批量读取安装物的新 Action6 两场景另核对6份文件：独立设备端 SHA-256 与全部6份本地副本、数据库 target 摘要一致；其中普通录像4份和 native MP4 的 copy 已可靠保存源摘要。native LRF 的原 copy 源摘要仍为空、校验仍为 FAILED，后续独立查询和新交付均没有更新这次失败。`action6-batch-v1-six-file-comparison.json` 和两份 `*-cross-layer-evidence.json` 保留初次核对；上述恢复阶段补齐原片客户端导入、旧失败 ACK 和新预览交付 ACK，版本边界分别记录。
 
 OSMO 普通自动与手动两轮的 P7 报告分别位于 `media-osmo-auto-v2/`、`media-osmo-manual-v2/`。目标均为 12000 毫秒，默认短缺容限 100 毫秒；默认范围和全部保留集合的两路主视频分别累计约 12345.667、12145.467 毫秒，短缺均为 0。自动轮首个非尾段的两路主视频各为 165 帧、5505.5 毫秒，帧率均为 `30000/1001`；保留其比参考范围多 5.5 毫秒的观察。逐段判定采用[设备分段契约](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#设备分段与命名契约)，该偏长不单独构成失败；本次规则调整未重跑媒体工具或改写原始报告。手动轮前两非尾段约 5438.767、5005 毫秒。全部主视频及音频逐流解码退出 0，timescale、帧率估计及私有流 codec 诊断均保留；段间连续性未由聚合时长证明。
 
