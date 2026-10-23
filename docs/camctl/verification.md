@@ -1607,6 +1607,7 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 | 两设备单文件必要产物单元与原 Action6 单文件装配 | 77项单元和6项装配通过；普通录像保持精确一份非空视频，native 保持原最低格式与数量合同。OSMO未知顺序键的受影响4项及 native6项定向回归通过。 |
 | 公共登记、结构与历史 SQL | 协议、报告依赖、事件、配置消费及历史SQL同步检查通过；数据库结构3858项断言、登记接缝115项测试、数据库历史SQL27项测试通过。 |
 | 客户端覆盖消费、上传与浏览器 | 最终关联单元79项和报告／媒体集成13项通过；浏览器5项在公共目录／索引摘要断言同步后定向复测通过。首次组合运行的2项失败是旧浏览器断言仍期待设备专属目录前缀，原日志保留。 |
+| 客户端完整 `VITEST_MAX_WORKERS=2 npm test` | 66个单元文件3212项、40个集成／浏览器文件1559项全部通过，类型检查和实际构建均通过，退出0。实际UTC为03:18:44—03:30:14，耗时689.23秒；完整命令、环境、提交及输出位于 `.local/verification/action6-full-plan/client-final-workers2/`。两worker设置采用既有客户端验证环境；构建保留既有chunk大小提示。 |
 
 安装版联合链运行 `tests/integration/test_action6_builtin_segmented_roundtrip.py`。普通分段完整通过，来源报告4、两次取回报告7／10，C host 累计确认到报告10、水位55。native 分段修复后以 `-k native-timelapse` 定向复测，1 passed、1 deselected，38.52秒，退出码0；来源报告3，帧数目标按300秒／1秒间隔计算为301帧，正常覆盖为 `not_performed`。默认视频范围含两段视频，默认取回取得JPEG及两份MP4，预览取回取得独立JPEG及两份LRF；六份交付分别有独立ID和摘要，客户端实际导入报告3／6／9及媒体，C host累计确认到报告9、水位68。
 
@@ -1619,6 +1620,8 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 异常恢复的普通60秒目标使用18／27／22／40秒分段，只检查前三段并确认67秒；第三段指标未知时保留前两段45秒，可靠控制依据仍可使来源成功，同时报告覆盖未确认。完整可靠三段共50秒时报告确认不足并使来源失败。原生延时目标由300秒、2秒间隔冻结为151帧，60／60／45／20帧只检查前三段，确认165帧。检查所需完整副本、媒体工具响应与真实检查记录分别保存；测试提供受接口约束的工具响应，不证明真实固件媒体时长或帧数。
 
 来源发布事务的 `published_event_id` 固定检查副本的复用截点，取回依据该完整历史边界恢复原等待关系。首次授权前副本不可用时读取设备；正式本地读取中源失败时，`COPY_CHANGED.SOURCE_FALLBACK` 单向更新原copy的读取源，保留原delivery、已提交字节、round和READ_FILE预算。所有后续尝试继续核对产物读取资格，显式清理不因副本仍在而失效。完整组件目录和安装版故障矩阵仍在运行，未取得完整结果的门槛不计通过。
+
+重拷与本地源失效的组合由 `test_segment_local_integrity.py` 的3项实际文件集成验证：摘要不匹配触发原重拷轮次；耗尽后有限失败；重拷期间本地源读取失败时，独立守卫核对原READ_FILE意图至结果之间的连续重拷历史，再沿同一copy、目标和剩余预算从设备偏移4继续，最终发布正确摘要。隔离分支实际UTC为03:41:03—03:41:12，日志在6dae工作树 `.local/verification/action6-local-recopy/integrity-final.log`；相关换源4项于03:41:16—03:41:28再次通过。
 
 重复键恢复已由 `test_action6_duplicate_segment_keys.py` 的3项真实集成验证：后段冲突保留此前可靠前缀，最早键冲突使起点未知，两份重复成员跨真实仓储分页时仍停在冲突组之前。修复前2 failed、1 passed，修复后3 passed（10.92秒）；对应纯前缀单元10 passed，OSMO集合回归66 passed（59.63秒）。原始日志分别为 `/tmp/action6-duplicate-segment-red4.log`、`/tmp/action6-duplicate-segment-final.log`、`/tmp/action6-duplicate-prefix-unit-final.log`、`/tmp/action6-duplicate-osmo-persistence.log`。根目录集成后重复键单元再验证通过，命令与实际UTC保存在 `.local/verification/action6-full-plan/integrated-duplicate-unit/`。所有合格原片仍登记并可按明确ID取回。
 
