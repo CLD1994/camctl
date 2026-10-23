@@ -107,6 +107,35 @@ def _append(path, value):
         os.close(descriptor)
 
 
+def _wait_at_declared_read_gate(file_kind, script):
+    """Pause a real ADB-file read after the first committed 64 KiB chunk."""
+    gate_value = os.environ.get("CAMCTL_ACTION6_TEST_READ_GATE_DIR")
+    if file_kind != "read" or gate_value is None:
+        return
+    match = re.fullmatch(r"dd if=(.+) bs=65536 skip=(0|[1-9][0-9]*)", script)
+    if match is None or int(match[2]) < 1:
+        return
+    gate = Path(gate_value)
+    entered = gate / "read-entered.json"
+    release = gate / "release-read"
+    if entered.exists() or release.exists():
+        return
+    record = {
+        "stage": "after_first_committed_chunk",
+        "path_argument": match[1],
+        "skip": int(match[2]),
+        "pid": os.getpid(),
+        "pgid": os.getpgrp(),
+        "cli_pid": os.getppid(),
+        "started_ns": time.monotonic_ns(),
+    }
+    temporary = entered.with_suffix(".new")
+    temporary.write_text(json.dumps(record), encoding="utf-8")
+    temporary.replace(entered)
+    while not release.exists():
+        time.sleep(0.01)
+
+
 def main():
     if len(sys.argv) != 6 or sys.argv[1:5] != ["-s", "action6-test-serial", "shell", "-T"]:
         raise ValueError(f"不是明确绑定的 ADB shell 调用: {sys.argv[1:]!r}")
@@ -183,10 +212,11 @@ def main():
         sys.stdout.write(f"[dji_mb_ctrl] read global seq: 1\nResp message, len = 1, data:\n  {response}\n")
         return 0
 
-    _file_kind(script)
+    file_kind = _file_kind(script)
+    _wait_at_declared_read_gate(file_kind, script)
     local_script = script.replace("/mnt/media_rw/", str(root / "mnt/media_rw") + "/")
     result = subprocess.run(["bash", "-c", local_script], capture_output=True)
-    record.update(kind="file", file_kind=_file_kind(script), returned_ns=time.monotonic_ns(),
+    record.update(kind="file", file_kind=file_kind, returned_ns=time.monotonic_ns(),
                   returncode=result.returncode, **_clock_fields("returned"))
     _append(calls, record)
     output = result.stdout
