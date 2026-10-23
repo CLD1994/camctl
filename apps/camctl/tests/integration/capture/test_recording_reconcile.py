@@ -163,7 +163,8 @@ def _environment(tmp_path: Path, *, started_at_offset_s: int) -> tuple:
         " expiration_reason, source_resolution_state, resolved_source_plan_id,"
         " target_selection_state, created_event_id, last_event_id, change_count)"
         " VALUES (1, 1, 0, 'rec', 2, 'cam-1', ?, NULL, '{}', '{}',"
-        " 'camctl-adb', 1000, '{\"target_duration_ms\": 60000}', 2, 1, 0, NULL,"
+        " 'camctl-adb', 1000, '{\"target_duration_ms\": 60000,"
+        "\"video_result_mode\": \"single_file\"}', 2, 1, 0, NULL,"
         " NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1)", (started_at,))
     connection.execute(
         "INSERT INTO device_activities (id, action_id, task_key, task_locator_json,"
