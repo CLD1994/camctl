@@ -554,13 +554,15 @@ async def _large_fixture(tmp_path,count):
                 page_no=offset//128+1,cursor=previous),new_operation_key(),owned))
             page=runtime.capture.read_result_pages(ticket,last_event,1,owned).items[0]
             files=dict(page.file_ids)
-            for entry in entries:
-                file_id=files[entry['identity']]
-                _ok(runtime.capture.save_file_ownership(OwnershipSave(file_id,action_id,1,2,{},runtime.wall_us()),new_operation_key(),owned))
-                _ok(runtime.capture.save_file_completion(FileCompletionSave(file_id,3,runtime.wall_us(),basis=1,
-                    observation={},size_bytes=entry['size_bytes']),new_operation_key(),owned))
-                event,=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(file_id,)).fetchone()
-                stage.execute('INSERT INTO members(file_id,page_event,file_event) VALUES (?,?,?)',(file_id,saved.event_id,event))
+            with stage:
+                stage.execute('BEGIN IMMEDIATE')
+                for entry in entries:
+                    file_id=files[entry['identity']]
+                    _ok(runtime.capture.save_file_ownership(OwnershipSave(file_id,action_id,1,2,{},runtime.wall_us()),new_operation_key(),owned))
+                    _ok(runtime.capture.save_file_completion(FileCompletionSave(file_id,3,runtime.wall_us(),basis=1,
+                        observation={},size_bytes=entry['size_bytes']),new_operation_key(),owned))
+                    event,=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(file_id,)).fetchone()
+                    stage.execute('INSERT INTO members(file_id,page_event,file_event) VALUES (?,?,?)',(file_id,saved.event_id,event))
             previous=following;last_event=saved.event_id
         attempt,=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
             (ticket.run_id,ticket.attempt_id)).fetchone()
