@@ -105,19 +105,28 @@ def install() -> None:
 
         def observe(self, limit):
             result = original(self, limit)
-            if result.data is not None and not marker.exists():
-                record = {
-                    "pid": os.getpid(),
-                    "pgid": os.getpgrp(),
-                    "position": self.position(),
-                    "bytes_read": len(result.data),
-                    "utc_ns": time.time_ns(),
-                }
-                temporary = marker.with_suffix(".new")
-                temporary.write_text(json.dumps(record), encoding="utf-8")
-                temporary.replace(marker)
-                while not release.exists():
-                    time.sleep(0.05)
+            if result.data is None or marker.exists():
+                return result
+            try:
+                claim_fd = os.open(gate / "local-read.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                return result
+            else:
+                os.close(claim_fd)
+            if marker.exists():
+                return result
+            record = {
+                "pid": os.getpid(),
+                "pgid": os.getpgrp(),
+                "position": self.position(),
+                "bytes_read": len(result.data),
+                "utc_ns": time.time_ns(),
+            }
+            temporary = marker.with_suffix(".new")
+            temporary.write_text(json.dumps(record), encoding="utf-8")
+            temporary.replace(marker)
+            while not release.exists():
+                time.sleep(0.05)
             return result
 
         LocalSourceReader.read_chunk = observe

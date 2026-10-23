@@ -120,6 +120,12 @@ def _wait_at_declared_read_gate(file_kind, script):
     release = gate / "release-read"
     if entered.exists() or release.exists():
         return
+    try:
+        claim = os.open(gate / "read.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return
+    else:
+        os.close(claim)
     record = {
         "stage": "after_first_committed_chunk",
         "path_argument": match[1],

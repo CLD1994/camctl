@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import time
 from decimal import Decimal
@@ -330,6 +331,35 @@ def _source_rows(deployment, source_id):
     }
 
 
+def _assert_source_manifest_facts(scenario, output_rows):
+    expected_sha_by_output_id = {}
+    for path, row in output_rows.items():
+        content = scenario["contents"][path]
+        digest = hashlib.sha256(content).hexdigest()
+        assert row["size"] == len(content)
+        if row["sha256"] is not None:
+            assert row["sha256"] == digest
+        expected_sha_by_output_id[row["output_id"]] = digest
+    return expected_sha_by_output_id
+
+
+def _assert_inspection_copy_facts(deployment, scenario, source_id):
+    rows = query_state(
+        deployment.state_db,
+        "SELECT c.source_device_file_id,c.committed_bytes,c.source_size,c.target_sha256,d.locator_json "
+        "FROM file_copies c JOIN segment_inspections i ON i.id=c.inspection_id "
+        "JOIN device_files d ON d.id=c.source_device_file_id WHERE i.action_id=? ORDER BY c.id",
+        (source_id,),
+    )
+    assert rows
+    for _device_file_id, committed, size, target_sha256, locator_json in rows:
+        path = json.loads(locator_json)["path"]
+        content = scenario["contents"][path]
+        assert committed == size == len(content)
+        if target_sha256 is not None:
+            assert target_sha256 == hashlib.sha256(content).hexdigest()
+
+
 def _coverage_rows(deployment, source_id):
     return query_state(
         deployment.state_db,
@@ -338,6 +368,21 @@ def _coverage_rows(deployment, source_id):
         "LEFT JOIN outputs o ON o.id=m.output_id "
         "LEFT JOIN device_files d ON d.id=o.device_file_id "
         "WHERE s.action_id=? AND s.published_event_id IS NOT NULL ORDER BY m.ordinal",
+        (source_id,),
+    )
+
+
+def _inspection_copy_state(deployment, source_id):
+    return query_state(
+        deployment.state_db,
+        "SELECT c.id,c.source_device_file_id,c.source_intermediate_file_id,c.target_file_id,"
+        "c.round,c.recopies_used,c.max_recopies_used,c.committed_bytes,c.source_size,"
+        "r.id,r.attempts_used,r.max_attempts_used,"
+        "(SELECT t.copy_round FROM operation_attempts t WHERE t.run_id=r.id "
+        "ORDER BY t.attempt_no DESC LIMIT 1) "
+        "FROM file_copies c JOIN segment_inspections i ON i.id=c.inspection_id "
+        "JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3 "
+        "WHERE i.action_id=? ORDER BY c.id LIMIT 1",
         (source_id,),
     )
 
@@ -520,6 +565,15 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         _release_clock(scenario, 75)
         gate_marker = None
         boundary_pgid = None
+        resume_copy_before = None
+        resume_path_argument = None
+        resume_initial_skip = None
+        resume_call_count = None
+        resume_after_ns = None
+        resume_evidence = None
+        post_h_waiter_id = None
+        post_h_waiter_name = None
+        post_h_submit_ns = None
         if boundary == "copy_progress":
             gate_marker = wait_for(
                 lambda: adb_gate / "read-entered.json"
@@ -527,17 +581,16 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 180,
                 "Action6 检查副本未在真实第二个 64KiB 设备读取前暂停",
             )
-            first_copies = query_state(
-                deployment.state_db,
-                "SELECT c.id,c.committed_bytes,c.source_size FROM file_copies c "
-                "JOIN segment_inspections i ON i.id=c.inspection_id "
-                "WHERE i.action_id=? ORDER BY c.id LIMIT 1",
-                (source_id,),
-            )
-            assert len(first_copies) == 1
-            assert 65_536 <= first_copies[0][1] < first_copies[0][2]
             observed = json.loads(gate_marker.read_text(encoding="utf-8"))
             assert observed["skip"] >= 1
+            resume_path_argument = observed["path_argument"]
+            resume_initial_skip = observed["skip"]
+            first_copies = _inspection_copy_state(deployment, source_id)
+            assert len(first_copies) == 1
+            resume_copy_before = first_copies[0]
+            assert resume_copy_before[1] is not None and resume_copy_before[2] is None
+            assert 65_536 <= resume_copy_before[7] < resume_copy_before[8]
+            assert resume_copy_before[12] == resume_copy_before[4]
             boundary_pgid = observed["pgid"]
         elif boundary in ("inspection_saved", "source_committed"):
             marker = deployment.root / "action6-observer-marker.json"
@@ -564,7 +617,22 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                     and row[3] == int(enum_for("obtain_source_selections.status").PENDING)
                     for row in at_commit if row[0] in waiter_ids
                 )
-        else:
+                post_h_waiter_name = "post-h-default"
+                post_h_submit_ns = time.monotonic_ns()
+                post_h_waiter_id = _submit_obtain(
+                    demo, deployment, action_name=post_h_waiter_name,
+                    source_id=source_id, selection={"filter": "default"},
+                )
+                assert post_h_waiter_id not in {row[0] for row in at_commit}
+                current_post_h = query_state(
+                    deployment.state_db,
+                    "SELECT d.action_id,s.id FROM action_dependencies d "
+                    "JOIN obtain_source_selections s ON s.dependency_id=d.id "
+                    "WHERE d.action_id=? AND d.depends_on_action_id=?",
+                    (post_h_waiter_id, source_id),
+                )
+                assert len(current_post_h) == 1
+        elif boundary == "local_read":
             marker = local_gate / "local-read-entered.json"
             gate_marker = wait_for(
                 lambda: marker if marker.is_file() else None,
@@ -607,17 +675,73 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             if release_gate is not None:
                 (release_gate / "release-read").touch()
                 (release_gate / "release-local-read").touch()
+            if boundary == "copy_progress":
+                resume_call_count = len(_records(deployment.root / "adb-calls.jsonl"))
+                resume_after_ns = time.monotonic_ns()
             demo = HostDemo(
                 scenario["deployment"], host_demo, launcher=str(scenario["camctl"])
             )
             monkeypatch.chdir(package.root)
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
+            if boundary == "copy_progress":
+                assert resume_path_argument is not None and resume_copy_before is not None
+                assert resume_call_count is not None and resume_after_ns is not None
+                resumed_reads = wait_for(
+                    lambda: reads if (reads := [
+                        call for call in _records(deployment.root / "adb-calls.jsonl")[resume_call_count:]
+                        if call.get("kind") == "file"
+                        and call.get("file_kind") == "read"
+                        and call.get("started_ns", 0) >= resume_after_ns
+                        and resume_path_argument in call.get("script", "")
+                    ]) else None,
+                    120,
+                    "重启后没有对同一源文件发起续偏移设备读取",
+                )
+                first_resumed_read = min(resumed_reads, key=lambda call: call["started_ns"])
+                skip_match = re.search(r"(?:^| )skip=([0-9]+)$", first_resumed_read["script"])
+                assert skip_match is not None
+                resumed_skip = int(skip_match[1])
+                assert resumed_skip == resume_copy_before[7] // 65_536
+                after_copy_rows = wait_for(
+                    lambda: state if len(state := _inspection_copy_state(deployment, source_id)) == 1 else None,
+                    30,
+                    "恢复后的分段检查读取流程未保留原拷贝状态",
+                )
+                after_copy = after_copy_rows[0]
+                assert after_copy[:7] == resume_copy_before[:7]
+                assert after_copy[9] == resume_copy_before[9]
+                assert after_copy[10] >= resume_copy_before[10]
+                assert after_copy[11] == resume_copy_before[11]
+                assert after_copy[12] == after_copy[4] == resume_copy_before[4]
+                assert after_copy[10] <= after_copy[11]
+                resume_evidence = {
+                    "copy_id": after_copy[0],
+                    "source_path_argument": resume_path_argument,
+                    "copy_progress_gate_initial_skip": resume_initial_skip,
+                    "source_device_file_id": after_copy[1],
+                    "target_file_id": after_copy[3],
+                    "round": after_copy[4],
+                    "committed_bytes_before_restart": resume_copy_before[7],
+                    "source_size": resume_copy_before[8],
+                    "resume_skip": resumed_skip,
+                    "adb_call_count_before_restart": resume_call_count,
+                    "resume_boundary_monotonic_ns": resume_after_ns,
+                    "read_started_monotonic_ns": first_resumed_read["started_ns"],
+                    "operation_run_id": after_copy[9],
+                    "attempts_used_before_restart": resume_copy_before[10],
+                    "attempts_used_after_resume": after_copy[10],
+                    "max_attempts_used": after_copy[11],
+                }
+        expected_report_statuses = {
+            "capture": source_status,
+            waiter_names[0]: "succeeded",
+            waiter_names[1]: "succeeded",
+        }
+        if post_h_waiter_name is not None:
+            expected_report_statuses[post_h_waiter_name] = "succeeded"
         report = wait_for(
-            lambda: _report_with_statuses(
-                deployment.ready,
-                {"capture": source_status, waiter_names[0]: "succeeded", waiter_names[1]: "succeeded"},
-            ),
+            lambda: _report_with_statuses(deployment.ready, expected_report_statuses),
             240,
             f"Action6 来源及等待取回没有在 {boundary} 恢复后成功",
         )
@@ -639,6 +763,11 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             assert coverage.get("reason") is None
 
         output_rows = _source_rows(deployment, source_id)
+        expected_sha_by_output_id = _assert_source_manifest_facts(scenario, output_rows)
+        expected_size_by_output_id = {
+            row["output_id"]: row["size"] for row in output_rows.values()
+        }
+        _assert_inspection_copy_facts(deployment, scenario, source_id)
         video_paths = [item["device_path"] for item in scenario["facts"]]
         expected_scope = [output_rows[path]["output_id"] for path in video_paths[:checked_count]]
         assert coverage["checked_output_ids"] == expected_scope
@@ -698,7 +827,12 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             int(enum_for("file_copies.verification_state").MATCHED),
             int(enum_for("file_copies.verification_state").SOURCE_CHECKSUM_UNAVAILABLE),
         }
-        assert all(row[5] in verified and row[6] == row[7] and row[8] for row in bound_copies)
+        assert all(
+            row[5] in verified
+            and row[6] == row[7] == expected_size_by_output_id[str(row[1])]
+            and row[8] == expected_sha_by_output_id[str(row[1])]
+            for row in bound_copies
+        )
         assert len({row[2] for row in bound_copies}) == checked_count * 2
         _cleanup_inspection_inputs(deployment, source_id)
 
@@ -725,18 +859,61 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             )
             late_copies = query_state(
                 deployment.state_db,
-                "SELECT c.source_device_file_id,c.source_intermediate_file_id,c.committed_bytes,c.source_size "
+                "SELECT d.output_id,c.source_device_file_id,c.source_intermediate_file_id,"
+                "c.committed_bytes,c.source_size,c.target_sha256 "
                 "FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id WHERE d.action_id=?",
                 (late_id,),
             )
             assert len(late_copies) == 1
-            assert late_copies[0][0] is not None and late_copies[0][1] is None
-            assert late_copies[0][2] == late_copies[0][3]
+            assert late_copies[0][1] is not None and late_copies[0][2] is None
+            assert late_copies[0][3] == late_copies[0][4] == expected_size_by_output_id[str(late_copies[0][0])]
+            assert late_copies[0][5] == expected_sha_by_output_id[str(late_copies[0][0])]
             assert any(
                 call.get("file_kind") == "read"
                 and late_path in call.get("script", "")
                 for call in _records(deployment.root / "adb-calls.jsonl")
             )
+        elif post_h_waiter_id is not None:
+            late_id = post_h_waiter_id
+            late_name = post_h_waiter_name
+            assert late_name is not None and post_h_submit_ns is not None
+            # The report above waits for and imports this post-H action with
+            # the source and original waiters, so do not claim the same report
+            # a second time.
+            late_report_path = source_report_path
+            late_evidence = _assert_client_delivery_files(
+                deployment, scenario["store"], report, late_name, delivery_map
+            )
+            post_h_copies = query_state(
+                deployment.state_db,
+                "SELECT d.output_id,c.source_device_file_id,c.source_intermediate_file_id,"
+                "c.committed_bytes,c.source_size,c.target_sha256 FROM deliveries d "
+                "JOIN file_copies c ON c.delivery_id=d.id WHERE d.action_id=? ORDER BY d.output_id",
+                (late_id,),
+            )
+            expected_post_h = {
+                output_rows[path]["output_id"]: output_rows[path]["device_file_id"]
+                for path in video_paths[:checked_count]
+            }
+            assert len(post_h_copies) == len(expected_post_h)
+            assert {
+                str(row[0]): row[1] for row in post_h_copies
+            } == expected_post_h
+            assert all(row[1] is not None and row[2] is None and row[3] == row[4]
+                       for row in post_h_copies)
+            assert all(
+                row[3] == row[4] == expected_size_by_output_id[str(row[0])]
+                and row[5] == expected_sha_by_output_id[str(row[0])]
+                for row in post_h_copies
+            )
+            post_h_reads = [
+                call for call in _records(deployment.root / "adb-calls.jsonl")
+                if call.get("kind") == "file"
+                and call.get("file_kind") == "read"
+                and call.get("started_ns", 0) >= post_h_submit_ns
+            ]
+            assert all(any(path in call.get("script", "") for call in post_h_reads)
+                       for path in video_paths[:checked_count])
         late_report_receipt = _assert_ack(demo, scenario, final_report)
         evidence = {
             "scenario": f"ordinary-{case}-recovery",
@@ -751,6 +928,10 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             "prepublication_waiter_action_ids": list(map(str, waiter_ids)),
             "bound_delivery_copies": len(bound_copies),
             "late_obtain_action_id": None if late_id is None else str(late_id),
+            "post_h_waiter_was_in_commit_snapshot": (
+                False if post_h_waiter_id is not None else None
+            ),
+            "resume_copy": resume_evidence,
             "delivery_evidence": delivery_evidence + late_evidence,
             "ffprobe": probes,
             "ack": late_report_receipt,
@@ -806,6 +987,11 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
         assert coverage["default_scope"]["output_ids"] == coverage["checked_output_ids"]
 
         output_rows = _source_rows(deployment, source_id)
+        expected_sha_by_output_id = _assert_source_manifest_facts(scenario, output_rows)
+        expected_size_by_output_id = {
+            row["output_id"]: row["size"] for row in output_rows.values()
+        }
+        _assert_inspection_copy_facts(deployment, scenario, source_id)
         video_paths = [item["device_path"] for item in scenario["facts"]]
         expected_scope = [output_rows[path]["output_id"] for path in video_paths[:3]]
         assert coverage["checked_output_ids"] == expected_scope
@@ -854,7 +1040,11 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             int(enum_for("file_copies.verification_state").SOURCE_CHECKSUM_UNAVAILABLE),
         }
         assert all(row[5] in verified for row in bound_copies)
-        assert all(row[6] == row[7] and row[8] for row in bound_copies)
+        assert all(
+            row[6] == row[7] == expected_size_by_output_id[str(row[1])]
+            and row[8] == expected_sha_by_output_id[str(row[1])]
+            for row in bound_copies
+        )
         _cleanup_inspection_inputs(deployment, source_id)
         ack = _assert_ack(demo, scenario, report)
         (deployment.root / "action6-native-photo-failure.json").write_text(
