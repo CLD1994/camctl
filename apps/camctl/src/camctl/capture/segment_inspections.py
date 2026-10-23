@@ -29,6 +29,7 @@ from camctl.persistence.repositories.segment_inspections import (
     InspectionCreate, InspectionResultSave, SegmentInspectionRef,
     SegmentInspectionRepository, read_inspection_for_member,
 )
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
 
 __all__ = [
     "SegmentInspectionPhase",
@@ -39,6 +40,11 @@ __all__ = [
 
 _INSPECTION_STATE = enum_for("segment_inspections.state")
 _RUN_STATUS = enum_for("operation_runs.status")
+
+
+def _inspection_batch_size(flow) -> int:
+    configured = getattr(flow, "read_discovery_batch_size", None)
+    return positive_limit(DEFAULT_BATCH_SIZE if configured is None else configured)
 
 
 class SegmentInspectionPhase(Enum):
@@ -259,23 +265,46 @@ def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
 def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
                                                 occurred_at: int) -> bool:
     """仅补齐该动作已终态检查副本上欠缺的读取机会释放。"""
-    rows = flow.owned.connection.execute(
-        "SELECT c.id,c.slot_device_id FROM segment_inspections s"
-        " JOIN file_copies c ON c.inspection_id=s.id"
-        " WHERE s.action_id=? AND s.state!=?"
-        " ORDER BY s.id",
-        (action_id, int(_INSPECTION_STATE.PENDING)),
-    ).fetchall()
-    terminal_copy_ids = {copy_id for copy_id, _slot in rows}
-    copy_ids = {copy_id for copy_id, slot in rows if slot is not None}
-    copy_ids.update(
-        copy_id for copy_id, operation in flow.pending_read_business
-        if operation == "release_read_slot" and copy_id in terminal_copy_ids
-    )
     complete = True
-    for copy_id in sorted(copy_ids):
-        complete = settle_terminal_inspection_read_slot(
-            flow, copy_id, occurred_at) and complete
+    connection = flow.owned.connection
+    # UNKNOWN 的释放必须按原 copy id 与原 request/key 续接。先核对该 copy
+    # 当前仍属于本动作的终态 inspection，不能把其他读取责任并入本次收场。
+    pending_copy_ids = tuple(
+        copy_id for copy_id, operation in flow.pending_read_business
+        if operation == "release_read_slot"
+    )
+    for copy_id in pending_copy_ids:
+        rows = connection.execute(
+            "SELECT s.id FROM file_copies c"
+            " JOIN segment_inspections s ON s.id=c.inspection_id"
+            " WHERE c.id=? AND s.action_id=? AND s.state!=? LIMIT 2",
+            (copy_id, action_id, int(_INSPECTION_STATE.PENDING)),
+        ).fetchall()
+        if len(rows) > 1:
+            raise ConsistencyError("同一读取机会关联了重复的当前动作检查责任")
+        if rows:
+            complete = settle_terminal_inspection_read_slot(
+                flow, copy_id, occurred_at) and complete
+
+    batch_size = _inspection_batch_size(flow)
+    after_inspection_id = 0
+    after_copy_id = 0
+    while True:
+        rows = connection.execute(
+            "SELECT s.id,c.id FROM segment_inspections s"
+            " JOIN file_copies c ON c.inspection_id=s.id"
+            " WHERE s.action_id=? AND s.state!=? AND c.slot_device_id IS NOT NULL"
+            " AND (s.id>? OR (s.id=? AND c.id>?))"
+            " ORDER BY s.id,c.id LIMIT ?",
+            (action_id, int(_INSPECTION_STATE.PENDING), after_inspection_id,
+             after_inspection_id, after_copy_id, batch_size),
+        ).fetchall()
+        if not rows:
+            break
+        for inspection_id, copy_id in rows:
+            complete = settle_terminal_inspection_read_slot(
+                flow, copy_id, occurred_at) and complete
+        after_inspection_id, after_copy_id = rows[-1]
     return complete
 
 

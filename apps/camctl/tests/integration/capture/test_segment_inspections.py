@@ -18,7 +18,7 @@ from camctl.capture.segment_inspections import (
     inspect_segment,
 )
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import ConsistencyError
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
@@ -27,10 +27,11 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.outputs.qualification import OperationConfig
 from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
 from camctl.persistence.repositories.segment_inspections import (
+    InspectionCreate,
     read_inspection_for_member,
 )
 
-from .test_input_copy import _CONTENT, _NOW, pipeline
+from .test_input_copy import _CONTENT, _NOW, _seed_device_file, pipeline
 
 pytestmark = pytest.mark.asyncio
 
@@ -745,6 +746,244 @@ async def test_action6_finalizer_releases_slot_for_existing_terminal_inspection(
     assert digest.calls == 1
     assert tools.requests == []
     reopened.connection.close()
+
+
+async def test_action6_inspection_recovery_pages_and_retries_exact_pending_keys(
+    pipeline, monkeypatch,
+):
+    from camctl.capture import segment_inspections
+    from camctl.capture.action6_recovery import finalize_pending_action6_inspections
+    from camctl.outputs.read_attempts import PendingReadBusiness
+    from camctl.outputs.slots import SlotRequest
+    from camctl.persistence.repositories.outputs import OutputsRepository
+
+    owned, roots = pipeline[0], pipeline[1]
+    _fixed_member(owned)
+    connection = owned.connection
+    for member_id in range(2, 8):
+        file_id = 10 + member_id
+        _seed_device_file(connection, file_id)
+        connection.execute(
+            "INSERT INTO segment_members (id,created_event_id,set_id,file_id,page_event_id,"
+            "file_event_id,identity,directory_number,segment_index,role,ownership,completion,"
+            "pairing_state,pairing_identity,pairing_fact_id)"
+            " VALUES (?,1,1,?,1,1,?,1,?,1,1,1,1,NULL,NULL)",
+            (member_id, file_id, f"file-{file_id:04d}", member_id),
+        )
+    connection.execute("UPDATE segment_sets SET member_count=7 WHERE id=1")
+    connection.commit()
+
+    result_repository = SegmentInspectionRepository()
+    target = {"metric": "duration_s", "value": 60}
+    budget = {"max_attempts": 3, "timeout_s": 10, "retry_interval_s": 0}
+    for member_id in range(1, 8):
+        created = result_repository.create(
+            InspectionCreate(1, member_id, target, budget, _NOW + 10),
+            new_operation_key(), owned,
+        )
+        assert created.kind is DbOutcomeKind.COMPLETED, created.error
+
+    flow, request, driver, tools = _inspection_runtime(owned, roots, _FailedDigest())
+    flow.read_discovery_batch_size = 2
+    copy_ids = {}
+
+    release_read_slot = OutputsRepository.release_read_slot
+    release_keys_by_copy = {}
+    unknown_release_seen = False
+
+    def commit_then_report_release_unknown(repository, save, key, owned_connection):
+        nonlocal unknown_release_seen
+        release_keys_by_copy.setdefault(save.copy_id, []).append(key)
+        outcome = release_read_slot(repository, save, key, owned_connection)
+        if not unknown_release_seen:
+            unknown_release_seen = True
+            assert outcome.kind is DbOutcomeKind.COMPLETED
+            return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=OSError("commit reply lost"))
+        return outcome
+
+    monkeypatch.setattr(
+        OutputsRepository, "release_read_slot", commit_then_report_release_unknown,
+    )
+    with pytest.raises(ConsistencyError, match="原读取业务结果未可靠保存"):
+        await inspect_segment(flow, replace(request, member_id=1))
+    copy_ids[1] = connection.execute(
+        "SELECT id FROM file_copies WHERE inspection_id=("
+        " SELECT id FROM segment_inspections WHERE action_id=1 AND member_id=1)",
+    ).fetchone()[0]
+    original_failures = {
+        1: connection.execute(
+            "SELECT r.error_json,c.verification_error_json,s.result_json,s.result_event_id"
+            " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN segment_inspections s ON s.id=c.inspection_id WHERE c.id=?",
+            (copy_ids[1],),
+        ).fetchone(),
+    }
+
+    drivers = [driver]
+    digests = [flow.digest]
+    tools_list = [tools]
+    for member_id in (3, 7):
+        other_flow, other_request, other_driver, other_tools = _inspection_runtime(
+            owned, roots, _FailedDigest(),
+        )
+        other_flow.read_discovery_batch_size = 2
+        result = await inspect_segment(
+            other_flow, replace(other_request, member_id=member_id),
+        )
+        assert result.phase is SegmentInspectionPhase.FAILED
+        assert result.reason == "source_file_unconfirmed"
+        drivers.append(other_driver)
+        digests.append(other_flow.digest)
+        tools_list.append(other_tools)
+        copy_ids[member_id] = connection.execute(
+            "SELECT id FROM file_copies WHERE inspection_id=("
+            " SELECT id FROM segment_inspections WHERE action_id=1 AND member_id=?)",
+            (member_id,),
+        ).fetchone()[0]
+        original_failures[member_id] = connection.execute(
+            "SELECT r.error_json,c.verification_error_json,s.result_json,s.result_event_id"
+            " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN segment_inspections s ON s.id=c.inspection_id WHERE c.id=?",
+            (copy_ids[member_id],),
+        ).fetchone()
+
+    active_flow, active_request, active_driver, active_tools = _inspection_runtime(
+        owned, roots, _FailedDigest(),
+    )
+    original_finish = segment_inspections._finish_internal_read
+    monkeypatch.setattr(segment_inspections, "_finish_internal_read",
+                        lambda *_args, **_kwargs: None)
+    active = await inspect_segment(active_flow, replace(active_request, member_id=5))
+    monkeypatch.setattr(segment_inspections, "_finish_internal_read", original_finish)
+    assert active.phase is SegmentInspectionPhase.WAITING
+    assert active.reason == "verification_failed"
+    copy_ids[5] = connection.execute(
+        "SELECT id FROM file_copies WHERE inspection_id=("
+        " SELECT id FROM segment_inspections WHERE action_id=1 AND member_id=5)",
+    ).fetchone()[0]
+    drivers.append(active_driver)
+    digests.append(active_flow.digest)
+    tools_list.append(active_tools)
+
+    release_unknown_key = release_keys_by_copy[copy_ids[1]][0]
+    assert connection.execute(
+        "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_ids[1],),
+    ).fetchone()[0] is None
+    assert (copy_ids[1], "release_read_slot") in flow.pending_read_business
+
+    connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
+    connection.commit()
+
+    save_result = SegmentInspectionRepository.save_result
+    result_keys = []
+    unknown_result_seen = False
+
+    def commit_then_report_result_unknown(repository, save, key, owned_connection):
+        nonlocal unknown_result_seen
+        result_keys.append((save.inspection_id, key))
+        outcome = save_result(repository, save, key, owned_connection)
+        if save.inspection_id == 5 and not unknown_result_seen:
+            unknown_result_seen = True
+            assert outcome.kind is DbOutcomeKind.COMPLETED
+            return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=OSError("commit reply lost"))
+        return outcome
+
+    monkeypatch.setattr(
+        SegmentInspectionRepository, "save_result", commit_then_report_result_unknown,
+    )
+    runtime = SimpleNamespace(
+        owned=owned, media=flow, pending_read_business=flow.pending_read_business,
+        wall_us=lambda: _NOW + 20,
+    )
+    statements = []
+    connection.set_trace_callback(statements.append)
+
+    assert not finalize_pending_action6_inspections(
+        runtime, 1, reason="inspection_canceled",
+    )
+    result_event_id = connection.execute(
+        "SELECT result_event_id FROM segment_inspections WHERE action_id=1 AND member_id=5",
+    ).fetchone()[0]
+    assert result_event_id is not None
+    assert connection.execute(
+        "SELECT state FROM segment_inspections WHERE action_id=1 AND member_id=6",
+    ).fetchone()[0] == int(enum_for("segment_inspections.state").PENDING)
+
+    event_count_before_retry = connection.execute(
+        "SELECT COUNT(*) FROM history_events",
+    ).fetchone()[0]
+
+    def unrelated_save(*_args):
+        raise AssertionError("Action6 inspection recovery touched an unrelated read release")
+
+    unrelated = PendingReadBusiness(
+        unrelated_save, SlotRequest(999, _NOW + 20), new_operation_key(),
+    )
+    flow.pending_read_business[(999, "release_read_slot")] = unrelated
+
+    assert finalize_pending_action6_inspections(
+        runtime, 1, reason="inspection_canceled",
+    )
+    connection.set_trace_callback(None)
+
+    pending_pages = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith("SELECT ID FROM SEGMENT_INSPECTIONS")
+        and "ACTION_ID" in statement.upper() and "STATE" in statement.upper()
+    ]
+    slot_pages = [
+        statement for statement in statements
+        if statement.lstrip().upper().startswith("SELECT S.ID,C.ID FROM SEGMENT_INSPECTIONS")
+    ]
+    assert len(pending_pages) >= 4
+    assert all("LIMIT 2" in statement.upper() for statement in pending_pages)
+    assert any("ID>4" in statement.upper() for statement in pending_pages)
+    assert len(slot_pages) >= 2
+    assert all("LIMIT 2" in statement.upper() for statement in slot_pages)
+
+    id5_keys = [key for inspection_id, key in result_keys if inspection_id == 5]
+    assert len(id5_keys) == 2 and id5_keys[0] == id5_keys[1]
+    assert connection.execute(
+        "SELECT COUNT(*) FROM history_events WHERE id=?", (result_event_id,),
+    ).fetchone()[0] == 1
+    assert connection.execute(
+        "SELECT COUNT(*) FROM history_events",
+    ).fetchone()[0] == event_count_before_retry + 1
+    assert connection.execute(
+        "SELECT state FROM segment_inspections WHERE action_id=1 AND state=?",
+        (int(enum_for("segment_inspections.state").PENDING),),
+    ).fetchone() is None
+    for member_id in (1, 3, 7):
+        after = connection.execute(
+            "SELECT r.error_json,c.verification_error_json,s.result_json,s.result_event_id"
+            " FROM file_copies c"
+            " JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN segment_inspections s ON s.id=c.inspection_id WHERE c.id=?",
+            (copy_ids[member_id],),
+        ).fetchone()
+        before = original_failures[member_id]
+        assert after == before
+        assert connection.execute(
+            "SELECT slot_device_id FROM file_copies WHERE id=?",
+            (copy_ids[member_id],),
+        ).fetchone()[0] is None
+    assert release_keys_by_copy[copy_ids[1]][0] == release_unknown_key
+    assert release_keys_by_copy[copy_ids[1]][-1] == release_unknown_key
+    assert (999, "release_read_slot") in flow.pending_read_business
+    assert flow.pending_read_business[(999, "release_read_slot")] is unrelated
+    assert connection.execute(
+        "SELECT status FROM operation_runs WHERE copy_id=?", (copy_ids[5],),
+    ).fetchone()[0] == int(enum_for("operation_runs.status").ACTIVE)
+    assert connection.execute(
+        "SELECT status FROM operation_attempts WHERE run_id=("
+        " SELECT id FROM operation_runs WHERE copy_id=?)", (copy_ids[5],),
+    ).fetchone()[0] == int(enum_for("operation_attempts.status").RUNNING)
+    assert connection.execute(
+        "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_ids[5],),
+    ).fetchone()[0] is not None
+    assert [offset for driver in drivers for offset in driver.offsets] == [0, 0, 0, 0]
+    assert sum(digest.calls for digest in digests) == 4
+    assert all(not tools.requests for tools in tools_list)
 
 
 async def test_cancelled_complete_read_uses_existing_action6_inspection_finalizer(
