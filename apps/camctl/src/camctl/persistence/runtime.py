@@ -358,6 +358,12 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
+        if format_version >= int(_FORMAT_VERSIONS.V3):
+            from camctl.persistence.recovery_structure import verify_recovery_structure
+            try:
+                verify_recovery_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"软件恢复格式结构无效: {error}") from error
         state = connection.execute(
             "SELECT acknowledged_wm FROM runtime_state WHERE id = 1"
         ).fetchone()

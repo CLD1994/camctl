@@ -69,6 +69,9 @@ def upgrade_software_recovery(owned, state_db):
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise StateDatabaseError("升级后的外键核验失败")
         connection.commit()
+        from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+        verified = open_existing(Path(state_db), DbOpenMode.EXISTING_RO, DbConfig())
+        verified.connection.close()
     except BaseException:
         if connection.in_transaction:
             connection.rollback()
