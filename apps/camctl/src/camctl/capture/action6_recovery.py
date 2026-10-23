@@ -104,8 +104,11 @@ async def inspect_continuous_prefix(
 
 def finalize_pending_action6_inspections(runtime, action_id: int, *, reason: str) -> bool:
     """在来源取消或已终态时结束尚未完成的检查责任，不继续读取设备。"""
+    from types import SimpleNamespace
+
     from camctl.capture.segment_inspections import InspectionResultSave
     from camctl.capture.segment_inspections import SegmentInspectionRepository
+    from camctl.capture.segment_inspections import settle_terminal_inspection_slots_for_action
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
     from camctl.contracts.enums import enum_for
@@ -151,6 +154,12 @@ def finalize_pending_action6_inspections(runtime, action_id: int, *, reason: str
                 pending[inspection_id] = (request, key)
             return False
         raise ConsistencyError(f"Action6 未结束检查收场被拒绝: {outcome.error}")
+    slot_flow = flow if flow is not None else SimpleNamespace(
+        owned=owned, pending_read_business=runtime.pending_read_business,
+    )
+    # READ 仍 ACTIVE 或尚有重试等待时只保留原 slot；这不应阻断既有
+    # Action6 取消终态。后续 Action6 恢复会在 READ 自身终结后补做释放。
+    settle_terminal_inspection_slots_for_action(slot_flow, action_id, runtime.wall_us())
     return True
 
 

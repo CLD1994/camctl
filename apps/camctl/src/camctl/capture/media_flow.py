@@ -791,14 +791,35 @@ def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
     succeeded = pending.finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
     exhausted = (pending.finish.run_finish is not None
                  and pending.finish.run_finish.status is RunOutcome.FAILED)
+    row = flow.owned.connection.execute(
+        "SELECT processing_id,inspection_id FROM file_copies WHERE id=?",
+        (int(ticket.target_id),)).fetchone()
+    if row is None:
+        raise ConsistencyError("已结束读取尝试缺少对应拷贝")
     if exhausted:
-        row = flow.owned.connection.execute(
-            "SELECT processing_id,inspection_id FROM file_copies WHERE id=?",
-            (int(ticket.target_id),)).fetchone()
-        if row is None:
-            raise ConsistencyError("已结束读取尝试缺少对应拷贝")
         if row[0] is not None:
             _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
+    if row[1] is not None:
+        run_status = flow.owned.connection.execute(
+            "SELECT status FROM operation_runs WHERE copy_id=?", (int(ticket.target_id),),
+        ).fetchone()
+        if run_status is None:
+            raise ConsistencyError("检查读取缺少原流程状态")
+        from camctl.contracts.enums import enum_for
+
+        if run_status[0] == int(enum_for("operation_runs.status").FAILED):
+            from camctl.capture.segment_inspections import (
+                settle_inspection_read_failure, settle_terminal_inspection_read_slot,
+            )
+
+            copy_id = int(ticket.target_id)
+            if not settle_inspection_read_failure(flow, copy_id, pending.finish.occurred_at):
+                return
+            # 读取尝试先可靠保存，检查结果再可靠保存；只有这两项都完成后
+            # 才可解除检查读取机会。结果未知时保留同一 AttemptFinish 与结果键。
+            forget_read_result(flow, pending)
+            settle_terminal_inspection_read_slot(flow, copy_id, pending.finish.occurred_at)
+            return
     if succeeded and not exhausted:
         from camctl.outputs.read_attempts import save_read_business
 
