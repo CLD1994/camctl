@@ -922,10 +922,10 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             assert preview[2] == int(roles.PREVIEW)
             assert preview[3] == original[0]
             pairing = json.loads(preview[4])
-            assert pairing["method"] == 2
-            assert query_state(deployment.state_db,
-                "SELECT original_file_id,preview_file_id FROM device_file_pairing_facts WHERE id=?",
-                (pairing["pairing_fact_id"],)) == [(original[0], preview[0])]
+            assert pairing == {
+                "method": int(enum_for("device_files.pairing_evidence_json.method").DRIVER_PAIRING),
+                "observation": {"paired_identity": _OSV_PATH},
+            }
             assert preview[5] == int(completed) and preview[6] == len(_LRF_CONTENT) >= 1
 
         if action_type == "camera_record":
@@ -1002,14 +1002,17 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
                           for entry in observation["data"]["entries"])
         expected_listed = {(_OSV_PATH, "video", "osv", None)}
         if include_preview:
-            expected_listed.add((_LRF_PATH, "video", "lrf", None))
+            expected_listed.add((_LRF_PATH, "video", "lrf", _OSV_PATH))
         assert {(entry["identity"], entry["kind"], entry["format_id"], entry["paired_identity"])
                 for entry in listed} == expected_listed
         assert len(listed) == len(expected_listed) * len(result_rows)
         if action_type == "camera_record":
+            assert len(result_rows) == 1
             assert query_state(deployment.state_db,
-                "SELECT attempts_used=max_attempts_used FROM operation_runs WHERE action_id=? AND kind=?",
-                (action_id, int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) == [(1,)]
+                "SELECT status,attempts_used,max_attempts_used FROM operation_runs"
+                " WHERE action_id=? AND kind=?",
+                (action_id, int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) == [(
+                    int(enum_for("operation_runs.status").SUCCEEDED), 1, 3)]
 
         demo.claim()
         saved = deployment.import_reports_with_client(deployment.processing)
