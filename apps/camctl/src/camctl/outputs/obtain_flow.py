@@ -1200,7 +1200,8 @@ def _failed_inspection_read_request(connection, facts: Mapping):
     """恢复已有的本地源失败事实；只返回仍有预算的可靠终态尝试。"""
     with closing(connection.execute(
         "SELECT r.status,r.attempts_used,r.max_attempts_used,r.retry_wait_required,"
-        " a.id,a.attempt_no,a.status,a.error_json,a.result_event_id,a.copy_round,"
+        " a.id,a.attempt_no,a.status,a.error_json,a.intent_event_id,"
+        " a.result_event_id,a.copy_round,"
         " h.occurred_at FROM operation_runs r"
         " LEFT JOIN operation_attempts a ON a.run_id=r.id"
         " LEFT JOIN history_events h ON h.id=a.result_event_id"
@@ -1211,15 +1212,17 @@ def _failed_inspection_read_request(connection, facts: Mapping):
     if row is None or row[4] is None:
         return None
     (run_status, attempts_used, max_attempts, retry_wait_required,
-     attempt_id, attempt_no, attempt_status, error_json,
+     attempt_id, attempt_no, attempt_status, error_json, intent_event_id,
      result_event_id, copy_round, occurred_at) = row
     if (run_status != int(_RUN_STATUS.ACTIVE)
             or attempts_used != attempt_no
             or attempts_used >= max_attempts
             or retry_wait_required != 1
             or attempt_status != int(_ATTEMPT_STATUS.FAILED)
-            or error_json is None or result_event_id is None
-            or copy_round != facts["round"] or occurred_at is None):
+            or error_json is None or intent_event_id is None
+            or result_event_id is None
+            or copy_round is None or copy_round > facts["round"]
+            or occurred_at is None):
         return None
     error = error_json if isinstance(error_json, Mapping) else parse_exact_json(error_json)
     details = error.get("details")

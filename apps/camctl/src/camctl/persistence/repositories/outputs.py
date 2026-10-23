@@ -2552,30 +2552,18 @@ class _SlotChangeCommand:
         )
         if not eligible:
             return self._decision(SlotOutcome.WAIT, reason)
-        return self._save(scope, copy, None, device_id, SlotOutcome.GRANTED)
+        return self._save(
+            scope, copy, None, device_id, SlotOutcome.GRANTED,
+            plan_read_scope=(PlanReadScope(action["plan_id"], 1)
+                             if retrying_source_fallback else None),
+        )
 
     def _is_source_fallback_retry(self, connection, copy, run) -> bool:
         """只为有原始 SOURCE_FALLBACK 历史的失败本地读取续接机会。"""
         self._load_attempts(connection, run["id"])
         attempt = _source_fallback_retry_attempt(
-            copy, run, self._state["operation_attempts"])
-        if attempt is None:
-            return False
-        with closing(connection.execute(
-            "SELECT 1 FROM history_events e, json_each(e.body_json,'$.rows') r"
-            " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
-            " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
-            " AND json_extract(r.value,'$.table')='file_copies'"
-            " AND json_extract(r.value,'$.id')=?"
-            " AND json_extract(r.value,'$.before.values.source_device_file_id') IS NULL"
-            " AND json_extract(r.value,'$.before.values.source_intermediate_file_id') IS NOT NULL"
-            " AND json_extract(r.value,'$.after.values.source_device_file_id')=?"
-            " AND json_extract(r.value,'$.after.values.source_intermediate_file_id') IS NULL"
-            " LIMIT 1",
-            (_COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON,
-             attempt["id"], copy["id"], copy["source_device_file_id"]),
-        )) as cursor:
-            return cursor.fetchone() is not None
+            copy, run, self._state["operation_attempts"], connection)
+        return attempt is not None
 
     def _device_holder(self, connection, device_id: str) -> int | None:
         return device_holder(connection, device_id)
@@ -2610,7 +2598,8 @@ class _SlotChangeCommand:
 
     # ---- 事件与出口 ----
 
-    def _save(self, scope, copy, before_slot, after_slot, outcome) -> CommandPlan:
+    def _save(self, scope, copy, before_slot, after_slot, outcome, *,
+              plan_read_scope=None) -> CommandPlan:
         copy_id = copy["id"]
         row = _update(
             "file_copies", copy_id,
@@ -2629,6 +2618,7 @@ class _SlotChangeCommand:
             state_rows=self._state,
             read_coverage=self._coverage,
             result=SlotDecision(outcome=outcome),
+            plan_read_scope=plan_read_scope,
         )
 
     def _decision(self, outcome: SlotOutcome, reason: str | None = None) -> CommandPlan:
@@ -4032,7 +4022,6 @@ class _ReadSourceFallbackCommand:
         if (attempt["id"] != request.failed_attempt_id
                 or attempt["run_id"] != run["id"]
                 or attempt["attempt_no"] != run["attempts_used"]
-                or attempt["copy_round"] != copy["round"]
                 or attempt["status"] != int(_ATTEMPT_STATUS.FAILED)
                 or attempt["result_json"] is None
                 or not isinstance(attempt["error_json"], Mapping)
@@ -4042,6 +4031,11 @@ class _ReadSourceFallbackCommand:
                 or attempt["error_json"]["details"].get("source_failed") is not True
                 or attempt["result_event_id"] is None):
             raise ConsistencyError("读取换源没有可确认的原本地读取失败结果")
+        if not _copy_round_chain_proven(
+                connection, copy["id"], attempt["copy_round"], copy["round"],
+                attempt["intent_event_id"], attempt["result_event_id"],
+                copy["source_size"]):
+            raise ConsistencyError("读取换源的当前拷贝轮次不在原 READ_FILE 尝试事件链内")
         with closing(connection.execute(
             "SELECT occurred_at FROM history_events WHERE id=?",
             (attempt["result_event_id"],),
@@ -4080,6 +4074,7 @@ class _ReadSourceFallbackCommand:
         return CommandPlan(
             events=(event,), owners=self._owners, state_rows=self._state,
             result=ReadSourceFallbackOutcome(ReadSourceFallbackDisposition.SWITCHED),
+            plan_read_scope=PlanReadScope(action["plan_id"], 1),
         )
 
     def _required(self, connection, table, identity):
@@ -6395,6 +6390,74 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
         raise EventValidationError("副本字节未完整保存不能准备或发布")
 
 
+def _copy_round_chain_proven(
+        connection, copy_id, initial_round, current_round,
+        intent_event_id, result_event_id, source_size) -> bool:
+    """流式证明 READ_FILE 意图到结果间的连续重拷轮次。
+
+    每次只解码一条涉及目标拷贝的历史事件，并仅累计期望轮次；内存
+    不随重拷次数增长。调用方分别在写命令和独立事件守卫中校验该链。
+    """
+    values = (copy_id, initial_round, current_round, intent_event_id,
+              result_event_id, source_size)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return False
+    if (initial_round > current_round
+            or intent_event_id >= result_event_id):
+        return False
+
+    expected_round = initial_round
+    with closing(connection.execute(
+        "SELECT h.id,h.transaction_id,h.event_type,h.event_version,h.occurred_at,"
+        " h.clock_status,h.change_seq,h.body_json"
+        " FROM history_events h"
+        " WHERE h.id>? AND h.id<?"
+        " AND EXISTS (SELECT 1 FROM json_each(h.body_json,'$.rows') AS r"
+        "  WHERE json_extract(r.value,'$.table')='file_copies'"
+        "  AND json_extract(r.value,'$.id')=?)"
+        " ORDER BY h.id",
+        (intent_event_id, result_event_id, copy_id),
+    )) as cursor:
+        for stored_event in cursor:
+            event = decode_event_row(stored_event)
+            copy_change = None
+            for change in event.rows:
+                if change.table == "file_copies" and change.row_id == copy_id:
+                    if copy_change is not None:
+                        return False
+                    copy_change = change
+            if copy_change is None:
+                return False
+
+            before, after = copy_change.before.values, copy_change.after.values
+            has_before_round = "round" in before
+            has_after_round = "round" in after
+            if event.event_type == _COPY_CHANGED_EVENT and event.reason == _RECOPY_REASON:
+                if (not copy_change.before.exists or not copy_change.after.exists
+                        or not has_before_round or not has_after_round
+                        or before.get("round") != expected_round
+                        or after.get("round") != expected_round + 1
+                        or before.get("recopies_used") != expected_round - 1
+                        or after.get("recopies_used") != expected_round
+                        or before.get("committed_bytes") != source_size
+                        or after.get("committed_bytes") != 0
+                        or before.get("reset_state") != int(_RESET_STATE.READY)
+                        or after.get("reset_state") != int(_RESET_STATE.RESET_PENDING)
+                        or before.get("verification_state") != int(_VERIFICATION.MISMATCHED)
+                        or after.get("verification_state") != int(_VERIFICATION.NOT_PERFORMED)
+                        or "target_sha256" not in before
+                        or after.get("target_sha256") is not None):
+                    return False
+                expected_round += 1
+                continue
+
+            if (has_before_round != has_after_round
+                    or (has_before_round and before["round"] != after["round"])):
+                return False
+
+    return expected_round == current_round
+
+
 def _copy_guard(event, context) -> None:
     """拷贝建档、进度段、目标重置、校验与重拷守卫。"""
     if (event.event_type == _COPY_CHANGED_EVENT
@@ -6434,8 +6497,9 @@ def _copy_guard(event, context) -> None:
         run = run_rows[0]
         if (attempt.get("run_id") != run.get("id")
                 or attempt.get("attempt_no") != run.get("attempts_used")
-                or attempt.get("copy_round") != copy.get("round")
                 or attempt.get("status") != int(_ATTEMPT_STATUS.FAILED)
+                or attempt.get("intent_event_id") is None
+                or attempt.get("result_event_id") is None
                 or not isinstance(attempt.get("error_json"), Mapping)
                 or attempt["error_json"].get("code") != "local_read_failed"
                 or not isinstance(attempt["error_json"].get("details"), Mapping)
@@ -6446,6 +6510,12 @@ def _copy_guard(event, context) -> None:
                 or run.get("retry_wait_required") != 1
                 or run.get("attempts_used", 0) >= run.get("max_attempts_used", 0)):
             raise EventValidationError("读取换源必须沿用仍有余量的原本地失败读取预算")
+        reads = context.current_reads
+        if (reads is None or not _copy_round_chain_proven(
+                reads.connection, row.row_id, attempt.get("copy_round"),
+                copy.get("round"), attempt.get("intent_event_id"),
+                attempt.get("result_event_id"), copy.get("source_size"))):
+            raise EventValidationError("读取换源的拷贝轮次没有原 READ_FILE 意图到结果的连续重拷链")
 
         item_rows = [
             facts for facts in context.state_rows.get("obtain_items", {}).values()
@@ -6803,8 +6873,31 @@ def _slot_run(context, copy_id: int) -> dict[str, Any]:
     return run
 
 
-def _source_fallback_retry_attempt(copy, run, attempts):
-    """返回同一拷贝当前等待重试的本地源失败尝试。"""
+def _has_source_fallback_retry_proof(connection, copy, attempt) -> bool:
+    """核实原失败尝试已有指向同一拷贝和设备文件的换源事件。"""
+    if (connection is None or not is_json_integer(attempt.get("id"))
+            or not is_json_integer(copy.get("id"))
+            or not is_json_integer(copy.get("source_device_file_id"))):
+        return False
+    with closing(connection.execute(
+        "SELECT 1 FROM history_events e, json_each(e.body_json,'$.rows') r"
+        " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+        " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
+        " AND json_extract(r.value,'$.table')='file_copies'"
+        " AND json_extract(r.value,'$.id')=?"
+        " AND json_extract(r.value,'$.before.values.source_device_file_id') IS NULL"
+        " AND json_extract(r.value,'$.before.values.source_intermediate_file_id') IS NOT NULL"
+        " AND json_extract(r.value,'$.after.values.source_device_file_id')=?"
+        " AND json_extract(r.value,'$.after.values.source_intermediate_file_id') IS NULL"
+        " LIMIT 1",
+        (_COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON,
+         attempt["id"], copy["id"], copy["source_device_file_id"]),
+    )) as cursor:
+        return cursor.fetchone() is not None
+
+
+def _source_fallback_retry_attempt(copy, run, attempts, connection):
+    """返回有连续重拷链和原换源事件证明的等待中本地源失败尝试。"""
     if (run.get("status") != int(_RUN_STATUS.ACTIVE)
             or run.get("retry_wait_required") != 1
             or run.get("attempts_used", 0) < 1
@@ -6819,8 +6912,8 @@ def _source_fallback_retry_attempt(copy, run, attempts):
     if len(matches) != 1:
         return None
     attempt = matches[0]
-    if (attempt.get("copy_round") != copy.get("round")
-            or attempt.get("status") != int(_ATTEMPT_STATUS.FAILED)
+    if (attempt.get("status") != int(_ATTEMPT_STATUS.FAILED)
+            or attempt.get("intent_event_id") is None
             or attempt.get("result_event_id") is None):
         return None
     error = attempt.get("error_json")
@@ -6833,6 +6926,13 @@ def _source_fallback_retry_attempt(copy, run, attempts):
             or error.get("stage") != "source_read"
             or not isinstance(details, Mapping)
             or details.get("source_failed") is not True):
+        return None
+    if not _copy_round_chain_proven(
+            connection, copy.get("id"), attempt.get("copy_round"),
+            copy.get("round"), attempt.get("intent_event_id"),
+            attempt.get("result_event_id"), copy.get("source_size")):
+        return None
+    if not _has_source_fallback_retry_proof(connection, copy, attempt):
         return None
     return attempt
 
@@ -6887,7 +6987,9 @@ def _read_slot_guard(event, context) -> None:
             if run["retry_wait_required"] != 0:
                 attempts = context.complete_rows(
                     "operation_attempts", "run_id", run["id"])
-                if _source_fallback_retry_attempt(copy, run, attempts) is None:
+                reads = context.current_reads
+                if (reads is None or _source_fallback_retry_attempt(
+                        copy, run, attempts, reads.connection) is None):
                     raise EventValidationError("重试等待期间不授予新的读取机会")
             action = _slot_owner_action(context, copy)
             try:
