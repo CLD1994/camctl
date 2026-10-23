@@ -473,7 +473,15 @@ def _conclude_action6_results(runtime, action, ref):
     )
 
     repository = SegmentRepository()
-    result_ref = repository.read_prepared_result_ref(action["id"], runtime.owned)
+    canceled = bool(action["cancel_requested"])
+    if canceled:
+        setrow = repository.read_set(ref, runtime.owned)
+        result_ref = repository.find_canceled_result_ref(
+            action["id"], setrow["predecessor_set_id"],
+            setrow["cancel_event_id"], runtime.owned,
+        )
+    else:
+        result_ref = repository.read_prepared_result_ref(action["id"], runtime.owned)
     if not isinstance(result_ref, SegmentResultRef):
         raise ConsistencyError("Action6 共同完成缺少已准备的原 RESULTS 集合")
     if repository.read_current_segment_ref(result_ref, runtime.owned) != ref:
@@ -484,9 +492,14 @@ def _conclude_action6_results(runtime, action, ref):
     ).fetchone():
         return
     setrow = repository.read_result_set(result_ref, runtime.owned)
-    run = row_facts(db, "operation_runs", setrow["run_id"])
+    run = (
+        None
+        if setrow["run_id"] is None
+        else row_facts(db, "operation_runs", setrow["run_id"])
+    )
+    if run is None and not canceled:
+        raise ConsistencyError("Action6 原 RESULTS 集合缺少核实责任")
     action_type = _action_type(action)
-    canceled = bool(action["cancel_requested"])
     if canceled:
         reason = ResultCheckEndReason.CANCELED_BEFORE_PUBLICATION
         anchor = setrow["cancel_event_id"]
@@ -516,8 +529,8 @@ def _conclude_action6_results(runtime, action, ref):
             raise ConsistencyError("Action6 原 RESULTS 责任缺少实际结束事件")
         prior_conclusion = None
     prior_end = None
-    check_config = runtime.check_config
-    if run["status"] not in (1, 2):
+    check_config = runtime.check_config if run is not None else None
+    if run is not None and run["status"] not in (1, 2):
         prior_end = db.execute(
             "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
             "WHERE json_extract(r.value,'$.table')='operation_runs' "
@@ -559,6 +572,11 @@ def publish_action6_segment_result(runtime, action, ref, decision, *, failure=No
     if not isinstance(decision, SegmentDecision) or decision.set_ref != ref:
         raise TypeError("Action6 发布必须引用相同的有限 SegmentDecision")
     setrow = repository.read_set(ref, runtime.owned)
+    # 取消结论要求原成员仍处于 MEMBERS_FIXED；先结论原 RESULTS
+    # 责任，再将覆盖决策推进为 ASSESSED，避免状态顺序反转后无法收场。
+    # 正常收场必须在保存 SegmentDecision 后结论，保证关闭事实与该决策一致。
+    if action["cancel_requested"]:
+        _conclude_action6_results(runtime, action, ref)
     if setrow["state"] != int(enum_for("segment_sets.state").ASSESSED):
         _save(
             runtime,
@@ -615,9 +633,9 @@ def publish_action6_segment_result(runtime, action, ref, decision, *, failure=No
         ).fetchone():
             raise ConsistencyError("空 Action6 视频范围不能已有成员")
 
-    _conclude_action6_results(runtime, action, ref)
-
     setrow = repository.read_set(ref, runtime.owned)
+    if not action["cancel_requested"]:
+        _conclude_action6_results(runtime, action, ref)
     if failure is None and decision.status in (
         SegmentDecisionStatus.FAILED,
         SegmentDecisionStatus.UNCONFIRMED,

@@ -49,7 +49,8 @@ def _candidates(request,reader,batch=128):
         action = row_facts(reader.connection, "actions", request.ref.action_id)
         from camctl.devices.tasks import CaptureResultPolicy
         if (action["execution_spec_json"].get("result_policy")
-                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+                or action["type"] != int(enum_for("actions.type").CAMERA_TIMELAPSE)):
             return
     cursor=None
     while True:

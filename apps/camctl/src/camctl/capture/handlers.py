@@ -2243,7 +2243,10 @@ def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
 
     if (
         action["execution_spec_json"].get("result_policy")
-        == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        in {
+            CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+            CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+        }
     ):
         failure = _close_stop_exhausted(runtime, action)
         from camctl.capture.segment_completion import finish_segmented_external_failure
@@ -2533,7 +2536,8 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     """取消终态：放弃内容，不登记正式产物。"""
     from camctl.devices.tasks import CaptureResultPolicy
 
-    policy = runtime.action(action_id)["execution_spec_json"].get("result_policy")
+    action = runtime.action(action_id)
+    policy = action["execution_spec_json"].get("result_policy")
     if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
         from camctl.capture.action6_recovery import finalize_pending_action6_inspections
 
@@ -2543,6 +2547,9 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
             return
     if (
         policy == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
+        or policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+        and action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+        and action["execution_started"]
         or unstarted
         and policy == CaptureResultPolicy.OSMO_EMPTY_TAIL_CLASSIFICATION_V1.value
     ) and runtime.action(action_id)["execution_started"]:

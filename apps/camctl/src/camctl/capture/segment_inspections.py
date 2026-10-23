@@ -289,6 +289,10 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
         _target_document(request.target), _budget_document(request.budget), request.occurred_at)
     created = repository.create(inspection_request, new_operation_key(), flow.owned)
     if created.kind is not DbOutcomeKind.COMPLETED:
+        if created.kind is DbOutcomeKind.ROLLED_BACK and isinstance(
+            created.error, ConsistencyError
+        ):
+            raise created.error
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             reason="inspection_create_unknown", error=created.error)
     ref = created.value
