@@ -110,6 +110,7 @@ class InputPhase(Enum):
     SEGMENT_FAILED = "segment_failed"
     OWNER_SKIPPED = "owner_skipped"
     COMPLETION_FAILED = "completion_failed"
+    VERIFICATION_FAILED = "verification_failed"
     RECOPY_PENDING = "recopy_pending"
     CHECKSUM_EXHAUSTED = "checksum_exhausted"
     RETRY_WAITING = "retry_waiting"
@@ -285,8 +286,11 @@ async def _complete_input(context: InputContext, copy_id: int,
     except RecopyExhausted as error:
         return InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=copy_id, error=error)
     except (CopyCompletionError, ConsistencyError) as error:
-        return InputStep(InputPhase.COMPLETION_FAILED, copy_id=copy_id,
-                         error=error)
+        phase = (InputPhase.VERIFICATION_FAILED
+                 if isinstance(error, CopyCompletionError)
+                 and error.stage == "verification_failed"
+                 else InputPhase.COMPLETION_FAILED)
+        return InputStep(phase, copy_id=copy_id, error=error)
     if completion.phase is CompletionPhase.PREPARED:
         return InputStep(
             InputPhase.INPUT_READY, copy_id=copy_id,

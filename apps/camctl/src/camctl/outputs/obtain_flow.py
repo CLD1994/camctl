@@ -729,13 +729,16 @@ def _begin_read_attempt(
 
 
 def _fail_read_delivery(
-        runtime: ObtainRuntime, facts: Mapping, now: int, *, checksum_mismatch=False) -> None:
-    """读取预算耗尽：交付终局失败后释放读取机会。"""
+        runtime: ObtainRuntime, facts: Mapping, now: int, *,
+        checksum_mismatch=False, source_verification_failed=False) -> None:
+    """交付读取终局失败后释放读取机会及原源文件保护。"""
     from camctl.outputs.read_attempts import save_read_business
 
     save_read_business(runtime, facts["id"], "fail_delivery",
         FailReadDelivery(delivery_id=facts["delivery_id"], occurred_at=now,
-                         checksum_mismatch=checksum_mismatch), runtime.outputs.fail_read_delivery)
+                         checksum_mismatch=checksum_mismatch,
+                         source_verification_failed=source_verification_failed),
+        runtime.outputs.fail_read_delivery)
 
 
 def _settle_failed_reads(runtime: ObtainRuntime) -> None:
@@ -751,12 +754,17 @@ def _settle_failed_reads(runtime: ObtainRuntime) -> None:
         if error_json is None:
             raise ConsistencyError("原失败读取缺少可靠终局错误")
         error = parse_exact_json(error_json)
-        if error["code"] not in ("read_attempts_exhausted", "checksum_mismatch"):
-            raise ConsistencyError("原失败读取的所属错误不属于读取耗尽或摘要不一致")
+        if error["code"] not in (
+                "read_attempts_exhausted", "checksum_mismatch",
+                "source_file_unconfirmed"):
+            raise ConsistencyError("原失败读取的所属错误不属于已登记读取终局失败")
         facts = _read_facts(runtime.owned.connection, copy_id)
         if facts is None:
             raise ConsistencyError("原失败读取的未终态交付不可解释")
-        _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=error["code"] == "checksum_mismatch")
+        _fail_read_delivery(
+            runtime, facts, runtime.occurred_at(),
+            checksum_mismatch=error["code"] == "checksum_mismatch",
+            source_verification_failed=error["code"] == "source_file_unconfirmed")
 
 
 async def _run_read(
@@ -894,8 +902,11 @@ async def _complete_copy(
     except RecopyExhausted as error:
         return InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=copy_id, error=error)
     except (CopyCompletionError, ConsistencyError) as error:
-        return InputStep(InputPhase.COMPLETION_FAILED, copy_id=copy_id,
-                         error=error)
+        phase = (InputPhase.VERIFICATION_FAILED
+                 if isinstance(error, CopyCompletionError)
+                 and error.stage == "verification_failed"
+                 else InputPhase.COMPLETION_FAILED)
+        return InputStep(phase, copy_id=copy_id, error=error)
     if completion.phase is CompletionPhase.PREPARED:
         return InputStep(InputPhase.INPUT_READY, copy_id=copy_id)
     return InputStep(InputPhase.RECOPY_PENDING, copy_id=copy_id)
@@ -926,10 +937,18 @@ def _finish_read_attempt(
     if completed_cancel is not None:
         _save_read_result_and_settle(runtime, completed_cancel, facts)
         return
+    from camctl.outputs.read_attempts import source_verification_run_finish
+
+    verification_failed = step.phase is InputPhase.VERIFICATION_FAILED
+    verification_finish = (source_verification_run_finish(
+        runtime, ticket, step, output_id=facts["output_id"])
+        if verification_failed else None)
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
-    if step.phase is not InputPhase.INPUT_READY and not step.source_failed and not checksum_failed:
+    if (step.phase is not InputPhase.INPUT_READY and not step.source_failed
+            and not checksum_failed and not verification_failed):
         raise ConsistencyError(f"读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
-    succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
+    succeeded = (step.phase is InputPhase.INPUT_READY
+                 or checksum_failed or verification_failed)
     # 原 ticket 的连续 attempt_no 已在取得／恢复时核实为原累计次数。
     # 实际返回后先持有结果，不能为读取预算再访问数据库而丢失结果。
     exhausted = ticket.attempt_id >= assembly.max_read_attempts
@@ -944,6 +963,15 @@ def _finish_read_attempt(
             evidence=EvidenceValue(
                 type="read_returned", version=1, data={})),
         observations=())
+    if verification_failed:
+        run_finish = verification_finish
+    elif checksum_failed:
+        run_finish = RunFinish(RunOutcome.FAILED, ErrorValue(
+            "checksum_mismatch", "source_read", {
+                "max_recopies": step.error.max_recopies,
+                "recopies_used": step.error.recopies_used}))
+    else:
+        run_finish = _run_finish(succeeded, exhausted)
     from camctl.outputs.read_attempts import hold_read_result
 
     pending = hold_read_result(runtime, AttemptFinish(
@@ -951,10 +979,7 @@ def _finish_read_attempt(
             outcome=validate_outcome(ticket, outcome, assembly.evidence),
             occurred_at=runtime.occurred_at(),
             retry_wait=(not succeeded) and not exhausted,
-            run_finish=(RunFinish(RunOutcome.FAILED, ErrorValue(
-                "checksum_mismatch", "source_read", {
-                    "max_recopies": step.error.max_recopies,
-                    "recopies_used": step.error.recopies_used})) if checksum_failed else _run_finish(succeeded, exhausted))))
+            run_finish=run_finish))
     _save_read_result_and_settle(runtime, pending, facts)
 
 
@@ -1006,10 +1031,18 @@ def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) ->
         return
     succeeded = finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
     exhausted = finish.run_finish is not None and finish.run_finish.status is RunOutcome.FAILED
-    if exhausted and finish.run_finish.error.code == "checksum_mismatch":
-        _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True)
-        forget_read_result(runtime, pending)
-        return
+    if exhausted:
+        code = finish.run_finish.error.code
+        if code == "checksum_mismatch":
+            _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True)
+            forget_read_result(runtime, pending)
+            return
+        if code == "source_file_unconfirmed":
+            _fail_read_delivery(
+                runtime, facts, runtime.occurred_at(),
+                source_verification_failed=True)
+            forget_read_result(runtime, pending)
+            return
     if succeeded:
         if facts["source_device_file_id"] is not None:
             released = runtime.outputs.release_read_slot(

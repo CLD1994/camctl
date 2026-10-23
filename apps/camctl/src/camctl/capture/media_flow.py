@@ -643,21 +643,35 @@ def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
     if completed_cancel is not None:
         _save_internal_read_and_settle(flow, completed_cancel)
         return
+    from camctl.outputs.read_attempts import source_verification_run_finish
+
+    verification_failed = step.phase is InputPhase.VERIFICATION_FAILED
+    verification_finish = (source_verification_run_finish(
+        flow, ticket, step)
+        if verification_failed else None)
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
-    if step.phase is not InputPhase.INPUT_READY and not step.source_failed and not checksum_failed:
+    if (step.phase is not InputPhase.INPUT_READY and not step.source_failed
+            and not checksum_failed and not verification_failed):
         raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
-    succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
+    succeeded = (step.phase is InputPhase.INPUT_READY
+                 or checksum_failed or verification_failed)
     # 原 ticket 的连续编号已由意图／恢复事务核实，实际返回后先持有结果。
     exhausted = ticket.attempt_id >= (max_attempts or flow.max_read_attempts)
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
         error=None if succeeded else ErrorValue("device_error", "read", {"reason": str(step.error)}),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
-    run_finish = RunFinish(RunOutcome.SUCCEEDED) if succeeded else (
-        RunFinish(RunOutcome.FAILED, ErrorValue("read_attempts_exhausted", "source_read")) if exhausted else None)
-    if checksum_failed:
+    if verification_failed:
+        run_finish = verification_finish
+    elif checksum_failed:
         run_finish = RunFinish(RunOutcome.FAILED, ErrorValue("checksum_mismatch", "source_read", {
             "max_recopies": step.error.max_recopies, "recopies_used": step.error.recopies_used}))
+    elif succeeded:
+        run_finish = RunFinish(RunOutcome.SUCCEEDED)
+    elif exhausted:
+        run_finish = RunFinish(RunOutcome.FAILED, ErrorValue("read_attempts_exhausted", "source_read"))
+    else:
+        run_finish = None
     pending = hold_read_result(flow, AttemptFinish(
         ticket, validate_outcome(ticket, outcome, flow.evidence), flow.occurred_at(),
         retry_wait=not succeeded and not exhausted, run_finish=run_finish))
@@ -824,6 +838,9 @@ def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
     elif original_error["code"] == "read_attempts_exhausted":
         failure = ProcessingError("read_attempts_exhausted", "source_read",
                                   {"attempts_used": used, "max_read_attempts": maximum})
+    elif original_error["code"] == "source_file_unconfirmed":
+        failure = ProcessingError("source_file_unconfirmed", "source_read",
+                                  original_error["details"])
     else:
         raise ConsistencyError("原内部读取失败的所属错误不可解释")
     repository = CaptureRepository()

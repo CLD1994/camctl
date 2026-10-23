@@ -273,6 +273,7 @@ _RUN_STATUS = enum_for("operation_runs.status")
 _AVAILABILITY = enum_for("outputs.availability")
 _PRESENCE = enum_for("device_files.presence_state")
 _COMPLETION = enum_for("device_files.completion_state")
+_FILE_CHECKSUM = enum_for("device_files.checksum_support")
 _RESTRICTION = enum_for("cleanup_items.restriction_state")
 _CLEANUP_STATUS = enum_for("cleanup_items.status")
 _OUTPUT_CLEANUP_STATUS = enum_for("outputs.cleanup_status")
@@ -3826,17 +3827,21 @@ class _UnconfirmedFailureCommand(_DeliveryPublicationMixin):
 
 @dataclass(frozen=True)
 class FailReadDelivery:
-    """一次读取耗尽交付失败的输入；预算事实从读取流程行读取。"""
+    """一次读取终局失败交付的输入；预算及校验事实从原记录读取。"""
 
     delivery_id: int
     occurred_at: int
     checksum_mismatch: bool = False
+    source_verification_failed: bool = False
 
     def __post_init__(self) -> None:
         ObjectId(self.delivery_id)
         UtcMicros(self.occurred_at)
-        if type(self.checksum_mismatch) is not bool:
-            raise TypeError("摘要不一致分区必须是布尔值")
+        if (type(self.checksum_mismatch) is not bool
+                or type(self.source_verification_failed) is not bool):
+            raise TypeError("读取终局失败分区必须使用布尔值")
+        if self.checksum_mismatch and self.source_verification_failed:
+            raise ValueError("摘要不一致与源摘要查询失败不能同时成立")
 
 
 @dataclass(frozen=True)
@@ -4393,11 +4398,11 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
 
 
 class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
-    """读取尝试预算耗尽的交付终局失败事务命令。
+    """读取终局失败的交付保存事务命令。
 
     读取流程已按 FAILED 终态收场且没有在途尝试时，把交付结束为
-    FAILED 并保存公共错误 read_attempts_exhausted；预算与累计次
-    数从流程行读取，保证详情与已保存事实一致。
+    FAILED 并保存原读取错误。读取耗尽、摘要不一致和源摘要查询失败
+    分别从其可靠流程与校验事实核实。
     """
 
     _TABLES = (
@@ -4417,7 +4422,7 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, connection)
         delivery, copy = self._load_delivery(connection, self._command.delivery_id)
         status = delivery["status"]
         if status == int(_DELIVERY_STATUS.FAILED):
@@ -4464,7 +4469,26 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
                 if action is None:
                     raise ConsistencyError("读取耗尽缺少原来源动作")
                 self._state["actions"][action_id] = action
-        if self._command.checksum_mismatch:
+        if self._command.source_verification_failed:
+            verification_failed = int(_VERIFICATION.FAILED)
+            if (copy["source_device_file_id"] is None
+                    or copy["verification_state"] != verification_failed
+                    or copy["committed_bytes"] != copy["source_size"]
+                    or copy["source_sha256"] is not None
+                    or copy["target_sha256"] is None
+                    or copy["verification_error_json"] is None):
+                raise ConsistencyError("源摘要查询失败必须沿用完整副本的已保存校验失败事实")
+            verification_error = copy["verification_error_json"]
+            if (not isinstance(verification_error, dict)
+                    or not isinstance(verification_error.get("reason"), str)):
+                raise ConsistencyError("源摘要查询失败缺少原校验错误")
+            source = row_facts(connection, "device_files", copy["source_device_file_id"])
+            if (source is None
+                    or source["checksum_support"] != int(_FILE_CHECKSUM.SUPPORTED)):
+                raise ConsistencyError("源摘要查询失败要求原设备源已确认支持摘要")
+            code = "source_file_unconfirmed"
+            details = {"output_id": str(output["id"])}
+        elif self._command.checksum_mismatch:
             if (copy["verification_state"] != int(_VERIFICATION.MISMATCHED)
                     or copy["committed_bytes"] != copy["source_size"]
                     or copy["source_sha256"] is None or copy["target_sha256"] is None
@@ -4481,6 +4505,11 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             }
         if run["error_json"] is None or run["error_json"]["code"] != code:
             raise ConsistencyError("所属交付失败必须沿原读取流程的可靠最终错误")
+        if (self._command.source_verification_failed
+                and run["error_json"] != {
+                    "code": code, "stage": registered_error(code)["stage"],
+                    "details": details}):
+            raise ConsistencyError("源摘要失败交付必须沿用原读取流程的完整错误")
         failure = DeliveryFailure(code=code, stage=registered_error(code)["stage"], details=details)
         row = _update(
             "deliveries", delivery["id"],
@@ -4524,7 +4553,7 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
         return run
 
     def _require_read_finished(self, connection, run) -> None:
-        """读取预算耗尽失败的保存前提：流程终态失败且无在途尝试。"""
+        """读取终局失败的保存前提：流程终态失败且无在途尝试。"""
         _RUN_STATUS = enum_for("operation_runs.status")
         _ATTEMPT_STATUS = enum_for("operation_attempts.status")
         if run["status"] != int(_RUN_STATUS.FAILED):
@@ -4542,8 +4571,8 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
                for attempt in self._state["operation_attempts"].values()):
             raise ConsistencyError("读取仍有未保存结束结果的尝试，不能保存终局失败")
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
-        """原键恢复首次读取耗尽失败响应。"""
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
+        """原键恢复首次读取终局失败响应。"""
         types = [(event["type"], event["reason"]) for event in saved]
         required = [(_DELIVERY_CHANGED_EVENT, _DELIVERY_FAIL_REASON),
                     (_READ_PERMISSION_EVENT, _RELEASE_REASON)]
@@ -4555,10 +4584,19 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
         rows = saved[0]["body"]["rows"]
         if len(rows) != 1 or rows[0]["table"] != "deliveries" or rows[0]["id"] != self._command.delivery_id:
             raise TransactionError("读取耗尽失败的交付身份与原事务不同")
-        expected_code = "checksum_mismatch" if self._command.checksum_mismatch else "read_attempts_exhausted"
+        expected_code = (
+            "source_file_unconfirmed" if self._command.source_verification_failed
+            else "checksum_mismatch" if self._command.checksum_mismatch
+            else "read_attempts_exhausted")
         error = rows[0]["after"]["values"].get("error_json")
         if not isinstance(error, dict) or error.get("code") != expected_code:
             raise TransactionError("读取失败的所属错误与原事务不同")
+        if self._command.source_verification_failed:
+            current = row_facts(connection, "deliveries", self._command.delivery_id)
+            if (current is None
+                    or error.get("stage") != registered_error(expected_code)["stage"]
+                    or error.get("details") != {"output_id": str(current["output_id"])}):
+                raise TransactionError("源摘要失败的交付产物身份与原事务不同")
         return self._decision(
             FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
 

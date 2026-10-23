@@ -50,13 +50,24 @@ def hold_read_end(runtime, ticket, end, complete, *, resume=None, evidence=None)
 async def retry_read_ends(runtime):
     """真实完整结束与必要摘要已取得时，先核实原副本并保存原结果。"""
     from camctl.outputs.copy import SourceChecksumSupport
+    from camctl.contracts.enums import enum_for
     from camctl.persistence.repositories.outputs import OutputsRepository
 
+    verification = enum_for("file_copies.verification_state")
     for copy_id, held in tuple(runtime.pending_read_ends.items()):
         facts = OutputsRepository().load_copy_state(copy_id, runtime.owned)
+        saved_source_failure = False
+        if (facts.verification_state == int(verification.FAILED)
+                and facts.source_support is SourceChecksumSupport.SUPPORTED
+                and facts.source_sha256 is None and facts.target_sha256 is not None):
+            row = runtime.owned.connection.execute(
+                "SELECT verification_error_json FROM file_copies WHERE id=?",
+                (copy_id,),
+            ).fetchone()
+            saved_source_failure = row is not None and row[0] is not None
         if (facts.committed_bytes != facts.source_size
                 or (facts.source_support is not SourceChecksumSupport.UNSUPPORTED
-                    and facts.source_sha256 is None)):
+                    and facts.source_sha256 is None and not saved_source_failure)):
             continue
         original = running_read_ticket(runtime.owned, copy_id)
         if original is None or original[0] != held.ticket:
@@ -64,6 +75,68 @@ async def retry_read_ends(runtime):
         if held.resume is None:
             raise ConsistencyError("原实际读取结束缺少本地校验续接责任")
         await held.resume(runtime, held)
+
+
+def source_verification_run_finish(runtime, ticket, step, *, output_id=None):
+    """确认无错误的原 ReadEnd 对应已保存的源摘要查询终局失败。"""
+    from camctl.capture.input_copy import InputPhase
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.read_session import ReadEnd
+    from camctl.outputs.copy import SourceChecksumSupport
+    from camctl.persistence.repositories.outputs import OutputsRepository
+
+    verification = enum_for("file_copies.verification_state")
+    run_statuses = enum_for("operation_runs.status")
+    if step.phase is not InputPhase.VERIFICATION_FAILED:
+        raise ConsistencyError("源摘要失败收场必须来自明确的校验失败阶段")
+    end = step.read_end
+    if (not isinstance(end, ReadEnd) or end.stopped is not True or end.error is not None
+            or step.stop_requested is not True or step.content_complete is not True):
+        raise ConsistencyError("源摘要失败收场缺少无错误的原 ReadEnd 或完整内容事实")
+
+    copy_id = int(ticket.target_id)
+    facts = OutputsRepository().load_copy_state(copy_id, runtime.owned)
+    row = runtime.owned.connection.execute(
+        "SELECT c.verification_error_json,c.delivery_id,c.source_device_file_id,"
+        " d.output_id,r.status,a.cancel_requested"
+        " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id AND r.id=?"
+        " JOIN actions a ON a.id=r.action_id"
+        " LEFT JOIN deliveries d ON d.id=c.delivery_id"
+        " WHERE c.id=?",
+        (ticket.run_id, copy_id),
+    ).fetchone()
+    if row is None:
+        raise ConsistencyError("源摘要失败收场缺少原 READ 流程归属")
+    error_json, delivery_id, source_id, saved_output_id, run_status, canceled = row
+    if (facts.committed_bytes != facts.source_size
+            or facts.source_support is not SourceChecksumSupport.SUPPORTED
+            or facts.source_sha256 is not None or facts.target_sha256 is None
+            or facts.verification_state != int(verification.FAILED) or source_id is None
+            or error_json is None):
+        raise ConsistencyError("源摘要失败收场与已保存的完整性事实不一致")
+    error = parse_exact_json(error_json)
+    if not isinstance(error, dict) or not isinstance(error.get("reason"), str):
+        raise ConsistencyError("源摘要失败收场缺少已保存的查询错误")
+    if delivery_id is None:
+        if output_id is not None:
+            raise ConsistencyError("内部读取不能携带取回交付的产物身份")
+        details = {}
+    else:
+        if type(output_id) is not int or output_id != saved_output_id:
+            raise ConsistencyError("源摘要失败收场的正式产物身份与交付不一致")
+        details = {"output_id": str(output_id)}
+
+    run_status = int(run_status)
+    if run_status not in (
+            int(run_statuses.PENDING), int(run_statuses.ACTIVE)):
+        return None
+    if canceled == 1:
+        return RunFinish(RunOutcome.CANCELED)
+    return RunFinish(
+        RunOutcome.FAILED,
+        ErrorValue("source_file_unconfirmed", "source_read", details),
+    )
 
 
 def canceled_complete_read_result(runtime, ticket, evidence):
