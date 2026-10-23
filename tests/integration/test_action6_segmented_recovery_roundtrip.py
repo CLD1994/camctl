@@ -355,6 +355,15 @@ def _action_status_report(deployment, action_name, expected_status):
     )
 
 
+def _save_report_snapshot(deployment, report, name: str) -> Path:
+    target = deployment.root / f"{name}.json"
+    target.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
 def _deliveries_from_report(report, action_name):
     action = _action(report, action_name)
     return action.get("deliveries", [])
@@ -612,6 +621,9 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             240,
             f"Action6 来源及等待取回没有在 {boundary} 恢复后成功",
         )
+        source_report_path = _save_report_snapshot(
+            deployment, report, f"action6-ordinary-{case}-source-report"
+        )
         source = _action(report, "capture")
         coverage = source["result"]["coverage"]
         assert coverage["metric"] == "duration_s"
@@ -702,6 +714,9 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 selection={"output_ids": [output_rows[late_path]["output_id"]]},
             )
             final_report = _action_status_report(deployment, late_name, "succeeded")
+            late_report_path = _save_report_snapshot(
+                deployment, final_report, "action6-ordinary-late-obtain-report"
+            )
             demo.claim()
             deployment.import_reports_with_client(deployment.processing)
             late_evidence = _assert_client_delivery_files(
@@ -728,6 +743,10 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             "boundary": boundary,
             "source_action_id": str(source_id),
             "coverage": coverage,
+            "source_report_json": str(source_report_path),
+            "final_report_json": (
+                str(late_report_path) if late_id is not None else str(source_report_path)
+            ),
             "scope_output_ids": expected_scope,
             "prepublication_waiter_action_ids": list(map(str, waiter_ids)),
             "bound_delivery_copies": len(bound_copies),
@@ -772,6 +791,9 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             ),
             240,
             "Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回",
+        )
+        report_path = _save_report_snapshot(
+            deployment, report, "action6-native-photo-failure-report"
         )
         source = _action(report, "capture")
         coverage = source["result"]["coverage"]
@@ -840,6 +862,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
                 "scenario": "native-required-photo-failure",
                 "source_action_id": str(source_id),
                 "coverage": coverage,
+                "report_json": str(report_path),
                 "scope_output_ids": expected_scope,
                 "prepublication_waiter_action_ids": list(map(str, waiter_ids)),
                 "delivery_evidence": delivery_evidence,
