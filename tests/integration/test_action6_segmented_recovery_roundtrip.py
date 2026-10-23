@@ -61,7 +61,7 @@ def _install_action6_tools(
     gate_script = tools / "ffprobe-gate.py"
     gate_script.write_text(
         "from __future__ import annotations\n"
-        "import fcntl, json, os, subprocess, sys, time\n"
+        "import fcntl, hashlib, json, os, subprocess, sys, time\n"
         "log = os.environ['CAMCTL_ACTION6_TEST_FFPROBE_LOG']\n"
         "with open(log + '.lock', 'a+') as lock:\n"
         "    fcntl.flock(lock, fcntl.LOCK_EX)\n"
@@ -72,11 +72,18 @@ def _install_action6_tools(
         "        index = 1\n"
         "    with open(counter, 'w', encoding='utf-8') as stream:\n"
         "        stream.write(str(index))\n"
+        "input_path = sys.argv[-1]\n"
+        "input_size = os.path.getsize(input_path)\n"
+        "digest = hashlib.sha256()\n"
+        "with open(input_path, 'rb') as source:\n"
+        "    for block in iter(lambda: source.read(1024 * 1024), b''):\n"
+        "        digest.update(block)\n"
         "failure = os.environ.get('CAMCTL_ACTION6_TEST_FAIL_FFPROBE_INDEX')\n"
         "real_tool = failure is None or index != int(failure)\n"
         "returncode = (subprocess.run([os.environ['CAMCTL_ACTION6_REAL_FFPROBE'], *sys.argv[1:]]).returncode\n"
         "             if real_tool else 86)\n"
-        "record = {'index': index, 'pid': os.getpid(), 'argv': sys.argv[1:], 'path': sys.argv[-1],\n"
+        "record = {'index': index, 'pid': os.getpid(), 'argv': sys.argv[1:], 'path': input_path,\n"
+        "          'input_size_bytes': input_size, 'input_sha256': digest.hexdigest(),\n"
         "          'real_tool': real_tool, 'returncode': returncode, 'utc_ns': time.time_ns()}\n"
         "with open(log, 'a', encoding='utf-8') as stream:\n"
         "    stream.write(json.dumps(record) + '\\n')\n"
@@ -401,6 +408,20 @@ def _inspection_copy_state(deployment, source_id):
 def _ffprobe_records(deployment):
     path = deployment.root / "ffprobe.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _assert_probe_input_facts(probes, facts, contents):
+    """Compare bytes observed by the ffprobe wrapper with the fixture sequence.
+
+    The wrapper records these facts while the media input is still held by the
+    inspection operation, so this remains valid after result cleanup removes
+    the staging copy.
+    """
+    assert len(probes) == len(facts)
+    for probe, fact in zip(probes, facts, strict=True):
+        expected = contents[fact["device_path"]]
+        assert probe["input_size_bytes"] == len(expected)
+        assert probe["input_sha256"] == hashlib.sha256(expected).hexdigest()
 
 
 def _action_status_report(deployment, action_name, expected_status):
@@ -827,11 +848,9 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         successful_probes = [item for item in probes if item["real_tool"] and item["returncode"] == 0]
         expected_successful_probes = 2 if case == "unknown" else checked_count
         assert len(successful_probes) == expected_successful_probes
+        _assert_probe_input_facts(probes, scenario["facts"][:len(probes)], scenario["contents"])
         if case == "unknown":
             assert probes[-1]["index"] == 3 and not probes[-1]["real_tool"]
-            assert Path(probes[-1]["path"]).read_bytes() == scenario["contents"][
-                scenario["facts"][2]["device_path"]
-            ]
 
         published_sets = query_state(
             deployment.state_db,
@@ -844,7 +863,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         assert len([call for call in calls if call.get("kind") == "start"]) == 1
         assert len([call for call in calls if call.get("kind") == "stop"]) == 1
         if boundary == "inspection_saved":
-            probed = [Path(item["path"]).name for item in _ffprobe_records(deployment)]
+            probed = [item["path"] for item in _ffprobe_records(deployment)]
             assert len(probed) == len(set(probed)) == 3
 
         demo.claim()
@@ -1058,8 +1077,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
         assert len(probes) == 3
         assert all(item["real_tool"] and item["returncode"] == 0 for item in probes)
         assert all("-count_frames" in item["argv"] for item in probes)
-        expected_probe_names = {path.rsplit("/", 1)[-1] for path in video_paths[:3]}
-        assert {Path(item["path"]).name for item in probes} == expected_probe_names
+        _assert_probe_input_facts(probes, scenario["facts"][:3], scenario["contents"])
         calls = _records(deployment.root / "adb-calls.jsonl")
         assert len([call for call in calls if call.get("kind") == "start"]) == 1
         assert len([call for call in calls if call.get("kind") == "stop"]) == 0
