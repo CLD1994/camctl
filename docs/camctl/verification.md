@@ -60,6 +60,9 @@
 | --- | --- | --- |
 | `action6-segmented-record-auto-094948` | 12 秒目标，唯一 START／STOP 均正常；完整结果登记 2 份 MP4 及 2 份 LRF，默认原片、预览分别取回成功，4 份文件经客户端导入并 ACK 8、水位 51 | 首次 RESULTS 的目录调用超时保留，原结果流程第二次尝试成功；没有重拍。 |
 | `action6-segmented-timelapse-auto-095957` | 300 秒目标、2 秒间隔，唯一 START，无 STOP，自然完成；来源与原片取回成功，1 份 MP4 及配对 LRF 已登记 | LRF 字节全部落盘后源摘要调用超时，copy 校验终局失败；CLI 因未闭合的取回状态交接退出，原预览取回仍运行态，客户端完整链尚未完成。 |
+| `action6-segmented-timelapse-auto-150650` | 同一批量读取安装物执行新的 `video_jpeg` 任务，300秒目标、2秒间隔；唯一 START，无 STOP，完整结果登记151张 JPEG、1份 MP4 和1份 LRF。来源、原片及预览取回均成功，304份独立交付由客户端导入，ACK 20、水位2000已保存 | 这次合法参数试验正常生成必需照片，检查数量为0，未触发 native 异常选段。它与 `095957` 保持独立身份，不替代原摘要失败的收场验证。 |
+
+`action6-segmented-timelapse-auto-150650/cross-layer-evidence.json` 逐项核对304份已交付文件：实际长度、落盘 SHA-256、原 copy 保存的源摘要和目标摘要全部一致，共381605707字节；报告确认水位从原状态库只读核对。该次审计没有另发相机摘要命令。原执行会话结束后不再可查询，未据此补写 shell 退出码；业务、文件及客户端结果分别由原库、交付字节和客户端凭据证明。
 
 普通录像专项 `action6-segmented-record-auto-103923` 使用新的 16 秒目标和 10 秒异常余量，在唯一 START 保存后暂挂本次 CLI 组约 35.02 秒，再恢复原组。STOP 正常，保存的 `control_elapsed_ns=36512076393` 确认进入生产异常检查；4 份 MP4 和 4 份配对 LRF 均登记保留。仅前两份原片执行检查，保存的时长分别为 9.542867、9.709700 秒，达到目标后不检查后两段。
 
@@ -70,6 +73,10 @@
 检查冷恢复专项 `action6-check-cold-112419/action6-segmented-record-auto-112419` 使用同一安装物、新的 16 秒任务及 `copy.segment_size="1 MiB"`。四条会话准备均记录为接受，START 返回 `00`；本次 CLI 暂挂约 35.024 秒后，唯一 STOP 在 11:25:06.098029 UTC 发起、11:25:12.583112 UTC 返回本地退出码 255。驱动记录 `response_missing`、响应数 0、stderr 为空，STOP 流程为 UNCONFIRMED、效果未知；原始 STOP stdout 未持久化，不能据此声称 stdout 为空。来源、原片取回、预览取回分别以错误 14、21、21 结束，失败报告已导入并 ACK 4；没有检查、副本或检查中断冷恢复。原活动仍为 UNKNOWN／HELD，原库和文件保留，没有补发 STOP、读取结果或重拍。
 
 本次只读设备日志在 STOP 失败数分钟后取得，显示视频管线状态转换失败及 USB 通信超时；缺少关联证据，未将这些日志判为本次 STOP 失败的原因。专项控制器另有候选限制：把等待分段收尾的 ACTIVE 结果流程一并当作活动设备调用，会拒绝“结果尝试已经完整成功、第二段 READ 尚在途”的合法状态；该脚本问题与本次先发生的 STOP 失败分别记录，尚未修正。用户要求收尾并停止实施后，未继续执行设备控制或修复。
+
+恢复实施后的控制器仅把无结果的 RUNNING 实际尝试计为在途设备调用，并保存全部活动流程作旁证；其他中断门槛保持。修正脚本、前后摘要及只读核对位于 `resume-20261023T145540Z/` 的 `camctl-action6-cold-controller.py` 和 `cold-controller-fix.json`，没有以此声称取得新的实机冷恢复证据。
+
+同一恢复阶段另对两型号各执行一次独立的软件重启能力探针。Action6 在8.988秒后观察到新的启动标识，四项会话设置均正常返回，重启前后750条文件路径一致；OSMO 在24.798秒后观察到新的启动标识，两项设置均正常返回，前后32条路径一致。原始命令、boot ID、目录及日志分别保存在 `reboot-capability-action6-150428/` 与 `reboot-capability-osmo360ii-150824/`。这些事实只证明该次整机重启与设置恢复可执行，不能证明活动拍摄不会自动续录、文件内容完整、旧状态库责任已释放或自动恢复流程通过。
 
 Action6 在首次设置时，工具退出 0，却在 stdout 明确报告 `server not exist`。相机进程和画面管线日志显示异常；一次相机服务重启请求后仍无法设置。随后整机重启，取得新的 boot ID，四条设置均返回服务连接及注册成功；后续 12 秒录像的控制命令没有再次出现 `-1002`。这证明上述执行顺序后的观察结果，不把服务异常解释为此前 STOP 失败的已证实原因。原始设置、服务及重启记录保存在 `session-settings-device/`。
 
@@ -89,7 +96,11 @@ Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现
 
 OSMO 普通自动与手动两轮的 P7 报告分别位于 `media-osmo-auto-v2/`、`media-osmo-manual-v2/`。目标均为 12000 毫秒，默认短缺容限 100 毫秒；默认范围和全部保留集合的两路主视频分别累计约 12345.667、12145.467 毫秒，短缺均为 0。自动轮首个非尾段的两路主视频各为 165 帧、5505.5 毫秒，帧率均为 `30000/1001`；保留其比参考范围多 5.5 毫秒的观察。逐段判定采用[设备分段契约](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#设备分段与命名契约)，该偏长不单独构成失败；本次规则调整未重跑媒体工具或改写原始报告。手动轮前两非尾段约 5438.767、5005 毫秒。全部主视频及音频逐流解码退出 0，timescale、帧率估计及私有流 codec 诊断均保留；段间连续性未由聚合时长证明。
 
-OSMO 原生延时的 `media-osmo-native-v2/` 报告测得两路各 150 帧、5005 毫秒；因缺少独立采样端点和预期帧率依据，预期播放时长保持未知。该任务的采样数量采用[独立帧数验收规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#原生延时的采样数量验收)，实际值可满足其数量条件；当前工具尚未接入帧数基准范围和容差结果，未重跑工具或改写原报告，也未将端点、播放预期或段间连续性记为已核实。
+OSMO 原生延时的 `media-osmo-native-v2/` 报告测得两路各150帧、5005毫秒；原报告继续保留。新增工具按[独立帧数验收规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#原生延时的采样数量验收)从原任务目标300000毫秒及间隔2000毫秒独立推导参考范围150～151帧，默认短缺容差3帧，最低147帧。真实媒体复核结果位于 `media-osmo-native-v3-frames/osmo-p7-report.json`：默认交付与全部保留范围各自的两路主视频均为150帧，逐路数量通过，源身份匹配后源数量结论也通过。缺少独立采样端点和预期帧率依据，预期播放时长仍为未知，段间连续性仍未评估；数量通过不代表这些独立事实已核实。
+
+该扩展的单元验证为66 passed、0.07秒；集成验证为32 passed、59.69秒，包含真实媒体工具及既有大清单内存场景，均退出0。完整命令、工作目录和退出码在 `.local/worktrees/real-device-frames-20261023/.local/real-device-frames-acceptance/` 下的 `unit-final-recheck.run`、`integration-final-recheck.run` 及对应日志；候选提交 `d1b8812ec2d05ad08fbac03767004bf6561ea5b0` 经独立审查后集成，未改 camctl 运行依赖。
+
+真实媒体复核使用 `.local/verification/osmo-directory-20261023/media-venv/bin/python` 调用该候选的 `docs/hardware/validate_osmo_segments.py`，读取原 `media-osmo-native-v2/osmo-p7-manifest.json`，参数为 `--shortfall-tolerance-ms 100 --frame-count-shortfall-tolerance 3 --batch-size 64`。UTC 15:12:50 至15:14:04运行74.31秒，退出0；完整 argv、cwd、工具源码 SHA-256 和退出结果保存在新报告同目录的 `command.json`，stdout、stderr分别保存，未覆盖旧报告或媒体。
 
 OSMO 异常多录的 `media-osmo-overrun-v2/` 报告分别测量全部 5 段和默认 2 段。两路全部保留集合各约 24991.633 毫秒，默认范围各约 10443.767 毫秒，8 秒目标的短缺均为 0；范围外原片不参与默认覆盖。`scope-comparison.json` 核对主机恢复、后到的明确 ID 取回前后默认范围及唯一控制不变。完整视频和音频解码均退出 0，保留与正常轮相同类别的诊断，段间连续性仍未单独证明。
 
@@ -349,7 +360,7 @@ outputs 的 35 项失败可按测试入口复核：test_product_event_sequence.p
 
 bootstrap 的两项清理来源失败来自旧断言：现行契约要求成员批次和唯一末固定事件，而原断言只列一个来源事件。只读原失败库确认实际事件及事务范围符合契约，随后补齐上述独立断言并取得完整文件通过结果。其余十一项位于 `test_osmo_shared_recovery.py`，已有分段完成依据的来源要求原完整分段申请和同组最终 `ACTIVATE`，当前运行时尚未提交该事务；未放宽生产守卫或测试。完整 bootstrap 的本次结果仍是表中的 13 项失败，不能用定向通过数替代完整目录的重新验收。H7 步骤 5、H8 步骤 6 保持未完成。
 
-全部命令、起止 UTC、候选／差异摘要、日志、退出码与 JUnit 保存在 `.superpowers/sdd/2026-10-21-hasselblad-photo-parameters/resume-20261022/`。安装链的 1568 份业务证据已归档到 `.local/verification/hasselblad-photo-20261022/installed.tar.gz`，逐件核对长度与 SHA-256；归档 SHA-256 为 `f4efb43d493d73c1e3e24d9812dc066984a36a6901b88deb7b0160d04b931181`。目录名沿用本次本地日期，执行时间以各收据的 UTC 为准。
+全部命令、起止 UTC、候选／差异摘要、日志、退出码与 JUnit 已归档到 `.local/verification/historical-evidence-20261023/hasselblad-photo-20261022/main/`；归档时逐件核对229份文件的长度与 SHA-256，清单位于该历史证据根的 `manifest.json`。安装链的1568份业务证据继续保存在 `.local/verification/hasselblad-photo-20261022/installed.tar.gz`，归档 SHA-256 为 `f4efb43d493d73c1e3e24d9812dc066984a36a6901b88deb7b0160d04b931181`。目录名沿用对应本地日期，执行时间以各收据的 UTC 为准。
 
 本轮由当前 Agent 自审，未使用子代理，不提供新增独立评审者结论。本项仅证明软件与安装版联合链；ARM 部署、真实机身／镜头参数、JPEG 设备源字节一致性及现场客户端／ACK 仍按 H9 另行取证，没有新增真实相机操作。
 
@@ -806,7 +817,7 @@ Action6 独立诊断的四文件交付见[操作说明](../hardware/camera-demo-
 
 组合树的两项生成器 `--check`、包资源逐字节 `--check` 及诊断 `--help` 均退出 0。生成器源码变异验证覆盖重绑定、相对或嵌套导入、未知依赖和分发漂移的明确拒绝；生产完整模板和纯编码函数仍是独立诊断编码的来源。
 
-阶段命令、日志和退出码保存在各工作区忽略目录 `.superpowers/sdd/2026-10-16-osmo360ii-timelapse/`：主树 `integrated-d1-unit`、`integrated-d1-dispatch`、`integrated-e1-p3`、`integrated-d1a-unit`、`integrated-d1a-integration`，交付树 `logs/e1-chain-verify-*`、`logs/e1-chain-review-products.log`，诊断树 `d1a-fix-logs`，客户端树 `task-C3-final-*`。原阶段日志与本次复验分别保留。
+现存五个工作区的阶段命令、日志和退出码已归档到 `.local/verification/historical-evidence-20261023/osmo-timelapse-20261016/`，共430份文件；每个工作区独立保留，其来源、长度及 SHA-256 由该历史证据根的 `manifest.json` 登记。主树的 `integrated-d1-unit`、`integrated-d1-dispatch`、`integrated-e1-p3`、`integrated-d1a-unit`、`integrated-d1a-integration`，交付树的 `logs/e1-chain-verify-*`、`logs/e1-chain-review-products.log`，诊断树的 `d1a-fix-logs` 及客户端树的 `task-C3-final-*` 均按原工作区保存。原阶段日志与后续复验分别保留。
 
 候选整链通过测试启动器显式注入相机合同，ADB、ffprobe 和采集时钟按测试范围替代；生产登记未由这些测试启用延时。整秒负载映射来自已有完整样例的有界推导，保留非时间字节，仍需实机核验模板适用性和未观察位。软件测试没有取得参数生效、实际开始、自然结束、停止重复安全性、单文件写完或结果集合齐备的新设备依据。正式 OSMO 合同和 ARM 完整业务验收继续由计划中的设备及后续阶段跟踪，Action6 正式延时仍沿原 T9 门槛。
 
@@ -929,7 +940,7 @@ Root 对每个修改文件亲自核对规格、生产者、消费者和测试，
 | `integration/contracts` | 438 项通过 | 5.016 秒 |
 | 报告工作锁单节点 | 1 项通过 | 5.486 秒 |
 
-所有完整目录分别启动 pytest 并串行执行。完整命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`；实际命令参数、PID、UTC 时间、耗时、退出码及原始输出保存于工作区忽略的 `.superpowers/sdd/2026-10-14-camctl-sw05-session-lock-errors/resume-validation/`，最终文件摘要见 `final-gate-manifest.json`。有效红、旧测试预期同步及中间诊断遗漏分别保留，不作为最终通过测次。本次验证提供开发环境的软件证据，真实相机、ARM 部署及物理断电继续按各自计划验收。
+当时的完整目录分别启动 pytest 并串行执行，命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`。2026-10-23核对当前登记的工作区时，未找到该阶段的原始日志及 `final-gate-manifest.json`；本节保留历史汇总，不能据此重新核实具体测次或代替当前版本验证。真实相机、ARM 部署及物理断电继续按各自计划验收。
 
 两个跳过项分别为单元测试的非 Linux 守护对照和 bootstrap 的 Windows 文件系统大小写别名对照；三条警告来自既有同步测试的 asyncio 标记。最终八个进程退出码均为 `0`，18 个生产与测试 Python 文件在门禁前后摘要一致。
 
@@ -959,7 +970,7 @@ Root 逐文件核对规格、生产者、消费者和测试，GPT6.1-Sol 完成�
 | `integration/outputs` | 2011 项通过，2 项跳过 | 328.794 秒 |
 | `配置消费检查` | 通过，退出码 0 | 0.622 秒 |
 
-命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`，配置消费检查使用同一解释器运行 `scripts/check-config-consumption.py`。各完整集成目录分别启动进程并串行执行。完整命令、PID、UTC 起止时间、耗时、退出码、原始输出和文件 SHA-256 保存在工作区忽略的 `.superpowers/sdd/2026-10-14-camctl-sw06-bounded-read-discovery/`。软件证据与真实相机、ARM 部署及物理断电的证据分别维护。
+当时的命令从仓库根使用 `apps/camctl/.venv311/bin/python -m pytest <目标> -q -rs`，配置消费检查使用同一解释器运行 `scripts/check-config-consumption.py`，各完整集成目录分别启动进程并串行执行。2026-10-23核对当前登记的工作区时，未找到该阶段的完整原始日志；本节保留历史汇总，不能据此重新核实具体测次或代替当前版本验证。软件证据与真实相机、ARM 部署及物理断电的证据分别维护。
 
 表内11个进程均退出0。跳过项包括非 Linux 守护对照、Windows 大小写别名对照，以及两类不适用参数（主机源不携带相机读取配置、内部副本不执行普通交付发布）；警告来自既有同步测试的 asyncio 标记。最终38个修改或新增的 Python 文件已完成语法与摘要核对。完整 bootstrap 复跑前仅校正另外三份既有测试的私有调用签名和候选边界，其余35份生产及测试文件摘要保持；原 bootstrap 的12项失败及其全部边界消费者定向复验、完整目录复验均保留。完整目录通过后，W-11 的默认发现、排序、详情释放、新提交、原持有者、终态后独立收场、继续唤醒及退出条件均有软件证据。 验收映射结构检查另有3项通过，本地文件链接4450项、新增标题链接6项及删除标题入链检查均通过；`git diff --check` 通过。
 
@@ -1122,7 +1133,7 @@ devices 组件集成完整目录|93 项通过；覆盖六种游标分区、空�
 bootstrap 的 `test_tool_cancellation.py`、`test_recording_stop.py`、`test_timelapse_finish.py`|16 项通过；覆盖实际工具收场、录像停止与延时完成
 根 `test_real_camera_demo_roundtrip.py` 与 `test_camctl_c_module_roundtrip.py`|四条双相机软件演示链和三条原 C host 链共同运行，7 项通过
 
-本次软件门禁与上述 Windows 目录和文件访问实测分别记录；ARM Linux 的执行与字节核验仍待进行，候选相机能力未启用。诊断保存在工作区忽略的 `.superpowers/sdd/2026-10-10-camctl-real-camera-demo/t9-*.log`。
+本次软件门禁与上述 Windows 目录和文件访问实测分别记录；ARM Linux 的执行与字节核验仍待进行，候选相机能力未启用。2026-10-23核对当前登记的工作区时，未找到该阶段的原始 T9 诊断日志；本节保留历史汇总，不能代替当前设备诊断。
 
 ## Action6 的 Windows 普通录像试录（2026-10-10）
 
