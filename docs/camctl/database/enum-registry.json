@@ -123,7 +123,8 @@
       "contract": "reports-runtime.md#单份状态字段",
       "members": {
         "V1": 1,
-        "V2": 2
+        "V2": 2,
+        "V3": 3
       }
     },
     "deliveries.status": {

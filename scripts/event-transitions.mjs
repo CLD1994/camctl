@@ -10,7 +10,7 @@ const values = { type: 'object', additionalProperties: { type: 'array', minItems
 const object = (properties, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });
 const schema = object({
   format_version: { const: 1 }, report_dependencies: { const: 'report-dependencies.json' }, contract: string,
-  tables: { type: 'object', additionalProperties: object({ immutable: strings, mutable: strings, derived: strings, write_once: strings, state_columns: strings, owner: { $ref: '#/$defs/owner' } }) },
+  tables: { type: 'object', additionalProperties: object({ immutable: strings, mutable: strings, derived: strings, write_once: strings, state_columns: strings, owner: { $ref: '#/$defs/owner' }, minimum_format: { type: 'integer', minimum: 1 } }, ['immutable','mutable','derived','write_once','state_columns','owner']) },
   guards: { type: 'object', additionalProperties: object({ contract: string, rule: string, scope: { oneOf: [
     { const: 'transaction' }, object({ rows: { type: 'array', minItems: 1, items: object({ table: string, op: { enum: ['create','update'] } }) } })
   ] } }) },

@@ -1093,6 +1093,26 @@
       "state_columns": [
         "state"
       ]
+    },
+    "software_recoveries": {
+      "immutable": [
+        "action_id",
+        "activity_id"
+      ],
+      "mutable": [
+        "state_json"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": [],
+      "minimum_format": 3
     }
   },
   "guards": {
@@ -1493,6 +1513,11 @@
           }
         ]
       }
+    },
+    "software_recovery": {
+      "contract": "operation-fields.md#无人值守的软件重启责任",
+      "rule": "原活动唯一的独立责任，可靠意图先于派发，累计预算和期限不可重置；同绑定新boot及驱动重启合同证明设备结束；完整分页范围和会话准备分别判定。",
+      "scope": "transaction"
     }
   },
   "state_models": {
@@ -2259,7 +2284,8 @@
           "by": [
             "DEVICE_OBSERVED.OBSERVE",
             "EMERGENCY_RECORDED.FINAL",
-            "DEVICE_OBSERVED.FINITE_CANCEL_END"
+            "DEVICE_OBSERVED.FINITE_CANCEL_END",
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
           ],
           "id": "transition_2"
         },
@@ -2269,7 +2295,8 @@
           "by": [
             "DEVICE_OBSERVED.OBSERVE",
             "EMERGENCY_RECORDED.FINAL",
-            "DEVICE_OBSERVED.FINITE_CANCEL_END"
+            "DEVICE_OBSERVED.FINITE_CANCEL_END",
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
           ],
           "id": "transition_3"
         }
@@ -5550,6 +5577,67 @@
           ],
           "evidence": [
             "cancel_completion"
+          ]
+        },
+        "SOFTWARE_RECOVERY": {
+          "reason": 5,
+          "title": "保存独立软件重启恢复责任及设备结束事实",
+          "rows": [
+            {
+              "table": "software_recoveries",
+              "op": "create",
+              "after": {}
+            },
+            {
+              "table": "software_recoveries",
+              "op": "update",
+              "columns": [
+                "state_json"
+              ],
+              "before": {},
+              "after": {},
+              "required": [
+                "state_json"
+              ],
+              "transitions": {}
+            },
+            {
+              "table": "device_activities",
+              "op": "update",
+              "columns": [
+                "activity_state"
+              ],
+              "before": {
+                "activity_state": [
+                  1,
+                  2
+                ]
+              },
+              "after": {
+                "activity_state": [
+                  3
+                ]
+              },
+              "required": [
+                "activity_state"
+              ],
+              "transitions": {
+                "activity_state": [
+                  "transition_2",
+                  "transition_3"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "software_recovery"
+          ],
+          "evidence": [
+            "recovery"
           ]
         }
       }

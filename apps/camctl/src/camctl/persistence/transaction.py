@@ -39,6 +39,7 @@ from camctl.history.events import (
 )
 from camctl.history.reads import (
     AdmissionSourceReadScope,
+    SoftwareRecoveryReadScope,
     BaselineRangeRead,
     BaselineReadWriteScope,
     CaptureResultReadScope,
@@ -104,6 +105,7 @@ class CommandPlan:
     result_page_write_scope: ResultPageWriteScope | None = None
     baseline_read_write_scope: BaselineReadWriteScope | None = None
     result_check_write_scope: ResultCheckWriteScope | None = None
+    software_recovery_read_scope: SoftwareRecoveryReadScope | None = None
 
 
 class TransactionScope:
@@ -713,7 +715,7 @@ def commit_operation(
                 return rollback_error(error)
         events = plan.events
         scopes = (
-            plan.product_read_scope, plan.plan_read_scope,
+            plan.software_recovery_read_scope, plan.product_read_scope, plan.plan_read_scope,
             plan.capture_result_read_scope, plan.segment_read_scope,
             plan.source_read_scope, plan.result_page_write_scope,
         )

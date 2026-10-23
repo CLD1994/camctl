@@ -23,6 +23,7 @@ from .commands import settings_from_effective_params, start_for, stop_for
 from .contracts import CameraCall
 from .filesystem import AdbFilesystem
 from .transport import shell_argv
+from .software_recovery import SoftwareRecoveryDriver
 
 
 class _NeverStop:
@@ -43,7 +44,7 @@ class _RawOutcomeCapture:
         return raw
 
 
-class AdbCameraDriver:
+class AdbCameraDriver(SoftwareRecoveryDriver):
     def __init__(self, contract, devices, transport, *, terminate_grace_s, monotonic_ns):
         self.contract = contract
         self.declaration = contract.declaration
@@ -52,12 +53,15 @@ class AdbCameraDriver:
         self.terminate_grace_s = terminate_grace_s
         self.monotonic_ns = monotonic_ns
         self._configured_settings = set()
+        self._recovery_devices = set()
 
     def begin_session(self):
         """新执行会话只清空内存记录，相机设置仍在拍摄准备时按需执行。"""
         self._configured_settings.clear()
+        self._recovery_devices.clear()
 
     def _serial(self, binding):
+        self._check_recovery_access(binding)
         result = check_binding(binding, SimpleNamespace(devices=self.devices))
         if binding.driver_id != self.contract.driver_id or result.status is not BindingStatus.MATCHED:
             raise DeviceConfigurationError("原相机绑定在本次配置中不可用")

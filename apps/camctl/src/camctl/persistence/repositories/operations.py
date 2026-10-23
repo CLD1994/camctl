@@ -10,6 +10,8 @@ operation_finish、retry）在本模块注册。
 
 from __future__ import annotations
 
+from camctl.capture.software_recovery import intent_recovery_locked
+
 from collections import ChainMap
 from contextlib import closing
 from dataclasses import asdict
@@ -549,6 +551,8 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        if intent_recovery_locked(connection, intent):
+            return self._rejected("device_recovery")
         _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
                                "retry_interval_s_json": intent.config.retry_interval_s}, self._state)
         if intent.kind is OperationKind.START:

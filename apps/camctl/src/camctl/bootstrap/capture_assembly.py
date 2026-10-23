@@ -721,7 +721,19 @@ def session_capture_assembly(
             extra_wait = declaration.get("capture", {}).get("extra_wait_ms", 0)
             return replace(wait_config(action), extra_wait_ms=extra_wait)
 
+        from camctl.capture.software_recovery import SoftwareRecoveryConfig
+        from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+        recovery_driver = (entry.driver if isinstance(entry.driver, AdbCameraDriver)
+            and entry.driver.declaration.os_reboot_recovery_supported else None)
+        recovery_config = SoftwareRecoveryConfig(**dict(declaration.get("software_recovery", {})))
+        if recovery_driver is not None and owned.metadata.format_version >= 3:
+            row = owned.connection.execute("SELECT 1 FROM software_recoveries r JOIN actions a ON a.id=r.action_id"
+                " JOIN device_activities d ON d.id=r.activity_id WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (device_id,)).fetchone()
+            if row is not None:
+                recovery_driver.hold_recovery(device_id)
         runtime = CaptureRuntime(
+            software_recovery_driver=recovery_driver,
+            software_recovery_config=recovery_config,
             owned=owned,
             scheduling=SchedulingRepository(),
             operations=OperationRepository(),

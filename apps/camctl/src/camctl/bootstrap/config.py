@@ -594,6 +594,17 @@ def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
         if "recording" in normalized:
             normalized["recording"] = _validated_recording(
                 device_id, normalized["recording"])
+        if "software_recovery" in normalized:
+            section = dict(_take(normalized["software_recovery"], f"devices.{device_id}.software_recovery",
+                ("verified_fingerprint", "max_reboots", "timeout_s", "deadline_s", "retry_interval_s", "max_checks", "max_pages")))
+            if "verified_fingerprint" in section:
+                _require_nonempty_str(section["verified_fingerprint"], f"devices.{device_id}.software_recovery.verified_fingerprint")
+            fingerprint = section.pop("verified_fingerprint", "")
+            normalized["software_recovery"] = dict(_validated_seconds_subtable(device_id, section,
+                "software_recovery", ("timeout_s", "deadline_s", "retry_interval_s"),
+                positive_keys=("timeout_s", "deadline_s"),
+                integer_fields=(("max_reboots", 1), ("max_checks", 1), ("max_pages", 1))))
+            normalized["software_recovery"]["verified_fingerprint"] = fingerprint
         for section in ("query", "residual_stop"):
             if section in normalized:
                 normalized[section] = _validated_attempts_subtable(

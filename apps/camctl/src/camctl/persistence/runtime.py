@@ -319,6 +319,7 @@ def _verify_format_constraints(
         allowed_metadata_checks = {
             frozenset({int(_FORMAT_VERSIONS.V1)}),
             SUPPORTED_FORMAT_VERSIONS,
+            frozenset({1, 2}),
         }
         if purpose_values not in allowed_purpose_checks or metadata_values not in allowed_metadata_checks:
             raise DatabaseInvalidError(
@@ -326,7 +327,7 @@ def _verify_format_constraints(
             )
         return
 
-    if format_version == CURRENT_FORMAT_VERSION:
+    if format_version in (int(_FORMAT_VERSIONS.V2), CURRENT_FORMAT_VERSION):
         if (
             purpose_values != mapped_purposes
             or not metadata_values.issubset(SUPPORTED_FORMAT_VERSIONS)
@@ -349,7 +350,11 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        missing = expected_table_names() - present
+        expected = expected_table_names()
+        from camctl.history.events import business_tables_for_format, load_event_registry
+        unavailable = set(load_event_registry()["tables"]) - set(business_tables_for_format(format_version))
+        expected = expected - unavailable
+        missing = expected - present
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)

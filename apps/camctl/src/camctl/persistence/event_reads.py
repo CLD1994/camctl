@@ -6,6 +6,7 @@ from types import MappingProxyType
 
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.reads import (
+    SoftwareRecoveryReadScope,
     AdmissionSourceReadScope,
     CaptureResultReadScope,
     PlanReadScope,
@@ -49,11 +50,23 @@ class SqlEventReads:
     SOURCE_COLUMNS = ("id", "type", "status", "plan_id", "name", "group_name")
     ACTION_COLUMNS = ("id", "type", "status", "scheduled_at", "cancel_requested", "plan_id", "input_index")
 
+    def verify_software_recovery_event(self, event, context):
+        if not isinstance(self.scope, SoftwareRecoveryReadScope):
+            raise ConsistencyError("软件恢复核实范围不匹配")
+        from camctl.persistence.repositories.software_recovery import verify_scope_event
+        verify_scope_event(self.connection, event, context)
+
+    def verify_software_recovery_release(self, activity, state):
+        if not isinstance(self.scope, SoftwareRecoveryReadScope) or self.scope.activity_id != activity["id"]:
+            raise ConsistencyError("软件恢复释放核实范围不匹配")
+        from camctl.persistence.repositories.software_recovery import verify_recovery_scope
+        verify_recovery_scope(self.connection, activity, state)
+
     def __init__(self, connection, scope, validated=(), planned_events=(), *,
                  proposal_event=None, segment_ref=None, segment_guard_state=None,
                  result_page_guard_state=None, result_page_bounded=False):
         if not isinstance(scope, (
-                ProductReadScope, PlanReadScope, CaptureResultReadScope,
+                SoftwareRecoveryReadScope, ProductReadScope, PlanReadScope, CaptureResultReadScope,
                 ResultPageWriteScope, SegmentReadScope,
                 SourceResolutionReadScope, AdmissionSourceReadScope)):
             raise ConsistencyError("事实读取必须使用原事务声明的范围")

@@ -84,7 +84,7 @@ from camctl.acceptance.definitions import read_action_spec
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import completed_file_wait_source, is_completed_file_wait
 from camctl.history.decoding import decode_event_row
-from camctl.history.reads import ReadCoverage, PlanReadScope
+from camctl.history.reads import ReadCoverage, PlanReadScope, SoftwareRecoveryReadScope
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.capture.photo_format import saved_photo_format
@@ -1076,6 +1076,8 @@ def register_capture_guards() -> None:
     register_guard("emergency", _emergency_guard)
     from .finite_cancel import register_finite_cancel_guard
     register_finite_cancel_guard()
+    from .software_recovery import register_software_recovery_guard
+    register_software_recovery_guard()
     register_guard("activity", _activity_guard)
     register_guard("release", _release_guard)
     register_guard("result_check", _result_check_guard)
@@ -3345,6 +3347,19 @@ class _ActivityReleaseCommand:
         self._state["actions"] = {action["id"]: action}
         unstarted = (command.preparation_resolved and action["status"] in _ACTION_TERMINAL
                      and load_start_facts(connection, action, result_events=activity_result_events).not_started)
+        recovery = None
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='software_recoveries'").fetchone():
+            found = connection.execute("SELECT id FROM software_recoveries WHERE activity_id=?", (activity_id,)).fetchone()
+            if found is not None:
+                recovery_row = row_facts(connection, "software_recoveries", found[0])
+                self._state["software_recoveries"] = {found[0]: recovery_row}
+                recovery = recovery_row["state_json"]
+        if recovery is not None:
+            if recovery.get("phase") != "ready":
+                return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True, result=ActivityReleaseResult(outcome=ReleaseOutcome.REJECTED, reason="software_recovery_pending"))
+            from .software_recovery import verify_recovery_scope
+            verify_recovery_scope(connection, facts, recovery)
         decision = decide_release(ActivityFacts(
             activity_state=ActivityState[
                 _ACTIVITY_STATE(projected["activity_state"]).name],
@@ -3352,7 +3367,7 @@ class _ActivityReleaseCommand:
             completion_evidence=release_basis_holds(projected),
             unresolved_calls=unresolved,
             file_ownership_resolved=(projected["ownership_mode"] != 2 or unstarted
-                                     or output_scope_resolved(projected))))
+                                     or output_scope_resolved(projected, recovery))))
         if decision is not ReleaseDecision.RELEASE:
             return CommandPlan(
                 events=(), owners=self._owners, state_rows=self._state,
@@ -3390,7 +3405,8 @@ class _ActivityReleaseCommand:
         events.append(event)
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
-            result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED))
+            result=ActivityReleaseResult(outcome=ReleaseOutcome.RELEASED),
+            software_recovery_read_scope=(None if recovery is None else SoftwareRecoveryReadScope(command.action_id, activity_id)))
 
     def _reuse(self, scope, saved) -> CommandPlan:
         """原键重送：核实原释放分支与输入后恢复首次响应。"""
@@ -3465,6 +3481,10 @@ class _ActivityConcludeCommand:
                 events=(), owners=self._owners, state_rows=self._state,
                 read_only=True,
                 result=ActivityConclusion(outcome=ConcludeOutcome.ALREADY))
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='software_recoveries'").fetchone():
+            if connection.execute("SELECT 1 FROM software_recoveries WHERE activity_id=? LIMIT 1", (activity_id,)).fetchone():
+                # 独立恢复责任只能由准备与差集核实后的释放事务收口。
+                return self._rejected("software_recovery_pending")
         if facts["activity_state"] == 3:
             needs_ended = False
         elif facts["activity_state"] == 2:
@@ -7192,8 +7212,14 @@ def _release_guard(event, context) -> None:
                      and action.get("status") in _ACTION_TERMINAL
                      and facts.get("dispatch_state") in (1, 4)
                      and facts.get("activity_state") == 1 and facts.get("started_at") is None)
+        recovery = next((item["state_json"] for item in context.state_rows.get("software_recoveries", {}).values()
+                         if item["activity_id"] == row.row_id), None)
+        if recovery is not None:
+            if recovery.get("phase") != "ready" or context.current_reads is None:
+                raise EventValidationError("软件恢复尚未完成准备及范围责任，不能释放相机")
+            context.current_reads.verify_software_recovery_release(facts, recovery)
         if (facts.get("ownership_mode") == 2 and not unstarted
-                and not output_scope_resolved(facts)):
+                and not output_scope_resolved(facts, recovery)):
             raise EventValidationError("原输出范围的归属及集合未确定不得释放占用")
 
 

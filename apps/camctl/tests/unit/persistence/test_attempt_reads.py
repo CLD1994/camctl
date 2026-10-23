@@ -41,6 +41,7 @@ def repository(monkeypatch):
     spec = find_spec("camctl.persistence.repositories.operations")
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "intent_recovery_locked", create_autospec(module.intent_recovery_locked, return_value=False))
     monkeypatch.setattr(module, "_saved_transaction_events", create_autospec(
         module._saved_transaction_events, return_value=None))
     action = {"id": 1, "device_id": "cam-1"}

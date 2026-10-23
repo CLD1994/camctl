@@ -284,3 +284,19 @@ config.log_path = "/home/user/.camctl/host.log";
 先核对主程序传入的 `config_path`、实际文件内容和 CLI 的运行账户。配置文件不存在时允许使用默认值，因此文件名拼错也可能表现为使用默认目录。`describe --config <path>` 可以检查配置解析和设备能力，但不会展示全部生效配置，也不检查状态库的目录绑定；目录初始化和切换结果以 `init` 的退出状态与诊断为准。
 
 字段覆盖核对从[通用配置解析](../../apps/camctl/src/camctl/bootstrap/config.py)、[文件与路径适配](../../apps/camctl/src/camctl/bootstrap/application.py)及[内建驱动](../../apps/camctl/src/camctl/devices/drivers/builtin.py)开始。维护配置实现时同步核对本页，实际业务含义仍按各节链接的责任专题解释。
+
+### 相机软件重启恢复
+
+`devices.<id>.software_recovery` 只用于明确提供 OS 软件重启恢复端口的 Action6 与 OSMO 360 II。部署完成对应机型、固件的重启终止采集及控制、不会自动续拍核实后，填写 `verified_fingerprint` 精确值使能；省略该字段时不建立自动重启责任。它表示部署已核实该固件的恢复合同，不能仅为绕过占用填写设备当前指纹。
+
+| 字段 | 默认值及合法范围 |
+| --- | --- |
+| `verified_fingerprint` | 缺省不使能；提供时为非空字符串，与原绑定设备实际 `ro.build.fingerprint` 精确比较。 |
+| `max_reboots` | 正整数，默认 1，包含第一次；已可能派发的意图先核实，不自动补发。 |
+| `timeout_s` | 有限正秒数，默认 10；单次受管调用仍受整体剩余期限限制。 |
+| `deadline_s` | 有限正秒数，默认 180；首次建立责任时固定绝对期限。 |
+| `retry_interval_s` | 有限非负秒数，默认 3；0 表示不额外等待。 |
+| `max_checks` | 正整数，默认 64；身份核实与准备轮次累计，不因重启 run 重置。 |
+| `max_pages` | 正整数，默认 256；限制目录调用及每次原基准批次读取。 |
+
+部署状态库须为 V3。已有 V2 库通过 `camctl init --upgrade-software-recovery --config <config.toml>` 显式升级；普通 `init`、`run` 和 `submit` 不升级。升级备份、事务与恢复规则见[数据库格式检查](persistence-runtime.md#数据库整体格式检查与显式升级)。

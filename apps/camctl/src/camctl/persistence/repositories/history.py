@@ -904,6 +904,10 @@ class HistoryRepository:
             # 快照与 H 恢复必须按 action_id 读取这些不可变关系行。
             yield from _ids_where(connection, "result_page_files", "action_id", action)
             yield from _ids_where(connection, "baseline_read_calls", "action_id", action)
+            from camctl.history.events import business_tables_for_format
+            database_format = _one(connection, "SELECT format_version FROM database_metadata WHERE id=1")[0]
+            if "software_recoveries" in business_tables_for_format(database_format):
+                yield from _ids_where(connection, "software_recoveries", "action_id", action)
             # 录像动作自身包含内部处理引用的拷贝行（交付拷贝由交付
             # 子树包含）；归属列不变，恢复范围按处理行归属。
             for _, processing_id in _ids_where(connection, "recording_processing", "action_id", action):

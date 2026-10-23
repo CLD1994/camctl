@@ -42,6 +42,7 @@ class CameraContract:
     evidence: EvidenceRegistry = field(default_factory=lambda: EvidenceRegistry(()))
     status: DriverStatus = DriverStatus.DEVICE_VERIFICATION_PENDING
     capture_read_parallel_supported: bool = False
+    os_reboot_recovery_supported: bool = False
     recovery_operations: frozenset[str] = frozenset()
     result_reader: Callable[[Any, ControlRequest, int], Awaitable[DeviceCallResult]] | None = None
     session_setup_commands: tuple[Command, ...] = ()
@@ -119,6 +120,7 @@ class CameraContract:
                                                     and self._has_evidence("file_digest", 1, "digest")),
             delete_supported=delete_supported,
             directory_supported=files,
+            os_reboot_recovery_supported=self.os_reboot_recovery_supported,
             capture_read_parallel_supported=self.capture_read_parallel_supported,
             adb_foreground_recovery_operations=self.recovery_operations)
 

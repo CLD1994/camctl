@@ -400,3 +400,12 @@ CREATE TABLE device_file_pairing_facts (
         OR (state = 2 AND reason IN (2,3,4,5)))
 ) STRICT;
 CREATE INDEX device_file_pairing_history ON device_file_pairing_facts(preview_file_id, created_event_id, id);
+
+-- 格式 3：按原活动唯一的独立软件重启恢复责任。
+CREATE TABLE software_recoveries (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    activity_id INTEGER NOT NULL UNIQUE REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    state_json TEXT NOT NULL CHECK (json_valid(state_json) AND json_type(state_json) = 'object')
+) STRICT;
+CREATE INDEX recoveries_action ON software_recoveries(action_id, id);

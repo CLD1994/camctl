@@ -77,6 +77,7 @@
 | `operation_attempts` | [操作流程的一次业务尝试](database/operations-devices.md#操作流程与尝试的公共模型) |
 | `device_file_pairing_facts` | [结果扫描配对](database/file-fields.md#结果扫描配对) |
 | `result_page_files` | [结果页文件身份索引](database/operations-devices.md#结果页文件身份索引) |
+| `software_recoveries` | [无人值守的软件重启责任](database/operation-fields.md#无人值守的软件重启责任) |
 | `baseline_read_calls` | [基准目录调用](database/operation-fields.md#基准目录调用) |
 | `device_activities` | [设备持续活动及可靠观察](database/operations-devices.md#设备活动记录) |
 | `recording_processing` | [录像内部检查和修复的决定、进度与结果](database/operations-devices.md#录像内部检查与修复记录) |

@@ -277,6 +277,14 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     if _original_binding_failure(runtime, trigger) is not None:
         # 普通动作先取得本地执行身份，再由其绑定失败事务结束。
         return True
+    from camctl.capture.software_recovery import pass_software_recovery_gate
+    recovery = await pass_software_recovery_gate(runtime, trigger)
+    if recovery is not None:
+        if recovery:
+            return True
+        # 未配置的驱动仍沿原 ACTIVE 查询/停止链处理。
+        if getattr(runtime, "software_recovery_driver", None) is not None:
+            return False
     candidates = residual_candidates(
         runtime.owned.connection, trigger["device_id"])
     if not candidates:
@@ -619,6 +627,20 @@ def residual_flow(
             discovery.begin_round(owned.connection, now)
             await _recover_old_attempts(owned, capture_factory, owns_device=owns_device, discovery=discovery, now=now)
             _settle_orphan_queries(context, owned, OperationRepository(), discovery=discovery, now=now)
+            if owned.metadata.format_version >= 3:
+                from camctl.capture.software_recovery import advance_recovery
+                recovery_page = discovery.rows(owned.connection, "software_recovery", now,
+                    "SELECT r.id,r.activity_id,a.device_id FROM software_recoveries r"
+                    " JOIN actions a ON a.id=r.action_id JOIN device_activities d ON d.id=r.activity_id"
+                    " WHERE d.occupancy_state=1 AND json_extract(r.state_json,'$.phase')"
+                    " NOT IN ('isolated','abandoned')", identity="r.id")
+                for _, activity_id, device_id in recovery_page.items:
+                    if owns_device is not None and owns_device(device_id):
+                        continue
+                    runtime = capture_factory(owned, device_id)
+                    if runtime is not None:
+                        await advance_recovery(runtime, activity_id)
+
             page = discovery.rows(owned.connection, "residual", now,
                 "SELECT id, action_id, activity_id, attempts_used"
                 " FROM operation_runs WHERE kind = 8"

@@ -854,6 +854,8 @@ class CaptureRuntime(_FileObservationSaves):
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
     #: 残留收场停止的本次预算；默认 3 次包含第一次、单次 10 秒、
     #: 重试间隔 3 秒（camera-recovery.md#后续动作触发的残留收场）。
+    software_recovery_driver: Any = None
+    software_recovery_config: Any = None
     residual_config: AttemptConfig = field(default_factory=lambda: AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3")))
     #: 仅恢复固定启动边界之前的旧尝试，不用于本会话新派发调用。

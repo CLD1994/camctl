@@ -213,11 +213,26 @@ def release_basis_holds(facts: Mapping[str, Any]) -> bool:
             or facts.get("completion_basis") == 3)
 
 
-def output_scope_resolved(facts: Mapping[str, Any]) -> bool:
+def output_scope_resolved(facts: Mapping[str, Any], recovery=None) -> bool:
     """基准已固定，且原集合结论或独立集合事实证明范围确定。"""
-    return (facts.get("baseline_state") == 3
+    ordinary = (facts.get("baseline_state") == 3
             and (facts.get("result_set_state") == 3
                  or facts.get("output_set_finalized_event_id") is not None))
+    if ordinary:
+        return True
+    if not isinstance(recovery, Mapping):
+        return False
+    from camctl.capture.software_recovery import RecoveryPhase
+    return (facts.get("baseline_state") == 3 and facts.get("activity_state") == 3
+        and recovery.get("phase") == RecoveryPhase.READY.value
+        and recovery.get("prepared") is True and recovery.get("scope_finalized") is True
+        and recovery.get("cursor") is None
+        and recovery.get("scope_pages", 0) > 0
+        and recovery.get("scope_first_event_id") is not None and recovery.get("scope_last_event_id") is not None
+        and recovery.get("boot_before") is not None and recovery.get("boot_after") is not None
+        and recovery["boot_before"] != recovery["boot_after"]
+        and recovery.get("baseline_first") == facts.get("baseline_first_event_id")
+        and recovery.get("baseline_last") == facts.get("baseline_last_event_id"))
 
 
 def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = False,

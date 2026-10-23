@@ -63,6 +63,8 @@ class DriverDeclaration:
     local_control_recovery_supported: bool = False
     #: 按文件身份查询存在性；独立于拍摄活动状态查询。
     file_query_supported: bool = False
+    #: 提供按固件验证门槛使能的操作系统重启及准备端口。
+    os_reboot_recovery_supported: bool = False
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():

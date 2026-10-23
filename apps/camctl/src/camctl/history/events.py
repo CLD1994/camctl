@@ -140,3 +140,9 @@ def write_once_columns(table: str) -> frozenset[str]:
     """一次写列：只允许从空值变为有可靠依据的值。"""
     spec = load_event_registry()["tables"][table]
     return frozenset(spec["write_once"])
+
+
+def business_tables_for_format(format_version: int) -> tuple[str, ...]:
+    """按同一表登记区分旧库尚不拥有的新格式表。"""
+    return tuple(name for name, spec in load_event_registry()["tables"].items()
+                 if spec.get("minimum_format", 1) <= format_version)

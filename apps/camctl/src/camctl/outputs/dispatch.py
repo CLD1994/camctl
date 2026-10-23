@@ -37,6 +37,7 @@ class DeviceFacts:
     held_reads: tuple[int, ...]
     #: 驱动声明该设备拍摄与读取可并行（缺省不并行）。
     capture_read_parallel: bool = False
+    software_recovery: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,8 @@ def decide_device_work(facts: DeviceFacts) -> DeviceWork:
     先表达为派发顺序，不推迟读取）；一次一份拷贝的互斥不因并行
     声明改变，在途读取继续时不重复授予。
     """
+    if facts.software_recovery:
+        return DeviceWork(facts.device_id, (), (), facts.held_reads, ())
     if not facts.capture_read_parallel:
         if facts.held_reads and facts.due_captures:
             return DeviceWork(
@@ -107,6 +110,7 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
         activity_devices = ()
     devices = dict.fromkeys(candidate.device_id for candidate in candidates if candidate.device_id is not None)
     devices.update(dict.fromkeys(activity_devices))
+    from camctl.capture.software_recovery import recovery_locked
     work = []
     for device_id in devices:
         # 读取消费者只需要知道是否存在拍摄阻挡，不加载该设备所有活动。
@@ -136,5 +140,6 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
         work.append(decide_device_work(DeviceFacts(
             device_id, () if due is None else (due[0],),
             () if held_capture is None else (held_capture[0],), reads if holder is None else (),
-            () if delivery_holder is None else (delivery_holder,), device_id in capture_read_parallel)))
+            () if delivery_holder is None else (delivery_holder,), device_id in capture_read_parallel,
+            recovery_locked(connection, device_id))))
     return tuple(work)

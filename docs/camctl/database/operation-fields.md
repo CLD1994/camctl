@@ -739,3 +739,27 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 恢复先检查取消和所属责任的终态，普通重试或续传以相应执行资格仍然成立为前提；原调用收场及独立设备活动核实按其自身责任继续，不能因普通流程已结束而遗漏。读取超时已经发生但失败结果尚未保存时中断，恢复可以按未完成读取尝试继续；已经保存的读取失败则保持原结果，新增尝试按原累计次数和本次上限判断。
 
 报告只采用冻结边界前已提交的事实。冻结时尝试仍为 `RUNNING`，即使进程内已经观察到超时，内部历史恢复仍取得未结束的尝试；报告使用该边界已保存的动作、产物和交付结果，不把内存中的超时补成公开失败。后来保存结束结果不改写旧报告。结果及其必要依据具有相同的事务可见边界，三种历史恢复路径均恢复该边界的尝试状态、已知效果和其他已提交事实，历史回放不执行调用或收场。
+
+## 无人值守的软件重启责任
+
+格式 V3 的 `software_recoveries` 独立保存已经失败或取消、仍占用相机的原活动恢复责任。`action_id` 引用原动作，`activity_id` 唯一引用原设备活动；后续触发动作在责任正文中另行保存。它不属于原 START、STOP 或 RESULTS，不消耗或重置这些流程的预算，也不改写其结果。
+
+`state_json` 使用版本 1。其完整身份及可变进度如下；秒数字段使用有限十进制文本，时间使用 UTC 整数微秒。物理列及唯一性约束见[operations.sql](schema/operations.sql)。阶段字面量由 `camctl.capture.software_recovery.RecoveryPhase` 集中维护。
+
+| 正文成员 | 保存及推进规则 |
+| --- | --- |
+| `version`、`origin_trigger_id`、`device_id`、`driver_id`、`serial`、`fingerprint` | 首次固定。`serial` 是部署明确指定的 ADB transport 选择器；`fingerprint` 是已经完成该固件重启合同核实的精确指纹。 |
+| `trigger_id` | 当前授权触发动作。原触发动作结束且尚未派发时保存 `abandoned`；新的有效触发动作可沿同一责任接续，累计预算及原期限保持。已经派发后不因触发动作结束改变原目标。 |
+| `created_at`、`deadline_at`、`timeout_s`、`retry_interval_s`、`max_reboots`、`max_checks`、`max_pages` | 首次固定。后续请求、配置变化和 run 不重算整体期限或预算。 |
+| `reboots`、`checks`、`pages`、`next_check_at` | 派发和核实前先可靠增加相应累计次数；次数不回退，每次最多增加一次，不能超过首次上限。等待时刻持久化。 |
+| `boot_before`、`boot_after`、`reported_serial` | 原 boot 在首次可靠意图前确定，boot 字段一经保存不改写。`ro.serialno` 可以为空，只是额外身份观察；前后都有值而不同则停止恢复。它不代替明确的 ADB 选择器及原绑定。 |
+| `phase`、`prepared`、`scope_finalized` | 检查、意图、确认、准备、目录、就绪分别推进。新 boot 与已验证的固件合同只建立旧活动 ENDED；设置及存储可用和范围事实分别建立。失败或到期保存 `isolated`；未派发且触发者结束保存 `abandoned`。 |
+| `baseline_first`、`baseline_last`、`cursor` | 原基准首末引用首次固定；目录页始终保持原绑定、完整目录及连续游标。恢复不重拍、不删除原片、不重开终态 RESULTS。 |
+| `scope_pages`、`scope_members`、`scope_first_event_id`、`scope_last_event_id` | 保存已经可靠提交的差集页数、新成员累计数及首末页事件。事件页逐批保存当前目录身份及与原完整基准计算的 `new_entries`。空差集同样需要完整扫描和可靠末页。 |
+| `last_identity`、`last_identity_check`、`last_preparation`、`last_directory_error`、`last_directory_return`、`reason` | 保存实际工具结果、错误、对应核实次数及隔离或未派发结束原因；不把调用退出或目录结束解释为采集完成。 |
+
+`DEVICE_OBSERVED.SOFTWARE_RECOVERY` 保存独立责任的创建或更新；确认新 boot 时可共同保存原活动 `activity_state = ENDED`。`evidence.recovery.request` 保存完整原申请，原键重送必须逐项相同。原始核实及设置调用保存在 `identity_call`、`call` 或 `preparation`；可靠目录页的 `directory` 保存 `activity_id`、`page_no`、`previous_event_id`、原输入与后续游标、完整本页 `entries` 及 `new_entries`。差集只排除原固定基准中的身份；原基准按连续历史批次有界读取并核对首末、总批数、总成员数和排序。恢复页链必须从首页开始，逐页引用上一可靠页，并覆盖所有原目录到无后续游标的末页。
+
+事件守卫核对原终态动作、设备绑定、保留占用、不可改写的启动代次、阶段前后关系、累计预算和目录游标；目录保存及释放使用独立的原事务读取端口重新核对基准和差集。释放前逐页核实全部已保存差集、累计成员及可靠末引用，不能只凭 `scope_finalized` 或新 boot 释放。基准缺失、差集未定、目录错误或预算耗尽时仍保留 HELD，保存隔离原因，其他设备继续。
+
+恢复明确结束后的占用释放仍通过 `DEVICE_OBSERVED.RELEASE`，原 `result_set_state`、`capture_json`、采集完成依据、动作终态和 STOP 结果不因恢复范围确定而改写。差集记录只证明文件身份归属范围，不证明文件写完、媒体有效、目标满足或交付成功。

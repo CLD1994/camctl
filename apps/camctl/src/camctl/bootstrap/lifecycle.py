@@ -608,6 +608,16 @@ def _initialize_recovery(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     from camctl.devices.drivers.adb_cameras.registration import begin_builtin_camera_session
 
     begin_builtin_camera_session()
+    if owned.metadata.format_version >= 3:
+        from camctl.devices.drivers.runtime import current_registry
+        from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+        with closing(owned.connection.execute("SELECT DISTINCT a.device_id,a.driver_id FROM software_recoveries r"
+                " JOIN device_activities d ON d.id=r.activity_id JOIN actions a ON a.id=r.action_id"
+                " WHERE d.occupancy_state=1")) as recoveries:
+            for device_id, driver_id in recoveries:
+                entry = current_registry().entry(driver_id)
+                if entry is not None and isinstance(entry.driver, AdbCameraDriver):
+                    entry.driver.hold_recovery(device_id)
 
     with closing(owned.connection.execute(
             "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:

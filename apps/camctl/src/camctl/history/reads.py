@@ -8,6 +8,17 @@ from camctl.contracts.values import ObjectId, UtcMicros
 
 
 @dataclass(frozen=True)
+class SoftwareRecoveryReadScope:
+    """只定位原活动的软件恢复责任与独立目录页链。"""
+    action_id: int
+    activity_id: int
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        ObjectId(self.activity_id)
+
+
+@dataclass(frozen=True)
 class ProductReadScope:
     """逐产物资格的可信比较范围；只在原写事务内使用。"""
 
@@ -79,6 +90,8 @@ class CurrentEventReads(Protocol):
     ACTION_COLUMNS: tuple[str, ...]
     SOURCE_COLUMNS: tuple[str, ...]
 
+    def verify_software_recovery_event(self, event, context): ...
+    def verify_software_recovery_release(self, activity, state): ...
     def optional(self, table: str, identity: int, columns=None) -> Mapping[str, Any] | None: ...
     def required(self, table: str, identity: int) -> Mapping[str, Any]: ...
     def admitted_source_owner(self, owner_id: int, transaction) -> Mapping[str, Any]: ...

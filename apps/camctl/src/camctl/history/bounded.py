@@ -355,7 +355,10 @@ class SegmentHistoryHandle:
         # C0固定完整永久候选目录。count/max与所有分支来自同一视图。
         with self.repository._read_connection() as connection:
             self.repository._boundary(connection)
-            for table in load_event_registry()['tables']:
+            from camctl.history.events import business_tables_for_format
+            with closing(connection.execute("SELECT format_version FROM database_metadata WHERE id=1")) as metadata:
+                database_format = metadata.fetchone()[0]
+            for table in business_tables_for_format(database_format):
                 branches=_ownership_branches(table)
                 if not branches:
                     continue

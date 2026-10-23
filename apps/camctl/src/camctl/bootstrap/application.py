@@ -126,6 +126,9 @@ def query_work_facts(connection) -> "WorkFacts":
         " WHERE status = 1 OR (status = 2 AND type <> 7)")
     settlements = scalar(
         "SELECT COUNT(*) FROM operation_runs WHERE status IN (1, 2)")
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='software_recoveries'").fetchone():
+        settlements += scalar("SELECT COUNT(*) FROM software_recoveries r JOIN device_activities d ON d.id=r.activity_id"
+            " WHERE d.occupancy_state=1 AND json_extract(r.state_json,'$.phase') NOT IN ('isolated','abandoned')")
     settlements += scalar(
         "SELECT COUNT(*) FROM actions WHERE type = 7 AND status = 2"
         " AND cancel_requested = 1")

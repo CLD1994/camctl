@@ -162,6 +162,7 @@ def action6_record_contract():
             **{kind: file_command_factory(kind, tools=tools, evidence=evidence)
                for kind in (CameraCall.FILE_QUERY, CameraCall.DELETE)}},
         file_tools=tools, digest_timeout_s=_digest_timeout, evidence=evidence,
+        os_reboot_recovery_supported=True,
         session_setup_commands=ACTION6_SESSION_SETUP,
         session_once_commands=frozenset(ACTION6_SESSION_SETUP),
         non_blocking_setting_commands=frozenset(

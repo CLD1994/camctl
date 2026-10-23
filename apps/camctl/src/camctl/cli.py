@@ -56,6 +56,7 @@ class Command:
     plan_path: str | None
     config_path: str | None
     host_notification_fd: int | None = None
+    upgrade_software_recovery: bool = False
 
 
 class _Parser(argparse.ArgumentParser):
@@ -77,6 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--config", dest="config_path", default=None)
+    init_parser.add_argument("--upgrade-software-recovery", action="store_true", help="备份并显式升级软件恢复格式")
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("plan_path", nargs="?")
@@ -118,7 +120,8 @@ def parse_command(argv: Sequence[str]) -> Command:
     if kind in (CommandKind.INIT, CommandKind.DESCRIBE) and plan_path:
         raise CommandLineError(f"{kind.value} 不接受计划输入文件")
     return Command(kind=kind, plan_path=plan_path, config_path=parsed.config_path,
-                   host_notification_fd=getattr(parsed, "host_notification_fd", None))
+                   host_notification_fd=getattr(parsed, "host_notification_fd", None),
+                   upgrade_software_recovery=getattr(parsed, "upgrade_software_recovery", False))
 
 
 def encode_session_result(
@@ -340,7 +343,8 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     try:
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        result = initialize_state(config, adapter.state_db_path(config))
+        result = initialize_state(config, adapter.state_db_path(config),
+            upgrade_software_recovery=command.upgrade_software_recovery)
     except (ConfigError, OSError) as error:
         print(f"camctl init: {error}", file=err)
         return 1

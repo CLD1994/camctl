@@ -239,6 +239,7 @@ class ReadDiscoveryOwner:
             "failed",
             "capture",
             "residual",
+            "software_recovery",
             "attempts",
             "queries",
             "segment_queries",

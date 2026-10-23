@@ -163,7 +163,7 @@ def _build_initial_database(
         os.close(descriptor)
 
 
-def initialize_state(config, state_db: Path) -> InitResult:
+def initialize_state(config, state_db: Path, *, upgrade_software_recovery=False) -> InitResult:
     """按配置显式初始化或验证目标状态库。
 
     全程持有目标库的稳定会话锁；锁冲突按失败报告，不无界等待。
@@ -206,7 +206,7 @@ def initialize_state(config, state_db: Path) -> InitResult:
     result: InitResult | None = None
     body_error: BaseException | None = None
     try:
-        result = _initialize_under_lease(state_db, roots)
+        result = _initialize_under_lease(state_db, roots, upgrade_software_recovery=upgrade_software_recovery)
     except BaseException as error:
         body_error = error
 
@@ -264,17 +264,18 @@ def initialize_state(config, state_db: Path) -> InitResult:
 def _initialize_under_lease(
     state_db: Path,
     roots: tuple[Path, Path, Path],
+    *, upgrade_software_recovery=False,
 ) -> InitResult:
     """在已取得的会话锁下完成一次初始化或既有库验证。"""
     binding = tuple(_canonical_binding(root) for root in roots)
     if state_db.exists() or state_db.is_symlink():
         # 已有目标：无论内容如何都按已有库验证；无效时保留原文件。
-        return _verify_existing(state_db, roots, binding)
+        return _verify_existing(state_db, roots, binding, upgrade_software_recovery=upgrade_software_recovery)
     try:
         _prepare_directories(state_db, *roots)
     except (OSError, StateDatabaseError) as error:
         return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
-    return _create_new(state_db, roots, binding)
+    return _create_new(state_db, roots, binding, upgrade_software_recovery=upgrade_software_recovery)
 
 
 def _attach_initialization_note(target: BaseException, note: str) -> None:
@@ -406,6 +407,7 @@ def _verify_existing(
     state_db: Path,
     roots: tuple[Path, Path, Path],
     binding: tuple[str, str, str],
+    *, upgrade_software_recovery=False,
 ) -> InitResult:
     try:
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
@@ -418,12 +420,17 @@ def _verify_existing(
             # 配置侧按操作系统路径比较；规范绑定文本只在库内保存。
             verify_directory_binding(owned.metadata, *(str(root) for root in roots))
         except StateDatabaseError:
+            if upgrade_software_recovery:
+                return InitResult(InitOutcome.FAILED, "软件恢复格式升级不能与目录绑定切换合并；先按原配置升级，再单独切换目录")
             # 绑定不一致：显式 init 是第一版唯一切换入口，按切换资格判定。
             return _attempt_directory_switch(state_db, owned, roots, binding)
         try:
             _prepare_directories(state_db, *roots)
-        except (OSError, StateDatabaseError) as error:
-            return InitResult(InitOutcome.FAILED, f"目录准备失败: {error}", error)
+            if upgrade_software_recovery:
+                from camctl.persistence.software_recovery_upgrade import upgrade_software_recovery as upgrade
+                upgrade(owned, state_db)
+        except (OSError, sqlite3.Error, StateDatabaseError) as error:
+            return InitResult(InitOutcome.FAILED, f"目录准备或显式升级失败，须核实原库及备份: {error}", error)
     finally:
         owned.connection.close()
     return InitResult(
@@ -504,6 +511,7 @@ def _create_new(
     state_db: Path,
     roots: tuple[Path, Path, Path],
     binding: tuple[str, str, str],
+    *, upgrade_software_recovery=False,
 ) -> InitResult:
     prepared = state_db.parent / f".{state_db.name}.init-{uuid.uuid4().hex}"
     try:
@@ -514,7 +522,7 @@ def _create_new(
         except FileExistsError:
             # 另一进程已发布完整库：按已有库重新验证。
             prepared.unlink()
-            return _verify_existing(state_db, roots, binding)
+            return _verify_existing(state_db, roots, binding, upgrade_software_recovery=upgrade_software_recovery)
         _fsync_directory(state_db.parent)
     except (OSError, sqlite3.Error, StateDatabaseError) as error:
         prepared.unlink(missing_ok=True)
