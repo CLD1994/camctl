@@ -19,6 +19,7 @@ from _osmo_builtin_clock import format_utc, read_clock, set_frozen, set_running,
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl.contracts.enums import enum_for
 from camctl_fixtures import Deployment
+from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
 from test_action6_builtin_demo_roundtrip import action6_package, _run
 from test_camctl_c_module_roundtrip import _report_with_statuses
 from test_osmo_builtin_timelapse_roundtrip import _action, _records
@@ -160,9 +161,12 @@ def _prepare_installed_action6(
         "\n[devices.action6.recording]\nrepair_margin_s = 2\n"
         if not native else ""
     )
+    # The real deployment default is 128 MiB. This recovery fixture needs a
+    # durable partial-copy boundary inside its deliberately small media files.
+    copy_config = '\n[copy]\nsegment_size = "1 MiB"\n'
     deployment.config_path.write_text(
         deployment.config_path.read_text(encoding="utf-8")
-        + "\n" + base_config + recovery_config
+        + "\n" + base_config + copy_config + recovery_config
         + '\n[devices.action6.video]\nresult_mode = "segmented"\n',
         encoding="utf-8",
     )
@@ -587,20 +591,20 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 lambda: adb_gate / "read-entered.json"
                 if (adb_gate / "read-entered.json").is_file() else None,
                 180,
-                "Action6 检查副本未在真实首个 64KiB 设备数据流出后暂停",
+                "Action6 检查副本未在真实首个进度段字节流出后暂停",
             )
             observed = json.loads(gate_marker.read_text(encoding="utf-8"))
-            assert observed["stage"] == "after_first_streamed_chunk"
+            assert observed["stage"] == "after_first_copy_segment_bytes_streamed"
             assert observed["request_skip"] == 0
             assert observed["request_offset_bytes"] == 0
-            assert observed["bytes_forwarded"] == 65_536
+            assert observed["bytes_forwarded"] == DEFAULT_CHUNK_SIZE_BYTES
             resume_path_argument = observed["path_argument"]
             resume_request_offset_bytes = observed["request_offset_bytes"]
             resume_bytes_forwarded = observed["bytes_forwarded"]
             first_copies = wait_for(
                 lambda: rows if len(rows := _inspection_copy_state(
                     deployment, source_id
-                )) == 1 and observed["bytes_forwarded"] <= rows[0][7] < rows[0][8]
+                )) == 1 and DEFAULT_CHUNK_SIZE_BYTES <= rows[0][7] < rows[0][8]
                 else None,
                 30,
                 "首块已转发后，检查副本没有提交对应的部分字节",
@@ -608,7 +612,8 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             assert len(first_copies) == 1
             resume_copy_before = first_copies[0]
             assert resume_copy_before[1] is not None and resume_copy_before[2] is None
-            assert 65_536 <= resume_copy_before[7] < resume_copy_before[8]
+            assert (DEFAULT_CHUNK_SIZE_BYTES <= resume_copy_before[7]
+                    < resume_copy_before[8])
             assert resume_copy_before[12] == resume_copy_before[4]
             boundary_pgid = observed["pgid"]
         elif boundary in ("inspection_saved", "source_committed"):

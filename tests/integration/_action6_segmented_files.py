@@ -82,6 +82,7 @@ def create_segmented_media_manifest(
     entries = []
     facts: list[dict] = []
     frame_rate = 10 if metric == "duration_s" else 30
+    resolution = "480x360" if metric == "duration_s" else "160x120"
     directory_indices = ("DJI_001", "DJI_001", "DJI_002", "DJI_002")
     index_values = (998, 999, 1, 2)
 
@@ -98,7 +99,7 @@ def create_segmented_media_manifest(
             [
                 "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
                 "-y", "-f", "lavfi", "-i",
-                f"testsrc2=size=160x120:rate={frame_rate}:duration={duration}",
+                f"testsrc2=size={resolution}:rate={frame_rate}:duration={duration}",
                 "-frames:v", str(frame_count), "-an", "-c:v", "libx264",
                 "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart", str(source),

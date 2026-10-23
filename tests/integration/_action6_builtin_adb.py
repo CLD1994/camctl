@@ -107,10 +107,14 @@ def _append(path, value):
         os.close(descriptor)
 
 
-def _wait_after_first_read_chunk(file_kind, script, bytes_forwarded):
-    """Pause streamed ADB output after forwarding its first 64 KiB chunk."""
+def _wait_after_copy_segment_bytes(file_kind, script, bytes_forwarded):
+    """Pause after streaming one durable copy-progress segment's bytes."""
     gate_value = os.environ.get("CAMCTL_ACTION6_TEST_READ_GATE_DIR")
     if file_kind != "read" or gate_value is None:
+        return
+    from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
+
+    if bytes_forwarded < DEFAULT_CHUNK_SIZE_BYTES:
         return
     match = re.fullmatch(r"dd if=(.+) bs=65536 skip=(0|[1-9][0-9]*)", script)
     if match is None:
@@ -127,7 +131,7 @@ def _wait_after_first_read_chunk(file_kind, script, bytes_forwarded):
     else:
         os.close(claim)
     record = {
-        "stage": "after_first_streamed_chunk",
+        "stage": "after_first_copy_segment_bytes_streamed",
         "path_argument": match[1],
         "request_skip": int(match[2]),
         "request_offset_bytes": int(match[2]) * 65_536,
@@ -150,16 +154,15 @@ def _forward_read_stream(script, local_script):
         ["bash", "-c", local_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     assert process.stdout is not None and process.stderr is not None
-    first_chunk = True
+    bytes_forwarded = 0
     while True:
         chunk = process.stdout.read(65_536)
         if not chunk:
             break
         sys.stdout.buffer.write(chunk)
         sys.stdout.buffer.flush()
-        if first_chunk:
-            first_chunk = False
-            _wait_after_first_read_chunk("read", script, len(chunk))
+        bytes_forwarded += len(chunk)
+        _wait_after_copy_segment_bytes("read", script, bytes_forwarded)
     stderr = process.stderr.read()
     returncode = process.wait()
     sys.stderr.buffer.write(stderr)

@@ -10,6 +10,7 @@ import subprocess
 import pytest
 
 from _action6_segmented_files import create_segmented_media_manifest
+from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
 
 
 @pytest.mark.skipif(
@@ -35,6 +36,10 @@ def test_action6_media_fixture_contains_real_ordered_segments_and_photo(
     assert len(facts) == 4
     assert [row["ordinal"] for row in facts] == [1, 2, 3, 4]
     assert [row[metric] for row in facts] == list(expected)
+    if metric == "duration_s":
+        # The installed recovery test kills after one durable copy segment;
+        # the first source must have bytes left after that committed prefix.
+        assert facts[0]["source"].stat().st_size > DEFAULT_CHUNK_SIZE_BYTES
 
     for offset, row in enumerate(facts):
         path = row["source"]
