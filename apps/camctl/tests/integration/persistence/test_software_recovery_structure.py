@@ -33,6 +33,16 @@ def malformed(statement, defect):
         return statement.replace("REFERENCES device_activities(id)", "REFERENCES device_activities(action_id)")
     if defect == "no_json_check":
         return statement.replace(" CHECK (json_valid(state_json) AND json_type(state_json) = 'object')", "")
+    if defect == "comment_json_check":
+        clause = "CHECK (json_valid(state_json) AND json_type(state_json) = 'object')"
+        return statement.replace(clause, "/* " + clause + " */")
+    if defect == "comment_deferred_fk":
+        return statement.replace("REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED", "REFERENCES actions(id) /* DEFERRABLE INITIALLY DEFERRED */")
+    if defect == "moved_deferred_fk":
+        result = statement.replace("REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED", "REFERENCES actions(id)")
+        return result.replace("REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED", "REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED DEFERRABLE INITIALLY DEFERRED")
+    if defect == "line_comment_json_check":
+        return statement.replace(" CHECK (json_valid(state_json) AND json_type(state_json) = 'object')", " -- CHECK (json_valid(state_json) AND json_type(state_json) = 'object')")
     if defect == "not_strict":
         return statement.replace(") STRICT;", ");")
     raise AssertionError(defect)
@@ -40,7 +50,8 @@ def malformed(statement, defect):
 
 @pytest.mark.parametrize("entrypoint", ["open-rw", "open-ro", "init", "upgrade"])
 @pytest.mark.parametrize("defect", ["missing_column", "wrong_type", "nullable", "no_unique",
-    "no_action_fk", "no_activity_fk", "wrong_fk_parent", "wrong_fk_column", "no_json_check", "not_strict"])
+    "no_action_fk", "no_activity_fk", "wrong_fk_parent", "wrong_fk_column", "no_json_check", "not_strict",
+    "comment_json_check", "comment_deferred_fk", "moved_deferred_fk", "line_comment_json_check"])
 def test_open_v3_rejects_missing_real_recovery_constraints(tmp_path, defect, entrypoint):
     path = tmp_path / "state.db"
     _create_valid_database(path)
@@ -72,3 +83,17 @@ def test_authoritative_v3_structure_is_accepted_and_legacy_v2_needs_no_new_table
     opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     assert opened.metadata.format_version == 2
     opened.connection.close()
+
+
+
+def test_real_sql_comments_preserve_constraints_and_quoted_comment_text():
+    from camctl.persistence.recovery_structure import _tokens
+    sql = create_statement()
+    commented = sql.replace("CREATE TABLE", "CREATE /* valid comment */ TABLE").replace("state_json TEXT", "state_json -- valid line comment\n TEXT")
+    with sqlite3.connect(":memory:") as first, sqlite3.connect(":memory:") as second:
+        first.execute(sql)
+        second.execute(commented)
+        actual = second.execute("SELECT sql FROM sqlite_master WHERE name='software_recoveries'").fetchone()[0]
+        expected = first.execute("SELECT sql FROM sqlite_master WHERE name='software_recoveries'").fetchone()[0]
+        assert _tokens(actual) == _tokens(expected)
+    assert _tokens("SELECT '/* quoted */ -- text', \"name/*--*/\" -- dropped\n") == ("select", "'/* quoted */ -- text'", ",", '"name/*--*/"')

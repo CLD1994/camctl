@@ -7,29 +7,14 @@ import sqlite3
 from camctl.resources import resource_bytes
 
 
-_TOKENS = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|[^\s]", re.S)
+_TOKENS = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|--[^\n]*(?:\n|$)|/\*.*?\*/|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|[^\s]", re.S)
 
 
 def _tokens(sql):
-    return tuple(token if token.startswith("'") else token.strip('"').lower()
-                 for token in _TOKENS.findall(sql))
-
-
-def _checks(sql):
-    tokens = _tokens(sql)
-    checks = set()
-    for start, token in enumerate(tokens):
-        if token != "check" or start + 1 >= len(tokens) or tokens[start + 1] != "(":
-            continue
-        depth = 1
-        end = start + 2
-        while end < len(tokens) and depth:
-            depth += (tokens[end] == "(") - (tokens[end] == ")")
-            end += 1
-        if depth:
-            raise ValueError("恢复表 CHECK 定义括号未闭合")
-        checks.add(tokens[start + 2:end - 1])
-    return frozenset(checks)
+    # 引号分支先消费完整字面量；注释分支只可能从引号外开始匹配。
+    return tuple(token if token.startswith(("'", '"')) else token.lower()
+                 for token in _TOKENS.findall(sql)
+                 if not token.startswith(("--", "/*")))
 
 
 def _signature(connection):
@@ -53,10 +38,10 @@ def _signature(connection):
     sql = found[0]
     with closing(connection.execute("SELECT strict FROM pragma_table_list WHERE schema='main' AND name='software_recoveries'")) as cursor:
         strict = cursor.fetchone()
-    tokens = _tokens(sql)
-    deferred = sum(tokens[index:index + 3] == ("deferrable", "initially", "deferred") for index in range(len(tokens)))
-    not_deferred = sum(tokens[index:index + 2] == ("not", "deferrable") for index in range(len(tokens)))
-    return columns, foreign_keys, tuple(sorted(unique)), _checks(sql), strict, deferred, not_deferred
+    # 完整 CREATE 词元共同约束每一个 FK 与 CHECK 的实际声明位置。
+    # 不用全表关键字计数代替逐约束含义。
+    return columns, foreign_keys, tuple(sorted(unique)), strict, _tokens(sql)
+
 
 
 @lru_cache(maxsize=1)
