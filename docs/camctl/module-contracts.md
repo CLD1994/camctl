@@ -50,6 +50,8 @@ O6 的真实 C 进程收场和 R9 的真实报告消费者用例分别位于根 
 | `WorkFacts`、`SessionOutcome`、`ResponsibilityOwner` | `session`。会话的可靠责任分类、最终结果和取消等待后的接手接口。 |
 | `WakeToken`、`ScheduleDecision`、`DispatchGrant` | `scheduling`。检查与等待之间的版本、纯资格决定及经过事务再次核对的授予结果。 |
 | `ProjectionInput`、`PublicFragment` | `contracts.public_projection`。单对象及有界依赖的纯公开字段计算；事件变化比较与报告编码共用。实体子集合仍分页取得，不建立整棵对象树。 |
+| `SegmentSetRef`、`SegmentCursor` | `contracts.segment_values`。结果集合的冻结引用和成员顺序位置，由拍摄、持久化及报告使用同一类型。 |
+| `CoverageTarget`、`SegmentDecision` | `contracts.video_coverage`。设备特化、拍摄与报告共用的目标、有限判决及精确解码；纯覆盖累计不访问设备或状态库。报告从同H事实解码，不导入拍摄流程。 |
 | `SendPermit`、`MotorActionFacts`、`FinishSendRequest` | `motor.models`。电机专属意图、当前事实与结束命令；许可仅由首次意图事务交给本地执行流程，恢复读取不能重新取得发送资格。 |
 | `NotificationWriter`、`NotificationWriteResult` | `motor.notification`。单向管道端口服务，配置和写入返回本地传输事实。`motor.service` 与 `motor.rules` 负责时间、许可及终态，`bootstrap.motor_assembly` 负责有界工作发现；管道端口不调用业务流程或数据库。 |
 | `GenerationJob`、`GenerationResult`、`FrozenReport` | `reporting`。一次生成调用、已同步文件结果和不再改变的报告依据；生成任务与报告身份分开。 |

@@ -1585,51 +1585,88 @@ Linux x86_64 开发容器使用 CPython 3.11.16、SQLite 3.53.1，最终结果�
 
 ## 视频结果模式与 Action6 分段的软件验证（2026-10-23）
 
-本版按[视频结果模式与 Action6 分段计划](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#本版执行与验证安排)推进 V1—V11 完整软件交付，下文区分已有证据与尚未完成的范围。两类相机保留独立单文件流程，并按每台设备的[部署配置](configuration-reference.md#设备与驱动)选择分段流程；已受理任务冻结原选择。公共分段层承载集合、范围、检查和副本责任，Action6 与 OSMO 分别提供文件身份、目标及完成规则。
+本轮完成[视频结果模式与 Action6 分段计划](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#本版执行与验证安排)的 V1—V11 软件范围。两类相机通过每台设备的[部署配置](configuration-reference.md#设备与驱动)选择独立的 `single_file` 或 `segmented` 流程；省略配置时采用 `single_file`。模式、设备策略、覆盖目标和操作预算随动作受理保存，重启后继续消费原定义。公共层负责有序集合、范围、独立检查、共同发布、取回复用与历史，Action6 和 OSMO 各自提供身份及完成规则。
 
-环境为 Linux x86_64 开发容器、Python 3.11.16、SQLite 3.53.1、Node.js 24.20.0。组件集成在各自工作树内逐进程运行，隔离工作树使用自身 `apps/camctl/src`，共享部署版解释器。表中的 `python` 指部署版 `apps/camctl/.venv311/bin/python`；相对路径均以对应仓库根为起点，客户端命令在 `apps/client` 执行。
+环境为 Linux x86_64 开发容器、CPython 3.11.16、SQLite 3.53.1、Node.js 24.20.0。源码侧检查显式设置所属工作树的 `PYTHONPATH`，并记录 `camctl.__file__`；安装版子进程移除源码搜索路径，从独立环境的 `site-packages` 运行。组件集成按测试指南在各自工作树内逐目录、逐进程运行。下文的 `python` 指 `apps/camctl/.venv311/bin/python`，命令以对应仓库根为起点；客户端命令在 `apps/client` 执行。
 
-| 验证范围与命令 | 实际结果与证明范围 |
+### 单元、组件和客户端门槛
+
+最终生产基线 `33687b5` 的完整命令 `python -m pytest apps/camctl/tests/unit -q` 为 **7065 passed、1 skipped、2 条既有标记警告**，退出0。实际UTC为05:20:46—05:21:31，pytest耗时44.30秒；命令、解释器、源码位置和退出码保存在 `.local/verification/action6-full-plan/release-final-unit/`。跳过项为当前平台不适用的分支；两条警告来自既有同步函数上的 asyncio 标记。
+
+16个组件目录均已完成完整范围。下表保留各阶段的实际结果；它们不是同一提交的一次运行，后续变更由受影响路径的组合验证补齐。完整日志、原始收据和日志摘要位于 `.local/verification/action6-full-plan/agent-evidence/`、各 `final-component-*` 目录及 `component-gates.json`。
+
+| 完整组件目录 | 实际结果 |
 | --- | --- |
-| `python -m pytest apps/camctl/tests/unit -q` | 最终生产基线 `227a162` 显式固定 `PYTHONPATH` 并确认主工作区源码后，7061 passed、1 skipped、2条既有标记警告（45.38秒），退出0。实际UTC为03:57:25—03:58:12，收据在 `.local/verification/action6-full-plan/final-unit/`。此前7054项过程结果未记录源码导入位置，原始收据 `unit-full/` 保留，不用作最终版本证据。 |
-| `python -m pytest apps/camctl/tests/integration/bootstrap/test_video_result_mode_binding.py -q` | 4 passed；实际装配、两设备两模式、重开连接、旧请求与新请求均按受理时合同工作。 |
-| `python -m pytest apps/camctl/tests/unit/devices/test_catalog.py apps/camctl/tests/unit/bootstrap/test_video_result_configuration.py apps/camctl/tests/unit/capture/test_video_result_contract.py apps/camctl/tests/unit/devices/test_video_segment_profiles.py -q` | 61 passed；新增无视频任务和仅照片任务的驱动拒绝 `segmented`，修复前该参数化反例实际2 failed。装配受理4项随后再次通过，实际命令、UTC和退出码在 `.local/verification/action6-full-plan/mode-binding/`；单元原始红、绿日志分别为 `/tmp/camctl-video-mode-unsupported-red.log` 和 `/tmp/camctl-video-mode-binding-full-goal.log`，这两次单元运行未保存实际UTC。 |
-| `python -m pytest apps/camctl/tests/integration/capture/test_action6_segmented_normal.py -q` | 2 passed；普通和 native 登记全部3份MP4、配对LRF及独立照片，视频默认范围不含照片，检查拷贝和探测为零。 |
-| `python -m pytest apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py -q` | 首批6项及新增空／未知范围照片组合2项均通过；经实际处理器、持久化与报告生成验证不等长达标、可靠前缀后未知、完整不足、起点未知、已知起点但首段指标未知，以及151帧目标；空／未知视频范围仍可默认及预览取回独立JPEG，明确ID仍可选择范围外MP4。 |
-| `python -m pytest apps/camctl/tests/unit/capture/test_segment_inspections_metrics.py apps/camctl/tests/unit/capture/test_action6_recovery_prefix.py -q` | 13 passed；流指标可靠性、容器时长缺失、时长与整数帧量纲、连续前缀停止规则通过。 |
-| `python -m pytest apps/camctl/tests/integration/reporting/test_video_coverage_report.py -q` | 2 passed；普通与 native 正常覆盖报告通过根 Schema，并能在同一 H 重建相同报告。异常覆盖报告同时由上述实际恢复链验证。 |
-| 检查副本、取回复用和混合照片的定向集成 | 独立检查端口2项、既有输入／native完成12项、固定等待者与副本复用2项、默认／预览照片选择2项通过。两个已等待取回具有独立交付，后到请求读取设备；来源与读取目标保持文件操作保护。 |
-| `python -m pytest apps/camctl/tests/integration/outputs/test_segment_copy_maintenance.py -q` | 3 passed（6.86秒）；通过真实 Action6 异常处理器建立完整检查副本，验证没有绑定等待者时实际文件任务仍阻止清理、任务结束后删除；删除失败关闭并重开数据库后可重试且不改变来源终态；原等待取回经公开取消及原责任收场后释放副本。实际UTC、命令和退出码位于 `.local/verification/action6-full-plan/copy-maintenance-fixed/`。首次运行2 passed、1 failed，原因是新测试读取了 actions 不存在的列，修正为权威错误列后通过；原日志保留于 `copy-maintenance-first/`。 |
-| `python -m pytest apps/camctl/tests/integration/capture/test_action6_lifecycle_recovery.py -q` | 根集成后9 passed（13.75秒）。普通取消保留观察但正式产物为0；native取消保留3份MP4和必需JPEG；STOP耗尽保留未知活动与占用。还验证基准、启动、绑定失败，原生延时151帧达标仍因缺必需照片失败，受限媒体会话不启动探测，终态重入不重复处理。收据在 `.local/verification/action6-full-plan/integrated-action6-lifecycle/`；隔离分支与重复键、异常恢复、独立检查组合25 passed，日志在 cf97 工作树 `.local/verification/action6-lifecycle/v6-v8-targeted-integration-final.log`。 |
-| `python -m pytest apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py::test_bound_obtains_fall_back_to_same_device_copy_after_local_read_failure -q` | 隔离分支4 passed，覆盖成功续读、换源提交前后回执未知及设备不可用的预算耗尽。正式本地读取先提交4字节，再切换同一copy的源；原5秒重试等待后从偏移4读取设备，原run、round、target和delivery不变。未知回执重开复用稳定键，只有一个换源事件；设备不可用累计3/3次后有限失败。日志在6dae工作树 `.local/verification/action6-source-fallback-v7/unknown-exhaustion-fixed.log`；根先集成成功用例后该文件2 passed，收据在 `integrated-copy-fallback/`。 |
-| `python -m pytest apps/camctl/tests/integration/history/test_action6_video_result_history.py -q` | 1 passed；来源失败但前缀可取回。H后真实完成已授权delivery并保存copy、目标文件与公开交付SHA，再实际删除设备源并清理检查副本；按不同批次、从初始状态／快照／当前状态恢复H的报告字节相同，且不出现H后的摘要。日志在8e17工作树 `.local/verification/action6-video-result-history/history.log`。 |
-| `python -m pytest apps/camctl/tests/integration/acceptance -q -x` | 显式主工作区源码最终复验338 passed（77.27秒），退出0；收据在 `.local/verification/action6-full-plan/final-component-acceptance/`。首轮334 passed、4 failed，均为旧预期遗漏显式模式；原失败与中间定向日志保持。 |
-| 完整 host_files、logging_runtime、motor、scheduling | 各自独立pytest进程依次通过121、112、12、136项，均退出0；logging_runtime保留1条既有同步函数asyncio标记警告。实际命令、源码位置、UTC及退出码在 `.local/verification/action6-full-plan/final-component-<目录>/`；host_files使用收据名 `final-component-host-files`。 |
-| 两设备单文件必要产物单元与原 Action6 单文件装配 | 77项单元和6项装配通过；普通录像保持精确一份非空视频，native 保持原最低格式与数量合同。OSMO未知顺序键的受影响4项及 native6项定向回归通过。 |
-| 公共登记、结构与历史 SQL | 协议、报告依赖、事件、配置消费及历史SQL同步检查通过；数据库结构3858项断言、登记接缝115项测试、数据库历史SQL27项测试通过。 |
-| 最终公共检查 | `227a162`生产基线之后再次通过协议、报告依赖、事件转换、历史SQL、配置消费、资源检查；数据库40张表／3858项断言、登记接缝115项和历史SQL27项均通过。完整命令、UTC及退出码在 `.local/verification/action6-full-plan/final-*` 对应收据中；覆盖协议专项也退出0。 |
-| 客户端覆盖消费、上传与浏览器 | 最终关联单元79项和报告／媒体集成13项通过；浏览器5项在公共目录／索引摘要断言同步后定向复测通过。首次组合运行的2项失败是旧浏览器断言仍期待设备专属目录前缀，原日志保留。 |
-| 客户端完整 `VITEST_MAX_WORKERS=2 npm test` | 66个单元文件3212项、40个集成／浏览器文件1559项全部通过，类型检查和实际构建均通过，退出0。实际UTC为03:18:44—03:30:14，耗时689.23秒；完整命令、环境、提交及输出位于 `.local/verification/action6-full-plan/client-final-workers2/`。两worker设置采用既有客户端验证环境；构建保留既有chunk大小提示。 |
+| acceptance | 338 passed。 |
+| bootstrap | 1346 passed、1 skipped；按同一有序集合分批完成，说明见下文。 |
+| cancellation | 396 passed。 |
+| capture | 2091 passed。 |
+| contracts | 442 passed。 |
+| devices | 220 passed。 |
+| history | 345 passed。 |
+| host_files | 121 passed。 |
+| logging_runtime | 112 passed，保留1条既有 asyncio 标记警告。 |
+| motor | 12 passed。 |
+| operations | 314 passed。 |
+| outputs | 2501 passed、2 skipped。 |
+| persistence | 860 passed。 |
+| reporting | 440 passed。 |
+| scheduling | 136 passed。 |
+| session | 194 passed。 |
 
-安装版联合链运行 `tests/integration/test_action6_builtin_segmented_roundtrip.py`。普通分段完整通过，来源报告4、两次取回报告7／10，C host 累计确认到报告10、水位55。native 分段修复后以 `-k native-timelapse` 定向复测，1 passed、1 deselected，38.52秒，退出码0；来源报告3，帧数目标按300秒／1秒间隔计算为301帧，正常覆盖为 `not_performed`。默认视频范围含两段视频，默认取回取得JPEG及两份MP4，预览取回取得独立JPEG及两份LRF；六份交付分别有独立ID和摘要，客户端实际导入报告3／6／9及媒体，C host累计确认到报告9、水位68。
+bootstrap 首轮已通过479项并跳过1项，在第481项构建解释器准备阶段停止；明确 `UV_PYTHON` 指向部署版解释器后，按保存的1347项有序集合只运行余下867项，全部通过。首480项排除文件的SHA-256为 `5a6da13099b75ba20c4104c7976aec7186623bee174bd65eb5edf417d5ef7d50`；原失败、一次主动中断的重复运行、完整集合及最终867项日志均保留于 `agent-evidence/bootstrap-final/`，不把原失败称为完整成功运行。该目录跳过项仅适用于 Windows 不区分大小写的文件系统。outputs 两项跳过分别属于内部检查副本不走普通交付发布、主机源候选没有设备读取配置的既有分支。
 
-联合链首次因构建解释器选择失败，显式指定部署版 `UV_PYTHON` 后进入业务验证；随后客户端将可选 `media_type` 缺省判成非视频，修正后普通链通过。native 曾在默认取回等待120秒：来源已成功、取回选择与delivery已创建，但设备活动缺少自然完成依据，全部READ_FILE尚未尝试。现沿既有 `ResultSetSave` 保存可靠 `TIME_AND_OUTPUTS`，再释放占用，native组件核对完成依据、占用与集合状态为 `(3,2,3)`。之后的preview断言漏计独立JPEG，修正测试期望后上述native全链通过。原失败状态库、报告、日志及最终收据均保留。
+共享目标、覆盖算法和判决解码现由 `contracts.video_coverage` 唯一维护，集合引用及游标由 `contracts.segment_values` 维护。设备、拍摄、持久化与报告使用相同类型；报告不导入拍摄流程。此整理之后，完整 contracts 442项、依赖边界10项、覆盖与设备单元75项通过；最终解码调整后覆盖单元16项及报告2项通过。根集成后的受影响 capture 六文件24项、outputs 三文件11项、同H历史1项分别通过，收据为 `shared-types-capture/`、`shared-types-outputs/`、`shared-types-history/`。
 
-此前安装版wheel已归档到 `.local/verification/action6-video-mode-final/dist/camctl-0.1.0-py3-none-any.whl`，大小1,471,676字节，SHA-256为 `9903cd7262b339d768e7e9d0ba9d9c456be503ed42c1164dc5c7de8fc0807f9d`。在 `86e60a6` 基线核对325个已打包源码与资源文件，缺失和差异均为0；该wheel经修后的native全链验证。后续生产改动须重新构建并验证发行候选。完整安装证据归档为同目录的 `installed-evidence.tar.gz`，摘要和收据位置见 `installed-archive.json`。样例是受约束的字节文件，传输和客户端导入通过不表示真实媒体可解码。
+客户端完整 `VITEST_MAX_WORKERS=2 npm test` 通过66个单元文件3212项、40个集成及浏览器文件1559项，同时完成类型检查和实际构建，退出0。实际UTC为03:18:44—03:30:14，689.23秒；收据为 `client-final-workers2/`。公共Schema随后恢复原生延时 RUNNING／EXPIRED 的 `outputs` 数量上限，同时允许适用终态的覆盖结果；修正后完整客户端单元再次3212项通过，相关报告、知识合并和浏览器5文件213项通过，`npm run build` 再次通过。后三项分别位于 `client-schema-unit/`、`client-schema-reports/`、`client-schema-build/`。构建只有既有chunk大小提示；后续Python整理没有修改客户端或公共Schema。
 
-安装链未保留实际UTC起止；ordinary通过所在测次的完整shell命令和环境赋值也未留存。已有日志、状态库和收据保持原样，最终native命令、工作目录、环境及退出码保存在 `execution-metadata.json`；冻结业务时钟不作为实际运行时间。
+### 生产路径与恢复验证
 
-异常恢复的普通60秒目标使用18／27／22／40秒分段，只检查前三段并确认67秒；第三段指标未知时保留前两段45秒，可靠控制依据仍可使来源成功，同时报告覆盖未确认。完整可靠三段共50秒时报告确认不足并使来源失败。原生延时目标由300秒、2秒间隔冻结为151帧，60／60／45／20帧只检查前三段，确认165帧。检查所需完整副本、媒体工具响应与真实检查记录分别保存；测试提供受接口约束的工具响应，不证明真实固件媒体时长或帧数。
+| 生产责任 | 实际可观察结果及证据 |
+| --- | --- |
+| 部署绑定、冻结与独立单文件流程 | 实际装配受理4项验证同驱动不同设备、配置切换、旧请求和新请求；无视频任务及仅照片任务拒绝 `segmented` 的反例先2项失败，修复后相关61项通过。原普通单文件仍要求恰好一份非空必要视频，native保留原最低格式及数量要求，异常仍进入原媒体检查和修复。 |
+| OSMO结果读取 | 冻结模式贯穿 `PendingResultScan`、装配端口及驱动请求；`single_file` 使用原目录配对，`segmented` 保存原始页文件后由集合配对。普通单文件LRF保存为PREVIEW，指向同目录同stem的OSV；部署切换后重启仍读取原模式。对应单元35项、设备页6项、bootstrap模式3项、共享恢复22项及相邻拍摄81项通过。 |
+| Action6正常分段 | 普通及native均登记全部合格MP4、真实LRF和独立照片；默认视频范围不含照片，正常检查拷贝与探测为零。默认、预览、明确ID和其他来源选择保持独立资格。 |
+| 实际内容选段 | 普通60秒目标使用18／27／22／40秒分段，只检查前三段，确认67秒；native的300秒／2秒目标冻结为151帧，60／60／45／20帧只检查前三段，确认165帧。选中的最后一段完整交付。指标未知只保留已检查的连续前缀，完整可靠不足才确认不足；后段不补位。 |
+| 生命周期及错误优先 | 实际处理器验证基准、START、绑定、STOP耗尽、时钟限制、终态重入及取消。普通取消不发布正式产物；native取消保留全部合格完成视频和照片。必要照片缺失、可靠缺口、零字节及明确无主视频流不能被已达到目标覆盖；可靠控制与覆盖未知分别判定。 |
+| 检查身份和冷恢复 | 每段具有独立检查、输入copy与工具操作。部分副本重开后保留copy、目标、原预算及偏移；JSON整数秒经统一配置解码恢复为精确Decimal，显式零值保留。媒体结果已保存而回执未知时使用原结果，不重新探测。 `test_action6_budget_cold_recovery.py` 实际保存4字节后重开并续传；安装版另验证已提交1 MiB的恢复。 |
+| 来源事务和等待者 | `segment_sets.published_event_id` 固定完整来源发布H；原事务恢复真正RUNNING且PENDING等待来源的取回。两个已等待取回有独立delivery、copy及目标，后到请求不绑定检查副本而读取设备。来源提交回执未知时核实原H，不重建等待集合。 |
+| 读取、重拷和源失效 | 正式本地读取中源失效，经连续原重拷历史核实后，沿同一copy、delivery、target、round及剩余预算读取设备；已提交偏移保留。提交前后回执未知只产生一次换源，预算耗尽有限失败。目标摘要不匹配使用原重拷合同，不把目标错误当作检查源损坏。相关换源4项、重拷实际文件3项通过。 |
+| 实际使用和清理 | 来源副本及交付目标均登记实际使用；线程、进程、会话和工具真正结束后才释放。一个等待取回结束、另一取回仍读副本时，维护器保留文件；全部关联责任结束后清理。无等待者、取消收场、实际文件保护及删除失败关闭重开重试均通过，来源终态保持。 |
+| 历史和报告 | 真实异常来源固定H后实际完成delivery、保存copy／目标／公开摘要，再删除设备源和清理检查副本；不同分页批次、初始状态／快照／当前状态恢复H时报告原字节一致，不出现H后的摘要。覆盖状态、未知与零、失败来源及成功取回经根Schema、客户端知识合并、媒体上传和累计ACK分别核对。 |
+| 重复顺序键 | 后段冲突保留此前可靠前缀；最早键冲突形成未知起点；跨真实仓储分页仍停在冲突组前。反例修复前2 failed、1 passed，修复后真实集成3项、纯前缀10项及OSMO集合66项通过。全部合格原片仍可按明确ID选择。 |
 
-来源发布事务的 `published_event_id` 固定检查副本的复用截点，取回依据该完整历史边界恢复原等待关系。首次授权前副本不可用时读取设备；正式本地读取中源失败时，`COPY_CHANGED.SOURCE_FALLBACK` 单向更新原copy的读取源，保留原delivery、已提交字节、round和READ_FILE预算。所有后续尝试继续核对产物读取资格，显式清理不因副本仍在而失效。完整组件目录和安装版故障矩阵仍在运行，未取得完整结果的门槛不计通过。
+上述定向检查使用真实生产处理器、SQLite和正式文件操作端口；部分组件测试在媒体边界提供受约束响应。实际ffprobe、C host、安装包和客户端联合证据由下节单独说明。原失败日志和状态库保留，命令、UTC、版本与具体范围以原始收据为准。
 
-重拷与本地源失效的组合由 `test_segment_local_integrity.py` 的3项实际文件集成验证：摘要不匹配触发原重拷轮次；耗尽后有限失败；重拷期间本地源读取失败时，独立守卫核对原READ_FILE意图至结果之间的连续重拷历史，再沿同一copy、目标和剩余预算从设备偏移4继续，最终发布正确摘要。隔离分支实际UTC为03:41:03—03:41:12，日志在6dae工作树 `.local/verification/action6-local-recopy/integrity-final.log`；相关换源4项于03:41:16—03:41:28再次通过。
+### 安装版联合链与发行物
 
-安装版部分副本冷恢复曾在重建预算时失败：JSON将完整秒数解为整数，而执行配置要求精确 `Decimal`。恢复入口现通过统一文档解码器还原原值，保留原次数、超时和零重试间隔。`test_action6_budget_cold_recovery.py` 实际保存4字节后重开数据库，沿原copy与偏移继续；媒体结果提交回执未知后再次重开，使用已存结果且没有重复探测。该文件1项、读取配置单元108项及原恢复回归2项均通过，日志在cf97工作树 `.local/verification/action6-budget-cold-recovery/logs/`，实际UTC分别为03:54:54—03:55:02、03:53:54—03:53:58及03:54:16—03:54:31。后续安装版同一场景从已提交1 MiB继续的证据另按V10归档。
+安装版联合链通过客户端导出、C host递交、独立wheel受理、SQLite、正式取回、报告及媒体导入和累计ACK核对。普通及native正常分段的默认取回与预览取回各有独立delivery，照片保持独立；正常检查拷贝和媒体探测为零。既有Action6演示、原生延时和正常分段三个文件共4项通过，能力声明6项通过；OSMO普通分段8场景通过。
 
-重复键恢复已由 `test_action6_duplicate_segment_keys.py` 的3项真实集成验证：后段冲突保留此前可靠前缀，最早键冲突使起点未知，两份重复成员跨真实仓储分页时仍停在冲突组之前。修复前2 failed、1 passed，修复后3 passed（10.92秒）；对应纯前缀单元10 passed，OSMO集合回归66 passed（59.63秒）。原始日志分别为 `/tmp/action6-duplicate-segment-red4.log`、`/tmp/action6-duplicate-segment-final.log`、`/tmp/action6-duplicate-prefix-unit-final.log`、`/tmp/action6-duplicate-osmo-persistence.log`。根目录集成后重复键单元再验证通过，命令与实际UTC保存在 `.local/verification/action6-full-plan/integrated-duplicate-unit/`。所有合格原片仍登记并可按明确ID取回。
+Action6安装版恢复矩阵使用真实生成媒体及ffprobe：普通不等长达标在copy进度、检查结果保存、来源提交回执、正式本地读取四处中断后分别恢复；第三段工具退出保留45／60秒的已检查前缀并报告 `unconfirmed`；完整可靠50／60秒报告 `confirmed_short`，来源失败但前缀仍可取回。native确认165／151帧但缺必需JPEG时来源失败，视频前缀和独立取回仍可完成。模式矩阵逐项核对两设备、两模式、两动作及配置切换。8个逻辑场景均已有成功记录，两个真实媒体夹具通过；它们在分阶段修复后的候选上验证，未称为同一版本的一次完整运行。
 
-最终公共检查及客户端构建的原始输出保存在 `.local/verification/action6-video-mode-final/`。5311个文档本地链接、本轮9个标题锚点及差异空白检查通过，新增正式文档没有临时目录引用。首次 pnpm 命令停在依赖准备，构建未开始；按客户端 README 使用原 `package-lock.json` 执行 `npm ci` 后，`npm run build` 通过，锁文件未改变。开发容器的 npm CLI 来自已有缓存，实际调用路径保留在命令记录中。真机、ARM部署、物理故障及现场媒体端点均未执行，仍由计划 V12 独立安排。
+copy进度故障点实际等待1 MiB持久化后中断，并沿同一copy、目标、round及预算从偏移1 MiB继续；source-commit故障点固定两个原等待者，恢复后后到及明确范围外取回实际读取设备；local-read故障点位于第二个等待者读取期间，第一个等待者的delivery已PREPARED、第二个仍PENDING，两取回动作在该截点仍为RUNNING。检查输入的大小及SHA-256在实际ffprobe调用时保存，不依赖副本清理后的路径或文件名。
+
+公共Schema修正后，将9份实际普通异常报告重新导入5组全新客户端存储，reached、unconfirmed及confirmed_short均保留，实际累计ACK分别推进到16、16、12、17、17。原始报告、媒体、状态库、导入收据和ACK留在联合验证归档中。
+
+最终生产基线 `33687b5` 在仓库外 `/tmp/camctl-action6-final-installed-33687b5-20261023` 构建并安装候选，普通source-commit恢复及native151缺照片两个代表场景再次通过，2 passed（110.89秒），退出0；实际UTC为05:23:24—05:25:15。22个实际CLI进程的解释器及模块位置均属于该独立环境，子进程没有源码 `PYTHONPATH`。OSMO同一摘要候选的单文件普通录像1项、两种native场景2项及正常分段代表1项分别通过，实际UTC为05:21:07—05:22:29、05:22:51—05:24:07和05:24:32—05:26:05，均退出0；每条链保存实际导入及ACK。原有describe子测按其原候选保留，不当作最终发行物的资源证明。
+
+最终wheel为 `.local/verification/action6-full-plan/dist-final/camctl-0.1.0-py3-none-any.whl`，1,482,718字节，SHA-256为 `d7d056b0c03c1fe6da7fa808d0659a9ab747fb8399806582684c4a6e2d3d4952`。协调者独立核对298份生产Python及27项权威资源，共325个不同路径，当前源码／权威来源、wheel与实际安装副本三方的缺失、多余及内容差异均为0；资源中的Python脚本不重复计入生产Python。逐文件大小和SHA、原始wheel位置、独立命令及实际UTC保存在 `dist-final/source-manifest.json` 和 `release-wheel/`。此前候选保留过程证据，发行使用本段摘要。
+
+两设备安装证据已集中复制到 `.local/verification/action6-full-plan/installed-evidence/`，协调者核对归档摘要并按清单逐文件核验内容：
+
+- `action6-segmented-evidence.tar.gz`：477,891,894字节，SHA-256为 `870bd1302fc2657eceb91775d22bb6bff2861277f5a0c5303ae8ef0ee7840658`。978项内容及清单本身共979个文件成员全部核对；保留既有8场景、最终两场景、实际媒体、SQLite、客户端导入和ACK、原失败及命令收据。仅含一份最终wheel，排除重复虚拟环境、依赖目录和构建中间文件。
+- `osmo-v10-evidence-20261023.tar.gz`：17,809,866字节，SHA-256为 `b599a57b946851a54c6ce1be9c4fb24c0056eef15020b21ea553d72116fcfa3a`。868项内容及清单本身共869个文件成员；保留最终单文件及分段代表链、原8场景和各失败候选，版本分别登记。
+
+同目录的两份内容清单、原始归档收据及 `*-copy-verification.json` 记录复制来源和协调核验。组件门槛、最终wheel和安装证据的统一入口为 `.local/verification/action6-full-plan/delivery-manifest.json`；原始世界继续保留，不依赖源工作树重新构造验证结果。
+
+### 公共检查与证据边界
+
+`33687b5` 上协议、报告依赖、事件转换、数据库结构、历史SQL、配置消费及包资源只读检查均退出0，收据为 `.local/verification/action6-full-plan/release-*/`；数据库40张表、3858项断言通过。登记接缝115项、历史SQL27项及覆盖协议专项通过。类型、事件和资源由各自权威来源生成；没有维护第二套完整清单。
+
+5311个本地文件链接、28个相关标题锚点、39条计划Python测试路径及正式文档指向临时文档的链接检查均通过，收据为 `release-doc-links/` 和 `release-doc-anchors/`；最终差异空白检查通过。独立静态复核未发现可沿生产路径确认的缺陷，范围包括共享类型归属、冻结模式、单文件及分段结果读取、两类完成恢复、取回复用清理与同H报告；该审查没有另行运行测试。文档与收据的一致性另经只读复核，两个审查记录为 `final-review.json`、`final-doc-review.json`。
+
+软件设备替身没有验证新固件的实际分段、相机控制、物理故障或现场媒体。本轮未连接相机、未部署ARM、未执行真实拍摄或删除；三十秒等待等设备合同仍需对应现场证据。V12在设备准备后独立执行，分别保留安装、控制、文件、媒体、客户端和ACK结论。
+
 
 ## 部署交接与待核验项
 
