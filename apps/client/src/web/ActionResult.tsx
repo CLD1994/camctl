@@ -51,6 +51,10 @@ export function ActionResult({
       : undefined;
   const products =
     automatic?.products ?? resultProducts(action, allPlans, videos);
+  const sourceActions = [
+    ...allPlans.flatMap((owner) => owner.actions ?? []),
+    ...(source ? [source] : []),
+  ];
   const sourceDevices = new Map(
     [plan, ...allPlans].flatMap((owner) =>
       (owner.actions ?? [])
@@ -156,11 +160,13 @@ export function ActionResult({
               : "报告中没有已登记产物"}
           </p>
         ) : null}
-        {(automatic?.notes ?? resultNotes(action)).map((note, i) => (
-          <p key={i} className={note.error ? "notice error" : ""}>
-            {note.text}
-          </p>
-        ))}
+        {(automatic?.notes ?? resultNotes(action, sourceActions)).map(
+          (note, i) => (
+            <p key={i} className={note.error ? "notice error" : ""}>
+              {note.text}
+            </p>
+          ),
+        )}
         {issueText && <p className="notice error">{issueText}</p>}
         {problems > 0 && (
           <p className="notice error">{problems} 次交付或文件核验异常</p>

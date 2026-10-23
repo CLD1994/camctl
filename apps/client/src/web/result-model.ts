@@ -145,7 +145,10 @@ export function automaticResult(
     stages: [...stages].map(([status, count]) => ({ status, count })),
     local: [...local].map(([status, count]) => ({ status, count })),
     waitingPublished,
-    notes: resultNotes(action),
+    notes: resultNotes(
+      action,
+      plans.flatMap((plan) => plan.actions ?? []),
+    ),
   };
 }
 
@@ -195,6 +198,7 @@ export function actionIssueText(action: ReportAction): string | undefined {
 /** 仅汇总报告明确提供的业务结果，不用动作终态补造逐文件结果。 */
 export function resultNotes(
   action: ReportAction,
+  sourceActions: readonly ReportAction[] = [],
 ): Array<{ text: string; error: boolean }> {
   const notes: Array<{ text: string; error: boolean }> = [];
   const result = action.result;
@@ -217,6 +221,42 @@ export function resultNotes(
       if (!isObject(failure)) continue;
       const segment = segmentIssue(failure.error);
       if (segment) notes.push({ text: segmentIssueText(segment), error: true });
+      if (
+        isObject(failure.error) &&
+        failure.error.code === "source_action_failed"
+      ) {
+        const sourceId =
+          typeof failure.source_action_instance_id === "string"
+            ? failure.source_action_instance_id
+            : typeof failure.error.details === "object" &&
+                failure.error.details !== null &&
+                "source_action_instance_id" in failure.error.details &&
+                typeof failure.error.details.source_action_instance_id ===
+                  "string"
+              ? failure.error.details.source_action_instance_id
+              : undefined;
+        const source = sourceId
+          ? sourceActions.find(
+              (candidate) => candidate.action_instance_id === sourceId,
+            )
+          : undefined;
+        const identity = source
+          ? `${source.name} · 动作 ID ${source.action_instance_id}`
+          : sourceId
+            ? `动作 ID ${sourceId}`
+            : "来源动作身份未提供";
+        const cause = source?.error;
+        const reason =
+          typeof cause?.details?.message === "string"
+            ? `；来源失败原因：${cause.details.message}`
+            : cause?.code
+              ? `；来源错误码：${cause.code}`
+              : "";
+        notes.push({
+          text: `来源动作失败，未生成可取回产物或预览；来源：${identity}${reason}`,
+          error: true,
+        });
+      }
     }
   if (Array.isArray(result.failures) && result.failures.length)
     notes.push({

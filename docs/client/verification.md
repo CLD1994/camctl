@@ -2,6 +2,22 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 来源动作失败且没有产物的客户端处理（2026-10-24 UTC）
+
+客户端识别 `obtain_action_outputs.result.failures` 中的 `source_action_failed`，核对错误阶段、详情来源 ID 与失败项来源 ID，并拒绝把该错误用于显式产物 ID 取回。同一报告或相同 `to_wm` 边界的合并报告内出现来源动作时，客户端要求来源已失败且明确报告 `outputs: []`；较早或较晚边界的历史合并不把之前省略的 `outputs` 当作空目录。报告摘要显示来源失败、没有可取回产物或预览、来源名称和 ID，以及已提供的来源错误码；展开技术详情仍可查看原始取回失败项和来源动作错误。该码没有进入分段错误处理，因此不会显示缺口或默认范围未知提示。
+
+先添加失败单元与浏览器用例。客户端原实现下，单元用例为 10 项失败、3 项通过；页面基线构建后，浏览器用例也未显示来源失败说明。修改后记录如下：
+
+| 检查与实际命令（均在 `apps/client` 执行） | 实际结果 |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc --noEmit` | 退出 0。 |
+| `node node_modules/vite/bin/vite.js build` | 退出 0，转换 469 个模块；主包 891.79 kB、gzip 后 265.07 kB，保留超过 500 kB 的既有体积提示。 |
+| `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 67 个文件、3227 项通过，退出 0。 |
+| `node node_modules/vitest/vitest.mjs run tests/integration/reports.test.ts tests/integration/segment-reports.test.ts tests/integration/scalar-schema-import.test.ts --maxWorkers=1` | 3 个文件、51 项通过，退出 0。 |
+| `node node_modules/vitest/vitest.mjs run tests/integration/browser-previews.test.ts --maxWorkers=2` | 1 个文件、19 项通过，退出 0；包含来源错误摘要、自动预览来源定位及原始详情展示。 |
+
+本次没有运行完整客户端集成套件、后端验证、安装版联合验证或真实设备操作；后端的新错误处理仍需独立实现和验证。客户端结果只证明当前代码的导入、校验和页面展示，不证明主机已生成该错误，也不证明真实相机行为。
+
 ## Hasselblad 命名选项与安装版参数验收（2026-10-21 UTC）
 
 在 `39b01db` 候选上，以 Node.js 24.20.0、pnpm 12.3.4 和 Chromium 验证通用中文常量选项、曝光／白平衡／对焦分支及精确短快门。仓库外客户端从原 `package-lock.json` 严格安装 157 个依赖，279 个受控源文件与仓库逐一匹配；直接依赖版本与原锁相同。`pnpm import` 仅为本地运行生成配套环境，转换文件不作为新的依赖权威来源。

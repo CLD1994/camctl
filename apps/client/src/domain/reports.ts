@@ -348,7 +348,7 @@ export class SegmentReportKnowledge {
         segmentAssociations(entities, details);
   }
 }
-function associations(index: Index) {
+function associations(index: Index, sameBoundary = true) {
   consistentSegmentFacts([index]);
   const entities = segmentEntities(index);
   coverageAssociations(index, entities);
@@ -520,6 +520,39 @@ function associations(index: Index) {
       for (const failure of (action.result as unknown as ObtainResult)
         .failures) {
         selected(owner, failure.source_action_instance_id, failure.output_id);
+        if (failure.error.code === "source_action_failed") {
+          const details = failure.error.details;
+          requireFact(
+            failure.error.stage === "output_selection" &&
+              isObject(details) &&
+              Object.keys(details).length === 1 &&
+              details.source_action_instance_id ===
+                failure.source_action_instance_id,
+            "来源失败项的阶段或来源身份不一致",
+          );
+          requireFact(
+            failure.output_id === undefined &&
+              failure.delivery_id === undefined,
+            "来源失败项不能关联产物或交付",
+          );
+          const params = owner.value.input_params;
+          requireFact(
+            !isObject(params) || !Object.hasOwn(params, "output_ids"),
+            "显式产物 ID 取回不能替代逐项失败",
+          );
+          if (sameBoundary) {
+            const source = index.actions.get(
+              failure.source_action_instance_id,
+            )?.value;
+            if (source)
+              requireFact(
+                source.status === "failed" &&
+                  Array.isArray(source.outputs) &&
+                  source.outputs.length === 0,
+                "可见来源失败项要求来源动作已失败且明确报告空产物目录",
+              );
+          }
+        }
         if (
           failure.error.code === "output_not_found" ||
           failure.error.code === "output_source_mismatch"
@@ -671,7 +704,7 @@ function failureLinks(
     }
   }
 }
-function ownFacts(report: StatusReport) {
+function ownFacts(report: StatusReport, sameBoundary = true) {
   requireFact(report.from_wm <= report.to_wm, "报告水位顺序不合法");
   const index = indexReport(report);
   for (const diagnostic of report.plan_file_diagnostics ?? [])
@@ -683,6 +716,10 @@ function ownFacts(report: StatusReport) {
     );
     for (const action of plan.actions ?? []) {
       requireFact(isName(action.name), "动作名称不合法");
+      requireFact(
+        action.error?.code !== "source_action_failed",
+        "来源动作失败码只能用于取回结果中的逐来源失败项",
+      );
       validateVideoCoverage(action);
       const admission =
         action.status === "failed" && action.error?.stage === "admission";
@@ -863,7 +900,7 @@ function ownFacts(report: StatusReport) {
       }
     }
   }
-  associations(index);
+  associations(index, sameBoundary);
   failureLinks(index, report.to_wm, index, report.to_wm);
 }
 export function validateReport(value: unknown): asserts value is StatusReport {
@@ -1260,7 +1297,7 @@ export function mergeReport(
     (_o, n) => n,
   );
   if (diagnostics !== undefined) combined.plan_file_diagnostics = diagnostics;
-  ownFacts(combined);
+  ownFacts(combined, false);
   return cloneProtocolJson(combined);
 }
 /** 只检查已知证据，不应用状态，也不把缺口中的旧子状态当作新边界事实。 */
@@ -1303,8 +1340,8 @@ export function validateReportAgainstHistory(
   const nextThenOld = combined(next, old);
   coverageAssociations(old, segmentEntities(oldThenNext));
   coverageAssociations(next, segmentEntities(nextThenOld));
-  associations(oldThenNext);
-  associations(nextThenOld);
+  associations(oldThenNext, boundary === "same");
+  associations(nextThenOld, boundary === "same");
   failureLinks(old, current.to_wm, next, incoming.to_wm);
   failureLinks(next, incoming.to_wm, old, current.to_wm);
 }

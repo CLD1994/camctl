@@ -28,6 +28,7 @@ import {
 import { Readable } from "node:stream";
 import { makeMediaFixture } from "../helpers/media";
 import { createHash } from "node:crypto";
+import { sourceActionFailedReport } from "../helpers/source-action-failed";
 
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
@@ -479,6 +480,39 @@ it("报告独有自动取回在来源晚到后归并，保留展开与选择且�
   await page.getByRole("button", { name: "折叠计划", exact: true }).click();
   await page.getByRole("button", { name: "展开计划", exact: true }).click();
   await browserExpect(auto).toContainText("已选择 1");
+}, 20000);
+it("自动预览摘要说明失败来源没有产物并保留原始错误详情", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = sourceActionFailedReport();
+  application.applyReports([reportInput(report)]);
+  expect(application.coverage()).toBe(report.to_wm);
+
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  const automatic = page.locator('[data-action-id="20"]');
+  await browserExpect(automatic).toContainText("准备失败录像");
+  await browserExpect(automatic).toContainText("来源动作失败");
+  await browserExpect(automatic).toContainText("未生成可取回产物或预览");
+  await browserExpect(automatic.locator(".action-summary")).toContainText(
+    "device_prepare_failed",
+  );
+  await browserExpect(automatic.locator(".action-summary")).not.toContainText(
+    "默认范围未确认",
+  );
+  await browserExpect(automatic.locator(".action-summary")).not.toContainText(
+    "缺口分类未确认",
+  );
+
+  await automatic
+    .getByRole("button", { name: "展开动作 自动预览", exact: true })
+    .click();
+  await automatic.getByText("执行技术详情", { exact: true }).click();
+  const technical = automatic.locator(":scope > div > details.advanced");
+  await browserExpect(technical).toContainText("source_action_failed");
+  await browserExpect(technical).toContainText("来源动作 ID");
+  await browserExpect(technical).toContainText("10");
 }, 20000);
 it("可靠来源的多个受理失败和缺少来源ID的动作全部可见", async () => {
   const { page, application } = await setup();
