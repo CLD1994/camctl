@@ -805,7 +805,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         assert coverage["default_scope"]["member_count"] == checked_count
         assert coverage["default_scope"]["output_ids"] == coverage["checked_output_ids"]
         if case == "unknown":
-            assert coverage["reason"] == {"code": "probe_failed"}
+            assert coverage["reason"] == {"code": "probe_error"}
         else:
             assert coverage.get("reason") is None
 
@@ -829,7 +829,9 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         assert len(successful_probes) == expected_successful_probes
         if case == "unknown":
             assert probes[-1]["index"] == 3 and not probes[-1]["real_tool"]
-            assert probes[-1]["path"].endswith(scenario["facts"][2]["source"].name)
+            assert Path(probes[-1]["path"]).read_bytes() == scenario["contents"][
+                scenario["facts"][2]["device_path"]
+            ]
 
         published_sets = query_state(
             deployment.state_db,
