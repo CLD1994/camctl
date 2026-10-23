@@ -837,19 +837,20 @@ it("未完成曝光 JSON 和未完成时长不遮蔽独立枚举，选择后原�
     "0",
   );
   await check
-    .poll(
-      () =>
-        app.draft(draft.id).content.pending?.["/actions/0/params/duration_s"]
-          ?.text,
-    )
-    .toBe("10e");
-  expect(
-    app.draft(draft.id).content.pending?.["/actions/0/params/exposure"]?.text,
-  ).toBe('{"mode":');
-  expect(
-    (parseJson(app.draft(draft.id).content.text) as any).actions[0].params
-      .resolution,
-  ).toBe("8k30");
+    .poll(() => {
+      const content = app.draft(draft.id).content;
+      return {
+        duration: content.pending?.["/actions/0/params/duration_s"]?.text,
+        exposure: content.pending?.["/actions/0/params/exposure"]?.text,
+        resolution: (parseJson(content.text) as any).actions[0].params
+          .resolution,
+      };
+    })
+    .toEqual({
+      duration: "10e",
+      exposure: '{"mode":',
+      resolution: "8k30",
+    });
   await page.reload();
   await page.getByTestId("draft-open-button").click();
   await check(
