@@ -175,6 +175,7 @@ describe("视频覆盖报告", () => {
     expect(validateActionSchema(source(timelapse))).toBe(true);
     for (const status of ["running", "expired"] as const) {
       const action = { ...source(timelapse), status };
+      delete action.result;
       if (status === "expired") action.expiration_reason = "window_missed";
       expect(validateActionSchema(action)).toBe(false);
     }
