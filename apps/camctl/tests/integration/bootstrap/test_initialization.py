@@ -262,6 +262,64 @@ class TestFirstCreation:
         assert Path(cfg.paths.ready).is_dir()
         assert Path(cfg.paths.processing).is_dir()
 
+    def test_init_builds_schema_and_initial_records_in_one_transaction(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        cfg = _config(tmp_path)
+        actual_connect = sqlite3.connect
+        traces: list[list[tuple[str, bool]]] = []
+
+        def traced_connect(database, *args, **kwargs):
+            connection = actual_connect(database, *args, **kwargs)
+            if str(database) != ":memory:":
+                statements: list[tuple[str, bool]] = []
+                connection.set_trace_callback(
+                    lambda statement: statements.append(
+                        (statement, connection.in_transaction)
+                    )
+                )
+                traces.append(statements)
+            return connection
+
+        monkeypatch.setattr(sqlite3, "connect", traced_connect)
+        result = initialize_state(cfg, Path(cfg.paths.state_db))
+        assert result.outcome is InitOutcome.CREATED
+        assert len(traces) == 1
+
+        statements = traces[0]
+        schema_indexes = [
+            index for index, (statement, _) in enumerate(statements)
+            if statement.lstrip().upper().startswith("CREATE ")
+        ]
+        metadata_indexes = [
+            index for index, (statement, _) in enumerate(statements)
+            if statement.lstrip().upper().startswith("INSERT INTO DATABASE_METADATA")
+        ]
+        state_indexes = [
+            index for index, (statement, _) in enumerate(statements)
+            if statement.lstrip().upper().startswith("INSERT INTO RUNTIME_STATE")
+        ]
+        transaction_indexes = [
+            (index, statement.strip().rstrip(";").upper())
+            for index, (statement, _) in enumerate(statements)
+            if statement.strip().upper().startswith(("BEGIN", "COMMIT", "ROLLBACK"))
+        ]
+
+        assert schema_indexes
+        assert len(metadata_indexes) == len(state_indexes) == 1
+        assert len(transaction_indexes) == 2
+        begin_index, begin_statement = transaction_indexes[0]
+        commit_index, commit_statement = transaction_indexes[1]
+        assert begin_statement.startswith("BEGIN ")
+        assert commit_statement == "COMMIT"
+        assert begin_index < schema_indexes[0]
+        assert schema_indexes[-1] < metadata_indexes[0] < state_indexes[0]
+        assert state_indexes[0] < commit_index
+        assert all(
+            statements[index][1]
+            for index in (*schema_indexes, *metadata_indexes, *state_indexes)
+        )
+
     def test_failed_directory_preparation_leaves_no_database(self, tmp_path: Path) -> None:
         (tmp_path / "processing").write_text("occupied", encoding="utf-8")
         cfg = _config(tmp_path)

@@ -127,9 +127,12 @@ def _build_initial_database(
     connection = sqlite3.connect(target)
     try:
         connection.execute("PRAGMA journal_mode=wal")
-        connection.execute("BEGIN IMMEDIATE")
-        for name in _SCHEMA_RESOURCES:
-            connection.executescript(resource_bytes(name).decode("utf-8"))
+        # executescript 会先提交脚本外已有事务；将 BEGIN 放进合并后的
+        # 权威 SQL，使全部结构和两条初始记录保持在同一写事务中。
+        schema_sql = "\n".join(
+            resource_bytes(name).decode("utf-8") for name in _SCHEMA_RESOURCES
+        )
+        connection.executescript(f"BEGIN IMMEDIATE;\n{schema_sql}")
         connection.execute(
             "INSERT INTO database_metadata (id, application_id, instance_id, format_version,"
             " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
