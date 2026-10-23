@@ -383,6 +383,24 @@ def test_catalog_rejects_segmented_mode_without_a_deployment_video_binding():
         build_catalog(config, DriverDefinitions({"synthetic-camera": definition}))
 
 
+@pytest.mark.parametrize("photo_only", [False, True])
+def test_catalog_rejects_segmented_mode_without_video_tasks(photo_only):
+    from camctl.acceptance.schema import RuleError
+
+    definition = _definitions().drivers["camctl-adb"]
+    if photo_only:
+        photo = replace(definition.actions["camera_take_photo"][0],
+                        task_factory=lambda _params: object())
+        definition = replace(definition, actions={"camera_take_photo": (photo,)})
+    else:
+        definition = replace(definition, actions={})
+    config = _config({"camera": {"kind": "camera", "driver": "camctl-adb",
+                                 "video": {"result_mode": "segmented"}}})
+
+    with pytest.raises(RuleError):
+        build_catalog(config, DriverDefinitions({"camctl-adb": definition}))
+
+
 class TestApplyDefaults:
     def test_defaults_preserve_raw_input(self) -> None:
         raw = {"type": "single_shot"}

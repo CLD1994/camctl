@@ -178,6 +178,12 @@ class Catalog:
             if any(capability.deployment_task_factory is not None and not callable(capability.task_factory)
                    for capabilities in actions.values() for capability in capabilities):
                 raise RuleError(f"设备 {device_id} 的部署任务定义未提供任务工厂")
+            if (video_result_mode is VideoResultMode.SEGMENTED
+                    and not any(callable(capability.task_factory)
+                                for action_type, capabilities in actions.items()
+                                if action_type in {"camera_record", "camera_timelapse"}
+                                for capability in capabilities)):
+                raise RuleError(f"设备 {device_id} 未提供可绑定 segmented 模式的视频任务")
             resolved[device_id] = (driver_id, replace(definition, actions=actions), declared)
         return resolved, source_delete_supported
 
