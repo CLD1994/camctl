@@ -61,6 +61,51 @@ def _config(tmp_path: Path, *, prefix: str = ""):
     )
 
 
+class _PragmaReadbackCursor:
+    """只改写受控 PRAGMA 的读回值，SQL 仍由真实 SQLite 执行。"""
+
+    def __init__(self, cursor, reported_row: tuple):
+        self._cursor = cursor
+        self._reported_row = reported_row
+
+    def fetchone(self):
+        self._cursor.fetchone()
+        return self._reported_row
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _PragmaReadbackConnection:
+    """包装真实连接，仅在指定查询边界报告受控的错误值。"""
+
+    def __init__(self, connection, statement: str, reported_row: tuple):
+        self._connection = connection
+        self._statement = " ".join(statement.casefold().split())
+        self._reported_row = reported_row
+
+    def execute(self, statement, *args, **kwargs):
+        cursor = self._connection.execute(statement, *args, **kwargs)
+        if " ".join(statement.casefold().split()) == self._statement:
+            return _PragmaReadbackCursor(cursor, self._reported_row)
+        return cursor
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def _misreport_pragma_readback(monkeypatch, statement: str, reported_row: tuple) -> None:
+    actual_connect = sqlite3.connect
+
+    def connect(database, *args, **kwargs):
+        connection = actual_connect(database, *args, **kwargs)
+        if str(database) == ":memory:":
+            return connection
+        return _PragmaReadbackConnection(connection, statement, reported_row)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+
+
 def _dump(path: Path) -> dict[str, list[tuple]]:
     """独立读取全部表的当前事实，用于前后对比。"""
     connection = sqlite3.connect(path)
@@ -319,6 +364,36 @@ class TestFirstCreation:
             statements[index][1]
             for index in (*schema_indexes, *metadata_indexes, *state_indexes)
         )
+
+    def test_init_does_not_publish_when_wal_readback_mismatches(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        cfg = _config(tmp_path)
+        _misreport_pragma_readback(
+            monkeypatch, "PRAGMA journal_mode=WAL", ("delete",)
+        )
+
+        result = initialize_state(cfg, Path(cfg.paths.state_db))
+
+        assert result.outcome is InitOutcome.FAILED
+        assert isinstance(result.error, StateDatabaseError)
+        assert not Path(cfg.paths.state_db).exists()
+        assert not tuple(tmp_path.glob(".state.db.init-*"))
+
+    def test_init_does_not_publish_when_full_sync_readback_mismatches(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        cfg = _config(tmp_path)
+        _misreport_pragma_readback(
+            monkeypatch, "PRAGMA synchronous", (1,)
+        )
+
+        result = initialize_state(cfg, Path(cfg.paths.state_db))
+
+        assert result.outcome is InitOutcome.FAILED
+        assert isinstance(result.error, StateDatabaseError)
+        assert not Path(cfg.paths.state_db).exists()
+        assert not tuple(tmp_path.glob(".state.db.init-*"))
 
     def test_failed_directory_preparation_leaves_no_database(self, tmp_path: Path) -> None:
         (tmp_path / "processing").write_text("occupied", encoding="utf-8")

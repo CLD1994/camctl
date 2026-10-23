@@ -40,6 +40,7 @@ from camctl.persistence.runtime import (
     ensure_runtime_library,
     open_existing,
     verify_directory_binding,
+    _set_and_verify,
 )
 from camctl.session.locks import (
     SessionLockConflictError,
@@ -126,7 +127,13 @@ def _build_initial_database(
     """在准备路径上建立完整初始库并可靠落盘。"""
     connection = sqlite3.connect(target)
     try:
-        connection.execute("PRAGMA journal_mode=wal")
+        _set_and_verify(connection, "synchronous", 2)
+        journal = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+        actual_journal = None if journal is None else journal[0]
+        if not isinstance(actual_journal, str) or actual_journal.lower() != "wal":
+            raise StateDatabaseError(
+                f"journal_mode 核验失败: 期望 'wal'，实际 {actual_journal!r}"
+            )
         # executescript 会先提交脚本外已有事务；将 BEGIN 放进合并后的
         # 权威 SQL，使全部结构和两条初始记录保持在同一写事务中。
         schema_sql = "\n".join(
@@ -509,7 +516,7 @@ def _create_new(
             prepared.unlink()
             return _verify_existing(state_db, roots, binding)
         _fsync_directory(state_db.parent)
-    except (OSError, sqlite3.Error) as error:
+    except (OSError, sqlite3.Error, StateDatabaseError) as error:
         prepared.unlink(missing_ok=True)
         return InitResult(InitOutcome.FAILED, f"状态库建立失败: {error}", error)
     finally:
