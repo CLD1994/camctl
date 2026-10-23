@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping
 
 from camctl.devices.segments import SegmentKey
-from camctl.capture.video_coverage import CoverageTarget, CoverageMetric, target_frames
+from camctl.contracts.video_coverage import CoverageTarget, CoverageMetric, target_frames
 
 
 class SegmentFileKind(StrEnum):

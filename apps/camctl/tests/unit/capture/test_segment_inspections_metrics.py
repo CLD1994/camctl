@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from camctl.capture.segment_inspections import _metric_from_probe
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.host_files.media import MediaProbe, MediaStream
 
 

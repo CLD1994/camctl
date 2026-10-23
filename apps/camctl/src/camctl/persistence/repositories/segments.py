@@ -418,7 +418,7 @@ def _verify_action6_checked_prefix(db, setrow, decision, target):
         CoverageMetric, CoverageStatus, DefaultScopeState, FileCompletionState,
         OwnershipState, SegmentDecisionStatus, SegmentMemberRole,
     )
-    from camctl.capture.video_coverage import (
+    from camctl.contracts.video_coverage import (
         CoverageAccumulator, CoverageTarget, VideoMetric, advance_coverage,
     )
     from camctl.contracts.enums import enum_for

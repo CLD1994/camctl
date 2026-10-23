@@ -13,7 +13,7 @@ from camctl.capture.segment_inspections import (
     SegmentInspectionRequest,
     inspect_segment,
 )
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.contracts.values import ConsistencyError
 from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.tasks import FileTaskId, FileTaskResult

@@ -1,15 +1,16 @@
 """拍摄分段规则使用的稳定事实、有限摘要与结果分类。"""
 
 from dataclasses import dataclass
-from decimal import Decimal
-from enum import StrEnum
 
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId
 from camctl.contracts.segment_values import (
-    DefaultScopeState, SegmentGap, SegmentGapKind, SegmentGapNeighborState,
-    SegmentKey, text_enum_for,
+    DefaultScopeState, SegmentCursor, SegmentGap, SegmentGapKind,
+    SegmentGapNeighborState, SegmentKey, SegmentSetRef, text_enum_for,
 )
-from camctl.capture.video_coverage import CoverageMetric, CoverageStatus
+from camctl.contracts.video_coverage import (
+    CoverageMetric, CoverageStatus, SegmentDecision, SegmentDecisionScope,
+    SegmentDecisionStatus,
+)
 
 
 def _text_enum(name, column):
@@ -51,37 +52,6 @@ CompletionBasis = _text_enum("CompletionBasis", "segment_sets.assessment_json.ba
 OverrecordStatus = _text_enum("OverrecordStatus", "segment_sets.assessment_json.overrecord")
 
 DefaultScopeBasis = _text_enum("DefaultScopeBasis", "segment_sets.assessment_json.scope_basis")
-
-@dataclass(frozen=True, slots=True)
-class SegmentSetRef:
-    """一个冻结结果集合的有限稳定引用。"""
-
-    action_id: int
-    scan_id: int
-    final_page_event_id: int
-    version: int
-
-    def __post_init__(self) -> None:
-        for name in ("action_id", "scan_id", "final_page_event_id", "version"):
-            value = getattr(self, name)
-            if type(value) is not int or not 1 <= value <= MAX_OBJECT_ID:
-                raise ValueError(f"{name} 必须是正安全整数")
-
-
-@dataclass(frozen=True, order=True, slots=True)
-class SegmentCursor:
-    """集合内一个成员的完整设备顺序键和稳定身份。"""
-
-    key: SegmentKey
-    member_identity: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.key, SegmentKey):
-            raise ValueError("分段游标必须携带设备顺序键")
-        if not isinstance(self.member_identity, str) or not self.member_identity:
-            raise ValueError("分段游标必须携带稳定成员身份")
-        self.member_identity.encode("utf-8")
-
 
 @dataclass(frozen=True, slots=True)
 class SegmentMember:
@@ -228,115 +198,6 @@ class DefaultSegmentScope:
                     or self.last_cursor is None or type(self.member_count) is not int
                     or self.member_count <= 0 or self.last_cursor < self.first_cursor):
                 raise ValueError("非空默认范围必须提供有效首尾游标和成员数")
-
-
-class SegmentDecisionStatus(StrEnum):
-    """公共来源决策的有限状态；不复用 OSMO 的分段判断状态。"""
-
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    UNCONFIRMED = "unconfirmed"
-    CANCELED = "canceled"
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentDecisionScope:
-    """不展开成员数组的公共默认视频范围。"""
-
-    state: DefaultScopeState
-    set_ref: SegmentSetRef
-    first_cursor: SegmentCursor | None
-    last_cursor: SegmentCursor | None
-    member_count: int | None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.state, DefaultScopeState):
-            raise ValueError("公共默认范围状态未登记")
-        if not isinstance(self.set_ref, SegmentSetRef):
-            raise ValueError("公共默认范围必须引用冻结结果集合")
-        if self.state is DefaultScopeState.UNKNOWN:
-            if self.first_cursor is not None or self.last_cursor is not None or self.member_count is not None:
-                raise ValueError("未知范围不得携带猜测边界或数量")
-        elif self.state is DefaultScopeState.EMPTY:
-            if self.first_cursor is not None or self.last_cursor is not None or self.member_count != 0:
-                raise ValueError("空范围必须明确为零成员且不带游标")
-        elif (self.first_cursor is None or self.last_cursor is None
-              or type(self.member_count) is not int or self.member_count <= 0
-              or self.last_cursor < self.first_cursor):
-            raise ValueError("非空范围必须提供有序首尾游标和成员数")
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentDecision:
-    """公共分段完成头；设备特化的指标不进入 OSMO SegmentAssessment。"""
-
-    set_ref: SegmentSetRef
-    status: SegmentDecisionStatus
-    metric: CoverageMetric
-    target: Decimal | int
-    confirmed: Decimal | int | None
-    coverage_status: CoverageStatus
-    checked_count: int
-    default_scope: SegmentDecisionScope
-    failure_code: str | None = None
-    reason: str | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.set_ref, SegmentSetRef):
-            raise ValueError("公共分段判断必须引用冻结集合")
-        if not isinstance(self.status, SegmentDecisionStatus):
-            raise ValueError("公共分段终态未登记")
-        if not isinstance(self.metric, CoverageMetric):
-            raise ValueError("覆盖量纲未登记")
-        if not isinstance(self.coverage_status, CoverageStatus):
-            raise ValueError("覆盖状态未登记")
-        if not isinstance(self.default_scope, SegmentDecisionScope):
-            raise ValueError("公共默认范围类型无效")
-        if self.default_scope.set_ref != self.set_ref:
-            raise ValueError("决策与默认范围必须引用同一集合")
-        if self.metric is CoverageMetric.DURATION_S:
-            if (not isinstance(self.target, Decimal) or not self.target.is_finite()
-                    or self.target <= 0):
-                raise ValueError("时长目标必须是正的精确秒数")
-            if self.confirmed is not None and (
-                not isinstance(self.confirmed, Decimal) or not self.confirmed.is_finite()
-                or self.confirmed < 0
-            ):
-                raise ValueError("已确认时长必须是非负精确秒数或未知")
-        else:
-            if type(self.target) is not int or self.target <= 0:
-                raise ValueError("帧数目标必须是正整数")
-            if self.confirmed is not None and (
-                type(self.confirmed) is not int or self.confirmed < 0
-            ):
-                raise ValueError("已确认帧数必须是非负整数或未知")
-        if type(self.checked_count) is not int or self.checked_count < 0:
-            raise ValueError("已检查成员数必须是非负整数")
-        if self.coverage_status is CoverageStatus.NOT_PERFORMED and (
-            self.confirmed is not None or self.checked_count != 0
-        ):
-            raise ValueError("未执行检查必须保持实际量未知且没有检查成员")
-        if self.coverage_status is CoverageStatus.REACHED and (
-            self.confirmed is None or self.confirmed < self.target
-        ):
-            raise ValueError("已达覆盖目标必须携带不低于目标的可靠量")
-        if self.coverage_status is CoverageStatus.CONFIRMED_SHORT and (
-            self.confirmed is None or self.confirmed >= self.target
-        ):
-            raise ValueError("确认不足必须携带低于目标的可靠量")
-        if self.failure_code is not None and (
-            not isinstance(self.failure_code, str) or not self.failure_code.strip()
-        ):
-            raise ValueError("失败代码必须是非空标识或未知")
-        if self.reason is not None and (
-            not isinstance(self.reason, str) or not self.reason.strip()
-        ):
-            raise ValueError("决策原因必须是非空文本或未知")
-        if self.status in (SegmentDecisionStatus.SUCCEEDED, SegmentDecisionStatus.CANCELED):
-            if self.failure_code is not None:
-                raise ValueError("成功或取消决策不得携带失败代码")
-        elif self.failure_code is None or self.reason is None:
-            raise ValueError("失败或未确认决策必须携带公开原因代码和说明")
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,7 @@ from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, SegmentKey, SegmentMember,
     SegmentMemberRole,
 )
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
 
 
 def members(count):

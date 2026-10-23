@@ -55,6 +55,37 @@ class SegmentKey:
 
 
 @dataclass(frozen=True, slots=True)
+class SegmentSetRef:
+    """一个冻结结果集合的有限稳定引用。"""
+
+    action_id: int
+    scan_id: int
+    final_page_event_id: int
+    version: int
+
+    def __post_init__(self) -> None:
+        for name in ("action_id", "scan_id", "final_page_event_id", "version"):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= MAX_OBJECT_ID:
+                raise ValueError(f"{name} 必须是正安全整数")
+
+
+@dataclass(frozen=True, order=True, slots=True)
+class SegmentCursor:
+    """集合内一个成员的完整设备顺序键和稳定身份。"""
+
+    key: SegmentKey
+    member_identity: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, SegmentKey):
+            raise ValueError("分段游标必须携带设备顺序键")
+        if not isinstance(self.member_identity, str) or not self.member_identity:
+            raise ValueError("分段游标必须携带稳定成员身份")
+        self.member_identity.encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True)
 class SegmentGap:
     """一个缺失区间或一个非尾部零字节原片的结构化诊断。"""
 

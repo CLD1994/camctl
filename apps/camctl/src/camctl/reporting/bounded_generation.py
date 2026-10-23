@@ -376,8 +376,7 @@ class _CoverageExpansion:
         self.ref = self.decision = None
         if self.public is None:
             return
-        from camctl.capture.segment_models import SegmentDecision
-        from camctl.capture.segment_storage import assessment_from_document
+        from camctl.contracts.video_coverage import SegmentDecision, decision_from_document
 
         self.ref = self.handle.active_result_ref()
         if self.ref is None:
@@ -385,13 +384,13 @@ class _CoverageExpansion:
         values = self.handle.read_result(self.ref)
         if values["assessment_json"] is None:
             raise ConsistencyError("同 H 正式结果集合缺少覆盖判断")
-        self.decision = assessment_from_document(values["assessment_json"])
+        self.decision = decision_from_document(values["assessment_json"])
         if not isinstance(self.decision, SegmentDecision):
             raise ConsistencyError("公开覆盖没有 Action6 公共分段判断")
         self._validate_projection()
 
     def _validate_projection(self):
-        from camctl.capture.segment_models import DefaultScopeState
+        from camctl.contracts.segment_values import DefaultScopeState
 
         decision = self.decision
         scope = decision.default_scope

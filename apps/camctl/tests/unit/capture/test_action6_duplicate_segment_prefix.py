@@ -13,7 +13,7 @@ from camctl.capture.segment_models import (
     SegmentMember,
     SegmentMemberRole,
 )
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
 
 
 def _stored(member_id, identity, key, role, ownership):

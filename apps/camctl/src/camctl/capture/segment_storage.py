@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 from camctl.capture import segment_models as models
 from camctl.capture.segment_models import (
     SegmentSetRef,SegmentMember,CompletionFacts,SegmentAssessment,SegmentSourceKind,PublicationKind,
-    SegmentDecision, SegmentDecisionScope, SegmentDecisionStatus, CoverageMetric, CoverageStatus,
     ResultCheckEndReason,CurrentSegmentResult)
+from camctl.contracts.video_coverage import (
+    CoverageMetric, CoverageStatus, SegmentDecision, decision_from_document,
+)
 from camctl.contracts.enums import enum_for
 from camctl.contracts.segment_values import decode_text_enum
 from camctl.contracts.values import ObjectId, UtcMicros
@@ -244,28 +246,6 @@ def assessment_from_document(value):
         scope[name] = cursor(scope[name])
     raw['default_scope'] = models.DefaultSegmentScope(**scope)
     return SegmentAssessment(**raw)
-
-
-def decision_from_document(value):
-    """只解码 Action6 的公共有限头，不尝试解释为 OSMO 判断。"""
-    raw = dict(value)
-    if raw.pop("decision_type", None) != "video_coverage_v1":
-        raise ValueError("公共分段决策类型未登记")
-    raw["set_ref"] = SegmentSetRef(**raw["set_ref"])
-    raw["status"] = SegmentDecisionStatus(raw["status"])
-    raw["metric"] = CoverageMetric(raw["metric"])
-    raw["coverage_status"] = CoverageStatus(raw["coverage_status"])
-    if raw["metric"] is CoverageMetric.DURATION_S:
-        raw["target"] = Decimal(raw["target"])
-        if raw["confirmed"] is not None:
-            raw["confirmed"] = Decimal(raw["confirmed"])
-    scope = dict(raw["default_scope"])
-    scope["state"] = decode_enum(models.DefaultScopeState, scope["state"])
-    scope["set_ref"] = SegmentSetRef(**scope["set_ref"])
-    for name in ("first_cursor", "last_cursor"):
-        scope[name] = cursor(scope[name])
-    raw["default_scope"] = SegmentDecisionScope(**scope)
-    return SegmentDecision(**raw)
 
 
 @dataclass(frozen=True)

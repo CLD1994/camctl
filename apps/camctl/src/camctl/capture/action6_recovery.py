@@ -9,7 +9,7 @@ from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, SegmentCursor, SegmentKey,
     SegmentMemberRole,
 )
-from camctl.capture.video_coverage import (
+from camctl.contracts.video_coverage import (
     CoverageAccumulator, CoverageDecision, CoverageFinishFacts, CoverageTarget,
     VideoMetric, advance_coverage, finish_coverage,
 )

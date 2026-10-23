@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
 from camctl.capture.media_facts import probe_document, read_probe
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget, VideoMetric
 from camctl.capture.media_flow import (
     MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support,
 )

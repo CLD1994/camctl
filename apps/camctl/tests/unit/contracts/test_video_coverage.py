@@ -5,7 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from camctl.capture import video_coverage
+from camctl.contracts import video_coverage
+from camctl.contracts.enums import enum_for
 
 
 def _coverage():
@@ -198,3 +199,47 @@ def test_target_frames_rejects_invalid_or_inexact_inputs(duration_s, interval_s)
 
     with pytest.raises(ValueError):
         coverage.target_frames(duration_s, interval_s)
+
+
+def test_public_decision_decoder_returns_the_contract_owned_capture_types() -> None:
+    from camctl.capture import segment_models
+    from camctl.capture import segment_storage
+    from camctl.contracts.segment_values import (
+        DefaultScopeState, SegmentCursor, SegmentSetRef,
+    )
+
+    set_ref = {
+        "action_id": 1,
+        "scan_id": 2,
+        "final_page_event_id": 3,
+        "version": 1,
+    }
+    decision = video_coverage.decision_from_document({
+        "decision_type": "video_coverage_v1",
+        "set_ref": set_ref,
+        "status": "succeeded",
+        "metric": "duration_s",
+        "target": "60.000",
+        "confirmed": None,
+        "coverage_status": "not_performed",
+        "checked_count": 0,
+        "default_scope": {
+            "state": int(enum_for("segment_sets.assessment_json.scope_state").UNKNOWN),
+            "set_ref": set_ref,
+            "first_cursor": None,
+            "last_cursor": None,
+            "member_count": None,
+        },
+        "failure_code": None,
+        "reason": None,
+    })
+
+    assert isinstance(decision, segment_models.SegmentDecision)
+    assert decision.metric is segment_models.CoverageMetric.DURATION_S
+    assert decision.target == Decimal("60.000")
+    assert decision.default_scope.state is DefaultScopeState.UNKNOWN
+    assert segment_models.SegmentDecisionStatus is video_coverage.SegmentDecisionStatus
+    assert segment_models.SegmentDecisionScope is video_coverage.SegmentDecisionScope
+    assert segment_models.SegmentSetRef is SegmentSetRef
+    assert segment_models.SegmentCursor is SegmentCursor
+    assert segment_storage.decision_from_document is video_coverage.decision_from_document

@@ -16,7 +16,7 @@ from camctl.capture.segment_inspections import (
     SegmentInspectionRequest,
     inspect_segment,
 )
-from camctl.capture.video_coverage import CoverageMetric, CoverageTarget
+from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
