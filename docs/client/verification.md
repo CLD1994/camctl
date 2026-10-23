@@ -4,19 +4,19 @@
 
 ## 来源动作失败且没有产物的客户端处理（2026-10-24 UTC）
 
-客户端识别 `obtain_action_outputs.result.failures` 中的 `source_action_failed`，核对错误阶段、详情来源 ID 与失败项来源 ID，并拒绝把该错误用于显式产物 ID 取回。同一报告或相同 `to_wm` 边界的合并报告内出现来源动作时，客户端要求来源已失败且明确报告 `outputs: []`；较早或较晚边界的历史合并不把之前省略的 `outputs` 当作空目录。报告摘要显示来源失败、没有可取回产物或预览、来源名称和 ID，以及已提供的来源错误码；展开技术详情仍可查看原始取回失败项和来源动作错误。该码没有进入分段错误处理，因此不会显示缺口或默认范围未知提示。
+客户端识别 `obtain_action_outputs.result.failures` 中的 `source_action_failed`，核对错误阶段、详情来源 ID 与失败项来源 ID，并拒绝把该错误用于显式产物 ID 取回。同一报告或相同 `to_wm` 边界的合并索引内出现来源动作时，客户端要求来源已失败且该边界没有已知正式产物实体。`outputs` 省略时允许导入，但省略不能删除历史已知产物；较早或较晚边界的历史实体不参与新边界的来源判断。客户端不靠字段省略推断完整产物目录为空，依赖来源错误本身表达该事实。报告摘要显示来源失败、没有可取回产物或预览、来源名称和 ID，以及已提供的来源错误码；展开技术详情仍可查看原始取回失败项和来源动作错误。该码没有进入分段错误处理，因此不会显示缺口或默认范围未知提示。
 
-先添加失败单元与浏览器用例。客户端原实现下，单元用例为 10 项失败、3 项通过；页面基线构建后，浏览器用例也未显示来源失败说明。修改后记录如下：
+先添加省略 `outputs` 的生产报告形态反例，原校验在真实 Python 报告导入、同报告导入和同边界合并三处均错误地拒绝。夹具来自生产 `generate_report_file`：[Python 报告 JSON](../../apps/client/tests/fixtures/source-action-failed/source-action-failed-report.json) 中来源动作状态为 `failed`，`outputs` 字段省略，取回失败项使用新来源错误；报告 SHA-256 为 `5f5feafddbbd6a5547429b4e056aa73c839a788b9061fd92331d5a8d370df579`。另有非空来源产物、非失败来源、显式 ID 与跨边界历史字段用例。客户端原页面基线构建后，浏览器用例未显示来源失败说明。修改后记录如下：
 
 | 检查与实际命令（均在 `apps/client` 执行） | 实际结果 |
 | --- | --- |
 | `node node_modules/typescript/bin/tsc --noEmit` | 退出 0。 |
 | `node node_modules/vite/bin/vite.js build` | 退出 0，转换 469 个模块；主包 891.79 kB、gzip 后 265.07 kB，保留超过 500 kB 的既有体积提示。 |
-| `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 67 个文件、3227 项通过，退出 0。 |
+| `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2` | 67 个文件、3229 项通过，退出 0。 |
 | `node node_modules/vitest/vitest.mjs run tests/integration/reports.test.ts tests/integration/segment-reports.test.ts tests/integration/scalar-schema-import.test.ts --maxWorkers=1` | 3 个文件、51 项通过，退出 0。 |
 | `node node_modules/vitest/vitest.mjs run tests/integration/browser-previews.test.ts --maxWorkers=2` | 1 个文件、19 项通过，退出 0；包含来源错误摘要、自动预览来源定位及原始详情展示。 |
 
-本次没有运行完整客户端集成套件、后端验证、安装版联合验证或真实设备操作；后端的新错误处理仍需独立实现和验证。客户端结果只证明当前代码的导入、校验和页面展示，不证明主机已生成该错误，也不证明真实相机行为。
+为取得上述 Python 报告样本，只运行了一个使用临时状态库的后端报告生成集成用例；该用例通过不代表完整后端门禁。客户端验证未运行完整客户端集成套件、安装版联合验证或真实设备操作；后端新错误处理仍需独立审查和完整验证。客户端结果只证明当前代码的导入、校验和页面展示，不证明真实主机或相机行为。
 
 ## Hasselblad 命名选项与安装版参数验收（2026-10-21 UTC）
 

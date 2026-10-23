@@ -544,13 +544,15 @@ function associations(index: Index, sameBoundary = true) {
             const source = index.actions.get(
               failure.source_action_instance_id,
             )?.value;
-            if (source)
-              requireFact(
-                source.status === "failed" &&
-                  Array.isArray(source.outputs) &&
-                  source.outputs.length === 0,
-                "可见来源失败项要求来源动作已失败且明确报告空产物目录",
+            if (source) {
+              const hasKnownOutputs = [...index.outputs.values()].some(
+                ({ parent }) => parent === failure.source_action_instance_id,
               );
+              requireFact(
+                source.status === "failed" && !hasKnownOutputs,
+                "可见来源失败项要求来源动作已失败且本边界没有已知产物实体",
+              );
+            }
           }
         }
         if (

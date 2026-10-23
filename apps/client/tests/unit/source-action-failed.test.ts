@@ -5,6 +5,7 @@ import {
 } from "../../src/domain/reports";
 import { resultNotes } from "../../src/web/result-model";
 import { cloneProtocolJson } from "../../src/shared/json";
+import sourceActionFailedPythonReport from "../fixtures/source-action-failed/source-action-failed-report.json";
 import {
   sourceActionFailedActions,
   sourceActionFailedReport,
@@ -14,13 +15,23 @@ it("accepts source_action_failed for a visible failed source with an explicitly 
   expect(() => validateReport(sourceActionFailedReport())).not.toThrow();
 });
 
+it("accepts source_action_failed when the report generator omits empty outputs", () => {
+  const report = sourceActionFailedReport();
+  const { source } = sourceActionFailedActions(report);
+  delete source.outputs;
+  expect(() => validateReport(report)).not.toThrow();
+});
+
+it("imports the production Python report with an omitted empty outputs field", () => {
+  expect(() => validateReport(sourceActionFailedPythonReport)).not.toThrow();
+});
+
 it.each([
   "details_source_mismatch",
   "extra_source_details",
   "wrong_stage",
   "missing_source_details",
   "source_succeeded",
-  "source_outputs_missing",
   "source_has_outputs",
   "explicit_ids",
   "misplaced_action_error",
@@ -38,7 +49,6 @@ it.each([
     source.status = "succeeded";
     source.error = undefined;
   }
-  if (change === "source_outputs_missing") delete source.outputs;
   if (change === "source_has_outputs") {
     source.outputs = [
       {
@@ -93,7 +103,7 @@ it("does not treat a prior boundary's omitted output list as an empty source at 
   expect(() => validateReportAgainstHistory(current, incoming)).not.toThrow();
 });
 
-it("requires a source visible across imports at the same report boundary to be explicitly empty and failed", () => {
+it("requires a visible source to be failed and rejects known outputs at the same boundary", () => {
   const current = sourceActionFailedReport();
   const { source } = sourceActionFailedActions(current);
   current.plans![0].actions = [source];
@@ -106,6 +116,54 @@ it("requires a source visible across imports at the same report boundary to be e
 
   expect(() => validateReportAgainstHistory(current, incoming)).not.toThrow();
   delete source.outputs;
+  expect(() => validateReportAgainstHistory(current, incoming)).not.toThrow();
+
+  source.outputs = [
+    {
+      output_id: "50",
+      source_action_instance_id: source.action_instance_id,
+      kind: "original",
+      media_type: "image/jpeg",
+      availability: "available",
+      cleanup: { status: "not_requested" },
+      checksum: { status: "not_obtained" },
+      media: {
+        check_status: "not_performed",
+        duration: { status: "unknown" },
+      },
+    },
+  ];
+  expect(() => validateReportAgainstHistory(current, incoming)).toThrow();
+});
+
+it("does not let an omitted same-boundary outputs field hide an existing output entity", () => {
+  const current = sourceActionFailedReport();
+  const { source } = sourceActionFailedActions(current);
+  source.outputs = [
+    {
+      output_id: "50",
+      source_action_instance_id: source.action_instance_id,
+      kind: "original",
+      media_type: "image/jpeg",
+      availability: "available",
+      cleanup: { status: "not_requested" },
+      checksum: { status: "not_obtained" },
+      media: {
+        check_status: "not_performed",
+        duration: { status: "unknown" },
+      },
+    },
+  ];
+  current.plans![0].actions = [source];
+
+  const incoming = sourceActionFailedReport();
+  const { source: currentSource, preview } =
+    sourceActionFailedActions(incoming);
+  delete currentSource.outputs;
+  incoming.plans![0].actions = [currentSource, preview];
+  incoming.from_wm = current.to_wm;
+  incoming.to_wm = current.to_wm;
+
   expect(() => validateReportAgainstHistory(current, incoming)).toThrow();
 });
 
