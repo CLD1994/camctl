@@ -62,7 +62,11 @@ git status --short
 apps/camctl/.venv311/bin/python --version
 node --version
 npm --version
+export PYTHONPATH="$PWD/apps/camctl/src"
+apps/camctl/.venv311/bin/python -c 'import camctl; print(camctl.__file__)'
 ```
+
+源码侧 Python 验证显式使用当前工作树的 `apps/camctl/src`，并保存实际导入位置；共享解释器不共享可编辑安装的归属。安装版子进程按联合测试说明移除源码搜索路径，实际导入独立环境的 `site-packages`。
 
 每项新增行为先写能证伪合同的失败测试，实际运行确认失败原因，再实现并运行同一范围。集成测试按目录分别启动 pytest，同工作区顺序执行；跨任务共享资源先隔离。阶段结束检查 diff、更新原步骤进度并提交该任务实际文件，检查暂存差异及提交后状态。局部通过后继续下一项，不为没有新增疑点的范围重复全量回归。
 
@@ -92,7 +96,7 @@ V1、V2、V4 都须取得实际业务结果，不能以基础类型或仓储测�
 | 责任 | 主要现有文件与建议新增位置 |
 | --- | --- |
 | 部署和受理 | `bootstrap/config.py`、`devices/catalog.py`、`devices/tasks.py`、`devices/drivers/adb_cameras/{registration,definitions,action6_record,osmo360ii_capture}.py`、`acceptance/definitions.py`、`capture/models.py`；建议 `devices/video_results.py`。 |
-| 公共集合与策略 | `capture/{segment_models,segment_storage,segment_completion,native_completion,segment_finish}.py`、`contracts/segment_values.py`；建议 `capture/segment_profiles.py`，设备算法保留独立模块。 |
+| 公共集合与策略 | `capture/{segment_models,segment_storage,segment_completion,native_completion,segment_finish}.py`、`contracts/segment_values.py`、`devices/segment_profiles.py`；设备算法保留独立模块。 |
 | 设备身份与目标 | `devices/drivers/adb_cameras/osmo360ii_segments.py`、`capture/{segments,native_segments}.py`；建议 `devices/drivers/adb_cameras/action6_segments.py` 与 `capture/video_coverage.py`。 |
 | 存储、守卫及共同提交 | `persistence/repositories/segment*.py`、`persistence/repositories/{capture,outputs,history}.py`；新增检查与复用仓储按 V6、V7 划分。 |
 | 字节和媒体 | `host_files/media.py`、`capture/{media,media_facts,media_flow}.py`、`outputs/{qualification,read_attempts,work_files,obtain_flow}.py`；建议 `capture/segment_inspections.py`。 |
@@ -139,11 +143,11 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 
 **为什么在 Action6 前完成：** 当前仓储、守卫和取回直接解析 CAM／OSV，并把 OSMO 下界模型当作完整判断。先以已有业务检验公共层，能够发现真实下游接缝。
 
-**文件：** 修改 `capture/segment*.py`、`capture/native_completion.py`、`persistence/repositories/segment*.py`、`contracts/segment_values.py` 与相关事件、SQL、历史登记；新增建议的 `capture/segment_profiles.py`。OSMO 解析和算法仍在对应设备模块。
+**文件：** 修改 `capture/segment*.py`、`capture/native_completion.py`、`persistence/repositories/segment*.py`、`contracts/segment_values.py` 与相关事件、SQL、历史登记；公共文件特化位于 `devices/segment_profiles.py`。OSMO 解析和算法仍在对应设备模块。
 
 **输入／交付：** 消费 V1 的 `VideoResultContract`，定义 `SegmentProfile`、`SegmentFileFacts`、有限 `SegmentDecision` 及策略分派；推广现有集合和来源完成端口。V4、V6、V7 直接使用这些生产端口。
 
-- [ ] **步骤 1：增加公共合同与 OSMO 回归反例。** 建议 `apps/camctl/tests/unit/capture/test_segment_profiles.py` 及 `apps/camctl/tests/integration/persistence/test_segment_profile_proofs.py`。断言公共成员资格不会调用固定 CAM 解析器；不匹配冻结特化的成员、配对或申请会被独立守卫拒绝。
+- [ ] **步骤 1：增加公共合同与 OSMO 回归反例。** 使用 `apps/camctl/tests/unit/devices/test_video_segment_profiles.py` 及 `apps/camctl/tests/integration/persistence/test_segment_file_proofs.py`。断言公共成员资格不会调用固定 CAM 解析器；不匹配冻结特化的成员、配对或申请会被独立守卫拒绝。
 - [ ] **步骤 2：分别运行单元文件和 persistence 文件，确认反例有效。** 使用下面前两条命令，两个目录不合并进同一进程。
 - [x] **步骤 3：抽离文件身份与有序集合责任。** 审计 `segments.py`、`segment_result_members.py`、`segment_starts.py`、`segment_listing.py` 的直接设备解析与后缀判断。由冻结特化提供解析结果，仓储仍独立核对原页、原固定文件、来源及完整申请，不能信任调用方直接给出的合格标记。2026-10-23：公共文件特化已接入原页证明、固定成员、起点及候选；OSMO 原解析器也复用该解析。定向单元两组分别为59项和49项通过，固定成员／原页文件证明集成15项通过（90.95秒，日志 `/tmp/camctl-video-shared-profile-tests.log`）。Action6 完成判定与发布接线继续后续步骤。
 - [ ] **步骤 4：抽离设备判定与公共发布。** OSMO 的普通下界／N 和 native 空尾分类返回公共有限判断；增长范围、缺口沿关系分页保存。解除 `segment_transactions.py` 对 OSMO `SegmentAssessment` 的通用假设；必要判定仍由独立守卫按相应策略核对。
@@ -152,8 +156,8 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 - [ ] **步骤 7：运行 OSMO 业务与存储门槛。** 分别运行 `apps/camctl/tests/unit/capture/test_record_segments.py`、`apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py`、`test_native_segment_completion.py`；再单独运行 persistence 的新文件及 `test_segment_transaction_batches.py`，history 的 `test_record_segment_history.py`，outputs 的 `test_segment_default_scope.py`。同目录文件可在一次进程中组合。断言 `9000 -> N=2`、`9001 -> N=3`、空尾不提升短尾、缺口前缀及运行时零媒体拷贝。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture/test_segment_profiles.py apps/camctl/tests/unit/capture/test_record_segments.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_profile_proofs.py apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_video_segment_profiles.py apps/camctl/tests/unit/capture/test_record_segments.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_file_proofs.py apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py apps/camctl/tests/integration/capture/test_native_segment_completion.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_record_segment_history.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_segment_default_scope.py -q
@@ -185,7 +189,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 
 **输入／交付：** 消费 V1—V3，增加 Action6 特化，并同时启用对应部署工厂与正常处理器。交付两类动作从真实 RESULTS 页、来源终态到默认／预览／明确 ID 取回及报告的路径；异常内容检查由 V8 完成。
 
-- [ ] **步骤 1：写解析和目标绑定失败测试。** 建议 `apps/camctl/tests/unit/devices/test_action6_segments.py`：DJI 目录与十四位时间、`0999 → 下一目录0001`、大小写配对原字节、不同 datetime、冲突键、非法名和孤立 LRF；不得用编号替代归属。原生延时目标使用冻结采集时长和间隔，不改变照片最低要求。
+- [ ] **步骤 1：写解析和目标绑定失败测试。** 使用 `apps/camctl/tests/unit/devices/test_action6_record_results.py` 和 `test_video_segment_profiles.py`：DJI 目录与十四位时间、`0999 → 下一目录0001`、大小写配对原字节、不同 datetime、冲突键、非法名和孤立 LRF；不得用编号替代归属。原生延时目标使用冻结采集时长和间隔，不改变照片最低要求。
 - [x] **步骤 2：写正常纵向集成失败测试并运行。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_normal.py`，同时覆盖普通和 native；观察原页、全部合格 MP4／LRF／照片、默认范围、产物及终态，拷贝和媒体调用次数为零。单独运行该文件确认当前不能闭合多段。
 - [x] **步骤 3：实现 Action6 文件特化及普通／native 绑定。** 视频和 LRF 具有序列位置，照片独立分类；普通多段为至少一份非空 MP4，不再要求精确一份。`coverage_target()` 从受理时生效参数生成精确时长或 `floor(D/I)+1` 整数帧，随执行定义固定；正常报告与之后异常检查读取同一目标，不另算一份。native 的 `outputs` 继续读取同一驱动格式映射，单文件路径不改变。
 - [ ] **步骤 4：接通正常、取消及有限失败的公共发布。** 两类动作共用公共结果集合，保留原控制、等待与取消资格。普通取消放弃；native 取消默认全部合格完成视频及照片。基准／START 失败、文件完成未知和必要格式缺失保持真实失败或未知，不调用 OSMO 下界或 native 专属入口。
@@ -194,7 +198,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 - [ ] **步骤 7：分别运行 devices、capture、outputs、reporting 的上述测试。** 补跑 Action6 现有结果页及单文件必要回归；测试证明模式确实由生产装配选中，原生延时没有被塞入只支持普通录像的 `FinishRecordingResults` 入口。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_segments.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_record_results.py apps/camctl/tests/unit/devices/test_video_segment_profiles.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/devices/test_action6_result_pages.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_action6_segmented_normal.py apps/camctl/tests/integration/capture/test_recording_media_link.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_video_scope_photos.py -q
@@ -234,12 +238,12 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/host_fil
 - [x] **步骤 3：实现独立检查所有权与拷贝分支。** 每项拷贝明确属于 delivery、单原片处理或分段检查中的一种；保存原成员、精确设备源、目标主机文件、预算及进度。复用现有 prepare、transfer、complete 的字节与校验内核，主文件及操作历史保持独立。
 - [x] **步骤 4：实现单段可靠执行。** `inspect_segment()` 先完整拷贝并可靠核验，再调用 V5 工具，按原操作保存主视频指标及实际失败；部分字节、工具退出、指标未知、明确媒体问题分别表达。取消、空间不足及调用收场沿现有有限规则处理。
 - [ ] **步骤 5：接通进程内和重启接续。** 输入进度或媒体结果提交未知时保留原键和申请，核实后继续；已可靠保存的检查不重跑，不重置预算；来源提交前有效检查可续传，已有来源终态时进入 V7 的保留与清理判断。
-- [ ] **步骤 6：同步历史及维护资格。** 新检查、内部 copies 与工具记录归原动作；输入文件仍为独立历史对象。新增 `apps/camctl/tests/integration/history/test_segment_inspection_history.py`，验证快照、正反向恢复及原 H 文件事实。维护器在来源检查或提交未可靠结束时保留副本，不能因普通 owner 分类不识别而删除。
+- [ ] **步骤 6：同步历史及维护资格。** 新检查、内部 copies 与工具记录归原动作；输入文件仍为独立历史对象。使用 `apps/camctl/tests/integration/history/test_action6_video_result_history.py`，验证快照、正反向恢复及原 H 文件事实。维护器在来源检查或提交未可靠结束时保留副本，不能因普通 owner 分类不识别而删除。
 - [ ] **步骤 7：分别运行 capture、history 及相关 outputs 的复制门槛，检查登记生成。** 原单文件 `test_recording_media_link.py` 和既有复制测试继续通过；本步不启用 Action6 异常编排，直到 V7 的正式取回及清理接缝完成。
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_segment_inspections.py apps/camctl/tests/integration/capture/test_recording_media_link.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_segment_inspection_history.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_action6_video_result_history.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_copy_segments.py -q
 ```
 
@@ -251,7 +255,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 
 **输入／交付：** 消费 V2 的公共完成端口、V4 的来源选择、V6 的完整副本，提供 `BoundCheckCopy` 和 `read_bound_check_copy()`。交付来源共同事务、原等待者关联、真实取回读本地副本和最终维护清理；V8 可直接发布实际检查结果。
 
-- [ ] **步骤 1：写事务截点失败测试。** 建议 `apps/camctl/tests/integration/persistence/test_segment_reuse_publication.py`：来源提交前已有两个 PENDING 正式选择，提交后才进入等待的第三个选择；前两者被原事务绑定，第三个不绑定。取回尚无固定 items 时按原 selection 身份关联，不能假定等待者已经完成产物选择。
+- [ ] **步骤 1：写事务截点失败测试。** 在 `apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py::test_only_obtains_waiting_at_the_source_publication_boundary_are_bound` 验证：来源提交前已有两个 PENDING 正式选择，提交后才进入等待的第三个选择；前两者被原事务绑定，第三个不绑定。取回尚无固定 items 时按原 selection 身份关联，不能假定等待者已经完成产物选择。
 - [x] **步骤 2：写取回与清理失败测试并分别运行。** 建议 `apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py` 及 `apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py`。两个取回有不同 delivery／目标文件；第一个结束时副本继续保留；读副本期间维护器不能删除源；全部相关责任结束后才可清理。
 - [x] **步骤 3：扩展来源终态的有界整组事务。** 同时提交产物、视频范围、适用覆盖、动作终态、等待转换及来源发布截点。按[存储专题](../../camctl/database/segments.md#生产端口与后续分工)，从该完整 H 按页恢复实际已运行且等待来源的 PENDING 选择及准确副本关系。原操作键保存完整有限申请；核对同源成员、真实 output、完整副本、原依赖及适用等待者。
 - [ ] **步骤 4：实现原申请核实与取消次序。** 事务已提交但回执未知时，从原整组恢复原 H、产物和等待者；不重新查询后来的等待集合。取消先于来源终态时采用取消处置，来源终态先提交时保持原结果。复用资格与默认／明确 ID 的实际选择分别核对。
@@ -263,9 +267,9 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_reuse_publication.py apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py apps/camctl/tests/integration/outputs/test_work_file_result_boundary.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_segment_inspection_history.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_action6_video_result_history.py -q
 ```
 
 - [x] **步骤 10：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
@@ -281,12 +285,13 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/
 - [x] **步骤 3：实现异常判定与检查推进。** 控制和文件核实后，从冻结起点逐段调用 `inspect_segment()`，保存累计量及首个中断位置，达到目标即停止为选段检查后段；下一指标未知时不跨越。正常登记接续、已有终态和取消先分派，不能误启内容检查。
 - [x] **步骤 4：实现来源终态与范围决策。** 使用 V7 一次发布所有合格原片和固定视频范围。可靠控制但覆盖未知可成功；没有控制或内容成功依据则失败；明确失败优先。来源失败不把非空前缀取回改为失败，空／未知视频范围不抑制独立照片处理。
 - [ ] **步骤 5：审计全部生命周期入口。** 核对下方入口表的普通、native、启动／绑定／外部失败、停止耗尽、时钟受限、取消、已有结论、提交未知及冷恢复分区。原生延时取消保留全部合格完成视频及照片，不继续检查以追求原目标。
-- [ ] **步骤 6：增加装配与恢复组合。** 建议 `apps/camctl/tests/integration/bootstrap/test_action6_segmented_resume.py`，在输入部分落盘、拷贝完成结果未保存、媒体结束、覆盖保存及来源提交前后分别中断。核对 START／STOP、预算、检查身份、范围及副本使用不会被重置或重复。
+- [ ] **步骤 6：增加装配与恢复组合。** 使用 capture 目录的 `test_action6_lifecycle_recovery.py`、`test_action6_budget_cold_recovery.py` 和 `test_action6_segmented_recovery.py`，并由 V10 安装版恢复矩阵验证进程中断。在输入部分落盘、拷贝完成结果未保存、媒体结束、覆盖保存及来源提交前后分别中断。核对 START／STOP、预算、检查身份、范围及副本使用不会被重置或重复。
 - [ ] **步骤 7：分别运行新 capture 与 bootstrap 文件，补跑同模式单文件和 OSMO 关键回归后提交。** 此步结束应可从实际处理器取得正常／异常的来源、范围、独立取回及正确清理，不等待 V9 才补齐执行所需持久化或归属。
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py apps/camctl/tests/integration/capture/test_native_segment_completion.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_action6_segmented_resume.py apps/camctl/tests/integration/bootstrap/test_action6_capture_completion.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_action6_lifecycle_recovery.py apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/bootstrap/test_action6_capture_completion.py -q
 ```
 
 ### 必须逐项核对的生产入口
@@ -318,7 +323,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/bootstra
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_video_coverage_report.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_video_result_boundary.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_action6_video_result_history.py -q
 node --disable-warning=ExperimentalWarning scripts/check-report-dependencies.mjs
 node --disable-warning=ExperimentalWarning --test tests/integration/report-dependenc*.test.mjs
 cd apps/client
@@ -344,6 +349,8 @@ cd ../..
 
 ```bash
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_segmented_roundtrip.py -q
+apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_segmented_media_fixtures.py -q
+apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_segmented_recovery_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_demo_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py -q
@@ -360,7 +367,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capabili
 **文件：** 受影响源码、权威资源、运行及配置说明、数据库专题、组件验证记录；模式样例与包内演示配置随实现更新，不复制权威清单。
 
 - [ ] **步骤 1：完成任务与规格覆盖核对。** 按下方验收映射确认每项已由真实生产路径和测试覆盖，审查所有显式模式分派及设备假设。旧 OSMO 证据按原范围保留，新增结果记录本次版本、环境与原日志。
-- [ ] **步骤 2：运行完整 Python 单元与组件集成门槛。** 单元命令 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`。组件集成按测试指南的目录逐进程顺序运行，不合并为单一 pytest 进程；下面脚本按实际测试目录发现，避免另外维护完整目录清单。
+- [ ] **步骤 2：运行完整 Python 单元与组件集成门槛。** 单元命令 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，最终生产基线显式固定源码后7061项通过、1项平台跳过。完整组件目录继续验证；按测试指南分目录启动进程，不合并为单一pytest进程，同工作树内串行。下面脚本按实际测试目录发现，避免另外维护完整目录清单。
 
 ```bash
 apps/camctl/.venv311/bin/python - <<'PY'
@@ -375,7 +382,7 @@ for directory in sorted(root.iterdir()):
 PY
 ```
 
-- [ ] **步骤 3：运行客户端和公共登记门槛。** 客户端在 `apps/client` 执行 `npm test`、`npm run build`；根执行下列只读检查。修改登记时先使用所属生成脚本的写入模式，再运行只读模式核对，不能手工维护生成区。
+- [x] **步骤 3：运行客户端和公共登记门槛。** 客户端完整 `VITEST_MAX_WORKERS=2 npm test` 已通过3212项单元、1559项集成／浏览器，并完成类型检查和实际构建；根目录下列只读检查、115项登记接缝测试和27项历史SQL测试均通过。修改登记时先使用所属生成脚本的写入模式，再运行只读模式核对，不能手工维护生成区。
 
 ```bash
 node scripts/check-protocol.mjs
@@ -441,6 +448,6 @@ V7 以 `segment_sets.published_event_id` 所属完整事务为固定截点，从
 
 ### 剩余实现与验证顺序
 
-1. 沿 V11 完成组件目录门槛。受理目录338项通过；bootstrap共享视频夹具已显式保存当前格式的模式，等待完整目录验证。7054项单元过程结果未固定源码导入位置，最终门槛须在生产收口后以显式 `PYTHONPATH` 重验。客户端已按既有两worker环境完成 `npm test`，3212项单元、1559项集成／浏览器、类型检查和实际构建全部通过。
+1. 沿 V11 完成组件目录门槛。显式源码的最终完整单元7061项通过，公共检查与客户端完整门槛通过；受理338项及host_files、logging_runtime、motor、scheduling各目录通过，其余完整目录在隔离工作树推进。bootstrap及history共享视频夹具显式保存当前格式的模式，保留严格生产校验。
 2. 沿 V10 在隔离工作树完成安装版异常矩阵，核对部分副本、媒体结果与来源事务回执未知、原等待者截点、后到取回和实际读取保护。换源、取消、停止耗尽、明确错误优先及重复键已取得组件证据，安装门槛继续验证共同工作。
 3. 所有受影响门槛取得完整结果后，核对原步骤及规格映射，归档与最终源码／资源一致的发行物并完成独立审查；设备准备后再单独执行 V12。
