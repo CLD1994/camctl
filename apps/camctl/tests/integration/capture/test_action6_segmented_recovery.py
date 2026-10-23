@@ -436,7 +436,31 @@ class _Action6Native151Catalog(Action6NativeCatalog):
         )
 
 
-async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "values",
+        "entry_count",
+        "expected_status",
+        "expected_confirmed",
+        "expected_checked_count",
+        "action_status",
+    ),
+    [
+        ((60, 60, 45, 20), 4, "reached", 165, 3, 3),
+        ((60, 60, 20), 3, "confirmed_short", 140, 3, 4),
+    ],
+    ids=("reached-at-151-frames", "complete-short-of-151-frames"),
+)
+async def test_action6_native_recovery_reports_actual_frame_coverage(
+    tmp_path,
+    monkeypatch,
+    values,
+    entry_count,
+    expected_status,
+    expected_confirmed,
+    expected_checked_count,
+    action_status,
+):
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
@@ -462,7 +486,7 @@ async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, m
             "timelapse_sent",
             activity_facts={"sent_at": _NOW},
         )
-        tools = _attach_media(runtime, owned, tmp_path, (60, 60, 45, 20))
+        tools = _attach_media(runtime, owned, tmp_path, values)
         wall, mono = [_NOW], [5_000_000_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: mono[0]
@@ -473,7 +497,11 @@ async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, m
             from .test_result_page_history import _actual
 
             return DeviceCallResult.from_outcome(
-                _actual(request.ticket, entries=_entries(4, photo=True), finalized=True)
+                _actual(
+                    request.ticket,
+                    entries=_entries(entry_count, photo=True),
+                    finalized=True,
+                )
             )
 
         driver = _result_port(runtime, read)
@@ -486,7 +514,9 @@ async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, m
         from camctl.capture import action6_completion
         from camctl.capture.action6_recovery import advance_action6_recovery
 
-        async def inspect_saved_native_result(runtime, requested_action_id, *, canceled=False):
+        async def inspect_saved_native_result(
+            runtime, requested_action_id, *, canceled=False
+        ):
             action = runtime.action(requested_action_id)
             ref = await action6_completion.prepare_action6_segment_set(
                 runtime, action, None, canceled=canceled
@@ -505,16 +535,29 @@ async def test_action6_native_recovery_counts_explicit_frames_to_151(tmp_path, m
         assert owned.connection.execute(
             "SELECT target_duration_ms FROM segment_sets"
         ).fetchone() == (300_000,)
-        await _assert_saved_decision(
-            owned, action_id, coverage="reached", confirmed=165, count=3
+        ref = SegmentRepository().read_active_set(action_id, owned)
+        assert ref is not None
+        decision = SegmentRepository().read_decision(ref, owned)
+        assert decision.status.value == (
+            "succeeded" if expected_status == "reached" else "failed"
         )
-        assert len(tools.calls) == 3
+        assert decision.coverage_status.value == expected_status
+        assert decision.confirmed == expected_confirmed
+        assert decision.checked_count == expected_checked_count
+        assert len(tools.calls) == expected_checked_count
         assert all(count_frames for _, count_frames in tools.calls)
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
-        ).fetchone() == (3,)
-        assert runtime.action(action_id)["status"] == 3
+        ).fetchone() == (expected_checked_count,)
+        assert runtime.action(action_id)["status"] == action_status
         driver.list_results.assert_awaited_once()
+        report = _reported_coverage(tmp_path, owned, action_id)
+        assert report["status"] == expected_status
+        assert report["metric"] == "frames"
+        assert report["target"] == 151
+        assert report["confirmed"] == expected_confirmed
+        assert len(report["checked_output_ids"]) == expected_checked_count
+        assert report["default_scope"]["member_count"] == expected_checked_count
     finally:
         owned.connection.close()
 
