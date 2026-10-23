@@ -89,7 +89,9 @@
 
 普通录像的 `target_duration_ms` 来自原任务。正常录像的保留范围应完整；当默认范围也标为完整时，它必须与全部保留原片相同。异常录像分别列出全部保留原片和默认范围，范围外原片只会进入 `all_retained` 的测量，不会进入 `default_delivery` 的测量。
 
-原生延时的数量验收采用[采样数量规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#原生延时的采样数量验收)。当前工具尚未实现帧数基准范围、整体帧数容差及逐路数量判断；该扩展待恢复实施后接入，现有报告不手工补写为数量已通过。
+原生延时的帧数数量验收采用[采样数量规则](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#原生延时的采样数量验收)。工具从原任务的可靠目标 `T_ms`、采样间隔 `I_ms` 及其独立依据推导参考数量范围 `[ceil(T_ms/I_ms), floor(T_ms/I_ms)+1]`，并以范围下界 `B` 为基准。默认帧数短缺容差为 3 帧；每路最低合格数量为 `max(1, B-E)`。目标 300 秒、间隔 2 秒时参考范围为 150～151 帧，默认每路至少 147 帧。高于参考范围上界的实测帧数会记录，不因偏多单独失败。
+
+帧数数量判断不要求先取得独立播放帧率或采样端点规则；缺少它们时，`expected_playback` 仍为 `unknown`，而目标和间隔依据完整的 `expected_sampling_quantity` 及采样数量范围可以独立核验。缺少目标、间隔或对应依据时，数量也保持 `unknown`。显式容差使用 CLI 参数 `--frame-count-shortfall-tolerance`；省略参数采用工具默认值，传入 `0` 合法，负数不接受。该容差只影响帧数数量，不修改任务目标、设备等待或时长容限。
 
 当前工具推导单一预期播放时长时需要以下附加字段，且每项依据必须来自实测媒体以外的任务或设备资料：
 
@@ -107,7 +109,7 @@
 }
 ```
 
-工具按这些独立事实推导预期帧数和播放时长。`start_included_end_excluded` 表示从采样起点开始、直到目标时刻之前计数，帧数为 `ceil(target / interval)`；`start_and_end_included` 表示采样起点和恰好落在目标时刻的端点都计入，帧数为 `floor(target / interval) + 1`。预期播放时长按预期帧数除以已核实的播放帧率计算。缺少任务目标、采样间隔、帧率或端点规则的独立依据时，工具报告预期播放未知，不用本次媒体的实际帧数填补；这一结果不代替独立的采样数量结论。
+工具按这些独立事实推导唯一的预期播放帧数和播放时长。`start_included_end_excluded` 表示从采样起点开始、直到目标时刻之前计数，帧数为 `ceil(target / interval)`；`start_and_end_included` 表示采样起点和恰好落在目标时刻的端点都计入，帧数为 `floor(target / interval) + 1`。预期播放时长按预期播放帧数除以已核实的播放帧率计算。缺少播放帧率或端点依据时，工具不会猜测端点或写入预期播放帧数、预期时长；独立的采样数量规则仍只使用任务目标与采样间隔。
 
 ## 运行工具
 
@@ -117,7 +119,7 @@
 python3.11 -m pip install -r docs/hardware/requirements-osmo-media-validation.txt
 ```
 
-工具只读取清单引用的本地副本；它不修改媒体文件。省略容限参数时采用规格默认值 100 ms；部署可以提供其他非负整数毫秒值，`0` 表示不允许短缺。
+工具只读取清单引用的本地副本；它不修改媒体文件。整体时长容限与采样帧数容差分别配置：省略 `--shortfall-tolerance-ms` 时采用默认 100 毫秒；省略 `--frame-count-shortfall-tolerance` 时采用默认 3 帧。两项都可以配置为 `0`；时长参数以毫秒计，帧数参数以帧计。
 
 报告输出路径必须与输入清单和所有本地媒体副本分开。工具会拒绝覆盖这些输入，并使用独立临时文件写入报告。
 
@@ -125,25 +127,30 @@ python3.11 -m pip install -r docs/hardware/requirements-osmo-media-validation.tx
 python3.11 docs/hardware/validate_osmo_segments.py \
   --manifest /path/to/osmo-media-manifest.json \
   --shortfall-tolerance-ms 100 \
+  --frame-count-shortfall-tolerance 3 \
   --batch-size 64 \
   --output /path/to/osmo-media-report.json
 ```
 
-可省略 `--shortfall-tolerance-ms` 使用默认值，也可传入 `0` 或其他非负整数。负值、布尔值、浮点值及非整数输入不接受。报告会记录实际生效的 `shortfall_tolerance_ms`。
+可分别省略两个容限参数使用各自默认值，也可传入 `0` 或其他非负整数。两个参数都拒绝负数和非整数；报告记录实际生效的 `shortfall_tolerance_ms` 与 `frame_count_shortfall_tolerance`。后者不按分段或视频路数重复应用。
 
 `--batch-size` 必须是正整数，默认 `64`。工具用本地临时 SQLite 文件索引清单项、范围成员、逐文件结果和 findings，并按该批次大小读取索引及写出报告；SQLite 文件和诊断工件都在运行结束后清理。工具不会访问 camctl 业务数据库。ffprobe 帧时间戳逐行摘要，子进程 stderr 由独立读取线程写入临时工件，报告编码时再完整写回对应诊断字段。报告先写入输出目录中的临时文件，全部编码成功后才原子替换目标；校验或编码失败不会发布半份报告，也不会覆盖清单或媒体副本。报告记录 `processing_batch_size`，不同批次大小不改变验收结论。
 
 ## 报告与判定
 
-报告顶层保存 `acceptance_id`、`source_action_instance_id` 及其状态、任务目标、实际容限、独立预期依据、`ffprobe`/`ffmpeg` 版本、`files`、`scopes` 和 `findings`。每个文件记录源身份字段及本地副本的绝对路径、长度、SHA-256 和身份核对结果。原片探测结果分别列出容器格式与时长、每路主视频、实际音频、封面图流及其他流。
+报告使用 `report_schema_version: 2`，顶层保存 `acceptance_id`、`source_action_instance_id` 及其状态、任务目标、两项实际容限、独立预期依据、`ffprobe`/`ffmpeg` 版本、`files`、`scopes` 和 `findings`。清单仍使用 `manifest_version: 1`。每个文件记录源身份字段及本地副本的绝对路径、长度、SHA-256 和身份核对结果。原片探测结果分别列出容器格式与时长、每路主视频、实际音频、封面图流及其他流。
 
-双路主视频按 ffprobe 流顺序编号为 `main_video_ordinal` 0 和 1；`attached_pic` 封面图单独记录，不计作主视频。工具对每路记录原始时长字段、`duration_ts × time_base` 精确值、帧数、首末帧时间戳、单段内最大帧间隔、容器与主视频时长差、完整解码的退出码及诊断。音频流单独探测和完整解码，但不加入主视频时长。
+双路主视频按 ffprobe 流顺序编号为 `main_video_ordinal` 0 和 1；`attached_pic` 封面图单独记录，不计作主视频。工具对每路记录原始时长字段、`duration_ts × time_base` 精确值、帧数、首末帧时间戳、单段内最大帧间隔、容器与主视频时长差、完整解码的退出码及诊断。音频流单独探测和完整解码，但不加入主视频时长或采样帧数。
+
+数量判断以成功完成 `ffprobe -count_frames` 后取得的 `files[].media.main_videos[].frame_count_assessment.reliable_frame_count` 作为可靠帧数。`declared_frame_count` 是媒体声明值，`frame_coverage.decoded_frame_timestamp_count` 只数有可解析时间戳的帧记录；两者都不替代可靠帧数。工具逐流保留三项观察；声明值或有时间戳帧数与可靠帧数不同时，`frame_count_observation_difference` finding 会记录差值，数量汇总仍使用可靠帧数。若 ffprobe 没有成功结束或没有可靠计数，数量保持未知，即使声明值或时间戳计数存在也不补位。
 
 普通录像的非尾段实测时长按[设备分段契约](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#设备分段与命名契约)核对下界及参考范围；偏长记录与整体短缺、文件完整性及解码结果分别表达。
 
 所有精确毫秒值都以字符串保存。字段 `*_ms_exact` 使用整数文本或 `分子/分母` 文本；`shortfall_ms` 也采用同一精确文本格式。普通录像的预期播放时长取原任务目标。实际视频时长优先从逐流 `duration_ts × time_base` 取得，缺少该值时使用 ffprobe 的逐流 `duration`；容器时长、音频时长、帧率和封面图均不替代主视频时长。
 
-报告的 `scopes.all_retained` 与 `scopes.default_delivery` 各自汇总所列文件的两路主视频时长，并分别用同一预期时长和本次容限判断。短缺量按 `max(0, 预期时长 - 实测时长)` 计算；两路视频分别比较，任何一路超过容限都使该范围未达时长条件。容限不按分段或视频路数累加。段内帧时间戳摘要和段间重叠或缺帧是不同证据；报告将 `cross_segment_continuity` 保持为 `not_assessed`。`source_copy_identity_status` 和 `source_duration_status` 分别表示源／副本身份核对与源时长结论，解码诊断仍单独保留。
+报告的 `scopes.all_retained` 与 `scopes.default_delivery` 分别核验完整保留范围和默认交付范围；一个范围外的文件不会补足另一个范围。每个范围独立累计两路主视频的全部成员时长和可靠帧数，每路只应用一次相应容限。时长比较写入 `local_copy_duration_comparison`，帧数比较写入 `local_copy_sampling_quantity_comparison`。帧数流结果保留可靠累计值、已计数成员数、所需成员数、短缺及高于参考上界的数量；范围不完整或该路有成员缺少可靠计数时，该路状态为 `unknown`，并保留已观察到的部分累计值。可靠范围完整且两路中某一路全部成员可靠计数后，若该路低于最低数量则该路为 `fail`；另一条未知流继续保持 `unknown`。
+
+`source_sampling_quantity_status` 只有在该范围内源文件与本地副本身份全部匹配时才复用本地数量结论；源身份未知或不匹配时，源数量结论为 `unknown`，本地数量事实仍保留。身份不匹配继续作为独立 finding。采样数量达标只说明该范围两路累计帧数满足数量条件，不代表时长比较、解码、帧率、内容质量或段间连续性通过。实际播放时长、解码诊断及段间重叠或缺帧是独立证据；报告将 `cross_segment_continuity` 保持为 `not_assessed`。
 
 报告保留 `media.probe_stderr` 和每项 `decode_checks[].diagnostics` 原文。解码器即使以退出码 0 结束，只要输出诊断，诊断仍会出现在文件结果和 `findings` 中。媒体时长条件、源副本身份、探测状态和解码诊断是分开的事实；报告生成成功不表示媒体通过，工具退出码 0 也不清除诊断。清单无效时，工具把错误写到标准错误、不创建报告并返回非零；ffprobe/ffmpeg 版本探测失败或报告无法写出时也返回非零。媒体本身的不足、未知状态或解码问题仍写入证据报告。
 

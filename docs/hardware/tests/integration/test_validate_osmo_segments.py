@@ -26,18 +26,26 @@ def make_media(
     destination: Path,
     *,
     video_stream_count: int = 2,
+    video_frame_counts: list[int] | None = None,
     duration_seconds: str = "1",
     include_audio: bool = True,
     include_attached_picture: bool = False,
 ) -> Path:
+    if video_frame_counts is not None and len(video_frame_counts) != video_stream_count:
+        raise ValueError("video_frame_counts must match video_stream_count")
     command = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error"]
     for index in range(video_stream_count):
+        frame_count = (
+            video_frame_counts[index] if video_frame_counts is not None else None
+        )
+        frame_rate = frame_count if frame_count is not None else 10
+        duration = "1" if frame_count is not None else duration_seconds
         command.extend(
             [
                 "-f",
                 "lavfi",
                 "-i",
-                f"testsrc2=size=64x64:rate=10:duration={duration_seconds}",
+                f"testsrc2=size=64x64:rate={frame_rate}:duration={duration}",
             ]
         )
     if include_attached_picture:
@@ -66,6 +74,9 @@ def make_media(
         audio_input_index = video_stream_count + int(include_attached_picture)
         command.extend(["-map", f"{audio_input_index}:a:0"])
     command.extend(["-c:v", "mpeg4", "-q:v", "5"])
+    if video_frame_counts is not None:
+        for index, frame_count in enumerate(video_frame_counts):
+            command.extend([f"-frames:v:{index}", str(frame_count)])
     if include_attached_picture:
         command.extend(
             [
@@ -84,20 +95,44 @@ def make_media(
     return destination
 
 
-def file_entry(path: Path, file_id: str, output_id: str) -> dict:
+def file_entry(
+    path: Path,
+    file_id: str,
+    output_id: str,
+    *,
+    source_identity: str = "match",
+    role: str = "original",
+    preview_of_output_id: str | None = None,
+) -> dict:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    return {
+    source_size = path.stat().st_size
+    source_sha256 = digest
+    source_evidence_ref = f"synthetic-fixture#{file_id}"
+    source_locator_basis_ref = "synthetic-fixture#directory-entry-listing"
+    if source_identity == "unknown":
+        source_size = None
+        source_sha256 = None
+        source_evidence_ref = None
+        source_locator_basis_ref = None
+    elif source_identity == "mismatch":
+        source_sha256 = "0" * 64
+    elif source_identity != "match":
+        raise ValueError("unsupported synthetic source identity")
+    entry = {
         "file_id": file_id,
         "output_id": output_id,
-        "role": "original",
+        "role": role,
         "file_status": "retained",
         "source_device_path": f"DCIM/CAM_001/{file_id}.OSV",
-        "source_size_bytes": path.stat().st_size,
-        "source_sha256": digest,
-        "source_evidence_ref": f"synthetic-fixture#{file_id}",
-        "source_locator_basis_ref": "synthetic-fixture#directory-entry-listing",
+        "source_size_bytes": source_size,
+        "source_sha256": source_sha256,
+        "source_evidence_ref": source_evidence_ref,
+        "source_locator_basis_ref": source_locator_basis_ref,
         "local_copy_path": path.name,
     }
+    if preview_of_output_id is not None:
+        entry["preview_of_output_id"] = preview_of_output_id
+    return entry
 
 
 def manifest_for(
@@ -111,6 +146,8 @@ def manifest_for(
     default_file_ids: list[str] | None = None,
     retained_scope_status: str = "complete",
     default_scope_status: str = "complete",
+    sampling_interval_ms: int | None = None,
+    sampling_interval_basis_ref: str = "synthetic-task-record#sampling-interval",
 ) -> Path:
     retained = retained_file_ids or [entry["file_id"] for entry in files]
     default = retained if default_file_ids is None else default_file_ids
@@ -128,6 +165,9 @@ def manifest_for(
         "default_file_ids": default,
         "files": files,
     }
+    if sampling_interval_ms is not None:
+        document["sampling_interval_ms"] = sampling_interval_ms
+        document["sampling_interval_basis_ref"] = sampling_interval_basis_ref
     path = root / "manifest.json"
     path.write_text(json.dumps(document, indent=2), encoding="utf-8")
     return path
@@ -138,6 +178,7 @@ def run_validator(
     output_path: Path,
     *,
     tolerance_ms: int | None = None,
+    frame_count_tolerance: int | None = None,
     batch_size: int | None = None,
     environment: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
@@ -147,6 +188,8 @@ def run_validator(
     command = [sys.executable, str(SCRIPT_PATH), "--manifest", str(manifest_path), "--output", str(output_path)]
     if tolerance_ms is not None:
         command.extend(["--shortfall-tolerance-ms", str(tolerance_ms)])
+    if frame_count_tolerance is not None:
+        command.extend(["--frame-count-shortfall-tolerance", str(frame_count_tolerance)])
     if batch_size is not None:
         command.extend(["--batch-size", str(batch_size)])
     preexec_fn = None
@@ -188,6 +231,7 @@ def test_dual_video_and_audio_are_probed_and_each_stream_is_decoded(tmp_path: Pa
 
     assert completed.returncode == 0
     assert report["shortfall_tolerance_ms"] == 100
+    assert report["expected_sampling_quantity"]["status"] == "not_applicable"
     file_result = report["files"][0]
     assert file_result["local_copy"]["identity_status"] == "match"
     assert len(file_result["media"]["main_videos"]) == 2
@@ -203,6 +247,9 @@ def test_dual_video_and_audio_are_probed_and_each_stream_is_decoded(tmp_path: Pa
     )
     assert report["scopes"]["all_retained"]["source_duration_status"] == "pass"
     assert report["scopes"]["default_delivery"]["source_duration_status"] == "pass"
+    assert report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]["status"] == "not_applicable"
 
 
 def test_attached_picture_is_excluded_from_the_two_main_video_streams(tmp_path: Path):
@@ -273,17 +320,398 @@ def test_native_timelapse_without_independent_rate_and_endpoint_stays_unknown(tm
     manifest = manifest_for(
         tmp_path,
         [file_entry(media_path, "segment-a", "output-a")],
+        target_duration_ms=20_000,
         recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
     )
 
     completed, report = run_validator(manifest, tmp_path / "report.json")
 
     assert completed.returncode == 0
+    assert report["report_schema_version"] == 2
     assert report["expected_playback"]["status"] == "unknown"
     assert report["expected_playback"]["expected_frame_count"] is None
     assert "missing_independent_playback_frame_rate" in report["expected_playback"]["unknown_reasons"]
     assert "missing_independent_sample_endpoint_rule" in report["expected_playback"]["unknown_reasons"]
     assert report["scopes"]["all_retained"]["source_duration_status"] == "unknown"
+    expected_quantity = report["expected_sampling_quantity"]
+    assert expected_quantity["status"] == "known"
+    assert expected_quantity["reference_frame_count_range"] == {
+        "minimum": 10,
+        "maximum": 11,
+    }
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert quantity["status"] == "pass"
+    assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [10, 10]
+    assert report["scopes"]["all_retained"]["source_sampling_quantity_status"] == "pass"
+
+
+def test_native_sample_count_uses_two_main_streams_and_excludes_cover(tmp_path: Path):
+    media_path = make_media(
+        tmp_path / "native-with-cover.mp4",
+        video_frame_counts=[147, 146],
+        include_audio=False,
+        include_attached_picture=True,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [file_entry(media_path, "native-segment", "native-output")],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    file_result = report["files"][0]
+    assert len(file_result["media"]["main_videos"]) == 2
+    assert len(file_result["media"]["attached_picture_streams"]) == 1
+    assert [
+        video["frame_count_assessment"]["reliable_frame_count"]
+        for video in file_result["media"]["main_videos"]
+    ] == [147, 146]
+    assert report["expected_playback"]["status"] == "unknown"
+    assert report["expected_sampling_quantity"]["reference_frame_count_range"] == {
+        "minimum": 150,
+        "maximum": 151,
+    }
+    assert report["expected_sampling_quantity"]["minimum_accepted_frame_count"] == 147
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert quantity["status"] == "fail"
+    assert [stream["status"] for stream in quantity["streams"]] == ["pass", "fail"]
+    assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [
+        147,
+        146,
+    ]
+
+
+def test_native_sample_count_above_reference_range_is_recorded_without_failure(
+    tmp_path: Path,
+):
+    media_path = make_media(
+        tmp_path / "native-extra-frames.mp4",
+        video_frame_counts=[152, 152],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [file_entry(media_path, "native-segment", "native-output")],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert quantity["status"] == "pass"
+    assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [
+        152,
+        152,
+    ]
+    assert [
+        stream["excess_over_reference_maximum"] for stream in quantity["streams"]
+    ] == [1, 1]
+
+
+def test_native_sample_count_cli_accepts_zero_tolerance(tmp_path: Path):
+    media_path = make_media(
+        tmp_path / "native-zero-tolerance.mp4",
+        video_frame_counts=[149, 151],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [file_entry(media_path, "native-segment", "native-output")],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(
+        manifest, tmp_path / "report.json", frame_count_tolerance=0
+    )
+
+    assert completed.returncode == 0
+    assert report["frame_count_shortfall_tolerance"] == 0
+    assert report["expected_sampling_quantity"]["minimum_accepted_frame_count"] == 150
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert [stream["status"] for stream in quantity["streams"]] == ["fail", "pass"]
+
+
+def test_native_sample_count_applies_tolerance_once_across_scope_members(
+    tmp_path: Path,
+):
+    first = make_media(
+        tmp_path / "native-segment-a.mp4",
+        video_frame_counts=[73, 73],
+        include_audio=False,
+    )
+    second = make_media(
+        tmp_path / "native-segment-b.mp4",
+        video_frame_counts=[73, 73],
+        include_audio=False,
+    )
+    entries = [
+        file_entry(first, "native-segment-a", "native-output-a"),
+        file_entry(second, "native-segment-b", "native-output-b"),
+    ]
+    manifest = manifest_for(
+        tmp_path,
+        entries,
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        recording_class="abnormal",
+        retained_file_ids=["native-segment-a", "native-segment-b"],
+        default_file_ids=["native-segment-a", "native-segment-b"],
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    for scope_name in ("all_retained", "default_delivery"):
+        quantity = report["scopes"][scope_name][
+            "local_copy_sampling_quantity_comparison"
+        ]
+        assert quantity["status"] == "fail"
+        assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [
+            146,
+            146,
+        ]
+        assert [stream["reliable_file_count"] for stream in quantity["streams"]] == [
+            2,
+            2,
+        ]
+        assert [stream["shortfall_frames"] for stream in quantity["streams"]] == [1, 1]
+
+
+def test_native_default_scope_does_not_borrow_out_of_range_retained_frames(
+    tmp_path: Path,
+):
+    selected = make_media(
+        tmp_path / "native-default.mp4",
+        video_frame_counts=[146, 146],
+        include_audio=False,
+    )
+    out_of_range = make_media(
+        tmp_path / "native-outside-default.mp4",
+        video_frame_counts=[5, 5],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [
+            file_entry(selected, "native-default", "native-output-default"),
+            file_entry(out_of_range, "native-outside", "native-output-outside"),
+        ],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        recording_class="abnormal",
+        retained_file_ids=["native-default", "native-outside"],
+        default_file_ids=["native-default"],
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    retained = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    default = report["scopes"]["default_delivery"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert retained["status"] == "pass"
+    assert [stream["observed_frame_count"] for stream in retained["streams"]] == [
+        151,
+        151,
+    ]
+    assert default["status"] == "fail"
+    assert [stream["observed_frame_count"] for stream in default["streams"]] == [
+        146,
+        146,
+    ]
+
+
+def test_native_scope_range_unknown_keeps_partial_local_counts_but_not_source_count(
+    tmp_path: Path,
+):
+    media_path = make_media(
+        tmp_path / "native-range-unknown.mp4",
+        video_frame_counts=[147, 151],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [file_entry(media_path, "native-segment", "native-output")],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        recording_class="abnormal",
+        retained_scope_status="unknown",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    retained = report["scopes"]["all_retained"]
+    quantity = retained["local_copy_sampling_quantity_comparison"]
+    assert quantity["status"] == "unknown"
+    assert [
+        stream["observed_partial_frame_count"] for stream in quantity["streams"]
+    ] == [147, 151]
+    assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [
+        None,
+        None,
+    ]
+    assert retained["source_sampling_quantity_status"] == "unknown"
+    assert report["scopes"]["default_delivery"][
+        "local_copy_sampling_quantity_comparison"
+    ]["status"] == "pass"
+
+
+def test_native_missing_main_video_count_keeps_other_stream_result(tmp_path: Path):
+    media_path = make_media(
+        tmp_path / "native-one-video.mp4",
+        video_stream_count=1,
+        video_frame_counts=[146],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [file_entry(media_path, "native-segment", "native-output")],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert quantity["status"] == "fail"
+    assert [stream["status"] for stream in quantity["streams"]] == ["fail", "unknown"]
+    assert quantity["streams"][0]["observed_frame_count"] == 146
+    assert quantity["streams"][1]["observed_frame_count"] is None
+
+
+@pytest.mark.parametrize(
+    ("source_identity", "expected_identity_status"),
+    [("unknown", "unknown"), ("mismatch", "mismatch")],
+)
+def test_native_source_count_requires_matching_copy_identity(
+    tmp_path: Path, source_identity: str, expected_identity_status: str
+):
+    media_path = make_media(
+        tmp_path / f"native-{source_identity}.mp4",
+        video_frame_counts=[147, 147],
+        include_audio=False,
+    )
+    manifest = manifest_for(
+        tmp_path,
+        [
+            file_entry(
+                media_path,
+                "native-segment",
+                "native-output",
+                source_identity=source_identity,
+            )
+        ],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    scope = report["scopes"]["all_retained"]
+    assert scope["local_copy_sampling_quantity_comparison"]["status"] == "pass"
+    assert scope["source_copy_identity_status"] == expected_identity_status
+    assert scope["source_sampling_quantity_status"] == "unknown"
+    if expected_identity_status == "mismatch":
+        assert any(
+            finding["category"] == "source_copy_identity"
+            and finding["status"] == "mismatch"
+            for finding in report["findings"]
+        )
+
+
+def test_native_preview_and_empty_tail_do_not_add_to_original_frame_count(
+    tmp_path: Path,
+):
+    original = make_media(
+        tmp_path / "native-original.mp4",
+        video_frame_counts=[146, 146],
+        include_audio=False,
+    )
+    preview = make_media(
+        tmp_path / "native-preview.mp4",
+        video_frame_counts=[1_000, 1_000],
+        include_audio=False,
+    )
+    empty_tail = tmp_path / "native-empty-tail.OSV"
+    empty_tail.write_bytes(b"")
+    empty_tail_hash = hashlib.sha256(b"").hexdigest()
+    preview_entry = file_entry(
+        preview,
+        "native-preview",
+        "native-output-preview",
+        role="preview",
+        preview_of_output_id="native-output",
+    )
+    empty_entry = {
+        "file_id": "native-empty-tail",
+        "output_id": None,
+        "role": "original",
+        "file_status": "observed_empty",
+        "source_device_path": "DCIM/CAM_001/native-empty-tail.OSV",
+        "source_size_bytes": 0,
+        "source_sha256": empty_tail_hash,
+        "source_evidence_ref": "synthetic-fixture#native-empty-tail",
+        "source_locator_basis_ref": "synthetic-fixture#directory-entry-listing",
+        "local_copy_path": empty_tail.name,
+    }
+    manifest = manifest_for(
+        tmp_path,
+        [
+            file_entry(original, "native-original", "native-output"),
+            preview_entry,
+            empty_entry,
+        ],
+        target_duration_ms=300_000,
+        recording_kind="native_timelapse",
+        retained_file_ids=["native-original"],
+        default_file_ids=["native-original"],
+        sampling_interval_ms=2_000,
+    )
+
+    completed, report = run_validator(manifest, tmp_path / "report.json")
+
+    assert completed.returncode == 0
+    quantity = report["scopes"]["all_retained"][
+        "local_copy_sampling_quantity_comparison"
+    ]
+    assert quantity["status"] == "fail"
+    assert [stream["observed_frame_count"] for stream in quantity["streams"]] == [
+        146,
+        146,
+    ]
+    assert report["files"][1]["media"]["status"] == "excluded_preview_not_used_for_main_video_duration"
+    assert report["files"][2]["media"]["status"] == "zero_byte_file_no_media_duration"
 
 
 def test_cli_override_is_recorded_and_nonzero_exit_does_not_erase_decoder_diagnostics(

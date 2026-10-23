@@ -629,3 +629,218 @@ def test_manifest_rejects_boolean_target_duration():
 
     with pytest.raises(subject.ManifestError):
         subject.validate_manifest(manifest)
+
+
+def test_native_sampling_quantity_derives_reference_range_without_playback_facts():
+    subject = load_subject()
+
+    result = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 300_000,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        subject.DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE,
+    )
+
+    assert result["status"] == "known"
+    assert result["reference_frame_count_range"] == {"minimum": 150, "maximum": 151}
+    assert result["baseline_frame_count"] == 150
+    assert (
+        result["tolerance_frames"]
+        == subject.DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE
+    )
+    assert result["minimum_accepted_frame_count"] == 147
+
+
+def test_native_sampling_quantity_uses_integer_ceiling_for_nonintegral_ratio():
+    subject = load_subject()
+
+    result = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 10_001,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        0,
+    )
+
+    assert result["reference_frame_count_range"] == {"minimum": 6, "maximum": 6}
+    assert result["baseline_frame_count"] == 6
+    assert result["minimum_accepted_frame_count"] == 6
+
+
+def test_native_sampling_quantity_requires_independent_interval_basis():
+    subject = load_subject()
+
+    result = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 10_001,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+        },
+        0,
+    )
+
+    assert result["status"] == "unknown"
+    assert result["baseline_frame_count"] is None
+    assert result["unknown_reasons"] == ["missing_sampling_interval_basis"]
+
+
+def test_ordinary_recording_has_no_native_sampling_quantity_requirement():
+    subject = load_subject()
+
+    result = subject.derive_expected_sampling_quantity(
+        {"recording_kind": "ordinary_recording"},
+        subject.DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE,
+    )
+
+    assert result["status"] == "not_applicable"
+    assert result["reference_frame_count_range"] is None
+
+
+def test_frame_count_tolerance_accepts_zero_and_rejects_other_invalid_values():
+    subject = load_subject()
+
+    assert subject.parse_frame_count_shortfall_tolerance(0) == 0
+    for value in (-1, True, 1.5, "3", None):
+        with pytest.raises((TypeError, ValueError)):
+            subject.parse_frame_count_shortfall_tolerance(value)
+
+
+def test_sample_count_shortfall_tolerance_accepts_147_and_rejects_146():
+    subject = load_subject()
+    expected = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 300_000,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        subject.DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE,
+    )
+
+    assert subject.compare_sample_count(expected, 147)["status"] == "pass"
+    failed = subject.compare_sample_count(expected, 146)
+    assert failed["status"] == "fail"
+    assert failed["shortfall_frames"] == 1
+
+
+def test_sample_count_above_reference_range_is_recorded_without_failing():
+    subject = load_subject()
+    expected = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 300_000,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        subject.DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE,
+    )
+
+    result = subject.compare_sample_count(expected, 152)
+
+    assert result["status"] == "pass"
+    assert result["observed_frame_count"] == 152
+    assert result["excess_over_reference_maximum"] == 1
+
+
+def test_zero_tolerance_still_allows_the_alternate_reference_endpoint_count():
+    subject = load_subject()
+    expected = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 300_000,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        0,
+    )
+
+    assert subject.compare_sample_count(expected, 150)["status"] == "pass"
+    assert subject.compare_sample_count(expected, 151)["status"] == "pass"
+
+
+def test_large_frame_count_tolerance_never_lowers_minimum_below_one():
+    subject = load_subject()
+    expected = subject.derive_expected_sampling_quantity(
+        {
+            "recording_kind": "native_timelapse",
+            "target_duration_ms": 10_000,
+            "target_basis_ref": "task.json#target",
+            "sampling_interval_ms": 2_000,
+            "sampling_interval_basis_ref": "task.json#interval",
+        },
+        1_000,
+    )
+
+    assert expected["minimum_accepted_frame_count"] == 1
+    assert subject.compare_sample_count(expected, 0)["status"] == "fail"
+
+
+def test_ffprobe_counted_frames_are_authoritative_and_other_counts_remain_diagnostic():
+    subject = load_subject()
+
+    result = subject.assess_reliable_frame_count(
+        {
+            "probe_exit_code": 0,
+            "declared_frame_count": 151,
+            "ffprobe_counted_frame_count": 147,
+            "frame_coverage": {"decoded_frame_timestamp_count": 146},
+        }
+    )
+
+    assert result["status"] == "known"
+    assert result["reliable_frame_count"] == 147
+    assert result["reliable_count_basis"] == "ffprobe_counted_frame_count"
+    assert result["observation_differences"] == [
+        {"field": "declared_frame_count", "observed": 151, "authoritative": 147},
+        {
+            "field": "decoded_frame_timestamp_count",
+            "observed": 146,
+            "authoritative": 147,
+        },
+    ]
+
+
+def test_declared_and_timestamp_counts_cannot_replace_a_missing_ffprobe_count():
+    subject = load_subject()
+
+    result = subject.assess_reliable_frame_count(
+        {
+            "probe_exit_code": 0,
+            "declared_frame_count": 151,
+            "ffprobe_counted_frame_count": None,
+            "frame_coverage": {"decoded_frame_timestamp_count": 150},
+        }
+    )
+
+    assert result["status"] == "unknown"
+    assert result["reliable_frame_count"] is None
+    assert "ffprobe_counted_frame_count_unavailable" in result["unknown_reasons"]
+
+
+def test_nonzero_ffprobe_exit_keeps_partial_count_unknown():
+    subject = load_subject()
+
+    result = subject.assess_reliable_frame_count(
+        {
+            "probe_exit_code": 17,
+            "declared_frame_count": 151,
+            "ffprobe_counted_frame_count": 147,
+            "frame_coverage": {"decoded_frame_timestamp_count": 146},
+        }
+    )
+
+    assert result["status"] == "unknown"
+    assert result["reliable_frame_count"] is None
+    assert result["observation_differences"] == []
+    assert "media_probe_not_successfully_completed" in result["unknown_reasons"]

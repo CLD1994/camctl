@@ -26,9 +26,10 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 MANIFEST_VERSION = 1
 DEFAULT_SHORTFALL_TOLERANCE_MS = 100
+DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE = 3
 EXPECTED_MAIN_VIDEO_STREAMS = 2
 SAMPLE_ENDPOINT_RULES = {
     "start_included_end_excluded",
@@ -48,6 +49,16 @@ def parse_shortfall_tolerance_ms(value: object) -> int:
         raise TypeError("shortfall tolerance must be an integer number of milliseconds")
     if value < 0:
         raise ValueError("shortfall tolerance must be non-negative")
+    return value
+
+
+def parse_frame_count_shortfall_tolerance(value: object) -> int:
+    """只接受非负整数帧，明确拒绝布尔值和带小数的数值。"""
+
+    if type(value) is not int:
+        raise TypeError("frame-count shortfall tolerance must be an integer number of frames")
+    if value < 0:
+        raise ValueError("frame-count shortfall tolerance must be non-negative")
     return value
 
 
@@ -273,6 +284,166 @@ def _unknown_expected(reasons: Iterable[str]) -> dict[str, Any]:
         "derivation": None,
         "basis": {},
         "unknown_reasons": _unique(list(reasons)),
+    }
+
+
+def derive_expected_sampling_quantity(
+    task: dict[str, Any], tolerance_frames: int
+) -> dict[str, Any]:
+    """只用原任务的目标与间隔推导原生延时数量基准。"""
+
+    tolerance = parse_frame_count_shortfall_tolerance(tolerance_frames)
+    if task.get("recording_kind") != "native_timelapse":
+        return {
+            "status": "not_applicable",
+            "reference_frame_count_range": None,
+            "baseline_frame_count": None,
+            "tolerance_frames": tolerance,
+            "minimum_accepted_frame_count": None,
+            "derivation": None,
+            "basis": {},
+            "unknown_reasons": [],
+        }
+
+    target_ms = _nonnegative_int(task.get("target_duration_ms"))
+    interval_ms = _nonnegative_int(task.get("sampling_interval_ms"))
+    reasons: list[str] = []
+    if target_ms is None or target_ms == 0:
+        reasons.append("invalid_or_missing_task_target_duration")
+    if not _has_text(task.get("target_basis_ref")):
+        reasons.append("missing_independent_target_basis")
+    if interval_ms is None or interval_ms == 0:
+        reasons.append("invalid_or_missing_sampling_interval")
+    if not _has_text(task.get("sampling_interval_basis_ref")):
+        reasons.append("missing_sampling_interval_basis")
+
+    if reasons:
+        return {
+            "status": "unknown",
+            "reference_frame_count_range": None,
+            "baseline_frame_count": None,
+            "tolerance_frames": tolerance,
+            "minimum_accepted_frame_count": None,
+            "derivation": None,
+            "basis": {},
+            "unknown_reasons": _unique(reasons),
+        }
+
+    assert target_ms is not None and interval_ms is not None
+    baseline = (target_ms + interval_ms - 1) // interval_ms
+    reference_maximum = target_ms // interval_ms + 1
+    return {
+        "status": "known",
+        "reference_frame_count_range": {
+            "minimum": baseline,
+            "maximum": reference_maximum,
+        },
+        "baseline_frame_count": baseline,
+        "tolerance_frames": tolerance,
+        "minimum_accepted_frame_count": max(1, baseline - tolerance),
+        "derivation": "ceil_target_duration_ms_divided_by_sampling_interval_ms",
+        "basis": {
+            "target_duration_ms": target_ms,
+            "target_basis_ref": task["target_basis_ref"],
+            "sampling_interval_ms": interval_ms,
+            "sampling_interval_basis_ref": task["sampling_interval_basis_ref"],
+        },
+        "unknown_reasons": [],
+    }
+
+
+def compare_sample_count(
+    expected: dict[str, Any], observed_frame_count: int | None
+) -> dict[str, Any]:
+    """比较一条主视频在一个完整范围内的累计可靠采样帧数。"""
+
+    if expected.get("status") == "not_applicable":
+        return {
+            "status": "not_applicable",
+            "observed_frame_count": observed_frame_count,
+            "shortfall_frames": None,
+            "excess_over_reference_maximum": None,
+            "unknown_reasons": [],
+        }
+    minimum = expected.get("minimum_accepted_frame_count")
+    if (
+        expected.get("status") != "known"
+        or type(minimum) is not int
+        or observed_frame_count is None
+        or type(observed_frame_count) is not int
+        or observed_frame_count < 0
+    ):
+        reasons = list(expected.get("unknown_reasons", []))
+        if expected.get("status") == "known":
+            reasons.append("reliable_sample_frame_count_unavailable")
+        elif not reasons:
+            reasons.append("expected_sampling_quantity_unavailable")
+        return {
+            "status": "unknown",
+            "observed_frame_count": observed_frame_count,
+            "shortfall_frames": None,
+            "excess_over_reference_maximum": None,
+            "unknown_reasons": _unique(reasons),
+        }
+
+    reference_range = expected["reference_frame_count_range"]
+    reference_maximum = reference_range["maximum"]
+    shortfall = max(0, minimum - observed_frame_count)
+    return {
+        "status": "pass" if shortfall == 0 else "fail",
+        "observed_frame_count": observed_frame_count,
+        "shortfall_frames": shortfall,
+        "excess_over_reference_maximum": max(
+            0, observed_frame_count - reference_maximum
+        ),
+        "unknown_reasons": [],
+    }
+
+
+def assess_reliable_frame_count(video: dict[str, Any]) -> dict[str, Any]:
+    """以完整 ffprobe counted-frame 结果为可靠数量，保留其他观测差异。"""
+
+    counted = _nonnegative_int(video.get("ffprobe_counted_frame_count"))
+    declared = _nonnegative_int(video.get("declared_frame_count"))
+    coverage = video.get("frame_coverage")
+    if not isinstance(coverage, dict):
+        coverage = {}
+    timestamp_count = _nonnegative_int(
+        coverage.get("decoded_frame_timestamp_count")
+    )
+    probe_succeeded = video.get("probe_exit_code") == 0
+    differences = []
+    for field, observed in (
+        ("declared_frame_count", declared),
+        ("decoded_frame_timestamp_count", timestamp_count),
+    ):
+        if (
+            probe_succeeded
+            and counted is not None
+            and observed is not None
+            and observed != counted
+        ):
+            differences.append(
+                {"field": field, "observed": observed, "authoritative": counted}
+            )
+
+    reasons: list[str] = []
+    if not probe_succeeded:
+        reasons.append("media_probe_not_successfully_completed")
+    elif counted is None:
+        reasons.append("ffprobe_counted_frame_count_unavailable")
+    known = not reasons
+    return {
+        "status": "known" if known else "unknown",
+        "reliable_frame_count": counted if known else None,
+        "reliable_count_basis": "ffprobe_counted_frame_count" if known else None,
+        "observed_counts": {
+            "declared_frame_count": declared,
+            "ffprobe_counted_frame_count": counted,
+            "decoded_frame_timestamp_count": timestamp_count,
+        },
+        "observation_differences": differences,
+        "unknown_reasons": reasons,
     }
 
 
@@ -1212,6 +1383,16 @@ def _inspect_file(
             "declared_frame_count": _parse_index(stream.get("nb_frames")),
             "ffprobe_counted_frame_count": _parse_index(stream.get("nb_read_frames")),
             "frame_coverage": coverage.get(stream_index, {}),
+            "frame_count_assessment": assess_reliable_frame_count(
+                {
+                    "probe_exit_code": media["probe_exit_code"],
+                    "declared_frame_count": _parse_index(stream.get("nb_frames")),
+                    "ffprobe_counted_frame_count": _parse_index(
+                        stream.get("nb_read_frames")
+                    ),
+                    "frame_coverage": coverage.get(stream_index, {}),
+                }
+            ),
             "decode": decode,
             "raw_stream_metadata": stream,
         }
@@ -1793,6 +1974,22 @@ def _append_file_findings(
                 "required": EXPECTED_MAIN_VIDEO_STREAMS,
             },
         )
+    for video in media.get("main_videos", []):
+        assessment = video.get("frame_count_assessment", {})
+        differences = assessment.get("observation_differences", [])
+        if differences:
+            _append_finding(
+                connection,
+                {
+                    "file_id": file_id,
+                    "category": "frame_count_observation_difference",
+                    "status": "observed_difference",
+                    "main_video_ordinal": video.get("main_video_ordinal"),
+                    "reliable_frame_count": assessment.get("reliable_frame_count"),
+                    "reliable_count_basis": assessment.get("reliable_count_basis"),
+                    "differences": differences,
+                },
+            )
 
 
 def _expected_fraction(expected: dict[str, Any]) -> Fraction | None:
@@ -1814,11 +2011,14 @@ def _build_scope_indexed(
     scope_key: str,
     declared_status: str,
     expected: dict[str, Any],
+    expected_sampling_quantity: dict[str, Any],
     tolerance_ms: int,
     batch_size: int,
 ) -> dict[str, Any]:
     totals = [Fraction(0), Fraction(0)]
     contributing = [0, 0]
+    sample_totals = [0, 0]
+    sample_contributing = [0, 0]
     file_count = connection.execute(
         "SELECT COUNT(*) FROM scope_ids WHERE scope = ?", (scope_key,)
     ).fetchone()[0]
@@ -1893,6 +2093,20 @@ def _build_scope_indexed(
                     totals[stream_ordinal] += duration
                     contributing[stream_ordinal] += 1
 
+                if expected_sampling_quantity["status"] != "not_applicable":
+                    video = videos[stream_ordinal] if stream_ordinal < len(videos) else None
+                    assessment = (
+                        video.get("frame_count_assessment", {})
+                        if isinstance(video, dict)
+                        else {}
+                    )
+                    frame_count = _nonnegative_int(
+                        assessment.get("reliable_frame_count")
+                    )
+                    if assessment.get("status") == "known" and frame_count is not None:
+                        sample_totals[stream_ordinal] += frame_count
+                        sample_contributing[stream_ordinal] += 1
+
     if declared_status == "unknown":
         for stream_ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
             connection.execute(
@@ -1939,7 +2153,48 @@ def _build_scope_indexed(
         streams.append(comparison)
         statuses.append(comparison["status"])
 
+    sample_streams: list[dict[str, Any]] = []
+    sample_statuses: list[str] = []
+    for stream_ordinal in range(EXPECTED_MAIN_VIDEO_STREAMS):
+        sample_reasons: list[str] = []
+        if expected_sampling_quantity["status"] != "not_applicable":
+            if declared_status == "unknown":
+                sample_reasons.append(f"{scope_name}_scope_not_confirmed_complete")
+            if sample_contributing[stream_ordinal] != file_count:
+                sample_reasons.append(
+                    "one_or_more_required_file_frame_counts_unavailable"
+                )
+        sample_scope_complete = (
+            expected_sampling_quantity["status"] != "not_applicable"
+            and declared_status == "complete"
+            and sample_contributing[stream_ordinal] == file_count
+        )
+        sample_measured = (
+            sample_totals[stream_ordinal] if sample_scope_complete else None
+        )
+        sample_comparison = compare_sample_count(
+            expected_sampling_quantity, sample_measured
+        )
+        sample_comparison["main_video_ordinal"] = stream_ordinal
+        sample_comparison["observed_partial_frame_count"] = sample_totals[
+            stream_ordinal
+        ]
+        sample_comparison["reliable_file_count"] = sample_contributing[
+            stream_ordinal
+        ]
+        sample_comparison["required_file_count"] = file_count
+        sample_comparison["unknown_reasons"] = _unique(
+            [*sample_comparison["unknown_reasons"], *sample_reasons]
+        )
+        sample_streams.append(sample_comparison)
+        sample_statuses.append(sample_comparison["status"])
+
     local_status = _combine_statuses(statuses)
+    local_sample_status = (
+        "not_applicable"
+        if sample_statuses and all(status == "not_applicable" for status in sample_statuses)
+        else _combine_statuses(sample_statuses)
+    )
     if file_count == 0:
         identity_status = "empty_scope"
     elif identity_mismatches:
@@ -1959,11 +2214,25 @@ def _build_scope_indexed(
             "cross_segment_continuity": "not_assessed",
             "continuity_unknown_reason": "summed_stream_duration_does_not_prove_no_gap_or_overlap",
         },
+        "local_copy_sampling_quantity_comparison": {
+            "status": local_sample_status,
+            "expected_basis": expected_sampling_quantity,
+            "streams": sample_streams,
+        },
         "source_copy_identity_status": identity_status,
         "source_duration_status": (
             local_status
             if identity_status in {"verified", "empty_scope"}
             else "unknown"
+        ),
+        "source_sampling_quantity_status": (
+            local_sample_status
+            if identity_status in {"verified", "empty_scope"}
+            else (
+                "not_applicable"
+                if local_sample_status == "not_applicable"
+                else "unknown"
+            )
         ),
     }
 
@@ -2176,6 +2445,15 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_SHORTFALL_TOLERANCE_MS,
         help="整体时长短缺容限（非负整数毫秒，默认 100，允许 0）",
     )
+    parser.add_argument(
+        "--frame-count-shortfall-tolerance",
+        type=int,
+        default=DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE,
+        help=(
+            "原生延时整体帧数短缺容差（非负整数帧，默认 "
+            f"{DEFAULT_FRAME_COUNT_SHORTFALL_TOLERANCE}，允许 0）"
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path, help="验收证据 JSON 输出路径")
     parser.add_argument(
         "--batch-size",
@@ -2193,6 +2471,7 @@ def _run_indexed_validation(
     connection: sqlite3.Connection,
     diagnostics: DiagnosticArtifacts,
     tolerance: int,
+    frame_count_tolerance: int,
     batch_size: int,
 ) -> bool:
     ffprobe_version = _tool_version("ffprobe", diagnostics)
@@ -2232,6 +2511,9 @@ def _run_indexed_validation(
         connection.commit()
 
     expected = derive_expected_playback_duration(manifest)
+    expected_sampling_quantity = derive_expected_sampling_quantity(
+        manifest, frame_count_tolerance
+    )
     scopes = {
         "all_retained": _build_scope_indexed(
             connection,
@@ -2239,6 +2521,7 @@ def _run_indexed_validation(
             "retained_file_ids",
             manifest["retained_scope_status"],
             expected,
+            expected_sampling_quantity,
             tolerance,
             batch_size,
         ),
@@ -2248,6 +2531,7 @@ def _run_indexed_validation(
             "default_file_ids",
             manifest["default_scope_status"],
             expected,
+            expected_sampling_quantity,
             tolerance,
             batch_size,
         ),
@@ -2261,6 +2545,15 @@ def _run_indexed_validation(
                 "reasons": expected["unknown_reasons"],
             },
         )
+    if expected_sampling_quantity["status"] == "unknown":
+        _append_finding(
+            connection,
+            {
+                "category": "expected_sampling_quantity",
+                "status": "unknown",
+                "reasons": expected_sampling_quantity["unknown_reasons"],
+            },
+        )
     for scope in scopes.values():
         comparison = scope["local_copy_duration_comparison"]
         if comparison["status"] != "pass":
@@ -2271,6 +2564,17 @@ def _run_indexed_validation(
                     "scope_id": scope["scope_id"],
                     "status": comparison["status"],
                     "streams": comparison["streams"],
+                },
+            )
+        sample_comparison = scope["local_copy_sampling_quantity_comparison"]
+        if sample_comparison["status"] not in {"pass", "not_applicable"}:
+            _append_finding(
+                connection,
+                {
+                    "category": "scope_sampling_quantity",
+                    "scope_id": scope["scope_id"],
+                    "status": sample_comparison["status"],
+                    "streams": sample_comparison["streams"],
                 },
             )
 
@@ -2289,8 +2593,10 @@ def _run_indexed_validation(
         "recording_class": manifest["recording_class"],
         "task_target_duration_ms": manifest["target_duration_ms"],
         "shortfall_tolerance_ms": tolerance,
+        "frame_count_shortfall_tolerance": frame_count_tolerance,
         "processing_batch_size": batch_size,
         "expected_playback": expected,
+        "expected_sampling_quantity": expected_sampling_quantity,
         "tools": {"ffprobe": ffprobe_version, "ffmpeg": ffmpeg_version},
         "tool_errors": tool_errors,
         "files": _stream_marker("files"),
@@ -2306,6 +2612,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         tolerance = parse_shortfall_tolerance_ms(args.shortfall_tolerance_ms)
+    except (TypeError, ValueError) as exc:
+        _parser().error(str(exc))
+    try:
+        frame_count_tolerance = parse_frame_count_shortfall_tolerance(
+            args.frame_count_shortfall_tolerance
+        )
     except (TypeError, ValueError) as exc:
         _parser().error(str(exc))
 
@@ -2339,6 +2651,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     connection,
                     diagnostics,
                     tolerance,
+                    frame_count_tolerance,
                     args.batch_size,
                 )
     except ManifestError as exc:
