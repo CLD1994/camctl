@@ -222,7 +222,9 @@ async def advance_action6_recovery(runtime, action, decision=None):
         nonlocal explicit_media_failure
         existing = read_inspection_for_member(action_id, stored.member_id, runtime.owned)
         saved = existing.inspection
-        adopted_budget = budget if saved is None else OperationConfig(**saved.budget_json)
+        adopted_budget = budget if saved is None else OperationConfig.from_document(
+            saved.budget_json
+        )
         step = await inspect_segment(flow, SegmentInspectionRequest(
             action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
         ))

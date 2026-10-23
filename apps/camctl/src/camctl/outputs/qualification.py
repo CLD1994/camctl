@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
+from typing import Mapping
 
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.devices.bindings import BindingResult, BindingStatus
@@ -41,6 +42,32 @@ class OperationConfig:
     max_attempts: int
     timeout_s: Decimal
     retry_interval_s: Decimal
+
+    @classmethod
+    def from_document(cls, document: Mapping[str, object]) -> "OperationConfig":
+        """恢复持久化的读取预算，将 JSON 整数秒规范成精确 Decimal。
+
+        JSON 保存 Decimal 数值时不保留 Python 类型；比如 `10` 和 `0`
+        重开后会分别成为 `int`。次数仍必须是整数，秒数字段只接受
+        Decimal 或整数，之后统一交给构造器执行原有合法性校验。
+        """
+        fields = {"max_attempts", "timeout_s", "retry_interval_s"}
+        if not isinstance(document, Mapping) or set(document) != fields:
+            raise ValueError("持久化读取预算字段不完整或包含未知字段")
+
+        def decode_seconds(name: str) -> Decimal:
+            value = document[name]
+            if isinstance(value, Decimal):
+                return value
+            if type(value) is int:
+                return Decimal(value)
+            raise ValueError(f"持久化读取预算 {name} 必须是 JSON 数值: {value!r}")
+
+        return cls(
+            document["max_attempts"],
+            decode_seconds("timeout_s"),
+            decode_seconds("retry_interval_s"),
+        )
 
     def __post_init__(self) -> None:
         if (

@@ -41,6 +41,51 @@ def test_read_config_preserves_exact_values(attempts, interval):
     assert config.retry_interval_s.as_tuple() == interval.as_tuple()
 
 
+def test_saved_read_budget_decodes_integral_json_seconds_without_changing_zero():
+    config = OperationConfig.from_document({
+        "max_attempts": 3,
+        "timeout_s": 10,
+        "retry_interval_s": 0,
+    })
+
+    assert config.max_attempts == 3
+    assert type(config.max_attempts) is int
+    assert config.timeout_s == Decimal("10")
+    assert type(config.timeout_s) is Decimal
+    assert config.retry_interval_s == Decimal("0")
+    assert type(config.retry_interval_s) is Decimal
+
+
+def test_saved_read_budget_keeps_exact_fractional_json_seconds():
+    config = OperationConfig.from_document({
+        "max_attempts": 3,
+        "timeout_s": Decimal("1.234567890123456789"),
+        "retry_interval_s": Decimal("0.000000000000000001"),
+    })
+
+    assert config.timeout_s.as_tuple() == Decimal("1.234567890123456789").as_tuple()
+    assert config.retry_interval_s.as_tuple() == Decimal("0.000000000000000001").as_tuple()
+
+
+def test_saved_read_budget_still_requires_positive_timeout():
+    with pytest.raises(ValueError):
+        OperationConfig.from_document({
+            "max_attempts": 3,
+            "timeout_s": 0,
+            "retry_interval_s": 0,
+        })
+
+
+@pytest.mark.parametrize("invalid", [True, 1.0, "10", None])
+def test_saved_read_budget_rejects_non_json_numeric_seconds(invalid):
+    with pytest.raises(ValueError):
+        OperationConfig.from_document({
+            "max_attempts": 3,
+            "timeout_s": invalid,
+            "retry_interval_s": 0,
+        })
+
+
 def _candidate():
     return FileCandidate(
         action_id=31, item_id=101, processing_id=None, output_id=701,
