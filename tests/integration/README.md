@@ -34,6 +34,18 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capabili
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
 ```
 
+### Action6 分段视频安装版联合链
+
+`test_action6_builtin_segmented_roundtrip.py` 为普通录像和原生延时分别显式配置 `video.result_mode="segmented"`，从仓库外构建并安装 wheel，经真实 C host、CLI、SQLite、客户端报告及媒体导入和累计 ACK 验证完整交付。原单文件用例继续使用默认模式。分段样本跨越 `DJI_001/0999` 到 `DJI_002/0001`，核对全部视频、配对 LRF、native 独立 JPEG 和仅含视频的默认范围。默认取回包含全部原片，预览取回包含配对 LRF 及独立照片；正常任务不执行分段检查拷贝或媒体探测。
+
+测试使用不等长字节样例，只替换受约束的 ADB 进程边界，不连接相机；它核对实际传输、客户端导入和摘要，不证明媒体可解码、实际时长或帧数。每例保存 wheel 摘要、安装模块来源、来源覆盖、产物及交付摘要、客户端导入和 ACK 收据。使用部署版 Python 构建 wheel，避免继承容器中其他解释器：
+
+```bash
+UV_PYTHON="$PWD/apps/camctl/.venv311/bin/python" \
+  UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" \
+  apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_segmented_roundtrip.py -q
+```
+
 `test_timelapse_time_parameters.py` 使用 Action6 与 OSMO 360 II 的生产候选 Schema，经测试任务工厂、真实 `describe`、Python 精确校验、Chromium 中的客户端共享模块及 Node.js 后端真实导出，遍历同源时间域并核对精确词元、严格关系、型号曝光及输出。最短参数经过受理、未启动取消、报告发布和客户端导入，验证估算信息不进入生效参数或报告；该路径不执行设备命令。生成器在临时资料副本中验证漂移检查和重新生成。此时间域测试不直接调用正式合同；Action6 和 OSMO 360 II 的正式安装版业务链分别由[Action6 原生有限延时安装版联合链](#action6-原生有限延时安装版联合链)和[OSMO 内置合同联合链](#osmo-360-ii-正式内置合同安装版联合链)验证。
 
 ```bash

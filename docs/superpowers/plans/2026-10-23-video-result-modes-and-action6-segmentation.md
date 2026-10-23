@@ -52,7 +52,7 @@ V1—V11 是软件及安装版交付；V12 是独立安排的目标环境与实�
 
 ### 执行环境与提交方式
 
-先读取[组件测试指南](../../../apps/camctl/tests/AGENTS.md)、[客户端说明](../../../apps/client/README.md)、[跨组件测试说明](../../../tests/integration/README.md)及[脚本入口](../../../scripts/README.md)。核对现有 `.venv311` 的 Python 3.11；缺少环境时按组件指南用 uv 准备。Node、pnpm、C 工具、媒体工具及离线依赖按对应测试说明核对，不将缺工具记为用例通过。
+先读取[组件测试指南](../../../apps/camctl/tests/AGENTS.md)、[客户端说明](../../../apps/client/README.md)、[跨组件测试说明](../../../tests/integration/README.md)及[脚本入口](../../../scripts/README.md)。核对现有 `.venv311` 的 Python 3.11；缺少环境时按组件指南用 uv 准备。Node、npm、C 工具、媒体工具及离线依赖按对应测试说明核对，不将缺工具记为用例通过。客户端依照其 README 使用 `package-lock.json` 和 `npm ci`，先确认 npm CLI 可调用，再执行构建与测试。
 
 ```bash
 pwd
@@ -61,7 +61,7 @@ git branch --show-current
 git status --short
 apps/camctl/.venv311/bin/python --version
 node --version
-pnpm --version
+npm --version
 ```
 
 每项新增行为先写能证伪合同的失败测试，实际运行确认失败原因，再实现并运行同一范围。集成测试按目录分别启动 pytest，同工作区顺序执行；跨任务共享资源先隔离。阶段结束检查 diff、更新原步骤进度并提交该任务实际文件，检查暂存差异及提交后状态。局部通过后继续下一项，不为没有新增疑点的范围重复全量回归。
@@ -168,12 +168,12 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 **输入／交付：** 消费公共规格的四种覆盖结论和 V2 的范围语义；交付准确根协议、生成类型和消费者，供 V4、V9 输出。此步不要求尚未建立的检查记录作为事实来源，也不把 Schema 通过记为生产报告已接入。
 
 - [x] **步骤 1：增加协议和客户端失败样例。** 建议 `tests/integration/video-coverage-protocol.test.mjs` 及客户端 `tests/unit/video-coverage.test.ts`。覆盖普通／延时、秒数／整数帧、正常未检查、空／未知范围、成功动作但覆盖未知、非法交叉组合、未知与零，以及照片不属于视频数组。
-- [ ] **步骤 2：运行新样例并确认被当前 Schema 或导入器拒绝。** 根执行 `node --test tests/integration/video-coverage-protocol.test.mjs`；客户端执行 `pnpm --dir apps/client exec vitest run tests/unit/video-coverage.test.ts`。
+- [ ] **步骤 2：运行新样例并确认被当前 Schema 或导入器拒绝。** 根执行 `node --test tests/integration/video-coverage-protocol.test.mjs`；客户端在 `apps/client` 执行 `npm exec -- vitest run tests/unit/video-coverage.test.ts`。
 - [x] **步骤 3：在根 Schema 定义 `result.coverage` 及引用条件。** 建议表示包含量纲、目标、已确认连续量、结论、已检查产物引用、默认视频范围与原因；约束单位对应的数值类型和范围状态。复用既有实体 ID 与错误类型，移除实际内容策略原生延时不能带 `result` 的结构限制，保持单文件及其他策略的出现条件。扩展缺口错误的动作适用范围和引用校验，不能继续限制为普通录像。参数未生效或未形成决定时不补造结果。
 - [x] **步骤 4：统一设备位置表示及客户端文案来源。** 解除客户端 `segmentIssueText` 等固定 CAM 展示，按公共位置事实及相应格式描述显示 DJI／CAM。保持缺失位置没有路径或 `output_id`；公共错误编号仍由权威登记提供，不能维护第二套清单。
 - [ ] **步骤 5：接通导入、跨报告知识及结果展示。** 修改 Schema 校验、`parseReport`、`validateReportAgainstHistory`、`ownFacts` 和实际结果历史合并；展示目标、覆盖、固定范围和各文件结果。完整及增量报告的已知／未知处理遵守同一历史合同；媒体先到、报告先到均不提前确认 ACK。
 - [x] **步骤 6：生成公共类型及同步说明。** 客户端目录执行 `node --import tsx src/domain/generate-report-types.ts`，生成类型与根 Schema 一致；同步协议字段说明。
-- [x] **步骤 7：运行协议与客户端门槛。** 根执行 `node scripts/check-protocol.mjs`、本任务步骤 2 的协议测试；客户端执行步骤 2 的新单元测试及相关 segment 报告／结果模型测试、`pnpm --dir apps/client run typecheck`。全部预期通过，非法组合仍被拒绝。
+- [x] **步骤 7：运行协议与客户端门槛。** 根执行 `node scripts/check-protocol.mjs`、本任务步骤 2 的协议测试；客户端执行步骤 2 的新单元测试及相关 segment 报告／结果模型测试、`npm run typecheck`。全部预期通过，非法组合仍被拒绝。
 
 建议将业务语义固定到下面的精确结构，再从根 Schema 生成类型；可调整字段组织，但须在本步同步全部消费者。`coverage` 的建议字段为 `metric`、`target`、`confirmed`、`status`、`checked_output_ids`、`default_scope` 和可省略的结构化 `reason`。`metric` 区分 `duration_s` 与 `frames`；`status` 区分 `not_performed`、`reached`、`confirmed_short`、`unconfirmed`；目标与已确认量分别采用精确秒数或整数帧，未知实际量为 `null`。正常未检查时 `confirmed=null`、已检查列表为空，默认范围仍为全部合格视频。范围复用已有公共状态与 ID 结构，已检查列表和范围列表分别从自身关系生成，不能塞进动作的小型 JSON。枚举以权威登记／Schema 为源，后续任务不再定义第二套值。
 
@@ -189,8 +189,8 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 - [x] **步骤 2：写正常纵向集成失败测试并运行。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_normal.py`，同时覆盖普通和 native；观察原页、全部合格 MP4／LRF／照片、默认范围、产物及终态，拷贝和媒体调用次数为零。单独运行该文件确认当前不能闭合多段。
 - [x] **步骤 3：实现 Action6 文件特化及普通／native 绑定。** 视频和 LRF 具有序列位置，照片独立分类；普通多段为至少一份非空 MP4，不再要求精确一份。`coverage_target()` 从受理时生效参数生成精确时长或 `floor(D/I)+1` 整数帧，随执行定义固定；正常报告与之后异常检查读取同一目标，不另算一份。native 的 `outputs` 继续读取同一驱动格式映射，单文件路径不改变。
 - [ ] **步骤 4：接通正常、取消及有限失败的公共发布。** 两类动作共用公共结果集合，保留原控制、等待与取消资格。普通取消放弃；native 取消默认全部合格完成视频及照片。基准／START 失败、文件完成未知和必要格式缺失保持真实失败或未知，不调用 OSMO 下界或 native 专属入口。
-- [ ] **步骤 5：接通混合产物默认选择。** 建议 `apps/camctl/tests/integration/outputs/test_video_scope_photos.py`，验证默认视频范围加独立照片、配对预览用相同视频范围、范围外明确 ID、视频空／未知时照片继续及其他来源继续。保留实际查询、清理及逐项授权规则。
-- [ ] **步骤 6：接通正常覆盖的实际报告投影。** 正常实际内容策略输出未执行检查，实际量保持未知；范围及各产物来自同一提交。同步本步实际使用的存储字段、报告依赖及生成路由。新增 `apps/camctl/tests/integration/reporting/test_action6_normal_coverage.py`，经根 Schema 和客户端 V3 消费，不以单个错误头代替成功动作的覆盖。V9 再完成实际检查产生的增长关系展开和跨层重建。
+- [x] **步骤 5：接通混合产物默认选择。** 建议 `apps/camctl/tests/integration/outputs/test_video_scope_photos.py`，验证默认视频范围加独立照片、配对预览用相同视频范围、范围外明确 ID、视频空／未知时照片继续及其他来源继续。保留实际查询、清理及逐项授权规则。
+- [x] **步骤 6：接通正常覆盖的实际报告投影。** 正常实际内容策略输出未执行检查，实际量保持未知；范围及各产物来自同一提交。同步本步实际使用的存储字段、报告依赖及生成路由。新增 `apps/camctl/tests/integration/reporting/test_video_coverage_report.py`，经根 Schema 和客户端 V3 消费，不以单个错误头代替成功动作的覆盖。V9 再完成实际检查产生的增长关系展开和跨层重建。
 - [ ] **步骤 7：分别运行 devices、capture、outputs、reporting 的上述测试。** 补跑 Action6 现有结果页及单文件必要回归；测试证明模式确实由生产装配选中，原生延时没有被塞入只支持普通录像的 `FinishRecordingResults` 入口。
 
 ```bash
@@ -198,7 +198,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_ac
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/devices/test_action6_result_pages.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_action6_segmented_normal.py apps/camctl/tests/integration/capture/test_recording_media_link.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_video_scope_photos.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_action6_normal_coverage.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_video_coverage_report.py -q
 ```
 
 - [x] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
@@ -252,23 +252,23 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/
 **输入／交付：** 消费 V2 的公共完成端口、V4 的来源选择、V6 的完整副本，提供 `BoundCheckCopy` 和 `read_bound_check_copy()`。交付来源共同事务、原等待者关联、真实取回读本地副本和最终维护清理；V8 可直接发布实际检查结果。
 
 - [ ] **步骤 1：写事务截点失败测试。** 建议 `apps/camctl/tests/integration/persistence/test_segment_reuse_publication.py`：来源提交前已有两个 PENDING 正式选择，提交后才进入等待的第三个选择；前两者被原事务绑定，第三个不绑定。取回尚无固定 items 时按原 selection 身份关联，不能假定等待者已经完成产物选择。
-- [ ] **步骤 2：写取回与清理失败测试并分别运行。** 建议 `apps/camctl/tests/integration/outputs/test_segment_check_copy_reuse.py` 及 `apps/camctl/tests/unit/outputs/test_segment_check_copy_retention.py`。两个取回有不同 delivery／目标文件；第一个结束时副本继续保留；读副本期间维护器不能删除源；全部相关责任结束后才可清理。
-- [ ] **步骤 3：扩展来源终态的有界整组事务。** 同时提交产物、视频范围、适用覆盖、动作终态、等待转换及副本关联。截点由该事务中的实际正式等待选择确定，核对取回已经进入等待本来源的状态、原依赖与 PENDING 选择，不把仅已受理但尚未等待的后续动作加入。分页建立增长关联，原操作键保存完整有限申请。独立守卫核同源成员、真实 output、完整副本、适用等待者及整组闭合。
+- [x] **步骤 2：写取回与清理失败测试并分别运行。** 建议 `apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py` 及 `apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py`。两个取回有不同 delivery／目标文件；第一个结束时副本继续保留；读副本期间维护器不能删除源；全部相关责任结束后才可清理。
+- [x] **步骤 3：扩展来源终态的有界整组事务。** 同时提交产物、视频范围、适用覆盖、动作终态、等待转换及来源发布截点。按[存储专题](../../camctl/database/segments.md#生产端口与后续分工)，从该完整 H 按页恢复实际已运行且等待来源的 PENDING 选择及准确副本关系。原操作键保存完整有限申请；核对同源成员、真实 output、完整副本、原依赖及适用等待者。
 - [ ] **步骤 4：实现原申请核实与取消次序。** 事务已提交但回执未知时，从原整组恢复原 H、产物和等待者；不重新查询后来的等待集合。取消先于来源终态时采用取消处置，来源终态先提交时保持原结果。复用资格与默认／明确 ID 的实际选择分别核对。
 - [ ] **步骤 5：接通取回授权和本地读取。** 保持设备原片的 `output_id` 与正式源身份，将已绑定完整检查副本作为可核验的读取源，仍由原 item 创建独立 delivery、交付文件及 copy。副本不能可靠使用时沿同一原片、delivery 和累计预算核实或读设备；预览读取真实 LRF，后到取回读设备源。
-- [ ] **步骤 6：保护读取源和目标的实际生命周期。** `run_owned_read()` 等实际操作同时登记检查源文件与交付目标的使用资格；文件操作、线程、读取会话及工具真正收场后才释放。必要控制可继续推进，文件不能在仍被读取时清理。
+- [x] **步骤 6：保护读取源和目标的实际生命周期。** `run_owned_read()` 等实际操作同时登记检查源文件与交付目标的使用资格；文件操作、线程、读取会话及工具真正收场后才释放。必要控制可继续推进，文件不能在仍被读取时清理。
 - [ ] **步骤 7：实现保留与清理决策。** 绑定取回全部终态且实际操作收场才清理完整副本；没有绑定用途的完整副本与来源提交后无检查责任的部分副本及时清理。来源提交未知先核实，终态来源的部分检查不再续传。清理失败保存后续责任，不改写已有动作结果，不清理相机原片、照片、LRF 或正式交付文件。
 - [ ] **步骤 8：接通历史归属及冷恢复。** 来源拥有发布截点和复用关系，取回拥有自身使用与交付进度，文件独立恢复。新增关系纳入登记、事件、快照、有界读取和维护发现；测试等待者取消／失败、无等待者、清理失败与源文件后来不可用。
 - [ ] **步骤 9：分别运行 persistence、outputs、history 的相关门槛。** 扩展既有 `test_segment_transaction_batches.py`、`test_work_file_result_boundary.py` 及复用新测试。实际读取和维护组合必须通过，纯保留函数通过不能替代真实文件保护。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/outputs/test_segment_check_copy_retention.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/persistence/test_segment_reuse_publication.py apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py -q
-apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_segment_check_copy_reuse.py apps/camctl/tests/integration/outputs/test_work_file_result_boundary.py -q
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py apps/camctl/tests/integration/outputs/test_work_file_result_boundary.py -q
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_segment_inspection_history.py -q
 ```
 
-- [ ] **步骤 10：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 10：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V8：接入 Action6 普通与原生延时的异常恢复
 
@@ -276,10 +276,10 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/
 
 **输入／交付：** 消费 V4—V7，交付 Action6 的完整实际内容策略。普通目标采用主视频时长，native 采用主视频帧数；两类动作共用检查与范围机制，保留各自动作的控制和取消合同。
 
-- [ ] **步骤 1：写真实处理器异常集成失败测试。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py`。60 秒目标、18／27／22／40 秒仅检查前三段；第三段拷贝或指标未知只固定前两段；第一段未知形成空前缀；完整可靠全部不足才确认不足。
+- [x] **步骤 1：写真实处理器异常集成失败测试。** 建议 `apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py`。60 秒目标、18／27／22／40 秒仅检查前三段；第三段拷贝或指标未知只固定前两段；第一段未知形成空前缀；完整可靠全部不足才确认不足。
 - [ ] **步骤 2：写原生延时和明确错误反例并运行。** 151 帧目标、60／60／45／20 帧仅检查前三段；MP4 与 DNG/JPEG 同时存在且所需照片缺失不能被视频达标覆盖；可靠缺口、非空性及明确媒体错误保留优先失败。只有部分已检查量不足不能宣称全部内容短缺。
-- [ ] **步骤 3：实现异常判定与检查推进。** 控制和文件核实后，从冻结起点逐段调用 `inspect_segment()`，保存累计量及首个中断位置，达到目标即停止为选段检查后段；下一指标未知时不跨越。正常登记接续、已有终态和取消先分派，不能误启内容检查。
-- [ ] **步骤 4：实现来源终态与范围决策。** 使用 V7 一次发布所有合格原片和固定视频范围。可靠控制但覆盖未知可成功；没有控制或内容成功依据则失败；明确失败优先。来源失败不把非空前缀取回改为失败，空／未知视频范围不抑制独立照片处理。
+- [x] **步骤 3：实现异常判定与检查推进。** 控制和文件核实后，从冻结起点逐段调用 `inspect_segment()`，保存累计量及首个中断位置，达到目标即停止为选段检查后段；下一指标未知时不跨越。正常登记接续、已有终态和取消先分派，不能误启内容检查。
+- [x] **步骤 4：实现来源终态与范围决策。** 使用 V7 一次发布所有合格原片和固定视频范围。可靠控制但覆盖未知可成功；没有控制或内容成功依据则失败；明确失败优先。来源失败不把非空前缀取回改为失败，空／未知视频范围不抑制独立照片处理。
 - [ ] **步骤 5：审计全部生命周期入口。** 核对下方入口表的普通、native、启动／绑定／外部失败、停止耗尽、时钟受限、取消、已有结论、提交未知及冷恢复分区。原生延时取消保留全部合格完成视频及照片，不继续检查以追求原目标。
 - [ ] **步骤 6：增加装配与恢复组合。** 建议 `apps/camctl/tests/integration/bootstrap/test_action6_segmented_resume.py`，在输入部分落盘、拷贝完成结果未保存、媒体结束、覆盖保存及来源提交前后分别中断。核对 START／STOP、预算、检查身份、范围及副本使用不会被重置或重复。
 - [ ] **步骤 7：分别运行新 capture 与 bootstrap 文件，补跑同模式单文件和 OSMO 关键回归后提交。** 此步结束应可从实际处理器取得正常／异常的来源、范围、独立取回及正确清理，不等待 V9 才补齐执行所需持久化或归属。
@@ -301,7 +301,7 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/bootstra
 
 实现时按当前函数名重新定位，并在代码评审中逐项记录生产调用方与对应测试。搜索到标识符不代表实际路径已经接通。
 
-- [ ] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 8：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V9：完成实际覆盖的有界报告与同一历史边界重建
 
@@ -311,8 +311,8 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/bootstra
 
 - [ ] **步骤 1：写普通／native 实际报告失败测试。** 建议 `apps/camctl/tests/integration/reporting/test_video_coverage_report.py`：reached、confirmed short、unconfirmed、not performed；成功但未知、失败但取回成功、未知与零；目标和累计量按正确单位，OSMO 下界不进入实测结果。
 - [ ] **步骤 2：写冻结 H 的组合反例并运行。** 建议 `apps/camctl/tests/integration/history/test_video_result_boundary.py`，在 H 后补摘要、删除设备文件、结束后到取回及清理副本，旧 H 仍恢复同样的来源、范围、覆盖与文件身份；改变页批次和恢复方向后报告原字节一致。
-- [ ] **步骤 3：登记公共投影及报告路由。** 成功与失败动作、普通和 native 均有适用覆盖路径；公开变化推进原动作水位，内部检查进度不直接制造公开结果。已发布视频范围与逐文件检查事实沿真实关系取得，不能只从 `recording_processing` 或普通录像类型判断。
-- [ ] **步骤 4：实现增长关系的同 H 有界展开。** 在 `_report_plan`／`report_tokens` 对接的实际生成路径中分页展开已检查成员、范围、缺口和实际 output 引用；有限结果头不嵌入增长数组。关联缺失、数量矛盾及历史损坏按状态库错误处理。
+- [x] **步骤 3：登记公共投影及报告路由。** 成功与失败动作、普通和 native 均有适用覆盖路径；公开变化推进原动作水位，内部检查进度不直接制造公开结果。已发布视频范围与逐文件检查事实沿真实关系取得，不能只从 `recording_processing` 或普通录像类型判断。
+- [x] **步骤 4：实现增长关系的同 H 有界展开。** 在 `_report_plan`／`report_tokens` 对接的实际生成路径中分页展开已检查成员、范围、缺口和实际 output 引用；有限结果头不嵌入增长数组。关联缺失、数量矛盾及历史损坏按状态库错误处理。
 - [ ] **步骤 5：用真实生成报告验证客户端导入与展示。** 扩展客户端 segment 报告、知识合并、结果模型及浏览器测试；验证两种设备位置、覆盖状态、范围外明确 ID、照片保留、媒体与报告不同到达顺序及累计 ACK 条件。
 - [ ] **步骤 6：运行分层门槛。** 分别运行 reporting 和 history 新文件；运行 `node --disable-warning=ExperimentalWarning scripts/check-report-dependencies.mjs`、对应登记集成测试，以及客户端相关单元、集成／浏览器测试。根 Schema、安装资源和客户端生成类型保持一致。
 
@@ -321,16 +321,18 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reportin
 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/history/test_video_result_boundary.py -q
 node --disable-warning=ExperimentalWarning scripts/check-report-dependencies.mjs
 node --disable-warning=ExperimentalWarning --test tests/integration/report-dependenc*.test.mjs
-pnpm --dir apps/client exec vitest run tests/unit/video-coverage.test.ts tests/unit/segment-reports.test.ts tests/unit/segment-result-model.test.ts
-pnpm --dir apps/client run build
-pnpm --dir apps/client exec vitest run tests/integration/segment-reports.test.ts tests/integration/browser-segment-results.test.ts
+cd apps/client
+npm exec -- vitest run tests/unit/video-coverage.test.ts tests/unit/segment-reports.test.ts tests/unit/segment-result-model.test.ts
+npm run build
+npm exec -- vitest run tests/integration/segment-reports.test.ts tests/integration/browser-segment-results.test.ts
+cd ../..
 ```
 
-- [ ] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V10：通过真实安装版、C host 与客户端验证模式矩阵
 
-**文件：** 建议新增 `tests/integration/test_action6_builtin_video_segmentation_roundtrip.py`；扩展现有 Action6／OSMO 普通、native、能力声明联合用例、受契约约束的 ADB／媒体进程替身及 `tests/integration/client_driver.ts`。测试说明随入口更新。
+**文件：** 建议新增 `tests/integration/test_action6_builtin_segmented_roundtrip.py`；扩展现有 Action6／OSMO 普通、native、能力声明联合用例、受契约约束的 ADB／媒体进程替身及 `tests/integration/client_driver.ts`。测试说明随入口更新。
 
 **输入／交付：** 消费 V1—V9 的完整生产实现，以仓库外构建和安装的 wheel、真实 CLI／SQLite、C host 和客户端验证。替身仅控制设备／工具边界；不能用测试直接构造成功终态代替生产接线。
 
@@ -341,7 +343,7 @@ pnpm --dir apps/client exec vitest run tests/integration/segment-reports.test.ts
 - [ ] **步骤 5：准备前置并顺序运行联合用例。** 按跨组件说明准备 Python 3.11、uv 离线缓存、客户端依赖与 Chromium、C 构建工具及对应进程工具。根执行下列文件，各用例完整结束并保留命令、日志、退出码及安装资源证据。
 
 ```bash
-apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_video_segmentation_roundtrip.py -q
+apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_segmented_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_demo_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_action6_builtin_timelapse_roundtrip.py -q
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py -q
@@ -349,9 +351,9 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 apps/camctl/.venv311/bin/python -m pytest tests/integration/test_device_capability_declarations.py -q
 ```
 
-- [ ] **步骤 6：核对证据边界。** 安装版实际包含新协议与模式说明；报告及媒体上传分别保留实际导入凭据，累计确认水位持久化。替身通过不证明真实固件分段或真实媒体，V12 保持独立。
+- [x] **步骤 6：核对证据边界。** 安装版实际包含新协议与模式说明；报告及媒体上传分别保留实际导入凭据，累计确认水位持久化。替身通过不证明真实固件分段或真实媒体，V12 保持独立。
 
-- [ ] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V11：完成全量软件门槛、发行物和部署交接
 
@@ -373,7 +375,7 @@ for directory in sorted(root.iterdir()):
 PY
 ```
 
-- [ ] **步骤 3：运行客户端和公共登记门槛。** 客户端执行 `pnpm --dir apps/client test`、`pnpm --dir apps/client run build`；根执行下列只读检查。修改登记时先使用所属生成脚本的写入模式，再运行只读模式核对，不能手工维护生成区。
+- [ ] **步骤 3：运行客户端和公共登记门槛。** 客户端在 `apps/client` 执行 `npm test`、`npm run build`；根执行下列只读检查。修改登记时先使用所属生成脚本的写入模式，再运行只读模式核对，不能手工维护生成区。
 
 ```bash
 node scripts/check-protocol.mjs
@@ -387,11 +389,11 @@ node --disable-warning=ExperimentalWarning --test tests/integration/report-depen
 apps/camctl/.venv311/bin/python -m unittest discover -s tests/integration -p 'test_database_history_sql.py' -v
 ```
 
-- [ ] **步骤 4：审查发行候选和部署资料。** 归档 V10 验证过且与最终源码、权威资源一致的 wheel 及摘要；之后若有生产或协议修改，重建并重跑受影响安装链。包内配置和正式演示明确选择所需模式；能力、配置参考与已实现情况一致，原单文件演示仍可执行。不得用源码目录可用代替安装物可用。
-- [ ] **步骤 5：完成文档及最终分支审查。** 执行 `node scripts/check-doc-links.mjs`、独立标题锚点／失效引用检查、正式文档临时目录引用检查及 `git diff --check`。独立整体审查应沿配置到交付和恢复核对，不以阶段提交数代替业务完成度。
-- [ ] **步骤 6：保存验证证据与交接说明。** 在组件验证记录写实际命令、退出码、完整目录结果、已知未验范围及发行摘要；更新本计划原步骤，交付可直接部署的资料与 V12 待验项。
+- [x] **步骤 4：审查发行候选和部署资料。** 归档 V10 验证过且与最终源码、权威资源一致的 wheel 及摘要；之后若有生产或协议修改，重建并重跑受影响安装链。包内配置和正式演示明确选择所需模式；能力、配置参考与已实现情况一致，原单文件演示仍可执行。不得用源码目录可用代替安装物可用。
+- [x] **步骤 5：完成文档及最终分支审查。** 执行 `node scripts/check-doc-links.mjs`、独立标题锚点／失效引用检查、正式文档临时目录引用检查及 `git diff --check`。独立整体审查应沿配置到交付和恢复核对，不以阶段提交数代替业务完成度。
+- [x] **步骤 6：保存验证证据与交接说明。** 在组件验证记录写实际命令、退出码、完整目录结果、已知未验范围及发行摘要；更新本计划原步骤，交付可直接部署的资料与 V12 待验项。
 
-- [ ] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
+- [x] **步骤 7：完成阶段提交。** 按全局提交方式审查实际 diff 和验证证据，更新本任务原步骤进度，仅提交本任务文件；记录提交标识、通过范围与剩余接线，并核对提交后状态。
 
 ## V12：目标 ARM 与实机媒体验收
 
@@ -421,18 +423,25 @@ apps/camctl/.venv311/bin/python -m unittest discover -s tests/integration -p 'te
 
 ## 当前进度与交接记录
 
-2026-10-23：主分支已集成部署绑定（`bf008ea`）、公共文件身份（`1c1a7f8`）、媒体指标（`4008615`）、覆盖协议与客户端（`fb9c3e5`）、实际内容前缀规则（`f1ea3b3`）。`eda8826` 保留 OSMO 普通单文件的精确一份合同，并让组件分段夹具显式选择模式。公共模式、目标与结果头的完整业务接线仍在 V4、V6—V9 推进，不以这些基础提交表示 Action6 已完成。
+2026-10-23：V1—V9 的本版业务路径已集成，普通与原生延时共用结果模式、分段身份、独立检查、副本复用及公开覆盖。详细命令、环境、实际结果与发行证据由[组件验证记录](../../camctl/verification.md#视频结果模式与-action6-分段的软件验证2026-10-23)维护。下表说明当前交付；原步骤中仍未勾选的完整矩阵继续作为后续工作，不记为通过。
 
-已取得的验证包括：模式及设备定向单元、主视频与覆盖定向单元329项、真实本地媒体2项及媒体历史2项；客户端相关单元513项、TypeScript 编译和根协议校验。主分支新增前缀规则及 OSMO 模式单元组合53项通过；原 Action6 单文件自然完成与取消／恢复装配6项通过（日志 `/tmp/camctl-video-single-file-bootstrap.log`，退出码0）。未重复运行全部组件集成目录。模式冻结装配4项通过（`/tmp/camctl-video-mode-binding.log`，退出码0），验证两设备、两动作、同驱动两台相机独立配置、重开连接、旧请求重送和新请求。OSMO 完成／范围恢复原运行28项通过、2项因公共解析适配失败；修正未知顺序键保存后，仅重跑受影响的4项全部通过（`/tmp/camctl-video-osmo-unknown-order.log`，退出码0）。
+| 任务 | 已交付的本版范围 | 仍需补充的范围 |
+| --- | --- | --- |
+| V1、V2 | 每设备模式绑定与受理冻结；两设备单文件保留；公共身份、顺序及 OSMO 特化。 | 两设备所有生命周期的模式矩阵。 |
+| V3、V9 | 普通与 native 的覆盖 Schema、投影、有界展开和客户端消费；正常同 H 重建；未知及空范围分别表达。 | 删除、清理、取回变化后的历史组合及完整报告字节矩阵。 |
+| V4 | 正常全部合格视频、配对LRF和独立照片；正常检查拷贝与探测均为零；视频空／未知时照片仍可取回。 | 所有有限失败与取消组合。 |
+| V5、V6 | 可靠流时长／整数帧、精确累计、独立检查与完整副本、目标和预算重用；异常检查记录实际进入历史与报告。 | 部分副本、工具结束但保存未知等完整恢复矩阵。 |
+| V7 | 以来源完整发布 H 固定原等待者资格；两取回独立交付、后到请求读设备；受管哈希及读取保护源和目标，实际责任结束后清理。 | 正式本地读取开始后失败的持久化换源，以及清理失败、取消和提交回执未知的完整组合。 |
+| V8 | 不等长分段的最短连续前缀、可靠控制与覆盖分别判定、完整不足失败、未知与空范围、151帧目标及照片独立取回。 | 重复顺序键之前的可靠前缀保留，以及下述异常矩阵。 |
+| V10 | 普通与native安装版均经 C host、CLI、SQLite、客户端导入、独立默认／预览取回和ACK闭合；native自然完成依据与设备占用已修正；发行wheel与当前325个源码／资源文件一致。 | 异常安装链及两设备完整模式矩阵。 |
+| V11 | 完整 Python 单元仅运行一次，其后按影响定向验证；公共登记、数据库结构、历史SQL、客户端构建和定向浏览器测试通过；发行物及原失败证据已归档。 | 全部组件集成目录按后续安排执行。 |
+| V12 | 按本版执行安排留待设备准备。 | ARM安装、真实固件控制、真实媒体、现场异常及独立客户端／ACK证据。 |
 
-V7 采用已有来源 `published_event_id` 所属完整事务边界，恢复该边界下真正已运行且等待来源的取回，而不另建一套等待者清单。它必须保留与来源提交时固定关联相同的行为；仅已受理的后续取回不具备复用资格。检查副本建档后本地读取失败，再切回设备源的持久化换源流程列为本版待完善项；首次授权前副本不可用时仍直接选设备源。
+V7 以 `segment_sets.published_event_id` 所属完整事务为固定截点，从该 H 恢复真正已运行且等待来源的取回。该历史表示保持首次来源发布时固定关联的行为；仅已受理、后到或尚未等待来源的取回不取得复用资格。
 
-V4 已集成为 `0a65861`：Action6 普通与 native 的实际处理器、原页 MP4/LRF 配对、照片、有限结论和共同提交已接通。两个正常混合产物测试通过，验证3份MP4、2份LRF、JPEG及仅含3份视频的默认范围，复制和探测为零；另通过OSMO native6项、原Action6 native单文件1项及有限头30项。主分支增加默认／预览照片选择2项通过（`/tmp/camctl-video-scope-photos.log`）。空／未知视频范围与照片的异常组合继续V8验证。
+### 后续实现与验证顺序
 
-V7 已集成为 `0e40c84`，有界读取与受管哈希修正为 `290dc82`。检查副本授权前两等待者、后到设备直读、独立交付及实际文件清理集成2项通过，相关单元5项通过；源和目标均受文件执行器保护，来源清理限制仍适用。原默认范围／查询定向回归17项通过，最小SQLite排序夹具补齐策略后1项复测通过。
-
-完整Python单元门槛在包含V4的隔离工作区仅运行一次：Python3.11.16，7046 passed、1 skipped、2 warnings，45.21秒，退出码0。原日志与命令已复制到主工作区 `.local/verification/action6-video-mode-v11/`；警告来自两个同步测试被标记asyncio。后续V8/V9新增改动继续按影响定向验证，不重复整套单元门槛。最终审查还补足Action6单文件非空合同：零字节MP4经真实产物规则被拒，保持精确一份；Action6与OSMO相关任务单元77项通过（`/tmp/camctl-video-single-required-contract.log`，退出码0）。
-
-V6 独立检查链已集成为 `584099a`：新增检查作为 action 子记录，copy 有独立 inspection 所有权，完整校验后按需探测；新检查端口两项实际读取／完整副本／指标保存／重入测试通过，既有输入拷贝与 native 完成12项通过，数据库结构3857项断言和事件登记通过。V7 正在闭合副本复用及释放，V8 正在组合真实异常处理器，V9 正在组合覆盖报告；来源终态后的部分检查与取消收场须经这些后续接缝验证。
-
-V10 的安装版组合用例正在隔离工作区准备，须在实际运行接口稳定后验证。V12 按本版执行安排留待设备准备后进行。未勾选的原步骤仍需继续完成；未执行的故障矩阵和验证不记为通过。
+1. 先补齐正式本地读取失败后的持久化换源。沿同一原片、delivery、原预算和操作核实责任恢复，并用已等待／后到取回组合验证；不得重置预算或重建来源截点。
+2. 再修正重复顺序键的前缀处理。检查编排与持久化复核须在首个冲突之前共同停止，保留此前可靠前缀；起点本身无法确定时仍为未知范围。目前遇到任意后段重复键会将默认范围整体置为未知，所有合格原片仍保留，明确ID可以取回。
+3. 在上述行为稳定后补 V6—V10 的故障矩阵：输入部分落盘、结果保存未知、来源事务回执未知、多等待者取消／失败、清理失败、无等待者及设备源不可用。按原步骤分别通过真实边界注入和同 H 核实，保持原控制与预算。
+4. 根据这些新增改动安排尚未执行的组件目录及安装版全矩阵，沿 V11 归档最终发行物；设备准备好后单独执行 V12，不重复已核实且行为未变的拍摄。
