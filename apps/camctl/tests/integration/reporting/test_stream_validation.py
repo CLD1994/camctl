@@ -123,6 +123,21 @@ def test_current_action_count_constraints_match_original_validator(kind, status,
             gate.close_node()
 
 
+@pytest.mark.parametrize('status', ['succeeded', 'failed', 'canceled'])
+def test_terminal_native_timelapse_may_retain_outputs(status):
+    document = _action('camera_timelapse', status)
+    if status == 'failed':
+        document['error'] = {'code': 'future_error', 'stage': 'capture', 'details': {}}
+    document['result'] = {'coverage': {
+        'metric': 'frames', 'target': 151, 'confirmed': 151, 'status': 'reached',
+        'checked_output_ids': ['20'],
+        'default_scope': {'state': 'nonempty', 'member_count': 1, 'output_ids': ['20']},
+    }}
+    document['outputs'] = [_output()]
+    assert _original_accepts('action', document)
+    _stream_action(document).close_node()
+
+
 @pytest.mark.parametrize('name,field', [('obtain_result', 'failures'), ('delete_result', 'items'), ('cancel_result', 'items')])
 def test_required_ordinary_arrays_are_not_optional_empty_entities(name, field):
     plan = _plan(name, (DeferredField((field,)),))

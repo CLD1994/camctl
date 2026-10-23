@@ -12,6 +12,7 @@ import type {
   StatusReport,
 } from "../../src/shared/types";
 import { parseJson } from "../../src/shared/json";
+import { createProtocolValidator } from "../../src/shared/protocol-validation";
 import { scopeReport, segmentReport } from "../helpers/segment-reports";
 
 type Coverage = {
@@ -27,6 +28,10 @@ type Coverage = {
   };
   reason?: { code: string; output_id?: string; message?: string };
 };
+
+const validateActionSchema = createProtocolValidator().getSchema(
+  "status-report.schema.json#/$defs/action",
+)!;
 
 const coverage = (changes: Partial<Coverage> = {}): Coverage => ({
   metric: "duration_s",
@@ -167,6 +172,12 @@ describe("视频覆盖报告", () => {
       "camera_timelapse",
     );
     expect(() => validateReport(timelapse)).not.toThrow();
+    expect(validateActionSchema(source(timelapse))).toBe(true);
+    for (const status of ["running", "expired"] as const) {
+      const action = { ...source(timelapse), status };
+      if (status === "expired") action.expiration_reason = "window_missed";
+      expect(validateActionSchema(action)).toBe(false);
+    }
     expect(
       resultNotes(source(timelapse)).some((note) =>
         /目标 151帧/.test(note.text),

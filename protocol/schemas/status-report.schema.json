@@ -2180,31 +2180,46 @@
                   ]
                 }
               ]
-            },
+            }
+          }
+        },
+        {
+          "if": {
             "allOf": [
               {
-                "if": {
-                  "properties": {
-                    "status": {
-                      "enum": [
-                        "running",
-                        "expired"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ]
-                },
-                "then": {
-                  "properties": {
-                    "outputs": {
-                      "maxItems": 0
-                    }
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "camera_take_photo",
+                      "camera_timelapse"
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running",
+                      "expired"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
               }
             ]
+          },
+          "then": {
+            "properties": {
+              "outputs": {
+                "maxItems": 0
+              }
+            }
           }
         },
         {
