@@ -14,7 +14,7 @@
 
 ### 安装与定向软件验证
 
-当前相机会话准备及响应修复的安装环境为 `/tmp/camctl-video-real-settings-v2-20261023/venv`，Python 3.11.16、SQLite 3.53.1、ffprobe／ffmpeg 6.1.1。wheel 位于证据根 `session-settings-runtime-v2/dist/camctl-0.1.0-py3-none-any.whl`，SHA-256 为 `3c5e80e31ade0d5fad5e3addac0886ebc67aed9d66ffb079aabd43f9ee791fa7`。同目录 `source-wheel-install-manifest.json` 核对 298 个生产 Python 文件与 27 个权威资源，325 项源码、wheel、安装文件逐字节一致；`uv pip check` 和安装版静态能力导出均退出 0。Action6 设备读数为固件 `v10.00.39.16`；OSMO 系统构建读数为 `eagle4_oq102-userdebug`、增量 `38390`，不是商品固件版本号。早期场景使用各自归档的发行物；修复后继续原任务的记录保留实际版本边界。
+相机会话准备及响应修复阶段的安装环境为 `/tmp/camctl-video-real-settings-v2-20261023/venv`，Python 3.11.16、SQLite 3.53.1、ffprobe／ffmpeg 6.1.1。wheel 位于证据根 `session-settings-runtime-v2/dist/camctl-0.1.0-py3-none-any.whl`，SHA-256 为 `3c5e80e31ade0d5fad5e3addac0886ebc67aed9d66ffb079aabd43f9ee791fa7`。同目录 `source-wheel-install-manifest.json` 核对 298 个生产 Python 文件与 27 个权威资源，325 项源码、wheel、安装文件逐字节一致；`uv pip check` 和安装版静态能力导出均退出 0。Action6 设备读数为固件 `v10.00.39.16`；OSMO 商品固件版本未知；系统构建读数为 `eagle4_oq102-userdebug`、增量 `38390`。早期场景使用各自归档的发行物；修复后继续原任务的记录保留实际版本边界。
 
 本次修复包括：预览取回不再误用原片检查副本；Action6 结果读取按冻结模式选择原始分段页，完整扫描结束标记在保存页替换后仍保留；保留产物的完成判定使用已登记状态及原明确失败；OSMO 验收工具只对原片要求两路主视频。另将[相机会话准备](../architecture/camera-parameters.md#相机会话准备)接入两型号的普通录像和原生延时。已观察到的 `simulate_device` 服务不存在／查找失败诊断，即使伴随退出 0，也不再记录为设置接受或进入会话缓存。
 
@@ -32,6 +32,18 @@
 
 新增服务错误分类的 6 项测试在修复前全部失败；修复后与设备目录一同通过。软件替身不承担真实固件、媒体时长或设备状态证据。
 
+随后按既有结果页范围，将分段模式的逐文件 metadata 调用合为一次页内批量读取。设备脚本分别保存每项身份、退出码、stdout 和 stderr 的原始字节；传输、帧、单项任一失败仍使结果页不完整，不增加重试、放宽长度格式或重置期限。生产接口只读扫描完成 Action6 的 734 份文件、23 页、46 次 ADB 调用；OSMO 完成 32 份 OSV／LRF、1 页、2 次调用。各原始页位于 `metadata-batching-continuation/`，这次成功扫描不撤销早期任务的终态失败。
+
+批量读取安装环境为 `/tmp/camctl-video-real-batch-20261023/venv`，版本与上一阶段相同。wheel 位于 `metadata-batching-continuation/runtime-batch-v1/dist/camctl-0.1.0-py3-none-any.whl`，SHA-256 为 `c7af3e20348164aad5dc13fc3378fb1c7ada275474f2506eae4496ecbc71bc45`；298 个生产 Python 文件和 27 个资源共 325 项源码、wheel、安装文件一致，`uv pip check` 和 `describe` 退出 0。
+
+以下批量读取测试继续使用仓库的 `apps/camctl/.venv311/bin/python` 启动 pytest，真机安装环境与测试解释器分别记录。组件集成复核另存 `device-integration-recorded.command.json`，包含完整 argv、cwd、环境、UTC 和退出码。
+
+| 批量读取验证目标 | 实际结果 | `metadata-batching-continuation/` 下日志 |
+| --- | --- | --- |
+| `apps/camctl/tests/unit/devices` | 1626 passed，24.43 秒，退出 0；一条既有 asyncio 标记警告 | `all-unit-devices.log` |
+| `apps/camctl/tests/integration/devices/test_adb_camera_transport.py`、`test_action6_result_pages.py`、`test_osmo360ii_result_pages.py` | 首轮 41 passed、3.04 秒；补存完整命令的复核为 41 passed、2.91 秒，均退出 0 | `device-integration.log`、`device-integration-recorded.log` |
+| `tests/integration/test_action6_builtin_segmented_roundtrip.py`、`test_osmo_builtin_record_segmentation_roundtrip.py`，筛选 `action6_segmented or normal or native-tail` | 4 passed、6 deselected，212.18 秒，退出 0 | `installed-chains.log` |
+
 ### 已观察的设备与交付结果
 
 | 场景目录 | 控制、文件和客户端事实 | 证据边界 |
@@ -42,13 +54,32 @@
 | `osmo360ii-segmented-record-auto-082757` | 8 秒目标在唯一 START 保存后中断本次主机执行进程，等待 18 秒，再沿原状态库恢复；唯一 STOP 正常。5 份 OSV 和 5 份 LRF 保留，默认前 2 份原片及配对预览交付，ACK 10；新取回明确选择范围外 3 份原片及其预览，导入并 ACK 21 | 原执行恢复及后到取回前后冻结定义、集合、默认范围和控制记录相同；没有重拍、相机重启或删除文件。 |
 | `action6-segmented-record-auto-080425` | 四项会话设置、唯一 START 和唯一 STOP 均取得正常返回；两份 MP4 及两份 LRF 文件事实已观察，但三次结果读取因文件长度响应无效而失败；原拍摄错误 13，默认原片及预览取回均为错误 21，失败报告 ACK 7、水位 25 | 原拍摄和默认范围保持失败／未知。新显式 ID 取回动作 5 单独交付两份已登记 MP4，客户端导入成功并 ACK 14；没有成功的预览交付。 |
 
+新安装物另执行以下 Action6 场景；它们与原失败任务分别保留独立身份。
+
+| 场景目录 | 控制、文件和客户端事实 | 证据边界 |
+| --- | --- | --- |
+| `action6-segmented-record-auto-094948` | 12 秒目标，唯一 START／STOP 均正常；完整结果登记 2 份 MP4 及 2 份 LRF，默认原片、预览分别取回成功，4 份文件经客户端导入并 ACK 8、水位 51 | 首次 RESULTS 的目录调用超时保留，原结果流程第二次尝试成功；没有重拍。 |
+| `action6-segmented-timelapse-auto-095957` | 300 秒目标、2 秒间隔，唯一 START，无 STOP，自然完成；来源与原片取回成功，1 份 MP4 及配对 LRF 已登记 | LRF 字节全部落盘后源摘要调用超时，copy 校验终局失败；CLI 因未闭合的取回状态交接退出，原预览取回仍运行态，客户端完整链尚未完成。 |
+
+普通录像专项 `action6-segmented-record-auto-103923` 使用新的 16 秒目标和 10 秒异常余量，在唯一 START 保存后暂挂本次 CLI 组约 35.02 秒，再恢复原组。STOP 正常，保存的 `control_elapsed_ns=36512076393` 确认进入生产异常检查；4 份 MP4 和 4 份配对 LRF 均登记保留。仅前两份原片执行检查，保存的时长分别为 9.542867、9.709700 秒，达到目标后不检查后两段。
+
+默认两份原片及配对预览交付、客户端导入和 ACK 10 成功；后到请求明确取回范围外的输出 3、4、7、8，再独立取回已检查的输出 1、5，两次均成功，最终 ACK 24、水位 123。
+
+两份检查输入均完整校验，原先已等待的默认原片取回从对应主机中间文件读入独立交付，预览仍从设备 LRF 读取。等待者完成后，两个检查输入均已可靠释放并清理；后到请求为已检查原片新建设备读取副本。`default-chain-audit.json` 逐行核对来源定义、集合、默认范围、结论、检查及原控制记录在新请求前后相同；8 份设备原片／预览保持可用，没有设备删除流程。原始进程、时钟、唯一控制及脚本摘要位于 `action6-overrun-harness/`；本次没有在检查中终止进程，不宣称取得检查中断冷恢复证据。
+
 Action6 在首次设置时，工具退出 0，却在 stdout 明确报告 `server not exist`。相机进程和画面管线日志显示异常；一次相机服务重启请求后仍无法设置。随后整机重启，取得新的 boot ID，四条设置均返回服务连接及注册成功；后续 12 秒录像的控制命令没有再次出现 `-1002`。这证明上述执行顺序后的观察结果，不把服务异常解释为此前 STOP 失败的已证实原因。原始设置、服务及重启记录保存在 `session-settings-device/`。
 
-Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现：旧 DNG 文件的长度命令退出 0、stdout 和 stderr 均为空。容器原 ADB 34.0.4 的标准输入选项对照、官方 ADB 37.0.1 客户端、shell 变量收集后打印、独立版本帧调用均有单独归档；这些对照仍分别出现空响应、退出 255 或超时，尚未证明可稳定替代当前查询。新版客户端来自 [Android 官方发布入口](https://developer.android.com/tools/releases/platform-tools)，只用于独立探针，没有替换任务使用的客户端。原因尚未确定。读取器继续拒绝空长度，不将错误当作空目录、完整扫描或默认范围。已终态的原任务没有重新开放、重拍或补发控制命令。
+Action6 的结果读取问题已在只读扫描第 178 个 metadata 调用复现：旧 DNG 文件的长度命令退出 0、stdout 和 stderr 均为空。容器原 ADB 34.0.4 的标准输入选项对照、官方 ADB 37.0.1 客户端、shell 变量收集后打印、独立版本帧调用均有单独归档；这些对照仍分别出现空响应、退出 255 或超时。后续采用上述页内批量接口，已完成新安装物的真实普通录像登记与交付。新版客户端来自 [Android 官方发布入口](https://developer.android.com/tools/releases/platform-tools)，只用于独立探针，没有替换任务使用的客户端。逐文件查询空响应的原因尚未确定。读取器继续拒绝空长度，不将错误当作空目录、完整扫描或默认范围。已终态的原任务没有重新开放、重拍或补发控制命令。
+
+早期 OSMO 单文件原生延时任务 `osmo360ii-single_file-timelapse-auto-065733` 的来源因不符合必要产物合同而失败，原库仍保存 `UNKNOWN_HELD` 活动责任。当前驱动无活动查询，公开取消入口保持来源终态且不会为该旧责任新发 STOP；残留处理也没有能确认该未知活动归属的查询。该旧库保留原失败和文件，不用后续独立场景的 STOP 改写它。当前固件的单文件真机矩阵不适用，旧责任的程序收场仍为独立设计缺口，P9 步骤 3 保持未完成。
+
+原生延时预览的状态交接缺口已定位到：源摘要超时先保存 copy 校验 FAILED，完整读取收尾随后返回 `COMPLETION_FAILED`，读取流程将其作为未完成的本地前提抛出 `state_db_error`，原 READ 尝试及动作没有终态。后续会话再次遇到保存的 FAILED 校验，仍退出；没有重读字节或抹除原错误。现有公开错误与收场规则未定义这一分区，须先补足设计决定。直接取消也不能作为已验证恢复：取消候选不再续接读取，而取消收场仍等待 RUNNING 尝试。原库、日志和完整文件均保留，尚未试发取消或新预览请求。
 
 ### 媒体与独立源摘要
 
 相机端另行执行摘要命令取得上述五场景的 26 份已交付源文件 SHA-256，逐项与读取、交付和本地副本核对，26／26 一致。原始输出和对照位于 `independent-source-digests/`；不依赖 `device_files.sha256` 是否已填写来声称取得设备端独立摘要。
+
+批量读取安装物的新 Action6 两场景另核对 6 份文件：独立设备端 SHA-256 与全部 6 份本地副本、数据库 target 摘要一致；其中普通录像 4 份和 native MP4 的 copy 已可靠保存源摘要。native LRF 的原 copy 源摘要仍为空、校验仍为 FAILED，后续独立查询成功不会更新这次失败。`action6-batch-v1-six-file-comparison.json` 和两份 `*-cross-layer-evidence.json` 分别保存文件、动作、客户端及 ACK 事实；native 尚无客户端导入／ACK。
 
 OSMO 普通自动与手动两轮的 P7 报告分别位于 `media-osmo-auto-v2/`、`media-osmo-manual-v2/`。目标均为 12000 毫秒，默认短缺容限 100 毫秒；默认范围和全部保留集合的两路主视频分别累计约 12345.667、12145.467 毫秒，短缺均为 0。自动轮首个非尾段为 5505.5 毫秒，保留其比 5.5 秒多 5.5 毫秒的观察，不将聚合通过表述为逐段上界均满足。手动轮前两非尾段约 5438.767、5005 毫秒。全部主视频及音频逐流解码退出 0，timescale、帧率估计及私有流 codec 诊断均保留；段间连续性未由聚合时长证明。
 
@@ -57,6 +88,14 @@ OSMO 原生延时的 `media-osmo-native-v2/` 报告测得两路各 150 帧、500
 OSMO 异常多录的 `media-osmo-overrun-v2/` 报告分别测量全部 5 段和默认 2 段。两路全部保留集合各约 24991.633 毫秒，默认范围各约 10443.767 毫秒，8 秒目标的短缺均为 0；范围外原片不参与默认覆盖。`scope-comparison.json` 核对主机恢复、后到的明确 ID 取回前后默认范围及唯一控制不变。完整视频和音频解码均退出 0，保留与正常轮相同类别的诊断，段间连续性仍未单独证明。
 
 Action6 的 `media-action6-record-explicit-v2/` 报告只分析两份显式交付原片：主视频约 10844.167 毫秒／325 帧、1801.8 毫秒／54 帧，完整解码均退出 0 并保留 timescale 诊断。其和为已取回文件的实测总和，不能代替失败来源的完整扫描或默认范围结论；音频未单独枚举，不能据此断言不存在。
+
+Action6 新普通录像的 `media-action6-normal-batch-v1/` 记录主视频约 10443.767 毫秒／313 帧和 2135.467 毫秒／64 帧；主视频累计精确为 `377377/30` 毫秒，约 12579.233 毫秒。音频分别约 10432、2133.333 毫秒；两份 MP4 完整解码退出 0，保留 timescale 诊断。
+
+新原生延时的 `media-action6-native-batch-v1/` 对已发布 MP4 独立计数：唯一 HEVC 主视频 151 帧、约 5038.367 毫秒，符合冻结目标 `floor(300/2)+1=151`；附带 MJPEG 封面排除计数，未发现音频流。完整主视频解码退出 0，并保留 timescale 诊断。上述正常链媒体测量不能代替异常恢复的生产选段及检查副本责任证据。
+
+Action6 正常 `300/2, outputs=video` 在完整自然结果上不进入生产帧检查；START 未知、结果有限耗尽和取消也不构成该入口。仅完整自然集合上的真实必需照片缺失、视频缺口等异常会进入恢复检查，当前没有可保证触发它的既有主机中断安排。151 帧的正常原片测量已取得，native 异常选段仍未验。
+
+Action6 异常专项的 `media-action6-overrun-batch-v1/` 分别分析固定默认前缀和全部保留集合。默认两份主视频的精确时长为 `143143/15`、`97097/10` 毫秒，累计 `577577/30` 毫秒，约 19252.567 毫秒；第一份单独不足 16000 毫秒，最短达标前缀确为两份。四份唯一原片共 `359359/10` 毫秒，约 35935.9 毫秒、1077 帧；预览和重复交付不参与该累计。生产检查保存的六位小数秒数累计值与独立时间基计算相差约 0.333 微秒，未改变本次选段。8 份唯一原片／预览均有独立源摘要，全部 10 份交付的源摘要、目标摘要、落盘长度与 SHA-256 一致；两份后到重复交付分别与对应首份字节相同。每份文件均探测到唯一主视频、附带 MJPEG 封面及 AAC 音轨，8 份完整解码均退出 0，保留 timescale 诊断；没有据累计时长推断段间无缝或独立播放质量。
 
 ## OSMO 分段目录命名的软件验证
 
