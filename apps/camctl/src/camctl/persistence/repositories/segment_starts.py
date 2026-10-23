@@ -90,17 +90,33 @@ def segment_start_from_set(connection, setrow):
             earliest = position
     if earliest is None or order_unknown:
         return unknown
-    # 成员按设备键已建立稳定索引；冲突的实际原片不提供摄制顺序。
+    key, page_id, file_id = earliest
     originals = int(enum_for("segment_members.role").ORIGINAL)
-    conflict = _one(
-        connection,
-        "SELECT 1 FROM segment_members WHERE set_id=? AND role=?"
-        " GROUP BY directory_number,segment_index HAVING COUNT(*)>1 LIMIT 1",
-        (setrow["id"], originals),
-    )
+    action = row_facts(connection, "actions", setrow["action_id"])
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    if (action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value):
+        # Action6 只因最早视频键自身冲突而失去起点。后段冲突由覆盖前缀
+        # 的有限检查处理，不能抹掉此前已可靠确定的起点；明确 NOT_OWNED 成员不参与冲突。
+        not_owned = int(enum_for("segment_members.ownership").NOT_OWNED)
+        conflict = _one(
+            connection,
+            "SELECT 1 FROM segment_members WHERE set_id=? AND role=? AND ownership<>?"
+            " AND directory_number=? AND segment_index=? GROUP BY directory_number,segment_index"
+            " HAVING COUNT(*)>1 LIMIT 1",
+            (setrow["id"], originals, not_owned, key.directory_number, key.index),
+        )
+    else:
+        # OSMO 保留既有专用起点规则；本次顺序冲突前缀处理仅适用于 Action6。
+        conflict = _one(
+            connection,
+            "SELECT 1 FROM segment_members WHERE set_id=? AND role=?"
+            " GROUP BY directory_number,segment_index HAVING COUNT(*)>1 LIMIT 1",
+            (setrow["id"], originals),
+        )
     if conflict is not None:
         return unknown
-    key, page_id, file_id = earliest
     return SegmentStart(key, SegmentStartObservation(fixed[0], page_id, file_id))
 
 

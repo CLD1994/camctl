@@ -43,14 +43,34 @@ async def inspect_continuous_prefix(
         reason = "start_unknown"
     else:
         expected = start
-        for stored in members:
+        previous_key = None
+        iterator = iter(members)
+
+        def next_original():
+            for candidate in iterator:
+                candidate_member = candidate.member
+                if (candidate_member.role is SegmentMemberRole.ORIGINAL
+                        and candidate_member.ownership is not OwnershipState.NOT_OWNED):
+                    return candidate
+            return None
+
+        stored = next_original()
+        while stored is not None:
             member = stored.member
-            if member.role is not SegmentMemberRole.ORIGINAL:
-                continue
-            if member.ownership is OwnershipState.NOT_OWNED:
-                continue
+            following = next_original()
             if member.key != expected:
-                reason = "order_unknown" if member.key is None else "segment_gap"
+                reason = (
+                    "order_unknown"
+                    if member.key is None or member.key == previous_key
+                    else "segment_gap"
+                )
+                break
+            if (member.key is not None and following is not None
+                    and following.member.key == member.key):
+                # 相同设备键的原片顺序无法确定。先查看相邻成员，避免在
+                # 冲突组内任意选一份进行复制或媒体探测；next_original 会
+                # 跨越底层分页继续，因此页边界不会改变判断。
+                reason = "order_unknown"
                 break
             if (member.ownership is not OwnershipState.OWNED
                     or member.completion is not FileCompletionState.COMPLETE
@@ -73,6 +93,8 @@ async def inspect_continuous_prefix(
             if state.reached:
                 break
             expected = member.key.successor()
+            previous_key = member.key
+            stored = following
     decision = finish_coverage(state, CoverageFinishFacts(
         collection_complete=collection_complete and reason is None,
         interruption_reason=reason,
