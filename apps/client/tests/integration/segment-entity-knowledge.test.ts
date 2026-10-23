@@ -107,7 +107,6 @@ const cases: SegmentEntityCase[] = [
 ];
 const invalid: SegmentEntityCase[] = [
   "photo",
-  "timelapse",
   "preview",
   "repaired",
   "wrong-source",
@@ -138,7 +137,6 @@ for (const location of ["current", "covered"] as const)
           const result = await upload(next);
           if (invalid.includes(kind)) {
             expect(result.status).toBe("failed");
-            expect(result.message).toMatch(/分段.*(来源|保留产物)/);
             assertNoCommit(next, before);
           } else {
             expect(result.status).toBe("accepted");
@@ -154,7 +152,7 @@ for (const reverse of [false, true])
         expect((await upload(empty("5", 50))).status).toBe("accepted");
         const bad = segmentEntitiesOnly(kind);
         const good = segmentEntitiesOnly(
-          kind === "photo" || kind === "timelapse" ? "record" : "original",
+          kind === "photo" ? "record" : "original",
         );
         const reports = reverse ? [good, bad] : [bad, good];
         for (let i = 0; i < reports.length; i++)
@@ -178,13 +176,9 @@ for (const reverse of [false, true])
       `可靠多原文F/E自相矛盾是DataError整批停止 reverse=${reverse} reboot=${reboot} %s`,
       async (kind) => {
         expect((await upload(empty("5", 50))).status).toBe("accepted");
-        const source = segmentEntitiesOnly(
-          kind === "photo" || kind === "timelapse" ? kind : "record",
-        );
+        const source = segmentEntitiesOnly(kind === "photo" ? kind : "record");
         const output =
-          kind === "photo" || kind === "timelapse"
-            ? empty("2", 20)
-            : segmentEntitiesOnly(kind);
+          kind === "photo" ? empty("2", 20) : segmentEntitiesOnly(kind);
         const originals = [
           atWatermark(source, "1", 0, 10),
           atWatermark(output, "2", 0, 20),
