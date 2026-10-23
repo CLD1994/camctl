@@ -29,6 +29,10 @@ Action6 原生延时在拍摄设置阶段返回 `action6_response_unconfirmed`�
 
 更新前备份原库、配置、日志和交接文件后，通过安装版 `camctl run --config <原配置>` 恢复请求 `5933339839340923781`。恢复入口的外部相机工具由独立包装程序禁止派发，实际工具调用为 0，CLI 退出 0。原延时及预览分别以 `capture_failed/device_failed`、`obtain_items_failed` 结束，报告 6 已发布，覆盖水位为 `(0,24]`，摘要为 `7cfd493194b86ad8cfb0c020102aba63ed697280a198152e625ff2b61e002af2`。原 67 条历史事件、原 START 流程和唯一一次启动尝试均逐字节保持；状态库快速检查通过，外键错误为 0。完整安装、前后库快照、命令与恢复审核位于 `.local/deployments/20261024-start-failure-fix/`。本次只恢复原任务的软件收场，不证明相机控制服务已恢复。
 
+后续请求 `8008267051166010444` 在录像设置失败返回时耗尽启动窗口，动作按可靠未启动事实过期，预览选择保存了默认范围未确认的错误。报告 11 的读取器却把进入过准备阶段的 `EXPIRED` 来源也要求为已发布分段集合，因而再次退出。现仅将过期状态排除出该缺集断言；成功、失败、取消来源及覆盖结果的一致性校验保持。报告继续如实表达过期与无集合，不补造结果集合或放宽 Schema。新增普通录像和原生延时的真实过期事务、预览选择失败、固定历史生成与同边界重建用例，修复前两项重现异常，修复后报告组合 68 passed／41.52 秒、报告单元 744 passed 和 1 skipped／1.88 秒，均退出 0。日志位于 `.local/verification/expired-segment-report-20261024/`。
+
+当前安装已再更新至 wheel `b478184d77f927d9386defa599e0e46aa88cc34f5c197efd00cdfefa42f22d82`；305 个生产文件及 27 份权威资源与源码和独立安装版一致。报告 11 沿原编号、水位 `(24,41]` 与冻结事件 149 重建，摘要为 `489594a8c89634e26b25b4a7e3ec7732cd4092ef7749e546393a8436194e8695`。更新前退出空闲 host-demo 并备份原库后，正式恢复入口退出 0，设备工具调用为 0；后续延时因启动窗口已经错过而过期，最新报告 12 已发布，水位 `(24,47]`。原 150 条历史事件、原启动流程和尝试不变。原现场快照位于 `.local/diagnostics/expired-segment-report-20261023T213225Z/`，安装、前后快照及审核位于 `.local/deployments/20261024-expired-segment-report-fix/`。该记录仍不提供新的实拍或相机服务恢复证据。
+
 ## 容器与真机分段验证（2026-10-23）
 
 本次执行对应 [OSMO 分段计划 P9](../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p9按独立证据层次完成容器与实机验收)及 [Action6 联合计划 V12](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md#v12容器与实机媒体验收)。环境为 Linux x86_64 开发容器，通过 `ADB_SERVER_SOCKET=tcp:host.docker.internal:5037` 访问 Windows 主机 ADB 服务。两台当前固件均仅支持分段视频，单文件真机矩阵不适用；软件中的单文件能力与原验证范围保持。

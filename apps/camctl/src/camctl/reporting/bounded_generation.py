@@ -211,7 +211,8 @@ class _SegmentExpansion:
             raise ConsistencyError("分段公开详情必须属于普通录像或原生延时")
         if (
             source["execution_started"]
-            and source["status"] in (3, 4, 5, 6)
+            # 过期只允许可靠未启动；执行准备不要求发布拍摄结果集合。
+            and source["status"] in (3, 4, 6)
             and self.ref is None
         ):
             raise ConsistencyError("已执行分段来源缺少正式发布集合")
