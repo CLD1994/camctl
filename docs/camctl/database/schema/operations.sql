@@ -406,6 +406,8 @@ CREATE TABLE software_recoveries (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
     activity_id INTEGER NOT NULL UNIQUE REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    phase INTEGER NOT NULL CHECK (phase IN (1,2,3,4,5,6,7,8)),
     state_json TEXT NOT NULL CHECK (json_valid(state_json) AND json_type(state_json) = 'object')
 ) STRICT;
 CREATE INDEX recoveries_action ON software_recoveries(action_id, id);
+CREATE INDEX recoveries_phase ON software_recoveries(phase, id);

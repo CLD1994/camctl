@@ -1100,6 +1100,7 @@
         "activity_id"
       ],
       "mutable": [
+        "phase",
         "state_json"
       ],
       "derived": [
@@ -1111,7 +1112,9 @@
         "id": "action_id",
         "via": []
       },
-      "state_columns": [],
+      "state_columns": [
+        "phase"
+      ],
       "minimum_format": 3
     }
   },
@@ -3760,6 +3763,130 @@
           "id": "transition_2"
         }
       ]
+    },
+    "software_recoveries.phase": {
+      "edges": [
+        {
+          "id": "transition_1",
+          "from": 1,
+          "to": 2,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_2",
+          "from": 1,
+          "to": 8,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_3",
+          "from": 1,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_4",
+          "from": 2,
+          "to": 3,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_5",
+          "from": 2,
+          "to": 4,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_6",
+          "from": 2,
+          "to": 8,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_7",
+          "from": 2,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_8",
+          "from": 3,
+          "to": 4,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_9",
+          "from": 3,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_10",
+          "from": 4,
+          "to": 5,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_11",
+          "from": 4,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_12",
+          "from": 5,
+          "to": 6,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_13",
+          "from": 5,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_14",
+          "from": 6,
+          "to": 7,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        },
+        {
+          "id": "transition_15",
+          "from": 8,
+          "to": 1,
+          "by": [
+            "DEVICE_OBSERVED.SOFTWARE_RECOVERY"
+          ]
+        }
+      ]
     }
   },
   "events": {
@@ -5586,20 +5713,41 @@
             {
               "table": "software_recoveries",
               "op": "create",
-              "after": {}
+              "after": {
+                "phase": [
+                  1
+                ]
+              }
             },
             {
               "table": "software_recoveries",
               "op": "update",
               "columns": [
+                "phase",
                 "state_json"
               ],
               "before": {},
               "after": {},
-              "required": [
-                "state_json"
-              ],
-              "transitions": {}
+              "required": [],
+              "transitions": {
+                "phase": [
+                  "transition_1",
+                  "transition_2",
+                  "transition_3",
+                  "transition_4",
+                  "transition_5",
+                  "transition_6",
+                  "transition_7",
+                  "transition_8",
+                  "transition_9",
+                  "transition_10",
+                  "transition_11",
+                  "transition_12",
+                  "transition_13",
+                  "transition_14",
+                  "transition_15"
+                ]
+              }
             },
             {
               "table": "device_activities",

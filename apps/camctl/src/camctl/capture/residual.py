@@ -21,6 +21,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import binding_failure_details
 from camctl.devices.ports import ControlRequest
@@ -632,8 +633,9 @@ def residual_flow(
                 recovery_page = discovery.rows(owned.connection, "software_recovery", now,
                     "SELECT r.id,r.activity_id,a.device_id FROM software_recoveries r"
                     " JOIN actions a ON a.id=r.action_id JOIN device_activities d ON d.id=r.activity_id"
-                    " WHERE d.occupancy_state=1 AND json_extract(r.state_json,'$.phase')"
-                    " NOT IN ('isolated','abandoned')", identity="r.id")
+                    " WHERE d.occupancy_state=1 AND r.phase NOT IN (?,?)",
+                    (int(enum_for("software_recoveries.phase").ISOLATED),
+                     int(enum_for("software_recoveries.phase").ABANDONED)), identity="r.id")
                 for _, activity_id, device_id in recovery_page.items:
                     if owns_device is not None and owns_device(device_id):
                         continue

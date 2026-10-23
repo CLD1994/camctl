@@ -600,6 +600,12 @@ def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
             if "verified_fingerprint" in section:
                 _require_nonempty_str(section["verified_fingerprint"], f"devices.{device_id}.software_recovery.verified_fingerprint")
             fingerprint = section.pop("verified_fingerprint", "")
+            if fingerprint:
+                from camctl.devices.drivers.adb_cameras.firmware_identity import validate_firmware_fingerprint
+                try:
+                    validate_firmware_fingerprint(driver_id, fingerprint)
+                except (ValueError, KeyError) as error:
+                    raise ConfigError(f"devices.{device_id}.software_recovery.verified_fingerprint 无效: {error}") from error
             normalized["software_recovery"] = dict(_validated_seconds_subtable(device_id, section,
                 "software_recovery", ("timeout_s", "deadline_s", "retry_interval_s"),
                 positive_keys=("timeout_s", "deadline_s"),

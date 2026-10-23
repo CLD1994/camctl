@@ -781,6 +781,21 @@
 | 3 | `FAILED` |
 | 4 | `UNCONFIRMED` |
 
+### `software_recoveries.phase`
+
+[行为说明](operation-fields.md#无人值守的软件重启责任)
+
+| 编号 | 成员 |
+| --- | --- |
+| 1 | `CHECKING` |
+| 2 | `INTENT` |
+| 3 | `CONFIRMING` |
+| 4 | `PREPARING` |
+| 5 | `SCANNING` |
+| 6 | `READY` |
+| 7 | `ISOLATED` |
+| 8 | `ABANDONED` |
+
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`

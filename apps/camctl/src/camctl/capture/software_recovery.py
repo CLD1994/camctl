@@ -14,15 +14,16 @@ from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
 
 
-class RecoveryPhase(StrEnum):
-    CHECKING = "checking"
-    INTENT = "intent"
-    CONFIRMING = "confirming"
-    PREPARING = "preparing"
-    SCANNING = "scanning"
-    READY = "ready"
-    ISOLATED = "isolated"
-    ABANDONED = "abandoned"
+from camctl.contracts.enums import enum_for
+
+
+#: 普通 phase 列的编号由组件枚举登记维护，内存只派生成员名的小写文本。
+RecoveryPhase = StrEnum("RecoveryPhase", {member.name: member.name.lower()
+    for member in enum_for("software_recoveries.phase")})
+
+
+def recovery_state(row):
+    return {**row["state_json"], "phase": enum_for("software_recoveries.phase")(row["phase"]).name.lower()}
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ def recovery_of(activity, connection):
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='software_recoveries'").fetchone() is None:
         return None
     row = connection.execute("SELECT id FROM software_recoveries WHERE activity_id=?", (activity["id"],)).fetchone()
-    return None if row is None else row_facts(connection, "software_recoveries", row[0])["state_json"]
+    return None if row is None else recovery_state(row_facts(connection, "software_recoveries", row[0]))
 
 
 def held_candidates(connection, device_id):

@@ -291,7 +291,7 @@ config.log_path = "/home/user/.camctl/host.log";
 
 | 字段 | 默认值及合法范围 |
 | --- | --- |
-| `verified_fingerprint` | 缺省不使能；提供时为非空字符串，与原绑定设备实际 `ro.build.fingerprint` 精确比较。 |
+| `verified_fingerprint` | 缺省不使能；提供时为带固件资料来源类型的完整指纹，与原绑定设备实际资料按同源规则计算的值精确比较。 |
 | `max_reboots` | 正整数，默认 1，包含第一次；已可能派发的意图先核实，不自动补发。 |
 | `timeout_s` | 有限正秒数，默认 10；单次受管调用仍受整体剩余期限限制。 |
 | `deadline_s` | 有限正秒数，默认 180；首次建立责任时固定绝对期限。 |
@@ -300,3 +300,14 @@ config.log_path = "/home/user/.camctl/host.log";
 | `max_pages` | 正整数，默认 256；限制目录调用及每次原基准批次读取。 |
 
 部署状态库须为 V3。已有 V2 库通过 `camctl init --upgrade-software-recovery --config <config.toml>` 显式升级；普通 `init`、`run` 和 `submit` 不升级。升级备份、事务与恢复规则见[数据库格式检查](persistence-runtime.md#数据库整体格式检查与显式升级)。
+
+固件资料的读取方法与类型前缀由[驱动资料配置](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/firmware_identity.py)统一维护。Action6 使用完整固件 JSON，要求四段 `Version` 和完整构建资料；解析拒绝重复键、非有限数和多余正文，递归按 Unicode 键排序，保留全部成员及精确数值，以紧凑 UTF-8 JSON 编码且不加末尾换行，再取 SHA-256。结果使用 `action6-verinfo-json-sha256/v1:` 前缀和小写摘要。OSMO 360 II 使用非空单行 Android build fingerprint，移除行末换行后使用 `android-build-fingerprint/v1:` 前缀；裸属性文本不能作为配置值。读取、解析或匹配失败均保留诊断并拒绝重启，不降级为只核对 ADB 选择器。
+
+部署可在保存的原始资料上调用同源纯函数计算值；该命令不访问设备。`<driver-id>` 为已验证的原绑定驱动，`<raw-firmware-stdout>` 为该驱动资料命令的原始标准输出：
+
+```bash
+python -c 'from pathlib import Path; import sys; from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint; print(firmware_fingerprint(sys.argv[1], Path(sys.argv[2]).read_bytes()))' \
+  '<driver-id>' '<raw-firmware-stdout>'
+```
+
+`ro.serialno` 是可选的额外观察；设备未提供该属性时，仍以原绑定、明确的 ADB transport 选择器、带来源的固件指纹和 `boot_id` 核实同一设备。重启前后都提供而不一致时拒绝恢复。

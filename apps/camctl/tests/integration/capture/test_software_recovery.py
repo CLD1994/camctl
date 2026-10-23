@@ -27,6 +27,10 @@ register_capture_guards()
 register_operation_guards()
 _BEFORE = "00000000-0000-4000-8000-000000000001"
 _AFTER = "00000000-0000-4000-8000-000000000002"
+from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint
+_FIRMWARE_SAMPLE = {"Version": "v1.2.3.4", "Metabuild_Info": {
+    "Meta_Build_ID": "software-test-build", "Product_Flavor": "asic", "Time_Stamp": "2026-10-20 19:32:30"}}
+_FINGERPRINT = firmware_fingerprint("dji-action6", json.dumps(_FIRMWARE_SAMPLE).encode())
 
 
 class Transport:
@@ -40,7 +44,7 @@ class Transport:
         self.directory_ready = True
         self.new_boot = True
         self.identity_serial = "camera-serial"
-        self.fingerprint = "verified-firmware"
+        self.firmware_version = "v1.2.3.4"
         self.interrupt_reboot = False
         self.directory_frames = []
 
@@ -51,10 +55,11 @@ class Transport:
         if spec.timeout_s == Decimal("0.001"):
             return RawToolOutcome(LocalExit(signal=9), b"", "timeout", Decimal("1"), stderr=b"")
         if spec.argv[-1] == "reboot":
-            saved = self.connection.execute("SELECT state_json FROM software_recoveries").fetchone()
+            saved = self.connection.execute("SELECT phase,state_json FROM software_recoveries").fetchone()
             assert saved is not None
-            assert json.loads(saved[0])["phase"] == "intent"
-            assert json.loads(saved[0])["reboots"] == 1
+            from camctl.contracts.enums import enum_for
+            assert saved[0] == int(enum_for("software_recoveries.phase").INTENT)
+            assert json.loads(saved[1])["reboots"] == 1
             self.reboots += 1
             if self.new_boot:
                 self.boot = _AFTER
@@ -62,7 +67,10 @@ class Transport:
                 raise RuntimeError("已可能派发，主机在保存返回前中断")
             output = b""
         elif "/proc/sys/kernel/random/boot_id" in script:
-            output = f"{self.boot}\n{self.fingerprint}\n{self.identity_serial}\n".encode()
+            document = {**_FIRMWARE_SAMPLE, "Version": self.firmware_version}
+            output = (b"CAMCTL-RECOVERY-IDENTITY/1\n" + self.boot.encode()
+                + b"\nCAMCTL-FIRMWARE\n" + json.dumps(document).encode()
+                + b"\nCAMCTL-SERIAL\n" + self.identity_serial.encode() + b"\nCAMCTL-END\n")
         elif "CAMCTL-DIRECTORY/1" in script:
             if not self.directory_ready:
                 return RawToolOutcome(LocalExit(exit_code=1), b"", None, None, stderr=b"directory unavailable")
@@ -93,7 +101,7 @@ async def failed_world(owned, tmp_path, *, baseline=()):
     runtime.stopper = driver
     runtime.software_recovery_driver = driver
     runtime.software_recovery_config = SoftwareRecoveryConfig(
-        verified_fingerprint="verified-firmware", retry_interval_s=Decimal("0"))
+        verified_fingerprint=_FINGERPRINT, retry_interval_s=Decimal("0"))
     runtime.stop_config = AttemptConfig(1, Decimal("0.001"), Decimal("0"))
     await capture_handler("camera_record")(1, runtime)
     # 正式驱动保留受管工具超时与未知效果，有限流程原样结算失败。
@@ -155,7 +163,7 @@ async def test_unverified_recovery_keeps_device_held_with_bounded_budget(owned, 
     if fault == "unchanged_boot": transport.new_boot = False
     if fault == "not_prepared": transport.prepare_ready = False
     if fault == "unknown_directory": transport.directory_ready = False
-    if fault == "wrong_identity": transport.fingerprint = "different-firmware"
+    if fault == "wrong_identity": transport.firmware_version = "v2.2.3.4"
     runtime.software_recovery_config = replace(runtime.software_recovery_config, max_checks=3, max_pages=2)
     for _ in range(12):
         await pass_residual_gate(runtime, runtime.action(2))
@@ -320,7 +328,9 @@ async def test_actual_sqlite_commit_unknown_never_reissues_reboot(owned, tmp_pat
             return getattr(self.real, name)
         def execute(self, statement, parameters=()):
             if not self.injected and statement.startswith("UPDATE software_recoveries SET"):
-                self.armed = any(isinstance(value, str) and f'"phase":"{unknown_phase}"' in value for value in parameters)
+                from camctl.contracts.enums import enum_for
+                expected = int(enum_for("software_recoveries.phase")[unknown_phase.upper()])
+                self.armed = any(type(value) is int and value == expected for value in parameters[:-1])
             if self.armed and statement == "COMMIT":
                 self.real.execute(statement, parameters)
                 self.injected, self.armed = True, False
@@ -351,7 +361,8 @@ async def test_recovery_history_restores_responsibility_and_legacy_v2_without_ta
     current = history.current_boundary()
     restored = history.restore_entity("action", 1, current)
     recovery_key = next(key for key in restored if key[0] == "software_recoveries")
-    assert restored[recovery_key]["state_json"]["phase"] == "confirming"
+    from camctl.capture.software_recovery import recovery_state
+    assert recovery_state(restored[recovery_key])["phase"] == "confirming"
     assert recovery_key not in history.restore_entity("action", 1, before)
     with history.open_segment_history(1, current, strategy="current") as handle:
         assert handle.row(*recovery_key)["state_json"]["reboots"] == 1
@@ -385,7 +396,7 @@ async def test_session_assembly_consumes_verified_deployment_config_in_formal_ga
     from camctl.devices.drivers.registry import DriverEntry, DriverRegistry
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-action6",
         "adb": {"serial": "camera-serial"}, "recording": {"stop_timeout_s": Decimal("0.001"), "max_stop_attempts": 1},
-        "software_recovery": {"verified_fingerprint": "verified-firmware", "retry_interval_s": 0}}}}, ConfigDefaults())
+        "software_recovery": {"verified_fingerprint": _FINGERPRINT, "retry_interval_s": 0}}}}, ConfigDefaults())
     entry = DriverEntry("dji-action6", driver, driver.declaration, driver.contract.evidence, driver.contract.status)
     factory = session_capture_assembly(devices=config.devices, drivers=DriverRegistry((entry,)),
         staging=tmp_path, wait_config=execution_wait_config,

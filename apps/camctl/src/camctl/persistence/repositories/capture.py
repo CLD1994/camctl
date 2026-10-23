@@ -3353,7 +3353,8 @@ class _ActivityReleaseCommand:
             if found is not None:
                 recovery_row = row_facts(connection, "software_recoveries", found[0])
                 self._state["software_recoveries"] = {found[0]: recovery_row}
-                recovery = recovery_row["state_json"]
+                from camctl.capture.software_recovery import recovery_state
+                recovery = recovery_state(recovery_row)
         if recovery is not None:
             if recovery.get("phase") != "ready":
                 return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
@@ -7212,7 +7213,8 @@ def _release_guard(event, context) -> None:
                      and action.get("status") in _ACTION_TERMINAL
                      and facts.get("dispatch_state") in (1, 4)
                      and facts.get("activity_state") == 1 and facts.get("started_at") is None)
-        recovery = next((item["state_json"] for item in context.state_rows.get("software_recoveries", {}).values()
+        from camctl.capture.software_recovery import recovery_state
+        recovery = next((recovery_state(item) for item in context.state_rows.get("software_recoveries", {}).values()
                          if item["activity_id"] == row.row_id), None)
         if recovery is not None:
             if recovery.get("phase") != "ready" or context.current_reads is None:

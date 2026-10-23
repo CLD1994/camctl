@@ -1,7 +1,6 @@
 """ADB 相机的软件重启端口；只有固件合同明确配置后由恢复责任调用。"""
 from contextvars import ContextVar
 from decimal import Decimal
-import re
 import shlex
 from types import SimpleNamespace
 
@@ -13,7 +12,6 @@ from .filesystem import _returned
 from .transport import shell_argv
 
 _RECOVERY_ACCESS = ContextVar("adb_camera_recovery_access", default=None)
-_BOOT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def raw_document(raw):
@@ -57,18 +55,17 @@ class SoftwareRecoveryDriver:
             return None
 
     async def recovery_identity(self, binding, *, timeout_s):
+        from .firmware_identity import identity_script, decode_identity
         serial = self.recovery_serial(binding)
-        raw = await self._recovery_raw(binding, shell_argv(serial,
-            "cat /proc/sys/kernel/random/boot_id && getprop ro.build.fingerprint && getprop ro.serialno"), timeout_s)
+        raw = await self._recovery_raw(binding, shell_argv(serial, identity_script(binding.driver_id)), timeout_s)
         result = {"identity": None, "call": raw_document(raw)}
         if raw is None or not _returned(raw) or raw.stderr != b"":
+            result["reason"] = "identity_call_failed"
             return result
         try:
-            fields = raw.output.decode("utf-8", "strict").splitlines()
-        except UnicodeError:
-            return result
-        if len(fields) in (2, 3) and _BOOT.fullmatch(fields[0]) is not None and fields[1]:
-            result["identity"] = [fields[0], fields[1], (fields[2] or None) if len(fields) == 3 else None]
+            result["identity"] = decode_identity(binding.driver_id, raw.output)
+        except (ValueError, UnicodeError) as error:
+            result["reason"] = str(error)
         return result
 
     async def recovery_reboot(self, binding, *, timeout_s):

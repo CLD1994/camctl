@@ -396,7 +396,7 @@ def main() -> None:
            stop_supported=0, safe_repeat_stop=0, start_return_meaning=1, completion_mode=2,
            ownership_mode=1, output_scope_json='{}', baseline_state=1, dispatch_state=3,
            activity_state=1, occupancy_state=1, completion_basis=1, result_set_state=1)
-    insert(db, 'software_recoveries', id=1, action_id=1, activity_id=1, state_json='{}')
+    insert(db, 'software_recoveries', id=1, action_id=1, activity_id=1, phase=1, state_json='{}')
     insert(db, 'baseline_read_calls', id=1, created_event_id=1, action_id=1, activity_id=1,
            call_key='d' * 32, result_save_key='e' * 32, device_id='camera', driver_id='driver',
            directories_json='["/DCIM"]', timeout_s_json='0.0001', chunk_count=0, entry_count=0,

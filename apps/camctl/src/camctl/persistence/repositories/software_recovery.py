@@ -4,9 +4,10 @@ from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Mapping
 
-from camctl.capture.software_recovery import RecoveryPhase, recovery_blocker
+from camctl.capture.software_recovery import RecoveryPhase, recovery_blocker, recovery_state
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError
+from camctl.contracts.enums import enum_for
 from camctl.history.events import reason_for_branch
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.transaction import (CommandPlan, commit_operation, event_envelope,
@@ -26,14 +27,17 @@ class RecoverySave:
 _IMMUTABLE = ("version", "origin_trigger_id", "device_id", "driver_id", "serial", "fingerprint",
     "created_at", "deadline_at", "timeout_s", "retry_interval_s", "max_reboots", "max_checks",
     "max_pages", "baseline_first", "baseline_last")
-_NEXT = {
-    RecoveryPhase.CHECKING: {RecoveryPhase.CHECKING, RecoveryPhase.INTENT, RecoveryPhase.ABANDONED},
-    RecoveryPhase.INTENT: {RecoveryPhase.INTENT, RecoveryPhase.CONFIRMING, RecoveryPhase.PREPARING, RecoveryPhase.ABANDONED},
-    RecoveryPhase.CONFIRMING: {RecoveryPhase.CONFIRMING, RecoveryPhase.PREPARING},
-    RecoveryPhase.PREPARING: {RecoveryPhase.PREPARING, RecoveryPhase.SCANNING},
-    RecoveryPhase.SCANNING: {RecoveryPhase.SCANNING, RecoveryPhase.READY},
-    RecoveryPhase.READY: {RecoveryPhase.ISOLATED}, RecoveryPhase.ISOLATED: set(), RecoveryPhase.ABANDONED: {RecoveryPhase.CHECKING},
-}
+def _phase_transitions():
+    from camctl.history.events import load_event_registry
+    from camctl.contracts.enums import enum_for
+    codes = enum_for("software_recoveries.phase")
+    result = {phase: {phase} for phase in RecoveryPhase}
+    for edge in load_event_registry()["state_models"]["software_recoveries.phase"]["edges"]:
+        result[RecoveryPhase[codes(edge["from"]).name]].add(RecoveryPhase[codes(edge["to"]).name])
+    return result
+
+
+_NEXT = _phase_transitions()
 
 
 def _validate(previous, state, *, ended, evidence):
@@ -80,9 +84,7 @@ def _validate(previous, state, *, ended, evidence):
             old_phase = RecoveryPhase(previous["phase"])
             if any(not json_equal(previous[key], state[key]) for key in _IMMUTABLE):
                 raise ValueError("原身份、基准或预算发生变化")
-            if phase not in _NEXT[old_phase] and not (
-                    phase is RecoveryPhase.ISOLATED and old_phase not in (
-                        RecoveryPhase.READY, RecoveryPhase.ISOLATED, RecoveryPhase.ABANDONED)):
+            if phase not in _NEXT[old_phase]:
                 raise ValueError("恢复阶段不能重新开始")
             if state["trigger_id"] != previous["trigger_id"] and not (
                     old_phase is RecoveryPhase.ABANDONED and phase is RecoveryPhase.CHECKING
@@ -142,8 +144,8 @@ def _guard(event, context):
         raise EventValidationError("软件恢复必须修改唯一独立责任")
     row = recovery_rows[0]
     original = context.state_rows.get("software_recoveries", {}).get(row.row_id)
-    state = row.after.values["state_json"]
-    previous = None if original is None else original["state_json"]
+    state = recovery_state({**(original or {}), **row.after.values})
+    previous = None if original is None else recovery_state(original)
     ended = any(change.table == "device_activities" for change in event.rows)
     try:
         _validate(previous, state, ended=ended, evidence=event.evidence["recovery"])
@@ -191,7 +193,7 @@ class _Save:
         action = row_facts(connection, "actions", activity["action_id"])
         found = connection.execute("SELECT id FROM software_recoveries WHERE activity_id=?", (request.activity_id,)).fetchone()
         original = None if found is None else row_facts(connection, "software_recoveries", found[0])
-        previous = None if original is None else original["state_json"]
+        previous = None if original is None else recovery_state(original)
         if not json_equal(previous, request.previous):
             raise ConsistencyError("软件恢复原状态已经改变，不能覆盖")
         state_values = dict(request.state)
@@ -224,10 +226,13 @@ class _Save:
         identity = next_row_id(connection, "software_recoveries") if original is None else original["id"]
         if original is None:
             changes = [row_change("software_recoveries", identity, {"action_id": action["id"],
-                "activity_id": activity["id"], "state_json": state_values})]
+                "activity_id": activity["id"], "phase": int(enum_for("software_recoveries.phase")[RecoveryPhase(state_values["phase"]).name]),
+                "state_json": {key: value for key, value in state_values.items() if key != "phase"}})]
         else:
             changes = [update_change("software_recoveries", identity,
-                {"state_json": previous}, {"state_json": state_values})]
+                {"phase": original["phase"], "state_json": original["state_json"]},
+                {"phase": int(enum_for("software_recoveries.phase")[RecoveryPhase(state_values["phase"]).name]),
+                 "state_json": {key: value for key, value in state_values.items() if key != "phase"}})]
         if request.ended and activity["activity_state"] != 3:
             changes.append(update_change("device_activities", activity["id"],
                 {"activity_state": activity["activity_state"]}, {"activity_state": 3}))
@@ -366,8 +371,8 @@ def verify_scope_event(connection, event, context):
     original = context.state_rows.get("software_recoveries", {}).get(row.row_id)
     activity_id = row.after.values.get("activity_id", (original or {}).get("activity_id"))
     activity = context.state_rows["device_activities"][activity_id]
-    state = row.after.values["state_json"]
-    previous = None if original is None else original["state_json"]
+    state = recovery_state({**(original or {}), **row.after.values})
+    previous = None if original is None else recovery_state(original)
     if previous is None or state["trigger_id"] != previous["trigger_id"] or state["reboots"] > previous["reboots"]:
         trigger = row_facts(connection, "actions", state["trigger_id"])
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
@@ -383,7 +388,7 @@ def verify_scope_event(connection, event, context):
             raise ConsistencyError("重启意图的原启动代次没有可靠身份核实")
     directory = event.evidence["recovery"].get("directory")
     if directory is not None:
-        _verify_directory(connection, activity, original["state_json"], row.after.values["state_json"], directory)
+        _verify_directory(connection, activity, recovery_state(original), state, directory)
         if (state["scope_last_event_id"] != event.event_id
                 or state["scope_first_event_id"] != (previous["scope_first_event_id"] or event.event_id)):
             raise ConsistencyError("软件恢复范围的首末引用不是原连续页事件")

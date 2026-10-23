@@ -8,6 +8,22 @@ from camctl.resources import resource_bytes
 from camctl.persistence.runtime import StateDatabaseError
 
 
+def _verify_upgraded(state_db, original):
+    from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+    verified = open_existing(Path(state_db), DbOpenMode.EXISTING_RO, DbConfig())
+    try:
+        metadata = verified.metadata
+        if (metadata.format_version != 3 or metadata.instance_id != original.instance_id
+                or metadata.application_id != original.application_id
+                or (metadata.staging_path, metadata.ready_path, metadata.processing_path)
+                    != (original.staging_path, original.ready_path, original.processing_path)
+                or verified.connection.execute("PRAGMA quick_check").fetchone() != ("ok",)
+                or verified.connection.execute("PRAGMA foreign_key_check").fetchone() is not None):
+            raise StateDatabaseError("软件恢复升级后的身份、格式或完整性无法核实")
+    finally:
+        verified.connection.close()
+
+
 def upgrade_software_recovery(owned, state_db):
     """先保留 SQLite 一致备份，再原子创建新责任表与版本声明。"""
     if owned.metadata.format_version >= 3:
@@ -66,14 +82,22 @@ def upgrade_software_recovery(owned, state_db):
         create = re.search(r"CREATE TABLE software_recoveries \(.*?\) STRICT;", sql, re.S).group()
         connection.execute(create)
         connection.execute("CREATE INDEX recoveries_action ON software_recoveries(action_id,id)")
+        connection.execute("CREATE INDEX recoveries_phase ON software_recoveries(phase,id)")
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise StateDatabaseError("升级后的外键核验失败")
-        connection.commit()
-        from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
-        verified = open_existing(Path(state_db), DbOpenMode.EXISTING_RO, DbConfig())
-        verified.connection.close()
     except BaseException:
         if connection.in_transaction:
             connection.rollback()
         raise
+    try:
+        connection.commit()
+    except sqlite3.Error as error:
+        # 停用原连接后才能排除迟到提交；只观察实际结构，绝不重发迁移。
+        connection.close()
+        try:
+            _verify_upgraded(state_db, owned.metadata)
+        except (OSError, sqlite3.Error, StateDatabaseError) as verification_error:
+            raise StateDatabaseError(f"软件恢复升级提交结果未能核实: {verification_error}") from error
+    else:
+        _verify_upgraded(state_db, owned.metadata)
     return backup

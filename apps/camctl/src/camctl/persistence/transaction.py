@@ -434,37 +434,9 @@ def json_columns() -> dict[str, frozenset[str]]:
 
 
 def encode_json_value(value: Any) -> str:
-    """按精确数值编码 JSON 文本；不经过 float，不使用上下文舍入。"""
-
-    def dump(node: Any) -> str:
-        if node is None:
-            return "null"
-        if node is True:
-            return "true"
-        if node is False:
-            return "false"
-        if isinstance(node, int):
-            return str(node)
-        if isinstance(node, str):
-            return json.dumps(node, ensure_ascii=False)
-        from decimal import Decimal
-
-        if isinstance(node, Decimal):
-            if not node.is_finite():
-                raise TransactionError("事件正文不能包含非有限数值")
-            return str(node)
-        if isinstance(node, list):
-            return "[" + ",".join(dump(item) for item in node) + "]"
-        if isinstance(node, dict):
-            parts = []
-            for key, item in node.items():
-                if not isinstance(key, str):
-                    raise TransactionError("事件正文对象键必须是字符串")
-                parts.append(json.dumps(key, ensure_ascii=False) + ":" + dump(item))
-            return "{" + ",".join(parts) + "}"
-        raise TransactionError(f"事件正文包含无法精确编码的值: {type(node).__name__}")
-
-    return dump(value)
+    """事件正文使用公共精确编码器，并保留原事务错误分类。"""
+    from camctl.contracts.json_encoding import encode_exact_json
+    return encode_exact_json(value, error_type=TransactionError)
 
 
 def _body_document(event: EventEnvelope) -> dict[str, Any]:

@@ -636,6 +636,19 @@
         "FAILED": 3,
         "UNCONFIRMED": 4
       }
+    },
+    "software_recoveries.phase": {
+      "contract": "operation-fields.md#无人值守的软件重启责任",
+      "members": {
+        "CHECKING": 1,
+        "INTENT": 2,
+        "CONFIRMING": 3,
+        "PREPARING": 4,
+        "SCANNING": 5,
+        "READY": 6,
+        "ISOLATED": 7,
+        "ABANDONED": 8
+      }
     }
   },
   "history_objects": {
