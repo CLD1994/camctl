@@ -5,6 +5,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.contracts.pages import Page
 from camctl.contracts.enums import enum_for
@@ -59,6 +60,7 @@ class Filesystem:
         self.metadata_error = metadata_error
         self.directory_calls = []
         self.metadata_calls = []
+        self.metadata_batches = []
 
     async def read_directory(self, request, *, stop):
         assert request.binding == BINDING and request.directories == (ROOT,)
@@ -84,6 +86,10 @@ class Filesystem:
                  "local_exit_code": 1, "stderr": "metadata failed"}))
         size = self.sizes.get(identity.path, 10)
         return FileAccessRead(_tool_result(f"{size}\n".encode()), size, None)
+
+    async def metadata_many(self, identities, *, timeout_s, stop):
+        self.metadata_batches.append((identities, timeout_s))
+        return await collect_fake_metadata_many(self, identities, timeout_s=timeout_s, stop=stop)
 
 
 async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40"),
@@ -189,9 +195,9 @@ async def test_metadata_failure_preserves_every_file_identity_from_the_directory
     assert set(entries) == {OSV, LRF, other_original}
     assert entries[OSV]["size_bytes"] == 10 and entries[OSV]["complete"] is True
     assert entries[LRF]["size_bytes"] is None and entries[LRF]["complete"] is False
-    assert entries[other_original]["size_bytes"] is None and entries[other_original]["complete"] is False
+    assert entries[other_original]["size_bytes"] == 10 and entries[other_original]["complete"] is True
     assert page["set_finalized"] is False
-    assert [item.path for item in fs.metadata_calls] == [OSV, LRF]
+    assert [item.path for item in fs.metadata_calls] == [OSV, LRF, other_original]
 
 
 @pytest.mark.asyncio
@@ -268,7 +274,8 @@ async def test_page_size_bounds_metadata_and_result_entries_as_directory_grows()
     assert len(fs.directory_calls) == 1 and fs.directory_calls[0].batch == 32
     assert len(fs.metadata_calls) == 32
     data = result.outcome.settlement.evidence.data
-    assert data["call_count"] == len(data["calls"]) == 33
+    assert data["call_count"] == len(data["calls"]) == 2
+    assert len(fs.metadata_batches) == 1
 
 
 @pytest.mark.asyncio
@@ -320,7 +327,8 @@ async def test_real_driver_filesystem_and_result_parser_accept_raw_osmo_page():
 
     class Transport:
         def __init__(self):
-            self.outputs = [frame(OSV, LRF), b"10\n", b"4\n"]
+            self.outputs = [frame(OSV, LRF), b"\0".join((b"CAMCTL-METADATA/1",
+                OSV.encode(), b"0", b"10\n", b"", LRF.encode(), b"0", b"4\n", b"", b"END", b""))]
             self.specs = []
 
         async def run(self, spec, stop):
@@ -335,7 +343,7 @@ async def test_real_driver_filesystem_and_result_parser_accept_raw_osmo_page():
         "completion_context": _natural(), "video_result_mode": "segmented"}, TICKET, Decimal("10"))
     result = await driver.list_results(request, 32)
     assert result.outcome.status is AttemptStatus.SUCCEEDED and transport.outputs == []
-    assert len(transport.specs) == 3
+    assert len(transport.specs) == 2
     page = page_from_outcome(TICKET, result.outcome, binding=BINDING)
     assert page.set_finalized is True and page.scan_complete is True
     assert [(entry.identity, entry.paired_identity) for entry in page.entries] == [(OSV, None), (LRF, None)]
@@ -388,17 +396,24 @@ async def test_budget_exhaustion_preserves_page_identities_and_unknown_metadata(
     clock = [0]
     other_original = ROOT + "/folder/Other.OSV"
     class ExhaustingFilesystem(Filesystem):
-        async def metadata(self, identity, *, timeout_s, stop):
-            result = await super().metadata(identity, timeout_s=timeout_s, stop=stop)
+        async def metadata_many(self, identities, *, timeout_s, stop):
+            from camctl.devices.drivers.adb_cameras.filesystem import FileMetadataBatch, FileMetadataItem
+
+            assert timeout_s == Decimal("0.5")
+            result = await self.metadata(identities[0], timeout_s=timeout_s, stop=stop)
             clock[0] = 500_000_000
-            return result
+            raw = RawToolOutcome(LocalExit(signal=15), b"\0".join((b"CAMCTL-METADATA/1",
+                identities[0].path.encode(), b"0", b"10\n", b"", b"")), "timeout", Decimal("1"), stderr=b"")
+            error = ErrorValue("adb_metadata_failed", "device_file_access",
+                {"reason": "call_failed", "transport_error": "timeout"})
+            return FileMetadataBatch(raw, (FileMetadataItem(identities[0], result.value, None),), error)
 
     fs = ExhaustingFilesystem([OSV, LRF, other_original])
     result = await _list(fs, context=_natural(), clock=clock, timeout=Decimal("0.5"))
 
     assert result.error is not None
     assert result.error["code"] == "adb_metadata_failed"
-    assert result.error["details"]["reason"] == "call_unavailable"
+    assert result.error["details"]["transport_error"] == "timeout"
     entries = {entry["identity"]: entry for entry in _page(result)["entries"]}
     assert set(entries) == {OSV, LRF, other_original}
     assert entries[OSV]["complete"] is True and entries[OSV]["size_bytes"] == 10
@@ -410,7 +425,7 @@ async def test_budget_exhaustion_preserves_page_identities_and_unknown_metadata(
 
 
 @pytest.mark.asyncio
-async def test_raw_page_reads_each_result_metadata_once_in_directory_page_order():
+async def test_raw_page_batches_result_metadata_once_in_directory_page_order():
     other = ROOT + "/folder/Other.OSV"
     class OrderedFilesystem(Filesystem):
         def __init__(self):
@@ -422,6 +437,8 @@ async def test_raw_page_reads_each_result_metadata_once_in_directory_page_order(
     fs = OrderedFilesystem()
     result = await _list(fs, context=_natural())
     assert result.error is None and fs.metadata_paths == [OSV, LRF, other]
+    assert len(fs.metadata_batches) == 1
+    assert [identity.path for identity in fs.metadata_batches[0][0]] == [OSV, LRF, other]
     assert [entry["identity"] for entry in _page(result)["entries"]] == [OSV, LRF, other]
 
 

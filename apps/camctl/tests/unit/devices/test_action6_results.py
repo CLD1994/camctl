@@ -6,6 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
@@ -17,6 +18,7 @@ from camctl.devices.drivers.adb_cameras.filesystem import FileAccessRead
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import ControlRequest
 from camctl.operations.models import AttemptTicket, ErrorValue
+from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.validation import validate_outcome
 
 
@@ -92,6 +94,9 @@ class Filesystem:
             self.change_after_metadata = None
         return FileAccessRead(None, size, None)
 
+    async def metadata_many(self, identities, *, timeout_s, stop):
+        return await collect_fake_metadata_many(self, identities, timeout_s=timeout_s, stop=stop)
+
 
 def _page(result):
     return next((item.data for item in result.observations if item.type == "result_files_listed"), None)
@@ -119,6 +124,65 @@ async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=D
 def _validate(result):
     from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
     return validate_outcome(TICKET, result.outcome, action6_record_contract().evidence)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "item", "prefix"])
+async def test_segmented_page_uses_one_metadata_batch_with_remaining_budget(failure):
+    paths = [MP4, ROOT + "/folder/second.JPG", ROOT + "/folder/third.DNG"]
+    clock = [0]
+    expected_error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": failure or "none"})
+
+    class BatchFilesystem(Filesystem):
+        def __init__(self):
+            super().__init__(paths)
+            self.batch_calls = []
+
+        async def read_directory(self, request, *, stop):
+            result = await super().read_directory(request, stop=stop)
+            clock[0] = 2_000_000_000
+            return result
+
+        async def metadata(self, identity, *, timeout_s, stop):
+            raise AssertionError("分段主页必须使用一次批量 metadata 调用")
+
+        async def metadata_many(self, identities, *, timeout_s, stop):
+            self.batch_calls.append((identities, timeout_s))
+            items = tuple(SimpleNamespace(identity=identity,
+                value=None if failure == "item" and index == 1 else 10 + index,
+                error=expected_error if failure == "item" and index == 1 else None)
+                for index, identity in enumerate(identities))
+            if failure == "prefix":
+                items = items[:1]
+            records = []
+            for item in items:
+                records.extend((item.identity.path.encode(), b"1" if item.error else b"0",
+                    b"" if item.error else f"{item.value}\n".encode(),
+                    b"metadata failed" if item.error else b""))
+            output = b"\0".join((b"CAMCTL-METADATA/1", *records,
+                *((b"END", b"") if failure != "prefix" else (b"",))))
+            outcome = RawToolOutcome(LocalExit(exit_code=0), output,
+                "output_failed" if failure == "prefix" else None, None,
+                output_failure="truncated" if failure == "prefix" else None, stderr=b"")
+            return SimpleNamespace(outcome=outcome, items=items,
+                error=expected_error if failure else None)
+
+    fs = BatchFilesystem()
+    result = await _list(fs, context=_natural(), clock=clock,
+        params={"video_result_mode": "segmented"})
+
+    assert len(fs.batch_calls) == 1
+    identities, timeout = fs.batch_calls[0]
+    assert [identity.path for identity in identities] == paths
+    assert timeout == Decimal("38")
+    assert _evidence(result)["call_count"] == 2
+    page = _page(result)
+    expected_sizes = ([10, 11, 12] if failure is None else
+                      [10, None, 12] if failure == "item" else [10, None, None])
+    assert [entry["size_bytes"] for entry in page["entries"]] == expected_sizes
+    assert page["set_finalized"] is (failure is None)
+    assert (result.error is None) is (failure is None)
+    _validate(result)
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from decimal import Decimal
 import json
 
 import pytest
+from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -54,6 +55,9 @@ class Filesystem:
 
     async def metadata(self, identity, *, timeout_s, stop):
         return FileAccessRead(None, 10, None)
+
+    async def metadata_many(self, identities, *, timeout_s, stop):
+        return await collect_fake_metadata_many(self, identities, timeout_s=timeout_s, stop=stop)
 
 
 class Transport:

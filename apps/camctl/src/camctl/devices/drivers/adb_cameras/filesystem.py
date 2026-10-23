@@ -116,16 +116,19 @@ def _decode_metadata_frame(output, identities):
         expected_identity = identity.path.encode("utf-8")
         if actual_identity != expected_identity:
             frame_errors.append({"reason": "identity_mismatch", "index": index,
-                "expected_identity": identity.path, "actual_identity_hex": actual_identity.hex()})
+                "expected_identity": identity.path, "actual_identity_hex": actual_identity.hex(),
+                "stdout_hex": stdout.hex(), "stderr_hex": stderr.hex()})
             return tuple(items), tuple(frame_errors), False
         if re.fullmatch(rb"(?:0|[1-9][0-9]{0,2})", status_bytes) is None:
             frame_errors.append({"reason": "invalid_remote_exit_code", "index": index,
-                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex()})
+                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex(),
+                "stdout_hex": stdout.hex(), "stderr_hex": stderr.hex()})
             return tuple(items), tuple(frame_errors), False
         remote_exit_code = int(status_bytes)
         if remote_exit_code > 255:
             frame_errors.append({"reason": "invalid_remote_exit_code", "index": index,
-                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex()})
+                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex(),
+                "stdout_hex": stdout.hex(), "stderr_hex": stderr.hex()})
             return tuple(items), tuple(frame_errors), False
 
         if remote_exit_code != 0:

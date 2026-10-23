@@ -185,6 +185,13 @@ def _shell_kind(script: str) -> str:
 
     tools = ShellFileTools()
     known_files = tuple(path for path, _ in _scenario_files())
+    batch_line = next((line.strip() for line in script.splitlines()
+        if line.strip().startswith("for path in ") and line.strip().endswith("; do")), None)
+    if batch_line is not None:
+        selected = tuple(shlex.split(batch_line[len("for path in "):-len("; do")]))
+        if (selected and all(path in known_files for path in selected)
+                and script == tools.metadata_many_script(selected)):
+            return "metadata"
     for path in known_files:
         if script == tools.metadata_script(path):
             return "metadata"

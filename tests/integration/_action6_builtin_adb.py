@@ -77,6 +77,13 @@ def _file_kind(script):
     paths = tuple(path for path, _ in _scenario_files()) + (
         NEW_VIDEO, NEW_PREVIEW, NEW_PHOTO,
         REMOTE_DIRECTORY + "/DJI_001/DJI_OLD.MP4")
+    batch_line = next((line.strip() for line in script.splitlines()
+        if line.strip().startswith("for path in ") and line.strip().endswith("; do")), None)
+    if batch_line is not None:
+        selected = tuple(shlex.split(batch_line[len("for path in "):-len("; do")]))
+        if (selected and all(path in paths for path in selected)
+                and script == tools.metadata_many_script(selected)):
+            return "metadata"
     for path in paths:
         for kind, candidate in (("metadata", tools.metadata_script(path)),
                                 ("digest", tools.digest_script(path)),

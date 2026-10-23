@@ -262,6 +262,8 @@ async def test_metadata_many_rejects_noncanonical_or_out_of_range_remote_exit_co
     assert result.error.code == "adb_metadata_failed"
     assert result.items == ()
     assert result.error.details["frame_errors"][0]["reason"] == "invalid_remote_exit_code"
+    assert result.error.details["frame_errors"][0]["stdout_hex"] == b"12\n".hex()
+    assert result.error.details["frame_errors"][0]["stderr_hex"] == ""
 
 
 @pytest.mark.asyncio

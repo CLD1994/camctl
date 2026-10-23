@@ -284,15 +284,19 @@ async def list_declared_results(driver, request, batch, profile):
             for identity, file_format in raw_files
         ]
         page["entries"] = page_entries
-        for index, (identity, file_format) in enumerate(raw_files):
+        if raw_files:
             if not read.available():
                 error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": "call_unavailable"})
                 return read.reply(error, page)
-            metadata = await filesystem.metadata(identity, timeout_s=read.remaining(), stop=_NeverStop())
+            metadata = await filesystem.metadata_many(tuple(identity for identity, _ in raw_files),
+                timeout_s=read.remaining(), stop=_NeverStop())
             read.remember(metadata.outcome, "metadata")
+            for index, item in enumerate(metadata.items):
+                identity, file_format = raw_files[index]
+                if item.error is None:
+                    page_entries[index] = _entry(identity, item.value, complete, file_format)
             if metadata.error is not None:
                 return read.reply(metadata.error, page)
-            page_entries[index] = _entry(identity, metadata.value, complete, file_format)
         page["set_finalized"] = complete and listing.page.next_cursor is None
         return read.reply(page=page)
 
