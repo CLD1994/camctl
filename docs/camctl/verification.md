@@ -46,6 +46,14 @@
 
 普通取回的源摘要失败收场阶段基于提交 `6946e63192a03548b791b95e314843808eda1f41` 构建，安装在 `/tmp/camctl-video-real-recovery-v1-20261023/venv`。wheel 位于证据根 `resume-20261023T145540Z/runtime-recovery-v1/dist/`，SHA-256 为 `4e12e99434be292e321acbc769f22b7bd5b0d6bd6167b0582fbb7034344aa69d`；298份生产 Python 文件及27份权威资源共325项在源码、wheel、安装位置的字节一致。锁定依赖检查、独立临时库初始化与静态能力导出均退出0，实际 Python 3.11.16、SQLite 3.53.1；完整命令与安装清单位于同目录。该阶段包不包含尚在独立复核的分段检查收场或软件重启恢复。
 
+后续完整恢复候选已集成分段检查失败及分页收场、独立软件重启责任和 V3 显式升级。主树 `06645ee` 的组合验证为7132 passed、1 skipped、2条既有 asyncio 标记警告；受影响的7组组件集成合计141 passed，均退出0，记录位于 `resume-20261023T145540Z/combined-recovery-integration/`。软件恢复候选树的完整 persistence 为925 passed／713.47秒，history 为345 passed／853.38秒；原始命令、PID、UTC 和退出码位于 `.local/worktrees/real-device-reboot-20261023/.local/reboot-validation/`。这两轮自然结束，没有将此前主动中断的 capture 轮次计作通过。
+
+大历史夹具的临时 `fixture-members.db` 插入随后改为每页不超过128条的事务；正式状态库的公共事务、FULL、256／2048规模及测量断言不变。同一20／40条 setup-only 对照实测分别从2.222180／4.987871秒降为1.923613／4.428157秒，同步调用从159／279降为83／123，行数一致，异常回滚与关闭验证通过；记录位于 `.local/worktrees/real-device-test-perf-20261023/.local/verification/large-fixture-*`。完整 history 的345项通过属于优化前版本，不将小规模 setup 对照写成优化后的完整历史门禁。该单文件测试优化集成后为 `2c64c1b`，生产源码、权威数据库资源及协议与组合验证版本一致。
+
+完整候选的隔离安装环境为 `/tmp/camctl-video-real-recovery-v2-20261023/venv`，来源提交 `2c64c1bf330aa028f6fe901cc08307af1b8ece8e`。wheel 位于 `resume-20261023T145540Z/runtime-recovery-v2/dist/`，SHA-256 为 `4c2b8f55b67c6c3d2e84b30b17fce87b2d189e36286e7e8e341c5f6ba8b05f1d`；305份生产 Python 文件及27份权威资源共332项源码、wheel、安装字节一致。包内 Python 验收脚本按权威资源归类，没有再次计入生产模块。依赖检查及两型号静态能力导出通过，离线固件指纹复算与已保存原始读数一致。
+
+该安装包新建状态库为 V3；复制前一阶段真实 V2 空 smoke 库后，普通 `init` 保持 V2，显式 `init --upgrade-software-recovery` 才升级为 V3，并保留有效 V2 备份、原实例、目录绑定和非元信息行摘要。重复核验通过；输入库只有两条单份状态记录，不能据此宣称非空业务历史升级已由安装版实测。原始辅助检查失败及修正分别保留在上述目录的 `runtime.json`、`commands.jsonl` 与日志中。这些是容器软件及安装证据，活动录像重启、不自动续拍和正式恢复的真机证据尚未取得。
+
 主树在上述固定提交顺序执行普通摘要失败恢复、OSV 输入失败和录像恢复三个组件测试文件，结果分别为7 passed／1.38秒、33 passed／7.13秒、3 passed／0.80秒，均退出0；命令、UTC、源码提交和输出位于 `resume-20261023T145540Z/integrated-source-digest/`。初始化的单事务与 WAL／FULL 读回修复另在 `2dcc6f3` 核对27项初始化测试，以及相同三项清理恢复矩阵；后者实测3.90秒、161次 fsync。记录位于 `initialization-integrated-155346/`，该目录属于同一恢复阶段；不把容器测量解释为目标硬件性能。
 
 ### 已观察的设备与交付结果
