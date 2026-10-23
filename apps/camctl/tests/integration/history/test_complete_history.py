@@ -723,6 +723,12 @@ _EVENT_COVERAGE: dict[str, tuple[bool, list[str]]] = {
     "RECORDING_DECIDED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),
     "RECORDING_PROCESSED": (True, ["apps/camctl/tests/integration/capture/test_media_processing.py"]),
     "OUTPUT_REGISTERED": (True, ["apps/camctl/tests/integration/capture/test_recording_finish.py"]),
+    # 检查流程真实覆盖 CREATE、RESULT 与结果提交回执未知后的冷启动恢复；
+    # 历史入口另核对 inspection 行及其副本在固定 H 下的归属。
+    "SEGMENT_INSPECTION": (False, [
+        "apps/camctl/tests/integration/capture/test_segment_inspections.py",
+        "apps/camctl/tests/integration/history/test_action6_video_result_history.py",
+    ]),
     "READ_PERMISSION_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_read_associations.py"]),
     "COPY_CHANGED": (True, ["apps/camctl/tests/integration/outputs/test_copy_creation_slot.py"]),
     "SEGMENT_FACTS": (False, ["apps/camctl/tests/integration/persistence/test_segment_storage.py"]),
