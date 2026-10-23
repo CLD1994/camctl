@@ -20,7 +20,7 @@ CLI 是命令行接口：主程序通过启动 camctl 进程交给它工作。�
 ## 命令与用途
 
 ```text
-camctl init [--config <path>]
+camctl init [--upgrade-software-recovery] [--config <path>]
 camctl run [<plan-path>] [--config <path>] [--host-notification-fd FD]
 camctl submit <plan-path> [--config <path>]
 camctl describe [--config <path>]
