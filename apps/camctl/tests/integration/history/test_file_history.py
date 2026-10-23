@@ -108,7 +108,8 @@ def _seed_action(connection, action_id: int, *, action_type: int) -> None:
     if action_type == 2:
         params["duration_s"] = 60
     original = {"params": params, "policy": {"max_delay_ms": 1000}}
-    definition = {"target_duration_ms": 60000} if action_type == 2 else {}
+    definition = ({"target_duration_ms": 60000, "video_result_mode": "single_file"}
+                  if action_type == 2 else {})
     connection.execute(
         "INSERT INTO actions (id, plan_id, input_index, name, type, device_id,"
         " scheduled_at, group_name, input_fields_json, effective_params_json,"
