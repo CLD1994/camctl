@@ -203,14 +203,23 @@ def main():
         code = format(int(words[index + 1], 16), "x")
         payload = words[index + 2].lower()
         record.update(code=code, payload=payload)
-        if os.environ.get("CAMCTL_ACTION6_TEST_CAPTURE") == "timelapse":
+        timelapse = os.environ.get("CAMCTL_ACTION6_TEST_CAPTURE") == "timelapse"
+        timelapse_settings = ()
+        if timelapse:
             from camctl.devices.drivers.adb_cameras.commands import settings_from_effective_params, start_for, stop_for
             params = json.loads(os.environ["CAMCTL_ACTION6_TEST_PARAMS"])
-            allowed = (*settings_from_effective_params("dji-action6", "camera_timelapse", params),
+            timelapse_settings = settings_from_effective_params(
+                "dji-action6", "camera_timelapse", params
+            )
+            allowed = (*timelapse_settings,
                        start_for("dji-action6", "camera_timelapse"), stop_for("dji-action6", "camera_timelapse"))
             if tuple(words) not in allowed:
                 raise ValueError(f"不是本次 Action6 的完整命令: {words!r}")
-        timelapse = os.environ.get("CAMCTL_ACTION6_TEST_CAPTURE") == "timelapse"
+        setting_call = (
+            tuple(words) in timelapse_settings
+            if timelapse
+            else (code, payload) in SETTINGS
+        )
         start_code = "1" if timelapse else "2"
         if (code, payload) == (start_code, "01"):
             record["kind"] = "start"
@@ -233,8 +242,7 @@ def main():
                     (root / NEW_PHOTO.lstrip("/")).write_bytes(b"Action6 independent JPEG original")
         elif (code, payload) == (start_code, "00"):
             record["kind"] = "stop"
-        elif (code, payload) in ({("e1", "02"), ("18", "1003000000"),
-                ("6c", "0400020a002c0100000000000000000000"), ("1e", "0100")} if timelapse else SETTINGS):
+        elif setting_call:
             record["kind"] = "setting"
         else:
             raise ValueError(f"未声明的控制调用: {words!r}")
