@@ -23,6 +23,10 @@ from camctl.operations.process import RawToolOutcome, ToolSpec, ToolStartError
 from .transport import shell_argv
 
 
+METADATA_FRAME_HEADER = b"CAMCTL-METADATA/1\0"
+MAX_METADATA_BATCH_SIZE = 128
+
+
 
 def _error(raw, operation, reason):
     details: dict[str, Any] = {"reason": reason}
@@ -38,6 +42,138 @@ def _error(raw, operation, reason):
 def _returned(raw):
     return (raw.error is None and raw.output_failure is None and raw.exit is not None
             and raw.exit.exit_code == 0 and isinstance(raw.output, bytes))
+
+
+@dataclass(frozen=True)
+class FileMetadataItem:
+    """一个批量文件元数据请求的身份、实际大小或逐路径错误。"""
+
+    identity: FileIdentity
+    value: int | None
+    error: ErrorValue | None
+
+
+@dataclass(frozen=True)
+class FileMetadataBatch:
+    """一次批量工具调用及其按请求顺序解码的完整记录前缀。"""
+
+    outcome: RawToolOutcome | None
+    items: tuple[FileMetadataItem, ...]
+    error: ErrorValue | None
+
+
+def _metadata_paths(paths):
+    if (not isinstance(paths, tuple) or not 1 <= len(paths) <= MAX_METADATA_BATCH_SIZE
+            or any(not isinstance(path, str) or not path or "\0" in path for path in paths)):
+        raise ValueError("批量文件元数据请求必须包含 1 到 128 个非空路径")
+    try:
+        for path in paths:
+            path.encode("utf-8", "strict")
+    except UnicodeError as error:
+        raise ValueError("文件路径必须是有效 UTF-8") from error
+    if len(set(paths)) != len(paths):
+        raise ValueError("批量文件元数据请求不能重复文件身份")
+    return paths
+
+
+def _nul_field(data, offset):
+    end = data.find(b"\0", offset)
+    return None if end < 0 else (data[offset:end], end + 1)
+
+
+def _metadata_item_error(identity, reason, remote_exit_code, stdout, stderr):
+    return ErrorValue("adb_metadata_failed", "device_file_access", {
+        "reason": reason,
+        "identity": identity.path,
+        "remote_exit_code": remote_exit_code,
+        "stdout_hex": stdout.hex(),
+        "stderr_hex": stderr.hex(),
+    })
+
+
+def _decode_metadata_frame(output, identities):
+    """只返回身份顺序完全匹配且四字段均闭合的记录前缀。"""
+    items = []
+    frame_errors = []
+    if not isinstance(output, bytes) or not output.startswith(METADATA_FRAME_HEADER):
+        frame_errors.append({"reason": "invalid_header"})
+        return tuple(items), tuple(frame_errors), False
+
+    offset = len(METADATA_FRAME_HEADER)
+    fields = ("identity", "remote_exit_code", "stdout", "stderr")
+    for index, identity in enumerate(identities):
+        record = []
+        for field in fields:
+            value = _nul_field(output, offset)
+            if value is None:
+                frame_errors.append({"reason": "truncated_record", "index": index,
+                    "identity": identity.path, "field": field})
+                return tuple(items), tuple(frame_errors), False
+            field_value, offset = value
+            record.append(field_value)
+
+        actual_identity, status_bytes, stdout, stderr = record
+        expected_identity = identity.path.encode("utf-8")
+        if actual_identity != expected_identity:
+            frame_errors.append({"reason": "identity_mismatch", "index": index,
+                "expected_identity": identity.path, "actual_identity_hex": actual_identity.hex()})
+            return tuple(items), tuple(frame_errors), False
+        if re.fullmatch(rb"(?:0|[1-9][0-9]{0,2})", status_bytes) is None:
+            frame_errors.append({"reason": "invalid_remote_exit_code", "index": index,
+                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex()})
+            return tuple(items), tuple(frame_errors), False
+        remote_exit_code = int(status_bytes)
+        if remote_exit_code > 255:
+            frame_errors.append({"reason": "invalid_remote_exit_code", "index": index,
+                "identity": identity.path, "remote_exit_code_hex": status_bytes.hex()})
+            return tuple(items), tuple(frame_errors), False
+
+        if remote_exit_code != 0:
+            error = _metadata_item_error(identity, "remote_command_failed", remote_exit_code,
+                                         stdout, stderr)
+            items.append(FileMetadataItem(identity, None, error))
+            continue
+
+        if re.fullmatch(rb"(?:0|[1-9][0-9]*)\n", stdout) is None:
+            error = _metadata_item_error(identity, "invalid_size", remote_exit_code, stdout, stderr)
+            items.append(FileMetadataItem(identity, None, error))
+            continue
+        try:
+            size = int(stdout[:-1])
+        except ValueError:
+            error = _metadata_item_error(identity, "invalid_size", remote_exit_code, stdout, stderr)
+            items.append(FileMetadataItem(identity, None, error))
+            continue
+        items.append(FileMetadataItem(identity, size, None))
+
+    end = _nul_field(output, offset)
+    if end is None:
+        frame_errors.append({"reason": "missing_end", "records_completed": len(items)})
+        return tuple(items), tuple(frame_errors), False
+    end_value, offset = end
+    if end_value != b"END":
+        frame_errors.append({"reason": "unexpected_entry_after_requested_items",
+            "value_hex": end_value.hex()})
+        return tuple(items), tuple(frame_errors), False
+    if offset != len(output):
+        frame_errors.append({"reason": "trailing_data_after_end", "trailing_bytes": len(output) - offset})
+        return tuple(items), tuple(frame_errors), False
+    return tuple(items), (), True
+
+
+def _metadata_batch_error(raw, *, frame_errors=(), item_errors=()):
+    if not _returned(raw):
+        primary = _error(raw, "metadata", "call_failed")
+    elif frame_errors:
+        primary = _error(raw, "metadata", "invalid_response_frame")
+    else:
+        primary = _error(raw, "metadata", "item_failures")
+    details = dict(primary.details)
+    if frame_errors:
+        details["frame_errors"] = list(frame_errors)
+    if item_errors:
+        details["item_errors"] = [dict(item.details) for item in item_errors]
+    return ErrorValue(primary.code, primary.stage, details)
 
 
 def decode_directory(request, raw):
@@ -175,6 +311,27 @@ class ShellFileTools:
         path = shlex.quote(path)
         return f'test -f {path} && LC_ALL=C stat -c %s -- {path}'
 
+    def metadata_many_script(self, paths: tuple[str, ...]) -> str:
+        paths = _metadata_paths(paths)
+        header = METADATA_FRAME_HEADER[:-1].decode("ascii")
+        return "\n".join((
+            'tmp=$(mktemp) || exit $?',
+            'trap \'rm -f -- "$tmp" "$tmp.err"\' 0',
+            f"printf '%s\\000' {shlex.quote(header)} || exit $?",
+            'for path in ' + shlex.join(paths) + '; do',
+            '    : > "$tmp" || exit $?',
+            '    : > "$tmp.err" || exit $?',
+            '    { test -f "$path" && LC_ALL=C stat -c %s -- "$path"; } > "$tmp" 2> "$tmp.err"',
+            '    status=$?',
+            '    printf \'%s\\000%s\\000\' "$path" "$status" || exit $?',
+            '    cat "$tmp" || exit $?',
+            "    printf '\\000' || exit $?",
+            '    cat "$tmp.err" || exit $?',
+            "    printf '\\000' || exit $?",
+            'done',
+            "printf 'END\\000' || exit $?",
+        ))
+
     def digest_script(self, path):
         return f'LC_ALL=C sha256sum < {shlex.quote(path)}'
 
@@ -241,6 +398,29 @@ class AdbFilesystem:
                 raise ValueError("文件长度响应无效")
             return int(data)
         return await self._file_call(identity, "metadata", self.tools.metadata_script, decode, timeout_s, stop)
+
+    async def metadata_many(
+        self, identities: tuple[FileIdentity, ...], *, timeout_s, stop,
+    ) -> FileMetadataBatch:
+        if not isinstance(identities, tuple) or not 1 <= len(identities) <= MAX_METADATA_BATCH_SIZE:
+            raise ValueError("批量文件元数据请求必须包含 1 到 128 个身份")
+        paths = tuple(self._identity(identity) for identity in identities)
+        _metadata_paths(paths)
+        try:
+            raw = await self._run(self.tools.metadata_many_script(paths), timeout_s, stop)
+        except ToolStartError as error:
+            return FileMetadataBatch(None, (), _error(None, "metadata", str(error)))
+
+        items, frame_errors, frame_complete = _decode_metadata_frame(raw.output, identities)
+        if raw.output_failure is not None:
+            frame_errors = (*frame_errors, {"reason": "output_incomplete",
+                "output_failure": raw.output_failure})
+            frame_complete = False
+        item_errors = tuple(item.error for item in items if item.error is not None)
+        error = None
+        if not _returned(raw) or not frame_complete or frame_errors or item_errors:
+            error = _metadata_batch_error(raw, frame_errors=frame_errors, item_errors=item_errors)
+        return FileMetadataBatch(raw, items, error)
 
     async def exists(self, identity, *, timeout_s, stop):
         result = await self.metadata(identity, timeout_s=timeout_s, stop=stop)

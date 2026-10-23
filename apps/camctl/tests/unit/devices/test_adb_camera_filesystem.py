@@ -5,8 +5,9 @@ import shlex
 import pytest
 
 from camctl.devices.bindings import DeviceBinding
+from camctl.devices.file_identity import FileIdentity
 from camctl.devices.drivers.adb_cameras.filesystem import (
-    DirectoryCursor, DirectoryRequest, decode_directory,
+    AdbFilesystem, DirectoryCursor, DirectoryRequest, ShellFileTools, decode_directory,
 )
 from camctl.devices.drivers.adb_cameras.transport import shell_argv
 from camctl.operations.process import LocalExit, RawToolOutcome
@@ -100,3 +101,230 @@ def test_shell_command_preserves_one_remote_script_argument():
 def test_serial_must_be_explicit(serial):
     with pytest.raises(ValueError):
         shell_argv(serial, "true")
+
+
+def _metadata_record(path, remote_exit, stdout=b"", stderr=b""):
+    return (path.encode("utf-8") + b"\0" + str(remote_exit).encode("ascii") + b"\0"
+            + stdout + b"\0" + stderr + b"\0")
+
+
+def _metadata_frame(*records, end=True, trailing=b""):
+    return (b"CAMCTL-METADATA/1\0" + b"".join(records)
+            + (b"END\0" if end else b"") + trailing)
+
+
+def _metadata_raw(data, *, code=0, error=None, failure=None, stderr=b""):
+    return RawToolOutcome(LocalExit(exit_code=code), data, error, None,
+                          output_failure=failure, stderr=stderr)
+
+
+class _MetadataTransport:
+    def __init__(self, raw):
+        self.raw = raw
+        self.calls = []
+
+    async def run(self, spec, stop):
+        self.calls.append((spec, stop))
+        return self.raw
+
+
+async def _metadata_many(filesystem, identities, *, timeout_s=Decimal("9"), stop=None):
+    method = getattr(filesystem, "metadata_many", None)
+    assert callable(method), "AdbFilesystem must expose metadata_many"
+    return await method(identities, timeout_s=timeout_s, stop=stop)
+
+
+@pytest.mark.asyncio
+async def test_metadata_many_reads_ordered_identities_in_one_call_with_original_timeout():
+    first = "/DCIM/a 'quoted'\nname.MP4"
+    second = "/DCIM/zero.JPG"
+    identities = (FileIdentity(BINDING, first), FileIdentity(BINDING, second))
+    transport = _MetadataTransport(_metadata_raw(_metadata_frame(
+        _metadata_record(first, 0, b"73\n"), _metadata_record(second, 0, b"0\n"))))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+    stop = object()
+
+    result = await _metadata_many(filesystem, identities, timeout_s=Decimal("4.125"), stop=stop)
+
+    assert result.error is None
+    assert tuple(item.identity for item in result.items) == identities
+    assert tuple(item.value for item in result.items) == (73, 0)
+    assert all(item.error is None for item in result.items)
+    assert len(transport.calls) == 1
+    assert transport.calls[0][0].timeout_s == Decimal("4.125")
+    assert transport.calls[0][1] is stop
+
+
+@pytest.mark.asyncio
+async def test_metadata_many_preserves_each_complete_item_and_all_item_errors():
+    paths = ("/DCIM/first.MP4", "/DCIM/missing.JPG", "/DCIM/zero.JPG", "/DCIM/bad.DNG")
+    identities = tuple(FileIdentity(BINDING, path) for path in paths)
+    transport = _MetadataTransport(_metadata_raw(_metadata_frame(
+        _metadata_record(paths[0], 0, b"120\n"),
+        _metadata_record(paths[1], 1, b"", b"missing"),
+        _metadata_record(paths[2], 0, b"0\n"),
+        _metadata_record(paths[3], 0, b"17"))))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, identities)
+
+    assert result.error.code == "adb_metadata_failed"
+    assert tuple(item.identity for item in result.items) == identities
+    assert tuple(item.value for item in result.items) == (120, None, 0, None)
+    assert result.items[0].error is None and result.items[2].error is None
+    assert result.items[1].error.details["identity"] == paths[1]
+    assert result.items[1].error.details["remote_exit_code"] == 1
+    assert result.items[1].error.details["stdout_hex"] == ""
+    assert result.items[1].error.details["stderr_hex"] == b"missing".hex()
+    assert result.items[3].error.details["identity"] == paths[3]
+    assert result.items[3].error.details["remote_exit_code"] == 0
+    assert result.items[3].error.details["stdout_hex"] == b"17".hex()
+    assert result.items[3].error.details["stderr_hex"] == ""
+    assert [error["identity"] for error in result.error.details["item_errors"]] == [paths[1], paths[3]]
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdout", [b"", b"00\n", b"+1\n", b"1"])
+async def test_metadata_many_requires_exact_size_stdout_for_remote_success(stdout):
+    path = "/DCIM/bad-size.MP4"
+    identity = FileIdentity(BINDING, path)
+    transport = _MetadataTransport(_metadata_raw(_metadata_frame(
+        _metadata_record(path, 0, stdout, b"raw diagnostic\xff"))))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, (identity,))
+
+    assert result.error.code == "adb_metadata_failed"
+    assert result.items[0].value is None
+    assert result.items[0].error.details["stdout_hex"] == stdout.hex()
+    assert result.items[0].error.details["stderr_hex"] == b"raw diagnostic\xff".hex()
+    assert result.error.details["item_errors"] == [dict(result.items[0].error.details)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identities", [
+    (),
+    [FileIdentity(BINDING, "/DCIM/a.MP4")],
+    (FileIdentity(BINDING, "/DCIM/a.MP4"), FileIdentity(BINDING, "/DCIM/a.MP4")),
+    tuple(FileIdentity(BINDING, f"/DCIM/{index}.MP4") for index in range(129)),
+    (FileIdentity(DeviceBinding("other", "dji-action6"), "/DCIM/a.MP4"),),
+])
+async def test_metadata_many_rejects_invalid_request_before_dispatch(identities):
+    transport = _MetadataTransport(_metadata_raw(b""))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    with pytest.raises(ValueError):
+        await _metadata_many(filesystem, identities)
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_metadata_many_rejects_successful_empty_stdout_as_a_bad_frame():
+    identity = FileIdentity(BINDING, "/DCIM/a.MP4")
+    transport = _MetadataTransport(_metadata_raw(b""))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, (identity,))
+
+    assert result.error.code == "adb_metadata_failed"
+    assert result.items == ()
+
+
+@pytest.mark.asyncio
+async def test_metadata_many_keeps_only_complete_prefix_when_frame_is_truncated():
+    first, second = "/DCIM/a.MP4", "/DCIM/b.MP4"
+    identities = (FileIdentity(BINDING, first), FileIdentity(BINDING, second))
+    prefix = _metadata_record(first, 0, b"12\n")
+    partial = second.encode() + b"\0" + b"0\0" + b"4"
+    transport = _MetadataTransport(_metadata_raw(b"CAMCTL-METADATA/1\0" + prefix + partial))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, identities)
+
+    assert result.error.code == "adb_metadata_failed"
+    assert [(item.identity.path, item.value) for item in result.items] == [(first, 12)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [b"", b"00", b"256", b"+1"])
+async def test_metadata_many_rejects_noncanonical_or_out_of_range_remote_exit_code(status):
+    path = "/DCIM/a.MP4"
+    identity = FileIdentity(BINDING, path)
+    frame = (b"CAMCTL-METADATA/1\0" + path.encode() + b"\0" + status
+             + b"\0" + b"12\n\0" + b"\0" + b"END\0")
+    transport = _MetadataTransport(_metadata_raw(frame))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, (identity,))
+
+    assert result.error.code == "adb_metadata_failed"
+    assert result.items == ()
+    assert result.error.details["frame_errors"][0]["reason"] == "invalid_remote_exit_code"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame", [
+    lambda first, second: _metadata_frame(_metadata_record(second, 0, b"2\n"),
+                                           _metadata_record(first, 0, b"1\n")),
+    lambda first, second: _metadata_frame(_metadata_record(first, 0, b"1\n"),
+                                           _metadata_record(first, 0, b"1\n")),
+    lambda first, second: _metadata_frame(_metadata_record(first, 0, b"1\n"),
+                                           _metadata_record(second, 0, b"2\n"), end=False),
+    lambda first, second: _metadata_frame(_metadata_record(first, 0, b"1\n"),
+                                           _metadata_record(second, 0, b"2\n"), trailing=b"extra\0"),
+])
+async def test_metadata_many_rejects_wrong_identity_duplicate_missing_end_or_trailing_data(frame):
+    first, second = "/DCIM/a.MP4", "/DCIM/b.MP4"
+    identities = (FileIdentity(BINDING, first), FileIdentity(BINDING, second))
+    transport = _MetadataTransport(_metadata_raw(frame(first, second)))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, identities)
+
+    assert result.error.code == "adb_metadata_failed"
+    if b"END\0" not in frame(first, second):
+        assert [item.value for item in result.items] == [1, 2]
+        assert result.error.details["frame_errors"][0]["reason"] == "missing_end"
+
+
+@pytest.mark.asyncio
+async def test_metadata_many_tool_error_keeps_frame_and_all_decoded_item_errors():
+    first, second = "/DCIM/a.MP4", "/DCIM/b.MP4"
+    identities = (FileIdentity(BINDING, first), FileIdentity(BINDING, second))
+    data = (b"CAMCTL-METADATA/1\0" + _metadata_record(first, 1, b"", b"gone")
+            + second.encode() + b"\0" + b"0\0" + b"7\n")
+    transport = _MetadataTransport(_metadata_raw(data, error="timeout"))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, identities)
+
+    assert result.error.details["reason"] == "call_failed"
+    assert result.error.details["transport_error"] == "timeout"
+    assert result.error.details["frame_errors"]
+    assert result.error.details["item_errors"] == [dict(result.items[0].error.details)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cause", ["transport", "exit", "output"])
+async def test_metadata_many_keeps_complete_prefix_but_tool_failure_still_fails(cause):
+    path = "/DCIM/a.MP4"
+    identities = (FileIdentity(BINDING, path),)
+    kwargs = {"code": 0}
+    if cause == "transport":
+        kwargs["error"] = "timeout"
+    elif cause == "exit":
+        kwargs["code"] = 9
+    else:
+        kwargs["failure"] = "output_limit_exceeded"
+    transport = _MetadataTransport(_metadata_raw(
+        _metadata_frame(_metadata_record(path, 0, b"12\n")), **kwargs))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await _metadata_many(filesystem, identities)
+
+    assert result.error.code == "adb_metadata_failed"
+    assert [(item.identity.path, item.value) for item in result.items] == [(path, 12)]
+    if cause == "output":
+        assert result.error.details["frame_errors"][0]["reason"] == "output_incomplete"

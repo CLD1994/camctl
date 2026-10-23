@@ -287,6 +287,35 @@ async def test_metadata_and_source_digest_come_from_remote_tool(tmp_path):
 
 
 @_POSIX_ONLY
+async def test_metadata_batch_script_preserves_raw_fields_statuses_and_special_paths(
+        tmp_path, monkeypatch):
+    first = tmp_path / "a 'quoted'\nfile.mp4"
+    zero = tmp_path / "zero.jpg"
+    missing = tmp_path / "missing.dng"
+    first.write_bytes(b"data")
+    zero.write_bytes(b"")
+    paths = tuple(map(str, (first, zero, missing)))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    script = ShellFileTools().metadata_many_script(paths)
+    argv = _local_bash_argv(script, tmp_path)
+
+    raw = await AdbTransport().run(ToolSpec(
+        argv, Decimal("5"), Decimal("1")), Stop())
+
+    expected = (b"CAMCTL-METADATA/1\0"
+        + paths[0].encode() + b"\0" + b"0\0" + b"4\n\0" + b"\0"
+        + paths[1].encode() + b"\0" + b"0\0" + b"0\n\0" + b"\0"
+        + paths[2].encode() + b"\0" + b"1\0" + b"\0" + b"\0"
+        + b"END\0")
+    assert raw.exit == LocalExit(exit_code=0)
+    assert raw.error is None and raw.output_failure is None
+    assert raw.output == expected
+    assert raw.stderr == b""
+    assert first.read_bytes() == b"data" and zero.read_bytes() == b""
+    assert set(tmp_path.iterdir()) == {first, zero, Path(argv[1])}
+
+
+@_POSIX_ONLY
 async def test_concrete_driver_file_ports_preserve_original_identity_and_content(tmp_path):
     content = b"camera-source" * 100000
     path, other = tmp_path / "source ' \n.mp4", tmp_path / "keep.mp4"
