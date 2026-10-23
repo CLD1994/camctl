@@ -107,9 +107,11 @@ async def test_intent_saved_but_cancelled_before_call_has_no_fabricated_return(o
     allowed=iter((True,False))
     result=await reads.advance_baseline_read(owner,directory=directory,capture=CaptureRepository(),
         owned=owned,wall_us=lambda:_SCHEDULED+1,can_read=lambda:next(allowed))
-    assert result is None and directory.calls==[]
+    assert result.state.name=='UNCONFIRMED' and directory.calls==[]
     assert owner.task is None
-    assert owned.connection.execute('SELECT state,result_event_id FROM baseline_read_calls').fetchone()==(1,None)
+    state,event,returned_at,error=owned.connection.execute(
+        'SELECT state,result_event_id,returned_at,error_json FROM baseline_read_calls').fetchone()
+    assert state==3 and event is not None and returned_at is None and error is None
 
 
 async def test_return_handoff_waits_for_actual_task_to_finish(owned,tmp_path):

@@ -142,13 +142,17 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
     )
     from types import SimpleNamespace
-    from camctl.capture.baseline import PreparationPhase, resume_baseline_save, resume_baseline_settlement
+    from camctl.capture.baseline import (
+        PreparationPhase, recover_terminal_baselines, resume_baseline_save,
+        resume_baseline_settlement,
+    )
     from camctl.capture.result_scans import resume_result_page_saves
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.capture import CaptureRepository
 
     runtime = SimpleNamespace(owned=owned, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
                               wall_us=lambda: SystemClock().utc_micros())
+    recover_terminal_baselines(runtime=runtime)
     for action_id in tuple(deps.capture_baselines):
         result = resume_baseline_save(action_id, runtime=runtime)
         if result is not None and result.phase is PreparationPhase.PENDING:

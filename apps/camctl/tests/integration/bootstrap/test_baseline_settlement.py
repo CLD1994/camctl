@@ -57,7 +57,11 @@ async def test_common_resume_preserves_active_directory_owner(
             self.calls += 1
             entered.set()
             await released.wait()
-            return DirectoryRead(None, None, Page(_entries("a"), None))
+            entries = _entries(
+                "a", device=request.binding.device_id, driver=request.binding.driver_id,
+                directory=request.directories[0],
+            )
+            return DirectoryRead(None, None, Page(entries, None))
 
     directory = HeldDirectory()
     if segmented:
@@ -155,3 +159,291 @@ async def test_common_resume_retains_real_baseline_save_failure(owned, tmp_path)
             _resume_capture_requests(SimpleNamespace(capture_baselines=runtime.pending_baselines), owned)
     assert runtime.pending_baselines[1].saves.pending == original
     assert len(runtime.baseline_directory.calls) == 1
+
+
+async def test_common_resume_retries_original_segment_read_save(tmp_path):
+    from unittest.mock import patch
+
+    from camctl.contracts.values import ConsistencyError
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
+
+    class UnavailableReturn(CaptureRepository):
+        def save_baseline_read_return(self, request, key, owned):
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OSError("return unavailable"))
+
+    current, runtime, action_id, _ = await consumer_world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
+    )
+    runtime.capture = UnavailableReturn()
+    deps = SimpleNamespace(
+        capture_baselines=runtime.pending_baselines, capture_result_closes={},
+        capture_completions={}, capture_retry_gate=None, capture_result_scans={},
+        capture_segment_writes={},
+    )
+    try:
+        assert (await runtime.prepare_baseline(action_id)).phase is baseline.PreparationPhase.PENDING
+        owner = runtime.pending_baselines[action_id].read_owner
+        original = owner.saves.pending
+        with patch.object(CaptureRepository, "save_baseline_read_return", UnavailableReturn.save_baseline_read_return):
+            with pytest.raises(ConsistencyError):
+                _resume_capture_requests(deps, current)
+        assert owner.saves.pending == original
+        _resume_capture_requests(deps, current)
+        runtime.capture = CaptureRepository()
+        assert (await runtime.prepare_baseline(action_id)).phase is baseline.PreparationPhase.READY
+        assert current.connection.execute(
+            "SELECT COUNT(*) FROM baseline_read_calls"
+        ).fetchone() == (1,)
+        assert len(runtime.baseline_directory.calls) == 1
+    finally:
+        current.connection.close()
+
+
+async def _unstarted_segment_intent(tmp_path):
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
+
+    class UnavailableIntent(CaptureRepository):
+        def save_baseline_read_intent(self, request, key, owned):
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OSError("intent unavailable"))
+
+    current, runtime, action_id, handler = await consumer_world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
+    )
+    runtime.capture = UnavailableIntent()
+    assert (await runtime.prepare_baseline(action_id)).phase is baseline.PreparationPhase.PENDING
+    original = runtime.pending_baselines[action_id].read_owner.saves.pending
+    deps = SimpleNamespace(
+        capture_baselines=runtime.pending_baselines, capture_result_closes={},
+        capture_completions={}, capture_retry_gate=None, capture_result_scans={},
+        capture_segment_writes={},
+    )
+    _resume_capture_requests(deps, current)
+    runtime.capture = CaptureRepository()
+    return current, runtime, action_id, handler, original
+
+
+async def test_segment_intent_save_recovery_continues_same_unstarted_owner(tmp_path):
+    current, runtime, action_id, _, original = await _unstarted_segment_intent(tmp_path)
+    try:
+        assert (await runtime.prepare_baseline(action_id)).phase is baseline.PreparationPhase.READY
+        assert current.connection.execute(
+            "SELECT call_key,result_save_key,state FROM baseline_read_calls"
+        ).fetchone() == (str(original.request.call_key), str(original.request.result_save_key), 2)
+        assert len(runtime.baseline_directory.calls) == 1
+    finally:
+        current.connection.close()
+
+
+async def test_segment_window_ending_during_intent_save_closes_without_read(tmp_path):
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
+    from camctl.capture.handlers import capture_handler
+
+    current, runtime, action_id, handler = await consumer_world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
+    )
+    now = [runtime.wall_us()]
+
+    class SlowIntent(CaptureRepository):
+        def save_baseline_read_intent(self, request, key, owned):
+            saved = super().save_baseline_read_intent(request, key, owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            now[0] += 6_000_000
+            return saved
+
+    runtime.capture = SlowIntent()
+    runtime.wall_us = lambda: now[0]
+    try:
+        assert (await runtime.prepare_baseline(action_id)).phase is baseline.PreparationPhase.ABORTED
+        assert current.connection.execute(
+            "SELECT state,returned_at,error_json FROM baseline_read_calls"
+        ).fetchone() == (3, None, None)
+        await capture_handler(handler)(action_id, runtime)
+        assert current.connection.execute("SELECT status FROM actions").fetchone() == (5,)
+        runtime.resume_baselines(action_id)
+        assert current.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+        assert current.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+        assert runtime.baseline_directory.calls == []
+    finally:
+        current.connection.close()
+
+
+@pytest.mark.parametrize("save_fails", [False, True])
+async def test_cancel_closes_unstarted_segment_intent_before_terminal(tmp_path, save_fails):
+    from camctl.capture.handlers import _finish_canceled_capture
+    from camctl.contracts.values import ConsistencyError
+    from ..capture.test_record_segment_scope_recovery import _cancel
+
+    current, runtime, action_id, _, original = await _unstarted_segment_intent(tmp_path)
+    _cancel(current, runtime, action_id)
+
+    class UnavailableClose(CaptureRepository):
+        def save_baseline_read_unconfirmed(self, request, key, owned):
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OSError("close unavailable"))
+
+    try:
+        if save_fails:
+            runtime.capture = UnavailableClose()
+            with pytest.raises(ConsistencyError):
+                _finish_canceled_capture(runtime, action_id, unstarted=True)
+            assert current.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (2,)
+            assert current.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (1,)
+            pending = runtime.pending_baselines[action_id].read_owner.saves.pending
+            assert str(pending.key) == str(original.request.result_save_key)
+            runtime.capture = CaptureRepository()
+        _finish_canceled_capture(runtime, action_id, unstarted=True)
+        assert current.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (6,)
+        assert current.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+        assert current.connection.execute(
+            "SELECT call_key,result_save_key,state,returned_at,error_json FROM baseline_read_calls"
+        ).fetchone() == (str(original.request.call_key), str(original.request.result_save_key), 3, None, None)
+        assert runtime.baseline_directory.calls == []
+        assert current.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+    finally:
+        current.connection.close()
+
+
+async def test_start_entry_rejects_not_executed_baseline_save_without_error(tmp_path):
+    from camctl.capture.handlers import capture_handler
+    from camctl.contracts.values import ConsistencyError
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
+
+    class NotExecuted(CaptureRepository):
+        def save_baseline_read_intent(self, request, key, owned):
+            return DbOutcome(DbOutcomeKind.NOT_EXECUTED)
+
+    current, runtime, action_id, handler = await consumer_world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
+    )
+    runtime.capture = NotExecuted()
+    try:
+        with pytest.raises(ConsistencyError):
+            await capture_handler(handler)(action_id, runtime)
+        pending = runtime.pending_baselines[action_id].read_owner.saves.pending
+        assert str(pending.key) == str(pending.request.call_key)
+        assert runtime.baseline_directory.calls == []
+        assert current.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+    finally:
+        current.connection.close()
+
+
+@pytest.mark.parametrize("read_failed", [False, True])
+async def test_cold_resume_releases_terminal_unstarted_scope_after_saved_read(tmp_path, read_failed):
+    from camctl.capture.handlers import capture_handler
+    from camctl.devices.directory import DirectoryCursor
+    from camctl.operations.models import ErrorValue
+    from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog
+
+    current, runtime, action_id, handler = await consumer_world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
+    )
+    now = [runtime.wall_us()]
+
+    def finished_page(request):
+        now[0] += 6_000_000
+        if read_failed:
+            return DirectoryRead(None, ErrorValue("adb_directory_failed", "device_file_access", {"reason": "read_failed"}), None)
+        entries = _entries("a", device=request.binding.device_id,
+                           driver=request.binding.driver_id, directory=request.directories[0])
+        return DirectoryRead(None, None, Page(entries, DirectoryCursor(
+            request.binding, request.directories, 0, entries[-1].path)))
+
+    runtime.wall_us = lambda: now[0]
+    runtime.baseline_directory = Directory([finished_page])
+    try:
+        await runtime.prepare_baseline(action_id)
+        # 模拟下一次进程：保留数据库中的原页及返回，丢弃上一会话内存拥有者。
+        runtime.pending_baselines.clear()
+        await capture_handler(handler)(action_id, runtime)
+        assert current.connection.execute("SELECT status FROM actions").fetchone() == (5,)
+        deps = SimpleNamespace(
+            capture_baselines={}, capture_result_closes={}, capture_completions={},
+            capture_retry_gate=None, capture_result_scans={}, capture_segment_writes={},
+        )
+        _resume_capture_requests(deps, current)
+        assert current.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (2,)
+        assert current.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
+        assert len(runtime.baseline_directory.calls) == 1
+        assert deps.capture_baselines == {}
+    finally:
+        current.connection.close()
+
+
+async def test_cold_resume_keeps_unreturned_baseline_intent_occupied(tmp_path):
+    from camctl.persistence.repositories.scheduling import ExpireActionRequest
+
+    current, runtime, action_id, _, _ = await _unstarted_segment_intent(tmp_path)
+    try:
+        runtime.save_capture_completion(
+            ExpireActionRequest(action_id, runtime.wall_us() + 6_000_000,
+                                runtime.wall_us() + 6_000_000)
+        )
+        runtime.pending_baselines.clear()
+        deps = SimpleNamespace(
+            capture_baselines={}, capture_result_closes={}, capture_completions={},
+            capture_retry_gate=None, capture_result_scans={}, capture_segment_writes={},
+        )
+        _resume_capture_requests(deps, current)
+        assert current.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (1,)
+        assert current.connection.execute("SELECT state FROM baseline_read_calls").fetchone() == (1,)
+    finally:
+        current.connection.close()
+
+
+@pytest.mark.parametrize("local_first", [False, True])
+async def test_cold_resume_exhausts_batches_without_taking_local_owner(owned, tmp_path, local_first):
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from camctl.capture.baseline_models import BaselineReadIntent, BaselineReadReturn
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.operations.models import ErrorValue
+    from camctl.persistence.repositories.scheduling import ExpireActionRequest, SchedulingRepository
+    from camctl.outputs import read_discovery
+
+    capture = CaptureRepository()
+    identities = []
+    for number in (1, 2):
+        device = f"cam-{number}"
+        activity_id = await _activity(owned, tmp_path, request_id=str(40 + number), device_id=device)
+        action_id = owned.connection.execute("SELECT action_id FROM device_activities WHERE id=?", (activity_id,)).fetchone()[0]
+        binding = DeviceBinding(device, "dji-action6")
+        scope = owned.connection.execute(
+            "SELECT output_scope_json FROM device_activities WHERE id=?", (activity_id,)
+        ).fetchone()[0]
+        directories = tuple(parse_exact_json(scope)["directories"])
+        intent = BaselineReadIntent(action_id, activity_id, binding, directories, None,
+            Decimal("10"), capture.baseline_ref(activity_id, owned), 1,
+            new_operation_key(), new_operation_key(), _SCHEDULED)
+        saved = capture.save_baseline_read_intent(intent, intent.call_key, owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        error = ErrorValue("adb_directory_failed", "device_file_access", {"reason": "read_failed"})
+        returned = capture.save_baseline_read_return(BaselineReadReturn(
+            saved.value.call_id, _SCHEDULED + 1, error, DirectoryRead(None, error, None)),
+            intent.result_save_key, owned)
+        assert returned.kind is DbOutcomeKind.COMPLETED, returned.error
+        expired = SchedulingRepository().expire_action(
+            ExpireActionRequest(action_id, _SCHEDULED + 6_000_000, _SCHEDULED + 6_000_000),
+            new_operation_key(), owned)
+        assert expired.kind is DbOutcomeKind.COMPLETED, expired.error
+        identities.append((action_id, activity_id, binding, directories))
+    pending = {}
+    first, activity_id, binding, directories = identities[0]
+    if local_first:
+        pending[first] = baseline.PendingBaseline(activity_id, binding, directories, in_call=True)
+    original = pending.get(first)
+    deps = SimpleNamespace(
+        capture_baselines=pending, capture_result_closes={}, capture_completions={},
+        capture_retry_gate=None, capture_result_scans={}, capture_segment_writes={},
+    )
+    with patch.object(read_discovery, "DEFAULT_BATCH_SIZE", 1):
+        _resume_capture_requests(deps, owned)
+    assert owned.connection.execute(
+        "SELECT occupancy_state FROM device_activities ORDER BY action_id"
+    ).fetchall() == ([(1,), (2,)] if local_first else [(2,), (2,)])
+    assert pending == ({first: original} if local_first else {})

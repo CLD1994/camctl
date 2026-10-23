@@ -24,7 +24,13 @@ def consume_read(pending, runtime):
         owner, capture=runtime.capture, owned=runtime.owned
     )
     if result is None:
+        if (owner.aborted_before_call and owner.intent_view is None
+                and owner.saves.pending is None):
+            pending.aborted = True
+            pending.read_owner = None
+            return True
         return False
+    pending.aborted = owner.aborted_before_call
     pending.read_no = result.request.read_no
     pending.cursor = result.next_cursor
     pending.exhausted = (
@@ -84,6 +90,7 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                 view.request,
                 intent_view=view,
                 result=None if view.state is BaselineReadState.INTENDED else view,
+                locally_created=False,
             )
             if view.state is BaselineReadState.INTENDED:
                 resume_baseline_read_call(
@@ -100,13 +107,14 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                     reader=runtime.owned,
                     wall_us=runtime.wall_us,
                 )
-    if not consume_read(pending, runtime):
-        return BaselinePreparation(
-            PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
-        )
     resumed = resume_baseline_save(action_id, runtime=runtime)
     if resumed is not None:
-        return resumed
+        owner = pending.read_owner
+        if not (resumed.phase is PreparationPhase.WAITING and owner is not None
+                and owner.locally_created and owner.task is None and not pending.in_call):
+            return resumed
+    if pending.aborted:
+        return BaselinePreparation(PreparationPhase.ABORTED)
     if pending.error is not None:
         return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)
 
@@ -126,7 +134,7 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
         )
 
     while True:
-        if not can_read():
+        if not can_read() and pending.read_owner is None:
             return BaselinePreparation(PreparationPhase.ABORTED)
         ref = runtime.capture.baseline_ref(activity_id, runtime.owned)
         if pending.exhausted:
@@ -137,22 +145,24 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
             )
             return resume_baseline_save(action_id, runtime=runtime)
         if runtime.baseline_directory is None:
-            return BaselinePreparation(PreparationPhase.PENDING)
-        intent = BaselineReadIntent(
-            action_id,
-            activity_id,
-            pending.binding,
-            pending.directories,
-            pending.cursor,
-            runtime.baseline_timeout_s,
-            ref,
-            pending.read_no + 1,
-            new_operation_key(),
-            new_operation_key(),
-            runtime.wall_us(),
-        )
-        owner = PendingBaselineRead(intent)
-        pending.read_owner = owner
+            return BaselinePreparation(PreparationPhase.WAITING)
+        owner = pending.read_owner
+        if owner is None:
+            intent = BaselineReadIntent(
+                action_id,
+                activity_id,
+                pending.binding,
+                pending.directories,
+                pending.cursor,
+                runtime.baseline_timeout_s,
+                ref,
+                pending.read_no + 1,
+                new_operation_key(),
+                new_operation_key(),
+                runtime.wall_us(),
+            )
+            owner = PendingBaselineRead(intent)
+            pending.read_owner = owner
         pending.in_call = True
         try:
             await advance_baseline_read(
@@ -165,9 +175,10 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
             )
         finally:
             pending.in_call = owner.task is not None and not owner.task.done()
-        if not consume_read(pending, runtime):
-            return BaselinePreparation(
-                PreparationPhase.PENDING, database_error=owner.diagnostic
-            )
+        resumed = resume_baseline_save(action_id, runtime=runtime)
+        if resumed is not None:
+            return resumed
+        if pending.aborted:
+            return BaselinePreparation(PreparationPhase.ABORTED)
         if pending.error is not None:
             return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)

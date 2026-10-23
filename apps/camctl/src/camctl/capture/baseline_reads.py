@@ -32,6 +32,9 @@ class PendingBaselineRead:
     unconfirmed_request: BaselineReadUnconfirmedSave|None=None
     settlement_at: int|None=None
     settlement_clock_attempted: bool=False
+    #: 只授予本会话新建的原意图；冷恢复意图不能据此重做目录调用。
+    locally_created: bool=True
+    aborted_before_call: bool=False
 
 
 def resume_baseline_read_save(owner,*,capture,owned):
@@ -54,6 +57,23 @@ def resume_baseline_read_save(owner,*,capture,owned):
         return None
     owner.result=response
     return response
+
+
+def abort_unstarted_baseline_read(owner, *, capture, owned, wall_us):
+    """实际调用尚未创建时结束原意图，不伪造一次目录返回。"""
+    if not owner.locally_created or owner.task is not None:
+        return
+    owner.aborted_before_call = True
+    if owner.intent_view is None or owner.result is not None:
+        return
+    if owner.unconfirmed_request is None:
+        owner.settlement_clock_attempted = True
+        owner.settlement_at = wall_us()
+        owner.unconfirmed_request = BaselineReadUnconfirmedSave(
+            owner.intent_view.call_id, owner.settlement_at
+        )
+        owner.saves.begin(owner.unconfirmed_request, key=owner.intent.result_save_key)
+    resume_baseline_read_save(owner, capture=capture, owned=owned)
 
 
 @owned_tool_call
@@ -82,12 +102,16 @@ async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read
         return None
     if owner.intent_view is None:
         if not can_read():
+            abort_unstarted_baseline_read(owner, capture=capture, owned=owned, wall_us=wall_us)
             return None
         owner.saves.begin(owner.intent,key=owner.intent.call_key)
         resume_baseline_read_save(owner,capture=capture,owned=owned)
         if owner.intent_view is None:
             return None
     if not can_read():
+        abort_unstarted_baseline_read(owner, capture=capture, owned=owned, wall_us=wall_us)
+        return owner.result
+    if not owner.locally_created:
         return None
     owner.task=asyncio.create_task(_read_and_freeze(owner,directory,wall_us))
     interrupted=None

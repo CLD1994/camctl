@@ -1839,10 +1839,10 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
     from camctl.scheduling.rules import WindowPhase, window_phase
 
     result = await runtime.prepare_baseline(action["id"])
-    if result.phase is PreparationPhase.PENDING:
-        if result.database_error is not None:
-            raise ConsistencyError(f"基准保存未可靠完成: {result.database_error}")
+    if result.phase is PreparationPhase.WAITING:
         return HandlerOutcome("not_granted", "baseline_pending")
+    if result.phase is PreparationPhase.PENDING:
+        raise ConsistencyError(f"基准保存未可靠完成: {result.database_error}")
     current = runtime.action(action["id"])
     if current["status"] in _ACTION_TERMINAL:
         runtime.resume_baselines(action["id"])
@@ -2542,6 +2542,20 @@ def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     """取消终态：放弃内容，不登记正式产物。"""
     from camctl.devices.tasks import CaptureResultPolicy
 
+    pending = runtime.pending_baselines.get(action_id)
+    if pending is not None and pending.read_owner is not None:
+        if pending.in_call:
+            return
+        from camctl.capture.baseline_reads import abort_unstarted_baseline_read
+
+        abort_unstarted_baseline_read(
+            pending.read_owner, capture=runtime.capture, owned=runtime.owned,
+            wall_us=runtime.wall_us,
+        )
+        runtime.resume_baselines(action_id)
+        pending = runtime.pending_baselines.get(action_id)
+        if pending is not None and pending.read_owner is not None:
+            return
     action = runtime.action(action_id)
     policy = action["execution_spec_json"].get("result_policy")
     if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:

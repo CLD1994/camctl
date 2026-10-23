@@ -20,6 +20,7 @@ from camctl.persistence.transaction import row_facts
 class PreparationPhase(Enum):
     READY = "ready"
     FAILED = "failed"
+    WAITING = "waiting"
     PENDING = "pending"
     ABORTED = "aborted"
 
@@ -53,6 +54,54 @@ class PendingBaseline:
     release: tuple[ActivityReleaseSave, OperationKey] | None = None
     read_owner: object | None = None
     read_no: int = 0
+    aborted: bool = False
+
+
+def recover_terminal_baselines(*, runtime, limit=None):
+    """接手已结束目录调用的未派发终态范围，不据空内存推断调用已结束。"""
+    from contextlib import closing
+    from camctl.capture.baseline_models import BaselineReadState
+    from camctl.capture.baseline_reads import PendingBaselineRead
+    from camctl.persistence.repositories.segment_result_sets import _boundary
+    from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
+
+    limit = positive_limit(DEFAULT_BATCH_SIZE if limit is None else limit)
+    db = runtime.owned.connection
+    after = (0, 0)
+    while True:
+        with closing(db.execute(
+            "SELECT d.action_id,d.id,b.id FROM device_activities d INDEXED BY activities_occupancy"
+            " JOIN actions a ON a.id=d.action_id JOIN baseline_read_calls b ON b.id=("
+            "SELECT MAX(last.id) FROM baseline_read_calls last"
+            " WHERE last.action_id=a.id AND last.activity_id=d.id)"
+            " WHERE d.occupancy_state=1 AND d.baseline_state=2 AND d.dispatch_state=1"
+            " AND a.status IN (3,4,5,6) AND b.state IN (?,?)"
+            " AND (d.action_id,d.id)>(?,?) ORDER BY d.action_id,d.id LIMIT ?",
+            (int(BaselineReadState.RETURNED), int(BaselineReadState.UNCONFIRMED), *after, limit),
+        )) as cursor:
+            candidates = cursor.fetchall()
+        if not candidates:
+            return
+        for action_id, activity_id, call_id in candidates:
+            after = (action_id, activity_id)
+            if action_id in runtime.pending_baselines:
+                continue
+            action = row_facts(db, "actions", action_id)
+            activity = row_facts(db, "device_activities", activity_id)
+            view = runtime.capture.read_baseline_call(call_id, _boundary(db), runtime.owned)
+            scope = activity["output_scope_json"]
+            if isinstance(scope, str):
+                scope = parse_exact_json(scope)
+            runtime.pending_baselines[action_id] = PendingBaseline(
+                activity_id, DeviceBinding(action["device_id"], action["driver_id"]),
+                tuple(scope["directories"]),
+                read_owner=PendingBaselineRead(
+                    view.request, intent_view=view, result=view, locally_created=False,
+                ),
+            )
+            result = resume_baseline_settlement(action_id, runtime=runtime)
+            if result is not None and result.phase is PreparationPhase.PENDING:
+                raise ConsistencyError(f"原基准收场仍未可靠完成: {result.database_error}")
 
 
 def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
@@ -60,10 +109,15 @@ def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
+    if pending.in_call:
+        # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
+        return BaselinePreparation(PreparationPhase.WAITING)
     if pending.read_owner is not None:
         from camctl.capture.segment_baseline import consume_read
 
         if not consume_read(pending, runtime):
+            if pending.read_owner.saves.pending is None:
+                return BaselinePreparation(PreparationPhase.WAITING)
             return BaselinePreparation(
                 PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
             )
@@ -98,7 +152,7 @@ def release_preparation(action_id, *, runtime):
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
-    if pending.in_call or pending.saves.pending is not None:
+    if pending.in_call or pending.saves.pending is not None or pending.read_owner is not None:
         raise ConsistencyError("准备调用或原页保存仍未完成，不能形成释放申请")
     if pending.release is None:
         pending.release = (ActivityReleaseSave(action_id, runtime.wall_us(), preparation_resolved=True,
@@ -110,7 +164,7 @@ def release_preparation(action_id, *, runtime):
 def resume_baseline_settlement(action_id, *, runtime):
     """先核原保存，再为已有终态且实际收场的准备解除适用占用。"""
     result = resume_baseline_save(action_id, runtime=runtime)
-    if result is not None and result.phase is PreparationPhase.PENDING:
+    if result is not None and result.phase in (PreparationPhase.PENDING, PreparationPhase.WAITING):
         return result
     pending = runtime.pending_baselines.get(action_id)
     if pending is None or pending.in_call:
@@ -160,11 +214,11 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
     if pending.activity_id != activity_id:
         raise ConsistencyError("基准准备拥有者不得更换原活动")
     if pending.in_call:
-        return BaselinePreparation(PreparationPhase.PENDING)
+        return BaselinePreparation(PreparationPhase.WAITING)
     if pending.error is not None:
         return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)
     if runtime.baseline_directory is None:
-        return BaselinePreparation(PreparationPhase.PENDING)
+        return BaselinePreparation(PreparationPhase.WAITING)
     while True:
         check_call_interruption()
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
