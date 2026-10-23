@@ -92,7 +92,10 @@ def _check_write_kind(db,setrow,kind):
         from camctl.devices.tasks import CaptureResultPolicy
         action6=(action is not None and action['execution_spec_json'].get('result_policy')
             == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
-        allowed=(action6 and kind in ('MEMBERS','FIX_MEMBERS','ASSESS','SCOPE','ACTIVATE')
+        allowed=(action6 and (
+            kind in ('MEMBERS','FIX_MEMBERS','ASSESS','SCOPE','ACTIVATE')
+            or kind=='PUBLISH'
+                and setrow['publication_kind']==encode_enum(PublicationKind.CANCELED))
             and setrow['source_kind'] in tuple(encode_enum(value) for value in (
                 SegmentSourceKind.COMPLETE_SCAN, SegmentSourceKind.RETAINED_SOURCES,
                 SegmentSourceKind.NO_RESULTS))
