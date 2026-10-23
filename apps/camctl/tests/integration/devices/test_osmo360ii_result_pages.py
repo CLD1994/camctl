@@ -67,6 +67,7 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
     params = {"type": "osmo360ii_record", "duration_s": 10,
         "bitrate": "standard", "exposure": {"mode": "auto"}}
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-osmo360-ii",
+        "video": {"result_mode": "segmented"},
         "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
     catalog = build_catalog(config, DriverDefinitions({"dji-osmo360-ii": DriverDefinition("dji-osmo360-ii",
         {cap.action_type: (cap,) for cap in contract.capabilities()}, contract.declaration,
@@ -132,10 +133,12 @@ async def test_driver_pages_preserve_raw_range_order_and_actual_baseline_differe
     fs = Filesystem(paths)
     monkeypatch.setattr(driver, "_filesystem", lambda binding: fs)
     cursor, page_no, saved_refs = None, 1, []
+    video_result_mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
     while True:
         result = await driver.list_results(ControlRequest("result", BINDING,
             {"activity_id": ticket.target_id, "output_scope": {"directories": [ROOT]},
-                "cursor": None if cursor is None else cursor.as_json(), "completion_context": context},
+                "cursor": None if cursor is None else cursor.as_json(), "completion_context": context,
+                "video_result_mode": video_result_mode},
             ticket, Decimal("40")), batch)
         assert result.error is None, result.error
         request = ResultPageSave(ticket, page_no, cursor, validate_outcome(ticket, result.outcome,
@@ -179,9 +182,10 @@ async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_d
     adapter = DriverResultListing(driver, BINDING, driver.contract.evidence,
         capture_repository=runtime.capture, owned=owned)
     output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
+    video_result_mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
 
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=output_scope, completion_context=context)
+        output_scope=output_scope, completion_context=context, video_result_mode=video_result_mode)
     first_save = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, first.outcome, driver.contract.evidence), _SCHEDULED + 3),
         new_operation_key(), owned)
@@ -192,7 +196,7 @@ async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_d
 
     filesystem.paths = sorted([*paths, preview, ROOT + "/z/Z.tmp"])
     second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-        output_scope=output_scope, completion_context=context)
+        output_scope=output_scope, completion_context=context, video_result_mode=video_result_mode)
 
     page = next(value.data for value in second.outcome.observations
         if value.type == "result_files_listed")

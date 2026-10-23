@@ -371,12 +371,15 @@ class DriverResultListing:
 
     async def list_page(self, ticket: AttemptTicket, *, cursor: DirectoryCursor | None,
                         timeout_s: Decimal, output_scope: Mapping | None = None,
-                        completion_context: Mapping | None = None) -> ResultPage:
+                        completion_context: Mapping | None = None,
+                        video_result_mode: str | None = None) -> ResultPage:
         """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
         if (ticket.operation != "result" or ticket.target_id is None
                 or ticket.responsibility_key != f"results/{ticket.target_id}"):
             raise ValueError("结果列举要求原 RESULTS 活动票据")
         params = {"activity_id": ticket.target_id}
+        if video_result_mode is not None:
+            params["video_result_mode"] = video_result_mode
         if cursor is not None:
             if cursor.binding != self._binding:
                 raise ConsistencyError("结果游标与原设备绑定不符")

@@ -130,7 +130,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, ne
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.capture_timing import CaptureTiming, WaitClockReference
-from camctl.devices.tasks import CompletionMode
+from camctl.devices.tasks import CompletionMode, VideoResultMode
 from camctl.devices.capture_completion import is_stop_context
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.devices.directory import DirectoryReader
@@ -753,7 +753,8 @@ class ResultFilesPort(Protocol):
 
     async def list_page(self, ticket: AttemptTicket, *, cursor, timeout_s: Decimal,
                         output_scope: Mapping | None = None,
-                        completion_context: Mapping | None = None) -> ResultPage: ...
+                        completion_context: Mapping | None = None,
+                        video_result_mode: str | None = None) -> ResultPage: ...
 
 
 class RecordingStatePort(Protocol):
@@ -5222,9 +5223,18 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
     ticket = begin.ticket
     if _uses_result_pages(runtime):
         activity = row_facts(runtime.owned.connection, "device_activities", activity_id)
+        action = runtime.action(action_id)
+        execution_spec = action["execution_spec_json"]
+        video_result_mode = None
+        if action["type"] in (int(_ACTION_TYPE.CAMERA_RECORD), int(_ACTION_TYPE.CAMERA_TIMELAPSE)):
+            try:
+                video_result_mode = VideoResultMode(execution_spec["video_result_mode"]).value
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("视频结果列举缺少已冻结的有效 video_result_mode") from error
         pending = PendingResultScan(ticket, activity["output_scope_json"],
                                     runtime.check_config.timeout_s,
-                                    completion_context=_result_source(runtime, ticket).context)
+                                    completion_context=_result_source(runtime, ticket).context,
+                                    video_result_mode=video_result_mode)
         runtime.pending_result_scans[(ticket.run_id, ticket.attempt_id)] = pending
         return await _continue_result_scan(runtime, pending)
     result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)

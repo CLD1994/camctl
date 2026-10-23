@@ -25,6 +25,7 @@ class PendingResultScan:
     output_scope: Mapping | None
     timeout_s: Decimal
     completion_context: Mapping | None = None
+    video_result_mode: str | None = None
     page_no: int = 1
     cursor: DirectoryCursor | None = None
     saves: ResultPageSaveOwner = field(default_factory=ResultPageSaveOwner)
@@ -91,10 +92,15 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         check_call_interruption()
         pending.in_call = True
         try:
-            page = await runtime.results.list_page(pending.ticket, cursor=pending.cursor,
-                timeout_s=result_page_timeout_s(pending.timeout_s, pending.completion_context),
-                output_scope=pending.output_scope,
-                completion_context=deepcopy(pending.completion_context))
+            page_kwargs = {
+                "cursor": pending.cursor,
+                "timeout_s": result_page_timeout_s(pending.timeout_s, pending.completion_context),
+                "output_scope": pending.output_scope,
+                "completion_context": deepcopy(pending.completion_context),
+            }
+            if pending.video_result_mode is not None:
+                page_kwargs["video_result_mode"] = pending.video_result_mode
+            page = await runtime.results.list_page(pending.ticket, **page_kwargs)
             # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
             occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
             if not isinstance(page, ResultPage):

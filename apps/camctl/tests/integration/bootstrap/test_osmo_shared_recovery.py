@@ -51,6 +51,7 @@ class Channel:
 
     def __init__(self):
         self.calls = []
+        self.result_paths = [self.result_path]
         self.forbidden = False
         self.directory_end = b"END"
         self.metadata_error = False
@@ -66,7 +67,10 @@ class Channel:
         script = shlex.split(spec.argv[5])[2]
         if "CAMCTL-DIRECTORY/1" in script:
             self.result_tickets.append(ticket)
-            return RawToolOutcome(LocalExit(exit_code=0), b"CAMCTL-DIRECTORY/1\0" + self.result_path.encode() + b"\0" + self.directory_end + b"\0",
+            paths = sorted(self.result_paths)
+            output = b"\0".join((b"CAMCTL-DIRECTORY/1", *(path.encode() for path in paths),
+                self.directory_end, b""))
+            return RawToolOutcome(LocalExit(exit_code=0), output,
                                   None, None, stderr=b"")
         if "stat -c %s" in script:
             return RawToolOutcome(LocalExit(exit_code=7 if self.metadata_error else 0), b"" if self.metadata_error else b"50\n",
@@ -231,7 +235,8 @@ async def _save_actual_page(world, runtime, ticket, monkeypatch, page_kind):
         world.mono[0] += int(seconds * 1_000_000_000)
     monkeypatch.setattr(asyncio, "sleep", elapsed)
     page = await runtime.results.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=runtime.action(1)["execution_spec_json"]["output_scope"], completion_context=context)
+        output_scope=runtime.action(1)["execution_spec_json"]["output_scope"], completion_context=context,
+        video_result_mode=runtime.action(1)["execution_spec_json"].get("video_result_mode"))
     saved = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, page.outcome, world.entry.evidence), world.wall[0]),
         new_operation_key(), world.owned)

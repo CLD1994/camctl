@@ -613,7 +613,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
     package = osmo_package
     serial = _SERIAL
     deployment = Deployment(tmp_path / "world", devices=False)
-    _osmo_config(deployment.config_path, serial=serial)
+    _osmo_config(deployment.config_path, serial=serial, result_mode="single_file")
     params = _capture_params(action_type)
     preview_suffix = "with-preview" if include_preview else "without-preview"
     scratch = package.root / "runtime" / f"{action_type}-{preview_suffix}"
@@ -719,6 +719,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         if action_type == "camera_timelapse":
             assert started[6] is not None
         original_execution = json.loads(started[4])
+        assert original_execution["video_result_mode"] == "single_file"
         expected_target_ms = 10000 if action_type == "camera_record" else 300000
         assert original_execution["target_duration_ms"] == expected_target_ms
         assert original_execution["file_completion_wait_ms"] == 30000
@@ -824,16 +825,18 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert any(frame.get("line") == line for frame in _clock_frames(
             released_read, module="camctl.capture.handlers", function=decision[0]))
 
-        capture_status = "failed" if action_type == "camera_record" else "succeeded"
+        # This installed-chain case freezes the original single-file path for
+        # both OSMO capture types. Segmented completion-unknown behavior is
+        # covered by the dedicated segmentation scenarios.
         capture_report = wait_for(
-            lambda: _report_with_statuses(deployment.ready, {"capture": capture_status}),
+            lambda: _report_with_statuses(deployment.ready, {"capture": "succeeded"}),
             150, "安装版 OSMO capture 未完成或未发布预期报告")
         if action_type == "camera_record":
-            # 跨会话控制计时未知，单份尾段不提供分段时长下界；
-            # 来源保持未确认失败，已确定的原片仍可独立取回。
-            failure = _action(capture_report, "capture")["error"]
-            assert failure["code"] == "capture_result_unconfirmed"
-            assert failure["details"]["reason"] == "completion_unknown"
+            # 单文件录像通过已确认 STOP 和完整结果等待完成；它不进入分段
+            # assessment，也不适用“尾段无法证明覆盖目标”的失败规则。
+            assert _action(capture_report, "capture")["status"] == "succeeded"
+        assert query_state(deployment.state_db,
+            "SELECT id FROM segment_sets WHERE action_id=?", (action_id,)) == []
         final_start = _capture_facts(deployment.state_db)
         assert len(final_start) == 1
         assert final_start[0][:5] == started[:5]

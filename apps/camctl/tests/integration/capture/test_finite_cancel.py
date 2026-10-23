@@ -21,11 +21,13 @@ pytestmark = pytest.mark.asyncio
 
 
 class _FiniteResults(ResultsDouble):
-    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None, completion_context=None):
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None, video_result_mode=None):
         if completion_context is not None:
             assert completion_context['kind'] == 'timelapse_natural'
         page = await super().list_page(ticket, cursor=cursor, timeout_s=timeout_s,
-            output_scope=output_scope, completion_context=completion_context)
+            output_scope=output_scope, completion_context=completion_context,
+            video_result_mode=video_result_mode)
         observations = tuple(DeviceObservation(o.type, o.version,
             {**o.data, 'entries': [{**e, 'format_id': 'osv'} for e in o.data['entries']]})
             if o.type == 'result_files_listed' else o for o in page.outcome.observations)

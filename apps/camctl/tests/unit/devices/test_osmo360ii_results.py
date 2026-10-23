@@ -86,10 +86,13 @@ class Filesystem:
         return FileAccessRead(_tool_result(f"{size}\n".encode()), size, None)
 
 
-async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40"), scope=None):
+async def _list(fs, *, context=None, cursor=None, batch=3, clock=None, timeout=Decimal("40"),
+                scope=None, video_result_mode="segmented"):
     from camctl.devices.drivers.adb_cameras.osmo360ii_results import list_osmo360ii_results
     params = {"activity_id": "7", "output_scope": {"directories": [ROOT]} if scope is None else scope,
         "cursor": cursor}
+    if video_result_mode is not None:
+        params["video_result_mode"] = video_result_mode
     if context is not None:
         params["completion_context"] = context
     driver = SimpleNamespace(_filesystem=lambda binding: fs, monotonic_ns=lambda: 0 if clock is None else clock[0])
@@ -117,6 +120,28 @@ async def test_natural_completion_returns_raw_osv_and_lrf_entries_without_pairin
     assert all(entry["complete"] and entry["media_type"] is None for entry in page["entries"])
     assert page["completion_evidence"] is None
     assert result.outcome.settlement.evidence.data["file_completion"] is None
+
+
+@pytest.mark.asyncio
+async def test_single_file_pairs_lrf_with_matching_osv_from_scope():
+    fs = Filesystem([LRF, OSV])
+
+    result = await _list(fs, context=_natural(), video_result_mode="single_file")
+
+    entries = {entry["identity"]: entry for entry in _page(result)["entries"]}
+    assert result.error is None
+    assert entries[OSV]["paired_identity"] is None
+    assert entries[LRF]["paired_identity"] == OSV
+    assert entries[LRF]["format_id"] == "lrf"
+
+
+@pytest.mark.parametrize("video_result_mode", [None, "unknown"])
+@pytest.mark.asyncio
+async def test_video_result_mode_must_be_explicit_and_known(video_result_mode):
+    fs = Filesystem([OSV])
+
+    with pytest.raises(ValueError, match="video result mode"):
+        await _list(fs, context=_natural(), video_result_mode=video_result_mode)
 
 
 @pytest.mark.asyncio
@@ -307,7 +332,7 @@ async def test_real_driver_filesystem_and_result_parser_accept_raw_osmo_page():
     driver = AdbCameraDriver(osmo360ii_contract(), {"camera": {"driver": "dji-osmo360-ii",
         "adb": {"serial": "serial-1"}}}, transport, terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
     request = ControlRequest("result", BINDING, {"activity_id": "7", "output_scope": {"directories": [ROOT]},
-        "completion_context": _natural()}, TICKET, Decimal("10"))
+        "completion_context": _natural(), "video_result_mode": "segmented"}, TICKET, Decimal("10"))
     result = await driver.list_results(request, 32)
     assert result.outcome.status is AttemptStatus.SUCCEEDED and transport.outputs == []
     assert len(transport.specs) == 3
