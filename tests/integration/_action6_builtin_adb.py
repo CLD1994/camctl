@@ -107,13 +107,13 @@ def _append(path, value):
         os.close(descriptor)
 
 
-def _wait_at_declared_read_gate(file_kind, script):
-    """Pause a real ADB-file read after the first committed 64 KiB chunk."""
+def _wait_after_first_read_chunk(file_kind, script, bytes_forwarded):
+    """Pause streamed ADB output after forwarding its first 64 KiB chunk."""
     gate_value = os.environ.get("CAMCTL_ACTION6_TEST_READ_GATE_DIR")
     if file_kind != "read" or gate_value is None:
         return
     match = re.fullmatch(r"dd if=(.+) bs=65536 skip=(0|[1-9][0-9]*)", script)
-    if match is None or int(match[2]) < 1:
+    if match is None:
         return
     gate = Path(gate_value)
     entered = gate / "read-entered.json"
@@ -127,9 +127,11 @@ def _wait_at_declared_read_gate(file_kind, script):
     else:
         os.close(claim)
     record = {
-        "stage": "after_first_committed_chunk",
+        "stage": "after_first_streamed_chunk",
         "path_argument": match[1],
-        "skip": int(match[2]),
+        "request_skip": int(match[2]),
+        "request_offset_bytes": int(match[2]) * 65_536,
+        "bytes_forwarded": bytes_forwarded,
         "pid": os.getpid(),
         "pgid": os.getpgrp(),
         "cli_pid": os.getppid(),
@@ -140,6 +142,28 @@ def _wait_at_declared_read_gate(file_kind, script):
     temporary.replace(entered)
     while not release.exists():
         time.sleep(0.01)
+
+
+def _forward_read_stream(script, local_script):
+    """Forward dd output incrementally so a recovery boundary can interrupt it."""
+    process = subprocess.Popen(
+        ["bash", "-c", local_script], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None and process.stderr is not None
+    first_chunk = True
+    while True:
+        chunk = process.stdout.read(65_536)
+        if not chunk:
+            break
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+        if first_chunk:
+            first_chunk = False
+            _wait_after_first_read_chunk("read", script, len(chunk))
+    stderr = process.stderr.read()
+    returncode = process.wait()
+    sys.stderr.buffer.write(stderr)
+    return returncode
 
 
 def main():
@@ -219,19 +243,21 @@ def main():
         return 0
 
     file_kind = _file_kind(script)
-    _wait_at_declared_read_gate(file_kind, script)
     local_script = script.replace("/mnt/media_rw/", str(root / "mnt/media_rw") + "/")
-    result = subprocess.run(["bash", "-c", local_script], capture_output=True)
-    record.update(kind="file", file_kind=file_kind, returned_ns=time.monotonic_ns(),
-                  returncode=result.returncode, **_clock_fields("returned"))
-    _append(calls, record)
-    output = result.stdout
-    # dd 读取的媒体字节保持原样；文本和 NUL 帧中的文件路径还原为设备路径。
-    if not script.startswith("dd "):
+    if file_kind == "read":
+        returncode = _forward_read_stream(script, local_script)
+        output = b""
+    else:
+        result = subprocess.run(["bash", "-c", local_script], capture_output=True)
+        returncode = result.returncode
+        output = result.stdout
         output = output.replace(str(root).encode(), b"")
-    sys.stdout.buffer.write(output)
-    sys.stderr.buffer.write(result.stderr)
-    return result.returncode
+        sys.stdout.buffer.write(output)
+        sys.stderr.buffer.write(result.stderr)
+    record.update(kind="file", file_kind=file_kind, returned_ns=time.monotonic_ns(),
+                  returncode=returncode, **_clock_fields("returned"))
+    _append(calls, record)
+    return returncode
 
 
 if __name__ == "__main__":

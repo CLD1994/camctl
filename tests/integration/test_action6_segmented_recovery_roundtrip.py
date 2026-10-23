@@ -154,9 +154,16 @@ def _prepare_installed_action6(
     base_config = resources["config.toml"].replace(
         "REPLACE_ACTION6_SERIAL", "action6-test-serial"
     )
+    # 普通录像异常矩阵使用 62 秒修复门槛；与 75 秒停止目标配合时，
+    # 真实 STOP 耗时证据应使生产 handler 进入检查。本测试不合成该证据。
+    recovery_config = (
+        "\n[devices.action6.recording]\nrepair_margin_s = 2\n"
+        if not native else ""
+    )
     deployment.config_path.write_text(
         deployment.config_path.read_text(encoding="utf-8")
-        + "\n" + base_config + '\n[devices.action6.video]\nresult_mode = "segmented"\n',
+        + "\n" + base_config + recovery_config
+        + '\n[devices.action6.video]\nresult_mode = "segmented"\n',
         encoding="utf-8",
     )
     metric = "frames" if native else "duration_s"
@@ -221,7 +228,7 @@ def _prepare_installed_action6(
 def _start_installed_capture(host_demo, package, scenario, monkeypatch):
     deployment = scenario["deployment"]
     demo = HostDemo(deployment, host_demo, launcher=str(scenario["camctl"]))
-    monkeypatch.chdir(package.root)
+    monkeypatch.chdir(package.python.parents[2])
     demo.start(env=scenario["environment"])
     demo.submit(scenario["plan"])
     starts = wait_for(
@@ -567,7 +574,8 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         boundary_pgid = None
         resume_copy_before = None
         resume_path_argument = None
-        resume_initial_skip = None
+        resume_request_offset_bytes = None
+        resume_bytes_forwarded = None
         resume_call_count = None
         resume_after_ns = None
         resume_evidence = None
@@ -579,13 +587,24 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 lambda: adb_gate / "read-entered.json"
                 if (adb_gate / "read-entered.json").is_file() else None,
                 180,
-                "Action6 检查副本未在真实第二个 64KiB 设备读取前暂停",
+                "Action6 检查副本未在真实首个 64KiB 设备数据流出后暂停",
             )
             observed = json.loads(gate_marker.read_text(encoding="utf-8"))
-            assert observed["skip"] >= 1
+            assert observed["stage"] == "after_first_streamed_chunk"
+            assert observed["request_skip"] == 0
+            assert observed["request_offset_bytes"] == 0
+            assert observed["bytes_forwarded"] == 65_536
             resume_path_argument = observed["path_argument"]
-            resume_initial_skip = observed["skip"]
-            first_copies = _inspection_copy_state(deployment, source_id)
+            resume_request_offset_bytes = observed["request_offset_bytes"]
+            resume_bytes_forwarded = observed["bytes_forwarded"]
+            first_copies = wait_for(
+                lambda: rows if len(rows := _inspection_copy_state(
+                    deployment, source_id
+                )) == 1 and observed["bytes_forwarded"] <= rows[0][7] < rows[0][8]
+                else None,
+                30,
+                "首块已转发后，检查副本没有提交对应的部分字节",
+            )
             assert len(first_copies) == 1
             resume_copy_before = first_copies[0]
             assert resume_copy_before[1] is not None and resume_copy_before[2] is None
@@ -681,7 +700,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             demo = HostDemo(
                 scenario["deployment"], host_demo, launcher=str(scenario["camctl"])
             )
-            monkeypatch.chdir(package.root)
+            monkeypatch.chdir(package.python.parents[2])
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
             if boundary == "copy_progress":
@@ -718,7 +737,8 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
                 resume_evidence = {
                     "copy_id": after_copy[0],
                     "source_path_argument": resume_path_argument,
-                    "copy_progress_gate_initial_skip": resume_initial_skip,
+                    "copy_progress_gate_initial_request_offset_bytes": resume_request_offset_bytes,
+                    "copy_progress_gate_bytes_forwarded": resume_bytes_forwarded,
                     "source_device_file_id": after_copy[1],
                     "target_file_id": after_copy[3],
                     "round": after_copy[4],
