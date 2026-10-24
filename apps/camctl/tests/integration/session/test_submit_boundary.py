@@ -200,6 +200,10 @@ class BeginObserver:
         self.connection = connection
         self.began = began
 
+    @property
+    def in_transaction(self):
+        return self.connection.in_transaction
+
     def execute(self, statement, parameters=()):
         if statement == "BEGIN IMMEDIATE":
             self.began.set()
@@ -302,6 +306,10 @@ async def test_submit_unknown_commit_does_not_return_handoff_success(runtime, mo
     class LostCommitResponse:
         def __init__(self, connection):
             self.connection = connection
+
+        @property
+        def in_transaction(self):
+            return self.connection.in_transaction
 
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
@@ -419,6 +427,10 @@ async def test_close_transaction_failure_keeps_released_admission_closed(
     rollback_calls = []
 
     class EndTransactionFailure:
+        @property
+        def in_transaction(self):
+            return owned.connection.in_transaction
+
         def execute(self, statement, parameters=()):
             if statement == "ROLLBACK":
                 rollback_calls.append(statement)

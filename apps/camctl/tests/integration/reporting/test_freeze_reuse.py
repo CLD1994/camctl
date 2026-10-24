@@ -204,6 +204,10 @@ async def test_unknown_commit_is_resolved_with_same_freeze_key(environment, tmp_
     connection = environment.connection
 
     class LostReceipt:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, sql, parameters=()):
             if sql == "COMMIT":
                 if committed:

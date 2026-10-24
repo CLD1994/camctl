@@ -173,6 +173,10 @@ def test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key(connec
     key = new_operation_key()
 
     class LostReceipt:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, sql, parameters=()):
             if sql == "COMMIT":
                 if committed:

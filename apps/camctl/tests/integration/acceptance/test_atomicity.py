@@ -122,6 +122,10 @@ async def test_unknown_commit_is_checked_by_original_key_before_retry(environmen
     key = new_operation_key()
 
     class LostCommitResponse:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:
