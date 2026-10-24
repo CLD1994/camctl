@@ -1,5 +1,6 @@
 """当前结果尝试独占的完整目录清单和连续分页。"""
 import asyncio
+from dataclasses import replace
 import tempfile
 import time
 
@@ -214,17 +215,25 @@ class AdbDirectoryScan:
             return DirectoryRead(raw, None, page, call_performed=called, elapsed_ns=elapsed_ns)
         except (OSError, ValueError) as error:
             return self._failure(raw, str(error), called, elapsed_ns)
-        except BaseException:
-            self._close_cache()
+        except BaseException as error:
             self.closed = True
+            try:
+                self._close_cache()
+            except OSError as close_error:
+                raise error from close_error
             raise
         finally:
             self.busy = False
 
     def _failure(self, raw, reason, called, elapsed_ns):
-        self._close_cache()
         self.closed = True
-        return DirectoryRead(raw, _error(raw, "directory", reason), None,
+        error = _error(raw, "directory", reason)
+        try:
+            self._close_cache()
+        except OSError as close_error:
+            error = replace(error, details={**error.details,
+                "cache_close_error": f"{type(close_error).__name__}: {close_error}"})
+        return DirectoryRead(raw, error, None,
                              call_performed=called, elapsed_ns=elapsed_ns)
 
     def _close_cache(self):

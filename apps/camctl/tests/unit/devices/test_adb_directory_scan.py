@@ -251,6 +251,30 @@ async def test_cache_io_failure_waits_for_call_exit_and_never_delivers_a_page(me
 
 
 @pytest.mark.asyncio
+async def test_cache_close_error_preserves_original_tool_error_and_allows_close_retry(memory_files, monkeypatch):
+    create = directory_scan.tempfile.TemporaryFile
+    def broken(*, mode):
+        file = create(mode=mode)
+        close = file.close
+        def fail_once():
+            monkeypatch.setattr(file, "close", close)
+            raise OSError("cache close failed")
+        monkeypatch.setattr(file, "close", fail_once)
+        return file
+    monkeypatch.setattr(directory_scan.tempfile, "TemporaryFile", broken)
+    transport = _StreamTransport([_frame("/DCIM/a")], outcome=_raw(error="timeout"))
+    scan = _scan(transport)
+    result = await scan.read_directory(_request(), stop=object())
+    assert result.page is None
+    assert result.outcome.error == "timeout"
+    assert result.error.details["transport_error"] == "timeout"
+    assert "cache close failed" in result.error.details["cache_close_error"]
+    scan.close()
+    scan.close()
+    assert transport.exited and memory_files[0].closed
+
+
+@pytest.mark.asyncio
 async def test_first_page_waits_for_actual_process_exit(memory_files):
     gate = asyncio.Event()
     transport = _StreamTransport([_frame("/DCIM/a")], exit_gate=gate)
@@ -279,6 +303,28 @@ async def test_cancelled_stream_waits_for_actual_exit_before_closing_cache(memor
         await task
     assert transport.exited and memory_files[0].closed
     scan.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_retains_actual_outcome_when_cache_close_also_fails(memory_files, monkeypatch):
+    gate = asyncio.Event()
+    transport = _StreamTransport([_frame("/DCIM/a")], exit_gate=gate)
+    scan = _scan(transport)
+    task = asyncio.create_task(scan.read_directory(_request(), stop=object()))
+    await transport.output_ended.wait()
+    close = memory_files[0].close
+    def fail_close():
+        raise OSError("cache close failed")
+    monkeypatch.setattr(memory_files[0], "close", fail_close)
+    task.cancel()
+    gate.set()
+    with pytest.raises(ToolCallCancelled) as caught:
+        await task
+    assert transport.exited and caught.value.outcome.error == "cancelled"
+    assert isinstance(caught.value.__cause__, OSError)
+    monkeypatch.setattr(memory_files[0], "close", close)
+    scan.close()
+    assert memory_files[0].closed
 
 
 @pytest.mark.asyncio
