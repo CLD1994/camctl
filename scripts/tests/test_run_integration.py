@@ -159,6 +159,35 @@ class IntegrationRunnerTest(unittest.TestCase):
             summary = json.loads((output / 'summary.json').read_text())
             self.assertEqual(sum(task['progress']['collected'] for task in summary['tasks']), 7)
 
+    def test_failed_short_history_shards_current_nodes_but_passed_history_stays_whole(self):
+        for historical_status, expected_tasks in (('failed', 2), ('passed', 1)):
+            with self.subTest(historical_status=historical_status), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / 'input'
+                self._fixture_repository(source, 'test_matrix.py',
+                    'import pytest\n'
+                    '@pytest.mark.parametrize("value", range(3), ids=["a","b","new"])\n'
+                    'def test_value(value):\n    assert value >= 0\n', history=True)
+                timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
+                (timing / 'cross-component-files.csv').write_text('name,total_s\ntests/integration/test_matrix.py,6\n')
+                (timing / 'cross-component-cases.csv').write_text(
+                    'nodeid,status,total_s\n'
+                    'tests/integration/test_matrix.py::test_value[a],passed,5\n'
+                    f'tests/integration/test_matrix.py::test_value[b],{historical_status},1\n')
+                result, output = self._run_fixture(root, source, '--root-shards', '2')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                plan = json.loads((output / 'plan.json').read_text())
+                self.assertEqual(len(plan), expected_tasks)
+                summary = json.loads((output / 'summary.json').read_text())
+                inventory = [node for task in summary['tasks'] for node in json.loads(
+                    (Path(task['artifacts']) / 'inventory.json').read_text())]
+                expected = ['tests/integration/test_matrix.py::test_value[' + name + ']' for name in ('a', 'b', 'new')]
+                self.assertCountEqual(inventory, expected)
+                self.assertEqual(len(inventory), len(set(inventory)))
+                self.assertTrue(all(task['historical_failure_observed'] == (historical_status == 'failed') for task in plan))
+                if historical_status == 'passed':
+                    self.assertFalse((output / 'collection').exists())
+
     def _fixture_repository(self, source, filename, content, history=False):
         for directory in ('apps/camctl/tests/integration', 'apps/client', 'protocol', 'tests/integration'):
             (source / directory).mkdir(parents=True, exist_ok=True)
@@ -174,8 +203,8 @@ class IntegrationRunnerTest(unittest.TestCase):
             timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
             timing.mkdir(parents=True)
             (timing / 'cross-component-files.csv').write_text('name,total_s\ntests/integration/test_matrix.py,930\n')
-            (timing / 'cross-component-cases.csv').write_text('nodeid,total_s\n' + ''.join(
-                f'tests/integration/test_matrix.py::test_value[{name}],{seconds}\n'
+            (timing / 'cross-component-cases.csv').write_text('nodeid,status,total_s\n' + ''.join(
+                f'tests/integration/test_matrix.py::test_value[{name}],passed,{seconds}\n'
                 for name, seconds in zip(('a','b','c','d','e','f'), (300,240,180,120,60,30))))
         subprocess.run(['git', 'init', '-q', str(source)], check=True)
         subprocess.run(['git', 'add', '.'], cwd=source, check=True)

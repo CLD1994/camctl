@@ -29,9 +29,9 @@
 
 入口从 Git 已跟踪文件与未忽略的新文件冻结源码，包括当前未提交的修改；删除的文件保持删除。`--source` 可指定另一 Git 工作区。每个任务取得独立完整源码副本，Git 元数据保留原 HEAD 和当前差异；`source.json` 记录来源、状态、逐文件摘要和整体摘要。生成目录、依赖和缓存不作为源码快照输入。快照只接受普通源码文件；发现符号链接时明确报错，不跟随链接访问外部对象。已有逐文件测量仅用于优先调度较长任务，未测目标照常执行。
 
-根 pytest 中，历史所选节点估算至少 600 秒的模块先在独立源码副本执行 `--collect-only`，再按当前收集节点分片。`--root-shards` 默认取 `--jobs`，限制每个长模块的片数；设置为 1 可保持模块单进程。历史逐实例耗时只作为均衡权重，历史未登记的新节点仍会分配；各片的并集必须与本次收集清单一致且互不重复。每片独立构建／安装和执行，容量规模及完整 Hasselblad 十二组正常链保持。窄目标只估算并收集所选节点，不会因同模块的其他慢例而扩大覆盖。
+根 pytest 中，历史所选节点估算至少 600 秒，或逐实例历史 CSV 的 `status` 曾为 `failed` 的模块，先在独立源码副本执行 `--collect-only`；本次收集多于一个节点时按当前清单分片。没有历史失败的短模块保持单进程与一次准备。`--root-shards` 默认取 `--jobs`，限制每个模块的片数；设置为 1 可保持模块单进程。历史失败只计到实际失败步骤，其耗时是完整成本的下界，不能与已完成用例的耗时视为可比的完整成本；`historical_failure_observed` 在计划中标识这类模块。历史逐实例耗时仍作为均衡权重，不是精确负载预测，历史未登记的新节点仍会分配；各片的并集必须与本次收集清单一致且互不重复。每片独立构建／安装和执行，容量规模及完整 Hasselblad 十二组正常链保持。窄目标只估算并收集所选节点，不会因同模块的其他慢例而扩大覆盖。
 
-`--list` 只展示发现与选择的模块任务；需要审查实际分片时，用 `--plan-only` 冻结源码并生成 `plan.json`，长模块的真实收集清单与命令保存在 `collection/`。此模式不执行测试，也不代表测试通过：
+`--list` 只展示发现与选择的模块任务；需要审查实际分片时，用 `--plan-only` 冻结源码并生成 `plan.json`，分片候选的真实收集清单与命令保存在 `collection/`。此模式不执行测试，也不代表测试通过：
 
 ```bash
 /absolute/venv/bin/python scripts/run-integration.py --plan-only \
@@ -42,7 +42,7 @@
 
 `plan.json` 保存实际分配，`summary.json` 每半秒更新任务状态、PID、当前节点与阶段、退出码及墙钟时间；每 15 秒也向终端打印活动目标。pytest 插件在节点进入阶段时写入 `events.jsonl` 和 `progress.json`，因此即使用例没有输出，也可定位正在执行的节点。观测器配置在 pytest 配置阶段移除，不进入安装版运行环境。插件导入时固定自身文件操作和计时函数，避免产品测试替换共享模块函数时打断观察记录；真实磁盘错误仍显式报告。每个任务的 `artifacts/` 另存命令、工作目录、源码身份、工具版本、完整输出、真实收集的 `inventory.json`、主实例阶段结果 `cases.json` 和最终结果。主实例按 nodeid 聚合，嵌套子检查另计，父 call 的时长不再次加上子检查时长。Node 文件保留 TAP 日志与结果计数。入口等待全部分配完成后汇总：全部任务退出 0 才返回 0，有任务失败时返回 1；输入或准备失败保留非零状态，中断返回 130。准备与执行子进程都保留具体 PID、命令和退出结果；中断时仅向本入口持有的进程组发送信号并等待收场。早期准备中断只报告实际已经生成的证据。
 
-输出目录保留源码、私有缓存、安装物和证据，需预留磁盘空间；归档必要证据后可删除整个输出目录。各任务墙钟包含自身准备，整轮墙钟包含入口准备与全部调度；历史估计值不是本轮测量。只选择窄范围的结果不能证明全量验收。窄范围并发、失败传播和安装版环境的[验证回执](../docs/camctl/verification-data/2026-10-25-integration-runner/smoke-summary.json)单独保存，HB 正常链、最终插件计数和真实分片清单另见[后续验证](../docs/camctl/verification-data/2026-10-25-integration-runner/followup-summary.json)；两者都不代表完整集成验收。同一安装版无状态命令的[字节码缓存冷暖对照](../docs/camctl/verification-data/2026-10-25-integration-runner/python-startup-measurement.json)及[私有缓存复验](../docs/camctl/verification-data/2026-10-25-integration-runner/python-cache-summary.json)单独保存，局部耗时不外推整轮收益。共享文件故障注入与原 bootstrap 文件的[观察器复验](../docs/camctl/verification-data/2026-10-25-integration-runner/observer-summary.json)单独保存。入口本身的真实进程契约测试为：
+输出目录保留源码、私有缓存、安装物和证据，需预留磁盘空间；归档必要证据后可删除整个输出目录。各任务墙钟包含自身准备，整轮墙钟包含入口准备与全部调度；历史估计值不是本轮测量。只选择窄范围的结果不能证明全量验收。窄范围并发、失败传播和安装版环境的[验证回执](../docs/camctl/verification-data/2026-10-25-integration-runner/smoke-summary.json)单独保存，HB 正常链、最终插件计数和真实分片清单另见[后续验证](../docs/camctl/verification-data/2026-10-25-integration-runner/followup-summary.json)；两者都不代表完整集成验收。同一安装版无状态命令的[字节码缓存冷暖对照](../docs/camctl/verification-data/2026-10-25-integration-runner/python-startup-measurement.json)及[私有缓存复验](../docs/camctl/verification-data/2026-10-25-integration-runner/python-cache-summary.json)单独保存，局部耗时不外推整轮收益。共享文件故障注入与原 bootstrap 文件的[观察器复验](../docs/camctl/verification-data/2026-10-25-integration-runner/observer-summary.json)单独保存。历史失败耗时与当前节点分配的[分片复验](../docs/camctl/verification-data/2026-10-25-integration-runner/failed-history-summary.json)也单独保存。入口本身的真实进程契约测试为：
 
 ```bash
 /absolute/venv/bin/python -m unittest discover -s scripts/tests -v

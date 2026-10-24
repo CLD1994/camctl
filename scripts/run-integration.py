@@ -78,16 +78,19 @@ def covers(parent, child):
     return child == parent or any(child.startswith(parent + boundary) for boundary in ('/', '::', '['))
 
 
-def case_costs(source):
+def case_history(source):
     path = source / 'docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv'
     if not path.exists():
-        return {}
+        return {}, set()
     with path.open(encoding='utf-8-sig', newline='') as stream:
-        return {row['nodeid']: float(row['total_s']) for row in csv.DictReader(stream)}
+        rows = list(csv.DictReader(stream))
+    costs = {row['nodeid']: float(row['total_s']) for row in rows}
+    failed_modules = {row['nodeid'].partition('::')[0] for row in rows if row['status'] == 'failed'}
+    return costs, failed_modules
 
 
 def order_by_measurement(source, tasks):
-    """既有逐文件测量只用于排程；未测目标仍完整执行。"""
+    """既有记录只用于排程；未测目标仍完整执行。"""
     timing = source / 'docs/camctl/verification-data/2026-10-25-integration-timing'
     costs = {}
     for name in ('camctl-files.csv', 'cross-component-files.csv'):
@@ -96,13 +99,15 @@ def order_by_measurement(source, tasks):
             with path.open(encoding='utf-8-sig', newline='') as stream:
                 for row in csv.DictReader(stream):
                     costs[row['name']] = float(row['total_s'])
-    cases = case_costs(source)
+    cases, failed_modules = case_history(source)
     for task in tasks:
         task['estimated_seconds'] = sum(cost for path, cost in costs.items()
                                         if path == task['path'] or path.startswith(task['path'] + '/'))
-        if task['scope'] == 'root' and cases:
-            task['estimated_seconds'] = sum(cost for node, cost in cases.items()
-                                            if any(covers(target, node) for target in task['targets']))
+        if task['scope'] == 'root':
+            task['historical_failure_observed'] = task['path'] in failed_modules
+            if cases:
+                task['estimated_seconds'] = sum(cost for node, cost in cases.items()
+                                                if any(covers(target, node) for target in task['targets']))
     return sorted(tasks, key=lambda task: (-task['estimated_seconds'], task['id']))
 
 
@@ -195,11 +200,12 @@ def managed_wait_sync(process):
 
 
 def collect_and_shard(args, tasks, output, seed, python, versions, identity):
-    """当前收集清单决定覆盖；历史耗时只决定哪些模块分片及如何均衡。"""
-    costs = case_costs(seed)
+    """当前收集清单决定覆盖；历史记录决定分片候选与均衡权重。"""
+    costs, _ = case_history(seed)
     result = []
     for task in tasks:
-        if task['scope'] != 'root' or task['estimated_seconds'] < ROOT_SHARD_SECONDS or args.root_shards == 1:
+        if (task['scope'] != 'root' or args.root_shards == 1 or
+                (task['estimated_seconds'] < ROOT_SHARD_SECONDS and not task['historical_failure_observed'])):
             result.append(task)
             continue
         directory = output / 'collection' / task['id'].replace('/', '-')
@@ -449,7 +455,7 @@ def main():
     started, started_utc = time.monotonic(), utc()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jobs', type=int, default=4, help='最多同时运行的隔离任务数（默认 4）')
-    parser.add_argument('--root-shards', type=int, help='历史估算至少600秒的根pytest模块最多分为几片（默认随jobs，1禁用）')
+    parser.add_argument('--root-shards', type=int, help='历史长模块或曾失败根pytest模块最多分为几片（默认随jobs，1禁用）')
     parser.add_argument('--scope', choices=('all', 'camctl', 'root', 'node'), default='all')
     parser.add_argument('--target', action='append', default=[], help='仓库相对目录、文件或 pytest nodeid，可重复')
     parser.add_argument('--python', type=Path, default=Path(sys.executable), help='已准备测试依赖的外部 Python 3.11')

@@ -1,0 +1,138 @@
+{
+  "scope": "按历史失败状态修正分片候选；仅受控真实pytest小用例和cleanup当前收集，不执行真实长拍摄。",
+  "contract": "逐实例CSV中status为failed的根模块，其历史耗时只代表到失败阶段的下界。该模块也执行当前collect；当前多于一个节点时按既有规则分片，保留全部节点。没有历史失败的短模块维持原单进程准备。LPT继续使用旧权重，不是精确负载预测。",
+  "shared_boundary": "cleanup_package仅在本pytest模块进程内复用安装物；每个World复制env并拥有独立tmp_path下的数据库、远端树、时钟与工具，归档位于所属独立REPO，C构建使用随机唯一目录，回收仅本world的PID。每片因此可独立准备与执行。",
+  "contract_tests": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-v"
+    ],
+    "cwd": "/tmp/camctl-itopt-runner",
+    "exit_code": 0,
+    "log": "test_failed_short_history_shards_current_nodes_but_passed_history_stays_whole (test_run_integration.IntegrationRunnerTest.test_failed_short_history_shards_current_nodes_but_passed_history_stays_whole) ... ok\ntest_function_selector_already_contains_parameter_instances (test_run_integration.IntegrationRunnerTest.test_function_selector_already_contains_parameter_instances) ... ok\ntest_hasselblad_uses_built_external_candidate_from_current_source (test_run_integration.IntegrationRunnerTest.test_hasselblad_uses_built_external_candidate_from_current_source) ... ok\ntest_isolated_concurrency_progress_exact_assignment_and_failure (test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure) ... ok\ntest_nested_unittest_checks_do_not_inflate_primary_results (test_run_integration.IntegrationRunnerTest.test_nested_unittest_checks_do_not_inflate_primary_results) ... ok\ntest_observer_keeps_artifacts_when_product_file_operations_fail (test_run_integration.IntegrationRunnerTest.test_observer_keeps_artifacts_when_product_file_operations_fail) ... ok\ntest_parent_path_cannot_escape_source (test_run_integration.IntegrationRunnerTest.test_parent_path_cannot_escape_source) ... ok\ntest_prepare_interrupt_reaps_owned_process_and_saves_actual_state (test_run_integration.IntegrationRunnerTest.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state) ... ok\ntest_python_cache_is_private_and_external_dependency_is_unchanged (test_run_integration.IntegrationRunnerTest.test_python_cache_is_private_and_external_dependency_is_unchanged) ... ok\ntest_root_shards_use_current_collection_including_unmeasured_nodes (test_run_integration.IntegrationRunnerTest.test_root_shards_use_current_collection_including_unmeasured_nodes) ... ok\ntest_snapshot_reports_unsupported_symbolic_link (test_run_integration.IntegrationRunnerTest.test_snapshot_reports_unsupported_symbolic_link) ... ok\ntest_unknown_target_is_rejected_before_execution (test_run_integration.IntegrationRunnerTest.test_unknown_target_is_rejected_before_execution) ... ok\n\n----------------------------------------------------------------------\nRan 12 tests in 17.261s\n\nOK\n",
+    "new_case": "受控历史总计6秒。含failed时当前a/b/new三个节点实际两片运行且各一次；全passed时保持一次进程准备且不进行collection阶段。"
+  },
+  "actual_collection": {
+    "source": {
+      "root": "/tmp/camctl-itopt-runner",
+      "head": "6bd68bae119a0ecf4b4b706bcf355781dddb5a37",
+      "status": "M scripts/README.md\n M scripts/run-integration.py\n M scripts/tests/test_run_integration.py",
+      "snapshot_sha256": "1b74d90b7437bbda08aa0f864ca06d60985c0995fa6f3d361d73c18eafd90907"
+    },
+    "versions": {
+      "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+      "version": [
+        3,
+        11
+      ],
+      "sqlite": "3.53.1",
+      "pytest": "9.1.1",
+      "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+      "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+      "node": "v24.22.1",
+      "git": "git version 2.43.0"
+    },
+    "history_cases": 11,
+    "history_failed": 9,
+    "history_total_seconds": 60.710252590986784,
+    "history_csv_sha256": "a1eb35cc74879da6abda7056664d59e1415f97bacf0c06512fff601a9610580a",
+    "current_nodes": [
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_device_delete_unsupported_with_host_files",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+    ],
+    "assigned_once": true,
+    "shards": [
+      {
+        "id": "root/test_device_file_cleanup_roundtrip/shard-1",
+        "targets": [
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_device_delete_unsupported_with_host_files"
+        ],
+        "historical_weight": 31.890992549000657,
+        "historical_failure_observed": true
+      },
+      {
+        "id": "root/test_device_file_cleanup_roundtrip/shard-4",
+        "targets": [
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]"
+        ],
+        "historical_weight": 11.285482661998685,
+        "historical_failure_observed": true
+      },
+      {
+        "id": "root/test_device_file_cleanup_roundtrip/shard-2",
+        "targets": [
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]"
+        ],
+        "historical_weight": 8.800105462993088,
+        "historical_failure_observed": true
+      },
+      {
+        "id": "root/test_device_file_cleanup_roundtrip/shard-3",
+        "targets": [
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+        ],
+        "historical_weight": 8.733671916994354,
+        "historical_failure_observed": true
+      }
+    ],
+    "command": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_device_file_cleanup_roundtrip.py",
+        "--collect-only",
+        "-q",
+        "-p",
+        "integration_progress"
+      ],
+      "cwd": "/tmp/camctl-itopt-runner-failed-history-plan/collection/root-test_device_file_cleanup_roundtrip/source",
+      "started_utc": "2026-10-24T23:22:38.959265+00:00",
+      "source": "1b74d90b7437bbda08aa0f864ca06d60985c0995fa6f3d361d73c18eafd90907",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "pid": 383770,
+      "exit_code": 0,
+      "finished_utc": "2026-10-24T23:22:40.256292+00:00",
+      "wall_seconds": 1.2970589420001488
+    },
+    "plan": "/tmp/camctl-itopt-runner-failed-history-plan/plan.json",
+    "summary": "/tmp/camctl-itopt-runner-failed-history-plan/summary.json",
+    "measurement_scope": "仅真实收集与计划；无业务用例执行，不构成完整模块或全量墙钟测量。"
+  }
+}
