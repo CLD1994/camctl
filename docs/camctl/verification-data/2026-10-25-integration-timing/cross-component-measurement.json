@@ -1,0 +1,316 @@
+{
+  "scope": "Root cross-component pytest plus four Node test files",
+  "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+  "commands": [
+    {
+      "suite": "root-pytest",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration",
+        "-q",
+        "--durations=0",
+        "-p",
+        "timing_plugin"
+      ],
+      "cwd": "/workspaces/camctl",
+      "environment_overrides": {
+        "PYTHONPATH": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z:/workspaces/camctl/apps/camctl/src",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/workspaces/camctl/apps/camctl/.venv311",
+        "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-timing-client-20261024T181943Z",
+        "CAMCTL_TIMING_DATA": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/root-pytest",
+        "CAMCTL_TIMING_REPO": "/workspaces/camctl"
+      },
+      "started_utc": "2026-10-24T19:44:48.986030+00:00",
+      "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+      "exit_code": 1,
+      "elapsed_seconds": 3954.428715894999,
+      "finished_utc": "2026-10-24T20:52:46.936421+00:00"
+    },
+    {
+      "suite": "root-node",
+      "command": [
+        "node",
+        "--disable-warning=ExperimentalWarning",
+        "--test",
+        "--test-concurrency=1",
+        "--test-reporter=junit",
+        "--test-reporter-destination=/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/root-node/junit.xml",
+        "tests/integration/event-transitions.test.mjs",
+        "tests/integration/report-dependencies.test.mjs",
+        "tests/integration/report-dependency-conditions.test.mjs",
+        "tests/integration/video-coverage-protocol.test.mjs"
+      ],
+      "cwd": "/workspaces/camctl",
+      "started_utc": "2026-10-24T20:52:48.457553+00:00",
+      "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+      "exit_code": 0,
+      "elapsed_seconds": 4.478841775999172,
+      "finished_utc": "2026-10-24T20:52:52.936976+00:00"
+    }
+  ],
+  "case_count": 376,
+  "subchecks": {
+    "passed": 342,
+    "failed": 0,
+    "file": "cross-component-subchecks.csv",
+    "identity": "Parent nodeid plus report order. The collector did not retain subtest context labels.",
+    "timing": "Nested in parent call duration; do not add subcheck durations to case totals."
+  },
+  "node_runtime": "v24.22.1",
+  "client_prerequisite": {
+    "candidate": "/tmp/camctl-timing-client-20261024T181943Z",
+    "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+    "copied_files": 286,
+    "commands": [
+      {
+        "command": [
+          "npm",
+          "ci",
+          "--engine-strict",
+          "--no-audit",
+          "--no-fund"
+        ],
+        "cwd": "/tmp/camctl-timing-client-20261024T181943Z/apps/client",
+        "started_utc": "2026-10-24T18:21:22.108076+00:00",
+        "exit_code": 0,
+        "elapsed_seconds": 3.1048142129984626,
+        "finished_utc": "2026-10-24T18:21:25.212909+00:00"
+      },
+      {
+        "command": [
+          "npm",
+          "run",
+          "build"
+        ],
+        "cwd": "/tmp/camctl-timing-client-20261024T181943Z/apps/client",
+        "started_utc": "2026-10-24T18:21:25.213238+00:00",
+        "exit_code": 0,
+        "elapsed_seconds": 1.6232353630002763,
+        "finished_utc": "2026-10-24T18:21:26.836483+00:00"
+      }
+    ]
+  },
+  "notes": [
+    "Pytest total_s includes setup/call/teardown. Shared module/session setup is charged to the first consumer.",
+    "Node JUnit exposes test total only. Phase fields are unavailable and exported blank.",
+    "Node identifiers use repository-relative file plus test name; classname=test is not a source identity.",
+    "Failed cases are timed only to the observed failure, not the full successful path.",
+    "The original run was serial. The separate native diagnostic is excluded from these counts.",
+    "The first complete attempt remains recorded separately. Four environment-interference results were replaced by the independent corrected measurements."
+  ],
+  "files": {
+    "cross-component-files.csv": {
+      "bytes": 4996,
+      "sha256": "1e01f4d1f0b27f0f9f50b9a38cb504b4d7a8d10c5104f880b4ce1c731d20e399"
+    },
+    "cross-component-cases.csv": {
+      "bytes": 99851,
+      "sha256": "a1eb35cc74879da6abda7056664d59e1415f97bacf0c06512fff601a9610580a"
+    },
+    "cross-component-subchecks.csv": {
+      "bytes": 42286,
+      "sha256": "1d9c2428df7b4692303904f6d1979b24bfd731b099dfa0b30eda11d9a6067fdc"
+    },
+    "cross-component-first-pass-cases.csv": {
+      "bytes": 99855,
+      "sha256": "03f07b11b5b1e27cb37c5edfce95d1ce6db3b84c8b4d9514e303deed1086bfa9"
+    },
+    "cross-component-functions.csv": {
+      "bytes": 45266,
+      "sha256": "6c181c5467b9e0c642c7f7e00799c16c4dbeda8846e82f679cc4327e22ab75fd"
+    }
+  },
+  "first_pass_outcomes": {
+    "failed": 26,
+    "passed": 348,
+    "skipped": 2
+  },
+  "outcomes": {
+    "failed": 22,
+    "passed": 352,
+    "skipped": 2
+  },
+  "first_pass_suites": [
+    {
+      "suite": "root-node",
+      "collected": 118,
+      "outcomes": {
+        "passed": 118
+      },
+      "reported_case_seconds": 3.873557000000001,
+      "call_seconds": null,
+      "setup_seconds": null,
+      "teardown_seconds": null,
+      "wall_seconds": 4.478841775999172,
+      "exit_code": 0
+    },
+    {
+      "suite": "root-pytest",
+      "collected": 258,
+      "outcomes": {
+        "passed": 230,
+        "failed": 26,
+        "skipped": 2
+      },
+      "reported_case_seconds": 3952.709650668956,
+      "call_seconds": 3838.3752337239493,
+      "setup_seconds": 114.13788059800208,
+      "teardown_seconds": 0.19653634700443945,
+      "wall_seconds": 3954.428715894999,
+      "exit_code": 1
+    }
+  ],
+  "first_pass_suite_wall_seconds": 3958.9075576709984,
+  "correction": {
+    "reason": "Measurement configuration paths inherited by installed-runtime environment triggered the all-values external-path guard before business execution.",
+    "configuration_consumed_before_collection": [
+      "CAMCTL_TIMING_REPO",
+      "CAMCTL_TIMING_DATA"
+    ],
+    "launcher_configuration_omitted": [
+      "UV_PROJECT_ENVIRONMENT",
+      "UV_PYTHON"
+    ],
+    "production_and_test_source_modified": false,
+    "parallel_groups": [
+      {
+        "name": "osmo-correction-a",
+        "receipt": {
+          "suite": "osmo-correction-a",
+          "status": "complete",
+          "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+          "workspace_head": "00f8d7f237e65e1b3adfbaa840b14973dac57aa1",
+          "cwd": "/workspaces/camctl",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+            "-q",
+            "--durations=0",
+            "-p",
+            "timing_plugin_isolated",
+            "--basetemp=/tmp/camctl-timing-osmo-correction-a-20261024"
+          ],
+          "environment_overrides": {
+            "PYTHONPATH": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z:/workspaces/camctl/apps/camctl/src",
+            "CAMCTL_TIMING_REPO": "/workspaces/camctl",
+            "CAMCTL_TIMING_DATA": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/osmo-correction-a",
+            "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-timing-client-20261024T181943Z"
+          },
+          "removed_environment_variables": {
+            "UV_PROJECT_ENVIRONMENT": null,
+            "UV_PYTHON": null
+          },
+          "basetemp": "/tmp/camctl-timing-osmo-correction-a-20261024",
+          "started_utc": "2026-10-24T21:05:28.443150+00:00",
+          "runner_pid": 192402,
+          "exit_code": 0,
+          "elapsed_seconds": 95.49673504400198,
+          "finished_utc": "2026-10-24T21:07:07.127060+00:00",
+          "inventory_count": 2,
+          "collection_count": 2,
+          "phase_count": 6,
+          "case_outcomes": {
+            "passed": 2
+          },
+          "finish_event": {
+            "record": "finish",
+            "exit_status": 0,
+            "collected": 2,
+            "failed": 0,
+            "elapsed_seconds": 95.28021149400229,
+            "utc": "2026-10-24T21:07:07.082763+00:00"
+          },
+          "pytest_terminal_summary": "2 passed in 95.27s (0:01:35)"
+        },
+        "finish": {
+          "record": "finish",
+          "exit_status": 0,
+          "collected": 2,
+          "failed": 0,
+          "elapsed_seconds": 95.28021149400229,
+          "utc": "2026-10-24T21:07:07.082763+00:00"
+        }
+      },
+      {
+        "name": "osmo-correction-b",
+        "receipt": {
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]",
+            "-q",
+            "--durations=0",
+            "-p",
+            "timing_plugin_isolated",
+            "--basetemp=/tmp/camctl-timing-osmo-correction-b-20261024"
+          ],
+          "cwd": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel",
+          "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "pythonpath": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z:/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src",
+          "timing_data": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/osmo-correction-b",
+          "timing_repo": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel",
+          "removed_environment": [
+            "UV_PROJECT_ENVIRONMENT",
+            "UV_PYTHON"
+          ],
+          "basetemp": "/tmp/camctl-timing-osmo-correction-b-20261024",
+          "started_utc": "2026-10-24T21:05:13.587566+00:00",
+          "finished_utc": "2026-10-24T21:06:52.778999+00:00",
+          "wall_seconds": 95.98795194400009,
+          "launcher_pid": 191916,
+          "pytest_pid": 191917,
+          "exit_code": 0,
+          "launch_error": null
+        },
+        "finish": {
+          "record": "finish",
+          "exit_status": 0,
+          "collected": 2,
+          "failed": 0,
+          "elapsed_seconds": 95.76650566700118,
+          "utc": "2026-10-24T21:06:52.714788+00:00"
+        }
+      }
+    ],
+    "cases": [
+      {
+        "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+        "first_pass_status": "failed",
+        "first_pass_total_s": 1.3679733860008128,
+        "measurement_attempt": "osmo-correction-a"
+      },
+      {
+        "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+        "first_pass_status": "failed",
+        "first_pass_total_s": 0.0037091010017320514,
+        "measurement_attempt": "osmo-correction-a"
+      },
+      {
+        "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+        "first_pass_status": "failed",
+        "first_pass_total_s": 0.004590771004586713,
+        "measurement_attempt": "osmo-correction-b"
+      },
+      {
+        "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]",
+        "first_pass_status": "failed",
+        "first_pass_total_s": 0.011917770996660693,
+        "measurement_attempt": "osmo-correction-b"
+      }
+    ],
+    "group_wall_seconds_sum": 191.48468698800207,
+    "note": "Effective per-case rows use the corrected subset. Shared setup was rebuilt in each subset; these are not a single uninterrupted whole-suite timing.",
+    "collector": {
+      "file": "timing_plugin_isolated.py",
+      "sha256": "b4f9c7574e5c68e0087e655b1bb3ca4a1ef71f71e30bdf0084916935446c4c52"
+    }
+  }
+}

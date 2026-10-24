@@ -1,8 +1,12 @@
 # 集成测试耗时与精简评估（2026-10-25）
 
-camctl 的 16 个组件集成目录已完成逐项计时：**10,018 项，其中 9,999 项通过、16 项失败、3 项跳过；目录墙钟合计 4,814.507 秒，即 80 分 14.5 秒**。四项容量与增长测试合计 1,825.066 秒，占目录墙钟的 **37.91%**。日常回归的主要调整方向是单独安排这些资源门槛，以及合并重复的真实数据准备；删除毫秒级断言对整体耗时影响很小。
+camctl 组件与根目录跨组件测试均已完成逐项计时。**最终有效结果为 10,394 项，其中 10,351 项通过、38 项失败、5 项跳过**，另有 342 个通过的嵌套子检查。四项受采集环境干扰的首轮结果已由纠偏补测替换，原始记录仍保留；补测方法见下文。
 
-本记录的源码基线为 `9da49b20dcd1273074bb70b918b36ee4f1eb095c`。本轮只采集耗时、审查覆盖并保存报告，没有修改生产实现、测试断言或默认门禁入口。根目录跨组件 pytest 仍在执行，尚未计入本报告的总数；其结果及根目录 Node 测试将在完成后补充。
+首轮 18 组命令的进程墙钟合计 **8,773.415 秒，即 146 分 13.4 秒**；主 runner 从启动到导出完成的 UTC 起止跨度为 150.2 分钟，包含阶段间汇总等间隔。四项纠偏补测分成两组并行，各约 96 秒，另行记录，不伪装成同一次连续计时。
+
+其中 camctl 的 16 个组件目录共 **10,018 项，9,999 项通过、16 项失败、3 项跳过，目录墙钟合计 4,814.507 秒，即 80 分 14.5 秒**。四项容量与增长测试合计 1,825.066 秒，占组件目录墙钟的 **37.91%**。主要调整方向是隔离工作区后并行、单独安排资源门槛，以及合并重复的真实数据准备。
+
+本记录的生产与测试源码基线为 `9da49b20dcd1273074bb70b918b36ee4f1eb095c`。采集期间新增的提交只保存报告和数据；本轮没有修改生产实现、测试断言或默认门禁入口。
 
 ## 数据与计时口径
 
@@ -14,6 +18,13 @@ camctl 的 16 个组件集成目录已完成逐项计时：**10,018 项，其中
 | [按测试函数汇总](verification-data/2026-10-25-integration-timing/camctl-functions.csv) | 将同一函数的参数实例聚合，保留数量、结果与各阶段耗时。 |
 | [按测试文件汇总](verification-data/2026-10-25-integration-timing/camctl-files.csv) | 按模块聚合，便于定位重复准备所在文件。 |
 | [运行元数据](verification-data/2026-10-25-integration-timing/measurement.json) | 环境、实际 UTC、逐目录命令、退出码、墙钟时间与 CSV 摘要。 |
+| [本轮计时采集器](verification-data/2026-10-25-integration-timing/timing_plugin.py) | 原样保存的 pytest 观测插件，便于在新环境复核采集口径。 |
+| [跨组件逐项耗时](verification-data/2026-10-25-integration-timing/cross-component-cases.csv) | 根 pytest 258 项与 Node 118 项的有效结果；`measurement_attempt` 指明首轮或纠偏组。 |
+| [跨组件函数汇总](verification-data/2026-10-25-integration-timing/cross-component-functions.csv)及[文件汇总](verification-data/2026-10-25-integration-timing/cross-component-files.csv) | 对有效逐项记录聚合，Node 不提供阶段耗时。 |
+| [跨组件运行元数据](verification-data/2026-10-25-integration-timing/cross-component-measurement.json) | 首轮回执、两组纠偏回执与对应实例、采集器摘要。 |
+| [首轮跨组件记录](verification-data/2026-10-25-integration-timing/cross-component-first-pass-cases.csv) | 保留替换前的完整记录，不作为最终失败清单。 |
+| [342 个子检查](verification-data/2026-10-25-integration-timing/cross-component-subchecks.csv) | 以父 nodeid 和执行序号保存；其耗时已包含在父 call 中，不能再次累加。采集器未记录子检查的上下文标签。 |
+| [总览](verification-data/2026-10-25-integration-timing/overall-summary.json)及[最终失败清单](verification-data/2026-10-25-integration-timing/failed-cases.csv) | 全范围有效数量、首轮耗时、纠偏说明与 38 个失败实例。 |
 | [native 单例诊断](verification-data/2026-10-25-integration-timing/native-diagnostic.json)及[调用栈采样](verification-data/2026-10-25-integration-timing/native-profile.json) | 独立工作区并行执行的补充诊断，不计入串行基线的数量与耗时。 |
 
 环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1，使用 `apps/camctl/.venv311/bin/python`。实际执行日期以元数据中的 UTC 时间为准。每个目录独立启动一次 pytest，命令形态如下，具体目标与环境变量见元数据：
@@ -25,11 +36,21 @@ apps/camctl/.venv311/bin/python -m pytest \
 
 同一工作区只有一个集成 pytest 进程，遵守[组件测试隔离要求](../../apps/camctl/tests/AGENTS.md#运行边界与结果记录)。参数实例只测量一次，这些数字不是多轮中位数。
 
-`total_s` 为 pytest 的 setup、call、teardown 之和。模块级或 session 级 fixture 的成本计入首次／末次消费者；测试函数或辅助函数内部的建库、拍摄准备及报告生成计入 call，不能把 call 全部解释为目标业务操作耗时。目录墙钟还包含启动与收集，全部实例的阶段耗时合计为 4,786.297 秒。失败只测量到实际失败位置；跳过原因保留在 CSV 中。
+在新环境重新采集单个目录时，使用[隔离配置的采集器](verification-data/2026-10-25-integration-timing/timing_plugin_isolated.py)。它在 pytest 配置阶段消费并移除两个计时环境变量，后续子进程不会继承它们。例如，从仓库根目录执行以下命令会把 acceptance 的新证据写入独立目录；该命令仅用于后续复现，本轮没有因此重复运行已完成的组件目录。
+
+```sh
+PYTHONPATH="$PWD/docs/camctl/verification-data/2026-10-25-integration-timing:$PWD/apps/camctl/src" \
+  CAMCTL_TIMING_REPO="$PWD" \
+  CAMCTL_TIMING_DATA="$PWD/.local/verification/integration-timing-rerun/acceptance" \
+  apps/camctl/.venv311/bin/python -m pytest \
+  apps/camctl/tests/integration/acceptance -q --durations=0 -p timing_plugin_isolated
+```
+
+`total_s` 为 pytest 的 setup、call、teardown 之和。模块级或 session 级 fixture 的成本计入首次／末次消费者；测试函数或辅助函数内部的建库、拍摄准备及报告生成计入 call，不能把 call 全部解释为目标业务操作耗时。目录墙钟还包含启动与收集，camctl 全部实例的阶段耗时合计为 4,786.297 秒。耗时采用 pytest／单调时钟读数，UTC 用于定位执行区间，不替换单调耗时。失败只测量到实际失败位置；跳过原因保留在 CSV 中。
 
 完整命令回执、phase 事件、fixture 计时及原始输出位于本地 `.local/verification/integration-timing-20261024T181943Z/`，目录名使用本轮实际 UTC。
 
-## 目录结果
+## camctl 组件目录结果
 
 | 目录 | 项数 | 通过 | 失败 | 跳过 | 墙钟秒数 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -50,6 +71,56 @@ apps/camctl/.venv311/bin/python -m pytest \
 | scheduling | 136 | 136 | 0 | 0 | 6.446 |
 | session | 194 | 194 | 0 | 0 | 9.593 |
 | **合计** | **10,018** | **9,999** | **16** | **3** | **4,814.507** |
+
+## 跨组件结果与采集纠偏
+
+| 范围 | 主实例 | 通过 | 失败 | 跳过 |
+| --- | ---: | ---: | ---: | ---: |
+| 根 pytest，有效补测已覆盖 | 258 | 234 | 22 | 2 |
+| 根 Node，4 个文件 | 118 | 118 | 0 | 0 |
+| **跨组件合计** | **376** | **352** | **22** | **2** |
+
+根 pytest 首轮完整进程为 3,954.429 秒，Node 为 4.479 秒。Node 的 JUnit 每项提供文件名与总耗时，阶段列为空；标识已统一为仓库相对文件名加测试名称。342 个嵌套子检查全部通过，已包含于父测试，不加入主实例数量或耗时总和。
+
+首轮 OSMO 普通／原生延时模块的四项在 `_assert_runtime_paths_external` 提前失败。采集命令设置的 `CAMCTL_TIMING_REPO`、`CAMCTL_TIMING_DATA` 与 `UV_PROJECT_ENVIRONMENT` 含仓库路径，而测试构造的安装环境会保留这些变量，再要求所有环境值均不含仓库路径。因此这四项没有执行 init、describe 或 capture，不能作为业务失败或有效业务耗时。
+
+纠偏只调整采集环境：插件消费并移除自身配置，启动环境不再设置不需要的两个 UV 变量，原测试及外部路径断言保持。原工作区补测 describe 与普通录像；独立 worktree 补测两个原生延时实例，临时根均位于仓库外。两组各约 96 秒，四项全部通过，未重跑其余范围。最终 CSV 取这四项的补测数据；元数据同时保留首轮与补测回执。补测重建了各组共享准备，不能将有效实例耗时之和解释为首轮连续进程的纯性能基准。
+
+### 跨组件主要成本
+
+| 函数组 | 实例 | 本轮有效成本 | 覆盖判断 |
+| --- | ---: | ---: | --- |
+| Hasselblad 正常安装链 | 12 | 868.281 秒 | 三快门 × 两格式 × 两来源。可选择日常代表组合，发布保留完整矩阵。 |
+| OSMO 分段来源与交付链 | 8 | 810.921 秒 | 正常多段、异常多录、少文件、缺段、空段、未知顺序及原生空尾／恢复等业务事实不同，保留各场景。优先在隔离资源后按场景分组并行。 |
+| Action6 普通分段恢复矩阵 | 6 | 556.239 秒 | 不同同步点与原始事实恢复不能按名称相似删除。其中一个实例在后续检查副本回收阶段失败。 |
+| C 模块拍摄／取回／清理链 | 1 | 183.344 秒，失败 | 已有过期与失败终态，仍等待六动作全成功，适合增加明确的提前失败信号。 |
+| Hasselblad 已保存 START 的恢复 | 2 | 132.240 秒 | 保留两个来源的真实停止旧组与恢复路径。 |
+| Hasselblad 完整提交回执丢失 | 2 | 124.554 秒 | 保留真实 COMMIT 与重新核实，不由普通成功用例代替。 |
+
+### 可选的日常 Hasselblad 组合
+
+如果日常回归接受只覆盖所有两两因素组合，可从 12 个正常世界保留以下 6 个；发布仍运行全部 12 个。此安排尚未实施。
+
+| 快门 | 日常保留的格式与来源 |
+| --- | --- |
+| `0.000667` | `jpeg-host`、`raw-device` |
+| `0.000333` | `raw-host`、`jpeg-device` |
+| `0.00025` | `jpeg-host`、`raw-device` |
+
+这六项让每个快门都搭配两种格式和两种来源，四种格式／来源组合也都出现。另一半六项本轮合计 431.331 秒，即约 7.2 分钟。它们分别是 `0.000667` 的 raw-host／jpeg-device、`0.000333` 的 raw-device／jpeg-host、`0.00025` 的 raw-host／jpeg-device；省略后不再逐一验证这些三因素交叉组合，不能称作完整矩阵等价。恢复、历史损坏、报告重建与网页预设等独立故障和入口继续保留。
+
+有限参数校验链使用浏览器共享模块及安装版 submit，不执行真实产品网页完整流程或设备工具 argv；它不能单独替代安装链的网页导出与精确快门调用证据。
+
+### 提前失败与失效夹具
+
+两项长失败确认存在可观察的负向信号：
+
+- Action6 的 `reached-copy-progress` 实例耗时 244.282 秒。门闩、恢复报告、两个等待消费者、文件领取及客户端导入已经完成，随后等检查输入副本回收超过 180 秒。三行仍处于原保留／清理状态，CLI 已记录 `state_db_error` 及原内部读取结束的归属证明缺失。等待应识别对应 run 的错误及业务状态，及时保存诊断，继续保留成功回收断言。
+- C 模块链耗时 183.344 秒。run 子进程退出 0，但录像和延时已过期、延时取回已失败，报告已经发布；等待只要求六动作全成功，仍耗尽 180 秒。应在指定动作出现不相容终态时提前失败，不能只检查进程退出码，也不能把任意正常结束的 run 当作错误。
+
+两条路径使用的 `wait_for` 只检查成功谓词；改进应定位本请求／本 run 的状态与日志，不缩短合法成功路径的等待预算。该优化减少失败诊断的无效等待，不删除业务覆盖。
+
+清理模块的 9 个 OSMO 场景本轮在提交阶段因夹具任务工厂不接受 `result_mode` 而失败，尚未到 START，更没有执行 STOP 后的真实 30 秒等待。应先同步夹具与实际工厂接口并保留所有清理断言，再评估共享来源快照。本轮不能把 8 次重复等待的理论 240 秒列为实际收益；若后续共享完整来源，须保持每例独立数据库／文件／客户端状态、进程收场与证据归档。
 
 ## 日常回归可单独安排的四项资源门槛
 
@@ -139,7 +210,7 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 
 ## 失败与跳过
 
-这 16 项失败都已保留在统计中。没有因为失败或耗时而移除它们；本轮也没有据失败位置推断新容器是根因。
+最终 38 个失败实例均保留在[失败清单](verification-data/2026-10-25-integration-timing/failed-cases.csv)中，没有因为失败或耗时而移除；本轮也没有据失败位置推断新容器是根因。camctl 的 16 项分布如下：
 
 | 文件 | 数量 | 失败范围 |
 | --- | ---: | --- |
@@ -149,7 +220,23 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 | `capture/test_action6_budget_cold_recovery.py` | 1 | `test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy`；实际读取偏移 `[0, 0]`，预期 `[0]`。此前已有干净基线复现，见[环境恢复验证记录](verification.md#测试准备与等待矩阵提速)。 |
 | `devices/test_adb_camera_registration.py` | 2 | `test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6/dji-osmo360-ii]`；本轮未做新的干净源码对照，归因待核对。 |
 
-三项跳过分别是 Windows 大小写别名核对、主机来源不携带读取配置的无效参数组合、内部副本不执行普通 delivery 发布的无效参数组合。准确 nodeid 与原原因均在逐项 CSV 中。
+根目录的 22 项有效失败分布如下；已纠偏通过的四项 OSMO 外部环境断言不在此表内。
+
+| 文件 | 数量 |
+| --- | ---: |
+| `test_device_file_cleanup_roundtrip.py` | 9 |
+| `test_device_capability_declarations.py` | 2 |
+| `test_camctl_process_recovery.py` | 2 |
+| `test_timelapse_time_parameters.py` | 2 |
+| `test_action6_segmented_recovery_roundtrip.py` | 1 |
+| `test_camctl_c_module_roundtrip.py` | 1 |
+| `test_camctl_media_roundtrip.py` | 1 |
+| `test_camctl_output_roundtrip.py` | 1 |
+| `test_camctl_session_recovery.py` | 1 |
+| `test_camctl_cancellation_roundtrip.py` | 1 |
+| `test_hasselblad_photo_parameters.py` | 1 |
+
+camctl 三项跳过分别是 Windows 大小写别名核对、主机来源不携带读取配置的无效参数组合、内部副本不执行普通 delivery 发布的无效参数组合；根目录另有两项 Windows 句柄交接测试按平台跳过。准确 nodeid 与原原因均在逐项 CSV 中。
 
 ## 后续安排
 
@@ -159,13 +246,14 @@ history 大规模测试执行中进行了 15 秒、20 Hz 的非阻塞采样，�
 
 按本轮串行成本，可先研究四组负载：history 一组约 24.8 分钟；persistence、reporting、acceptance 合为一组约 20.5 分钟；bootstrap 与 outputs 一组约 21.1 分钟；capture、cancellation 及其余目录一组约 13.8 分钟。这是排程估算，尚未测得并行墙钟，实际收益还受 CPU、工具进程及剩余共享资源影响。根目录跨组件也应按模块及共享准备边界拆组，不能把整层固定在同一个长进程里。
 
-本轮 camctl 数据已完成后才调整并行安排：正在进行的根目录序列继续保留，native 单例诊断已在独立 worktree 中并行完成。诊断结果单独记录，不并入已完成的串行计时基线。本次隔离了 worktree 资源同步路径、pytest 临时目录和计时输出，共享解释器及 uv 工具缓存；下一轮分组仍须核对这些缓存与其他资源的实际读写边界，再扩大并发。
+本轮组件首测按目录串行，根目录首测也用了一个完整 pytest 进程。后续 native 诊断与根目录序列在独立 worktree 中并行完成；四项 OSMO 纠偏又由两个隔离组并行完成。补充测量的结果单独记录，未并入首轮连续进程耗时。本次隔离了 worktree 资源同步路径、pytest 临时目录和计时输出，共享解释器及 uv 工具缓存；下一轮分组仍须核对这些缓存与其他资源的实际读写边界，再扩大并发。
 
 ### 建议顺序
 
-1. 完成正在运行的根目录跨组件 pytest 与 4 个 Node 文件，将实际结果补入本报告；camctl 及单例诊断已经保存，不重跑已完成范围。
-2. 若实施提速，先建立四项资源门槛的显式执行入口及发布执行责任，再调整日常回归选择。该步只能缩短日常回归，不能宣称完整验收成本消失。
+1. 下一轮全量先建立隔离工作区与测试组，按上文估算均衡负载；根目录按模块／场景和共享准备拆组，保留每目录独立进程。当前测量及纠偏已完成，不为排程验证重跑整轮。
+2. 建立四项资源门槛的显式执行入口及发布执行责任，再调整日常回归选择。该步只能缩短日常回归，不能宣称完整验收成本消失。Hasselblad 六项日常组合是另一个明确降低交叉覆盖的可选项，发布仍保留 12 项。
 3. 优先实施两个 220 成员快照用例与两个缺段报告用例的准备合并，再处理取消拒绝矩阵和安装版能力导出复用。每项先保留原断言并测量受影响文件，之后按实际变更范围运行目录门禁。
-4. 根据 native 单例采样，审计结果页证明在事务与结果分类中的重复次数和可复用边界。真实大批次测试的只读数据库基线复制仍属于候选方案，取决于准备成本占比，以及是否仍能保持原提交、重开与恢复边界。
+4. 修正明确失效的夹具接口，并让成功谓词等待同时识别对应请求的错误终态或执行错误，缩短失败诊断时间；不通过删除失败用例或缩短合法等待预算处理。
+5. 根据 native 单例采样，审计结果页证明在事务与结果分类中的重复次数和可复用边界。真实大批次测试的只读数据库基线复制仍属于候选方案，取决于准备成本占比，以及是否仍能保持原提交、重开与恢复边界。
 
-上述步骤是后续建议，尚未改动测试组织或实现。行为验收继续遵守[测试规则](../../.agents/rules/testing.md)及对应目录的运行指南。
+上述步骤是后续建议，尚未改变项目默认门禁或生产实现。行为验收继续遵守[测试规则](../../.agents/rules/testing.md)及对应目录的运行指南。

@@ -1,0 +1,42 @@
+{
+  "source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+  "scope": "16 camctl integration directories; root pytest; four root Node test files",
+  "case_count": 10394,
+  "subchecks_passed": 342,
+  "native_diagnostic_excluded": true,
+  "scope_metadata": [
+    "measurement.json",
+    "cross-component-measurement.json"
+  ],
+  "notes": [
+    "Directory wall sums and full-run elapsed are different: the latter includes export and inter-stage overhead.",
+    "Sources/tests/protocol were unchanged during collection; intervening commits contain report data/documentation only.",
+    "Effective results use a four-case correction for observer environment interference; first-pass time and results are retained as first-pass records.",
+    "Per-command elapsed seconds use monotonic clocks; UTC spans are retained separately and do not replace those timings."
+  ],
+  "first_pass_outcomes": {
+    "passed": 10347,
+    "failed": 42,
+    "skipped": 5
+  },
+  "outcomes": {
+    "passed": 10351,
+    "failed": 38,
+    "skipped": 5
+  },
+  "first_pass_suite_wall_seconds": 8773.415051264998,
+  "correction_cases": 4,
+  "correction_parallel_group_wall_seconds": [
+    95.49673504400198,
+    95.98795194400009
+  ],
+  "valid_case_phase_seconds": 8932.326590568484,
+  "first_pass_started_utc": "2026-10-24T18:22:40.969501+00:00",
+  "first_pass_finished_utc": "2026-10-24T20:52:52.937575+00:00",
+  "first_pass_runner_utc_span_seconds": 9011.968074,
+  "effective_results_finished_utc": "2026-10-24T21:07:07.127060+00:00",
+  "failed_cases_file": {
+    "file": "failed-cases.csv",
+    "sha256": "0068095f856ae527c4dc668a152817f547a09cb8cbe16d86e6381ccc2535592f"
+  }
+}

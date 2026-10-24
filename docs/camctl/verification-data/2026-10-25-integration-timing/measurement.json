@@ -687,5 +687,10 @@
       "bytes": 3267084,
       "sha256": "403fe28c03990bf4bdf9b39fe5f5f52f2aafe9625ec66cf63a6983ddd0762519"
     }
+  },
+  "collector": {
+    "file": "timing_plugin.py",
+    "sha256": "1263a9f5c1edf9635695aa2429032f944d412e8d75c10bf0b6c47bb9a0751265",
+    "purpose": "Archived observational pytest plugin used for this run; scope and output are controlled by CAMCTL_TIMING_REPO and CAMCTL_TIMING_DATA."
   }
 }
