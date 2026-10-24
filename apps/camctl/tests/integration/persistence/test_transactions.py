@@ -274,6 +274,10 @@ class RecordingFailureConnection:
         self._after_failures = dict(after_failures or {})
         self.statements: list[str] = []
 
+    @property
+    def in_transaction(self) -> bool:
+        return self._connection.in_transaction
+
     def execute(self, sql, parameters=()):
         self.statements.append(sql)
         error = self._failures.pop(sql, None)
