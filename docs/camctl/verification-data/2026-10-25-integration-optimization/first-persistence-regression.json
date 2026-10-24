@@ -1,0 +1,312 @@
+{
+  "source_commit": "50776385",
+  "task": "camctl/persistence",
+  "failed_cases": [
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0020632619998650625
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 119.4661504249998
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.001343427000392694
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 119.46955711400005
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[command]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001836409999668831
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.026934133002214367
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0003426750008657109
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.02911321800274891
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[complete_result]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0017416800001228694
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.0229804860027798
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0005368819984141737
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.02525904800131684
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[command]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0020383749979373533
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.02025974100251915
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0004647999994631391
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.022762915999919642
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[complete_result]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001667230997554725
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.016354555998987053
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0003042999996978324
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.01832608699623961
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[False]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0012417610014381353
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.01678845599963097
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0004261860012775287
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.018456403002346633
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[True]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0012833900000259746
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.02195518699954846
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.00046497899893438444
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.02370355599850882
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[sqlite-error]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0012206220017105807
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.019135534999804804
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0005080379996798001
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.020864195001195185
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[control]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001786347998859128
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.034777880002366146
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0003003209967573639
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.03686454899798264
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_preserves_operation_error_and_is_not_retried",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0012516349997895304
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.018602721000206657
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.000390716999390861
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.020245072999387048
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_does_not_replace_earlier_control",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0016025789991545025
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.01758424699801253
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0004048349983349908
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.019591660995502025
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_ordinary_operation_and_rollback_errors_keep_ordered_group",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0011694470013026148
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.015497566997510148
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0023930490024213213
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.019060063001234084
+    }
+  ],
+  "growth_observations": [
+    {
+      "N": 20,
+      "B": 4,
+      "write_peak": 744583,
+      "verify_peak": 272054,
+      "cache_size": -2000,
+      "lookup_vm_steps": 23,
+      "lookup_rows": 1,
+      "lookup_plan": [
+        "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+      ],
+      "max_fetch": 20,
+      "fetched_rows": 13441,
+      "sql_calls": 12417,
+      "whole_group_checks": 2
+    },
+    {
+      "N": 200,
+      "B": 4,
+      "write_peak": 2164021,
+      "verify_peak": 1499840,
+      "cache_size": -2000,
+      "lookup_vm_steps": 23,
+      "lookup_rows": 1,
+      "lookup_plan": [
+        "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+      ],
+      "max_fetch": 128,
+      "fetched_rows": 147114,
+      "sql_calls": 120461,
+      "whole_group_checks": 2
+    },
+    {
+      "N": 400,
+      "B": 4,
+      "write_peak": 2750748,
+      "verify_peak": 2469934,
+      "cache_size": -2000,
+      "lookup_vm_steps": 23,
+      "lookup_rows": 1,
+      "lookup_plan": [
+        "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+      ],
+      "max_fetch": 128,
+      "fetched_rows": 326904,
+      "sql_calls": 256521,
+      "whole_group_checks": 2
+    }
+  ],
+  "violated_assertions": [
+    "N400.write_peak < N200.write_peak + 400000",
+    "N400.verify_peak < N200.verify_peak + 400000 (not reached after first failure, also contradicted by observations)"
+  ],
+  "interface_failure": "11 existing fault-connection cases lack in_transaction delegation; fixed separately in afd564c0",
+  "first_attempt_retained": true,
+  "partial_run_note": "other full tasks are still running; this task completed with 12 failed and 922 passed",
+  "investigation_hypothesis": "page record residency; still under investigation",
+  "two_page_probe": {
+    "outcome": "failed",
+    "call_seconds": 147.93,
+    "sizes": [
+      20,
+      200,
+      400
+    ],
+    "write_peaks": [
+      752504,
+      2106507,
+      2677033
+    ],
+    "verify_peaks": [
+      269212,
+      1506344,
+      2436084
+    ],
+    "observation": "SQL/fetched_rows/whole_group_checks match the three-page attempt per size; reducing entries alone does not resolve peak growth"
+  }
+}
