@@ -147,8 +147,7 @@ def _obtain(owned, runtime, source_id, mode, request_id):
     return action_id, selection
 
 
-@pytest.mark.parametrize("mode", ["default", "preview", "explicit"])
-async def test_default_scope_and_explicit_ids_select_independently(tmp_path, mode):
+async def test_default_scope_and_explicit_ids_select_independently(tmp_path):
     owned, runtime, aid = await _source(tmp_path)
     try:
         originals = [
@@ -163,43 +162,62 @@ async def test_default_scope_and_explicit_ids_select_independently(tmp_path, mod
                 "SELECT id FROM outputs WHERE kind=3 ORDER BY id"
             )
         ]
-        action, selection = _obtain(
-            owned, runtime, aid, originals[3:5] if mode == "explicit" else mode, 2
+        scenarios = (
+            ("default", "default", 2, originals[:3]),
+            ("preview", "preview", 3, previews[:3]),
+            ("explicit", originals[3:5], 4, originals[3:5]),
         )
-        request = FixSegmentSelection(selection, runtime.wall_us())
-        key = new_operation_key()
-        receipt = fix_segment_selection(request, key, owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        expected = (
-            originals[3:5]
-            if mode == "explicit"
-            else previews[:3]
-            if mode == "preview"
-            else originals[:3]
-        )
-        actual = [
-            row[0]
-            for row in owned.connection.execute(
-                "SELECT output_id FROM obtain_items WHERE selection_id=? ORDER BY id",
-                (selection,),
+        action_ids = []
+        selection_items = {}
+        operation_keys = set()
+        for label, mode, request_id, expected in scenarios:
+            action, selection = _obtain(owned, runtime, aid, mode, request_id)
+            action_ids.append(action)
+            request = FixSegmentSelection(selection, runtime.wall_us())
+            key = new_operation_key()
+            assert key not in operation_keys, label
+            operation_keys.add(key)
+            receipt = fix_segment_selection(request, key, owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            actual = [
+                row[0]
+                for row in owned.connection.execute(
+                    "SELECT output_id FROM obtain_items WHERE selection_id=? ORDER BY id",
+                    (selection,),
+                )
+            ]
+            assert actual == expected, label
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM outputs"
+            ).fetchone() == (12,)
+            before = owned.connection.execute(
+                "SELECT COUNT(*) FROM history_events"
+            ).fetchone()
+            again = fix_segment_selection(request, key, owned)
+            assert again.kind is DbOutcomeKind.COMPLETED, again.error
+            assert (
+                owned.connection.execute(
+                    "SELECT COUNT(*) FROM history_events"
+                ).fetchone()
+                == before
             )
-        ]
-        assert actual == expected
-        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
-            12,
-        )
-        before = owned.connection.execute(
-            "SELECT COUNT(*) FROM history_events"
-        ).fetchone()
-        again = fix_segment_selection(request, key, owned)
-        assert again.kind is DbOutcomeKind.COMPLETED, again.error
-        assert (
-            owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
-            == before
-        )
-        assert owned.connection.execute(
-            "SELECT COUNT(*) FROM deliveries"
-        ).fetchone() == (0,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM deliveries"
+            ).fetchone() == (0,)
+            selection_items[selection] = expected
+            for fixed_selection, fixed_items in selection_items.items():
+                actual_fixed_items = [
+                    row[0]
+                    for row in owned.connection.execute(
+                        "SELECT output_id FROM obtain_items WHERE selection_id=?"
+                        " ORDER BY id",
+                        (fixed_selection,),
+                    )
+                ]
+                assert actual_fixed_items == fixed_items
+        assert len(set(action_ids)) == len(scenarios)
+        assert len(selection_items) == len(scenarios)
+        assert len(operation_keys) == len(scenarios)
     finally:
         owned.connection.close()
 
@@ -289,10 +307,7 @@ async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_p
         owned.connection.close()
 
 
-@pytest.mark.parametrize("scope", ["group", "plan"])
-async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
-    tmp_path, scope
-):
+async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(tmp_path):
     from camctl.devices.directory import DirectoryRead
     from camctl.operations.attempts import RetryWaitGate
     from camctl.operations.models import ErrorValue
@@ -315,10 +330,15 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
     owned, runtime, aid = await _source(tmp_path, pending_capture_group="同组分段")
     try:
         plan_id = runtime.action(aid)["plan_id"]
-        source = {"plan_instance_id": str(plan_id)}
-        if scope == "group":
-            source["group"] = "同组分段"
-        action, _ = _obtain(owned, runtime, source, "default", 2)
+        scenarios = []
+        for request_id, scope in ((2, "group"), (3, "plan")):
+            source = {"plan_instance_id": str(plan_id)}
+            if scope == "group":
+                source["group"] = "同组分段"
+            action, selection = _obtain(
+                owned, runtime, source, "default", request_id
+            )
+            scenarios.append((scope, action, selection))
         obtain = ObtainRuntime(
             owned,
             {},
@@ -333,11 +353,14 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
             OperationRepository(),
         )
         _fix_pending_selections(obtain, runtime.wall_us())
-        facts = load_obtain_facts(owned.connection, action)
-        assert facts.waiting_sources == 1 and facts.total == 3
-        assert decide_obtain_finish(facts).phase is ObtainPhase.WAIT_SOURCES
-        await _publish_and_finish(obtain, action, runtime.wall_us(), publish_limit=1)
-        assert row_facts(owned.connection, "actions", action)["status"] == 2
+        for scope, action, _ in scenarios:
+            facts = load_obtain_facts(owned.connection, action)
+            assert facts.waiting_sources == 1 and facts.total == 3, scope
+            assert decide_obtain_finish(facts).phase is ObtainPhase.WAIT_SOURCES, scope
+            await _publish_and_finish(
+                obtain, action, runtime.wall_us(), publish_limit=1
+            )
+            assert row_facts(owned.connection, "actions", action)["status"] == 2
         pending = aid + 1
         now = runtime.wall_us()
         scheduling = SchedulingRepository()
@@ -364,19 +387,40 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
         await capture_handler("camera_record")(pending, runtime)
         obtain.discovery.begin_round(owned.connection, now)
         _fix_pending_selections(obtain, now)
-        facts = load_obtain_facts(owned.connection, action)
-        assert (
-            facts.waiting_sources == 0
-            and facts.total == 3
-            and facts.failed_sources == 1
-        )
-        assert decide_obtain_finish(facts).phase is ObtainPhase.WAIT_PREPARATION
+        for scope, action, selection in scenarios:
+            facts = load_obtain_facts(owned.connection, action)
+            assert (
+                facts.waiting_sources == 0
+                and facts.total == 3
+                and facts.failed_sources == 1
+            ), scope
+            assert (
+                decide_obtain_finish(facts).phase is ObtainPhase.WAIT_PREPARATION
+            ), scope
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?",
+                (selection,),
+            ).fetchone() == (3,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM obtain_items i"
+                " JOIN obtain_source_selections s ON s.id=i.selection_id"
+                " JOIN action_dependencies dep ON dep.id=s.dependency_id"
+                " WHERE dep.action_id=?",
+                (action,),
+            ).fetchone() == (3,)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM deliveries d JOIN obtain_items i"
+                " ON i.delivery_id=d.id JOIN obtain_source_selections s"
+                " ON s.id=i.selection_id JOIN action_dependencies dep"
+                " ON dep.id=s.dependency_id WHERE dep.action_id=?",
+                (action,),
+            ).fetchone() == (0,)
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM obtain_items"
+        ).fetchone() == (6,)
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM deliveries"
         ).fetchone() == (0,)
-        assert owned.connection.execute(
-            "SELECT COUNT(*) FROM obtain_items"
-        ).fetchone() == (3,)
     finally:
         owned.connection.close()
 
