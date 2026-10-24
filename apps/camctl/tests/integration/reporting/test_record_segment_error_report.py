@@ -76,12 +76,13 @@ async def test_expired_prepared_source_without_segment_set_reports_selection_fai
         owned.connection.close()
 
 
-async def test_gap_report_preserves_retained_outputs_and_default_prefix(tmp_path):
+async def test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup(tmp_path):
     owned, runtime, aid = await _source(tmp_path, (7, 8, 10))
     try:
         report = _freeze(owned)
-        generated = generate_report_file(_spec(tmp_path, report))
-        doc = json.loads(generated.path.read_bytes())
+        original = generate_report_file(_spec(tmp_path, report))
+        before = original.path.read_bytes()
+        doc = json.loads(before)
         validate_public_json("", doc)
         action = doc["plans"][0]["actions"][0]
         details = action["error"]["details"]
@@ -100,16 +101,7 @@ async def test_gap_report_preserves_retained_outputs_and_default_prefix(tmp_path
         assert gap["right"]["output_id"] == details["retained_output_ids"][2]
         assert details["first_gap"] == gap
         assert "output_id" not in gap and "deliveries" not in action
-    finally:
-        owned.connection.close()
-
-
-async def test_segment_report_rebuilds_identical_bytes_after_cleanup(tmp_path):
-    owned, runtime, aid = await _source(tmp_path, (7, 8, 10))
-    try:
-        report = _freeze(owned)
-        original = generate_report_file(_spec(tmp_path, report))
-        before = original.path.read_bytes()
+        # 当前文件事实及取回选择改变后，仍按原冻结依据重建同一报告。
         output_id, file_id = owned.connection.execute(
             "SELECT id,device_file_id FROM outputs WHERE kind=1 ORDER BY id LIMIT 1"
         ).fetchone()
