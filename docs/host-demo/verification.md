@@ -4,6 +4,14 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## 开发容器重建后的组件与安装版验证（2026-10-24 UTC）
+
+本次环境为 Ubuntu 24.04.5 x86_64、GCC 13.3.0、CMake 3.28.3、Python 3.11.17 和 SQLite 3.53.1。独立工作树 `.local/worktrees/host-refresh-20261025/` 在 `fdcdc92` 完成 Debug 构建及完整 CTest：35/35 通过，其中 13 个单元入口、22 个集成入口，退出 0，83.39 秒。交付集成入口同时核对源码包内容、解包后构建、安装目录、独立链接消费者与文档链接。Release 构建、安装及源码包生成均退出 0；完整命令和输出保存在该工作树的 `.local/host-refresh-verify/logs/`。
+
+真实安装 wheel 与 Release host 进一步在各自新目录完成两条无设备检查。正向场景经 `init`、host 递交唯一的完整状态报告动作、CLI 发布和 host 领取，确认计划及动作完成，`processing` 报告的文件名摘要和全部原始字节一致。负向场景只准备交接目录，配置指向不存在的状态库；CLI 以 `state_db_error`、退出 1 结束，host 直接发布完整独立诊断，库文件仍不存在。该诊断为 1606 字节，stdout 实际读取及保存量均为 432，stderr 均为 0，没有截断或读取错误；分类、退出信息、调用上下文及两段原始字节均经解析核对。
+
+两场景的 CLI 子进程均由 host 回收后，才向本次 host PID 发送 SIGTERM，host 结果为 -15，编排检查退出 0。命令、配置、进程收场、报告与诊断证据保存在 `.local/verification/installed-host-smoke-20261025/` 的两个独立运行目录。手工验证库与旧归档保留，没有连接真实设备。当前 Release 二进制为 x86_64，目标 ARM64 使用同次源码包在目标环境另行构建与验收；统一交付进度见[接续计划](../superpowers/plans/2026-10-25-environment-test-speed-delivery.md)。
+
 ## host 子进程失败诊断交付验证（2026-10-23 UTC）
 
 本次在 Linux x86_64、Ubuntu 24.04.4、GCC 13.3.0、glibc 2.39、CMake 3.28.3 和 CPython 3.11.16 中，验证 host 对失败 camctl 调用的输出捕获、直接发布至 `processing` 和初始化失败清理。构建目录位于独立 worktree `/workspaces/camctl/.local/worktrees/host-exit-log-20261024`，所有相对命令均从该 worktree 根目录运行；没有连接真实 camctl 部署环境或 ADB。
