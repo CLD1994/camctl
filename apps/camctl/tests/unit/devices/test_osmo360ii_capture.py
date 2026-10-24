@@ -62,7 +62,7 @@ def test_formal_osmo_tasks_explain_requests_readback_estimate_and_actual_cancel_
 def test_record_task_requires_one_nonzero_osv_and_independent_stop_wait():
     task = _contract().task_factories["osmo360ii_record"]({"duration_s": 12})
     assert task.target_duration_s == 12 and task.stop_supported is True
-    assert task.file_completion_wait_s == Decimal("30")
+    assert task.file_completion_wait_s == Decimal("3")
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     assert task.ownership_mode == 2
     assert task.product_rules == ({"kind": "video", "format_id": "osv", "min_count": 1,
@@ -75,7 +75,8 @@ def test_timelapse_task_freezes_natural_wait_and_finite_cancel_policy():
     assert task.end_control is EndControl.DEVICE and task.start_return_meaning is StartReturn.SENT
     assert task.completion_mode is CompletionMode.TIME_AND_OUTPUTS
     assert task.duration_based is True and task.wait_after_send is True
-    assert task.file_completion_wait_s == task.result_wait_margin_s == Decimal("30")
+    assert task.file_completion_wait_s == Decimal("3")
+    assert task.result_wait_margin_s == Decimal("30")
     assert task.cancel_completion_policy == "finite_device_end"
     assert task.product_rules == ({"kind": "video", "format_id": "osv", "min_count": 1,
         "exact_count": None, "require_pairing": False, "min_size_bytes": 1},)
@@ -191,6 +192,7 @@ def test_new_osmo_task_freezes_startup_margin_and_original_user_duration(kind, m
     assert spec['startup_margin_ms'] == margin_ms
     assert spec['start_return_meaning'] == 1
     assert spec['target_duration_ms'] == 300000
+    assert spec['file_completion_wait_ms'] == 3000
     if kind == 'timelapse':
         assert spec['result_wait_margin_ms'] == 30000
 

@@ -18,6 +18,9 @@ from .osmo360ii_responses import OSMO360II_OBSERVATIONS, Osmo360IIDjiInterpreter
 from .osmo360ii_results import list_osmo360ii_results
 
 
+FILE_COMPLETION_WAIT_S = Decimal("3")
+
+
 def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
     result_mode = VideoResultMode(result_mode)
     timelapse = params.get("type") == "osmo360ii_timelapse"
@@ -25,7 +28,7 @@ def _task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
         target_duration_s=params["duration_s"], stop_supported=True,
         start_return_meaning=StartReturn.SENT,
         startup_margin_ms=0,
-        file_completion_wait_s=Decimal("30"), ownership_mode=2,
+        file_completion_wait_s=FILE_COMPLETION_WAIT_S, ownership_mode=2,
         output_scope={"directories": ["/mnt/media_rw/emulated/DCIM"]},
         product_rules=({"kind": "video", "format_id": "osv", "min_count": 1,
             "exact_count": (1 if not timelapse and result_mode is VideoResultMode.SINGLE_FILE else None),
@@ -89,7 +92,7 @@ class _Osmo360IIContract(CameraContract):
                 + "相机在本会话首次拍摄准备时跳过时间设置、关闭自动休眠并选择仅充电；"
                 "本地设置命令被接受不表示已读回相机实际状态。固定设置按需执行，码率按每个动作动态设置。"
                 + (
-                    "完成判断采用正常设备运行与停止确认后固定 30 秒文件等待假设。"
+                    f"完成判断采用正常设备运行与停止确认后固定 {FILE_COMPLETION_WAIT_S} 秒文件等待假设。"
                     "普通取回按已保存范围交付整段原文件，明确产物 ID 可取回范围外原片；"
                     "运行时不测量或裁剪媒体时长，浏览器播放能力由实际格式和解码支持决定。"
                     if cap.action_type == "camera_record"

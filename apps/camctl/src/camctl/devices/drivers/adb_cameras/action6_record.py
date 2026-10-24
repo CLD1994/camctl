@@ -22,7 +22,7 @@ from .responses import (ACTION6_RECORD_OBSERVATIONS, ACTION6_TIMELAPSE_OBSERVATI
 FILE_COMPLETION_WAIT_S = Decimal("5")
 STARTUP_MARGIN_MS = 1000
 ACTION6_TIMELAPSE_RESULT_MARGIN_S = Decimal("30")
-ACTION6_TIMELAPSE_FILE_WAIT_S = Decimal("30")
+ACTION6_TIMELAPSE_FILE_WAIT_S = Decimal("3")
 ACTION6_TIMELAPSE_TASK_METADATA = CaptureTask(
     "camera_timelapse", stop_supported=True, duration_based=True, wait_after_send=True,
     end_control=EndControl.DEVICE, start_return_meaning=StartReturn.SENT,
@@ -107,7 +107,8 @@ class _Action6Contract(CameraContract):
                 "本会话首次拍摄准备时跳过时间设置、关闭自动休眠，并关闭两路屏幕实时画面；"
                 "本地设置命令被接受不表示已读回相机实际状态。"
                 + ("完成判断采用正常设备执行有限目标后自行结束的运行假设；"
-                   "目标后结果余量和提前停止后的文件等待各为 30 秒，均非实测保证。"
+                   f"目标后结果余量为 {ACTION6_TIMELAPSE_RESULT_MARGIN_S} 秒，"
+                   f"提前停止后的文件等待为 {ACTION6_TIMELAPSE_FILE_WAIT_S} 秒，均非实测保证。"
                    if cap.action_type == "camera_timelapse" else
                    "完成判断采用正常设备运行、停止确认后固定 5 秒文件等待的运行假设。"))
             for cap in super().capabilities())

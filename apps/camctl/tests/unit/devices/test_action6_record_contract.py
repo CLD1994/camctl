@@ -95,7 +95,8 @@ def test_action6_timelapse_freezes_finite_task_and_selected_nonempty_formats(
     assert task.end_control.value == 1 and task.start_return_meaning.value == 1
     assert task.completion_mode.value == 2
     assert task.startup_margin_ms == 0
-    assert task.result_wait_margin_s == task.file_completion_wait_s == Decimal("30")
+    assert task.file_completion_wait_s == Decimal("3")
+    assert task.result_wait_margin_s == Decimal("30")
     assert task.cancel_completion_policy == "finite_device_end"
     assert task.output_scope == {"directories": ["/mnt/media_rw/emulated/DCIM"]}
     expected = ({"kind": "video", "format_id": "mp4", "min_count": 1,
