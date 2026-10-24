@@ -106,7 +106,13 @@ def _init_with_capabilities(deployment: Deployment, spec: dict) -> None:
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
-    deployment.install_client_capabilities(spec)
+    initialized = deployment.install_client_capabilities(spec)
+    assert initialized["initialized"] is True
+    state = initialized["state"]
+    assert state["startup"]["state"] == "ready"
+    assert state["drafts"] == state["requests"] == state["imports"] == state["reports"] == []
+    assert state["coverage"] == 0
+    assert not any(path.is_file() for path in (deployment.root / "client-store/uploads").rglob("*"))
 
 
 def test_capture_obtain_cleanup_roundtrip_via_c_module(
@@ -314,17 +320,22 @@ def test_auto_preview_roundtrip_via_c_module(
             },
         ],
     }
-    plan_path, _ = deployment.export_plan_with_client(body)
+    plan_path, receipt = deployment.export_plan_with_client(body)
 
     demo = HostDemo(deployment, host_demo,
                     launcher=write_stub_launcher(deployment))
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"],
+        expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
+    )
     try:
         demo.start()
         demo.submit(plan_path)
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,), (3,)] or None,
-            timeout_s=180, message="拍摄与自动取回未全部成功")
+            timeout_s=180, message="拍摄与自动取回未全部成功",
+            failure=failure)
         assert query_state(state_db, "SELECT status FROM plans") == [(3,)]
         # 原片与预览分别登记；自动取回选择预览产物建立交付。
         assert query_state(
@@ -405,13 +416,18 @@ def test_late_cancel_roundtrip_via_c_module(
 
     demo = HostDemo(deployment, host_demo,
                     launcher=write_stub_launcher(deployment))
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"],
+        expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
+    )
     try:
         demo.start()
         demo.submit(plan_path)
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,), (3,)] or None,
-            timeout_s=180, message="录像与取回未全部成功")
+            timeout_s=180, message="录像与取回未全部成功",
+            failure=failure)
         report = wait_for(lambda: _report_with_statuses(
             deployment.ready,
             {"拍录": "succeeded", "取回": "succeeded"}) or None,

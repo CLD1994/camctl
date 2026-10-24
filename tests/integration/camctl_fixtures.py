@@ -206,19 +206,28 @@ class Deployment:
             "import", str(reports_dir), str(self.root / "client-store"),
             output=self.root / "client-import.json")
 
-    def install_client_capabilities(self, driver: dict) -> None:
+    def install_client_capabilities(self, driver: dict) -> dict:
         """把 camctl describe 的能力说明导入客户端存储。
 
         真实链路中客户端从部署侧取得设备能力说明；测试以 describe
-        命令与替身驱动的登记定义同源产生同一说明。
+        命令与替身驱动的登记定义同源产生同一说明，并完成客户端
+        初始化和能力读取，返回实际存储状态。
         """
         described = self.camctl(
             "describe", "--config", str(self.config_path), driver=driver)
         assert described.exit_code == 0, described.stderr
         store = self.root / "client-store"
         store.mkdir(exist_ok=True)
-        (store / "device-capabilities.json").write_text(
-            described.stdout, encoding="utf-8")
+        capabilities = store / "device-capabilities.json"
+        capabilities.write_text(described.stdout, encoding="utf-8")
+        original_bytes = capabilities.read_bytes()
+        initialized = self.run_client_driver(
+            "initialize", str(store), output=self.root / "client-initialize.json")
+        assert initialized["initialized"] is True, initialized
+        assert initialized["state"]["capabilities"]["error"] is None, initialized
+        assert initialized["state"]["capabilities"]["active"] is not None, initialized
+        assert capabilities.read_bytes() == original_bytes
+        return initialized
 
     def export_plan_with_client(self, plan_body: dict) -> tuple[Path, dict]:
         """用客户端服务的真实导出路径产生计划文件，返回路径与凭据。

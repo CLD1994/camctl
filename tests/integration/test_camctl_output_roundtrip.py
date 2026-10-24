@@ -411,8 +411,6 @@ def test_plan_cancel_before_start_settles_auto_preview(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
-    shoot_at = future_schedule(30)
-    cancel_at = future_schedule(1)
     spec = stub_driver_spec(
         {"1": [photo_file("shot-1"),
                preview_file("shot-1-preview", "shot-1")]},
@@ -420,6 +418,8 @@ def test_plan_cancel_before_start_settles_auto_preview(
                       "shot-1-preview": _PREVIEW_CONTENT},
         photo_preview_supported=True)
     deployment.install_client_capabilities(spec)
+    shoot_at = future_schedule(30)
+    cancel_at = future_schedule(1)
 
     body = {
         "request_id": "0",

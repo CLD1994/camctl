@@ -1,5 +1,6 @@
 // 客户端真实服务驱动：网页导出、服务导出、报告/媒体导入及视频估算交接。
 //
+//   client_driver.ts initialize <客户端存储目录> <输出凭据路径>
 //   client_driver.ts export <客户端存储目录> <计划正文JSON路径> <输出计划路径> <输出凭据路径>
 //   client_driver.ts import <报告目录> <客户端存储目录> <输出凭据路径>
 //   client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>
@@ -66,6 +67,20 @@ function openApp(storeDir: string) {
   const app = new Application(storeDir);
   app.store.initialize();
   return app;
+}
+
+function initializeClient(storeDir: string, receiptPath: string) {
+  const app = openApp(storeDir);
+  try {
+    const state = app.state();
+    writeFileSync(
+      receiptPath,
+      stringifyJson({ initialized: state.startup.state === "ready", state }),
+      "utf-8",
+    );
+  } finally {
+    app.store.close();
+  }
 }
 
 function exportPlan(
@@ -924,7 +939,11 @@ async function browserPhotoExport(
 }
 
 async function main() {
-  if (command === "browser-photo-export" || command === "browser-plan-export") {
+  if (command === "initialize") {
+    const [storeDir, receiptPath] = rest;
+    if (!storeDir || !receiptPath) badUsage();
+    initializeClient(storeDir, receiptPath);
+  } else if (command === "browser-photo-export" || command === "browser-plan-export") {
     const [storeDir, inputPath, planPath, receiptPath] = rest;
     if (!storeDir || !inputPath || !planPath || !receiptPath) badUsage();
     if (command === "browser-photo-export")
@@ -975,7 +994,7 @@ void main().catch((error) => {
 
 function badUsage(): never {
   console.error(
-    "用法: client_driver.ts export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
+    "用法: client_driver.ts initialize <存储目录> <凭据路径> | export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
   );
   process.exit(2);
 }

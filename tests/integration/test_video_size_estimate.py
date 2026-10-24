@@ -37,9 +37,7 @@ def _estimate(deployment, action, *, replacement=None, action_text=None):
         *arguments, output=deployment.root / "estimate-receipt.json")
 
 
-def _execute_and_import(deployment, driver, action):
-    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
-    assert initialized.exit_code == 0, initialized.stderr
+def _execute_and_import(deployment, driver, action, expected_params):
     plan, receipt = deployment.export_plan_with_client({
         "name": "估算与文件事实", "actions": [action],
     })
@@ -55,7 +53,7 @@ def _execute_and_import(deployment, driver, action):
     with closing(sqlite3.connect(deployment.state_db)) as connection:
         effective, status = connection.execute(
             "SELECT effective_params_json, status FROM actions").fetchone()
-        assert json.loads(effective) == action["params"]
+        assert json.loads(effective) == expected_params
         assert status == 3
     reports = list(deployment.ready.glob("status-report-*.json"))
     assert len(reports) == 1
@@ -63,7 +61,7 @@ def _execute_and_import(deployment, driver, action):
     assert "video_size_estimate" not in reports[0].read_text(encoding="utf-8")
     recorded = report["plans"][0]["actions"][0]
     assert recorded["status"] == "succeeded"
-    assert recorded["effective_params"] == action["params"]
+    assert recorded["effective_params"] == expected_params
     assert recorded["outputs"][0]["size"] == 8192
     imported = deployment.import_reports_with_client(deployment.ready)
     assert imported["saved_report_ids"] == [report["report_id"]]
@@ -87,7 +85,11 @@ def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
     assert result["http_estimate"] == expected
     assert result["drafts_before"] == result["drafts_after"]
     assert len(result["drafts_before"]) == 1
-    _execute_and_import(deployment, driver, action)
+    assert result["http_action"] == action
+    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    execution_action = {**action, "scheduled_at": future_schedule(3)}
+    _execute_and_import(deployment, driver, execution_action, action["params"])
 
 
 def _schema(parameter_type, properties, required):
@@ -118,7 +120,11 @@ def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path):
     expected = {"kind": "ready", "sizeBytes": 2_187_500,
                 "playbackSeconds": 0.1, "bitrateMbps": 175}
     assert result["estimate"] == result["http_estimate"] == expected
-    _execute_and_import(deployment, driver, action)
+    assert result["http_action"] == action
+    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    execution_action = {**action, "scheduled_at": future_schedule(3)}
+    _execute_and_import(deployment, driver, execution_action, action["params"])
     with closing(sqlite3.connect(deployment.state_db)) as connection:
         # 参数3秒进入执行定义；估算成片0.1秒不替换采集时长。
         execution = json.loads(connection.execute(
