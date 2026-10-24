@@ -6,6 +6,8 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+[集成测试耗时与精简评估（2026-10-25）](integration-test-timing-2026-10-25.md)保存本轮逐项计时、目录汇总、失败与跳过，以及保留覆盖前提下的执行分组和准备合并建议。逐项 CSV 与运行元数据一同纳入版本控制。
+
 ## 开发容器重建后的运行环境
 
 环境恢复、测试提速与统一交付由[接续计划](../superpowers/plans/2026-10-25-environment-test-speed-delivery.md)跟踪。恢复后的开发解释器位于 `.local/environments/dev-python311-20261025/`，`apps/camctl/.venv311` 指向该目录。旧失效环境保存在 `.local/archives/environment-20261025/venv311`。CPython 3.11.17 实际链接 SQLite 3.53.1；`uv sync --project apps/camctl --python 3.11 --group test --frozen` 使用显式的开发环境目录，依赖检查通过。运行库检查验证 STRICT、JSON、增量 BLOB 及临时文件库 WAL/FULL，退出 0。
