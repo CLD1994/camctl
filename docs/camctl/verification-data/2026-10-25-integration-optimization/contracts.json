@@ -1,0 +1,53 @@
+{
+  "scope": "apps/camctl/tests/integration/contracts",
+  "environment": {
+    "python": "3.11.17",
+    "sqlite": "3.53.1",
+    "platform": "Linux x86_64"
+  },
+  "method": "one run per revision; independent worktrees running concurrently; monotonic process wall time",
+  "source_baseline": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "coverage": "all original test instance identifiers preserved; source parse reused; each checker and synthetic violation retained",
+  "runs": {
+    "before": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/contracts",
+        "-q",
+        "--durations=15",
+        "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/contracts/before.xml"
+      ],
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "pid": 208104,
+      "exit_code": 0,
+      "wall_seconds": 14.465775087999646,
+      "commit": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "passed": 442,
+      "pytest_seconds": 14.158,
+      "log": ".local/verification/itopt/contracts/before.log",
+      "test_instances": 442
+    },
+    "after": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/contracts",
+        "-q",
+        "--durations=15",
+        "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/contracts/after.xml"
+      ],
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "pid": 208853,
+      "exit_code": 0,
+      "wall_seconds": 11.329990361002274,
+      "commit": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "passed": 442,
+      "pytest_seconds": 10.952,
+      "log": ".local/verification/itopt/contracts/after.log",
+      "test_instances": 442
+    }
+  }
+}
