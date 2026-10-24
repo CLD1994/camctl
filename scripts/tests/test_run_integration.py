@@ -263,6 +263,42 @@ class IntegrationRunnerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('../outside/test.py', result.stderr)
 
+    def test_observer_keeps_artifacts_when_product_file_operations_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_product_fault.py',
+                'import builtins\nimport os\nfrom pathlib import Path\nimport pytest\n'
+                '@pytest.mark.parametrize("fault", ["replace","path-open","path-write","builtin-open"])\n'
+                'def test_expected_product_failure(monkeypatch, tmp_path, fault):\n'
+                '    def denied(*args, **kwargs):\n        raise PermissionError("product fault")\n'
+                '    if fault == "replace":\n'
+                '        monkeypatch.setattr(os, "replace", denied)\n'
+                '        operation = lambda: os.replace(tmp_path / "a", tmp_path / "b")\n'
+                '    elif fault == "path-open":\n'
+                '        monkeypatch.setattr(Path, "open", denied)\n'
+                '        operation = lambda: (tmp_path / "a").open("w")\n'
+                '    elif fault == "path-write":\n'
+                '        monkeypatch.setattr(Path, "write_text", denied)\n'
+                '        operation = lambda: (tmp_path / "a").write_text("x")\n'
+                '    else:\n'
+                '        monkeypatch.setattr(builtins, "open", denied)\n'
+                '        operation = lambda: open(tmp_path / "a", "w")\n'
+                '    with pytest.raises(PermissionError, match="product fault"):\n        operation()\n')
+            result, output = self._run_fixture(root, source)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            task = json.loads((output / 'summary.json').read_text())['tasks'][0]
+            artifacts = Path(task['artifacts'])
+            self.assertEqual(task['progress']['outcomes'], {'passed': 4})
+            self.assertEqual(len(json.loads((artifacts / 'inventory.json').read_text())), 4)
+            cases = json.loads((artifacts / 'cases.json').read_text())
+            self.assertEqual(len(cases), 4)
+            for case in cases:
+                self.assertEqual(case['outcome'], 'passed')
+                self.assertEqual(set(case['phases']), {'setup', 'call', 'teardown'})
+            events = [json.loads(line) for line in (artifacts / 'events.jsonl').read_text().splitlines()]
+            self.assertEqual(events[-1]['status'], 'finished')
+            self.assertEqual(sum(event.get('record') == 'phase' for event in events), 12)
+
     def test_unknown_target_is_rejected_before_execution(self):
         result = subprocess.run([sys.executable, str(RUNNER), '--list', '--target',
                                  'tests/integration/does_not_exist.py'], capture_output=True, text=True)
