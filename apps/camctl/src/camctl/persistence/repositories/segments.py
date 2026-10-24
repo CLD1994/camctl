@@ -35,6 +35,7 @@ from camctl.history.events import load_event_registry, business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.history.validators import register_guard, EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.page_read_cache import opened_read_page_scope
 from camctl.persistence.transaction import (
     CommandPlan, commit_operation, event_envelope, next_row_id, row_change, row_facts,
     saved_transaction_events, update_change, TransactionError, read_transaction_range,
@@ -255,7 +256,8 @@ def read_segment_members(ref,cursor,batch,owned):
     if opened:
         db.execute('BEGIN')
     try:
-        return _read_segment_members(ref, cursor, batch, db)
+        with opened_read_page_scope(db, opened):
+            return _read_segment_members(ref, cursor, batch, db)
     finally:
         if opened:
             db.execute('ROLLBACK')

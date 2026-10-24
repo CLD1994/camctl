@@ -14,6 +14,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.events import business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.persistence.page_read_cache import opened_read_page_scope
 from camctl.persistence.transaction import (
     CommandPlan,event_envelope,next_row_id,read_transaction_range,row_change,row_facts,
     saved_transaction_events)
@@ -143,7 +144,9 @@ def _read_transaction(owned):
     db=owned.connection
     opened=not db.in_transaction
     if opened:db.execute('BEGIN')
-    try:yield db
+    try:
+        with opened_read_page_scope(db, opened):
+            yield db
     finally:
         if opened:db.execute('ROLLBACK')
 

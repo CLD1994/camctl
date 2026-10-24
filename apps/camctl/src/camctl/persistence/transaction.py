@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from contextlib import closing
+from contextlib import ExitStack, closing
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, Callable, Iterable, Mapping, Protocol, TypedDict
@@ -58,6 +58,7 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.page_read_cache import clear_page_records, discard_page_records, page_read_scope
 
 
 class TransactionError(ValueError):
@@ -300,6 +301,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         if len(proposed.rows) > 128:
             raise TransactionError("有界事件超过128行")
         context = plan.context(proposed, transaction)
+        clear_page_records(connection)
         context, reads = _bind_event_reads(
             context, proposed, transaction, segment_guard_state,
             source_guard_state, connection, operation_key,
@@ -364,6 +366,7 @@ def _write_bounded_plan(plan, scope, operation_key):
     _finish_result_check_group(result_check_group)
     _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
+        discard_page_records(connection)
         connection.execute("COMMIT")
     except Exception as error:
         return WriteReceipt(kind="unknown",error=error)
@@ -650,6 +653,7 @@ def commit_operation(
     begun = False
     committing = False
     rollback_attempted = False
+    page_reads = ExitStack()
 
     def rollback_error(error: BaseException) -> WriteReceipt:
         nonlocal rollback_attempted
@@ -671,8 +675,10 @@ def commit_operation(
             _scalar(connection, "SELECT MAX(id) FROM history_transactions"),
             _scalar(connection, "SELECT MAX(id) FROM history_events"),
         )
+        page_reads.enter_context(page_read_scope(connection, scope.max_event_id))
         try:
             plan = command.plan(scope)
+            clear_page_records(connection)
         except SchemaRuleError:
             raise
         except Exception as error:
@@ -710,6 +716,7 @@ def commit_operation(
                 return rollback_error(error)
             try:
                 rollback_attempted = True
+                discard_page_records(connection)
                 connection.execute("ROLLBACK")
             except Exception as rollback_error:
                 # 该回滚已经尝试过；不重复发送 ROLLBACK，也不把只读
@@ -780,6 +787,7 @@ def commit_operation(
                 current_reads=(None if read_scope is None else
                                SqlEventReads(connection, read_scope, validated, sequenced)),
             )
+            clear_page_records(connection)
             context, reads = _bind_event_reads(
                 context, event, transaction_range, segment_guard_state,
                 source_guard_state, connection, operation_key,
@@ -893,6 +901,7 @@ def commit_operation(
         _finish_baseline_read_group(baseline_read_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         committing = True
+        discard_page_records(connection)
         connection.execute("COMMIT")
         return WriteReceipt(
             kind="completed",
@@ -925,6 +934,8 @@ def commit_operation(
         if begun and not rollback_attempted:
             rollback_control(control)
         raise
+    finally:
+        page_reads.close()
 
 
 def _rollback_control_or_unknown(
@@ -933,6 +944,7 @@ def _rollback_control_or_unknown(
 ) -> None:
     """回滚一次并在原控制对象上附加实际事务结果。"""
     try:
+        discard_page_records(connection)
         connection.execute("ROLLBACK")
     except BaseException as rollback_error:
         _attach_control_receipt(control, "unknown", (rollback_error,))
@@ -947,6 +959,7 @@ def _rollback_or_unknown(
     if not begun:
         return WriteReceipt(kind="rolled_back", error=error)
     try:
+        discard_page_records(connection)
         connection.execute("ROLLBACK")
     except BaseException as rollback_error:
         if not isinstance(rollback_error, Exception):
