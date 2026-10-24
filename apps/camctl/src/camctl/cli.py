@@ -285,7 +285,11 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
         return 1
 
     try:
-        outcome = asyncio.run(execute_command(deps, source))
+        from camctl.logging_runtime.performance import performance_logging
+
+        log_runtime = getattr(deps, "log_runtime", None)
+        with performance_logging(None if log_runtime is None else log_runtime.channel):
+            outcome = asyncio.run(execute_command(deps, source))
     except BaseException as error:  # 装配后异常也须先释放 CLI 所有资源。
         close_runtime(deps, primary_error=error)
         if not isinstance(error, Exception):

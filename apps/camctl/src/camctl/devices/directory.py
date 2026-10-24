@@ -67,6 +67,10 @@ class DirectoryRead:
     outcome: RawToolOutcome | None
     error: ErrorValue | None
     page: Page[FileIdentity, DirectoryCursor] | None
+    #: 同一尝试复用已完成的目录清单时，不产生新的设备调用。
+    call_performed: bool = True
+    #: 实际目录工具调用的单调钟耗时；复用页不重复计算。
+    elapsed_ns: int | None = None
 
     def __post_init__(self):
         if (self.error is None) == (self.page is None):

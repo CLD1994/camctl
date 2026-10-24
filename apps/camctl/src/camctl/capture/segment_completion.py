@@ -34,6 +34,7 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.persistence.transaction import row_facts
+from camctl.logging_runtime.performance import measure_performance
 
 
 @dataclass(frozen=True)
@@ -51,9 +52,11 @@ def resume_segment_writes(owned, pending_writes, action_id=None):
         if action_id is not None and identity != action_id:
             continue
         pending = pending_writes[identity]
-        receipt = getattr(pending.repository, pending.method)(
-            *pending.args, pending.key, owned
-        )
+        with measure_performance("segment_save", action_id=identity,
+                                 method=pending.method, resumed=True):
+            receipt = getattr(pending.repository, pending.method)(
+                *pending.args, pending.key, owned
+            )
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             if receipt.kind is DbOutcomeKind.ROLLED_BACK:
                 del pending_writes[identity]
@@ -66,7 +69,9 @@ def _save(runtime, action_id, repository, method, *args):
         raise ConsistencyError("须先核实原分段申请，不能替换未决保存")
     pending = PendingSegmentWrite(repository, method, args, new_operation_key())
     runtime.pending_segment_writes[action_id] = pending
-    receipt = getattr(repository, method)(*args, pending.key, runtime.owned)
+    with measure_performance("segment_save", action_id=action_id,
+                             method=method, resumed=False):
+        receipt = getattr(repository, method)(*args, pending.key, runtime.owned)
     if receipt.kind is not DbOutcomeKind.COMPLETED:
         if receipt.kind is DbOutcomeKind.ROLLED_BACK:
             del runtime.pending_segment_writes[action_id]
