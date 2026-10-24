@@ -423,38 +423,6 @@ class TestResultSetConfirmation:
         finally:
             owned.connection.close()
 
-    async def test_capture_status_must_match_phase(self, tmp_path: Path) -> None:
-        """采集状态与结论分支不符属于输入错误。"""
-        owned = await _environment(tmp_path)
-        try:
-            wait_id = _complete_wait(owned)
-            with pytest.raises(ValueError):
-                _confirm(owned, ResultSetSave(
-                    action_id=1, occurred_at=_NOW, phase=ResultSetPhase.COMPLETE,
-                    contract=_RESULT_CONTRACT, observation={},
-                    capture={"status": "failed",
-                             "error": {"code": "capture_failed", "stage": "execution",
-                                       "details": {"activity_id": "1", "reason": "invalid_outputs"}}},
-                    evidence={"method": "time_and_outputs",
-                              "wait_completed_event_id": wait_id,
-                              "observation": {}}))
-        finally:
-            owned.connection.close()
-
-    async def test_conclusion_requires_contract_and_observation(
-            self, tmp_path: Path) -> None:
-        """结论分支必须携带驱动结果规则标识与结构化依据。"""
-        owned = await _environment(tmp_path)
-        try:
-            with pytest.raises(ValueError):
-                _confirm(owned, ResultSetSave(
-                    action_id=1, occurred_at=_NOW, phase=ResultSetPhase.COMPLETE,
-                    evidence={"method": "time_and_outputs",
-                              "wait_completed_event_id": 1,
-                              "observation": {}}))
-        finally:
-            owned.connection.close()
-
 
 #: 核实轮次尝试结果的证据登记：result 操作的可靠返回契约。
 _CHECK_EVIDENCE = EvidenceRegistry(

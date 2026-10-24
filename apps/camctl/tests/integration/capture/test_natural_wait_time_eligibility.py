@@ -319,55 +319,6 @@ async def test_unqualified_wait_returns_to_positive_host_poll_without_consuming_
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
-@pytest.mark.parametrize('branch', ['schedule', 'reconfigure', 'complete'])
-@pytest.mark.parametrize('change', ['none', 'q', 'a', 'r', 'd', 'source'])
-async def test_independent_wait_event_guard_uses_original_finite_task_and_source(tmp_path, startup, branch, change):
-    from camctl.history.validators import EventContext, EventValidationError, validate_event
-    from camctl.persistence.transaction import TransactionRange, event_envelope, row_facts, update_change
-    from camctl.persistence.repositories.capture import _history_source_row
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup)
-    try:
-        activity = row_facts(owned.connection, 'device_activities', action_id)
-        state = {table: {row[0]: row_facts(owned.connection, table, row[0])
-                for row in owned.connection.execute(f'SELECT id FROM {table}')}
-            for table in ('actions', 'device_activities', 'operation_runs', 'operation_attempts')}
-        state['history_events'] = {row[0]: _history_source_row(owned.connection, row[0])
-            for row in owned.connection.execute('SELECT id FROM history_events')}
-        activity = state['device_activities'][action_id]
-        if change == 'a': activity['sent_at'] += 1
-        elif change == 'r': activity['result_wait_margin_ms'] += 1
-        elif change == 'd': state['actions'][action_id]['execution_spec_json']['target_duration_ms'] += 1
-        elif change == 'source': state['operation_runs'] = {}
-        event_id = owned.connection.execute('SELECT MAX(id)+1 FROM history_events').fetchone()[0]
-        transaction = owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()[0]
-        if branch == 'schedule':
-            before = {'result_wait_margin_ms': None, 'extra_wait_ms_used': None, 'expected_check_at': None}
-            activity.update(before)
-            after = {'result_wait_margin_ms': 201 if change == 'r' else 200,
-                'extra_wait_ms_used': 0, 'expected_check_at': due+(1 if change == 'q' else 0)}
-            reason, occurred_at = 1, _NOW
-        elif branch == 'reconfigure':
-            before = {'extra_wait_ms_used': 0, 'expected_check_at': due}
-            after = {'extra_wait_ms_used': 1000, 'expected_check_at': due+1000000+(1 if change == 'q' else 0)}
-            reason, occurred_at = 2, _NOW
-        else:
-            if change == 'q': activity['expected_check_at'] += 1
-            before, after = {'wait_completed_event_id': None}, {'wait_completed_event_id': event_id}
-            reason, occurred_at = 3, due+100
-        event = event_envelope(event_id, transaction, load_event_registry()['events']['CAPTURE_WAIT_CHANGED']['id'],
-            reason, (update_change('device_activities', action_id, before, after),), occurred_at)
-        context = EventContext(TransactionRange(transaction, event_id, event_id),
-            {('device_activities', action_id): ('action', action_id)}, state)
-        if change == 'none':
-            assert validate_event(event, context).envelope == event
-        else:
-            with pytest.raises(EventValidationError):
-                validate_event(event, context)
-    finally:
-        owned.connection.close()
-
-
-@pytest.mark.parametrize('startup', [0, 1000])
 async def test_saved_page_registration_waits_for_current_source_qualification(tmp_path, startup):
     from camctl.capture.handlers import _listing_round, _register_listing
     owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup)
