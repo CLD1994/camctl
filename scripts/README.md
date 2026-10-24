@@ -2,6 +2,43 @@
 
 本目录保存跨组件使用的脚本。组件自己的构建、生成和测试工具留在组件目录。
 
+## 隔离并行集成测试
+
+在仓库根使用已准备测试依赖的 Python 3.11 运行下列入口。入口默认运行 camctl 的全部组件集成目录、根目录全部 pytest 模块和全部 Node 集成文件；容量测试与完整 Hasselblad 正常链矩阵都保留。
+
+```bash
+/absolute/venv/bin/python scripts/run-integration.py \
+  --python /absolute/venv/bin/python \
+  --node-modules /absolute/client/node_modules \
+  --jobs 4 --output /tmp/camctl-integration-run
+```
+
+`--output` 必须是尚不存在的目录；不指定时在 `/tmp` 创建新目录。`--python` 默认采用启动脚本的解释器；入口核对 Python 3.11 和 pytest，不安装或同步该环境。客户端依赖默认取源工作区的 `apps/client/node_modules`，需按[客户端说明](../apps/client/README.md)及锁文件预先安装；浏览器和媒体工具仍遵守[跨组件测试前提](../tests/integration/README.md)。uv 离线缓存默认取 `uv cache dir`，也可用 `--uv-cache` 指定已准备的缓存目录。
+
+先用 `--list` 查看从实际源码发现的任务；该选项不执行测试。`--scope camctl`、`--scope root`、`--scope node` 分别选择组件目录、根 pytest 和根 Node，默认 `all`。`--target` 可以重复指定所选范围内的仓库相对目录、文件或 pytest nodeid；同一组件目录仍只启动一个 pytest，不同目录保持独立进程。文件或目录已包含的节点不会再次分配。例如：
+
+```bash
+/absolute/venv/bin/python scripts/run-integration.py --list
+/absolute/venv/bin/python scripts/run-integration.py --scope camctl \
+  --target apps/camctl/tests/integration/motor \
+  --target apps/camctl/tests/integration/logging_runtime --jobs 2
+/absolute/venv/bin/python scripts/run-integration.py \
+  --target 'tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes' \
+  --node-modules /absolute/client/node_modules --jobs 1
+```
+
+入口从 Git 已跟踪文件与未忽略的新文件冻结源码，包括当前未提交的修改；删除的文件保持删除。`--source` 可指定另一 Git 工作区。每个任务取得独立完整源码副本，Git 元数据保留原 HEAD 和当前差异；`source.json` 记录来源、状态、逐文件摘要和整体摘要。生成目录、依赖和缓存不作为源码快照输入。已有逐文件测量仅用于优先调度较长任务，未测目标照常执行。
+
+每个执行槽有独立的 uv 缓存、uv 项目环境和客户端 `node_modules` 副本；同一槽依次复用，槽间不共享写入。复制使用 `cp -a --reflink=auto`，支持时由文件系统写时复制，否则复制普通文件，不建立硬链接。每个任务另有自己的源码、`_resources`、客户端 `dist`、pytest 临时根、SQLite、交接文件与安装环境。任务的 `.venv311` 使用标准库创建，不安装包，以 `.pth` 只读引用外部测试环境的依赖；源码通过该任务的 `PYTHONPATH` 导入。跨组件辅助中的 C 构建仍使用其随机唯一目录或 pytest 临时目录；现有 `/tmp/camctl-host-build-*` 不受 pytest 临时根管理。系统工具、外部测试依赖和已安装 Chromium 只读复用。入口面向 Linux 开发容器，要求 Git、GNU cp、uv 与 Node 已可用；不会安装系统工具，也不代替目标设备验收。
+
+`plan.json` 保存实际分配，`summary.json` 每半秒更新任务状态、PID、当前节点与阶段、退出码及墙钟时间；每 15 秒也向终端打印活动目标。pytest 插件在节点进入阶段时写入 `events.jsonl` 和 `progress.json`，因此即使用例没有输出，也可定位正在执行的节点。观测器配置在 pytest 配置阶段移除，不进入安装版运行环境。每个任务的 `artifacts/` 另存命令、工作目录、源码身份、工具版本、完整输出、真实收集的 `inventory.json`、主实例阶段结果 `cases.json` 和最终结果。主实例按 nodeid 聚合，嵌套子检查另计，父 call 的时长不再次加上子检查时长。Node 文件保留 TAP 日志与结果计数。入口等待全部分配完成后汇总：全部任务退出 0 才返回 0，有任务失败时返回 1；输入或准备失败保留非零状态，中断返回 130。
+
+输出目录保留源码、私有缓存、安装物和证据，需预留磁盘空间；归档必要证据后可删除整个输出目录。各任务墙钟包含自身准备，整轮墙钟包含入口准备与全部调度；历史估计值不是本轮测量。只选择窄范围的结果不能证明全量验收。窄范围并发、失败传播和安装版环境的[验证回执](../docs/camctl/verification-data/2026-10-25-integration-runner/smoke-summary.json)单独保存，不代表完整集成验收。入口本身的真实进程契约测试为：
+
+```bash
+/absolute/venv/bin/python -m unittest discover -s scripts/tests -v
+```
+
 ## 文档与公共协议
 
 在仓库根运行 `node scripts/check-doc-links.mjs` 检查文档的本地文件链接。

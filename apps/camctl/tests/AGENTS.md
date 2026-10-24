@@ -16,7 +16,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
 ```
 
-集成测试目录清单：acceptance、bootstrap、cancellation、capture、contracts、devices、history、host_files、logging_runtime、motor、operations、outputs、persistence、reporting、scheduling、session。
+当前集成目录由 `python scripts/run-integration.py --scope camctl --list` 从实际源码发现，不另行维护目录清单。完整回归可以使用[隔离并行入口](../../../scripts/README.md#隔离并行集成测试)，默认覆盖全部目录与容量测试；`--target` 用于窄范围验证，不能替代完整回归。
 
 不要用系统 Python 直接跑：系统解释器缺少测试依赖（如 `referencing`），SQLite 版本也不满足运行条件。
 
@@ -24,9 +24,9 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 **1. 集成测试当前默认分目录运行。** 集成测试模块会在导入时调用 `register_*_guards()`，这些调用修改同一进程内的 `NAMED_GUARDS` 注册表；不同模块注册同名守卫时会覆盖先前值。合并多个目录可能因此改变用例执行时的全局状态，所以全量回归按目录分别启动 pytest。这个默认安排规避已知的进程内副作用，不代表已查明某次长时间停滞的根因。
 
-**2. 同一工作区的集成 pytest 顺序运行。** 每次集成测试启动时，`integration/conftest.py` 都会同步包资源到同一个 `src/camctl/_resources/` 目录。多个进程同时使用该工作区时，资源写入和另一进程读取可能重叠；在资源同步路径隔离前，同一工作区一次只运行一个集成 pytest 进程。不同工作区或独立资源发布物是否能并行，按共享文件、工具环境和其他实际边界判断；本指南没有宣称全量并行安全。单元测试不主动执行这条同步，但用例或其他进程若读取该目录，仍须与同步写入协调。
+**2. 同一工作区的集成 pytest 顺序运行。** 每次集成测试启动时，`integration/conftest.py` 都会同步包资源到同一个 `src/camctl/_resources/` 目录。多个进程同时使用该工作区时，资源写入和另一进程读取可能重叠；在资源同步路径隔离前，同一工作区一次只运行一个集成 pytest 进程。不同工作区或独立资源发布物是否能并行，按共享文件、工具环境和其他实际边界判断；仓库的隔离并行入口为每个任务冻结独立完整源码副本，隔离该资源目录、临时根与工具写入；其具体边界见[入口说明](../../../scripts/README.md#隔离并行集成测试)。直接启动的测试仍须自行核对这些边界。单元测试不主动执行这条同步，但用例或其他进程若读取该目录，仍须与同步写入协调。
 
-**3. 保留可追踪的执行记录。** 每次验证都记录命令、工作目录、Python 版本、执行会话、日志和退出码。前台运行便于查看和控制，但本身不构成隔离条件；后台运行时保留进程会话并将输出写入日志。`pytest … | tail` 中的 `tail` 默认等上游结束后才打印末尾行，因此运行期间可能看不到进度；需要持续观察时，将输出重定向到文件并用 `tail -f` 查看新增内容。
+**3. 保留可追踪的执行记录。** 每次验证都记录命令、工作目录、Python 版本、执行会话、日志和退出码。前台运行便于查看和控制，但本身不构成隔离条件；后台运行时保留进程会话并将输出写入日志。`pytest … | tail` 中的 `tail` 默认等上游结束后才打印末尾行，因此运行期间可能看不到进度；需要持续观察输出时，将输出重定向到文件并用 `tail -f` 查看新增内容。使用隔离并行入口时，直接查看 `summary.json` 与任务的 `progress.json` 可取得 PID、当前节点与阶段；这些状态由执行钩子写入，不依赖日志是否产生新行。
 
 ## 历史时长参考
 
