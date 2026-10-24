@@ -1188,9 +1188,12 @@ async def execute_command(
 
         # 会话失败结论先于监督方收场与日志关闭记录。
         if outcome is not None and not outcome.succeeded:
-            await _emit_session_error(
-                deps, f"{deps.mode.value} 会话失败: {outcome.reason}"
-            )
+            try:
+                await _emit_session_error(
+                    deps, f"{deps.mode.value} 会话失败: {outcome.reason}"
+                )
+            except BaseException as error:
+                remember_cleanup_error("会话失败诊断异常", error)
         async def stop_worker(worker):
             nonlocal outcome
             if worker is None:
@@ -1210,6 +1213,20 @@ async def execute_command(
                 await stop_worker(worker)
             except BaseException as error:
                 remember_cleanup_error("报告监督收场异常", error)
+        if deps.capture_result_scans:
+            try:
+                if any(owner.required_settlements() for owner in deps.background_flows):
+                    raise RuntimeError("实际后台责任尚未交付，结果读取缓存仍由原拥有者保留")
+            except BaseException as error:
+                remember_cleanup_error("结果读取缓存关闭前提失效", error)
+            else:
+                for scan in tuple(deps.capture_result_scans.values()):
+                    try:
+                        if scan.in_call:
+                            raise RuntimeError("结果目录调用尚未结束，不能关闭读取缓存")
+                        scan.close()
+                    except BaseException as error:
+                        remember_cleanup_error("结果读取缓存关闭异常", error)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(
