@@ -1,0 +1,33 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/unit",
+    "-q",
+    "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/final-unit/junit.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "source_commit": "379369d6308e576e35e6e5858e60702da8a697ae",
+  "started_utc": "2026-10-24T21:53:26.956436+00:00",
+  "environment": {
+    "PYTHONPATH": "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/src"
+  },
+  "pid": 236961,
+  "exit_code": 0,
+  "wall_seconds": 76.08999081799993,
+  "finished_utc": "2026-10-24T21:54:46.683747+00:00",
+  "junit_suite": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "1",
+    "tests": "7147",
+    "time": "74.712",
+    "timestamp": "2026-10-25T05:53:27.135758+08:00",
+    "hostname": "1e0518e0c6b4"
+  },
+  "passed": 7146,
+  "skipped": 1,
+  "pytest_seconds": 74.75
+}
