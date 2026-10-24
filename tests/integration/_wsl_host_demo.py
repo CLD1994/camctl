@@ -10,6 +10,7 @@ C 模块为 POSIX 实现，在 Linux 或 WSL x86 Linux 构建当前工作区；
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -78,13 +79,20 @@ def _wsl_python() -> str:
     return resolved.stdout.strip() or "python3.11"
 
 
-def wait_for(predicate, timeout_s: float, message: str):
-    """轮询直到谓词为真；显式同步点，不使用随机 sleep。"""
+def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+    """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
     deadline = time.monotonic() + timeout_s
+    next_failure_check = 0.0
     while True:
         value = predicate()
         if value:
             return value
+        now = time.monotonic()
+        # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+        if failure is not None and now >= next_failure_check:
+            if reason := failure():
+                raise AssertionError(f"{message}: {reason}")
+            next_failure_check = now + 0.05
         assert time.monotonic() < deadline, f"等待超时: {message}"
 
 
@@ -223,6 +231,53 @@ class HostDemo:
 
     def module_log(self) -> str:
         return self.log_path.read_text(encoding="utf-8", errors="replace")
+
+    def watch_failures(self, *, request_id=None, expected_statuses=None):
+        """在操作前建立观察起点，返回供 wait_for 使用的失败检查。"""
+        log_start = len(self.module_log()) if self.log_path.exists() else 0
+        return lambda: self._failure_reason(log_start, request_id, expected_statuses)
+
+    def _failure_reason(self, log_start, request_id, expected_statuses) -> str | None:
+        """检查本次操作之后的 run 错误及指定请求的不相容动作终态。
+
+        正常 run 可以在新请求到达前结束，动作终态也不代表副本已回收；
+        因而这两种情况本身都不能中止等待。
+        异常退出和确定未启动仍等待 host 的既有自动重试耗尽。
+        """
+        current = self.module_log()[log_start:] if self.log_path.exists() else ""
+        failed = re.search(
+            r"^call=(\d+) command=run pid=\d+ result=error\b",
+            current, re.MULTILINE,
+        )
+        if failed is not None:
+            return f"本次 host 的 run 调用 {failed[1]} 已失败：\n{current}"
+        if re.search(r"^command=run retry_exhausted used=\d+", current, re.MULTILINE):
+            return f"本次 host 的 run 调用已耗尽自动重试：\n{current}"
+        if self.proc is not None and self.proc.poll() is not None:
+            return f"本次 host-demo 已退出，退出码为 {self.proc.returncode}：\n{current}"
+        if expected_statuses is None:
+            return None
+        assert request_id is not None, "动作终态检查必须指定 request_id"
+        from camctl.contracts.enums import enum_for
+
+        statuses = enum_for("actions.status")
+        terminal = {statuses[name] for name in ("SUCCEEDED", "FAILED", "CANCELED", "EXPIRED")}
+        observed = query_state(
+            self.deployment.state_db,
+            "SELECT a.id,a.name,a.status,a.error_code,a.error_details_json "
+            "FROM actions a JOIN plans p ON p.id=a.plan_id "
+            "WHERE p.request_id=? ORDER BY a.id", (request_id,),
+        )
+        incompatible = [
+            (identity, name, statuses(status).name, error, details)
+            for identity, name, status, error, details in observed
+            if name in expected_statuses and status in terminal
+            and status != statuses[expected_statuses[name]]
+        ]
+        if incompatible:
+            return (f"请求 {request_id} 的动作已进入不相容终态：{incompatible!r}"
+                    f"\n本次 host 日志：\n{current}")
+        return None
 
     def stop(self) -> None:
         if self.proc is None:

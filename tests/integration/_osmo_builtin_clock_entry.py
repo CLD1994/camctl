@@ -44,11 +44,12 @@ def _install_single_original_task() -> None:
     """既有清理链显式采用单原片任务声明，继续覆盖独立修复产物。"""
     from dataclasses import replace
     from camctl.devices.drivers.adb_cameras import osmo360ii_capture
+    from camctl.devices.tasks import VideoResultMode
 
     original = osmo360ii_capture._task
 
-    def task(params):
-        declared = original(params)
+    def task(params, *, result_mode=VideoResultMode.SINGLE_FILE):
+        declared = original(params, result_mode=result_mode)
         return replace(
             declared,
             result_policy=None,

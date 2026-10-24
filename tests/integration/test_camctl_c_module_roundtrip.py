@@ -183,10 +183,14 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
             },
         ],
     }
-    plan_path, _ = deployment.export_plan_with_client(body)
+    plan_path, receipt = deployment.export_plan_with_client(body)
 
     demo = HostDemo(deployment, host_demo,
                     launcher=write_stub_launcher(deployment))
+    failure = demo.watch_failures(
+        request_id=receipt["request_id"],
+        expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
+    )
     try:
         demo.start()
         demo.submit(plan_path)
@@ -194,7 +198,8 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,)] * 6 or None,
-            timeout_s=180, message="六动作未全部成功")
+            timeout_s=180, message="六动作未全部成功",
+            failure=failure)
         assert query_state(state_db, "SELECT status FROM plans") == [(3,)]
         # 三种拍摄各自登记原片产物；被取回来源建立交付（部分取回）。
         assert query_state(

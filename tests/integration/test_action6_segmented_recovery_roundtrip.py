@@ -519,7 +519,7 @@ def _release_clock(scenario, seconds: int):
     )
 
 
-def _cleanup_inspection_inputs(deployment, source_id):
+def _cleanup_inspection_inputs(deployment, source_id, failure):
     purpose = int(enum_for("intermediate_files.purpose").RECORDING_INPUT)
     released = int(enum_for("intermediate_files.retention_state").RELEASABLE)
     completed = int(enum_for("intermediate_files.cleanup_state").COMPLETED)
@@ -538,6 +538,7 @@ def _cleanup_inspection_inputs(deployment, source_id):
         else None,
         180,
         "全部绑定取回终态后，Action6 检查副本仍未完成清理",
+        failure=failure,
     )
     assert retained
     for _identity, relative_path, _retention, _cleanup in retained:
@@ -593,6 +594,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
         for name in waiter_names
     ]
     _wait_for_waiting_obtains(deployment, source_id, waiter_names)
+    failure = demo.watch_failures()
     try:
         _release_clock(scenario, 75)
         gate_marker = None
@@ -734,6 +736,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             demo = HostDemo(
                 scenario["deployment"], host_demo, launcher=str(scenario["camctl"])
             )
+            failure = demo.watch_failures()
             monkeypatch.chdir(package.python.parents[2])
             demo.start(env=scenario["environment"])
             demo.submit(scenario["plan"])
@@ -943,7 +946,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             for row in bound_copies
         )
         assert len({row[2] for row in bound_copies}) == checked_count * 2
-        _cleanup_inspection_inputs(deployment, source_id)
+        _cleanup_inspection_inputs(deployment, source_id, failure)
 
         final_report = report
         late_evidence = []
@@ -1037,6 +1040,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
         for name in waiter_names
     ]
     _wait_for_waiting_obtains(deployment, source_id, waiter_names)
+    failure = demo.watch_failures()
     try:
         _release_clock(scenario, 330)
         report = wait_for(
@@ -1118,7 +1122,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             and row[8] == expected_sha_by_output_id[str(row[1])]
             for row in bound_copies
         )
-        _cleanup_inspection_inputs(deployment, source_id)
+        _cleanup_inspection_inputs(deployment, source_id, failure)
         ack = _assert_ack(demo, scenario, report)
         (deployment.root / "action6-native-photo-failure.json").write_text(
             json.dumps({
