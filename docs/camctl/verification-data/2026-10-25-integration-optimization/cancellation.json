@@ -1,0 +1,1362 @@
+{
+  "scope": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+  "base_commit": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "implementation_commit": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+  "before_source_sha256": "909aafb718ba3646d01e5615e3fe1cf713badee46ac3fce6d5c9ed24a9820135",
+  "after_source_sha256": "8ca775def4d691518d697a7e72bc94da537482d92a5cacbaabb5f116aab7a744",
+  "patch_sha256": "80c1118e25caffe537c3479579c1552fb4e3a5273ef172d198846588a8cff69f",
+  "coverage": {
+    "matrix_coverage": [
+      {
+        "function": "test_original_source_cannot_disappear_behind_preview_label",
+        "worlds_before": 48,
+        "worlds_after": 8,
+        "checks_before": 48,
+        "checks_after": 48,
+        "cases_identical": true,
+        "preserved_cases": [
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "entered",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "entered",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "entered",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "entered",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "action",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "group",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "plan",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 1,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 2,
+            "surface": "guard"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "repository"
+          },
+          {
+            "kind": "request",
+            "state": "unknown",
+            "basis": 3,
+            "surface": "guard"
+          }
+        ]
+      },
+      {
+        "function": "test_complete_model_rejects_omissions_extra_members_and_wrong_effects",
+        "worlds_before": 14,
+        "worlds_after": 3,
+        "checks_before": 14,
+        "checks_after": 14,
+        "cases_identical": true,
+        "preserved_cases": [
+          {
+            "surface": "repository",
+            "state": "terminal",
+            "entries": [
+              [
+                1,
+                1,
+                3
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "guard",
+            "state": "terminal",
+            "entries": [
+              [
+                1,
+                1,
+                3
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "repository",
+            "state": "terminal",
+            "entries": [
+              [
+                1,
+                1,
+                1
+              ],
+              [
+                2,
+                2,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "guard",
+            "state": "terminal",
+            "entries": [
+              [
+                1,
+                1,
+                1
+              ],
+              [
+                2,
+                2,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "repository",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                1,
+                3
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "guard",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                1,
+                3
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "repository",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                2,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "guard",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                2,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "repository",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                3,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "guard",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                3,
+                1
+              ]
+            ],
+            "kind": "action"
+          },
+          {
+            "surface": "repository",
+            "state": "entered",
+            "entries": [
+              [
+                2,
+                1,
+                3
+              ]
+            ],
+            "kind": "preview"
+          },
+          {
+            "surface": "guard",
+            "state": "entered",
+            "entries": [
+              [
+                2,
+                1,
+                3
+              ]
+            ],
+            "kind": "preview"
+          },
+          {
+            "surface": "repository",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                1,
+                1
+              ],
+              [
+                2,
+                1,
+                1
+              ]
+            ],
+            "kind": "preview"
+          },
+          {
+            "surface": "guard",
+            "state": "entered",
+            "entries": [
+              [
+                1,
+                1,
+                1
+              ],
+              [
+                2,
+                1,
+                1
+              ]
+            ],
+            "kind": "preview"
+          }
+        ]
+      },
+      {
+        "function": "test_original_sql_and_complete_rows_keep_same_start_partition",
+        "worlds_before": 14,
+        "worlds_after": 7,
+        "checks_before": 14,
+        "checks_after": 14,
+        "cases_identical": true,
+        "preserved_cases": [
+          {
+            "camera": "hb",
+            "state": "ready"
+          },
+          {
+            "camera": "other",
+            "state": "ready"
+          },
+          {
+            "camera": "hb",
+            "state": "unknown"
+          },
+          {
+            "camera": "other",
+            "state": "unknown"
+          },
+          {
+            "camera": "hb",
+            "state": "entered"
+          },
+          {
+            "camera": "other",
+            "state": "entered"
+          },
+          {
+            "camera": "hb",
+            "state": "no_effect"
+          },
+          {
+            "camera": "other",
+            "state": "no_effect"
+          },
+          {
+            "camera": "hb",
+            "state": "zero_tools"
+          },
+          {
+            "camera": "other",
+            "state": "zero_tools"
+          },
+          {
+            "camera": "hb",
+            "state": "terminal"
+          },
+          {
+            "camera": "other",
+            "state": "terminal"
+          },
+          {
+            "camera": "hb",
+            "state": "blocked"
+          },
+          {
+            "camera": "other",
+            "state": "blocked"
+          }
+        ]
+      },
+      {
+        "function": "test_complete_scope_requires_authoritative_address_links_and_start_ranges",
+        "worlds_before": 10,
+        "worlds_after": 4,
+        "checks_before": 10,
+        "checks_after": 10,
+        "cases_identical": true,
+        "preserved_cases": [
+          {
+            "kind": "action",
+            "missing": [
+              "actions",
+              "id"
+            ]
+          },
+          {
+            "kind": "action",
+            "missing": [
+              "auto_preview_links",
+              "source_action_id"
+            ]
+          },
+          {
+            "kind": "action",
+            "missing": [
+              "auto_preview_links",
+              "obtain_action_id"
+            ]
+          },
+          {
+            "kind": "action",
+            "missing": [
+              "device_activities",
+              "action_id"
+            ]
+          },
+          {
+            "kind": "action",
+            "missing": [
+              "operation_runs",
+              "action_id"
+            ]
+          },
+          {
+            "kind": "action",
+            "missing": [
+              "operation_attempts",
+              "run_id"
+            ]
+          },
+          {
+            "kind": "group",
+            "missing": [
+              "actions",
+              "plan_id"
+            ]
+          },
+          {
+            "kind": "plan",
+            "missing": [
+              "plans",
+              "id"
+            ]
+          },
+          {
+            "kind": "request",
+            "missing": [
+              "plans",
+              "request_id"
+            ]
+          },
+          {
+            "kind": "request",
+            "missing": [
+              "actions",
+              "plan_id"
+            ]
+          }
+        ]
+      }
+    ],
+    "unchanged_success_worlds": 20,
+    "unchanged_mixed_worlds": 24
+  },
+  "runs": {
+    "before-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation/before-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/cancellation/before-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:31:53.748172+00:00",
+        "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation"
+        },
+        "pid": 206344,
+        "exit_code": 0,
+        "elapsed_seconds": 50.12105736000012,
+        "end_utc": "2026-10-24T21:32:45.010211+00:00"
+      },
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "111",
+          "time": "49.779",
+          "timestamp": "2026-10-25T05:31:53.918919+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_original_source_cannot_disappear_behind_preview_label": {
+          "nodes": 48,
+          "seconds": 20.573999999999998
+        },
+        "test_complete_model_rejects_omissions_extra_members_and_wrong_effects": {
+          "nodes": 14,
+          "seconds": 6.58
+        },
+        "test_original_sql_and_complete_rows_keep_same_start_partition": {
+          "nodes": 14,
+          "seconds": 5.6930000000000005
+        },
+        "test_authoritative_complete_scope_keeps_valid_direct_and_linked_members": {
+          "nodes": 20,
+          "seconds": 8.612000000000002
+        },
+        "test_complete_scope_requires_authoritative_address_links_and_start_ranges": {
+          "nodes": 10,
+          "seconds": 4.763
+        },
+        "test_original_key_keeps_first_direct_decision_after_capture_finishes": {
+          "nodes": 1,
+          "seconds": 0.502
+        },
+        "test_original_key_does_not_accept_a_duplicated_member_request": {
+          "nodes": 1,
+          "seconds": 0.473
+        },
+        "test_new_origin_reuses_original_hb_cancel_and_preview_scope": {
+          "nodes": 3,
+          "seconds": 1.3399999999999999
+        }
+      }
+    },
+    "after-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation/after-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/cancellation/after-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:33:06.724222+00:00",
+        "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation"
+        },
+        "pid": 208626,
+        "exit_code": 0,
+        "elapsed_seconds": 24.912273997997545,
+        "end_utc": "2026-10-24T21:33:32.765416+00:00"
+      },
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "47",
+          "time": "24.485",
+          "timestamp": "2026-10-25T05:33:06.898979+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_original_source_cannot_disappear_behind_preview_label": {
+          "nodes": 8,
+          "seconds": 3.987
+        },
+        "test_complete_model_rejects_omissions_extra_members_and_wrong_effects": {
+          "nodes": 3,
+          "seconds": 1.472
+        },
+        "test_original_sql_and_complete_rows_keep_same_start_partition": {
+          "nodes": 7,
+          "seconds": 3.343
+        },
+        "test_authoritative_complete_scope_keeps_valid_direct_and_linked_members": {
+          "nodes": 20,
+          "seconds": 9.733
+        },
+        "test_complete_scope_requires_authoritative_address_links_and_start_ranges": {
+          "nodes": 4,
+          "seconds": 2.123
+        },
+        "test_original_key_keeps_first_direct_decision_after_capture_finishes": {
+          "nodes": 1,
+          "seconds": 0.508
+        },
+        "test_original_key_does_not_accept_a_duplicated_member_request": {
+          "nodes": 1,
+          "seconds": 0.469
+        },
+        "test_new_origin_reuses_original_hb_cancel_and_preview_scope": {
+          "nodes": 3,
+          "seconds": 1.468
+        }
+      }
+    },
+    "after-directory": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/cancellation",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation/after-directory",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/cancellation/after-directory.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:33:57.756497+00:00",
+        "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation"
+        },
+        "pid": 210161,
+        "exit_code": 0,
+        "elapsed_seconds": 100.26525539800059,
+        "end_utc": "2026-10-24T21:35:41.447283+00:00"
+      },
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "332",
+          "time": "99.612",
+          "timestamp": "2026-10-25T05:33:57.943335+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_four_entries_match_independent_results": {
+          "nodes": 1,
+          "seconds": 0.411
+        },
+        "test_cancel_results_survive_restart": {
+          "nodes": 1,
+          "seconds": 0.064
+        },
+        "test_finished_cancel_does_not_wait_for_device": {
+          "nodes": 1,
+          "seconds": 0.057
+        },
+        "test_second_cancel_does_not_expand_scope": {
+          "nodes": 1,
+          "seconds": 0.034
+        },
+        "test_c1_canceled_c2_succeeded_a_continues": {
+          "nodes": 1,
+          "seconds": 0.039
+        },
+        "test_interrupt_boundaries_reenter_idempotently": {
+          "nodes": 1,
+          "seconds": 0.04
+        },
+        "test_c2_with_both_reuses_original_flow": {
+          "nodes": 1,
+          "seconds": 0.062
+        },
+        "test_inflight_cancel_closes_start_before_late_no_effect": {
+          "nodes": 1,
+          "seconds": 0.057
+        },
+        "test_running_unstarted_cancel_waits_for_local_finish": {
+          "nodes": 6,
+          "seconds": 0.338
+        },
+        "test_pre_start_target_cancels_immediately": {
+          "nodes": 1,
+          "seconds": 0.035
+        },
+        "test_terminal_target_succeeds_without_rewriting": {
+          "nodes": 1,
+          "seconds": 0.031
+        },
+        "test_with_stop_marks_target_and_waits": {
+          "nodes": 1,
+          "seconds": 0.037
+        },
+        "test_rejected_target_fails_without_touching_target": {
+          "nodes": 1,
+          "seconds": 0.034
+        },
+        "test_apply_is_idempotent_and_recoverable": {
+          "nodes": 1,
+          "seconds": 0.034
+        },
+        "test_pending_items_reject_finish": {
+          "nodes": 1,
+          "seconds": 0.031
+        },
+        "test_any_failure_fails_action_with_machine_error": {
+          "nodes": 1,
+          "seconds": 0.041
+        },
+        "test_all_succeeded_completes_action_and_plan": {
+          "nodes": 1,
+          "seconds": 0.049
+        },
+        "test_terminal_new_key_recovers_without_new_history": {
+          "nodes": 1,
+          "seconds": 0.045
+        },
+        "test_cancel_mark_is_not_settlement": {
+          "nodes": 1,
+          "seconds": 0.039
+        },
+        "test_failure_does_not_abandon_other_items": {
+          "nodes": 1,
+          "seconds": 0.045
+        },
+        "test_late_result_enables_restart_summary": {
+          "nodes": 1,
+          "seconds": 0.043
+        },
+        "test_started_partition_uses_activity_capability": {
+          "nodes": 1,
+          "seconds": 0.029
+        },
+        "test_may_have_dispatched_without_stop_is_rejected": {
+          "nodes": 1,
+          "seconds": 0.027
+        },
+        "test_not_started_allows_even_without_stop": {
+          "nodes": 1,
+          "seconds": 0.035
+        },
+        "test_running_without_attempt_is_reliably_not_started": {
+          "nodes": 2,
+          "seconds": 0.066
+        },
+        "test_terminal_keeps_state": {
+          "nodes": 1,
+          "seconds": 0.029
+        },
+        "test_applied_cancel_reuses_responsibility": {
+          "nodes": 1,
+          "seconds": 0.029
+        },
+        "test_timelapse_capability_comes_from_saved_spec": {
+          "nodes": 1,
+          "seconds": 0.033
+        },
+        "test_cancel_first_prevents_start": {
+          "nodes": 1,
+          "seconds": 0.032
+        },
+        "test_start_first_competes_in_started_partition": {
+          "nodes": 1,
+          "seconds": 0.038
+        },
+        "test_original_source_cannot_disappear_behind_preview_label": {
+          "nodes": 8,
+          "seconds": 3.8310000000000004
+        },
+        "test_complete_model_rejects_omissions_extra_members_and_wrong_effects": {
+          "nodes": 3,
+          "seconds": 1.5499999999999998
+        },
+        "test_original_sql_and_complete_rows_keep_same_start_partition": {
+          "nodes": 7,
+          "seconds": 2.9880000000000004
+        },
+        "test_authoritative_complete_scope_keeps_valid_direct_and_linked_members": {
+          "nodes": 20,
+          "seconds": 8.986999999999998
+        },
+        "test_complete_scope_requires_authoritative_address_links_and_start_ranges": {
+          "nodes": 4,
+          "seconds": 2.028
+        },
+        "test_original_key_keeps_first_direct_decision_after_capture_finishes": {
+          "nodes": 1,
+          "seconds": 0.506
+        },
+        "test_original_key_does_not_accept_a_duplicated_member_request": {
+          "nodes": 1,
+          "seconds": 0.503
+        },
+        "test_new_origin_reuses_original_hb_cancel_and_preview_scope": {
+          "nodes": 3,
+          "seconds": 1.31
+        },
+        "test_each_mixed_camera_keeps_its_original_preview_permission": {
+          "nodes": 8,
+          "seconds": 4.3180000000000005
+        },
+        "test_foreign_residual_keeps_each_mixed_source_preview_scope": {
+          "nodes": 24,
+          "seconds": 11.592999999999998
+        },
+        "test_direct_fixed_repository_rejects_ineligible_link_source": {
+          "nodes": 10,
+          "seconds": 4.298
+        },
+        "test_bare_fixed_event_rejects_ineligible_or_missing_source_facts": {
+          "nodes": 4,
+          "seconds": 1.684
+        },
+        "test_fixed_repository_accepts_reliable_original_link_source": {
+          "nodes": 3,
+          "seconds": 1.2029999999999998
+        },
+        "test_direct_preview_and_both_require_original_address_and_valid_link": {
+          "nodes": 8,
+          "seconds": 3.735
+        },
+        "test_both_label_cannot_add_an_unaddressed_preview": {
+          "nodes": 1,
+          "seconds": 0.479
+        },
+        "test_mixed_composite_sources_keep_each_previews_own_source": {
+          "nodes": 4,
+          "seconds": 2.8289999999999997
+        },
+        "test_independent_guard_accepts_reliable_preceding_original_source": {
+          "nodes": 2,
+          "seconds": 0.8069999999999999
+        },
+        "test_independent_guard_requires_every_original_source_range": {
+          "nodes": 5,
+          "seconds": 2.255
+        },
+        "test_independent_guard_rejects_extra_conflicting_or_future_facts": {
+          "nodes": 4,
+          "seconds": 1.7670000000000001
+        },
+        "test_action_direct_preview_remains_independent": {
+          "nodes": 1,
+          "seconds": 0.51
+        },
+        "test_no_intent_header_alone_cannot_replace_atomic_source_apply": {
+          "nodes": 2,
+          "seconds": 0.74
+        },
+        "test_independent_guard_does_not_classify_partial_source_as_another_driver": {
+          "nodes": 3,
+          "seconds": 1.451
+        },
+        "test_no_intent_guard_borrows_exact_same_transaction_source_apply": {
+          "nodes": 11,
+          "seconds": 4.194999999999999
+        },
+        "test_plan_iteration_merges_only_verified_current_members": {
+          "nodes": 7,
+          "seconds": 2.7510000000000003
+        },
+        "test_real_photo_start_saves_entry_even_when_first_tool_fails": {
+          "nodes": 1,
+          "seconds": 0.45
+        },
+        "test_returned_no_photo_effect_does_not_reopen_start_cancellation": {
+          "nodes": 1,
+          "seconds": 0.512
+        },
+        "test_photo_cancel_before_entry_prevents_late_start": {
+          "nodes": 1,
+          "seconds": 0.397
+        },
+        "test_entered_start_rejection_finishes_without_waiting_for_photo": {
+          "nodes": 1,
+          "seconds": 0.487
+        },
+        "test_photo_cancel_rejection_respects_preview_addressing": {
+          "nodes": 4,
+          "seconds": 2.249
+        },
+        "test_setup_failure_releases_occupancy_without_claiming_activity_started": {
+          "nodes": 1,
+          "seconds": 0.463
+        },
+        "test_driver_entered_with_zero_tools_keeps_entry_and_rejects_cancel": {
+          "nodes": 1,
+          "seconds": 0.447
+        },
+        "test_cancel_before_any_start_does_not_fabricate_attempt": {
+          "nodes": 1,
+          "seconds": 0.391
+        },
+        "test_direct_cancel_mode_cannot_bypass_entered_start": {
+          "nodes": 2,
+          "seconds": 1.0630000000000002
+        },
+        "test_preview_both_is_deduplicated_when_source_cancel_is_applied": {
+          "nodes": 1,
+          "seconds": 0.397
+        },
+        "test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request": {
+          "nodes": 4,
+          "seconds": 1.6949999999999998
+        },
+        "test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan": {
+          "nodes": 1,
+          "seconds": 0.712
+        },
+        "test_cancel_after_actual_relative_focus_rejects_and_keeps_original_limits": {
+          "nodes": 3,
+          "seconds": 1.5859999999999999
+        },
+        "test_cancel_origin_itself_canceled_keeps_already_applied_source_responsibility": {
+          "nodes": 1,
+          "seconds": 0.486
+        },
+        "test_independent_fixed_event_guard_rejects_false_entry_request": {
+          "nodes": 4,
+          "seconds": 1.7440000000000002
+        },
+        "test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success": {
+          "nodes": 2,
+          "seconds": 0.896
+        },
+        "test_original_grant_without_ready_session_permit_never_enters_driver": {
+          "nodes": 2,
+          "seconds": 0.817
+        },
+        "test_four_entries_share_motor_permission": {
+          "nodes": 8,
+          "seconds": 0.415
+        },
+        "test_local_intent_cancel_has_no_persisted_unknown_gap": {
+          "nodes": 1,
+          "seconds": 0.076
+        },
+        "test_verify_motor_cancel_operation_preserves_original_result": {
+          "nodes": 2,
+          "seconds": 0.179
+        },
+        "test_cancel_unknown_reopens_verifies_and_stops_before_settlement": {
+          "nodes": 2,
+          "seconds": 0.15
+        },
+        "test_apply_cancel_ends_running_sync_in_same_transaction": {
+          "nodes": 1,
+          "seconds": 0.103
+        },
+        "test_running_sync_cancel_settles_target_before_member_success": {
+          "nodes": 2,
+          "seconds": 1.827
+        },
+        "test_acknowledged_running_sync_can_cancel_without_rewriting_ack": {
+          "nodes": 1,
+          "seconds": 0.193
+        },
+        "test_acknowledged_sync_recovers_local_action_success": {
+          "nodes": 1,
+          "seconds": 0.168
+        },
+        "test_work_facts_keeps_acknowledged_local_result_pending": {
+          "nodes": 1,
+          "seconds": 0.159
+        },
+        "test_sync_cancellation_failure_rolls_back_all_facts": {
+          "nodes": 2,
+          "seconds": 0.097
+        },
+        "test_unknown_sync_cancellation_verifies_original_complete_transaction": {
+          "nodes": 2,
+          "seconds": 0.126
+        },
+        "test_local_cancel_finish_rolls_back_action_and_plan_then_reenters": {
+          "nodes": 1,
+          "seconds": 0.056
+        },
+        "test_report_cancel_original_key_rejects_changed_apply_mode": {
+          "nodes": 4,
+          "seconds": 0.34400000000000003
+        },
+        "test_report_cancel_original_mode_reuses_after_later_facts": {
+          "nodes": 4,
+          "seconds": 0.395
+        },
+        "test_target_cancel_recovers_after_origin_stops_waiting": {
+          "nodes": 1,
+          "seconds": 0.137
+        },
+        "test_one_sync_cancel_preserves_shared_frozen_report_and_other_success": {
+          "nodes": 1,
+          "seconds": 0.22
+        },
+        "test_local_result_save_failure_stops_maintenance": {
+          "nodes": 2,
+          "seconds": 0.294
+        },
+        "test_report_state_query_failure_is_fatal_before_following_flow": {
+          "nodes": 4,
+          "seconds": 0.484
+        },
+        "test_cancel_finish_store_failure_stops_session_without_member_result": {
+          "nodes": 1,
+          "seconds": 0.06
+        },
+        "test_unknown_local_cancel_finish_recovers_original_key": {
+          "nodes": 2,
+          "seconds": 0.13
+        },
+        "test_sync_cancel_history_replays_target_sync_member_and_plan": {
+          "nodes": 1,
+          "seconds": 0.113
+        },
+        "test_running_unstarted_capture_original_key_keeps_exact_mode": {
+          "nodes": 1,
+          "seconds": 0.068
+        },
+        "test_cancel_guard_rejects_invalid_original_input_evidence": {
+          "nodes": 5,
+          "seconds": 0.27099999999999996
+        },
+        "test_foreign_residual_scope_keeps_sql_and_rows_start_facts_equal": {
+          "nodes": 12,
+          "seconds": 0.7630000000000001
+        },
+        "test_foreign_residual_and_preflight_do_not_require_trigger_activity": {
+          "nodes": 4,
+          "seconds": 0.19799999999999998
+        },
+        "test_pending_query_is_only_a_complete_row_domain_input": {
+          "nodes": 2,
+          "seconds": 0.11699999999999999
+        },
+        "test_only_unfinished_original_start_confirmation_blocks_start_partition": {
+          "nodes": 3,
+          "seconds": 0.19
+        },
+        "test_complete_residual_scope_rejects_wrong_responsibility_identity_and_ranges": {
+          "nodes": 15,
+          "seconds": 0.911
+        },
+        "test_complete_run_input_rejects_a_different_trigger_owner": {
+          "nodes": 1,
+          "seconds": 0.065
+        },
+        "test_actual_cancel_loader_keeps_foreign_target_owner_and_exact_coverage": {
+          "nodes": 1,
+          "seconds": 0.065
+        },
+        "test_copy_and_cleanup_fixed_combinations_do_not_require_parent_reads": {
+          "nodes": 1,
+          "seconds": 0.042
+        },
+        "test_saved_emergency_record_keeps_sql_and_rows_start_facts_equal": {
+          "nodes": 2,
+          "seconds": 0.181
+        },
+        "test_emergency_scope_keeps_original_owner_target_and_attempt_checks": {
+          "nodes": 3,
+          "seconds": 0.138
+        },
+        "test_actual_query_responsibility_keeps_sql_and_complete_rows_equivalent": {
+          "nodes": 3,
+          "seconds": 0.171
+        },
+        "test_terminal_obtain_still_withdraws_ready": {
+          "nodes": 1,
+          "seconds": 0.518
+        },
+        "test_processing_delivery_is_not_retractable": {
+          "nodes": 1,
+          "seconds": 0.497
+        },
+        "test_unknown_position_saves_finite_unconfirmed_result": {
+          "nodes": 1,
+          "seconds": 0.487
+        },
+        "test_deleted_item_does_not_block_others": {
+          "nodes": 1,
+          "seconds": 0.041
+        },
+        "test_running_capture_waits_for_execution_chain": {
+          "nodes": 1,
+          "seconds": 0.041
+        },
+        "test_running_report_without_sync_rejects_settlement": {
+          "nodes": 1,
+          "seconds": 0.031
+        },
+        "test_cancel_action_target_delegates_to_origin_settle": {
+          "nodes": 1,
+          "seconds": 0.049
+        },
+        "test_four_entries_resolve_against_real_store": {
+          "nodes": 1,
+          "seconds": 0.03
+        },
+        "test_auto_candidates_come_from_saved_links": {
+          "nodes": 1,
+          "seconds": 0.058
+        },
+        "test_fix_saves_full_set_with_basis_and_effect": {
+          "nodes": 1,
+          "seconds": 0.036
+        },
+        "test_self_scope_fails_action_without_any_item": {
+          "nodes": 1,
+          "seconds": 0.036
+        },
+        "test_missing_target_fails_action_with_registered_error": {
+          "nodes": 1,
+          "seconds": 0.03
+        },
+        "test_resend_and_recovery_produce_no_partial_cancel": {
+          "nodes": 1,
+          "seconds": 0.035
+        },
+        "test_empty_set_is_rejected_without_partial_save": {
+          "nodes": 1,
+          "seconds": 0.032
+        },
+        "test_linked_member_requires_valid_auto_link": {
+          "nodes": 1,
+          "seconds": 0.03
+        },
+        "test_initial_values_must_be_pending_without_result": {
+          "nodes": 1,
+          "seconds": 0.038
+        },
+        "test_fail_branch_rejects_members_and_foreign_error": {
+          "nodes": 1,
+          "seconds": 0.029
+        },
+        "test_real_c2_cancels_running_unfixed_c1_without_touching_its_targets": {
+          "nodes": 1,
+          "seconds": 0.415
+        },
+        "test_finish_itself_rechecks_complete_pending_empty_members": {
+          "nodes": 4,
+          "seconds": 1.788
+        },
+        "test_empty_finish_reuses_original_key_and_time_after_unknown": {
+          "nodes": 2,
+          "seconds": 0.876
+        }
+      }
+    }
+  },
+  "limitations": [
+    "各目标只测一次，前后值属于当前开发容器，不外推目标主机性能。",
+    "cancellation 目录改前耗时引用既有报告；本轮只对目标文件进行了同环境前后运行。"
+  ],
+  "design_gaps": []
+}
