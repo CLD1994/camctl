@@ -1,0 +1,444 @@
+{
+  "implementation_commit": "323a933c2634b70e761cdbca24a6e0db9236a687",
+  "base_commit": "cd228b16",
+  "scope": "local assertion ownership and installed describe input reuse",
+  "coverage_map": "# S1 单元归属与安装能力输入复用证据\n\n工作区为 `/tmp/camctl-itopt-unit-bootstrap`，分支为 `work/itopt-unit-bootstrap`，起点为 `cd228b16`。解释器为 `/workspaces/camctl/apps/camctl/.venv311/bin/python`，实际版本 Python 3.11.17。所有集成 pytest 在本工作区串行运行；包资源、pytest 临时根及安装部署均与主工作区分离。只复用解释器及只读已安装依赖，没有同步共享依赖环境。\n\n## 当前覆盖映射\n\n| 原覆盖 | 当前覆盖 | 保留的合同 |\n| --- | --- | --- |\n| `integration/acceptance/test_validation.py::TestPreciseNumbers::test_integral_decimals_satisfy_integer` | `unit/acceptance/test_validation.py` 同名节点 | `Decimal(\"1.0\")` 可满足整数 |\n| `TestPreciseNumbers::test_exponent_form_integer_satisfies` | 同上同名节点 | `Decimal(\"1e0\")` 可满足整数 |\n| `TestPreciseNumbers::test_near_integer_long_decimal_rejected` | 同上同名节点 | `Decimal(\"1.0000000000000001\")` 被拒绝 |\n| `TestPreciseNumbers::test_multiple_of_uses_exact_fraction` | 同上同名节点 | 精确倍数 `0.3` 成功，`0.35` 失败 |\n| `TestPreciseNumbers::test_bool_and_string_numbers_rejected` | 同上同名节点 | 布尔值和数字字符串不充当整数 |\n| `TestPreciseNumbers::test_defaults_applied_and_original_preserved` | 同上同名节点 | 保存完整默认参数且输入不变 |\n| `TestRuleErrors::test_invalid_schema_is_rule_error` | 同上同名节点 | 未知 Schema 类型抛 `RuleError` |\n| `integration/bootstrap/test_package.py::test_resource_names_reject_arbitrary_paths` | `unit/test_resources.py` 同名节点 | 六个原路径反例全部拒绝；登记集合隔离为内存，真实资源目录入口被阻断 |\n| 安装版四种合法样例 | 原四个节点全部保留 | 每项仍执行安装生成器、独立 `init`、`submit` 与 SQLite 原参数核对 |\n| 安装版两型号的七类非法时间 | 原十四个节点全部保留 | equal、reverse、boolean-interval、string-duration、neighboring-decimal、out-of-domain-interval、out-of-domain-duration 各自执行安装生成器，使用独立输入和输出路径，拒绝且不产生计划 |\n| 安装版重复匹配参数类型 | 原两个节点全部保留 | 每次从本用例能力文件解析独立文档后追加重复项，不修改共享原文 |\n| `integration/host_files/test_capture_sources.py` 中三项值、路径及 JSON 校验 | 原三个集成节点全部保留 | 三个函数仍覆盖全部非法输入和编解码；其模块冷导入依赖真实枚举登记，当前保持集成归属 |\n\n数字的七项集成输入和断言与既有单元节点一致。它们使用内联无 `$ref` 的参数 Schema；单元目录只把 `schema_registry()` 替换为内存注册表。集成文件剩余十项继续组合真实公共正文结构与动作片段。\n\n真实资源和引用见证继续由 `integration/contracts/test_schemas.py::test_packaged_plan_local_reference_accepts_decimal_integer`、同文件报告数字两个节点、`integration/contracts/test_motor_schema.py::test_shared_motor_plan_keeps_admission_boundary` 及 `integration/acceptance/test_fields.py::test_admission_details_match_registry` 保持。wheel 的全部真实资源字节摘要及同步检查保留，真实文件核验、归档、fsync 与线程取消也保留。\n\n## host_files 的当前分层边界\n\n`capture_sources.py:17` 导入 `models`；`models.py:23` 在模块初始化时使用 `enum_for(\"intermediate_files.purpose\")` 构造 `FilePurpose`；`contracts/enums.py:57` 调用 `load_registry()`，后者在第 37 行经 `resource_bytes(\"registry/enum-registry.json\")` 读取实际登记内容。`paths` 和 `photo_formats` 在同一导入链使用这些成员。仅允许源码导入不能消除对资源内容的真实依赖。\n\n`cold-import-boundary/` 保存新进程证据：在导入前阻断枚举资源读取，导入 `capture_sources` 会在上述链条请求 `registry/enum-registry.json`。三个局部断言当前保持集成归属；它们的迁移需要先独立处理这一模块导入边界。本次不修改生产模块结构，不手工复制登记集合，也不替换全局模块状态。\n\n## 准备复用边界\n\n`camera_spec()` 的设备及能力声明仅随型号变化，参数输入不改变该声明。模块级 fixture 为每个 `CameraModel` 执行一次安装版 `describe`，以不可变映射保存原文字符串；每个消费用例写入自己的能力文件。`describe` 本身不依赖状态库，因此只读能力世界无需初始化状态库。合法样例仍各自初始化状态库和受理；非法样例保持自己创建的部署目录和原拒绝断言。\n\n## 窄基准\n\n`before/` 和 `after/` 的每个目标都有完整命令、工作目录、实际 UTC、Python 版本、日志、退出码、外层墙钟、逐项阶段耗时及收集清单。两轮均使用同一解释器和源码布局，逐项采集器消费并移除自己的环境变量，未进入安装子进程环境。\n\n| 已实施目标 | 修改前节点 | 修改后节点 | 修改前墙钟秒数 | 修改后墙钟秒数 | 退出码 |\n| --- | ---: | ---: | ---: | ---: | --- |\n| acceptance validation | 17 | 10 | 0.783 | 0.727 | 均为 0 |\n| bootstrap package | 3 | 2 | 1.797 | 0.993 | 均为 0 |\n| 安装生成器 4 合法 + 14 非法 | 18 | 18 | 38.621 | 20.009 | 均为 0 |\n\n安装生成器目标外层墙钟减少 18.612 秒，约 48.2%。它的 18 个节点与断言全部保留，准备从 18 次 describe 和 18 次 init 改为 2 次 describe 和 4 次 init。其余两个文件主要调整覆盖归属，短任务和构建缓存的差值不外推为完整目录提速。真实生成器脚本提取与执行继续逐项保留。\n\n`before/host-capture-sources` 为原 23 个节点；`after/host-capture-sources` 和 `moved-unit` 仅保存分层调查过程，不代表当前树的覆盖归属。当前文件与起点逐字相同，以 `host-files-directory` 作为最终组合验证。\n\n## 验证范围\n\n`distribution-file` 运行完整发行物文件：41 项通过、2 项失败，pytest 61.52 秒，外层 61.851 秒，退出 1。两项失败均为 `test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw/jpeg]`：独立 init、生成计划与 submit 已成功，随后查询 `database_metadata.format_version` 得到 3，而原断言要求 2。两个完整失败堆栈保留在日志中；干净起点同目标复现另存 `distribution-baseline-failures`。\n\n`full-unit` 为 7,141 项通过、1 项跳过，pytest 90.18 秒，外层 91.756 秒，退出 0；保留两条既有同步用例 asyncio 标记警告。该次收集包含随后保持集成归属的三个调查用例，因此是当前最终单元集合加三个调查用例的通过超集，不把它报告为最终树 7,141 个单元节点。当前单元测试的新增只有资源名称一项；最终受影响单元范围由 `final-local-unit` 再验证。\n\n最终组合门禁均串行完成：`acceptance-directory` 为 331 项通过，pytest 75.29 秒，外层 75.723 秒；`host-files-directory` 为 121 项通过，pytest 2.86 秒，外层 3.168 秒；`real-schema-witnesses` 为 147 项通过，pytest 1.14 秒，外层 1.394 秒；`final-local-unit` 为 15 项通过，pytest 0.13 秒，外层 0.471 秒；以上退出码均为 0。完整 bootstrap 目录由协调者在最终合并树的完整范围验收中执行，本子任务没有据窄范围通过宣称整个 bootstrap 目录通过。\n\n干净 `cd228b16` 的两个 Hasselblad 目标复现为 2 项失败、41 项未选，pytest 7.62 秒，外层 7.879 秒，退出 1；失败位置同样是实际格式版本 3 与预期 2 的比较。基线位于 `/tmp/camctl-itopt-unit-bootstrap-baseline`，分支为 `work/itopt-unit-bootstrap-baseline`；证据完整复制到本目录，原收据保留实际执行路径。\n",
+  "runs": [
+    {
+      "name": "acceptance-directory",
+      "exit_code": 0,
+      "wall_s": 75.72270763900087,
+      "receipt": ".local/verification/itopt/unit-bootstrap/acceptance-directory/receipt.json",
+      "execution": {
+        "name": "acceptance-directory",
+        "started_utc": "2026-10-24T21:38:53.785604+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/acceptance",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-acceptance-directory"
+        ],
+        "exit_code": 0,
+        "wall_s": 75.72270763900087,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/acceptance-directory/pytest.log"
+      }
+    },
+    {
+      "name": "acceptance-validation",
+      "exit_code": 0,
+      "wall_s": 0.7272829909998109,
+      "receipt": ".local/verification/itopt/unit-bootstrap/after/acceptance-validation/receipt.json",
+      "execution": {
+        "name": "acceptance-validation",
+        "started_utc": "2026-10-24T21:34:22.839265+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/acceptance/test_validation.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-after-acceptance-validation"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.7272829909998109,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/after/acceptance-validation/pytest.log"
+      }
+    },
+    {
+      "name": "bootstrap-generator",
+      "exit_code": 0,
+      "wall_s": 20.009202457997162,
+      "receipt": ".local/verification/itopt/unit-bootstrap/after/bootstrap-generator/receipt.json",
+      "execution": {
+        "name": "bootstrap-generator",
+        "started_utc": "2026-10-24T21:34:26.193892+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "-k",
+          "test_installed_camera_sample_is_accepted_from_actual_describe or test_installed_generator_rejects_invalid_timelapse_time_before_plan",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-after-bootstrap-generator"
+        ],
+        "exit_code": 0,
+        "wall_s": 20.009202457997162,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/after/bootstrap-generator/pytest.log"
+      }
+    },
+    {
+      "name": "bootstrap-package",
+      "exit_code": 0,
+      "wall_s": 0.9928511800026172,
+      "receipt": ".local/verification/itopt/unit-bootstrap/after/bootstrap-package/receipt.json",
+      "execution": {
+        "name": "bootstrap-package",
+        "started_utc": "2026-10-24T21:34:24.049343+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_package.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-after-bootstrap-package"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.9928511800026172,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/after/bootstrap-package/pytest.log"
+      }
+    },
+    {
+      "name": "host-capture-sources",
+      "exit_code": 0,
+      "wall_s": 0.4812869439992937,
+      "receipt": ".local/verification/itopt/unit-bootstrap/after/host-capture-sources/receipt.json",
+      "execution": {
+        "name": "host-capture-sources",
+        "started_utc": "2026-10-24T21:34:23.567134+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/host_files/test_capture_sources.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-after-host-capture-sources"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.4812869439992937,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/after/host-capture-sources/pytest.log"
+      }
+    },
+    {
+      "name": "acceptance-validation",
+      "exit_code": 0,
+      "wall_s": 0.7834900170018955,
+      "receipt": ".local/verification/itopt/unit-bootstrap/before/acceptance-validation/receipt.json",
+      "execution": {
+        "name": "acceptance-validation",
+        "started_utc": "2026-10-24T21:32:25.517385+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/acceptance/test_validation.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-before-acceptance-validation"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.7834900170018955,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/before/acceptance-validation/pytest.log"
+      }
+    },
+    {
+      "name": "bootstrap-generator",
+      "exit_code": 0,
+      "wall_s": 38.620920371002285,
+      "receipt": ".local/verification/itopt/unit-bootstrap/before/bootstrap-generator/receipt.json",
+      "execution": {
+        "name": "bootstrap-generator",
+        "started_utc": "2026-10-24T21:32:28.598858+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "-k",
+          "test_installed_camera_sample_is_accepted_from_actual_describe or test_installed_generator_rejects_invalid_timelapse_time_before_plan",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-before-bootstrap-generator"
+        ],
+        "exit_code": 0,
+        "wall_s": 38.620920371002285,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/before/bootstrap-generator/pytest.log"
+      }
+    },
+    {
+      "name": "bootstrap-package",
+      "exit_code": 0,
+      "wall_s": 1.7972759830008727,
+      "receipt": ".local/verification/itopt/unit-bootstrap/before/bootstrap-package/receipt.json",
+      "execution": {
+        "name": "bootstrap-package",
+        "started_utc": "2026-10-24T21:32:26.801073+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_package.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-before-bootstrap-package"
+        ],
+        "exit_code": 0,
+        "wall_s": 1.7972759830008727,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/before/bootstrap-package/pytest.log"
+      }
+    },
+    {
+      "name": "host-capture-sources",
+      "exit_code": 0,
+      "wall_s": 0.4994081039985758,
+      "receipt": ".local/verification/itopt/unit-bootstrap/before/host-capture-sources/receipt.json",
+      "execution": {
+        "name": "host-capture-sources",
+        "started_utc": "2026-10-24T21:32:26.301284+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/host_files/test_capture_sources.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "timing_plugin_isolated",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-before-host-capture-sources"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.4994081039985758,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/before/host-capture-sources/pytest.log"
+      }
+    },
+    {
+      "exit_code": 1,
+      "wall_s": 0.08724809599880246,
+      "receipt": ".local/verification/itopt/unit-bootstrap/cold-import-boundary/receipt.json",
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-c",
+          "from camctl.contracts import enums\n\ndef forbidden_read(name):\n    raise RuntimeError(\"cold import requested resource: \" + name)\n\nenums.resource_bytes = forbidden_read\nfrom camctl.host_files import capture_sources\n"
+        ],
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "started_utc": "2026-10-24T21:38:18.413701+00:00",
+        "exit_code": 1,
+        "wall_s": 0.08724809599880246,
+        "expected_observation": "RuntimeError names registry/enum-registry.json while importing capture_sources"
+      }
+    },
+    {
+      "name": "distribution-baseline-failures",
+      "exit_code": 1,
+      "wall_s": 7.878808704997937,
+      "receipt": ".local/verification/itopt/unit-bootstrap/distribution-baseline-failures/receipt.json",
+      "execution": {
+        "name": "distribution-baseline-failures",
+        "started_utc": "2026-10-24T21:38:34.368754+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap-baseline",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "-k",
+          "test_installed_hasselblad_photo_pair_obtain_and_source_reuse",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-distribution-baseline-failures"
+        ],
+        "exit_code": 1,
+        "wall_s": 7.878808704997937,
+        "log": "/tmp/camctl-itopt-unit-bootstrap-baseline/.local/verification/itopt/unit-bootstrap/distribution-baseline-failures/pytest.log"
+      }
+    },
+    {
+      "name": "distribution-file",
+      "exit_code": 1,
+      "wall_s": 61.85105463799846,
+      "receipt": ".local/verification/itopt/unit-bootstrap/distribution-file/receipt.json",
+      "execution": {
+        "name": "distribution-file",
+        "started_utc": "2026-10-24T21:34:59.916402+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-distribution-file"
+        ],
+        "exit_code": 1,
+        "wall_s": 61.85105463799846,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/distribution-file/pytest.log"
+      }
+    },
+    {
+      "name": "final-local-unit",
+      "exit_code": 0,
+      "wall_s": 0.47062048699808656,
+      "receipt": ".local/verification/itopt/unit-bootstrap/final-local-unit/receipt.json",
+      "execution": {
+        "name": "final-local-unit",
+        "started_utc": "2026-10-24T21:40:17.713747+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/unit/acceptance/test_validation.py",
+          "apps/camctl/tests/unit/test_resources.py",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-final-local-unit"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.47062048699808656,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/final-local-unit/pytest.log"
+      }
+    },
+    {
+      "name": "full-unit",
+      "exit_code": 0,
+      "wall_s": 91.75580400800027,
+      "receipt": ".local/verification/itopt/unit-bootstrap/full-unit/receipt.json",
+      "execution": {
+        "name": "full-unit",
+        "started_utc": "2026-10-24T21:36:44.506305+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/unit",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-full-unit"
+        ],
+        "exit_code": 0,
+        "wall_s": 91.75580400800027,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/full-unit/pytest.log"
+      }
+    },
+    {
+      "name": "host-files-directory",
+      "exit_code": 0,
+      "wall_s": 3.167555320000247,
+      "receipt": ".local/verification/itopt/unit-bootstrap/host-files-directory/receipt.json",
+      "execution": {
+        "name": "host-files-directory",
+        "started_utc": "2026-10-24T21:40:13.097441+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/host_files",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-host-files-directory"
+        ],
+        "exit_code": 0,
+        "wall_s": 3.167555320000247,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/host-files-directory/pytest.log"
+      }
+    },
+    {
+      "name": "moved-unit",
+      "exit_code": 0,
+      "wall_s": 0.5924430910017691,
+      "receipt": ".local/verification/itopt/unit-bootstrap/moved-unit/receipt.json",
+      "execution": {
+        "name": "moved-unit",
+        "started_utc": "2026-10-24T21:33:56.762276+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/unit/host_files/test_capture_sources.py",
+          "apps/camctl/tests/unit/test_resources.py",
+          "apps/camctl/tests/unit/acceptance/test_validation.py",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-moved-unit"
+        ],
+        "exit_code": 0,
+        "wall_s": 0.5924430910017691,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/moved-unit/pytest.log"
+      }
+    },
+    {
+      "name": "real-schema-witnesses",
+      "exit_code": 0,
+      "wall_s": 1.393571434000478,
+      "receipt": ".local/verification/itopt/unit-bootstrap/real-schema-witnesses/receipt.json",
+      "execution": {
+        "name": "real-schema-witnesses",
+        "started_utc": "2026-10-24T21:40:16.293410+00:00",
+        "working_directory": "/tmp/camctl-itopt-unit-bootstrap",
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/contracts/test_schemas.py",
+          "apps/camctl/tests/integration/contracts/test_motor_schema.py",
+          "-q",
+          "--basetemp",
+          "/tmp/camctl-itopt-unit-bootstrap-real-schema-witnesses"
+        ],
+        "exit_code": 0,
+        "wall_s": 1.393571434000478,
+        "log": "/tmp/camctl-itopt-unit-bootstrap/.local/verification/itopt/unit-bootstrap/real-schema-witnesses/pytest.log"
+      }
+    }
+  ]
+}

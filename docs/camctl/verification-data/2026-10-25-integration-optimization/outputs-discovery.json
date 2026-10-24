@@ -1,0 +1,281 @@
+{
+  "base_commit": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+  "scope": "apps/camctl/tests/integration/outputs/test_read_discovery.py",
+  "coverage": {
+    "scan_pairs_before": [
+      [
+        12,
+        1
+      ],
+      [
+        120,
+        1
+      ],
+      [
+        120,
+        3
+      ]
+    ],
+    "scan_pairs_after": [
+      [
+        12,
+        1
+      ],
+      [
+        120,
+        1
+      ],
+      [
+        120,
+        3
+      ]
+    ],
+    "all_original_assertions_preserved": true,
+    "independent_owner_and_connection_per_scan": true,
+    "database_worlds_before": 3,
+    "database_worlds_after": 1,
+    "extra_grant_file_preparations_before": 252,
+    "extra_grant_file_preparations_after": 120,
+    "candidate_counts_each_scan": [
+      14,
+      122,
+      122
+    ],
+    "scan_unchanged_database_dump_added": true
+  },
+  "before_source_sha256": "9437328a80860460db00f9013701c6ebdb12a975e47eaadaadd049d3b6ab7f77",
+  "after_source_sha256": "fb47bdde7630fc599967a9aca67ab215454a76c1d3193dcd647a71ba91a2a9ee",
+  "patch_sha256": "f3aa8c75072e49dae315926ef61a000ae51eff6e98a860633631f007d8e6ec8b",
+  "source_head": "d6fd0f4790b071367b7a09f30d4c60ab68dbbc02",
+  "implementation_commit": "d6fd0f4790b071367b7a09f30d4c60ab68dbbc02",
+  "review": "独立只读审计 capture_merge_audit 对实际diff未发现确认问题；未执行pytest或写入文件。",
+  "runs": {
+    "before-target": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation/before-target",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/outputs-discovery/before-target.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:36:56.011048+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-cancellation"
+        },
+        "pid": 215631,
+        "exit_code": 0,
+        "elapsed_seconds": 14.541752609999094,
+        "end_utc": "2026-10-24T21:37:11.705615+00:00"
+      },
+      "exec_session_id": 45701,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "3",
+          "time": "14.184",
+          "timestamp": "2026-10-25T05:36:56.203511+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_candidate_capacity_tracks_batch_not_total": {
+          "nodes": 3,
+          "seconds": 12.597
+        }
+      }
+    },
+    "after-target": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-outputs-discovery/after-target",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/outputs-discovery/after-target.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:39:51.645780+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-outputs-discovery"
+        },
+        "pid": 222261,
+        "exit_code": 0,
+        "elapsed_seconds": 11.131221537001693,
+        "end_utc": "2026-10-24T21:40:02.780175+00:00"
+      },
+      "exec_session_id": 57168,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "1",
+          "time": "10.592",
+          "timestamp": "2026-10-25T05:39:51.838414+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_candidate_capacity_tracks_batch_not_total": {
+          "nodes": 1,
+          "seconds": 9.024
+        }
+      }
+    },
+    "after-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_read_discovery.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-outputs-discovery/after-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/outputs-discovery/after-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:42:05.919592+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-outputs-discovery"
+        },
+        "pid": 226303,
+        "exit_code": 0,
+        "elapsed_seconds": 15.910561189000873,
+        "end_utc": "2026-10-24T21:42:23.048997+00:00"
+      },
+      "exec_session_id": 4751,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "29",
+          "time": "15.565",
+          "timestamp": "2026-10-25T05:42:06.071425+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_later_registered_earlier_action_wins_without_full_load": {
+          "nodes": 1,
+          "seconds": 0.083
+        },
+        "test_missing_candidate_basis_is_not_filtered_away": {
+          "nodes": 4,
+          "seconds": 0.16199999999999998
+        },
+        "test_product_predecessor_scan_retains_only_current_batch": {
+          "nodes": 1,
+          "seconds": 0.262
+        },
+        "test_scope_cannot_read_another_database": {
+          "nodes": 1,
+          "seconds": 0.039
+        },
+        "test_host_missing_owner_is_not_filtered_away": {
+          "nodes": 1,
+          "seconds": 0.037
+        },
+        "test_internal_and_delivery_reads_share_global_order": {
+          "nodes": 1,
+          "seconds": 0.041
+        },
+        "test_delivery_discovery_keeps_internal_holder_with_capture_owner": {
+          "nodes": 2,
+          "seconds": 0.092
+        },
+        "test_held_retry_copy_precedes_new_candidates": {
+          "nodes": 1,
+          "seconds": 0.043
+        },
+        "test_newly_eligible_low_key_is_rediscovered": {
+          "nodes": 1,
+          "seconds": 0.039
+        },
+        "test_evicted_read_resumes_after_restart": {
+          "nodes": 1,
+          "seconds": 0.791
+        },
+        "test_guard_independently_rejects_skipped_predecessor": {
+          "nodes": 1,
+          "seconds": 0.061
+        },
+        "test_finishing_obtain_does_not_materialize_plan_siblings": {
+          "nodes": 1,
+          "seconds": 0.305
+        },
+        "test_candidate_capacity_tracks_batch_not_total": {
+          "nodes": 1,
+          "seconds": 9.768
+        },
+        "test_query_failure_is_not_exhaustion": {
+          "nodes": 1,
+          "seconds": 0.044
+        },
+        "test_terminal_actions_do_not_expand_discovered_details": {
+          "nodes": 1,
+          "seconds": 0.271
+        },
+        "test_idle_deadline_returns_only_nearest_pending_metadata": {
+          "nodes": 3,
+          "seconds": 0.834
+        },
+        "test_device_holder_query_detects_multiple_holders": {
+          "nodes": 1,
+          "seconds": 0.001
+        },
+        "test_obtain_summary_folds_many_items_without_full_materialization": {
+          "nodes": 5,
+          "seconds": 1.269
+        },
+        "test_plan_guard_independently_rejects_skipped_unfinished_sibling": {
+          "nodes": 1,
+          "seconds": 0.068
+        }
+      }
+    }
+  },
+  "limitations": [
+    "前后均为一次开发容器采样，同期负载不同，不将差值外推到全目录或目标主机。",
+    "各集成进程在本工作区顺序运行，使用本工作区src、同步包资源和临时根；复用现有Python 3.11.17环境而未修改共享依赖。"
+  ],
+  "design_gaps": []
+}
