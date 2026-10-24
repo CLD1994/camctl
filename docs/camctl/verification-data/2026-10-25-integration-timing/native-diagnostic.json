@@ -1,0 +1,148 @@
+{
+  "scope": "Additional single-node diagnostic, excluded from serial timing totals",
+  "receipt": {
+    "nodeid": "apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]",
+    "command": [
+      "uvx",
+      "--offline",
+      "--from",
+      "py-spy",
+      "py-spy",
+      "record",
+      "--nonblocking",
+      "--rate",
+      "20",
+      "--format",
+      "speedscope",
+      "--full-filenames",
+      "--output",
+      "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/native-sample/py-spy.json",
+      "--",
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]",
+      "-q",
+      "--durations=0",
+      "-p",
+      "timing_plugin",
+      "--basetemp=/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/native-sample/pyspy-tmp"
+    ],
+    "cwd": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel",
+    "started_utc": "2026-10-24T20:42:52.639298+00:00",
+    "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "pythonpath": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z:/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src",
+    "uv_python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "uv_project_environment": "/workspaces/camctl/apps/camctl/.venv311",
+    "timing_data": "/workspaces/camctl/.local/verification/integration-timing-20261024T181943Z/native-sample/pyspy-events",
+    "timing_repo": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel",
+    "resource_source": "wrapper resource.getrusage(RUSAGE_CHILDREN) delta around uvx subprocess",
+    "wrapper_pid": 176042,
+    "child_pid": 176043,
+    "returncode": 0,
+    "launch_error": null,
+    "wall_seconds": 51.94722323300084,
+    "children_user_cpu_seconds": 50.471368,
+    "children_system_cpu_seconds": 3.651337,
+    "finished_utc": "2026-10-24T20:43:46.603365+00:00"
+  },
+  "sampling": {
+    "tool": "py-spy",
+    "rate_hz": 20,
+    "reported_samples": 766,
+    "reported_sampling_errors": 278,
+    "frames_with_invalid_utf8": 1,
+    "samples_excluded_from_summary": 1,
+    "normalization": "The raw frame with invalid UTF-8 is replaced by an explicit unreadable-frame placeholder; its affected sample is excluded from function counts.",
+    "test_call_sites": {
+      "64": 3,
+      "82": 1,
+      "118": 609
+    },
+    "inclusive_counts": [
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/capture/native_completion.py",
+        "function": "advance_native_result",
+        "samples": 609
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "function": "finish_segment_recording",
+        "samples": 473
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/capture.py",
+        "function": "finish_segment_recording",
+        "samples": 473
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "function": "_verify_strict_member",
+        "samples": 417
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "function": "read_segment_members",
+        "samples": 412
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segment_dispositions.py",
+        "function": "retained_disposition",
+        "samples": 410
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segment_native.py",
+        "function": "native_classification",
+        "samples": 382
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "function": "_verify_page_relations",
+        "samples": 343
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segment_check_conclusions.py",
+        "function": "read_verified_conclusion",
+        "samples": 236
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "function": "_verify_assessment",
+        "samples": 69
+      },
+      {
+        "file": "/workspaces/camctl/.local/worktrees/integration-timing-native-parallel/apps/camctl/tests/integration/capture/result_consumer_fixtures.py",
+        "function": "consumer_world",
+        "samples": 3
+      }
+    ]
+  },
+  "notes": [
+    "The diagnostic ran in an isolated worktree in parallel with the main root cross-component suite.",
+    "The worktree HEAD is ea52a0d; production and test source matches the serial baseline 9da49b2.",
+    "Inclusive frame counts overlap; do not add them or treat sample weights as saved wall time.",
+    "User/system CPU figures include the profiler process family.",
+    "A prior diagnostic process exited 139 before test collection; it contributes no test result or duration to this record."
+  ],
+  "profile_sha256": "5a840f56ec6915c01fb1304a16f4a3136e631d3e3fc88768c66d551e09e748c0",
+  "pytest": {
+    "collected": 1,
+    "failed": 0,
+    "exit_status": 0,
+    "session_elapsed_seconds": 51.33291908499814,
+    "phases": {
+      "setup": {
+        "duration_seconds": 0.003416240000660764,
+        "outcome": "passed"
+      },
+      "call": {
+        "duration_seconds": 48.59217876599723,
+        "outcome": "passed"
+      },
+      "teardown": {
+        "duration_seconds": 0.0006637330006924458,
+        "outcome": "passed"
+      }
+    }
+  }
+}
