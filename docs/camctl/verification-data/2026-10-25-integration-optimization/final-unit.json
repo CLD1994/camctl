@@ -1,33 +1,60 @@
 {
+  "source_commit_at_start": "53e3f54939e40b02a6bd0420be33d7086f7bc731",
+  "source_status_at_start": " M docs/superpowers/plans/2026-10-25-integration-test-optimization.md",
+  "source_note": "运行开始时计划文档尚未提交；生产源码与最终集成快照48d2ee64相同。运行期间只更新文档和验证回执。",
+  "final_integration_source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+  "python": "3.11.17",
+  "sqlite": "3.53.1",
   "command": [
     "/workspaces/camctl/apps/camctl/.venv311/bin/python",
     "-m",
     "pytest",
     "apps/camctl/tests/unit",
     "-q",
-    "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/final-unit/junit.xml"
+    "--junitxml=/tmp/camctl-itopt-final-unit.xml"
   ],
-  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
-  "source_commit": "379369d6308e576e35e6e5858e60702da8a697ae",
-  "started_utc": "2026-10-24T21:53:26.956436+00:00",
   "environment": {
-    "PYTHONPATH": "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/src"
+    "PYTHONPATH": "apps/camctl/src"
   },
-  "pid": 236961,
+  "worktree": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "exec_session": 84000,
   "exit_code": 0,
-  "wall_seconds": 76.08999081799993,
-  "finished_utc": "2026-10-24T21:54:46.683747+00:00",
+  "passed": 7148,
+  "skipped": 1,
+  "failed": 0,
+  "errors": 0,
+  "warnings": 2,
+  "pytest_reported_seconds": 95.53,
   "junit_suite": {
     "name": "pytest",
     "errors": "0",
     "failures": "0",
     "skipped": "1",
-    "tests": "7147",
-    "time": "74.712",
-    "timestamp": "2026-10-25T05:53:27.135758+08:00",
+    "tests": "7149",
+    "time": "95.468",
+    "timestamp": "2026-10-25T07:25:57.297600+08:00",
     "hostname": "1e0518e0c6b4"
   },
-  "passed": 7146,
-  "skipped": 1,
-  "pytest_seconds": 74.75
+  "skip_details": [
+    {
+      "classname": "tests.unit.reporting.test_worker.TestParentGuard",
+      "name": "test_guard_is_noop_outside_linux",
+      "time": "0.000",
+      "reason": {
+        "type": "pytest.skip",
+        "message": "非 Linux 平台的守护为无操作"
+      }
+    }
+  ],
+  "warnings_note": "保留原有两个非异步函数上的asyncio标记警告。",
+  "artifacts": {
+    "/tmp/camctl-itopt-final-unit.xml": {
+      "sha256": "ac73dac9b97e280e27a7a05859ee7a83a8dd38ca0d97e839a6c92efe7042b862",
+      "bytes": 1124640
+    },
+    "/tmp/camctl-itopt-final-unit.log": {
+      "sha256": "f59cd3ad05479b1050d97e2e2d454a266bb129a65ac22476ae5e0f109cd6c80a",
+      "bytes": 8958
+    }
+  }
 }
