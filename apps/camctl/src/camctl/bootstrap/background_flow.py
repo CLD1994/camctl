@@ -93,17 +93,55 @@ class BackgroundFlow:
 
 
 class ReportBackgroundFlow(BackgroundFlow):
-    """报告实际任务拥有错误边界，检查与收场只消费其原结果。"""
+    """报告先公开前提错误，实际任务继续拥有日志与文件收场。"""
 
     owns_report_error_boundary = True
 
     def __init__(self, flow):
         from camctl.session.service import _advance_report_flow
 
+        self._fatal_error: Exception | None = None
+        self._interrupted_error: asyncio.CancelledError | None = None
+        self._file_step_result = None
+
         async def advance(context):
-            await _advance_report_flow(context, flow)
+            await _advance_report_flow(context, flow, on_fatal=self._notice_fatal)
 
         super().__init__(advance)
+
+    @property
+    def interrupted_error(self):
+        """已收场的原取消诊断；实际文件结果不随任务消费丢失。"""
+        return self._interrupted_error
+
+    @property
+    def file_step_result(self):
+        """停止期间当前文件阶段的实际结果，不授权继续发布。"""
+        return self._file_step_result
+
+    def _notice_fatal(self, error):
+        self._fatal_error = error
+
+    def _consume(self):
+        task = self._task
+        if not task.cancelled():
+            error = task.result().error
+            if isinstance(error, asyncio.CancelledError):
+                self._interrupted_error = error
+                self._file_step_result = getattr(error, "report_file_result", None)
+        try:
+            super()._consume()
+        finally:
+            self._fatal_error = None
+
+    def check_completed(self):
+        super().check_completed()
+        if self._fatal_error is not None:
+            raise self._fatal_error
+
+    async def __call__(self, context):
+        await super().__call__(context)
+        self.check_completed()
 
 
 class CombinedLocalWork:

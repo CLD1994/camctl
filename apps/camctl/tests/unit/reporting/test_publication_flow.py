@@ -256,6 +256,10 @@ class FileFake:
     """记录文件操作并返回可编程结果的文件替身。"""
 
     def __init__(self, monkeypatch) -> None:
+        async def in_process(function, /, *args, **kwargs):
+            return function(*args, **kwargs)
+
+        monkeypatch.setattr(publication.asyncio, "to_thread", in_process)
         self.staged: list[tuple] = []
         self.stale: list[str] = []
         self.withdrawn: list[str] = []

@@ -1262,14 +1262,20 @@ async def _drive_flows(context: SessionContext) -> str | None:
     return None
 
 
-async def _advance_report_flow(context: SessionContext, flow) -> None:
+async def _advance_report_flow(context: SessionContext, flow, *, on_fatal=None) -> None:
     """报告调用及后台实际任务共用同一失败分类和日志入口。"""
     try:
         await flow(context)
     except ClockBecameUntrusted:
         raise
     except (DirectoryBindingError, DeviceConfigurationError, StateDbFailure) as error:
-        await _trigger_failure_log(context, error)
+        if on_fatal is not None:
+            on_fatal(error)
+        try:
+            await _trigger_failure_log(context, error)
+        except BaseException as diagnostic_error:
+            _RequiredPhaseWaiter.attach_exception_notes(
+                error, "报告失败日志交付异常", diagnostic_error)
         raise
     except Exception as error:
         await _trigger_failure_log(context, error)

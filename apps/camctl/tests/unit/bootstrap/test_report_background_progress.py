@@ -17,9 +17,14 @@ from camctl.contracts.clock import ClockPort
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.devices.bindings import DeviceConfigurationError
 from camctl.persistence.repositories.history import HistoryRepository, _FrozenRegistration
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import DatabaseMetadata, DirectoryBindingError, OwnedConnection
-from camctl.reporting.messages import ResultSuccessMessage
-from camctl.reporting.publication import DeliveryOutcome, DeliveryResult
+from camctl.host_files.handoff import PublishResult, PublishStage
+from camctl.host_files.io import DirectorySyncStage
+from camctl.reporting.messages import ErrorKind, ResultFailureMessage, ResultSuccessMessage
+from camctl.reporting.policy import ReportingRepository
+from camctl.reporting.publication import (DeliveryOutcome, DeliveryResult, PublicationSession,
+                                         deliver_staged_report as publish_report_file)
 from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor
 from camctl.session.service import StateDbFailure, _drive_flows, _exception_details
 
@@ -58,6 +63,8 @@ async def test_production_assembly_does_not_await_report_before_scheduling(mocke
 class _ReportState:
     def __init__(self, mocker):
         self.pending = True
+        self.failed = False
+        self.report_id = 1
         self.connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
         self.connection.execute.side_effect = self._execute
         self.owned = OwnedConnection(self.connection, DatabaseMetadata(
@@ -79,7 +86,8 @@ class _ReportState:
         flow = report_flow(
             state_db=Path("/state.db"), staging=Path("/staging"), ready=Path("/ready"),
             processing=Path("/processing"), history=SimpleNamespace(entity_batch_size=10, event_batch_size=10),
-            database=SimpleNamespace(busy_timeout_ms=100), supervisor=self.supervisor)
+            database=SimpleNamespace(busy_timeout_ms=100), supervisor=self.supervisor,
+            on_failure=self.failure_log)
         self.report = background_flow.ReportBackgroundFlow(flow)
         self.local = background_flow.CombinedLocalWork((self.report,))
         self.context = SimpleNamespace(
@@ -92,7 +100,9 @@ class _ReportState:
             cursor.fetchone.return_value = (1,)
             rows = []
         elif query.startswith("SELECT id FROM reports WHERE status IN"):
-            rows = [(1,)] if self.pending else []
+            rows = [(self.report_id,)] if self.pending else []
+        elif query.startswith("SELECT id FROM reports WHERE status = 5"):
+            rows = [(self.report_id,)] if self.failed else []
         else:
             rows = []
         cursor.fetchall.return_value = rows
@@ -100,7 +110,7 @@ class _ReportState:
 
     def generated(self, job):
         success = ResultSuccessMessage(job.job_id, job.instance_id,
-            "/staging/reports/status-report-1-" + "b" * 64 + ".json", 42, "b" * 64)
+            f"/staging/reports/status-report-{job.report_id}-" + "b" * 64 + ".json", 42, "b" * 64)
         return WorkerGeneration(GenerationOutcomeKind.SUCCESS, job.job_id, success=success)
 
     async def _publish(self, *args, **kwargs):
@@ -136,6 +146,53 @@ async def test_report_generation_wait_allows_following_scheduling_rounds(mocker)
         await state.local.settle()
 
 
+async def test_report_failure_waits_new_changes_then_maintains_next_opportunity(mocker):
+    state = _ReportState(mocker)
+    changed = False
+
+    def freeze(*args, **kwargs):
+        nonlocal changed
+        if changed:
+            state.report_id = 2
+            state.pending = True
+            changed = False
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    repository = create_autospec(ReportingRepository, instance=True, spec_set=True)
+    repository.freeze_report.side_effect = freeze
+    mocker.patch("camctl.reporting.policy.ReportingRepository", return_value=repository)
+
+    def record_failure(*args, **kwargs):
+        state.pending = False
+        state.failed = True
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    mocker.patch("camctl.reporting.policy.record_report_failure", autospec=True, side_effect=record_failure)
+
+    async def generate(job):
+        if job.report_id == 1:
+            failure = ResultFailureMessage(job.job_id, job.instance_id, ErrorKind.REPORT,
+                                           "write_failed", "report file write failed")
+            return WorkerGeneration(GenerationOutcomeKind.REPORT_FAILURE, job.job_id, failure=failure)
+        return state.generated(job)
+
+    state.supervisor.generate.side_effect = generate
+    assert await _drive_flows(state.context) is None
+    await state.local.settle()
+    assert state.failed
+    state.failure_log.assert_awaited_once()
+    for _ in range(2):
+        assert await _drive_flows(state.context) is None
+        await state.local.settle()
+    state.supervisor.generate.assert_awaited_once()
+
+    changed = True
+    assert await _drive_flows(state.context) is None
+    await state.local.settle()
+    assert [call.args[0].report_id for call in state.supervisor.generate.await_args_list] == [1, 2]
+    assert not state.pending
+
+
 @pytest.mark.parametrize("failure", [
     RuntimeError("report content failed"), StateDbFailure("report state failed"),
     DirectoryBindingError("report directory changed"), DeviceConfigurationError("device config changed"),
@@ -166,6 +223,53 @@ async def test_report_background_result_keeps_original_error_boundary(mocker, fa
     assert state.device.call_count == (2 if type(failure) is RuntimeError else 1)
     state.failure_log.assert_awaited_once()
     await state.local.settle()
+
+
+@pytest.mark.parametrize("failure", [StateDbFailure("report state failed"),
+                                     DirectoryBindingError("report directory changed"),
+                                     DeviceConfigurationError("device config changed")])
+@pytest.mark.parametrize("stopped", [False, True])
+async def test_report_fatal_stops_scheduling_before_failure_log_wait_finishes(mocker, failure, stopped):
+    state = _ReportState(mocker)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def log_failure(context, error):
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            raise
+
+    state.failure_log.side_effect = log_failure
+    state.supervisor.generate.side_effect = failure
+    waiter = None
+    try:
+        if isinstance(failure, StateDbFailure):
+            assert await _drive_flows(state.context) == str(failure)
+        else:
+            with pytest.raises(type(failure)) as caught:
+                await _drive_flows(state.context)
+            assert caught.value is failure
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        state.device.assert_not_called()
+        assert state.local.required_settlements() == 1
+        if stopped:
+            state.local.stop_new_work()
+        waiter = asyncio.create_task(state.local.settle())
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        release.set()
+        with pytest.raises(type(failure)) as caught:
+            await asyncio.wait_for(waiter, timeout=1)
+        assert caught.value is failure
+        state.failure_log.assert_awaited_once_with(state.context, failure)
+    finally:
+        release.set()
+        if waiter is not None:
+            await asyncio.gather(waiter, return_exceptions=True)
+        else:
+            await asyncio.gather(state.local.settle(), return_exceptions=True)
 
 
 async def test_normal_report_settlement_waits_for_generation_and_connection_close(mocker):
@@ -213,6 +317,51 @@ async def test_report_stop_waits_for_supervisor_actual_cleanup_before_connection
     state.connection.close.assert_called_once()
     state.delivery.assert_not_awaited()
     assert state.local.required_settlements() == 0
+
+
+async def test_report_publication_allows_scheduling_and_stop_waits_actual_file_end(mocker):
+    state = _ReportState(mocker)
+    state.supervisor.generate.side_effect = state.generated
+    state.delivery.side_effect = publish_report_file
+    session = create_autospec(PublicationSession, instance=True, spec_set=True)
+    session.prepare.return_value = session.record_intent.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    mocker.patch("camctl.reporting.publication.DbPublicationSession", autospec=True, return_value=session)
+    mocker.patch("camctl.reporting.publication._list_stale_ready", autospec=True, return_value=((), None))
+
+    async def in_process(function, /, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    mocker.patch("camctl.reporting.publication.asyncio.to_thread", autospec=True, side_effect=in_process)
+    entered, release, moved = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def move(*args):
+        entered.set()
+        await release.wait()
+        moved.set()
+        return PublishResult(PublishStage.MOVED, DirectorySyncStage.SYNCED, True, None)
+
+    mocker.patch("camctl.reporting.publication._move_staged", autospec=True, side_effect=move)
+    await _drive_flows(state.context)
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    assert await _drive_flows(state.context) is None
+    assert state.device.call_count == 2
+    state.local.stop_new_work()
+    waiter = asyncio.create_task(state.local.settle())
+    try:
+        await asyncio.sleep(0)
+        assert not waiter.done() and state.local.required_settlements() == 1
+        state.connection.close.assert_not_called()
+        release.set()
+        await asyncio.wait_for(waiter, timeout=1)
+        assert moved.is_set()
+        assert state.report.file_step_result.value.stage is PublishStage.MOVED
+        assert any("moved" in note for note in state.report.interrupted_error.__notes__)
+        state.connection.close.assert_called_once()
+        session.save_publication.assert_not_called()
+        assert state.local.required_settlements() == 0
+    finally:
+        release.set()
+        await asyncio.gather(waiter, return_exceptions=True)
 
 
 @pytest.mark.parametrize("failure", [DirectoryBindingError("directory changed"),

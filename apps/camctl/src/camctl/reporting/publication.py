@@ -51,6 +51,8 @@ __all__ = [
     "RepublishDecision",
     "Sighting",
     "StagedReport",
+    "ReportFileReceipt",
+    "ReportFileStage",
     "decide_republish",
     "deliver_report",
     "deliver_staged_report",
@@ -64,6 +66,24 @@ __all__ = [
 REPORTS_DIRECTORY = "reports"
 
 _BINARY = getattr(os, "O_BINARY", 0)
+
+
+class ReportFileStage(Enum):
+    """报告文件操作的实际收场阶段。"""
+
+    WRITE = "write"
+    LIST = "list"
+    WITHDRAW = "withdraw"
+    MOVE = "move"
+
+
+@dataclass(frozen=True)
+class ReportFileReceipt:
+    """取消期间当前阶段的实际返回值或异常，不授予后续执行资格。"""
+
+    stage: ReportFileStage
+    value: object = None
+    error: BaseException | None = None
 
 _NAME_PATTERN = re.compile(
     r"\Astatus-report-([1-9][0-9]*)-([0-9a-f]{64})\.json\Z"
@@ -346,6 +366,42 @@ async def _move_staged(staging_root: Path, ready_dir: Path,
         HandoffDirectories(staging_root, ready_dir), ReadyName(name))
 
 
+def _retain_file_receipt(cancellation: asyncio.CancelledError, receipt: ReportFileReceipt) -> None:
+    cancellation.report_file_result = receipt
+    if receipt.error is not None:
+        detail = f"{type(receipt.error).__name__}: {receipt.error}"
+    elif receipt.stage is ReportFileStage.LIST:
+        names, error = receipt.value
+        detail = f"条目数={len(names)}; 错误={error!r}"
+    else:
+        detail = repr(receipt.value)
+    cancellation.add_note(f"报告文件阶段 {receipt.stage.value} 实际结果: {detail}")
+
+
+async def _settled_file_step(operation, *, stage: ReportFileStage):
+    """沿实际文件等待模式收场当前阶段，取消不推进下一阶段。"""
+    worker = asyncio.create_task(operation)
+    cancellation = None
+    while True:
+        try:
+            result = await asyncio.shield(worker)
+            break
+        except asyncio.CancelledError as error:
+            if worker.cancelled():
+                raise
+            if cancellation is None:
+                cancellation = error
+        except BaseException as error:
+            if cancellation is not None:
+                _retain_file_receipt(cancellation, ReportFileReceipt(stage, error=error))
+                raise cancellation from error
+            raise
+    if cancellation is not None:
+        _retain_file_receipt(cancellation, ReportFileReceipt(stage, value=result))
+        raise cancellation
+    return result
+
+
 def _sighting(directory: Path, *, missing_as_empty: bool = False) -> Sighting:
     try:
         names = os.listdir(directory)
@@ -403,8 +459,8 @@ async def deliver_report(
     staged = StagedReport(
         name=report_file_name(report_id, digest),
         size_bytes=len(payload), sha256=digest)
-    stage_error = await asyncio.to_thread(
-        _stage_payload, directories.staging, staged.name, payload)
+    stage_error = await _settled_file_step(asyncio.to_thread(
+        _stage_payload, directories.staging, staged.name, payload), stage=ReportFileStage.WRITE)
     if stage_error is not None:
         return DeliveryResult(DeliveryOutcome.WRITE_FAILED, error=stage_error)
     return await deliver_staged_report(
@@ -433,21 +489,21 @@ async def deliver_staged_report(
     if intent.kind is not DbOutcomeKind.COMPLETED:
         return _store_failure(intent)
 
-    stale, stale_error = await asyncio.to_thread(
-        _list_stale_ready, directories.ready, staged.name)
+    stale, stale_error = await _settled_file_step(asyncio.to_thread(
+        _list_stale_ready, directories.ready, staged.name), stage=ReportFileStage.LIST)
     if stale_error is not None:
         return DeliveryResult(DeliveryOutcome.WITHDRAW_FAILED,
                               error=stale_error)
     for name in stale:
-        withdrawn = await asyncio.to_thread(
-            _withdraw_stale, directories.ready, name)
+        withdrawn = await _settled_file_step(asyncio.to_thread(
+            _withdraw_stale, directories.ready, name), stage=ReportFileStage.WITHDRAW)
         if withdrawn.stage in (WithdrawStage.FAILED, WithdrawStage.UNKNOWN):
             return DeliveryResult(
                 DeliveryOutcome.WITHDRAW_FAILED,
                 error=withdrawn.error or withdrawn.stage.value)
 
-    file_result = await _move_staged(
-        directories.staging, directories.ready, staged.name)
+    file_result = await _settled_file_step(_move_staged(
+        directories.staging, directories.ready, staged.name), stage=ReportFileStage.MOVE)
     if file_result.stage is PublishStage.UNKNOWN:
         return DeliveryResult(
             DeliveryOutcome.UNKNOWN, error=file_result.error)
