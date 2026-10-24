@@ -52,6 +52,12 @@ Linux x86_64 开发容器、Python 3.11.17、SQLite 3.53.1 的合并树完整单
 
 人工环境仍使用 `/home/cld/.camctl/manual-validation-20261025`。没有 CLI 会话执行时更新了安装版，日志级别设为 INFO；原配置和前一份 wheel 保存在本次交付目录。新 wheel 的 308 个生产 Python 文件和 27 份权威资源与源码及安装目录逐字节一致，运行依赖检查退出 0。安装版 `describe` 与现有主机及客户端能力说明逐字节一致，不调用相机。交付清单及安装核对位于 `.local/deployments/20261025-result-reading-performance/`，当前环境 README 指向该目录。实际相机调用、阶段耗时及产物正确性由用户按[人工验证指南](../hardware/result-reading-performance-validation.md)验收，尚无本次真实设备提速结论。
 
+## 三秒停止后文件完成等待（2026-10-25）
+
+OSMO 普通录像、OSMO 原生延时及 Action6 原生延时在可靠 STOP 确认后的文件完成等待为 3 秒，能力说明从对应生产定义生成。新受理动作保存 `file_completion_wait_ms=3000`，既有动作按原执行定义继续恢复；自然结束的结果余量由独立字段表达。
+
+Python 3.11.17 的六份相关单元测试为 300 项通过、4.78 秒、退出 0，覆盖驱动工厂、执行定义冻结、完成上下文和结果读取。安装版工厂实际生成的三类任务均保存 3000 毫秒等待。wheel 的 308 个生产 Python 文件和 27 份权威资源与源码及安装目录逐字节一致，主机和客户端的磁盘能力说明已同步。当前人工环境 README 指向 `.local/deployments/20261025-file-completion-wait/`，交付清单及单元回执分别在该目录和 `.local/verification/file-completion-wait-20261025/`。本次未运行集成测试或调用真实相机，实际拍摄由用户继续人工验证。
+
 ## 无产物来源失败的取回与客户端说明（2026-10-24）
 
 [来源失败计划](../superpowers/plans/2026-10-24-source-action-failed.md)的生产与消费链已经接通。普通及分段来源只有在动作 FAILED、适用处理完成且完整正式产物目录可靠为空时，才对默认及预览固定 `source_action_failed`；原拍摄错误保持。受理失败的空执行定义经过真实取回入口及事务守卫处理，分段存在性查询使用有界 SQL；保留产物、显式 ID、取消、过期及固定历史边界均按原规则。
