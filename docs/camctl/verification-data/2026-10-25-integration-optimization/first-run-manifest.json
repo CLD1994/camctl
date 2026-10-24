@@ -1,0 +1,2404 @@
+{
+  "source_commit": "507763857649d894ba9e6ec34c728ddfad9d9354",
+  "source_snapshot_sha256": "842142394d3bcaa6d907c1b542f30e409eaec058408ec038f2b1a4eb1063494e",
+  "status": "incomplete",
+  "scope": "只读首轮真实证据归档；未重测，未修改计划或优化报告。",
+  "source_inputs": [
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/plan.json",
+      "sha256": "979a1b6ad86774bfc791e5b9109024ab71987c5186dfb4a468ae22dadc83c0d6",
+      "size_bytes": 24799
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/source.json",
+      "sha256": "3dee1fee5491a5138ae0bc19415ebb7163982222a47b671b47d5a2b37a920e5c",
+      "size_bytes": 309549
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/summary.json",
+      "sha256": "eb25654a9c07662f8eb91c305a34d34e20b276edc38b8685e6b0f63ccf51ebc7",
+      "size_bytes": 190820
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/cases.json",
+      "sha256": "297bb7fd1e33678e027053e16456c12416d149804b0410516b5ea37bf94f5f09",
+      "size_bytes": 189627
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/command.json",
+      "sha256": "9d92568b23f345bef79c67cd11b62824493ab3a22a66876761d50fe2f0979723",
+      "size_bytes": 2661
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/events.jsonl",
+      "sha256": "dce83cf3a0ce3bff54a467e1147a93e075b5b2f14c3a0d1c4f2135362dfa5930",
+      "size_bytes": 645597
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/inventory.json",
+      "sha256": "e6f2aa59db11dfb81e168de9277fab46c38a9612e4fc897d3e2eb13785644b87",
+      "size_bytes": 43438
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/output.log",
+      "sha256": "c0a0a12d9961db8bc516dc929677c585f0c63da2b45f1c3c0a91ad56fe74cb47",
+      "size_bytes": 96763
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/preparations.json",
+      "sha256": "d96c4319d39bea9d98a5430bdb8f4199c164c67a8339d4aea0827c54027eeab5",
+      "size_bytes": 508
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/progress.json",
+      "sha256": "82871af6130f4beeadfced010916e19eae6f6b912cbd38c6bc1ce5f35e334081",
+      "size_bytes": 199
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/001-camctl-history/artifacts/result.json",
+      "sha256": "a97a023a1ff8ed0e74cf9c6a986127b289e662f3fa3638e94ceebab3907a19df",
+      "size_bytes": 2398
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/cases.json",
+      "sha256": "31a23947cbe71b2289743ea98b55fc86eba543f0738e7da39df72131694d6881",
+      "size_bytes": 530884
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/command.json",
+      "sha256": "e1cae27617dc0aac72417b896b76b478559bbc6381828053ecf6fe081042eb72",
+      "size_bytes": 2713
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/events.jsonl",
+      "sha256": "0585d98d7b7690e328ce26b47d1144055e62b909487be9e3a6f5d60c03c8c7d1",
+      "size_bytes": 1857884
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/inventory.json",
+      "sha256": "cd131794d43aac5f21f70b536f9658373075dc71190cd849e09bb0f7dc1f756a",
+      "size_bytes": 132951
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/output.log",
+      "sha256": "f85b554d3a849b528839f39ac8c96f66d63adf117c95cec81cb108b8f64a9028",
+      "size_bytes": 247708
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/preparations.json",
+      "sha256": "c86cd3042ee5e4df013e1e01a7528fb8b770232a032eaea34e91cffd54249c6d",
+      "size_bytes": 516
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/progress.json",
+      "sha256": "a93ba94a359055faf89ee3c69b6ac1b8e9064d8755e6e75174bd4db05e2c4ccb",
+      "size_bytes": 212
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/002-camctl-persistence/artifacts/result.json",
+      "sha256": "7f0369db9a31031d27ab4a04d7aeb9c4bfe3e2d8130e94f7394c6ce302a378fe",
+      "size_bytes": 2466
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/cases.json",
+      "sha256": "58c7b283c9381aff789a2b7e2c803a8d202a5a1610fd755020b5908aa472ee4f",
+      "size_bytes": 317907
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/command.json",
+      "sha256": "c224de2ea9dd3dc70645d3b2c4ff32f3fed707d79e7ea13c6f6fca76b3b38332",
+      "size_bytes": 2685
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/events.jsonl",
+      "sha256": "7b81ea23104edffe85ff48d8da1788850762290bebad160ca5d0a40acdb8ffce",
+      "size_bytes": 1125257
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/inventory.json",
+      "sha256": "0b129655e497cdc012cefa60deedcc9cb5767f041a971c9bbc5e1e872082d53c",
+      "size_bytes": 204163
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/output.log",
+      "sha256": "0b0de198650973e23cf18f1037c5efbd9352054ae6cf92a2cf8aa0002e647cba",
+      "size_bytes": 13104
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/preparations.json",
+      "sha256": "38256709e8531506fb2ebe3c72fa02a6ce5f295cfbc65ffa27eb0fc13a60b0d6",
+      "size_bytes": 512
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/progress.json",
+      "sha256": "2a5c6dae10d3cd10ae87c3560b7ebd70676331b6afe8b83e3858b7eb4c86453b",
+      "size_bytes": 225
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/003-camctl-bootstrap/artifacts/result.json",
+      "sha256": "95635d204fe0b5cdb010585b17be973f86a7d90d58b10c3532b6af47c372cb43",
+      "size_bytes": 2423
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/cases.json",
+      "sha256": "ada10009423a49efe578c96cdcf617a8896daafb7374ccab403d2e3f3729a788",
+      "size_bytes": 1215360
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/command.json",
+      "sha256": "6474a326e77fb150079534a8772f0cb6a0a08efc6029b0e49efbf142160111a2",
+      "size_bytes": 2660
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/events.jsonl",
+      "sha256": "5426faf172513f300a745e6c81d9b0adfaa5691a983d81b3e90de8ec006aad7a",
+      "size_bytes": 4279788
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/inventory.json",
+      "sha256": "5646df27e58ccbcd5c1de9f942c458381d68b3c00b7680f539e0409bed16adef",
+      "size_bytes": 309892
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/output.log",
+      "sha256": "5cb778cd4f93f884bfa14ebdffb99815dd4e58c30dd01157db32bd11b2517573",
+      "size_bytes": 401452
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/preparations.json",
+      "sha256": "d5387363a45fa075905b51998de63a10258fb21794639b11d867fa65990c3d0c",
+      "size_bytes": 508
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/progress.json",
+      "sha256": "73b42069493cdcac9397221d495b0582e1cb9f53d5b3014de89d807c04317ee0",
+      "size_bytes": 213
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/004-camctl-capture/artifacts/result.json",
+      "sha256": "45832ec39cee0df687e0e5a2b806ddb9bf135caceb80dfaca9f8271078960887",
+      "size_bytes": 2417
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/cases.json",
+      "sha256": "a174d782ba776b4076a679f2e41f7fa79d1aa6fe35df316fd59babdd3e5d7878",
+      "size_bytes": 1417147
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/command.json",
+      "sha256": "3f049120e343aff8bd7f5444143f3316c3b7d81cd58801476e8b2de4cdfee3ee",
+      "size_bytes": 2660
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/events.jsonl",
+      "sha256": "2924e394df9fdb7ce6ed271df13837f59ef0f9ba699b98b11d97f5e440095e84",
+      "size_bytes": 4931913
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/inventory.json",
+      "sha256": "db3353cf811faed271fad466f7b7fab856becde28a43b1f3ad60bd3f5950a516",
+      "size_bytes": 348291
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/output.log",
+      "sha256": "5768b31ee415d77d2e78f819fed145c7775bfd81eef4acffbc822dc636a3d2b1",
+      "size_bytes": 926649
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/preparations.json",
+      "sha256": "4f76766ee60ce896e4e0aaec035d33eb479ae04c3cd11c394ed8a797c0957b09",
+      "size_bytes": 508
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/progress.json",
+      "sha256": "e1d54b98bda2e8cbf46f9b9e388c280f32ee48e3aa571ef990bdd737c097b1e3",
+      "size_bytes": 214
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/005-camctl-outputs/artifacts/result.json",
+      "sha256": "dcc2fe75723a78b08729112677a8c109e7ce5ffafce1605bd47ab2ac10609cdf",
+      "size_bytes": 2418
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/cases.json",
+      "sha256": "fa323283c22b82c85c6c9355df37f8e88e742804c5e049d03758e5af7596a905",
+      "size_bytes": 2782
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/command.json",
+      "sha256": "acd7713f489a0c6c76933a01c8551e1dac06ef049ff66107e8069fc1455a7be8",
+      "size_bytes": 5166
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/events.jsonl",
+      "sha256": "30bcd2f810a46bb9e571b8f4aaf5e0a10e087f48fad01da729fdbf723998ed7e",
+      "size_bytes": 10800
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/inventory.json",
+      "sha256": "189b8c3b5446ce76399cdbe1c798dcd4f9d1a61ac927bcd203a2f6fd0410d3af",
+      "size_bytes": 666
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/output.log",
+      "sha256": "0225814cce85022875aabf693bf77928c003cc4243a36b0e61d5c96b6e6b7f6f",
+      "size_bytes": 1109
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/preparations.json",
+      "sha256": "27b33e715bd5d7384494105ab8508a81c755f9edb787c1401a2dd68b253d4946",
+      "size_bytes": 998
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/progress.json",
+      "sha256": "35c7f6caa4c429660095ab68d5ac3af9b07792a62e182f202bce98fcc8f19b25",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/result.json",
+      "sha256": "dc919913e88a9d07a7f4b0c747ec6527bb01f07a29de5a996683273078063c0e",
+      "size_bytes": 4883
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/cases.json",
+      "sha256": "3abb69ab443d4acba3b745d332eabfc7ea6177cf3ad6fbb86fd0c9c39d6b1fab",
+      "size_bytes": 3283
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/command.json",
+      "sha256": "cfeac8429ff6fe2bc7fdc496bc34c5426bdf7aa5298a7186b4de386acaf9de98",
+      "size_bytes": 5340
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/events.jsonl",
+      "sha256": "d38ec14fbf5dd09427bc00762419e2047ab6e6f14ebf5e047c5750e8e8ff9729",
+      "size_bytes": 12450
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/inventory.json",
+      "sha256": "b103970185511bf943f2f6d02adeac4beb63d794c729cadfabbf686d6967df0a",
+      "size_bytes": 749
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/output.log",
+      "sha256": "38a7e90aad3143abc23778eba8b5390e7975c7b9b1032f3b7b9ce6f44a13e574",
+      "size_bytes": 1487
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/preparations.json",
+      "sha256": "a1529d5fcdae089508f9044275eff3d576b7c913d1ccac2f5008ee07fd72407c",
+      "size_bytes": 1001
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/progress.json",
+      "sha256": "e40c4ddcf627d864babe6279783b49cb8f03e66ca9dbbfffe454cbefc9318d0e",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/result.json",
+      "sha256": "81ca56749a073fb98d6005f853c05a1b074dd4d560be8a011893e32136678701",
+      "size_bytes": 5057
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/cases.json",
+      "sha256": "4379a9a8e24aef143d72d83b495e6dbdd5fd5e6dcb23a2bc08201fb0a67f29ba",
+      "size_bytes": 4959
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/command.json",
+      "sha256": "1d187bca4eef5188356e92f68400aefe979b8c7403b16817e963f7c5b4995d13",
+      "size_bytes": 6135
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/events.jsonl",
+      "sha256": "3587c3c4f06ba18bd14a41e7fec82fb7f1d67c64b54ac558f8a1c441fb671f65",
+      "size_bytes": 18580
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/inventory.json",
+      "sha256": "1fc66fbb760d378bd45c995407b7a5e40482bca380c5f636c3cc2c3f29c9fed4",
+      "size_bytes": 1143
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/output.log",
+      "sha256": "d7aa19f1b6db52c537ae03e5369fe1fcd2a069569eb503705a3adaae911cf59f",
+      "size_bytes": 1900
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/preparations.json",
+      "sha256": "e9e128b5dc1721274aa5b47541fba933a2b656a3846ba41cc6a87b9ad55f37ac",
+      "size_bytes": 999
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/progress.json",
+      "sha256": "80e79d75893926edc375a3773163574e36369c955e5ff475020440194866841c",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/result.json",
+      "sha256": "17806667a9c0669b2673ffa41053a38de6d2408063c4d6a37a05244aa5702220",
+      "size_bytes": 5852
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/cases.json",
+      "sha256": "7cc0b5317a667890d06a840531dbd5ad70d76179a26f1e4e1ded0080db20a23c",
+      "size_bytes": 4988
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/command.json",
+      "sha256": "aa501979aa4b2ed73e95a0676fc9e62d41fc609ba9ca2ae6d8583929c5499ecb",
+      "size_bytes": 6178
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/events.jsonl",
+      "sha256": "a09b3aab27a26c3e4962e5df1c150e140925bf911413f70bdc1eb4d3e875aca8",
+      "size_bytes": 18741
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/inventory.json",
+      "sha256": "2464fa8914dffc3f0e4fa9ecd576e04323060b34d5a8ff8fe2d06e5e499d9db8",
+      "size_bytes": 1163
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/output.log",
+      "sha256": "86467ebcf2cc9a040e661cf81a215b9bb1ce967e706b2afb47016a0bed33d039",
+      "size_bytes": 1786
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/preparations.json",
+      "sha256": "3465792b2079ed342282c0194c50a80b62c45a6e715dad2beb276d75f8f4b63b",
+      "size_bytes": 999
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/progress.json",
+      "sha256": "632333716f509a15c7478f39c8b85f590cdd0b72b389e0e7962f5d082d64f86d",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/result.json",
+      "sha256": "ec31ce073f39c8e613159f158c15393252630cb385bd2f803f1ab688386031ec",
+      "size_bytes": 5895
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/cases.json",
+      "sha256": "28ea93fbc52322b00eb0e95dcbc5744afa05400c90e267a22b412024ac0d0e40",
+      "size_bytes": 595
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/command.json",
+      "sha256": "7da49fc192c73cbcc40a416c6158920eea524e045f59905698863fa4019ca7db",
+      "size_bytes": 3565
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/events.jsonl",
+      "sha256": "23b2d60937401b7e37c67234c788babc0cc351b52b6e4abcd262bfa4ffd2700d",
+      "size_bytes": 2927
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/inventory.json",
+      "sha256": "10a870b30ff14715c401784c48f3fa31afa232dc3486b106c1fc2126d812e0d0",
+      "size_bytes": 175
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/output.log",
+      "sha256": "1824b9814d24d8900a1a1b6a477b273fead2f5b001608bf549c73429cb674a42",
+      "size_bytes": 623
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/preparations.json",
+      "sha256": "8921b6c9b60adbc82af59d49db99835c56d1b97ba86184c0c0afef239549e13d",
+      "size_bytes": 588
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/progress.json",
+      "sha256": "1b05242f2deae0cd795adc27bd178f92d6173e0a1497b981af433ba2f852bd20",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/010-root-test_action6_segmented_recovery_roundtrip-shard-1/artifacts/result.json",
+      "sha256": "12069a3feafbbe3b72d2cdc05b58f282e8221dc5363f444dc95a3d5dec20e8fd",
+      "size_bytes": 3274
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/cases.json",
+      "sha256": "752c163b26822d73ca9e8eaf27e34f7d6c2c7b684694bacd3b35ff267574cdc2",
+      "size_bytes": 1184
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/command.json",
+      "sha256": "f30821992d527ca9669b98beb894c343257809ab36ec9a52c008c7e8275478f8",
+      "size_bytes": 3973
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/events.jsonl",
+      "sha256": "343ccdcc94c5d027d79f0d86ccabaeba3a4ab949e7a5df4d1f7e794d2ea169ae",
+      "size_bytes": 5227
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/inventory.json",
+      "sha256": "35942bfec9285b04d08b082899be0d12667b5d96a345d668556b024e667bc437",
+      "size_bytes": 338
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/output.log",
+      "sha256": "35434e8f3d591d9e5978b015226ff3270937b51bcf342f6c5127532971390e63",
+      "size_bytes": 972
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/preparations.json",
+      "sha256": "b9d57a2ea0c10bfaf6393d120f8708a3e8afb9fac6369c7d023b6330f7d3c294",
+      "size_bytes": 600
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/progress.json",
+      "sha256": "662f84b5de312e9a0616f0742c9ed5d728086d9fcd3406ab1fb39318976af22e",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/011-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts/result.json",
+      "sha256": "03b8f5ddd15713bfe954e73b11589d4cf9564dfb12366ee7c44bd8103a16a4d4",
+      "size_bytes": 3674
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/cases.json",
+      "sha256": "cc925ce02d893e08f926ab84f6b940cad370d5775de89d38c8cda3f37e080d87",
+      "size_bytes": 1576
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/command.json",
+      "sha256": "1b9f0d46380e803c364b95e3f74fa077578fa1ced4596df8b9b4d6ed7b59831f",
+      "size_bytes": 2900
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/events.jsonl",
+      "sha256": "0474468c8a0ca88aa4540e4f17dfdb748ebdd690a36e9f18addad5d113b61b67",
+      "size_bytes": 5712
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/inventory.json",
+      "sha256": "d49f0598961f83419b90f28e5e3debdc0ebaaed12e9164c7083d7596f07989b6",
+      "size_bytes": 309
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+      "sha256": "83b45db52053ce88050f96cbc56daaecb5a048063d67abd9611dc909552b0ff7",
+      "size_bytes": 15191
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/preparations.json",
+      "sha256": "d74b3a9171d22e8003b7c0791c70cee51df5aaf3c2d7715227e14b64f270b379",
+      "size_bytes": 550
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/progress.json",
+      "sha256": "41609e04e9e56878eb7b61ae9547b0d21dfa19b63966ad1dcea883f0443bafe9",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/result.json",
+      "sha256": "aef3332c70d1c7cbea1b26ae98ad04d9a839f2f99f070e28aaccb4e3b0923ccc",
+      "size_bytes": 2620
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/cases.json",
+      "sha256": "878b41b2352fa291f66bddcd2521e79601eb2625a2207c5494e92d9067d9fcd1",
+      "size_bytes": 1186
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/command.json",
+      "sha256": "1c7a22a232ca3eefd8a781f02d6d28d7f0f526797b1e364a984f0a774431660d",
+      "size_bytes": 3983
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/events.jsonl",
+      "sha256": "aaba1b053ee88bf12abd3586349d1ba0d5f41fc2209a092d31c653f1122a0b23",
+      "size_bytes": 5264
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/inventory.json",
+      "sha256": "309f315dc35d631386ea0cd6655ebd43fa1291c77cf61a967c60f599ebaae19f",
+      "size_bytes": 343
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/output.log",
+      "sha256": "a93ba1ef62bb97d7ac7c5108693a0df1eeecac08b43b3bbe3334aa95e32f821f",
+      "size_bytes": 982
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/preparations.json",
+      "sha256": "baa2081ec74475ffa6275b3efd54125d1e83564bff3717208bfc626f654b23f2",
+      "size_bytes": 601
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/progress.json",
+      "sha256": "c6b443293da3a396c6a447b07291a420d23eb6f9943fc050d9d15001c7251e49",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/013-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/artifacts/result.json",
+      "sha256": "e5a19dde2726bf7b4f7cd6a21dd911dfea5b2f012fd28f917a83c8b9db34ca22",
+      "size_bytes": 3685
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/cases.json",
+      "sha256": "c24cfdce5a1d4ad78b0f97279c02f7dccd5ed7d54e3a3c879b3ea25d2bb4fd42",
+      "size_bytes": 1173
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/command.json",
+      "sha256": "f9efd4d9671c9fdd69cc66d1dd840147ac8747915c688408a582a1d30fbac741",
+      "size_bytes": 3956
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/events.jsonl",
+      "sha256": "4b668b91219f86ab62f2333f7a01c8a1d84ba5e2c116ee91f84ea2ed6a14aac1",
+      "size_bytes": 5153
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/inventory.json",
+      "sha256": "95a8c407c8b2e543bd9a00fce73c467e9000896c91dfc01f8cd6eea8065cf591",
+      "size_bytes": 329
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/output.log",
+      "sha256": "328a67498232abed5043e829ed6f4ad320345bf39e9b38669b9aa005c1b1e08b",
+      "size_bytes": 954
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/preparations.json",
+      "sha256": "ac02f9ae8f09156a8c2d52db3ee35c8f369f8d070bf1f71c69ff5921370c6aef",
+      "size_bytes": 601
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/progress.json",
+      "sha256": "d54df26ef30e3c4cf50381d520f50f5019ca2563541f2a81ecdbe6103c9288d6",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/014-root-test_osmo_builtin_record_segmentation_roundtrip-shard-3/artifacts/result.json",
+      "sha256": "e0c2bd28587d4b43877bbab19947366cfe82737ae32aab504472ddce0c411a6c",
+      "size_bytes": 3658
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/cases.json",
+      "sha256": "d9a63e9322efa6e562bf3a9f51850f220465682a7e882f5e5e617781e5dc2af6",
+      "size_bytes": 2266
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/command.json",
+      "sha256": "e936567da74ca165925efb83899de1627169c87f92bd48a9aa23722197f3e0fe",
+      "size_bytes": 2996
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/events.jsonl",
+      "sha256": "a3532274bc72f1f7335a92aa7859db1bcb60724a3a263d6f1441186cc7206d6b",
+      "size_bytes": 8598
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/inventory.json",
+      "sha256": "e6daa46360558630915bd719504a530697d404cfa72f8e15a991d2288edd2cf3",
+      "size_bytes": 578
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/output.log",
+      "sha256": "b9662e68395786f8243bbe9d7c2c81540cad7b83208be909adca5352a6223235",
+      "size_bytes": 1333
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/preparations.json",
+      "sha256": "7c8e331e7145773599bf08b528dea2deb5ee9a3548a9847cfe51eba247d60257",
+      "size_bytes": 565
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/progress.json",
+      "sha256": "f7df9c2e275449eb53e2d4d883ae0639bcf36d78e6e93e80e59573a3ab27e3df",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/015-root-test_osmo_builtin_timelapse_roundtrip/artifacts/result.json",
+      "sha256": "11b2e19d3e9b5f2f140c74a39bde008eb548f9a7595de8a7a1c971bdcebd01df",
+      "size_bytes": 2708
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/cases.json",
+      "sha256": "aa32bfce4d798812967e5206b5fc2373825f6e2b1429ea75c0d0ff606dfcee9a",
+      "size_bytes": 1186
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/command.json",
+      "sha256": "e0376a3e00344718c3b1186e0cd7d1774ee7c28e153be6316a25e7bfb282c5e6",
+      "size_bytes": 3981
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/events.jsonl",
+      "sha256": "3cef287b5ba053e61fbf01fc34646dd0f959acb50afa42e9d10ad29d711ae6be",
+      "size_bytes": 5257
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/inventory.json",
+      "sha256": "a020356a1601b4fa964e1a2ea6f2de267340b000397b52f845085c035dedfc96",
+      "size_bytes": 342
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/output.log",
+      "sha256": "1515c88ac7ef3ab761c20f907e8e6367d4074d1c8c731954a7df9f50fc8a01a4",
+      "size_bytes": 980
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/preparations.json",
+      "sha256": "355665657a127202b8ab95648d13f22ed19f59d25d670e2c647b5f68c36dd9bd",
+      "size_bytes": 600
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/progress.json",
+      "sha256": "f33d1a7660647535d5d5dbde644a48e92ceb46d5bcfc000e202356764d39929b",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/016-root-test_osmo_builtin_record_segmentation_roundtrip-shard-4/artifacts/result.json",
+      "sha256": "5e7d63f91f731fdd16eb495cc6eed7465038f98dea6402e214eef43d2c1d4b70",
+      "size_bytes": 3684
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/cases.json",
+      "sha256": "3afa53875fed25488f19e069879dd6654f7154b288b5db51d3e100e4290e0d63",
+      "size_bytes": 11283
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/command.json",
+      "sha256": "63cda1ce607ff762e26f47dfc9870fa03b88aa76aa6922bf9a4028b68ec9f94e",
+      "size_bytes": 2853
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/events.jsonl",
+      "sha256": "f551b8083b4eb438ce23bf144abe17ee5f7ab8f08d1e382313092fe5f1cc69a1",
+      "size_bytes": 38418
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/inventory.json",
+      "sha256": "1559a71887c2046436d1708601cc3fdfc9f00c15d0971681e60f467099a3c680",
+      "size_bytes": 2440
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/output.log",
+      "sha256": "635c2e6578c940014345b038c911ae5a2396f4512387795ed2b9a468084d75cf",
+      "size_bytes": 5565
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/preparations.json",
+      "sha256": "fdef6377477a5c13165d62e2e0623a0ebf8ea6fb5496592d7e40a42e2cb3714f",
+      "size_bytes": 542
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/progress.json",
+      "sha256": "5d860914cb234e2eb5e1c4f070a202d23e7d3282fe7fbd075c8ce0ebe4cfeb6c",
+      "size_bytes": 197
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/017-root-test_camctl_motor_recovery/artifacts/result.json",
+      "sha256": "4cbe37a7cba0f33d9b88bf82d2169c7876a5d732f4fe0b452827ee647efcd193",
+      "size_bytes": 2578
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/cases.json",
+      "sha256": "8d68212ab8ea3b00dcd373b098d9f0803f223f98ead3421c3ef1c2c7d531466f",
+      "size_bytes": 1185
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/command.json",
+      "sha256": "3f509c405cf67374f6c9e8f105b43a8a9791366be5f8870cf7e773ec5dc92e50",
+      "size_bytes": 3905
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/events.jsonl",
+      "sha256": "d2fc4f36b7ad87c3a4d63801568f9ee72108e6adb0c8f824509c7c1d9c62f2e0",
+      "size_bytes": 5259
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/inventory.json",
+      "sha256": "b9182c186fc7678ca98bd239c83d0d327a59ced047ae6a30b6ebc499b682fca9",
+      "size_bytes": 343
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/output.log",
+      "sha256": "e1b2eaee207ad445071412e6ac455d4eebddf46a3dbc3c0d5e6ef295c12e94da",
+      "size_bytes": 805
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/preparations.json",
+      "sha256": "d4160fd8974c212da94d5072be0ebf6f8e88ce12603da2b801c8b2843eba5e3c",
+      "size_bytes": 588
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/progress.json",
+      "sha256": "db6d5e92e6e12a8d3b7bc70b3718912c5818bcd82fbfd2f35ed4344a10c93d44",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/result.json",
+      "sha256": "c1b6d1c0f62321a7a67ddc497cf9ec1a1b69791f2c0b34889712a1ee0723f32c",
+      "size_bytes": 3614
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/cases.json",
+      "sha256": "1fd2f9a68a7beff2dad18858eb0c6bc6d3469de4201d9947e5f10ae050b78b73",
+      "size_bytes": 1744
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/command.json",
+      "sha256": "3cc9076e2da683e939b2ed39073656b657787cb58d72e93c3f6eee2ea062abed",
+      "size_bytes": 4172
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/events.jsonl",
+      "sha256": "e231014ac8b6bbeb2cef3cb7f7c5e964932c7a59d7e8e443e5381f96dc86ddf8",
+      "size_bytes": 7306
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/inventory.json",
+      "sha256": "b1fd76f5fd0b246aae43e43d9c83b95ff74901d580afe512d46d9d14a2f6216d",
+      "size_bytes": 475
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/output.log",
+      "sha256": "682cd60a12f03610db7ef2e0bc71dd7739495caa93f0068108db71bc5f7db06e",
+      "size_bytes": 943
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/preparations.json",
+      "sha256": "d8fc3d32f5ae429b623b1825daa25864481047ffd77be52256ebccc2dff48e01",
+      "size_bytes": 587
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/progress.json",
+      "sha256": "152e811c2bc7fd0ec91c796788b8bee34460195c777d216cf21f697e857763fc",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/result.json",
+      "sha256": "376425167304da520dc4b70df4c1bbc60628935c5cab76c203854948e6432670",
+      "size_bytes": 3881
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/cases.json",
+      "sha256": "cb088b4e11b676507bc2a7c26b552521c601f1f41031beb31ca6c444abbc9299",
+      "size_bytes": 1200
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/command.json",
+      "sha256": "6fe6a273293ac138db13f7667c81f9ec902126ca878da7ec21fe8afc2860da70",
+      "size_bytes": 3934
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/events.jsonl",
+      "sha256": "0d150b36962026acb1f88a7fb6e5f753aa5154a6ca9da830a2cd14affe02d5c3",
+      "size_bytes": 5382
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/inventory.json",
+      "sha256": "9524fadde6758d3ac5156aecb1bb62110dfee460f6a2142f040b9f2beb349d08",
+      "size_bytes": 357
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/output.log",
+      "sha256": "1da9c11018bb1b80ee1ff09b33cb16ed7cd4239b6ee3906580e9a32a9afa4ab2",
+      "size_bytes": 31097
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/preparations.json",
+      "sha256": "6107f37651766ee773237f7a6436a324d0799a71c9d32cf20da092720327709f",
+      "size_bytes": 589
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/progress.json",
+      "sha256": "40208e3a8a53f7c570932e1b0603ca0bef20d0f38455c30465442176922a6a6c",
+      "size_bytes": 206
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/020-root-test_action6_segmented_recovery_roundtrip-shard-2/artifacts/result.json",
+      "sha256": "32b7a760b0a3b63b6c4674e0752d01ddf4735a68a746418dcc0e40c802efb8b3",
+      "size_bytes": 3660
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/cases.json",
+      "sha256": "78d8f200f6c99c9f694e45482e24aa8d7f93029fbe28e19d96265b60d070bd56",
+      "size_bytes": 190155
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/command.json",
+      "sha256": "24b916cdc620396fda223af9c0c8bc9032df35af576e8529265b08a3cf8d9775",
+      "size_bytes": 2728
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/events.jsonl",
+      "sha256": "1c0b3e1ec09c6dc775592c78c4fbe0ee1c7699230932a37ff42c7f22aba3b4c2",
+      "size_bytes": 673726
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/inventory.json",
+      "sha256": "45a10c3f1d19379cff9f5c2cd31b173c569b958c864d3ebe19ba21c44d8304ac",
+      "size_bytes": 49150
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/output.log",
+      "sha256": "25c105e9886519da88ade38a73f0616b18c39d0277c8dc320d3859bcfbd4bf45",
+      "size_bytes": 79236
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/preparations.json",
+      "sha256": "20314fa61e038c9c12758668553f797dc73337195b40cf20bdc6e71275b84011",
+      "size_bytes": 519
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/progress.json",
+      "sha256": "6c249bb391b58b6f62b76ec9fe11781bc9c8cbbe939df01db6140bca1011c43e",
+      "size_bytes": 198
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/021-camctl-cancellation/artifacts/result.json",
+      "sha256": "cd28cfeb2eafd0a105b55dc33e685f481de79111fa0220d4810a711e2ce19b2d",
+      "size_bytes": 2460
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/cases.json",
+      "sha256": "fb903812a2edc79923d749c5880d8e25fdb588b8ad11e7e4f4ea0d9030dd924e",
+      "size_bytes": 246156
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/command.json",
+      "sha256": "57fcfea2c33c5a5f5c0bb3623f4d9587b6474a1d93cba11766026b83ea484281",
+      "size_bytes": 2688
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/events.jsonl",
+      "sha256": "eb4b8780d0f09aa852db42e10beb8a53fadc11919821254f94f7a3f3964abfa7",
+      "size_bytes": 839270
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/inventory.json",
+      "sha256": "16d1b12522041f2cfc0a206ef7c91e875b9db9e5a21f171fdca88a1064f3cdfd",
+      "size_bytes": 56674
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/output.log",
+      "sha256": "486336968ad79ad89879592d839df6cea50657bb9a7160be68b10e8103af0258",
+      "size_bytes": 225593
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/preparations.json",
+      "sha256": "4406cc571b2611333db501929c13ea6167fad2f110e0484d0fa8cf50540acd77",
+      "size_bytes": 512
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/progress.json",
+      "sha256": "4ebec075704e575ab53a18052d5f089047ba5439ec748ed5a0ed2d4e7fdbf951",
+      "size_bytes": 213
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts/result.json",
+      "sha256": "36a2c47d8fec7e48e4e1e825f95313c963e31c2763ab843a782d5dd2dc4e6c22",
+      "size_bytes": 2444
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/cases.json",
+      "sha256": "ee641bd1290f535c795d1534133c947490429471b777337a64d91414415e70e6",
+      "size_bytes": 3329
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/command.json",
+      "sha256": "fa409b6b70eaf5ef437c1fd82c82ebe2dc08d9a89138f4fe23686b2671c2a05c",
+      "size_bytes": 2969
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/events.jsonl",
+      "sha256": "f4296deec403ecc7365fad7dd6829a72a34298f366c1420b34fa9e797254e902",
+      "size_bytes": 12108
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/inventory.json",
+      "sha256": "f4eb04e9152f9567d997548935100c8a22e233376c4925bfac421350ffe4134a",
+      "size_bytes": 795
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/output.log",
+      "sha256": "ffed1e33b3053a8a37a0c85a247a907b2f89d3cb329386514fdfed7a4edc002f",
+      "size_bytes": 16876
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/preparations.json",
+      "sha256": "e8ad9d3aaaaec5bae0e2dddf12bf2396680000f2bd9cde320345b38f5938c590",
+      "size_bytes": 560
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/progress.json",
+      "sha256": "ec26e2a5c274082d5fcb70c17be1dd5acd7ad552164588e7ed245d5df6d8f636",
+      "size_bytes": 207
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/023-root-test_device_capability_declarations/artifacts/result.json",
+      "sha256": "1b230c072f9511c7327f229028395494f6649da4b4941900b9b5f3eae06d14d3",
+      "size_bytes": 2702
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/cases.json",
+      "sha256": "4848ddecb0b7308b5077541e278bf7fd63389e1a2985a5ad643ac915f529a7dc",
+      "size_bytes": 1148
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/command.json",
+      "sha256": "27f5387c0c042c484950dc0afc6d1e3a074b1f0de88fe094d8dc31bb4aee6917",
+      "size_bytes": 3034
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/events.jsonl",
+      "sha256": "a3d04986aeba0310c86fa069e82e75e40d70b0b676c2c3b67b4be20f2f56bb4d",
+      "size_bytes": 4713
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/inventory.json",
+      "sha256": "9780632f4c513903396d07d2ef2b13eeb1743b89499f19b9d7dd199cc6b1ad58",
+      "size_bytes": 305
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/output.log",
+      "sha256": "4c5927f579a8a9a0fef4e9b1d3050868a1a586978f6fd691205a4fe6d6eb2bba",
+      "size_bytes": 739
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/preparations.json",
+      "sha256": "2a64b5a3057e43fc5757d9885dd840671161668f84be502ddda35c75ece6e42f",
+      "size_bytes": 570
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/progress.json",
+      "sha256": "961727a7c8a6a5ac70e747649738cdaaca1d79fbd964df8ca8de10b240318eeb",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/024-root-test_action6_builtin_segmented_roundtrip/artifacts/result.json",
+      "sha256": "368d3231d22c07d19feabe2ecd26b1b2f6e8ebd87d8f7495f50e93de572ca016",
+      "size_bytes": 2744
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/cases.json",
+      "sha256": "061aea80d17ce036787801f67156db06f019c3f3a983c7f19f29e07ea32e1118",
+      "size_bytes": 2222
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/command.json",
+      "sha256": "65b908e2d83cfd7291301ff83a79380b28799e10efd5f91226418babfc8d6967",
+      "size_bytes": 2916
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/events.jsonl",
+      "sha256": "919581ccefa859af484cdbbdfed0d5ae813450f4b4343038da22cd91ded1b516",
+      "size_bytes": 8261
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/inventory.json",
+      "sha256": "94aed976b117e2a5fb25b2a6f6d54f56075d07d7cf66c8406d0de7bc3697d788",
+      "size_bytes": 531
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/output.log",
+      "sha256": "86f20d5f3fb0466f3f1298384349180e4ba512068039c3ac2b7c4368aed403e4",
+      "size_bytes": 969
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/preparations.json",
+      "sha256": "f4a6d001177ac220f84b07477a93dab2dfb158d952fd58f3d6b3941e74f37942",
+      "size_bytes": 552
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/progress.json",
+      "sha256": "dd522dc6ccde9463f4b5fb94bf2248d6ff1bef97cae09d18943c9d0d2b82cae6",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/025-root-test_real_camera_demo_roundtrip/artifacts/result.json",
+      "sha256": "6a19d136e77307deef7cf87765a7797c927bda518113f50635356e763b75a819",
+      "size_bytes": 2635
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/cases.json",
+      "sha256": "660950bc2ffb39cf66490b57a10a6a9c5a04b5a5115bc814b862c263ebebfac9",
+      "size_bytes": 3702
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/command.json",
+      "sha256": "8349b3e8cfe9f5036bb20b4f2aee1914d19faff3d48c755df27e22e073c3f485",
+      "size_bytes": 2877
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/events.jsonl",
+      "sha256": "783d835493f6f6e5a6af52fa263b99dccd0d08b74425273e0a0403fe685ddd87",
+      "size_bytes": 12658
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/inventory.json",
+      "sha256": "99824e50acb553d32f230770da42f22cabb6d2ee90a1f8c0dff21c3db67f71ec",
+      "size_bytes": 733
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "sha256": "789a9de0f8de511a88dc56520b2f8f2cd704ffaa0e09510ec9e5c6314b7a9e77",
+      "size_bytes": 22451
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/preparations.json",
+      "sha256": "f8a566fd035fe670ffefa4d9601dbd85363c3817c7d357f44d727dde77a84854",
+      "size_bytes": 545
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/progress.json",
+      "sha256": "0488e8688d89b8684a372a0f71d6675dbdd3eef279fce544dc24c6ec3f3e08ff",
+      "size_bytes": 207
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/026-root-test_camctl_output_roundtrip/artifacts/result.json",
+      "sha256": "c67c28a0bfaa8081d8b4cb88f129f368dc1fdd01374a1ef9b6d0a1ac1df0fa3e",
+      "size_bytes": 2616
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/cases.json",
+      "sha256": "7cf5b6e0110608bafae3769625ee1998a7a661caba7afbf12c0d75349bbb5d1c",
+      "size_bytes": 180875
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/command.json",
+      "sha256": "829281ab258d1867eb359b674e4798fe836365cc0fbf285fbe1399c98c8ec8a4",
+      "size_bytes": 2699
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/events.jsonl",
+      "sha256": "f6b24157e4ed2ab5a7c695b4b6739bb73f32b8b14a0da1211072878394f0926b",
+      "size_bytes": 608368
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/inventory.json",
+      "sha256": "c46f2858f600da8b1aa58a49d55aa49322bfbfdece7b26aa2875704ace4f1b39",
+      "size_bytes": 39931
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/output.log",
+      "sha256": "80958d4c929eafe7fab360addcba3252052b1bb4fd1a6297476a097b17af56ac",
+      "size_bytes": 95592
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/preparations.json",
+      "sha256": "b11a6c0440ae5ca943de9b590fcb0b78c63b66f42bae1776bc22eddac10f92a0",
+      "size_bytes": 514
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/progress.json",
+      "sha256": "33b57415e1b4189fa66a6b7e15cbda3710b5c719a66ff5c7b13212fb46598e0e",
+      "size_bytes": 212
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/027-camctl-acceptance/artifacts/result.json",
+      "sha256": "568738bceddc25b560a5c3fd32b3d7f428d79df86b9d3c7d0207325b35f0d898",
+      "size_bytes": 2453
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/cases.json",
+      "sha256": "3a11ce6fc45282286f5d123ff43a41c97a4548ad9bd8c0e441ace9c6438ede81",
+      "size_bytes": 3173
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/command.json",
+      "sha256": "2a898192b423ffa9e2cddbfcca57791f4e0d798e9ee75eb91aa625fc60a2270e",
+      "size_bytes": 2878
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/events.jsonl",
+      "sha256": "d56493fd89ee8208aefb1b878572e1f702094e28cfbdab4c1d85440d337dcce7",
+      "size_bytes": 10959
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/inventory.json",
+      "sha256": "b7f6c6c9f03c54528b7b252e47b23a5703bb016ebe9b6c1447d4b95507a66308",
+      "size_bytes": 632
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/output.log",
+      "sha256": "7538f6503f71940ee6afac24804291a3eacd989b1a8f9843cc6d247ae2919077",
+      "size_bytes": 17158
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/preparations.json",
+      "sha256": "eaf9c8b68edf4add67e149d15adca50c2a9c550f66dc599e0f594b75425179d4",
+      "size_bytes": 546
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/progress.json",
+      "sha256": "ac5fc9b09f84787da48876eeca51d1214d02811476a89d0499e7d5f7b7fe6ce0",
+      "size_bytes": 208
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/028-root-test_camctl_session_recovery/artifacts/result.json",
+      "sha256": "16a5102723cadb11444254bde6f9806a6e92c367ba9f974aadda80eec890fc45",
+      "size_bytes": 2619
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/cases.json",
+      "sha256": "58b0c36bc0d45bce099d6a78daef24a7eb22a4d9b113de7c0aec3186c4277d2d",
+      "size_bytes": 5872
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/command.json",
+      "sha256": "dccb15a3ac50ed050a137bb6646875715e2c85c2d52b44f21cee042dfff06634",
+      "size_bytes": 2957
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/events.jsonl",
+      "sha256": "f1251fa4934663b3fa865cccfcd764a64488bba246e059ee232f69f32c86cc8e",
+      "size_bytes": 20048
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/inventory.json",
+      "sha256": "fbcc7ca62171d4c958d34e8de7b58e71d2c2423d7e67b263ce07ebe6f8994327",
+      "size_bytes": 1223
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/output.log",
+      "sha256": "2e29395cd32100767a4fe3260b0ade7a53784c0d6b351f3528f700ef8e7e2e5b",
+      "size_bytes": 1824
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/preparations.json",
+      "sha256": "640e71e58bdf67cef80ed65f17f0047f22cad2178b681b8739cbad80f784484e",
+      "size_bytes": 558
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/progress.json",
+      "sha256": "76326fe90dee11f3355c0c62750234c5a55323b06cbcb6fe8bf2944c68710ed4",
+      "size_bytes": 196
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/029-root-test_device_file_cleanup_roundtrip/artifacts/result.json",
+      "sha256": "29b98c0ae7893fef1c263078c1ef8aff112adbaaae80c87d277d567917f565d8",
+      "size_bytes": 2673
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/cases.json",
+      "sha256": "c1ad8cb23ff68e3fb38793d56f0c56c232fb7aedf7d1561821c2058f8c236290",
+      "size_bytes": 2752
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/command.json",
+      "sha256": "ac33b6c14dbcacdd6b8b57e4d414e71bc2ff4491911817ecbe067c4e2b0370a4",
+      "size_bytes": 2917
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/events.jsonl",
+      "sha256": "3a888594d424f22e085946bb09d9efc7514b564c00b6f65e2a420ccc8665c667",
+      "size_bytes": 9968
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/inventory.json",
+      "sha256": "811d8b4ddc410d9d96f09616a044c5d9bc0488c012ba0c0fa63d01f6b6cf04d4",
+      "size_bytes": 633
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/output.log",
+      "sha256": "4d9fe6b8ad731562667e348eb408a697dbf487f344f810b21e20096fd11f4f4d",
+      "size_bytes": 1069
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/preparations.json",
+      "sha256": "a178ea78609b2994d81a50dc7fee4a269696958de91885ac01b753858615b69a",
+      "size_bytes": 552
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/progress.json",
+      "sha256": "fb778d95c36f593a5115b8ffd8fbdacb9636968adbf70f78fade6b67f94168ac",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/030-root-test_camctl_motor_notifications/artifacts/result.json",
+      "sha256": "ab1c609f11fe2189f13ef364852413ae5528e890bee22d5660047484b011125c",
+      "size_bytes": 2636
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/cases.json",
+      "sha256": "3744717b72ba366c92d873695d1cc49a51a0c4a096c17aa8f0b170262b04842d",
+      "size_bytes": 3156
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/command.json",
+      "sha256": "70d116683705834686ba8c7463fc75901f5c429981458959856db3ebb380194c",
+      "size_bytes": 2878
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/events.jsonl",
+      "sha256": "f12891c17fa36763797f8cf2b0f1ed8c99012e0ae5b8cdc1349680f17e27f2a7",
+      "size_bytes": 10850
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/inventory.json",
+      "sha256": "ac097aa759c69d97bbc9df48b52592846fb92f8bd9b85a1615cb660370012a37",
+      "size_bytes": 619
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/output.log",
+      "sha256": "dd437f33799e0affbc2ebc02f4c1e6feff69c2df99472ed52531b25043bc7858",
+      "size_bytes": 1153
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/preparations.json",
+      "sha256": "0fdf367829e69746a6fb845b660840c3b27aff1dde26abeb060a2a56c2aa1da0",
+      "size_bytes": 546
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/progress.json",
+      "sha256": "463a7ce543a38e4c359180bd181a718460eb7a7ee873ffadec2aa0b754e2bd72",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/031-root-test_camctl_report_roundtrip/artifacts/result.json",
+      "sha256": "f2f598731f3e19f95227c6a10ac4dfb8dec214130a1cee64da9e9157b3e5b511",
+      "size_bytes": 2598
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/cases.json",
+      "sha256": "f6e25112a7f5f34ebb14df77a127ab16b61d47c7b676ff8b9a8a4bba6bcc4269",
+      "size_bytes": 583
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/command.json",
+      "sha256": "1a73a31ffc93451f8f9e95446afa6123e3ad9ec121a7485b9fa574243a11b7cd",
+      "size_bytes": 3036
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/events.jsonl",
+      "sha256": "0d0b128f2bea8c22ea79d174ce419367a8f44f7b4ca8a4d0b46e0fe759e644c0",
+      "size_bytes": 2734
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/inventory.json",
+      "sha256": "46a912da51f5b778459ecf6a3a89c27e34e20c42cd4ef4eaa22031fae4979874",
+      "size_bytes": 164
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/output.log",
+      "sha256": "11463b446cde282e375111add8b89d06b75896baff7ff0eb56ae61e872c280ac",
+      "size_bytes": 601
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/preparations.json",
+      "sha256": "aa22cf7d9746ec851c46321e8820131ab3bef585d279039f84b1b19f599288e0",
+      "size_bytes": 571
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/progress.json",
+      "sha256": "c555cdbe4f88a97344cd822d17da2e440be7952d91558f5bfd6b9bbc4b13c34f",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/032-root-test_action6_builtin_timelapse_roundtrip/artifacts/result.json",
+      "sha256": "9a72f59167dd43ef8d967e6b407dd0b64c326a5811d61a638c8adb5b98deb2e9",
+      "size_bytes": 2746
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/cases.json",
+      "sha256": "2a46d6b67c0be21bb03020464794a9458f9f638f3eabd6a2273d47af25118780",
+      "size_bytes": 544
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/command.json",
+      "sha256": "99decb27daf00954be41638fee409e84724557919e6fa806d1139b5903b38f59",
+      "size_bytes": 2970
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/events.jsonl",
+      "sha256": "16b7e10e979dfe7040125df73f57956ba3558fe305cd0e24f84d8fa39a7cbdf3",
+      "size_bytes": 2458
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/inventory.json",
+      "sha256": "4eaf786fe4a84778b0050c3b6aeb91a78096b7da8f16df6c8e4b8e9c80bc5904",
+      "size_bytes": 126
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/output.log",
+      "sha256": "684ae7e91aa22c00ca317c5a5ba4ca7cb6e6b9e5d9ef4f9e0302c50715fe832f",
+      "size_bytes": 524
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/preparations.json",
+      "sha256": "8b57d04a7b7d74daf8a198a953d0b2e51c9bc6138f4467c4a84ebbe804d88113",
+      "size_bytes": 560
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/progress.json",
+      "sha256": "328c26ee50b479a2d6dc3f39419e5513d6cac054b4747a668dcdf1d58a34ed5a",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/033-root-test_action6_builtin_demo_roundtrip/artifacts/result.json",
+      "sha256": "3c41bb10314c57b746b1ea27a29ea8c597fab635e60526268f7470ecf066f373",
+      "size_bytes": 2683
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/cases.json",
+      "sha256": "45ccb7ba34a74075e6bd756b24eb598b2468ba915c3a95fac0454879d00a20e9",
+      "size_bytes": 6873
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/command.json",
+      "sha256": "f2555dc88c4503fa605a8e8006bc1e7750d36fd4efdc723e873fb60512574c32",
+      "size_bytes": 2827
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/events.jsonl",
+      "sha256": "a41169eb6259c49084dfc06740a16fcedcae22b5080f6aef651e46f9bdfe587c",
+      "size_bytes": 25012
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/inventory.json",
+      "sha256": "66dd050303f4b5740b2f452b59188b71a32554b7d072d04aa580386b07679cde",
+      "size_bytes": 1791
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/output.log",
+      "sha256": "49e9db2b20cde97e5a7e17477a302965dc00c9d8fe1ed67d65f051af0fd209cd",
+      "size_bytes": 9077
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/preparations.json",
+      "sha256": "a534f86057d56b6e38b493868f95f0510b33f10bac6e9afe6c20117584ef6ae5",
+      "size_bytes": 538
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/progress.json",
+      "sha256": "5af26f23cca2e592a13a9f2c80f134b596abbee519e0a23b3df2fb08b8712304",
+      "size_bytes": 209
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/034-root-test_video_size_estimate/artifacts/result.json",
+      "sha256": "4d54f57ca252a39055b3e83a98e54c55a8dbdd4b36cabc2bc5bf9fed3b383c96",
+      "size_bytes": 2572
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/cases.json",
+      "sha256": "0cadcef8c9e53b9271d33f0240a2c441d42a75a636646579ee8ce3bbfb82b1e3",
+      "size_bytes": 4293
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/command.json",
+      "sha256": "b7e1514a5be1a8451601288c27df764ec22f14eec5301240fec2991c297ac4ad",
+      "size_bytes": 2879
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/events.jsonl",
+      "sha256": "df0c230ae4251c01414ad02ac0b518059df3e32525dfb0627e16c75a0e45ec98",
+      "size_bytes": 14938
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/inventory.json",
+      "sha256": "c9bb7091208747a86debf8738ec5b2b8ea4c322d48177a91c8b3cb1bf965f09b",
+      "size_bytes": 919
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/output.log",
+      "sha256": "5dcf110dff5edbcd236654c879397f84109378532d8c6da1975c76adabd80958",
+      "size_bytes": 6196
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/preparations.json",
+      "sha256": "f3dbdf6bf4cc54ea157ea961053c8a889f20adf0925dd5143db6e5b01672eca0",
+      "size_bytes": 547
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/progress.json",
+      "sha256": "ba19a87f19d44a12f791ed057e070846d4d7b69a9d32464a80b8f1f97149cc24",
+      "size_bytes": 207
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/035-root-test_camctl_process_recovery/artifacts/result.json",
+      "sha256": "6a36e2274c43a4d008244d1d4476153b7382baf69404ce0448c85d80bd088c05",
+      "size_bytes": 2618
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/cases.json",
+      "sha256": "ab1ca952280f52562ceb878fcd2c7f9b87f2282c93f4ef846959d7994f7df599",
+      "size_bytes": 1583
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/command.json",
+      "sha256": "7645c7089e555bf6cff0a1f764c064b2ab15eddfa353e1c98fd2873723ad8c4f",
+      "size_bytes": 2866
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/events.jsonl",
+      "sha256": "047310b09ffaae1a1806e305fb7e860d369180a9c1d75038da05d9676b009759",
+      "size_bytes": 5768
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/inventory.json",
+      "sha256": "7ec747225c317e334a4b715c035a289ad3dc4e92eb722952658b298b09f9cb29",
+      "size_bytes": 316
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/output.log",
+      "sha256": "cc2ee6857301b31e7907af0d7d6360ddfc12e878c0349003d45d3f968b790669",
+      "size_bytes": 6828
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/preparations.json",
+      "sha256": "8006873f5925eb41b4bfaf53ba1046d0ed94b47c85d69137ad7d95eb0ba8d058",
+      "size_bytes": 544
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/progress.json",
+      "sha256": "7add625253e271cb38f5d3138845d81f0e13040a9ab0071381e14ee9641d8044",
+      "size_bytes": 207
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/036-root-test_camctl_media_roundtrip/artifacts/result.json",
+      "sha256": "0659653ba6c90ec0887fc827e0cc8a8e54f2506980cd67a81233c5afdde034e7",
+      "size_bytes": 2607
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/cases.json",
+      "sha256": "962bcc917a7395e601fc8b9f049e06e732078ad1743fd60d97cc5042eafd1332",
+      "size_bytes": 2699
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/command.json",
+      "sha256": "640a53f69dda0c24144b9de941dc53a55926c1ce2cd2b86fc1d254c38fb9dadd",
+      "size_bytes": 2866
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/events.jsonl",
+      "sha256": "59b35200f8a51adb3cc945730a3a8c44f13d9c7b078cdf91565fb40867d30861",
+      "size_bytes": 9626
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/inventory.json",
+      "sha256": "9759c4be907ea17a81e3c5f439ff3dde0554c50aa16cc683e8541c7c121fe7ab",
+      "size_bytes": 586
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/output.log",
+      "sha256": "0e107183738e8f979d645569ba1af2aadbeb78bfaedead6df040fd4e1e0a81e5",
+      "size_bytes": 1017
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/preparations.json",
+      "sha256": "40402d812050ce62fae980a43e31955507fbf7692b3e768c65ff0bcb1e4388d7",
+      "size_bytes": 544
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/progress.json",
+      "sha256": "8146a0c71ee810ef56745b97119c9047809ab0f2b992ea5ab01e322bb9260ffc",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/037-root-test_camctl_host_deployment/artifacts/result.json",
+      "sha256": "213f75b50fe7167391c26661664837dd9eabd46150f7dfb83701913be47437ac",
+      "size_bytes": 2588
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/cases.json",
+      "sha256": "5206c418c9cfdaccc0f9b92313530dec8813b5763a185fa396fb0418d6a0ce2f",
+      "size_bytes": 176891
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/command.json",
+      "sha256": "d5df717e938e2eb2d0dd5839398ec1de9d0d908db60a9a4991945fdc72dfbc9d",
+      "size_bytes": 2702
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/events.jsonl",
+      "sha256": "7a31b22b1dea43b340ff426c5bc4f48e723b72b6d0a421f20f206b0812368380",
+      "size_bytes": 614622
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/inventory.json",
+      "sha256": "84ea7d9f4bb94083d7e1977323d25ed36ae5a2545c8b904eb22595d0dea5dce6",
+      "size_bytes": 43236
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/output.log",
+      "sha256": "76a77cd82de1a0e812f3af83ef3e954b5a4f72e6321166efc102c3b50382ea03",
+      "size_bytes": 91772
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/preparations.json",
+      "sha256": "c440a2b343eb39f5fe1310683435a6eb39e1df0a082c6baf055f1389ba7f01ea",
+      "size_bytes": 515
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/progress.json",
+      "sha256": "6477bac2027d6c6af6f826b0c6a9c4af9978e5eeb0b1fe338a03bb23b4b14586",
+      "size_bytes": 198
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/038-camctl-operations/artifacts/result.json",
+      "sha256": "bccc65631182985107fa699e47aa31e219ebfc8204061ff052c18a9b91778e7b",
+      "size_bytes": 2435
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/cases.json",
+      "sha256": "3f39ee7a5ecb4217187d09927fbba3c5d50dc3ba31db79ead6b524f3008f7b96",
+      "size_bytes": 124321
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/command.json",
+      "sha256": "d1038c59bc528a4cc3099511ddfbf6a58faa925d55b5f6c38f17e2f84a1b13e8",
+      "size_bytes": 2662
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/events.jsonl",
+      "sha256": "fff59045381cdeb4cb314058cc91f4d33cdb9599bbb1156e6598af2d0abcb4c6",
+      "size_bytes": 424259
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/inventory.json",
+      "sha256": "6624f8239566851211a004ff4b084c13012a3803489ddb9be73e7541a157e0bd",
+      "size_bytes": 28883
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/output.log",
+      "sha256": "bb4392db37ed3557bcee7b8fa2a4bd16d5df3d667ee56afba6ade28dd08f41b3",
+      "size_bytes": 35038
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/preparations.json",
+      "sha256": "eba95b93da03f65f19c7f8e19fd2551b78f3b0b385a0642345ce49beaee6833d",
+      "size_bytes": 508
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/progress.json",
+      "sha256": "e408fa5aaebda2cd3564cb513fa085c7908cb51301f920a245828792ccdc4e9f",
+      "size_bytes": 211
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/039-camctl-devices/artifacts/result.json",
+      "sha256": "a773f10b7421716d2803718acdb693428a9e084a370509fc97f098a544104f20",
+      "size_bytes": 2417
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/cases.json",
+      "sha256": "07f53df81692dad7f29c4eb4d5b4d13f6da12cd260411590c7b1c0b731949fd5",
+      "size_bytes": 1037
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/command.json",
+      "sha256": "fef377e854dcd44b30abe40cd1cafbcce4a375d6d46b50f809ab962ba9c68413",
+      "size_bytes": 2892
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/events.jsonl",
+      "sha256": "0e2f62877147ba0bb1c2f9efc1a21f27a0650971677cf6a1c1c0255a38d31f4a",
+      "size_bytes": 3896
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/inventory.json",
+      "sha256": "583a0525acc1a678281c835429666bee883b47f24a88ecd23ca046625720c8f3",
+      "size_bytes": 191
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/output.log",
+      "sha256": "26bf7b9c80e844f752321cfa27a8c48f151cfa7e6e31eb96d3c614574addaa42",
+      "size_bytes": 5582
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/preparations.json",
+      "sha256": "50076ed3f3960810af506d489f4b42e603954daa8d2f06315479090366f7d619",
+      "size_bytes": 548
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/progress.json",
+      "sha256": "c348bf44a8118f413cfbccc4b4abd7e411b98920ebaffd3ce35f90bd4f455101",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/040-root-test_camctl_capture_roundtrip/artifacts/result.json",
+      "sha256": "7c3a14d8a39f1a2d1e1e01703fbcff3df3881aa12a06e81f2c9dbab2cd4928d8",
+      "size_bytes": 2611
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/cases.json",
+      "sha256": "41dbe3656e945f1e8954d5d6d3e87968c076c8df8daa90d37606013815b3b08b",
+      "size_bytes": 252419
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/command.json",
+      "sha256": "deeed4c359f38b8a2d0a972bb5b71ec0ac285dfe7c39b55513011eb92752aed9",
+      "size_bytes": 2687
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/events.jsonl",
+      "sha256": "ef70c91b2542b15f2524f7cb87166676cd81119b3527ce16e80bcdc57ebdebb5",
+      "size_bytes": 876405
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/inventory.json",
+      "sha256": "e6d2572ff5ac6f3ddfbc8ff53ec4d5f897602bb126e7e8a0440220d53e31a848",
+      "size_bytes": 62308
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/output.log",
+      "sha256": "e1dcedf1428caa2946cade686ddcd13df80ba15b03ffb5890376f5c724b50031",
+      "size_bytes": 5805
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/preparations.json",
+      "sha256": "6e2f3e0e2e83f99078c4c1a8b718781e1a7216e88f5b572be97d45323de2008a",
+      "size_bytes": 512
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/progress.json",
+      "sha256": "606d026a6821e6dc0426dfec0a233150d4bc8497bb506411e5b29c6c7891e95c",
+      "size_bytes": 199
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/041-camctl-contracts/artifacts/result.json",
+      "sha256": "5b0030b48dd74d94429c718b88798358893e962571de44edc24aceda46c989b7",
+      "size_bytes": 2423
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/cases.json",
+      "sha256": "48257e28f48b8495f41f60dba228c6a9ef6cc3113eb508db4c1aea616c674279",
+      "size_bytes": 3911
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/command.json",
+      "sha256": "48cab7b2c55755b1565fb334ab66ce1f7e83b236e38bfc336bc8862d5fe87182",
+      "size_bytes": 2932
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/events.jsonl",
+      "sha256": "ce236d0e8bd9f50be7362273b6c39f914d09503d44d678b35753aa86f45f0458",
+      "size_bytes": 14110
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/inventory.json",
+      "sha256": "d37352b1ece95d3b51261f95ed041138bfacc3bd293b9e01c947faf6b56804b7",
+      "size_bytes": 941
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/output.log",
+      "sha256": "3deca37536f147517530b510baf0064d0b6bcc8979e0c9d432dec20570d9dfe6",
+      "size_bytes": 1409
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/preparations.json",
+      "sha256": "66d48a71b6dc5ee21a29f8ebc0d34ea57a6b262897f5e90b4b9f95c33b5e854c",
+      "size_bytes": 555
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/progress.json",
+      "sha256": "4908737de95383df738353c7f2093ebe4ec8629073ea30c2ffca395f61ba7600",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/042-root-test_hasselblad_photo_parameters/artifacts/result.json",
+      "sha256": "e1b4923c955836bb5bc2d9d154ba3e5facf8eb86d5c42b92b63b90f40a88105d",
+      "size_bytes": 2650
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/cases.json",
+      "sha256": "8d34f08afe292f9638b3c2c832b1c61c3446aaeed529588abc9133bd3e5d6465",
+      "size_bytes": 107654
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/command.json",
+      "sha256": "41f3d65707c1911d5606e608559e2fa5e3b574cb6d06d1544f07954bef79f371",
+      "size_bytes": 2661
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/events.jsonl",
+      "sha256": "b8a3ae81975c24359d6af96197c3d5bd9ae4a53fcd896965ffd9966304085c29",
+      "size_bytes": 368042
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/inventory.json",
+      "sha256": "8d2056cc3f4f713335feb80cf368365929d529e1d1bf2cab25ad8d50c3d05eaf",
+      "size_bytes": 25009
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/output.log",
+      "sha256": "8b40cbce3a900ef487fe21bb72db696c1d5093d1c219c5b517ab1bf48a4ebe27",
+      "size_bytes": 76266
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/preparations.json",
+      "sha256": "afb88620b0372411adc83f825777d8f1e56b3bf60f4993e536a445d72aa587df",
+      "size_bytes": 508
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/progress.json",
+      "sha256": "ba67331f454295ff9361f166545eefc7586fd4caab4362e7c3415a05c828171a",
+      "size_bytes": 212
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/043-camctl-session/artifacts/result.json",
+      "sha256": "d535ecdeeac4091d79fde48495b2fdee98bcc7f5949b006a6c329ba22165c328",
+      "size_bytes": 2418
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/cases.json",
+      "sha256": "3b56da4ce41f427ecab09dedc6ce182361beeb06204d8e278331d78af125ca8d",
+      "size_bytes": 539
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/command.json",
+      "sha256": "19283f529e3d11e463b187f7de1a6ca69006e6164566463c826c3a7e4cbdef3e",
+      "size_bytes": 2878
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/events.jsonl",
+      "sha256": "14f2249148a2082fccdb2642b80724e1ecb901a93e6f38dd804311224af5bfff",
+      "size_bytes": 2384
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/inventory.json",
+      "sha256": "1a26c6e2a2552681497180f42154a4a10f97aa8c2e27eaa8a91af8265b884f08",
+      "size_bytes": 117
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/output.log",
+      "sha256": "33de83e50fdf5817b5df699f600885e108ea853efe810730dbabd9323bc823a9",
+      "size_bytes": 496
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/preparations.json",
+      "sha256": "7e0c0da0a5151277494cb10ef39dd2abce179ea93eb78344fd959521c4115da5",
+      "size_bytes": 546
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/progress.json",
+      "sha256": "62c6d7007119d6517eb4488a248fbfa854d6060c5f91fcac168906a177edcd1e",
+      "size_bytes": 195
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/044-root-test_camctl_directory_switch/artifacts/result.json",
+      "sha256": "0a07bcfd28b0738fdfd800ef2e01714a4e8a4a4ad7746032f769a919177db7ae",
+      "size_bytes": 2600
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/cases.json",
+      "sha256": "1805017759d8872cc5cdf4f579e7a807d5355b76f761077bba1206f0316db2e2",
+      "size_bytes": 544
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/command.json",
+      "sha256": "1bc2a86b1819aaef674b660c03272fc03d49ae308e0bafb05734436842ba5358",
+      "size_bytes": 2958
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/events.jsonl",
+      "sha256": "547cf7253fa60a3e47caa15e28ba3e3d3be2ea3651b9f03e01b3bc34a9cce097",
+      "size_bytes": 2418
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/inventory.json",
+      "sha256": "1e0b9ae138cf31f4c2a77b71b59cab180ffe2b539f4a939464f13b3babec6ac2",
+      "size_bytes": 120
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+      "sha256": "67d7dafe371320ad9d167aa079c09ae7234d2947c5f0b537fe679989dbd377dc",
+      "size_bytes": 3673
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/preparations.json",
+      "sha256": "bf45545063a768525d0058fde54fcc2bd01846d2ae39851c96009e33b8190ca6",
+      "size_bytes": 559
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/progress.json",
+      "sha256": "8d43913c55097379efd3afddd1c7f790ac7e23d217ccc1e937cff4a3574600da",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/045-root-test_camctl_cancellation_roundtrip/artifacts/result.json",
+      "sha256": "39219c31f7c10700fe4514f23f3c40106aeee9e12d438eeec77a4fd8cdd7bd33",
+      "size_bytes": 2673
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/cases.json",
+      "sha256": "c091e51f73f4abd1f4e5614884441f2f8634d83d50d9a48cac562404e10a1552",
+      "size_bytes": 1642
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/command.json",
+      "sha256": "3f5beb6c72d5b67868e403a30a80a58951117dcb3cba05d923ec26d852b71168",
+      "size_bytes": 2905
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/events.jsonl",
+      "sha256": "6dff175a4dd68368791cc9f176345d5c1e6ddbcccf12a95a650baa1219c0264c",
+      "size_bytes": 6164
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/inventory.json",
+      "sha256": "7645b5ed50c02935d83ce4c2684bf026fcf38897c5391cb872c42485cb3941b0",
+      "size_bytes": 371
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/output.log",
+      "sha256": "a805c9fa8c5736af6a22c32d14392037c638746ba8dfaec04620625002472540",
+      "size_bytes": 10960
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/preparations.json",
+      "sha256": "6589be325e521258d83cccfcb33638d174a44ec4c2eea2fd0f066bf066f1b697",
+      "size_bytes": 551
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/progress.json",
+      "sha256": "d7318efbde4f4e5b69bc12a0ed627c9f03cb5c0353e669e95be1105949505998",
+      "size_bytes": 207
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/046-root-test_timelapse_time_parameters/artifacts/result.json",
+      "sha256": "88b409807f798ec4158f64752dd14a3955fb33423e6a75a5970c9e334a703b5b",
+      "size_bytes": 2643
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/cases.json",
+      "sha256": "04bb76ca3d21e188dab568f61edfab74a5c82443192a3fdbad9568a99435a8b1",
+      "size_bytes": 74906
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/command.json",
+      "sha256": "e2d5252a3dc0bd0f1bb3d0e04c1853b71d1ee55d608adff10c51eafa4d40d133",
+      "size_bytes": 2699
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/events.jsonl",
+      "sha256": "e6e772673a2c3d70222c02caa462a40a9e58a1953f7a2d456d6734b173e71599",
+      "size_bytes": 254879
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/inventory.json",
+      "sha256": "4731ef7c07b85d1b89cbb9dceb93976c60ac380154fd38069535d3359f19f22b",
+      "size_bytes": 17074
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/output.log",
+      "sha256": "a47aeec54d60f49a41ace9b9cce4e46a3f9f6becded8d77fd619d18afc24cae8",
+      "size_bytes": 49934
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/preparations.json",
+      "sha256": "582c175a7c81c18573abc757b230b2363169d36beb78994e0039bedb211d1355",
+      "size_bytes": 513
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/progress.json",
+      "sha256": "b8bba6c6c81e2f4c7052449e087fb6d2892ff43b499d44313d4d49aff689a6ed",
+      "size_bytes": 199
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/047-camctl-scheduling/artifacts/result.json",
+      "sha256": "3143ecab48340f8ffdf96a71df25141aae6f930cfbe3e72ca480ddda57f548ee",
+      "size_bytes": 2434
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/048-node-report-dependencies.test/artifacts/command.json",
+      "sha256": "5f7c5472ffc1534e478322ba8a770e4d7aaa5aa0ff98afc60f602e64fb95fa88",
+      "size_bytes": 2601
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/048-node-report-dependencies.test/artifacts/output.log",
+      "sha256": "eab5f6e3c57d92d5632a45de3f420da448d910ad9ba2a5e59e6ce9870fb83eeb",
+      "size_bytes": 5134
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/048-node-report-dependencies.test/artifacts/preparations.json",
+      "sha256": "9ea6b1db95fe64052fb2175e1802f36a2ba25dee7bf7e4d942228f5f4a45f4df",
+      "size_bytes": 539
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/048-node-report-dependencies.test/artifacts/result.json",
+      "sha256": "1ae9e5fd9caaddb7c1167a3b030789cfbd842fb4466328ddc44e838b5f1432e4",
+      "size_bytes": 2230
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/cases.json",
+      "sha256": "f03e8c76a1547cb035bece470f120ef4c72ce96ffa6b272f9f2df8f31d089b46",
+      "size_bytes": 1157
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/command.json",
+      "sha256": "9f1bbdc6285479230ca96ae0074c079f3cd537486e756048ce426a4be77b2d39",
+      "size_bytes": 2996
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/events.jsonl",
+      "sha256": "b3013e44a9e6e7a33822a7f1ae5090211c41fabfd13e6c0296fb75991eead18b",
+      "size_bytes": 4746
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/inventory.json",
+      "sha256": "d3660119bd6ba93f0274511327c6b8d8371126b798cc8cc0afb79dd49e502ba6",
+      "size_bytes": 310
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/output.log",
+      "sha256": "2a5cef54d20bb6df32b98e50ed4639f7a912420317ac54f9bc18e4832beb76aa",
+      "size_bytes": 572
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/preparations.json",
+      "sha256": "ff1fd8e861039edabf062bb7c922aa1239dbe4659cfd86dc7889d85eefa8c23b",
+      "size_bytes": 565
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/progress.json",
+      "sha256": "043c9bb7b26b363171937bfc614f07e6ddf49fbdb16f6aa2ee97888642619b48",
+      "size_bytes": 194
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/049-root-test_action6_segmented_media_fixtures/artifacts/result.json",
+      "sha256": "5264da2dbb1d865ab8f063463fd402be89c8aa063bce1aeb683c7ccaf657c17f",
+      "size_bytes": 2708
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/cases.json",
+      "sha256": "4a582a99185538709857803439e517ba69340b5d07aac97f3932e98e6112367a",
+      "size_bytes": 65629
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/command.json",
+      "sha256": "bb284b1c6f7d97ba9dddb795ca9e1b24a3fd881c40a45bad840c57335fbbbfbd",
+      "size_bytes": 2702
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/events.jsonl",
+      "sha256": "a27ea9cb8086152e07fd678ae41c77ea22d9b279b7db1c9c8c0e528c5d91d464",
+      "size_bytes": 217333
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/inventory.json",
+      "sha256": "77973153df2a7785ae28a9652f4b867f31c03cbcf665d6a46b2b41ea048e3810",
+      "size_bytes": 13795
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/output.log",
+      "sha256": "f8185964c1983081743550603db29aa3632e48aff719e4d6133c97c260358d86",
+      "size_bytes": 8359
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/preparations.json",
+      "sha256": "63246f7f40f1d43ba8b51dc038d6bf664dc3b5ad675f4a676f020782b31b158f",
+      "size_bytes": 515
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/progress.json",
+      "sha256": "d771831ef27d03f1633eece9d0bf668f7192fac6501099c5d8f29b908d695b43",
+      "size_bytes": 198
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/050-camctl-host_files/artifacts/result.json",
+      "sha256": "6f5e69ff0c29296195f1d6c54880a33f5287467018505162d4da0ace6601c49b",
+      "size_bytes": 2435
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/cases.json",
+      "sha256": "fe88988528a174d7f3e9795d3064b5c4e84fde743bec17ebc42a130110cad7d2",
+      "size_bytes": 62935
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/command.json",
+      "sha256": "985704f649483dc7df7e58ba9c57ec4a1f535234cbd5f3e711c99f78c218e908",
+      "size_bytes": 2766
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/events.jsonl",
+      "sha256": "0cef93a44a38149640e69788a5746cc451580faae964b1785722c08a5a3bd17d",
+      "size_bytes": 216455
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/inventory.json",
+      "sha256": "c8d27accb8b24a2c2525b4a322796419c7db3583b6c6d34850f7a66310bacd7f",
+      "size_bytes": 14942
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/output.log",
+      "sha256": "27a83bd887cc097d5b3917a50e88c61d0edc99141ae85258c7b66f1a16392eb2",
+      "size_bytes": 11414
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/preparations.json",
+      "sha256": "44bc1d89de130c7aedf48e302884095b420ec35f0b9960c3045335897977d3ed",
+      "size_bytes": 524
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/progress.json",
+      "sha256": "d2829eafdf5608070c81e5b8dd74a3ad61f5e189be85f387b3733ef74e028e1e",
+      "size_bytes": 199
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/051-camctl-logging_runtime/artifacts/result.json",
+      "sha256": "d36196f4d579d8ff863063d6d8b58186b8bad3c9958211cb501dbe8dbf3e18d8",
+      "size_bytes": 2495
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/052-node-event-transitions.test/artifacts/command.json",
+      "sha256": "c7cb05bb0b0ad2c5316043ccbc25cb713f23baab4bb7c60e200d30153b663949",
+      "size_bytes": 2578
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/052-node-event-transitions.test/artifacts/output.log",
+      "sha256": "6eabda91caeaa1d0a682fd5fa9702da761abe2a1a111d69bd0a705b77fcc819a",
+      "size_bytes": 9159
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/052-node-event-transitions.test/artifacts/preparations.json",
+      "sha256": "98f332135673b7607df77d29c10050b8e93098994cb3da36d5cf83e21f23fe08",
+      "size_bytes": 534
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/052-node-event-transitions.test/artifacts/result.json",
+      "sha256": "d39bfd192e9f26e39e3fcf9e314b509ca5defba4c6abc7526d00abe997e777b8",
+      "size_bytes": 2210
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/cases.json",
+      "sha256": "7d9882c7ea54761ec6f35d7deb4d759ee89bcea52f951daa91a3991d301eeee2",
+      "size_bytes": 6423
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/command.json",
+      "sha256": "da18d0051e6922cbb3a6d372e5c292189ee7b8f7fae8aefcbe2dd70046f4dd81",
+      "size_bytes": 2636
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/events.jsonl",
+      "sha256": "5dac6df6b4bbbce6c849a04d1a1282ac620d3b22b21de133edad10d1a9e5a063",
+      "size_bytes": 21436
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/inventory.json",
+      "sha256": "859d9afc9f2795ab58fbd6beda384396c0d43bde92b706ffe58e411980a922e5",
+      "size_bytes": 1281
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/output.log",
+      "sha256": "e5c7a2fcd8250c20dd04a45b06edef2aac725d0f444c0f8af56edeee27edb638",
+      "size_bytes": 1685
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/preparations.json",
+      "sha256": "786878968cd3ac4d320e4800bb8a8c20dc68a5b9cfd4efd8ba2c1f1064c6e1ec",
+      "size_bytes": 505
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/progress.json",
+      "sha256": "60db6832048cddc84a06a1d677bd8ecf3398fd25d3549a7556d85813517a018b",
+      "size_bytes": 196
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/053-camctl-motor/artifacts/result.json",
+      "sha256": "6dc414a67a6815827f310f3c7724701d245c633a9a25193203602858810026f7",
+      "size_bytes": 2372
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/cases.json",
+      "sha256": "34f93b0df110fbd287c66fbbd7d971eaa792bcfd0a3613015c1279e0c8f934ab",
+      "size_bytes": 15043
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/command.json",
+      "sha256": "f1ebc684969401dfc2dd3f4af421fbb86d208b6a1d1dfcd5e1258d9c6faf43e9",
+      "size_bytes": 2839
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/events.jsonl",
+      "sha256": "ace17ef237f4ed7fb7dc8d7b5f9f6c7523f670056a700d6ee9f9b3481e99ae6f",
+      "size_bytes": 191917
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/inventory.json",
+      "sha256": "50eb383aa8b1d02bf5549e6637a41d1e7dc3dcba448dcd04a1fa0b3691fa26e8",
+      "size_bytes": 3468
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/output.log",
+      "sha256": "85b294c1767e0ad9fc0fbf705b7b602e6951697798e1569e477a2f3b521c431b",
+      "size_bytes": 3863
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/preparations.json",
+      "sha256": "ae631a3584eb3f7da6edfa3f4011e5b5f802d896edc19334d3a3c57a1d07283d",
+      "size_bytes": 539
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/progress.json",
+      "sha256": "d1e396ef72f8cc20fe1bd888a2b46fa08a09689acb7ddb3ec0b6b38d33d4ca8e",
+      "size_bytes": 210
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/054-root-test_database_history_sql/artifacts/result.json",
+      "sha256": "791f40b9b809ee9139e35b7cd40c2465c5cd909765344c418c67a7596ca073db",
+      "size_bytes": 2591
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/cases.json",
+      "sha256": "a24b20305f6d64c0f177a0eb3fc60d6c627e4ea0d5ed15ec1a640468c902756f",
+      "size_bytes": 23882
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/command.json",
+      "sha256": "da0a3a299c4e908e0bb1d82bd6558d8c8c93b03505d6c643874d7bc2a3698565",
+      "size_bytes": 2854
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/events.jsonl",
+      "sha256": "d51c76b225d0db4394a25120c05053c040e1aeaf5f6cec821d458190893bdd91",
+      "size_bytes": 81213
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/inventory.json",
+      "sha256": "a670fc26f0f5938139c3846b8a4687d2123827b6b4946e4dcb7b7813f1a92464",
+      "size_bytes": 5412
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/output.log",
+      "sha256": "fdd3d14ef3003e4cd6235e14dbbb85e5b6289e1722597f73e90a95108ec62c15",
+      "size_bytes": 961
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/preparations.json",
+      "sha256": "110a632f5003336fdc6da24b07800a81b90d377d383ccd5bc740f73e4f29bec7",
+      "size_bytes": 542
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/progress.json",
+      "sha256": "74d5d97a9df48cb50e6f86c4985508e32836950d920868a41a0e243dd46d4290",
+      "size_bytes": 197
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/055-root-test_camera_demo_transport/artifacts/result.json",
+      "sha256": "27ce7507a436e8f2a4d3983c6c16ecb046612fc1e6d0bc52166d02ee48b6b940",
+      "size_bytes": 2580
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/cases.json",
+      "sha256": "ae0e2d853a695a5af048734131132a3d5eb074d3dd15fce3ce0834ef172d0786",
+      "size_bytes": 10199
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/command.json",
+      "sha256": "4666b38ccbceb26018cf34b1181fd2335f7bd495a9d2b755234248ef4ddff164",
+      "size_bytes": 2855
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/events.jsonl",
+      "sha256": "c938abef6637f9f183ce62d37c0cf03878d9c1de690aa4fdd41ddcad8cc1aecb",
+      "size_bytes": 33932
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/inventory.json",
+      "sha256": "04120ee5e392c8c5439dafb709226fbd7ffb0955aebf4e8b578d4f4766cdeb6a",
+      "size_bytes": 2204
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/output.log",
+      "sha256": "86e2bae1074af2e7399dc1142abe7fa3bad9bdb13a68b9b51ab5b5938434be1a",
+      "size_bytes": 258
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/preparations.json",
+      "sha256": "b64b99451c1d49b80e6fb44fd53ec68ad523b5cbd8e957f76f78cc63728ccef0",
+      "size_bytes": 543
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/progress.json",
+      "sha256": "0ac3c27589402f436c8914d8c597af75416e588afc9bb6286d6830e1c62d4749",
+      "size_bytes": 212
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/056-root-test_ready_report_observer/artifacts/result.json",
+      "sha256": "6feba5a36e63d919994f88706b37b7289d1ee2d082383286b05c898b10d69542",
+      "size_bytes": 2602
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/cases.json",
+      "sha256": "0d636e738696487b649809d44dd861ccf2d0b0f7bbb6c751f242d218e61a6a3f",
+      "size_bytes": 1575
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/command.json",
+      "sha256": "ee2229a3925bbe2733340fa2d8823417dd9ed09053e53694bb9b1039b017c646",
+      "size_bytes": 2855
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/events.jsonl",
+      "sha256": "7fdeead22ed5a8317c4ea3d98b950c1d4f6b9013c93bf2a5a928ea7476339c54",
+      "size_bytes": 5560
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/inventory.json",
+      "sha256": "5d22ab59a25098b0ec4e8e34f5bf06d14a6509785d37bc6317499138b8c28506",
+      "size_bytes": 286
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/output.log",
+      "sha256": "5fbe308550536a63bf27430b175aa39607de2591dff6ace979e1afdc02191950",
+      "size_bytes": 357
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/preparations.json",
+      "sha256": "5251d98e79a171553b17f64fdb94cb148df04fa52a70a552b3b143a781a068c6",
+      "size_bytes": 542
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/progress.json",
+      "sha256": "8a1ece5b840c0c7634ebe04372532d22cbef4930760daef8645d8bae8f7685d8",
+      "size_bytes": 196
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/057-root-test_camctl_acceptance_map/artifacts/result.json",
+      "sha256": "8ad8f3659b696e77d96925ae8ff99c44bcfe48e59e0939c455eb321f19fc0217",
+      "size_bytes": 2579
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/058-node-video-coverage-protocol.test/artifacts/command.json",
+      "sha256": "d433bb284df2278103b9cd0657d2e224bfdb1131bde868d0e614003d6fcbd7f7",
+      "size_bytes": 2655
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/058-node-video-coverage-protocol.test/artifacts/output.log",
+      "sha256": "b32774a6cd33401ef6070b9afe7e76b97b91f907778ba7f1b403d32ef28ac305",
+      "size_bytes": 733
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/058-node-video-coverage-protocol.test/artifacts/preparations.json",
+      "sha256": "82a7b0df15bf1732fa4b05ee7121e16f6d8badc1c015d3c003d4d63ccdd3f922",
+      "size_bytes": 545
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/058-node-video-coverage-protocol.test/artifacts/result.json",
+      "sha256": "19e2561a7ca14dae51b2f5b4c4e2bac6e83fb335c6a9d649a7b85ed36e199fba",
+      "size_bytes": 2278
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/059-node-report-dependency-conditions.test/artifacts/command.json",
+      "sha256": "f5a28e19ef0f51fdc4e597c705eab63314852e83c6ab6144a94c163d9f828ba6",
+      "size_bytes": 2698
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/059-node-report-dependency-conditions.test/artifacts/output.log",
+      "sha256": "dd8cd65644e3d44c3c7702183800a4ec48fbe716b2d6e702cafbcfce791ac29a",
+      "size_bytes": 4109
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/059-node-report-dependency-conditions.test/artifacts/preparations.json",
+      "sha256": "0fc8a1ea635cfe0fab5531d651e638342c89af76383aad491c0e283b8bb8defe",
+      "size_bytes": 555
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/059-node-report-dependency-conditions.test/artifacts/result.json",
+      "sha256": "0825716bdb201695b128154f7430f52b4ebd326917c797e35506f99a3f2a1a45",
+      "size_bytes": 2319
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/cases.json",
+      "sha256": "a189a6838b86980d2b8653c0940812e182784b74b376c756ccaa6896d09abc11",
+      "size_bytes": 6587
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/command.json",
+      "sha256": "1b8aaafff1e4f1e2eafd501795d95e01ac79b61a81c483a924afe4134448f3ae",
+      "size_bytes": 2797
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/events.jsonl",
+      "sha256": "39066c578b1af534fa03b8d22b3a0e487bb82becdc203935c553b11962b503ee",
+      "size_bytes": 22766
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/inventory.json",
+      "sha256": "f234386c3d0621518a4a12eae2412fdd78cd1af55e94079fe405e72f4a638961",
+      "size_bytes": 1469
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/output.log",
+      "sha256": "5db6f14192190a0b1d8bebbd02329ff73de06b68ad91a7d5e085966ca55ecd26",
+      "size_bytes": 1964
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/preparations.json",
+      "sha256": "c600b5d2832f6214e22509b6c92dfe37d0622ddbb58801d8ba3ef4013aed55d9",
+      "size_bytes": 536
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/progress.json",
+      "sha256": "ddd035445a089ca55b64ac5aaa3c47579c74102e1c92c4df44931500bd295f29",
+      "size_bytes": 197
+    },
+    {
+      "path": "/tmp/camctl-itopt-full-20261025/tasks/060-root-test_host_wait_failures/artifacts/result.json",
+      "sha256": "28994d9c1dc1df4c2671923f91c7b663492d080d01d66cfa10418455848ae0f3",
+      "size_bytes": 2526
+    },
+    {
+      "path": "/tmp/camctl-itopt-rootwait/.local/verification/itopt/final-audit/audit_full.py",
+      "sha256": "a18cdaf67ac7ecef4b7e2029a4bd7bd3ed08a471103854e0257e5bb522dcc7f6",
+      "size_bytes": 16331
+    },
+    {
+      "path": "/tmp/camctl-itopt-rootwait/.local/verification/itopt/final-audit/derive_scope.py",
+      "sha256": "6dee99e80eecef7f3365f07680114539668a584514e40a252a75b904e28edaa7",
+      "size_bytes": 12185
+    },
+    {
+      "path": "/tmp/camctl-itopt-rootwait/.local/verification/itopt/final-audit/expected-scope.json",
+      "sha256": "e171e4dc02fc3fd14e2b48dedbd793084ed30721b3f63d9339e8e68f6ad6eba3",
+      "size_bytes": 51322
+    },
+    {
+      "path": "/tmp/camctl-itopt-rootwait/.local/verification/itopt/final-audit/first-run-audit.json",
+      "sha256": "ca9103c14f25d7579eea8111ad6b5a565cea0b1f27ff050e87799fa99399f430",
+      "size_bytes": 277761
+    },
+    {
+      "path": "/tmp/camctl-itopt-rootwait/.local/verification/itopt/final-audit/original-38-classification.json",
+      "sha256": "a84179e0b0af656077384c02a108b4555a5dfec7fe62e3e6a20bd61b4ea66565",
+      "size_bytes": 25807
+    }
+  ],
+  "generated_files": [
+    {
+      "path": "first-run-cases.csv",
+      "sha256": "9dfeedca1f0acd5c0feedf8a78af49235567e1fb73064432179ffaf08e7e6ae7",
+      "size_bytes": 4956636,
+      "data_rows": 9527
+    },
+    {
+      "path": "first-run-unexecuted.csv",
+      "sha256": "dc4e4b6069c8d7d938a3f537904000c28a8e8bdd63bb2445f2ad28aed109be35",
+      "size_bytes": 219311,
+      "data_rows": 811
+    },
+    {
+      "path": "first-run-subchecks.csv",
+      "sha256": "b9362453865259ded5617e063a2a586e6b0a6c987bfd8d9dff3f581e01b9fcf8",
+      "size_bytes": 271763,
+      "data_rows": 342
+    },
+    {
+      "path": "first-run-audit.json",
+      "sha256": "07b3358ff09dc4d18b594d975ee11fd3ca34167826518adf0011ac354f550917",
+      "size_bytes": 634191
+    },
+    {
+      "path": "first-run-expected-scope.json",
+      "sha256": "e171e4dc02fc3fd14e2b48dedbd793084ed30721b3f63d9339e8e68f6ad6eba3",
+      "size_bytes": 51322
+    },
+    {
+      "path": "full-run.json",
+      "sha256": "7b47765af768796014591b81f2457b04a111c524b97192a59129e09d70f16129",
+      "size_bytes": 2750
+    }
+  ],
+  "hash_note": "sha256按实际文件字节计算；本清单不包含自身哈希。CSV的data_rows不含表头。"
+}

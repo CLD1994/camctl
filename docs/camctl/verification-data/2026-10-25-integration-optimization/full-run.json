@@ -1,5 +1,5 @@
 {
-  "status": "running",
+  "status": "incomplete",
   "source_commit": "507763857649d894ba9e6ec34c728ddfad9d9354",
   "source_snapshot_sha256": "842142394d3bcaa6d907c1b542f30e409eaec058408ec038f2b1a4eb1063494e",
   "source_status": "",
@@ -57,5 +57,40 @@
       8,
       9
     ]
-  }
+  },
+  "raw_runner_status": "finished",
+  "finished_utc": "2026-10-24T22:58:22.005248+00:00",
+  "updated_utc": "2026-10-24T22:58:22.006834+00:00",
+  "exit_code": 1,
+  "wall_seconds": 2929.1222418140023,
+  "task_outcomes": {
+    "passed": 42,
+    "failed": 18
+  },
+  "collection_complete": true,
+  "execution_reporting_complete": false,
+  "validation_passed": false,
+  "actual_collected_primary_count": 10338,
+  "actual_primary_count": 9527,
+  "actual_outcomes": {
+    "passed": 9449,
+    "failed": 73,
+    "skipped": 5
+  },
+  "actual_complete_primary_count": 9526,
+  "actual_complete_outcomes": {
+    "passed": 9448,
+    "failed": 73,
+    "skipped": 5
+  },
+  "missing_primary_count": 811,
+  "actual_subchecks": {
+    "passed": 342
+  },
+  "audit_file": "first-run-audit.json",
+  "actual_primary_file": "first-run-cases.csv",
+  "unexecuted_file": "first-run-unexecuted.csv",
+  "subchecks_file": "first-run-subchecks.csv",
+  "manifest_file": "first-run-manifest.json",
+  "interpretation": "首轮已结束，但执行证据不完整：811项未执行，另1条记录缺少最终阶段。2929.1222418140023秒约为48.8分钟，不构成完整验收耗时，不能据此声称完整提速。"
 }
