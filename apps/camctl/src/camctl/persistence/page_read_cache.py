@@ -15,7 +15,7 @@ class _PageReads:
 
 
 _CURRENT = ContextVar('verified_page_reads', default=None)
-# 原页的首批、当前页及紧邻页可以同时被读取，窗口不随总页数增长。
+# 最多复用最近三页的原历史行，覆盖当前页、首批和紧邻页的反复读取。
 _PAGE_LIMIT = 3
 
 
@@ -69,6 +69,13 @@ def cached_page_record(connection, event_id):
     if record is not None:
         reads.records.move_to_end(event_id)
     return record
+
+
+def prepare_page_record(connection, event_id):
+    """读取新原页前释放一个旧记录，避免与完整原事务解码重叠驻留。"""
+    reads = _reads(connection)
+    if reads is not None and event_id <= reads.upper_event_id and len(reads.records) >= _PAGE_LIMIT:
+        reads.records.popitem(last=False)
 
 
 def remember_page_record(connection, event_id, transaction_last_event_id, record):

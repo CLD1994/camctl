@@ -1051,10 +1051,10 @@ def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict |
         found = cursor.fetchone()
         if found is None:
             return None
-        columns = tuple(description[0] for description in cursor.description)
+        description = cursor.description
     return {
-        name: _read_sql_value(table, name, value)
-        for name, value in zip(columns, found)
+        column[0]: _read_sql_value(table, column[0], value)
+        for column, value in zip(description, found)
     }
 
 

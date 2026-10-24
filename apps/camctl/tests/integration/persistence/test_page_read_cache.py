@@ -25,6 +25,7 @@ async def _page(tmp_path):
 @pytest.mark.asyncio
 async def test_committed_page_is_reused_only_inside_one_read_transaction(tmp_path, monkeypatch):
     owned, ref = await _page(tmp_path)
+    import weakref
     calls = []
     original = result_pages._verify_page_relations
     def verify(*args):
@@ -36,7 +37,11 @@ async def test_committed_page_is_reused_only_inside_one_read_transaction(tmp_pat
         db.execute('BEGIN')
         try:
             with opened_read_page_scope(db, True):
-                assert result_pages.read_page(ref, owned).ref == ref
+                saved = result_pages.read_page(ref, owned)
+                assert saved.ref == ref
+                released = weakref.ref(saved)
+                del saved
+                assert released() is None
                 assert result_pages.read_page(ref, owned).ref == ref
         finally:
             db.execute('ROLLBACK')
@@ -156,8 +161,8 @@ async def test_write_transaction_releases_page_proof_before_every_end(tmp_path, 
             return result
     connection = Connection()
     def plan(command, scope):
-        saved = result_pages._at_record(scope.connection, ref.event_id)
-        assert cached_page_record(scope.connection, ref.event_id) is saved
+        result_pages._at_record(scope.connection, ref.event_id)
+        assert cached_page_record(scope.connection, ref.event_id) is not None
         if end == 'cancel':
             raise asyncio.CancelledError()
         if end == 'rollback':

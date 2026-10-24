@@ -5,7 +5,7 @@ import pytest
 
 from camctl.persistence.page_read_cache import (
     cached_page_record, clear_page_records, discard_page_records,
-    page_read_scope, remember_page_record,
+    page_read_scope, prepare_page_record, remember_page_record,
 )
 
 
@@ -87,3 +87,37 @@ def test_independent_proof_phase_restarts_reads_without_widening_committed_range
         remember_page_record(connection, 11, 11, object())
         assert cached_page_record(connection, 7) is checked
         assert cached_page_record(connection, 11) is None
+
+
+def test_new_committed_page_releases_oldest_record_before_decoding():
+    import weakref
+    class Record:
+        pass
+    connection = SimpleNamespace(in_transaction=True)
+    with page_read_scope(connection, 10):
+        first, middle, latest = Record(), Record(), Record()
+        reference = weakref.ref(first)
+        remember_page_record(connection, 1, 1, first)
+        remember_page_record(connection, 2, 2, middle)
+        remember_page_record(connection, 3, 3, latest)
+        del first
+        prepare_page_record(connection, 4)
+        assert reference() is None
+        assert cached_page_record(connection, 2) is middle
+        assert cached_page_record(connection, 3) is latest
+        checked = Record()
+        remember_page_record(connection, 4, 4, checked)
+        assert cached_page_record(connection, 4) is checked
+
+
+def test_uncommitted_page_does_not_reserve_space_in_committed_window():
+    connection = SimpleNamespace(in_transaction=True)
+    first, middle, latest = object(), object(), object()
+    with page_read_scope(connection, 10):
+        remember_page_record(connection, 1, 1, first)
+        remember_page_record(connection, 2, 2, middle)
+        remember_page_record(connection, 3, 3, latest)
+        prepare_page_record(connection, 11)
+        assert cached_page_record(connection, 1) is first
+        assert cached_page_record(connection, 2) is middle
+        assert cached_page_record(connection, 3) is latest
