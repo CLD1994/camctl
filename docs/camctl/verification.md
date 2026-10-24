@@ -6,6 +6,14 @@
 
 各带日期的记录保存当时的环境、范围和结果，记录中的失败及尚未完成事项不自动代表当前状态。后续修复与当前遗留项从路线图核对；本次[文档复核发现的实现缺口](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#文档复核发现的实现缺口)也按该入口跟踪。部署和设备证据的当前交接范围见[本页末节](#部署交接与待核验项)。
 
+## 开发容器重建后的运行环境
+
+环境恢复、测试提速与统一交付由[接续计划](../superpowers/plans/2026-10-25-environment-test-speed-delivery.md)跟踪。恢复后的开发解释器位于 `.local/environments/dev-python311-20261025/`，`apps/camctl/.venv311` 指向该目录。旧失效环境保存在 `.local/archives/environment-20261025/venv311`。CPython 3.11.17 实际链接 SQLite 3.53.1；`uv sync --project apps/camctl --python 3.11 --group test --frozen` 使用显式的开发环境目录，依赖检查通过。运行库检查验证 STRICT、JSON、增量 BLOB 及临时文件库 WAL/FULL，退出 0。
+
+客户端使用 Node.js 24.22.1、npm 11.21.1，`npm ci --engine-strict` 按原锁文件安装 157 个依赖，完整依赖树检查通过；配套 Chromium 及系统依赖已经安装。容器另准备 ADB 和 ffmpeg／ffprobe，只检查工具版本，没有连接设备。环境路径、版本及锁文件摘要保存在 `.local/verification/environment-recovery-20261025/environment.json`。
+
+新环境首次完整 Python 单元测试为 7137 项通过、1 项跳过，77.56 秒，退出 0；保留两条既有同步测试的 asyncio 标记警告。客户端类型检查及生产构建退出 0，保留既有主包体积提示。命令、工作目录、实际 UTC、源码身份、日志和退出码保存在同目录的 `full-unit-baseline` 与 `client-build` 记录中；这些结果属于开发环境，安装交付和设备复测分别验收。
+
 ## 无产物来源失败的取回与客户端说明（2026-10-24）
 
 [来源失败计划](../superpowers/plans/2026-10-24-source-action-failed.md)的生产与消费链已经接通。普通及分段来源只有在动作 FAILED、适用处理完成且完整正式产物目录可靠为空时，才对默认及预览固定 `source_action_failed`；原拍摄错误保持。受理失败的空执行定义经过真实取回入口及事务守卫处理，分段存在性查询使用有界 SQL；保留产物、显式 ID、取消、过期及固定历史边界均按原规则。
