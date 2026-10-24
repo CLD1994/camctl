@@ -67,6 +67,9 @@ def pytest_runtest_logreport(report):
               'record': 'subcheck' if nested else 'phase'}
     if nested:
         _subchecks[report.outcome] += 1
+        if report.failed:
+            case = _primary.setdefault(report.nodeid, {'nodeid': report.nodeid, 'phases': {}, 'outcome': None})
+            case['outcome'] = 'failed'
         record['context'] = repr(report.context)
     else:
         case = _primary.setdefault(report.nodeid, {'nodeid': report.nodeid, 'phases': {}, 'outcome': None})

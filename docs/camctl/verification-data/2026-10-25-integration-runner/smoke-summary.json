@@ -459,7 +459,8 @@
           ],
           "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/005-node-report-dependency-conditions.test/artifacts"
         }
-      ]
+      ],
+      "counts_basis": "本次使用早期观测器；27主实例与342子检查由收集清单和pytest终态分离，非最终插件实测。最终插件真实回执见followup-summary.json。"
     },
     {
       "name": "osmo",
