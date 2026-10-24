@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 from pathlib import Path
 import subprocess
@@ -298,6 +299,41 @@ class IntegrationRunnerTest(unittest.TestCase):
             events = [json.loads(line) for line in (artifacts / 'events.jsonl').read_text().splitlines()]
             self.assertEqual(events[-1]['status'], 'finished')
             self.assertEqual(sum(event.get('record') == 'phase' for event in events), 12)
+
+    def test_python_cache_is_private_and_external_dependency_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_private_cache.py',
+                'import os\nimport sys\nfrom pathlib import Path\nimport jsonschema\n'
+                'def test_private_cache():\n'
+                '    repo = Path(__file__).resolve().parents[2]\n'
+                '    prefix = Path(os.environ["PYTHONPYCACHEPREFIX"]).resolve()\n'
+                '    assert not prefix.is_relative_to(repo)\n'
+                '    assert not sys.dont_write_bytecode\n'
+                '    assert "PYTHONDONTWRITEBYTECODE" not in os.environ\n'
+                '    assert str(repo) not in os.environ["PYTHONPYCACHEPREFIX"]\n'
+                '    cache = Path(jsonschema.__cached__)\n'
+                '    assert cache.is_relative_to(prefix) and cache.is_file()\n')
+            shared = Path(sys.prefix) / 'lib/python3.11/site-packages/jsonschema'
+            before = {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in shared.rglob('*.pyc')}
+            # 用户继承环境中的设置不能使任务再次禁写或采用外部缓存。
+            prior = {name: os.environ.get(name) for name in ('PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX')}
+            os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+            os.environ['PYTHONPYCACHEPREFIX'] = str(root / 'unowned-cache')
+            try:
+                result, output = self._run_fixture(root, source)
+            finally:
+                for name, value in prior.items():
+                    if value is None:
+                        os.environ.pop(name, None)
+                    else:
+                        os.environ[name] = value
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            task = json.loads((output / 'summary.json').read_text())['tasks'][0]
+            self.assertEqual(task['progress']['outcomes'], {'passed': 1})
+            self.assertFalse((root / 'unowned-cache').exists())
+            after = {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in shared.rglob('*.pyc')}
+            self.assertEqual(before, after)
 
     def test_unknown_target_is_rejected_before_execution(self):
         result = subprocess.run([sys.executable, str(RUNNER), '--list', '--target',

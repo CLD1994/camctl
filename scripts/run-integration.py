@@ -106,8 +106,8 @@ def order_by_measurement(source, tasks):
     return sorted(tasks, key=lambda task: (-task['estimated_seconds'], task['id']))
 
 
-def command_output(command, cwd=None):
-    return subprocess.check_output(command, cwd=cwd, text=True).strip()
+def command_output(command, cwd=None, env=None):
+    return subprocess.check_output(command, cwd=cwd, env=env, text=True).strip()
 
 
 def copy_tree(source, destination):
@@ -165,10 +165,12 @@ def read_progress(directory):
 
 def test_environment(python, project, control, private, temporary):
     environment = {key: value for key, value in os.environ.items()
-                   if key not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'PWD')
+                   if key not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', 'PWD',
+                                  'PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX')
                    and not key.startswith(('UV_', 'CAMCTL_', 'PYTEST_'))}
     environment.update(PYTHONPATH=os.pathsep.join([str(control), str(project / 'src')]),
-                       PYTHONNOUSERSITE='1', PYTHONUNBUFFERED='1', PYTHONDONTWRITEBYTECODE='1', UV_PYTHON=str(python),
+                       PYTHONNOUSERSITE='1', PYTHONUNBUFFERED='1',
+                       PYTHONPYCACHEPREFIX=str(private / 'python-cache'), UV_PYTHON=str(python),
                        UV_PROJECT_ENVIRONMENT=str(private / 'project-env'),
                        UV_CACHE_DIR=str(private / 'uv-cache'), UV_OFFLINE='1',
                        TMPDIR=str(temporary), TMP=str(temporary), TEMP=str(temporary))
@@ -225,7 +227,7 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
                         write_json(artifacts / 'prepare-command.json', preparation)
             if code:
                 raise subprocess.CalledProcessError(code, command)
-        command = [str(python), '-B', '-m', 'pytest', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress']
+        command = [str(python), '-m', 'pytest', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress']
         record = {'command': command, 'cwd': str(work), 'started_utc': utc(),
                   'source': identity['snapshot_sha256'], 'versions': versions}
         started = time.monotonic()
@@ -327,18 +329,18 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                 await asyncio.to_thread(clone_snapshot, seed, work)
                 project = work / 'apps/camctl'
                 project.mkdir(parents=True, exist_ok=True)
+                temporary = directory / 'tmp'
+                temporary.mkdir()
+                environment = test_environment(python, project, control, private, temporary)
                 environment_root = project / '.venv311'
                 await asyncio.to_thread(subprocess.run,
-                    [str(python), '-B', '-m', 'venv', '--without-pip', str(environment_root)], check=True)
+                    [str(python), '-m', 'venv', '--without-pip', str(environment_root)], env=environment, check=True)
                 packages = environment_root / 'lib/python3.11/site-packages'
                 (packages / 'integration-dependencies.pth').write_text(
                     versions['site_packages'] + '\n', encoding='utf-8')
                 if task['scope'] != 'camctl':
                     (work / 'apps/client').mkdir(parents=True, exist_ok=True)
                     (work / 'apps/client/node_modules').symlink_to(private / 'node_modules', target_is_directory=True)
-                temporary = directory / 'tmp'
-                temporary.mkdir()
-                environment = test_environment(python, project, control, private, temporary)
                 if task['scope'] == 'node':
                     command = ['node', '--disable-warning=ExperimentalWarning', '--test', '--test-reporter=tap', *task['targets']]
                     write_json(artifacts / 'inventory.json', task['targets'])
@@ -349,7 +351,8 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                                '--basetemp', str(temporary / 'pytest')]
                 task['command'] = command
                 task['environment'] = {key: environment[key] for key in (
-                    'PYTHONPATH', 'UV_PYTHON', 'UV_PROJECT_ENVIRONMENT', 'UV_CACHE_DIR', 'UV_OFFLINE', 'TMPDIR')}
+                    'PYTHONPATH', 'PYTHONPYCACHEPREFIX', 'UV_PYTHON', 'UV_PROJECT_ENVIRONMENT',
+                    'UV_CACHE_DIR', 'UV_OFFLINE', 'TMPDIR')}
                 # 根测试也需要实际同步资源；仅写此任务的源码副本。
                 async def prepare(label, command, cwd):
                     preparation = {'label': label, 'command': command, 'cwd': str(cwd), 'started_utc': utc()}
@@ -476,8 +479,10 @@ def main():
             print(json.dumps(tasks, ensure_ascii=False, indent=2))
             return 0
         python = args.python.absolute()
+        version_environment = {key: value for key, value in os.environ.items()
+                               if key not in ('PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX')}
         versions = json.loads(command_output([str(python), '-B', '-c',
-            'import sys,sysconfig,sqlite3,json,pytest; print(json.dumps({"python":sys.version,"version":list(sys.version_info[:2]),"sqlite":sqlite3.sqlite_version,"pytest":pytest.__version__,"executable":sys.executable,"site_packages":sysconfig.get_path("purelib")}))']))
+            'import sys,sysconfig,sqlite3,json,pytest; print(json.dumps({"python":sys.version,"version":list(sys.version_info[:2]),"sqlite":sqlite3.sqlite_version,"pytest":pytest.__version__,"executable":sys.executable,"site_packages":sysconfig.get_path("purelib")}))'], env=version_environment))
         if versions['version'] != [3, 11]:
             raise ValueError('--python 必须使用部署版 Python 3.11')
         versions.update({name: command_output([name, '--version']) for name in ('uv', 'node', 'git')})
