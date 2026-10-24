@@ -184,3 +184,107 @@ async def test_write_transaction_releases_page_proof_before_every_end(tmp_path, 
         assert not owned.connection.in_transaction
     finally:
         owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_three_page_strict_members_reuse_each_committed_page_within_scope(tmp_path, monkeypatch):
+    from collections import Counter
+    from camctl.capture.files import OwnershipFromResultPageSave
+    from camctl.capture.segment_models import (
+        FileCompletionState, OwnershipState, PreviewPairingState, SegmentMemberRole,
+        SegmentSetRef,
+    )
+    from camctl.capture.segment_storage import SegmentSetCreate
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.directory import DirectoryCursor
+    from camctl.devices.segments import SegmentKey
+    from camctl.persistence.repositories import segments
+    from camctl.persistence.transaction import row_facts
+    from .test_segment_file_pairing import _entry as segment_entry, _ok
+    from .test_segment_file_proofs import _boundary
+    from .test_segment_storage import SegmentedCatalog
+
+    owned, runtime, action_id, _ = await consumer_world(
+        tmp_path, 'record', catalog=SegmentedCatalog())
+    db = owned.connection
+    try:
+        ticket = _begin_check_round(runtime, action_id).ticket
+        action = runtime.action(action_id)
+        binding = DeviceBinding(action['device_id'], action['driver_id'])
+        entries = [segment_entry(
+            f'CAM_001/CAM_20261021090000_{number:04d}_D.OSV',
+            complete=False, size=None) for number in range(1, 7)]
+        pages = []
+        cursor = None
+        for offset in range(0, len(entries), 2):
+            chunk = entries[offset:offset + 2]
+            following = (DirectoryCursor(binding, ('/DCIM',), 0, chunk[-1]['identity'])
+                         if offset + 2 < len(entries) else None)
+            ref = _ok(runtime.capture.save_result_page(_request(
+                runtime, ticket, _actual(ticket, entries=chunk, cursor=cursor,
+                    next_cursor=following, finalized=following is None),
+                page_no=offset // 2 + 1, cursor=cursor), new_operation_key(), owned))
+            pages.append(runtime.capture.read_result_page(ref, owned))
+            cursor = following
+        assert [len(page.file_ids) for page in pages] == [2, 2, 2]
+        method = int(enum_for(
+            'device_files.ownership_evidence_json.method').RESULT_PAGE_DIFFERENCE)
+        for page in pages:
+            for _, file_id in page.file_ids:
+                _ok(runtime.capture.save_ownership_from_result_page(
+                    OwnershipFromResultPageSave(page.ref, file_id, runtime.wall_us()),
+                    new_operation_key(), owned))
+                facts = row_facts(db, 'device_files', file_id)
+                assert facts['ownership_evidence_json'] == {
+                    'method': method, 'result_page_event_id': page.ref.event_id}
+        boundary = _boundary(owned)
+        inputs = tuple(runtime.capture.read_strict_result_file_input(
+            page.ref, file_id, boundary, owned)
+            for page in pages for _, file_id in page.file_ids)
+        assert all(segments._uses_strict_proof(
+            item, row_facts(db, 'device_files', item.file_id)) for item in inputs)
+        (attempt_id,) = db.execute(
+            'SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
+            (ticket.run_id, ticket.attempt_id)).fetchone()
+        ref = SegmentSetRef(action_id, attempt_id, pages[-1].ref.event_id, 1)
+        repo = segments.SegmentRepository()
+        _ok(repo.create(SegmentSetCreate(ref, int(ticket.target_id), ticket.run_id,
+            action['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            new_operation_key(), owned))
+        _ok(repo.append_members(ref, inputs, runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        prefix = repo.read_members(ref, None, 4, owned)
+        assert len(prefix.items) == 4 and prefix.next_cursor is not None
+
+        # 建档守卫已各自核验；这里只统计同一一致读范围内的严格成员消费。
+        proved = Counter()
+        original = result_pages._verify_page_relations
+        def verify(*args):
+            proved[args[1].ref.event_id] += 1
+            return original(*args)
+        monkeypatch.setattr(result_pages, '_verify_page_relations', verify)
+        db.execute('BEGIN')
+        try:
+            with opened_read_page_scope(db, True):
+                first = repo.read_members(ref, prefix.next_cursor, 2, owned)
+                repeated = repo.read_members(ref, prefix.next_cursor, 2, owned)
+                assert first.items == repeated.items
+                assert first.next_cursor is None and repeated.next_cursor is None
+                assert [item.file_id for item in first.items] == [
+                    file_id for _, file_id in pages[-1].file_ids]
+                for number, stored in enumerate(first.items, 5):
+                    member = stored.member
+                    assert stored.page_event_id == pages[-1].ref.event_id
+                    assert member.identity == entries[number - 1]['identity']
+                    assert member.key == SegmentKey(1, number)
+                    assert member.role is SegmentMemberRole.ORIGINAL
+                    assert member.ownership is OwnershipState.OWNED
+                    assert member.completion is FileCompletionState.UNKNOWN
+                    assert member.size_bytes is None
+                    assert member.pairing_state is PreviewPairingState.NOT_APPLICABLE
+                assert proved == Counter({page.ref.event_id: 1 for page in pages})
+        finally:
+            db.execute('ROLLBACK')
+    finally:
+        db.close()
