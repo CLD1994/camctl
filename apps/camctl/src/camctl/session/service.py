@@ -419,6 +419,8 @@ def _exception_details(
         reason = "lock_error"
     elif facts is not None:
         reason = "internal_error"
+    elif isinstance(error, (DirectoryBindingError, DeviceConfigurationError)):
+        reason = "configuration_error"
     else:
         reason = fallback_reason
     message = f"{type(error).__name__}: {error}"
@@ -1245,22 +1247,32 @@ async def _drive_flows(context: SessionContext) -> str | None:
         except Exception as error:
             return f"后台流程异常: {error}"
         try:
-            await flow(context)
+            if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
+                await _advance_report_flow(context, flow)
+            else:
+                await flow(context)
         except ClockBecameUntrusted:
             raise
-        except (DirectoryBindingError, DeviceConfigurationError) as error:
-            if name == "report":
-                await _trigger_failure_log(context, error)
+        except (DirectoryBindingError, DeviceConfigurationError):
             raise
         except StateDbFailure as error:
-            if name == "report":
-                await _trigger_failure_log(context, error)
             return str(error)
         except Exception as error:
-            if name != "report":
-                return f"流程 {name} 异常: {error}"
-            await _trigger_failure_log(context, error)
+            return f"流程 {name} 异常: {error}"
     return None
+
+
+async def _advance_report_flow(context: SessionContext, flow) -> None:
+    """报告调用及后台实际任务共用同一失败分类和日志入口。"""
+    try:
+        await flow(context)
+    except ClockBecameUntrusted:
+        raise
+    except (DirectoryBindingError, DeviceConfigurationError, StateDbFailure) as error:
+        await _trigger_failure_log(context, error)
+        raise
+    except Exception as error:
+        await _trigger_failure_log(context, error)
 
 
 async def _trigger_failure_log(context: SessionContext, error: Exception) -> None:

@@ -92,6 +92,20 @@ class BackgroundFlow:
             self._consume()
 
 
+class ReportBackgroundFlow(BackgroundFlow):
+    """报告实际任务拥有错误边界，检查与收场只消费其原结果。"""
+
+    owns_report_error_boundary = True
+
+    def __init__(self, flow):
+        from camctl.session.service import _advance_report_flow
+
+        async def advance(context):
+            await _advance_report_flow(context, flow)
+
+        super().__init__(advance)
+
+
 class CombinedLocalWork:
     """先收场读取及其连接，再收场依赖文件责任，保留每项失败。"""
 

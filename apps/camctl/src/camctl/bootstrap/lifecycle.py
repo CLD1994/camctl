@@ -87,7 +87,7 @@ class RuntimeDeps:
     recovery_max_event_id: int | None = None
     #: 正常运行共用的文件实际拥有者及固定维护范围；submit 不装配。
     work_files: Any = None
-    #: 独立推进的拍摄及取回流程；实际任务和连接在会话收场前交付。
+    #: 独立推进的报告、拍摄及取回流程；实际任务和连接在会话收场前交付。
     background_flows: tuple[Any, ...] = ()
     #: 原 await 拥有者的实际结果；普通、残留与受限工厂共用同一集合。
     capture_call_results: dict[tuple[int, int], PendingCallResult] = field(default_factory=dict)
@@ -905,10 +905,11 @@ def _report_assembly(
         ),
         "work_files": deps.work_files.flow,
     }
-    from camctl.bootstrap.background_flow import BackgroundFlow
+    from camctl.bootstrap.background_flow import BackgroundFlow, ReportBackgroundFlow
     capture_owner = flows["scheduling"]
+    flows["report"] = ReportBackgroundFlow(flows["report"])
     flows["obtain"] = BackgroundFlow(flows["obtain"])
-    deps.background_flows = (capture_owner, flows["obtain"])
+    deps.background_flows = (flows["report"], capture_owner, flows["obtain"])
     return flows, supervisor
 
 
