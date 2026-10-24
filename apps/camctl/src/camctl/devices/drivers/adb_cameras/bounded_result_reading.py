@@ -16,6 +16,7 @@ from camctl.devices.recording_completion import FileCompletionMethod
 from camctl.operations.models import (AttemptStatus, CallInfo, CallOutcome, EffectState,
     ErrorValue, EvidenceValue, Settlement, SettlementBasis)
 from camctl.operations.owned_calls import current_call_scope
+from camctl.logging_runtime.performance import record_performance
 from .record_results import _NeverStop, _call_data
 
 
@@ -123,12 +124,17 @@ class _BoundedRead:
             await asyncio.sleep(wait_ms / 1000)
         except asyncio.CancelledError as error:
             self.completion["observed_wait_ns"] = max(0, self.driver.monotonic_ns() - began)
+            record_performance("file_completion_wait", self.completion["observed_wait_ns"],
+                device_id=self.request.binding.device_id, activity_id=context["activity_id"], completed=False)
             owned = current_call_scope()
             if owned is not None:
                 owned.interrupted = error
             return self.wait_error("wait_interrupted")
         self.completion["observed_wait_ns"] = self.driver.monotonic_ns() - began
         self.completion["completed"] = self.completion["observed_wait_ns"] >= wait_ms * 1_000_000
+        record_performance("file_completion_wait", self.completion["observed_wait_ns"],
+            device_id=self.request.binding.device_id, activity_id=context["activity_id"],
+            completed=self.completion["completed"])
         if not self.completion["completed"] or not self.available():
             reason = "wait_not_completed" if not self.completion["completed"] else "deadline_elapsed"
             return self.wait_error(reason)

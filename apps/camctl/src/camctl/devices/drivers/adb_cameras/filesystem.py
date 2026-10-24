@@ -403,7 +403,7 @@ class AdbFilesystem:
         script = self.tools.directory_script(request.directories[index], after, request.batch)
         try:
             with measure_performance("adb_directory", device_id=self.binding.device_id,
-                                     directory=request.directories[index]):
+                                     mode="page", directory=request.directories[index]):
                 raw = await self._run(script, request.timeout_s, stop)
         except ToolStartError as error:
             return DirectoryRead(None, _error(None, "directory", str(error)), None)

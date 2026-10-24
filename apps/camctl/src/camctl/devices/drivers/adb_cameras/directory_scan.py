@@ -202,6 +202,7 @@ class AdbDirectoryScan:
                     elapsed_ns = time.monotonic_ns() - started
                     record_performance("adb_directory", elapsed_ns,
                                        device_id=self.binding.device_id,
+                                       mode="single_scan",
                                        directory=request.directories[index])
                 if not _returned(raw):
                     return self._failure(raw, "call_failed", called, elapsed_ns)
