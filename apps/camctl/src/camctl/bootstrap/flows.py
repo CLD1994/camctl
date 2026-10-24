@@ -188,6 +188,7 @@ class CaptureFlow:
             now = context.clock.utc_micros()
             self._discovery.begin_round(owned.connection, now)
             page = self._discovery.captures(owned.connection, now)
+            self._observe_windows(context, owned, tuple(item[0] for item in page.items))
             device_ids = {}
             for action_id, device_id, *_ in page.items:
                 device_ids.setdefault(device_id, []).append(action_id)
@@ -220,6 +221,25 @@ class CaptureFlow:
                             context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
                     task.add_done_callback(completed)
 
+    def _observe_windows(self, context, owned, action_ids):
+        """中央流程保存窗口事实，不等待同设备已有任务交付。"""
+        scheduling = SchedulingRepository()
+        pending = _due_pending_actions(
+            owned.connection, context.clock.utc_micros(), action_ids=action_ids,
+            limit=self._discovery.batch_size)
+        for action_id, _, scheduled_at, max_delay_ms in pending:
+            current = context.clock.utc_micros()
+            if current > scheduled_at + max_delay_ms * 1000:
+                outcome = scheduling.expire_action(
+                    ExpireActionRequest(action_id, current, current), new_operation_key(), owned)
+                operation = "动作过期"
+            else:
+                outcome = scheduling.observe_window(
+                    ObserveWindowRequest(action_id, current, current), new_operation_key(), owned)
+                operation = "窗口观察"
+            if outcome.kind is not DbOutcomeKind.COMPLETED:
+                raise StateDbFailure(f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}")
+
     async def _advance_device(self, context, device_id, action_ids):
         owned = context.open_connection()
         try:
@@ -250,10 +270,6 @@ class CaptureFlow:
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
                         raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
                     continue
-                observation = scheduling.observe_window(
-                    ObserveWindowRequest(action_id, current, current), new_operation_key(), owned)
-                if observation.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(f"窗口观察事务未完成（{observation.kind.value}）: {observation.error}")
                 if runtime is not None:
                     from camctl.capture.residual import pass_residual_gate
                     if not await pass_residual_gate(runtime, runtime.action(action_id)):
