@@ -124,11 +124,11 @@ def _imported_modules(name: str, source: str | ast.AST) -> dict[str, set[str]]:
 
 
 @pytest.fixture(scope="module")
-def import_graph(source_trees) -> dict[str, dict[str, set[str]]]:
+def import_graph(source_inspection) -> dict[str, dict[str, set[str]]]:
     """每条依赖规则读取相同的真实源码导入图。"""
     return {
-        name: _imported_modules(name, tree)
-        for name, tree in source_trees.items()
+        name: facts["imports"]
+        for name, facts in source_inspection.items()
     }
 
 

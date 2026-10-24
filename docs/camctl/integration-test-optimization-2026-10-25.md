@@ -6,15 +6,15 @@
 
 原来的依赖图两次扫描并解析全部源码；子进程、网络、文件系统及异常检查又分别读取、解析同一批文件。各规则需要独立判定，但不需要分别读取和解析相同源码。
 
-`contracts/conftest.py` 现在为一次 pytest 会话提供同一份真实源码语法树；依赖图按模块生成一次。真实模块锚点、各禁止边规则及合成违规源码继续保留，合成源码仍分别解析。共享语法树只供读取，不缓存业务执行结果。
+`contracts/conftest.py` 现在逐文件读取并解析真实源码，同一文件的规则读取同一语法树，随后立即释放树，只保存导入图及各规则的检查事实。真实模块锚点、各禁止边规则及合成违规源码继续保留，合成源码仍分别解析。共享内容只供读取，不缓存业务执行结果。
 
 | 验证范围 | 修改前 | 修改后 |
 | --- | ---: | ---: |
 | 完整 contracts 目录 | 442 passed，退出 0 | 442 passed，退出 0 |
-| pytest 报告耗时 | 14.16 秒 | 10.95 秒 |
-| 外层进程墙钟 | 14.466 秒 | 11.330 秒 |
+| pytest 报告耗时 | 14.16 秒 | 9.41 秒 |
+| 外层进程墙钟 | 14.466 秒 | 9.825 秒 |
 
-环境为 Linux x86_64、Python 3.11.17、SQLite 3.53.1，工作区起点为 `cd228b16`。命令为部署版解释器执行 `-m pytest apps/camctl/tests/integration/contracts -q --durations=15`，并输出独立 JUnit。原始命令、PID、日志、XML 和退出码保存在本地 `.local/verification/itopt/contracts/`；可携带的测量回执见[数据文件](verification-data/2026-10-25-integration-optimization/contracts.json)。前后各测量一次，同期有其他隔离工作区的任务运行，不将差值外推为整轮收益。
+环境为 Linux x86_64、Python 3.11.17、SQLite 3.53.1，工作区起点为 `cd228b16`。命令为部署版解释器执行 `-m pytest apps/camctl/tests/integration/contracts -q --durations=15`，并输出独立 JUnit。原始命令、PID、日志、XML 和退出码保存在本地 `.local/verification/itopt/contracts/`；可携带的测量回执见[数据文件](verification-data/2026-10-25-integration-optimization/contracts.json)。前后各测量一次，同期有其他隔离工作区的任务运行，不将差值外推为整轮收益。普通 Python 诊断进程执行全部 306 份源码检查的峰值为 79,616 KiB；这项读数只描述独立检查过程，不是完整 pytest 峰值。
 
 ## 取消拒绝矩阵复用初始状态
 
