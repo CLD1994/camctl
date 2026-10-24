@@ -43,8 +43,13 @@ from camctl.capture.media_flow import (
 from camctl.capture.results import FileKind
 from camctl.capture.result_inputs import observed_file as _observed_file
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
+from camctl.capture.baseline_models import BaselineState
+from camctl.capture.result_reading import ResultReadingContext
+from camctl.contracts.enums import enum_for
+from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
+from camctl.devices.file_identity import FileIdentity
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recovery_registry
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
@@ -68,6 +73,8 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.transaction import row_facts
+from camctl.logging_runtime.performance import measure_performance, record_performance
 from camctl.scheduling.rules import LaunchWindow
 from camctl.session.supervision import OwnedTask, Supervisor
 
@@ -271,6 +278,8 @@ class DriverResultListing:
         self._evidence = evidence
         self._capture_repository = capture_repository
         self._owned = owned
+        self._history_owner = object()
+        self._reading_context: ResultReadingContext | None = None
 
     def _saved_result_pages(self, ticket: AttemptTicket) -> Iterator[Any]:
         """按原尝试逐页读取已可靠保存的历史，不缓存目录或页集合。"""
@@ -296,15 +305,19 @@ class DriverResultListing:
 
     def _prior_result_entries(
         self, ticket: AttemptTicket, cursor: DirectoryCursor | None,
-        output_scope: Mapping | None,
+        output_scope: Mapping | None, context: ResultReadingContext,
     ) -> Callable[[], Iterator[Mapping[str, Any]]] | None:
-        """派发前验证同尝试的完整前页链，返回再次逐页读取新增条目的提供器。"""
+        """先建立完整可靠链，之后只读取刚保存的新页。"""
         if self._capture_repository is None:
             return None
         if cursor is None:
             saved = next(self._saved_result_pages(ticket), None)
             if saved is not None:
                 raise ConsistencyError("已有可靠结果页后不能重开原尝试首页")
+            if context.history_initialized:
+                raise ConsistencyError("原结果页尚未可靠保存，不能重新派发首页")
+            context.history_initialized = True
+            context.history_owner = self._history_owner
             return lambda: iter(())
         directories = None if not isinstance(output_scope, Mapping) else output_scope.get("directories")
         if (not isinstance(directories, (list, tuple)) or not directories
@@ -312,12 +325,27 @@ class DriverResultListing:
                 or cursor.binding != self._binding or cursor.directories != tuple(directories)):
             raise ConsistencyError("后续结果页没有保持原绑定与完整输出范围")
 
-        expected_cursor = None
-        last_event_id = None
-        for saved in self._saved_result_pages(ticket):
+        incremental = context.history_initialized and context.history_owner is self._history_owner
+        previous_ref = context.verified_last_ref if incremental else None
+        expected_cursor = None if previous_ref is None else previous_ref.next_cursor
+        expected_page_no = 1 if previous_ref is None else previous_ref.page_no + 1
+        last_ref = previous_ref
+        if incremental:
+            pages = self._capture_repository.read_result_pages(
+                ticket, None if previous_ref is None else previous_ref.event_id, 1, self._owned)
+            if len(pages.items) != 1 or pages.next_cursor is not None:
+                raise ConsistencyError("下一次结果调用之前必须恰好可靠保存原当前页")
+            history = iter(pages.items)
+        else:
+            history = self._saved_result_pages(ticket)
+        for saved in history:
             page = saved.page
             if saved.ref.ticket != ticket or saved.page.outcome.error is not None:
                 raise ConsistencyError("前页没有同尝试的无错误可靠实际结果")
+            if (saved.ref.page_no != expected_page_no
+                    or last_ref is not None and saved.ref.event_id <= last_ref.event_id
+                    or saved.ref.next_cursor != page.next_cursor):
+                raise ConsistencyError("前页页号或可靠末引用没有连续推进")
             if page.cursor != expected_cursor:
                 raise ConsistencyError("前页输入游标没有沿原结果页连续推进")
             for page_cursor in (page.cursor, page.next_cursor):
@@ -328,15 +356,24 @@ class DriverResultListing:
             if page.set_finalized:
                 raise ConsistencyError("已最终化的结果页后不能继续读取")
             expected_cursor = page.next_cursor
-            last_event_id = saved.ref.event_id
-        if last_event_id is None:
+            expected_page_no += 1
+            last_ref = saved.ref
+        if last_ref is None:
             raise ConsistencyError("后续结果页缺少原尝试的可靠前页")
+        if (context.history_initialized and context.verified_last_ref is not None
+                and last_ref.event_id <= context.verified_last_ref.event_id):
+            raise ConsistencyError("原当前页尚未可靠保存，不能更换拥有者后重新读取")
         if expected_cursor != cursor:
             raise ConsistencyError("本次游标与原可靠末页的后续游标不符")
+        context.history_initialized = True
+        context.history_owner = self._history_owner
+        context.verified_last_ref = last_ref
 
         def entries() -> Iterator[Mapping[str, Any]]:
             observed_last_event_id = None
             for saved in self._saved_result_pages(ticket):
+                if saved.ref.event_id > last_ref.event_id:
+                    raise ConsistencyError("前页历史读取超出原可靠末引用")
                 if saved.page.outcome.error is not None:
                     raise ConsistencyError("读取前页历史时发现原页调用错误")
                 observed_last_event_id = saved.ref.event_id
@@ -344,10 +381,83 @@ class DriverResultListing:
                 for entry in saved.page.entries:
                     if entry.identity in file_ids:
                         yield {"identity": entry.identity, "format_id": entry.format_id}
-            if observed_last_event_id != last_event_id:
+            if observed_last_event_id != last_ref.event_id:
                 raise ConsistencyError("可靠结果页历史末引用在读取期间发生变化")
 
         return entries
+
+    def _result_candidates(self, ticket, output_scope, context):
+        """从原固定基准单调归并，只保留当前批次和比较位置。"""
+        if self._capture_repository is None:
+            return None
+
+        def candidates(identities):
+            began = time.monotonic_ns()
+            activity = row_facts(self._owned.connection, "device_activities", int(ticket.target_id))
+            action = (None if activity is None else
+                row_facts(self._owned.connection, "actions", activity["action_id"]))
+            if (activity is None or action is None
+                    or DeviceBinding(action["device_id"], action["driver_id"]) != self._binding
+                    or activity["ownership_mode"] != int(enum_for("device_activities.ownership_mode").BASELINE_COMPARISON)):
+                raise ConsistencyError("候选筛选缺少原绑定及基准比较活动")
+            original_scope = activity["output_scope_json"]
+            if isinstance(original_scope, str):
+                original_scope = parse_exact_json(original_scope)
+            if original_scope != output_scope:
+                raise ConsistencyError("候选筛选改变原活动的完整结果范围")
+            ref = self._capture_repository.baseline_ref(int(ticket.target_id), self._owned)
+            if ref.state is not BaselineState.FIXED or ref.activity_id != int(ticket.target_id):
+                raise ConsistencyError("候选筛选要求原活动已经固定的基准")
+            if context.baseline_ref is None:
+                context.baseline_ref = ref
+            elif context.baseline_ref != ref:
+                raise ConsistencyError("候选筛选的原固定基准发生变化")
+
+            def advance():
+                context.baseline_index += 1
+                if context.baseline_index == len(context.baseline_chunk.entries):
+                    context.baseline_chunk = None
+                    context.baseline_index = 0
+
+            def original():
+                while context.baseline_chunk is None and not context.baseline_exhausted:
+                    page = self._capture_repository.read_baseline(
+                        ref, context.baseline_cursor, 1, self._owned)
+                    if len(page.items) > 1:
+                        raise ConsistencyError("基准读取没有遵守单批上限")
+                    context.baseline_chunk = page.items[0] if page.items else None
+                    context.baseline_exhausted = page.next_cursor is None
+                    context.baseline_cursor = page.next_cursor
+                chunk = context.baseline_chunk
+                return None if chunk is None else chunk.entries[context.baseline_index]
+
+            selected = []
+            for identity in identities:
+                if (not isinstance(identity, FileIdentity) or identity.binding != self._binding
+                        or not any(identity.path.startswith(root + "/") for root in context.directories)
+                        or context.candidate_last_key is not None
+                        and identity.sort_key <= context.candidate_last_key):
+                    raise ConsistencyError("候选身份没有保持原范围和单调扫描次序")
+                context.candidate_last_key = identity.sort_key
+                item = original()
+                while item is not None and item.sort_key < identity.sort_key:
+                    advance()
+                    item = original()
+                if item is None or item.sort_key != identity.sort_key:
+                    selected.append(identity)
+                else:
+                    advance()
+            record_performance("result_candidates", time.monotonic_ns() - began,
+                run_id=ticket.run_id, attempt_no=ticket.attempt_id,
+                count=len(identities), new_count=len(selected))
+            return tuple(selected)
+
+        return candidates
+
+    def close_scan(self, ticket: AttemptTicket) -> None:
+        """原结果尝试结束后释放它独占的工作缓存。"""
+        if self._reading_context is not None and self._reading_context.ticket == ticket:
+            self._reading_context.close()
 
     async def list_round(
         self, ticket: AttemptTicket, *, timeout_s: Decimal,
@@ -372,7 +482,8 @@ class DriverResultListing:
     async def list_page(self, ticket: AttemptTicket, *, cursor: DirectoryCursor | None,
                         timeout_s: Decimal, output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
-                        video_result_mode: str | None = None) -> ResultPage:
+                        video_result_mode: str | None = None,
+                        reading_context: ResultReadingContext | None = None) -> ResultPage:
         """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
         if (ticket.operation != "result" or ticket.target_id is None
                 or ticket.responsibility_key != f"results/{ticket.target_id}"):
@@ -388,21 +499,67 @@ class DriverResultListing:
             params["output_scope"] = deepcopy(dict(output_scope))
         if completion_context is not None:
             params["completion_context"] = deepcopy(dict(completion_context))
-        prior_result_entries = self._prior_result_entries(ticket, cursor, output_scope)
+        context = reading_context
+        if context is None:
+            if self._reading_context is None or self._reading_context.ticket != ticket:
+                if self._reading_context is not None:
+                    self._reading_context.close()
+                self._reading_context = ResultReadingContext(ticket)
+            context = self._reading_context
+        self._reading_context = context
+        if context.ticket != ticket or context.closed:
+            raise ConsistencyError("结果读取上下文不是当前未结束的原尝试")
+        directories = None if output_scope is None else tuple(output_scope.get("directories", ()))
+        if context.binding is None:
+            context.binding, context.directories = self._binding, directories
+        elif context.binding != self._binding or context.directories != directories:
+            raise ConsistencyError("结果读取上下文改变原绑定或完整目录范围")
+        try:
+            with measure_performance("prior_result_history", run_id=ticket.run_id, attempt_no=ticket.attempt_id):
+                prior_result_entries = self._prior_result_entries(ticket, cursor, output_scope, context)
+        except BaseException as error:
+            try:
+                context.close()
+            except OSError as close_error:
+                raise error from close_error
+            raise
+
+        async def read_directory(filesystem, directory_request, *, stop):
+            if context.directory_scan is None:
+                if context.directory_started or directory_request.cursor is not None:
+                    raise ConsistencyError("原结果尝试缺少目录清单，须沿原尝试恢复规则开始新轮次")
+                context.directory_scan = filesystem.directory_scan(directory_request)
+            if directory_request.cursor != context.directory_cursor:
+                raise ConsistencyError("目录清单没有沿当前尝试的连续游标读取")
+            listing = await context.directory_scan.read_directory(directory_request, stop=stop)
+            context.directory_started = True
+            if listing.page is not None:
+                context.directory_cursor = listing.page.next_cursor
+            return listing
+
         request = ControlRequest("result", self._binding, params, ticket=ticket,
-            timeout_s=timeout_s, prior_result_entries=prior_result_entries)
-        result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
-        if result.outcome is None:
-            raise ValueError("结果列举缺少完整实际调用结果")
-        validate_outcome(ticket, result.outcome, self._evidence)
-        page = page_from_outcome(ticket, result.outcome, cursor=cursor, binding=self._binding)
-        if page.completion_evidence is not None:
-            from camctl.devices.evidence import validate_observation
-            observed = page.completion_evidence
-            contract = self._evidence.contract(observed.type, observed.version)
-            if contract.operation != "result":
-                raise ValueError("结果页完成观察与本次操作类别不符")
-            validate_observation(observed, contract, expected_identity=ticket.target_id)
+            timeout_s=timeout_s, prior_result_entries=prior_result_entries,
+            result_candidates=self._result_candidates(ticket, output_scope, context),
+            result_directory_reader=read_directory)
+        try:
+            result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+            if result.outcome is None:
+                raise ValueError("结果列举缺少完整实际调用结果")
+            validate_outcome(ticket, result.outcome, self._evidence)
+            page = page_from_outcome(ticket, result.outcome, cursor=cursor, binding=self._binding)
+            if page.completion_evidence is not None:
+                from camctl.devices.evidence import validate_observation
+                observed = page.completion_evidence
+                contract = self._evidence.contract(observed.type, observed.version)
+                if contract.operation != "result":
+                    raise ValueError("结果页完成观察与本次操作类别不符")
+                validate_observation(observed, contract, expected_identity=ticket.target_id)
+        except BaseException as error:
+            try:
+                context.close()
+            except OSError as close_error:
+                raise error from close_error
+            raise
         return page
 
     async def list_files(self, action_id: int) -> tuple[ObservedFile, ...]:

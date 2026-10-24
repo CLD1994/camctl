@@ -231,6 +231,22 @@ async def test_unconfirmed_current_page_cannot_dispatch_a_continuation(saved_cou
     driver.list_results.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_replacement_owner_cannot_reread_the_unconfirmed_current_page():
+    history = _chain()[:1]
+    repository, driver, adapter, owned = _world(history)
+    context = ResultReadingContext(_TICKET)
+    _reply(driver, cursor=_cursor("a"), next_cursor=_cursor("b"))
+    await _list_page(adapter, context, _cursor("a"))
+    replacement = DriverResultListing(driver, _BINDING, _EVIDENCE,
+        capture_repository=repository, owned=owned)
+
+    with pytest.raises(ConsistencyError):
+        await _list_page(replacement, context, _cursor("a"))
+
+    driver.list_results.assert_awaited_once()
+
+
 def _invalid_tail(case, valid):
     if case == "ticket":
         return replace(valid, ref=replace(

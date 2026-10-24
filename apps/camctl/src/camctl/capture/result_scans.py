@@ -7,6 +7,7 @@ from typing import Callable, Mapping
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.results import FileKind
 from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
+from camctl.capture.result_reading import ResultReadingContext
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.devices.capture_completion import is_stop_context, result_page_timeout_s
@@ -15,6 +16,7 @@ from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.owned_calls import check_call_interruption
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
+from camctl.logging_runtime.performance import measure_performance
 
 
 @dataclass
@@ -38,12 +40,17 @@ class PendingResultScan:
     interrupted: bool = False
     #: 本轮主机不再读取；实际扫描是否完整仍由可靠末页单独表达。
     finished: bool = False
+    reading_context: ResultReadingContext = field(init=False)
 
     def __post_init__(self):
         if not isinstance(self.timeout_s, Decimal) or not self.timeout_s.is_finite() or self.timeout_s <= 0:
             raise ValueError("结果扫描必须使用本尝试已采用的有限正时限")
         self.output_scope = deepcopy(self.output_scope)
         self.completion_context = deepcopy(self.completion_context)
+        self.reading_context = ResultReadingContext(self.ticket)
+
+    def close(self):
+        self.reading_context.close()
 
 
 def resume_result_page_saves(owned, *, pending_scans, repository):
@@ -51,7 +58,9 @@ def resume_result_page_saves(owned, *, pending_scans, repository):
     for pending in pending_scans.values():
         if pending.saves.pending is None:
             continue
-        receipt = pending.saves.save(repository, owned)
+        with measure_performance("result_page_save", run_id=pending.ticket.run_id,
+                attempt_no=pending.ticket.attempt_id, page_no=pending.saves.pending.request.page_no):
+            receipt = pending.saves.save(repository, owned)
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}")
 
@@ -61,6 +70,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         page_qualified: Callable[[SavedResultPage], bool] | None = None) -> bool:
     """可靠交接后继续原轮次；实际错误或中断不产生隐式重读。"""
     if pending.finished:
+        pending.close()
         return True
     if pending.interrupted:
         raise ConsistencyError("原结果扫描已中断，须沿原尝试恢复与新轮次规则收场")
@@ -69,7 +79,9 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
     while True:
         if pending.saves.pending is not None:
             original = pending.saves.pending.request
-            receipt = pending.saves.save(runtime.capture, runtime.owned)
+            with measure_performance("result_page_save", run_id=pending.ticket.run_id,
+                    attempt_no=pending.ticket.attempt_id, page_no=original.page_no):
+                receipt = pending.saves.save(runtime.capture, runtime.owned)
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}")
             page = page_from_outcome(original.ticket, original.outcome.outcome, cursor=original.cursor)
@@ -85,6 +97,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
                     SavedResultPage(pending.last_ref, page, original.occurred_at)):
                 pending.finished = True
             if pending.finished:
+                pending.close()
                 return True
             pending.page_no += 1
         if can_read is not None and not can_read():
@@ -97,6 +110,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
                 "timeout_s": result_page_timeout_s(pending.timeout_s, pending.completion_context),
                 "output_scope": pending.output_scope,
                 "completion_context": deepcopy(pending.completion_context),
+                "reading_context": pending.reading_context,
             }
             if pending.video_result_mode is not None:
                 page_kwargs["video_result_mode"] = pending.video_result_mode
@@ -109,9 +123,13 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
             request = ResultPageSave(pending.ticket, pending.page_no, pending.cursor, validated, occurred_at)
             pending.saves.begin(request)
             pending.returned_ns = returned_ns
-        except BaseException:
+        except BaseException as error:
             # 未取得可保存的实际结果时保留原责任，下一推进不能重新列举。
             pending.interrupted = True
+            try:
+                pending.close()
+            except OSError as close_error:
+                raise error from close_error
             raise
         finally:
             pending.in_call = False

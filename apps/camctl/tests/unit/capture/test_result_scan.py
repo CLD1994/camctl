@@ -13,6 +13,7 @@ from camctl.capture.result_pages import ResultPageRef
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
+from camctl.devices.drivers.adb_cameras.directory_scan import AdbDirectoryScan
 from camctl.operations.models import AttemptStatus, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
@@ -85,6 +86,9 @@ async def test_two_pages_use_original_attempt_and_reliable_save_before_next_call
     assert pending.last_outcome.outcome == last.outcome and pending.finished
     assert pending.occurred_at == 1_750_000_000_000_100 and pending.returned_ns == 2_000_000
     assert [call.args[0] for call in runtime.results.list_page.await_args_list] == [_TICKET, _TICKET]
+    assert all(call.kwargs["reading_context"] is pending.reading_context
+        for call in runtime.results.list_page.await_args_list)
+    assert pending.reading_context.closed
 
 
 @pytest.mark.asyncio
@@ -96,8 +100,12 @@ async def test_unknown_save_keeps_original_input_time_and_key_without_second_cal
         DbOutcome(DbOutcomeKind.COMPLETED, ResultPageRef(_TICKET, 1, 10, _CURSOR)),
         DbOutcome(DbOutcomeKind.COMPLETED, ResultPageRef(_TICKET, 2, 11, None))]
     pending = result_scans.PendingResultScan(_TICKET, {"directories": ["/DCIM"]}, Decimal("3"))
+    scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
+    pending.reading_context.directory_scan = scan
     with pytest.raises(ConsistencyError):
         await result_scans.advance_result_scan(pending, runtime=runtime)
+    scan.close.assert_not_called()
+    assert not pending.reading_context.closed
     runtime.results.list_page.assert_awaited_once()
     original = pending.saves.pending
     assert original.request.occurred_at == 1_750_000_000_000_000 and pending.last_ref is None
@@ -105,6 +113,7 @@ async def test_unknown_save_keeps_original_input_time_and_key_without_second_cal
     calls = runtime.capture.save_result_page.call_args_list
     assert calls[0].args[:2] == calls[1].args[:2] == (original.request, original.key)
     assert runtime.results.list_page.await_count == 2 and pending.saves.pending is None
+    scan.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -127,6 +136,8 @@ async def test_interrupted_scan_keeps_responsibility_and_cannot_silently_continu
     runtime = _runtime()
     runtime.results.list_page.side_effect = asyncio.CancelledError
     pending = result_scans.PendingResultScan(_TICKET, {"directories": ["/DCIM"]}, Decimal("3"))
+    scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
+    pending.reading_context.directory_scan = scan
     with pytest.raises(asyncio.CancelledError):
         await result_scans.advance_result_scan(pending, runtime=runtime)
     assert pending.interrupted and not pending.finished and not pending.in_call
@@ -134,6 +145,49 @@ async def test_interrupted_scan_keeps_responsibility_and_cannot_silently_continu
         await result_scans.advance_result_scan(pending, runtime=runtime)
     runtime.results.list_page.assert_awaited_once()
     runtime.capture.save_result_page.assert_not_called()
+    scan.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pause_preserves_directory_cache_until_original_scan_finishes():
+    runtime = _runtime()
+    runtime.results.list_page.return_value = _page(finalized=True)
+    runtime.capture.save_result_page.return_value = DbOutcome(
+        DbOutcomeKind.COMPLETED, ResultPageRef(_TICKET, 1, 10, None))
+    pending = result_scans.PendingResultScan(_TICKET, {"directories": ["/DCIM"]}, Decimal("3"))
+    scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
+    pending.reading_context.directory_scan = scan
+
+    assert not await result_scans.advance_result_scan(pending, runtime=runtime, can_read=lambda: False)
+    runtime.results.list_page.assert_not_awaited()
+    scan.close.assert_not_called()
+    assert not pending.reading_context.closed
+
+    assert await result_scans.advance_result_scan(pending, runtime=runtime, can_read=lambda: True)
+    scan.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cache_close_failure_keeps_saved_actual_page_and_retries_only_close():
+    runtime = _runtime()
+    actual = _page(finalized=True)
+    runtime.results.list_page.return_value = actual
+    reliable = ResultPageRef(_TICKET, 1, 10, None)
+    runtime.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED, reliable)
+    pending = result_scans.PendingResultScan(_TICKET, {"directories": ["/DCIM"]}, Decimal("3"))
+    scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
+    scan.close.side_effect = [OSError("cache close failed"), None]
+    pending.reading_context.directory_scan = scan
+
+    with pytest.raises(OSError):
+        await result_scans.advance_result_scan(pending, runtime=runtime)
+
+    assert pending.finished and pending.last_ref == reliable
+    assert pending.last_outcome.outcome == actual.outcome and pending.saves.pending is None
+    assert await result_scans.advance_result_scan(pending, runtime=runtime)
+    runtime.results.list_page.assert_awaited_once()
+    runtime.capture.save_result_page.assert_called_once()
+    assert scan.close.call_count == 2
 
 
 @pytest.mark.asyncio

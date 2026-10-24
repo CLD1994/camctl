@@ -754,7 +754,8 @@ class ResultFilesPort(Protocol):
     async def list_page(self, ticket: AttemptTicket, *, cursor, timeout_s: Decimal,
                         output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
-                        video_result_mode: str | None = None) -> ResultPage: ...
+                        video_result_mode: str | None = None,
+                        reading_context=None) -> ResultPage: ...
 
 
 class RecordingStatePort(Protocol):
@@ -1234,7 +1235,10 @@ class CaptureRuntime(_FileObservationSaves):
                                                   _target_duration_ms(action),
                                                   action["execution_spec_json"].get("startup_margin_ms", 0)))
                 del self.pending_start_results[identity]
-                self.pending_result_scans.pop(identity, None)
+                scan = self.pending_result_scans.get(identity)
+                if scan is not None:
+                    scan.close()
+                    self.pending_result_scans.pop(identity)
                 return
             if self.owned.connection.in_transaction:
                 # 当前连接内的新投影不是可靠提交。结束事务后才能重送原键。

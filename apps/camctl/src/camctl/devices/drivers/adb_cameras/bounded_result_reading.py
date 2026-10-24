@@ -261,9 +261,14 @@ async def list_declared_results(driver, request, batch, profile):
     filesystem = driver._filesystem(request.binding)
     if not read.available():
         return read.reply(read.wait_error("call_unavailable"))
-    listing = await filesystem.read_directory(DirectoryRequest(request.binding,
-        tuple(scope["directories"]), cursor, read.batch, read.remaining()), stop=_NeverStop())
-    read.remember(listing.outcome, "directory")
+    directory_request = DirectoryRequest(request.binding,
+        tuple(scope["directories"]), cursor, read.batch, read.remaining())
+    if profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES and request.result_directory_reader is not None:
+        listing = await request.result_directory_reader(filesystem, directory_request, stop=_NeverStop())
+    else:
+        listing = await filesystem.read_directory(directory_request, stop=_NeverStop())
+    if listing.call_performed:
+        read.remember(listing.outcome, "directory")
     if listing.error is not None:
         return read.reply(listing.error)
     page = {"activity_id": request.ticket.target_id, "entries": [],
@@ -284,15 +289,26 @@ async def list_declared_results(driver, request, batch, profile):
             for identity, file_format in raw_files
         ]
         page["entries"] = page_entries
-        if raw_files:
+        candidates = (tuple(identity for identity, _ in raw_files)
+            if request.result_candidates is None else
+            request.result_candidates(tuple(identity for identity, _ in raw_files)))
+        candidate_set = set(candidates)
+        if (len(candidate_set) != len(candidates)
+                or candidates != tuple(identity for identity, _ in raw_files if identity in candidate_set)):
+            raise ValueError("结果候选筛选必须返回原页中保持次序的文件身份子集")
+        metadata_files = tuple((index, identity, file_format)
+            for index, (identity, file_format) in enumerate(raw_files) if identity in candidate_set)
+        if metadata_files:
             if not read.available():
                 error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": "call_unavailable"})
                 return read.reply(error, page)
-            metadata = await filesystem.metadata_many(tuple(identity for identity, _ in raw_files),
+            metadata = await filesystem.metadata_many(tuple(identity for _, identity, _ in metadata_files),
                 timeout_s=read.remaining(), stop=_NeverStop())
             read.remember(metadata.outcome, "metadata")
-            for index, item in enumerate(metadata.items):
-                identity, file_format = raw_files[index]
+            for metadata_index, item in enumerate(metadata.items):
+                index, identity, file_format = metadata_files[metadata_index]
+                if item.identity != identity:
+                    raise ValueError("结果元数据改变本次候选文件身份")
                 if item.error is None:
                     page_entries[index] = _entry(identity, item.value, complete, file_format)
             if metadata.error is not None:

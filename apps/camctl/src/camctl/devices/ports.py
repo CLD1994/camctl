@@ -18,7 +18,17 @@ from camctl.devices.start_entry import StartEntryPermit
 from camctl.devices.evidence import DeviceObservation, OPERATIONS
 
 if TYPE_CHECKING:
+    from camctl.devices.directory import DirectoryRead, DirectoryRequest
+    from camctl.devices.file_identity import FileIdentity
+    from camctl.operations.process import StopSignal
     from camctl.operations.models import AttemptTicket, CallOutcome
+
+
+class ResultDirectoryReader(Protocol):
+    """借用当前驱动文件端口，沿当前尝试的主机清单读取一页。"""
+
+    async def __call__(self, filesystem: Any, request: DirectoryRequest, *,
+                       stop: StopSignal) -> DirectoryRead: ...
 
 __all__ = [
     "DriverDeclaration",
@@ -98,6 +108,10 @@ class ControlRequest:
     start_return_meaning: int | None = None
     #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
     prior_result_entries: Callable[[], Iterator[Mapping[str, Any]]] | None = None
+    #: 原活动固定基准的只读差集；保留输入次序，不进入机器参数。
+    result_candidates: Callable[[tuple[FileIdentity, ...]], tuple[FileIdentity, ...]] | None = None
+    #: 当前扫描拥有者提供的目录读取入口，不保存在驱动全局状态。
+    result_directory_reader: ResultDirectoryReader | None = None
 
 
 @dataclass(frozen=True)
