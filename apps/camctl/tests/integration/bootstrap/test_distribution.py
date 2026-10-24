@@ -868,7 +868,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     fake_executable.parent.mkdir()
     call_log = tmp_path / "hb-cli-argv.jsonl"
     fake_executable.write_text(
-        _hasselblad_tool_source(call_log, "TEST-HASSELBLAD-SERIAL"), encoding="utf-8")
+        _hasselblad_tool_source(call_log, "TEST-HASSELBLAD-SERIAL", installed_python=installed.python), encoding="utf-8")
     fake_executable.chmod(0o700)
     configured = (packaged_config
                   .replace("$HOME/.camctl/hasselblad-demo", str(data_root))

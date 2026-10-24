@@ -29,7 +29,7 @@ def test_installed_device_photo_reclaims_then_downloads_both_sources_twice(
     config = tmp_path / "device.toml"
     tool = tmp_path / "hb_cli"
     log = tmp_path / "calls.jsonl"
-    tool.write_text(_hasselblad_tool_source(log, "SERIAL-1"))
+    tool.write_text(_hasselblad_tool_source(log, "SERIAL-1", installed_python=installed.python))
     tool.chmod(0o700)
     config.write_text(f'''[paths]
 state_db="{home}/state.db"
