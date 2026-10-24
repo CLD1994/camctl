@@ -1,0 +1,449 @@
+{
+  "scope": "复用真实提交库的只读普通 Python 诊断；没有重建世界、运行 pytest 或修改生产。",
+  "environment": {
+    "python": "3.11.17",
+    "mode": "EXISTING_RO",
+    "batch_size": 4,
+    "warmup_members": 20,
+    "measured_members": [
+      200,
+      400
+    ],
+    "traceback_depth": 1
+  },
+  "source_commits": {
+    "baseline_production": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+    "helper_snapshot": "e32ab0b36377ae69e9fb968feb9d3a747c4edfbe"
+  },
+  "diagnostic_source_report": {
+    "historical_filename": "report.md",
+    "sha256": "543cfe7d97bcca6a877b0922d36c5317db174378d3a203885c31e1e0082f906f"
+  },
+  "modes": [
+    {
+      "mode": "baseline",
+      "page_limit": null,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1536513,
+          "remaining_before_gc_bytes": 276481,
+          "seconds": 27.28759405999881,
+          "full_gc_during_verify": 4,
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 1595691,
+          "remaining_before_gc_bytes": 249775,
+          "seconds": 59.95961508000255,
+          "full_gc_during_verify": 9,
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 59178,
+      "exit_code": 0,
+      "historical_log_sha256": "048fb105fb10de53a8d2d18375eced1ba70e4acf1171f7c4946fa38206150b71",
+      "injection": "无 helper 的原生产源码。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 2112,
+          "reported_free_tuple_bytes": 148408,
+          "estimated_bytes_with_gc_header": 182200,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 1678,
+          "reported_free_tuple_bytes": 104176,
+          "estimated_bytes_with_gc_header": 131024,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "page_limit": 2,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1540000,
+          "remaining_before_gc_bytes": 276999,
+          "seconds": 27.59994376100076,
+          "full_gc_during_verify": 4,
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 1599257,
+          "remaining_before_gc_bytes": 250487,
+          "seconds": 54.049961235999945,
+          "full_gc_during_verify": 9,
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 59257,
+      "exit_code": 0,
+      "historical_log_sha256": "c1a3f133b0c0210996c2a5945b6ce1e501c97f3156b4f9dc760c7a1f8a2bbcae",
+      "injection": "当前 helper 存在，仅本进程禁用记录读写端口；原解码与所有实际关系核验保留。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 2114,
+          "reported_free_tuple_bytes": 148520,
+          "estimated_bytes_with_gc_header": 182344,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 1679,
+          "reported_free_tuple_bytes": 104232,
+          "estimated_bytes_with_gc_header": 131096,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    },
+    {
+      "mode": "on",
+      "page_limit": 2,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1513757,
+          "remaining_before_gc_bytes": 595647,
+          "seconds": 1.6798124630004168,
+          "full_gc_during_verify": 0,
+          "largest_remaining_allocations": [
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1050",
+              "size": 289365,
+              "count": 1817
+            },
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1054",
+              "size": 47032,
+              "count": 236
+            },
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1051",
+              "size": 47032,
+              "count": 236
+            }
+          ],
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 2431361,
+          "remaining_before_gc_bytes": 835147,
+          "seconds": 6.441463562001445,
+          "full_gc_during_verify": 0,
+          "largest_remaining_allocations": [
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1050",
+              "size": 417565,
+              "count": 2552
+            },
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1051",
+              "size": 88232,
+              "count": 442
+            },
+            {
+              "location": "apps/camctl/src/camctl/persistence/transaction.py:1054",
+              "size": 88072,
+              "count": 441
+            }
+          ],
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 917604,
+      "exit_code": 0,
+      "historical_log_sha256": "eed0b784cd85da1832509049f6fe101441e4527e1b84fd57bdc38459d5dac478",
+      "injection": "仅在本进程将已解码记录缓存窗口设为两页。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 4013,
+          "reported_free_tuple_bytes": 434536,
+          "estimated_bytes_with_gc_header": 498744,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 5728,
+          "reported_free_tuple_bytes": 655880,
+          "estimated_bytes_with_gc_header": 747528,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    },
+    {
+      "mode": "on-direct",
+      "page_limit": 2,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1527132,
+          "remaining_before_gc_bytes": 313624,
+          "seconds": 1.8213232310008607,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 2059787,
+          "remaining_before_gc_bytes": 445452,
+          "seconds": 6.635645882000972,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 532655,
+      "exit_code": 0,
+      "historical_log_sha256": "c84c4069e1a82985aeb53de5bdba0cda3dad01f3adb665648bf665ff6f1f7dbf",
+      "injection": "本进程 row_facts 省去中间 columns 元组，使用相同实际 SELECT 与原 _read_sql_value；不提前淘汰记录。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 2295,
+          "reported_free_tuple_bytes": 180536,
+          "estimated_bytes_with_gc_header": 217256,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 3432,
+          "reported_free_tuple_bytes": 302280,
+          "estimated_bytes_with_gc_header": 357192,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    },
+    {
+      "mode": "on-direct-reserve",
+      "page_limit": 2,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1529350,
+          "remaining_before_gc_bytes": 312992,
+          "seconds": 1.692078894997394,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 1844787,
+          "remaining_before_gc_bytes": 445827,
+          "seconds": 5.9971684260017355,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 315437,
+      "exit_code": 0,
+      "historical_log_sha256": "106527acc5330d1b55eeef926be354a07abd4981e546ba7fd9780e4b5eb78ea3",
+      "injection": "本进程 row_facts 省去中间 columns 元组，使用相同实际 SELECT 与原 _read_sql_value；新页 miss 且窗口满时，原解码前先释放最旧一条记录。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 2295,
+          "reported_free_tuple_bytes": 180536,
+          "estimated_bytes_with_gc_header": 217256,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 3296,
+          "reported_free_tuple_bytes": 296448,
+          "estimated_bytes_with_gc_header": 349184,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    },
+    {
+      "mode": "on-direct-reserve3",
+      "page_limit": 3,
+      "measurements": [
+        {
+          "members": 200,
+          "peak_bytes": 1525894,
+          "remaining_before_gc_bytes": 313682,
+          "seconds": 2.2940804719983134,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        },
+        {
+          "members": 400,
+          "peak_bytes": 2059302,
+          "remaining_before_gc_bytes": 450444,
+          "seconds": 7.5091421640026965,
+          "full_gc_during_verify": 0,
+          "matches_expected_result": true
+        }
+      ],
+      "peak_increment_bytes": 533408,
+      "exit_code": 0,
+      "historical_log_sha256": "e55dd9f1acd8f868d88539e293b37eae054b374bf0b5e4ab9de2ff58147dd912",
+      "injection": "本进程 row_facts 省去中间 columns 元组，使用相同实际 SELECT 与原 _read_sql_value；新页 miss 且窗口满时，原解码前先释放最旧一条记录。",
+      "tuple_free_lists": [
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 200,
+          "free_tuple_count": 2295,
+          "reported_free_tuple_bytes": 180536,
+          "estimated_bytes_with_gc_header": 217256,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 200,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_BEFORE_GC",
+          "members": 400,
+          "free_tuple_count": 3372,
+          "reported_free_tuple_bytes": 299384,
+          "estimated_bytes_with_gc_header": 353336,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        },
+        {
+          "phase": "MALLOC_AFTER_GC",
+          "members": 400,
+          "free_tuple_count": 0,
+          "reported_free_tuple_bytes": 0,
+          "estimated_bytes_with_gc_header": 0,
+          "estimate_note": "按当前 CPython 3.11 输出对象大小加每个 16 字节 GC 头估算；不作为容量门槛数字。"
+        }
+      ]
+    }
+  ],
+  "scope_limits": [
+    "所有模式真实执行完整 verify_segment_finish，返回的完整结果逐规模相同。",
+    "GC 在测量前和被测 verify 返回后执行；没有在被测核实路径强制 GC。",
+    "诊断快照、类型统计和 malloc 统计在取得峰值后执行。",
+    "只读模式的内存和时长不能替代真实写入专项。",
+    "12 层先行采集及其中断基线不进入本单层对照。"
+  ],
+  "gc_reference": "https://docs.python.org/3.11/library/gc.html#gc.collect",
+  "actual_history_2048_source": {
+    "mode": "ro",
+    "members": [
+      2048,
+      16,
+      0
+    ],
+    "ownership_methods": [
+      [
+        1,
+        2048
+      ]
+    ]
+  },
+  "actual_history_2048_strict_branch": {
+    "result_page_difference_code": 4,
+    "first_member_uses_strict_proof": false
+  },
+  "conclusion": "缓存减少重复核验后改变对象分配及自动 GC 次数；退出作用域后的相当一部分内存属于 CPython 元组空闲池，不能等同业务对象仍被引用。该诊断只定位成本，最终生产采用紧凑原历史行三页缓存，真实门槛见 page-proof-compact3.json。",
+  "expected_results": {
+    "200": "SegmentFinishResult(ref=SegmentSetRef(action_id=1, scan_id=3, final_page_event_id=220, version=1), action_status=3, plan_status=3, boundary=HistoryBoundary(txn_id=420, last_event_id=836), output_count=200, original_count=200, preview_count=0, scope_count=14)",
+    "400": "SegmentFinishResult(ref=SegmentSetRef(action_id=1, scan_id=3, final_page_event_id=424, version=1), action_status=3, plan_status=3, boundary=HistoryBoundary(txn_id=824, last_event_id=1642), output_count=400, original_count=400, preview_count=0, scope_count=14)"
+  }
+}
