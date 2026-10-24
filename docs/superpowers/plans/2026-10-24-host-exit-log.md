@@ -12,7 +12,7 @@
 
 ```sh
 cmake -S apps/host-demo -B .local/host-exit-log-build -DHOST_BUILD_TESTS=ON \
-  -DHOST_TEST_PYTHON=/home/zsm1695/.local/bin/python3.11 -DCMAKE_BUILD_TYPE=Debug
+  -DHOST_TEST_PYTHON="$(uv python find 3.11)" -DCMAKE_BUILD_TYPE=Debug
 cmake --build .local/host-exit-log-build -- -j4
 ctest --test-dir .local/host-exit-log-build --output-on-failure
 ```
@@ -112,3 +112,7 @@ ctest --test-dir .local/host-exit-log-build --output-on-failure
 - [x] 文档记录触发分类、文件格式、容量、上下文、processing 发布、失败边界及原日志职责。
 - [x] 运行完整 host CTest（后续快照 35/35 通过）、文档本地链接检查（5369 个本地文件链接）和 `git diff --check`；完整测试首次运行及复测的边界记录在 `docs/host-demo/verification.md`。
 - [x] 检查完整 diff、保留首次全量失败证据，确认工作区归属并提交独立分支；实际命令、cwd、Python 3.11、UTC 和退出码见验证记录及交接。
+
+## 当前交付
+
+新开发容器使用 Python 3.11.17 完成完整 CTest，35/35 通过；Release 构建、安装及源码包生成通过。统一安装版进一步验证真实 CLI 的报告领取和状态库缺失时的独立失败诊断，旧记录与新环境结果分别保留。当前安装入口及目标硬件边界见[组件验证记录](../../host-demo/verification.md)和[统一交付记录](../../camctl/verification.md#独立安装与手工验证入口)。
