@@ -211,9 +211,20 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
         environment['CAMCTL_INTEGRATION_PROGRESS'] = str(artifacts)
         resource_script = project / 'scripts/sync_resources.py'
         if resource_script.exists():
+            command = [str(python), str(resource_script)]
+            preparation = {'command': command, 'cwd': str(work), 'started_utc': utc()}
             with (artifacts / 'prepare.log').open('wb') as log:
-                subprocess.run([str(python), str(resource_script)], cwd=work, env=environment,
-                               stdout=log, stderr=log, check=True)
+                with subprocess.Popen(command, cwd=work, env=environment, stdout=log, stderr=log,
+                                      start_new_session=True) as process:
+                    preparation['pid'] = process.pid
+                    write_json(artifacts / 'prepare-command.json', preparation)
+                    try:
+                        code = managed_wait_sync(process)
+                    finally:
+                        preparation.update(exit_code=process.returncode, finished_utc=utc())
+                        write_json(artifacts / 'prepare-command.json', preparation)
+            if code:
+                raise subprocess.CalledProcessError(code, command)
         command = [str(python), '-B', '-m', 'pytest', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress']
         record = {'command': command, 'cwd': str(work), 'started_utc': utc(),
                   'source': identity['snapshot_sha256'], 'versions': versions}

@@ -230,6 +230,34 @@ class IntegrationRunnerTest(unittest.TestCase):
             self.assertIn('protocol/link', result.stderr)
             self.assertEqual(outside.read_text(), 'external')
 
+    def test_collection_prepare_interrupt_reaps_owned_process(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source = Path(temporary), Path(temporary) / 'input'
+            self._fixture_repository(source, 'test_matrix.py', 'def test_value():\n    assert True\n', history=True)
+            script = source / 'apps/camctl/scripts/sync_resources.py'
+            script.parent.mkdir()
+            script.write_text('import time\ntime.sleep(60)\n')
+            cache, output = root / 'cache', root / 'output'
+            cache.mkdir()
+            process = subprocess.Popen([
+                sys.executable, str(RUNNER), '--source', str(source), '--python', sys.executable,
+                '--uv-cache', str(cache), '--output', str(output), '--jobs', '2', '--plan-only',
+            ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            pid = None
+            deadline = time.monotonic() + 15
+            while process.poll() is None and time.monotonic() < deadline:
+                receipts = list(output.glob('collection/*/artifacts/prepare-command.json'))
+                if receipts:
+                    pid = json.loads(receipts[0].read_text())['pid']
+                    break
+                time.sleep(.05)
+            self.assertIsNotNone(pid)
+            process.send_signal(signal.SIGINT)
+            stdout, _ = process.communicate(timeout=15)
+            self.assertEqual(process.returncode, 130, stdout)
+            self.assertFalse(Path(f'/proc/{pid}').exists(), stdout)
+            self.assertEqual(json.loads((output / 'summary.json').read_text())['status'], 'interrupted')
+
     def test_parent_path_cannot_escape_source(self):
         result = subprocess.run([sys.executable, str(RUNNER), '--list', '--target', '../outside/test.py'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
