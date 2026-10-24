@@ -330,3 +330,58 @@ async def test_metadata_many_keeps_complete_prefix_but_tool_failure_still_fails(
     assert [(item.identity.path, item.value) for item in result.items] == [(path, 12)]
     if cause == "output":
         assert result.error.details["frame_errors"][0]["reason"] == "output_incomplete"
+
+
+def _metadata_v2_record(path, stdout, stderr, status):
+    return path.encode() + b"\0" + stdout + b"\0" + stderr + b"\0" + status + b"\0"
+
+
+@pytest.mark.asyncio
+async def test_metadata_v2_preserves_zero_size_and_exact_per_path_error_bytes():
+    first, second = "/DCIM/zero.MP4", "/DCIM/a 'quote'\nerror.MP4"
+    identities = tuple(FileIdentity(BINDING, path) for path in (first, second))
+    frame = (b"CAMCTL-METADATA/2\0"
+             + _metadata_v2_record(first, b"0\n", b"", b"0")
+             + _metadata_v2_record(second, b"partial\n\n", b"diagnostic\xff\n\n", b"7") + b"END\0")
+    transport = _MetadataTransport(_metadata_raw(frame))
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+    result = await filesystem.metadata_many(identities, timeout_s=Decimal("3"), stop=object())
+    assert result.items[0].value == 0 and result.items[0].error is None
+    assert result.items[1].value is None
+    details = result.items[1].error.details
+    assert details["remote_exit_code"] == 7
+    assert details["stdout_hex"] == b"partial\n\n".hex()
+    assert details["stderr_hex"] == b"diagnostic\xff\n\n".hex()
+    assert result.error.details["item_errors"] == [dict(details)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tail, field, completed", [
+    (b"/DCIM/b", "identity", 1),
+    (b"/DCIM/b\0" + b"1\n", "stdout", 1),
+    (b"/DCIM/b\0" + b"1\n\0err", "stderr", 1),
+    (b"/DCIM/b\0" + b"1\n\0err\0", "remote_exit_code", 1),
+    (b"/DCIM/b\0" + b"1\n\0err\0" + b"0", "remote_exit_code", 1),
+    (_metadata_v2_record("/DCIM/b", b"1\n", b"", b"0"), None, 2),
+])
+async def test_metadata_v2_requires_complete_status_and_end_before_batch_success(tail, field, completed):
+    identities = (FileIdentity(BINDING, "/DCIM/a"), FileIdentity(BINDING, "/DCIM/b"))
+    frame = b"CAMCTL-METADATA/2\0" + _metadata_v2_record("/DCIM/a", b"2\n", b"", b"0") + tail
+    filesystem = AdbFilesystem(BINDING, "serial-1", _MetadataTransport(_metadata_raw(frame)), tools=ShellFileTools())
+    result = await filesystem.metadata_many(identities, timeout_s=Decimal("3"), stop=object())
+    assert result.error is not None and len(result.items) == completed
+    error = result.error.details["frame_errors"][0]
+    assert error["reason"] == ("missing_end" if field is None else "truncated_record")
+    if field is not None:
+        assert error["field"] == field
+
+
+def test_metadata_script_v2_uses_one_cat_and_one_error_cache_per_path():
+    script = ShellFileTools().metadata_many_script(("/DCIM/a 'quote'\nline",))
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=";")
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    assert "CAMCTL-METADATA/2" in tokens
+    assert tokens.count("cat") == 1
+    assert "$tmp.err" not in script
+    assert "/DCIM/a 'quote'\nline" in tokens

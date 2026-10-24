@@ -11,19 +11,28 @@ import re
 import shlex
 from pathlib import PurePosixPath
 import threading
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from camctl.contracts.pages import Page
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.read_session import ReadSession, SourceFile
+from camctl.logging_runtime.performance import measure_performance
 from camctl.operations.models import AttemptTicket, ErrorValue
 from camctl.operations.process import RawToolOutcome, ToolSpec, ToolStartError
 from .transport import shell_argv
 
+if TYPE_CHECKING:
+    from .directory_scan import AdbDirectoryScan
 
-METADATA_FRAME_HEADER = b"CAMCTL-METADATA/1\0"
+
+_METADATA_FRAME_FIELDS = {
+    1: ("identity", "remote_exit_code", "stdout", "stderr"),
+    2: ("identity", "stdout", "stderr", "remote_exit_code"),
+}
+_METADATA_FRAME_VERSION = 2
+METADATA_FRAME_HEADER = f"CAMCTL-METADATA/{_METADATA_FRAME_VERSION}\0".encode("ascii")
 MAX_METADATA_BATCH_SIZE = 128
 
 
@@ -95,14 +104,17 @@ def _decode_metadata_frame(output, identities):
     """只返回身份顺序完全匹配且四字段均闭合的记录前缀。"""
     items = []
     frame_errors = []
-    if not isinstance(output, bytes) or not output.startswith(METADATA_FRAME_HEADER):
+    header = _nul_field(output, 0) if isinstance(output, bytes) else None
+    formats = {f"CAMCTL-METADATA/{version}".encode("ascii"): fields
+               for version, fields in _METADATA_FRAME_FIELDS.items()}
+    if header is None or header[0] not in formats:
         frame_errors.append({"reason": "invalid_header"})
         return tuple(items), tuple(frame_errors), False
 
-    offset = len(METADATA_FRAME_HEADER)
-    fields = ("identity", "remote_exit_code", "stdout", "stderr")
+    header_value, offset = header
+    fields = formats[header_value]
     for index, identity in enumerate(identities):
-        record = []
+        record = {}
         for field in fields:
             value = _nul_field(output, offset)
             if value is None:
@@ -110,9 +122,10 @@ def _decode_metadata_frame(output, identities):
                     "identity": identity.path, "field": field})
                 return tuple(items), tuple(frame_errors), False
             field_value, offset = value
-            record.append(field_value)
+            record[field] = field_value
 
-        actual_identity, status_bytes, stdout, stderr = record
+        actual_identity = record["identity"]
+        status_bytes, stdout, stderr = record["remote_exit_code"], record["stdout"], record["stderr"]
         expected_identity = identity.path.encode("utf-8")
         if actual_identity != expected_identity:
             frame_errors.append({"reason": "identity_mismatch", "index": index,
@@ -250,6 +263,18 @@ class ShellFileTools:
             'done < "$tmp.sorted"',
         ))
 
+    def directory_scan_script(self, root):
+        """一次列举完整目录，实际退出后由主机分页。"""
+        return '\n'.join((
+            'tmp=$(mktemp) || exit $?',
+            'trap \'rm -f -- "$tmp" "$tmp.sorted"\' 0',
+            f'find {shlex.quote(root)} -type f -print0 > "$tmp" || exit $?',
+            'LC_ALL=C sort -z -- "$tmp" > "$tmp.sorted" || exit $?',
+            "printf 'CAMCTL-DIRECTORY/1\\000' || exit $?",
+            'cat "$tmp.sorted" || exit $?',
+            "printf 'END\\000' || exit $?",
+        ))
+
     def file_presence_script(self, path, *, delete=False):
         """单次精确删除及完整目录观察；输出大小不随目录条目数增长。"""
         # find 同时列出非文件，不能因类型过滤漏掉同名目录或失效链接。
@@ -317,20 +342,21 @@ class ShellFileTools:
     def metadata_many_script(self, paths: tuple[str, ...]) -> str:
         paths = _metadata_paths(paths)
         header = METADATA_FRAME_HEADER[:-1].decode("ascii")
+        fields = {
+            "identity": ('    printf \'%s\\000\' "$path" || exit $?',),
+            "stdout": (
+                '    { test -f "$path" && LC_ALL=C stat -c %s -- "$path"; status=$?; } 2> "$tmp" || exit $?',
+                "    printf '\\000' || exit $?",
+            ),
+            "stderr": ('    cat "$tmp" || exit $?', "    printf '\\000' || exit $?"),
+            "remote_exit_code": ('    printf \'%s\\000\' "$status" || exit $?',),
+        }
         return "\n".join((
             'tmp=$(mktemp) || exit $?',
-            'trap \'rm -f -- "$tmp" "$tmp.err"\' 0',
+            'trap \'rm -f -- "$tmp"\' 0',
             f"printf '%s\\000' {shlex.quote(header)} || exit $?",
             'for path in ' + shlex.join(paths) + '; do',
-            '    : > "$tmp" || exit $?',
-            '    : > "$tmp.err" || exit $?',
-            '    { test -f "$path" && LC_ALL=C stat -c %s -- "$path"; } > "$tmp" 2> "$tmp.err"',
-            '    status=$?',
-            '    printf \'%s\\000%s\\000\' "$path" "$status" || exit $?',
-            '    cat "$tmp" || exit $?',
-            "    printf '\\000' || exit $?",
-            '    cat "$tmp.err" || exit $?',
-            "    printf '\\000' || exit $?",
+            *(line for field in _METADATA_FRAME_FIELDS[_METADATA_FRAME_VERSION] for line in fields[field]),
             'done',
             "printf 'END\\000' || exit $?",
         ))
@@ -361,6 +387,14 @@ class AdbFilesystem:
         self.binding, self.serial, self.transport = binding, serial, transport
         self.tools, self.terminate_grace_s = tools, terminate_grace_s
 
+    def directory_scan(self, request: DirectoryRequest) -> "AdbDirectoryScan":
+        """建立当前尝试独占的目录清单；工厂本身不访问设备或文件。"""
+        from .directory_scan import AdbDirectoryScan
+
+        if not isinstance(request, DirectoryRequest) or request.binding != self.binding:
+            raise ValueError("目录请求不属于原驱动绑定")
+        return AdbDirectoryScan(self, request)
+
     async def read_directory(self, request, *, stop):
         if not isinstance(request, DirectoryRequest) or request.binding != self.binding:
             raise ValueError("目录请求不属于原驱动绑定")
@@ -368,7 +402,9 @@ class AdbFilesystem:
         after = None if request.cursor is None else request.cursor.after_path
         script = self.tools.directory_script(request.directories[index], after, request.batch)
         try:
-            raw = await self._run(script, request.timeout_s, stop)
+            with measure_performance("adb_directory", device_id=self.binding.device_id,
+                                     directory=request.directories[index]):
+                raw = await self._run(script, request.timeout_s, stop)
         except ToolStartError as error:
             return DirectoryRead(None, _error(None, "directory", str(error)), None)
         return decode_directory(request, raw)
@@ -410,7 +446,9 @@ class AdbFilesystem:
         paths = tuple(self._identity(identity) for identity in identities)
         _metadata_paths(paths)
         try:
-            raw = await self._run(self.tools.metadata_many_script(paths), timeout_s, stop)
+            with measure_performance("adb_metadata", device_id=self.binding.device_id,
+                                     path_count=len(paths)):
+                raw = await self._run(self.tools.metadata_many_script(paths), timeout_s, stop)
         except ToolStartError as error:
             return FileMetadataBatch(None, (), _error(None, "metadata", str(error)))
 
