@@ -40,6 +40,12 @@
   "containerEnv": {
     "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
   },
-  "runArgs": ["--privileged", "--group-add", "dialout"],
+  "runArgs": [
+    "--privileged",
+    "--group-add",
+    "dialout",
+    "--group-add",
+    "plugdev"
+  ],
   "postCreateCommand": "bash .devcontainer/post_create.sh"
 }
