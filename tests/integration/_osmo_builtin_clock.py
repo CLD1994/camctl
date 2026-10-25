@@ -120,12 +120,11 @@ class ControlledClock:
         self._log_path = log_path
 
     def _read(self, kind: str) -> dict:
-        real_now = time.monotonic_ns()
-        reading = read_clock(self._state_path, real_monotonic_ns=real_now)
+        reading = read_clock(self._state_path)
         _append_jsonl(self._log_path, {
             "pid": os.getpid(), "epoch": reading["epoch"], "kind": kind,
             "utc_us": reading["utc_us"], "monotonic_ns": reading["monotonic_ns"],
-            "real_monotonic_ns": real_now, "mode": reading["mode"],
+            "real_monotonic_ns": reading["real_monotonic_ns"], "mode": reading["mode"],
             "stack": _camctl_stack(),
         })
         return reading
