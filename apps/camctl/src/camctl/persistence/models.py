@@ -62,6 +62,7 @@ class DbOutcome(Generic[T]):
     stage: str | None = None
     control: BaseException | None = None
     observer_error: BaseException | None = None
+    handoff_error: BaseException | None = None
     secondary_errors: tuple[BaseException, ...] = ()
 
 

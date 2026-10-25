@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator, Mapping
-from dataclasses import fields, is_dataclass
+from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import replace
 import inspect
 import sqlite3
 from typing import TypeVar
@@ -11,7 +11,7 @@ from typing import TypeVar
 from camctl.contracts.values import OperationKey, new_operation_key
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.models import (DbExecutorError, DbJob, DbJobKind, DbOutcome,
-    DbPriority, ReadReceipt, _attach_db_outcome)
+    DbPriority, DbReadError, ReadReceipt, _attach_db_outcome)
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 
 T = TypeVar('T')
@@ -56,24 +56,10 @@ async def settle_required(awaitable: Awaitable[T]) -> T:
     return result
 
 
-def _check_value(value, seen=None):
-    if seen is None:
-        seen = set()
-    if id(value) in seen:
-        return
-    seen.add(id(value))
+def _check_value(value):
+    # callback自身负责既定有限值类型；端口不反射遍历业务对象图。
     if isinstance(value, (OwnedConnection, sqlite3.Connection, sqlite3.Cursor, Iterator)) or inspect.isawaitable(value):
         raise DbExecutorError('数据库callback只能返回有限值，不能交付连接、游标或延迟执行对象')
-    if isinstance(value, Mapping):
-        for key, member in value.items():
-            _check_value(key, seen)
-            _check_value(member, seen)
-    elif isinstance(value, (tuple, list, set, frozenset)):
-        for member in value:
-            _check_value(member, seen)
-    elif is_dataclass(value) and not isinstance(value, type):
-        for field in fields(value):
-            _check_value(getattr(value, field.name), seen)
 
 
 class BusinessDatabase:
@@ -137,9 +123,11 @@ class BusinessDatabase:
         payload, cancelled = await self._wait(self._executor.submit_read(job), key)
         if isinstance(payload, ReadReceipt):
             if payload.error is not None:
+                error = (payload.error.__cause__ if isinstance(payload.error, DbReadError)
+                         and payload.error.__cause__ is not None else payload.error)
                 if cancelled is not None:
-                    raise payload.error from cancelled
-                raise payload.error
+                    raise error from cancelled
+                raise error
             if cancelled is not None:
                 raise cancelled
             return payload.value
@@ -157,13 +145,16 @@ class BusinessDatabase:
             value = callback(owned)
             if not isinstance(value, DbOutcome):
                 raise DbExecutorError('业务写callback必须返回DbOutcome')
-            _check_value(value.value)
+            try:
+                _check_value(value.value)
+            except BaseException as error:
+                return replace(value, value=None, handoff_error=error)
             return value
         job = DbJob(key, description, DbJobKind.WRITE, DbPriority.BUSINESS, execute)
         outcome, cancelled = await self._wait(self._executor.submit_write(job), key)
         if not isinstance(outcome, DbOutcome):
             raise DbExecutorError('业务写入没有实际分类结果')
-        error = outcome.control or outcome.observer_error
+        error = outcome.control or outcome.handoff_error or outcome.observer_error
         if error is not None:
             _attach_actual(error, outcome)
             if cancelled is not None:

@@ -53,3 +53,23 @@ async def test_write_cancel_waits_for_dispatched_actual_outcome(ports):
     with pytest.raises(asyncio.CancelledError) as caught:
         await task
     assert db_outcome_for(caught.value) is outcome
+
+
+async def test_known_completed_receipt_is_preserved_when_value_cannot_leave_worker(ports):
+    from camctl.persistence.business import BusinessDatabase
+    executor, owned = ports
+    def submit(job):
+        outcome = job.execute(owned)
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(outcome)
+        return future
+    executor.submit_write.side_effect = submit
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value=owned.connection)
+    from camctl.persistence.models import db_outcome_for, DbExecutorError
+    with pytest.raises(DbExecutorError) as caught:
+        await BusinessDatabase(executor, owned.metadata).write(lambda owned: outcome,
+            key=OperationKey('c'*32))
+    actual = db_outcome_for(caught.value)
+    assert actual.kind is DbOutcomeKind.COMPLETED and actual.value is None
+    assert actual.handoff_error is caught.value
+    owned.connection.close.assert_not_called()
