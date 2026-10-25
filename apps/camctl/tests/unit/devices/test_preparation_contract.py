@@ -51,20 +51,23 @@ def test_unknown_action_has_no_capture_operation():
 
 
 @pytest.mark.parametrize("changed", [
-    "binding", "serial", "activity", "operation", "params", "bool", "ticket", "missing_ticket",
+    "binding", "serial", "route", "activity", "operation", "params", "bool", "ticket", "missing_ticket",
 ])
 def test_prepared_capture_requires_complete_original_identity(changed):
     cache = PreparedCaptureCache()
     preparation = _preparation()
     if changed == "bool":
         preparation = replace(preparation, params={"focus": {"mode": "MF", "relative_move": 1}})
-    cache.remember(preparation, "serial")
-    start, serial = _start(preparation), "serial"
+    serial = ("serial", 10) if changed == "route" else "serial"
+    cache.remember(preparation, serial)
+    start = _start(preparation)
     assert cache.matches(start, serial)
     if changed == "binding":
         start = replace(start, binding=DeviceBinding("camera", "other"))
     elif changed == "serial":
         serial = "different"
+    elif changed == "route":
+        serial = ("serial", 11)
     elif changed == "activity":
         start = replace(start, ticket=replace(start.ticket, target_id="8"))
     elif changed == "operation":

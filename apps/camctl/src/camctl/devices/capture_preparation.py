@@ -1,6 +1,6 @@
 """拍摄准备的公共动作、完成证据和会话内凭据。"""
 
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
@@ -38,7 +38,7 @@ def capture_operation(action_type: int) -> str:
 @dataclass(frozen=True)
 class _PreparedCapture:
     binding: DeviceBinding
-    serial: str
+    device_identity: Hashable
     operation: str
     params: Mapping
     ticket: AttemptTicket
@@ -59,19 +59,19 @@ class PreparedCaptureCache:
         else:
             self._captures.pop(binding.device_id, None)
 
-    def remember(self, request: ControlRequest, serial: str) -> None:
-        """调用方在组合可靠成功后登记调用前冻结的原参数。"""
+    def remember(self, request: ControlRequest, device_identity: Hashable) -> None:
+        """登记冻结参数和驱动提供的不可变设备路由身份。"""
         if request.ticket is None or request.ticket.operation != "control":
             raise ValueError("准备凭据必须属于原 control 尝试")
         self._captures[request.binding.device_id] = _PreparedCapture(
-            request.binding, serial, request.operation, deepcopy(dict(request.params)), request.ticket)
+            request.binding, device_identity, request.operation, deepcopy(dict(request.params)), request.ticket)
 
-    def matches(self, request: ControlRequest, serial: str) -> bool:
+    def matches(self, request: ControlRequest, device_identity: Hashable) -> bool:
         ready = self._captures.get(request.binding.device_id)
         return (ready is not None and request.ticket is not None
                 and request.prepared_by is not None
                 and request.ticket.operation == "control"
-                and ready.binding == request.binding and ready.serial == serial
+                and ready.binding == request.binding and ready.device_identity == device_identity
                 and ready.ticket == request.prepared_by
                 and ready.ticket.target_id == request.ticket.target_id
                 and ready.operation == request.operation
