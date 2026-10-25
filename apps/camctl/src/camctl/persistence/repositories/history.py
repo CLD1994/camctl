@@ -112,6 +112,34 @@ class _ObjectSeed:
     snapshot: _SnapshotChoice | None
 
 
+def read_frozen_registration(connection, report_id: int) -> "_FrozenRegistration":
+    """在调用方所属的连接读取有限冻结登记值。"""
+    ObjectId(report_id)
+    with closing(connection.execute(
+            "SELECT from_wm, to_wm, frozen_event_id, format_version"
+            " FROM reports WHERE id = ?", (report_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"报告 {report_id} 未登记")
+    if int(row[3]) != 1:
+        raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
+    frozen_event_id = int(row[2])
+    with closing(connection.execute(
+            "SELECT transaction_id FROM history_events WHERE id = ?",
+            (frozen_event_id,))) as cursor:
+        event_row = cursor.fetchone()
+    if event_row is None:
+        raise ConsistencyError(
+            f"报告 {report_id} 的冻结事件不在已提交历史中")
+    transaction = _transaction_range(connection, int(event_row[0]))
+    if transaction.last_event_id != frozen_event_id:
+        raise ConsistencyError(
+            f"报告 {report_id} 的冻结位置不是完整已提交边界")
+    return _FrozenRegistration(
+        from_wm=int(row[0]), to_wm=int(row[1]),
+        boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
+
+
 class HistoryRepository:
     """真实 SQLite 的历史读取仓储（报告进程使用只读连接）。"""
 
@@ -349,36 +377,10 @@ class HistoryRepository:
             connection.close()
 
     def frozen_registration(self, report_id: int) -> "_FrozenRegistration":
-        """读取一份报告的冻结依据并核实其冻结边界完整。
-
-        frozen_event_id 必须是其所在历史事务的末事件；否则该位置
-        不是完整已提交边界，按状态库一致性错误处理。
-        """
+        """读取并核实冻结的完整事务边界。"""
         ObjectId(report_id)
         with self._read_connection() as connection:
-            with closing(connection.execute(
-                    "SELECT from_wm, to_wm, frozen_event_id, format_version"
-                    " FROM reports WHERE id = ?", (report_id,))) as cursor:
-                row = cursor.fetchone()
-            if row is None:
-                raise ConsistencyError(f"报告 {report_id} 未登记")
-            if int(row[3]) != 1:
-                raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
-            frozen_event_id = int(row[2])
-            with closing(connection.execute(
-                    "SELECT transaction_id FROM history_events WHERE id = ?",
-                    (frozen_event_id,))) as cursor:
-                event_row = cursor.fetchone()
-            if event_row is None:
-                raise ConsistencyError(
-                    f"报告 {report_id} 的冻结事件不在已提交历史中")
-            transaction = _transaction_range(connection, int(event_row[0]))
-            if transaction.last_event_id != frozen_event_id:
-                raise ConsistencyError(
-                    f"报告 {report_id} 的冻结位置不是完整已提交边界")
-            return _FrozenRegistration(
-                from_wm=int(row[0]), to_wm=int(row[1]),
-                boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
+            return read_frozen_registration(connection, report_id)
 
     def open_report_selection(self, request: ReportScopeRequest) -> ReportEntitySelection:
         """打开固定 H/窗口的有界逐层实体选择会话。"""
