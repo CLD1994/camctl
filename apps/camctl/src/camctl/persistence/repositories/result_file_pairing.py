@@ -280,9 +280,7 @@ def _verify(request, key, connection, *, current_boundary=None):
         return None
     if transaction.first_event_id != transaction.last_event_id:
         raise TransactionError('原键不属于独立配对事务')
-    stored = _one(connection, f'SELECT {pages._COLUMNS} FROM history_events WHERE id=?',
-                  (transaction.first_event_id,))
-    event = pages.decode_event_row(stored)
+    event = read_event(connection, transaction.first_event_id).event
     validate_event_structure(event)
     if (event.event_type, event.reason, event.transaction_id) != (_EVENT['id'], _REASON, transaction.txn_id):
         raise TransactionError('原键属于其他完整事务')

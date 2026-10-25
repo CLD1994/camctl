@@ -9,7 +9,7 @@ from camctl.capture.segment_models import (
 from camctl.capture.segment_storage import SegmentMemberInput
 from camctl.contracts.enums import enum_for, load_registry
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.events import business_columns
 from camctl.persistence.fact_reads import read_event, read_transaction, _reuse_fixed_file
@@ -101,7 +101,7 @@ def _load_fixed_file(db,file_id,file_event_id):
 
 
 
-def _page_file(connection, page_id, file, boundary, *, run_id):
+def _page_file(connection, page_id, file, boundary, *, run_id, completed=False):
     if page_id > boundary.last_event_id or page_id > file['last_event_id']:
         raise ConsistencyError('文件引用页越过固定文件边界')
     saved, raw = result_pages.read_saved_page(connection, page_id)
@@ -110,6 +110,12 @@ def _page_file(connection, page_id, file, boundary, *, run_id):
     if (record.transaction.last_event_id > boundary.last_event_id
             or raw['run_id'] != run_id or (identity, file['id']) not in saved.file_ids):
         raise ConsistencyError('文件引用页不是同一来源的真实文件')
+    if completed:
+        entries = [entry for entry in saved.page.entries if entry.identity == identity]
+        if (len(entries) != 1 or not entries[0].complete or file['size_bytes'] is None
+                or entries[0].size_bytes != file['size_bytes']
+                or not json_equal(entries[0].locator, file['locator_json'])):
+            raise ConsistencyError('固定完成文件与引用页的完整大小或定位不同')
     return saved
 
 
@@ -120,7 +126,7 @@ def _completion_page(connection, page, file, boundary):
     if not isinstance(evidence, dict) or 'result_page_event_id' not in evidence:
         return None
     page_id = ObjectId(evidence['result_page_event_id'])
-    _page_file(connection, page_id, file, boundary, run_id=page.ticket.run_id)
+    _page_file(connection, page_id, file, boundary, run_id=page.ticket.run_id, completed=True)
     return page_id
 
 

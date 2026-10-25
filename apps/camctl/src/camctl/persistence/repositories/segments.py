@@ -255,7 +255,7 @@ def _eligible_original(member):
         and member.size_bytes is not None and member.size_bytes>0)
 
 
-def _output_candidate(db,setrow,stored, *, paired_members=None):
+def _output_candidate(db,setrow,stored, *, paired_members=None, file=None):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
     member=stored.member
     if (member.role is SegmentMemberRole.OTHER
@@ -293,6 +293,10 @@ def _output_candidate(db,setrow,stored, *, paired_members=None):
         left=profile.classify_file(member.identity)
         right=profile.classify_file(paired.member.identity)
         same_family = left.key is not None and right.key is not None and left.pairing_identity == right.pairing_identity
+    if file is None:
+        file = read_fixed_file(db, stored.file_id, stored.file_event_id)
+    if file['original_device_file_id'] != paired.file_id:
+        raise ConsistencyError('预览固定文件关联与同集合实际原片不同')
     if paired.member.role is not SegmentMemberRole.ORIGINAL or not same_family:
         raise ConsistencyError('预览没有同集合、同完整名称主干的真实原片')
     if (member.ownership is not OwnershipState.OWNED
@@ -338,7 +342,7 @@ def _candidate_page(ref, cursor, batch, db):
             paired[stored.member.identity] = stored
     values = []
     for fact in page.items:
-        candidate = _output_candidate(db, row, fact.stored, paired_members=paired)
+        candidate = _output_candidate(db, row, fact.stored, paired_members=paired, file=fact.file)
         if candidate is not None:
             values.append(SavedSegmentCandidate(candidate, fact.file))
     return Page(tuple(values), page.next_cursor)
@@ -1447,14 +1451,15 @@ def _verify_publication(db,ref,event,context,prior):
         cursor=page.next_cursor
     if count!=expected:raise ConsistencyError('正式默认范围数量与原判断不一致')
     # 有限直接提案也必须完整履行原申请；不能把新仓储的complete回调当守卫。
-    from .segment_transactions import _header_request,_failure,_verify_scope_members,_completion_qualification,_verify_qualification_header
+    from .segment_transactions import _header_request,_failure,_read_failure_sources,_verify_scope_members,_completion_qualification,_verify_qualification_header
     accepted=next(item for item in events() if item.event_type==load_event_registry()['events']['ACTION_FINISHED']['id']
         and any(row.table=='actions' and row.row_id==ref.action_id for row in item.rows))
     header=accepted.evidence.get('segment_finish_request')
     request=_header_request(header)
     _verify_qualification_header(header,_completion_qualification(db,request))
     _verify_scope_members(request,assessment,Reader)
-    status,error,details=_failure(request,assessment,original_count,setrow,db,before_event_id=context.transaction.first_event_id)
+    status,error,details=_failure(request,assessment,original_count,setrow,
+        _read_failure_sources(request,assessment,setrow,db),before_event_id=context.transaction.first_event_id)
     if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):
         raise ConsistencyError('直接完成组来源结果与原有限实际失败不同')
     registry=load_event_registry()['events']

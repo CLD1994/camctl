@@ -8,9 +8,9 @@ import pytest
 
 from camctl.capture.files import file_identity_key
 from camctl.capture.segment_models import (
-    FileCompletionState, OwnershipState, SegmentMemberRole,
+    FileCompletionState, OwnershipState, PreviewPairingState, SegmentMember, SegmentMemberRole,
 )
-from camctl.capture.segment_storage import SegmentResultRef
+from camctl.capture.segment_storage import SegmentResultRef, StoredSegmentMember
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
@@ -25,7 +25,8 @@ def _connection():
     return connection
 
 
-def test_fixed_original_member_does_not_replay_source_page(monkeypatch):
+@pytest.fixture
+def saved_member(monkeypatch):
     db = _connection()
     identity = "/DCIM/DJI_20261025_0077_D.OSV"
     row = dict(id=8, set_id=4, file_id=30, page_event_id=872,
@@ -51,12 +52,59 @@ def test_fixed_original_member_does_not_replay_source_page(monkeypatch):
         segments._one, return_value=(identity, 21, 28)))
     monkeypatch.setattr(segments, "_at", create_autospec(
         segments._at, side_effect=AssertionError("普通成员读取不应重放原页")))
+    return db, row, file
+
+
+def test_fixed_original_member_does_not_replay_source_page(saved_member):
+    db, row, file = saved_member
     stored = segments._read_member(db, row)
-    assert (stored.member_id, stored.file_id, stored.member.identity) == (8, 30, identity)
+    assert (stored.member_id, stored.file_id, stored.member.identity) == (8, 30, row['identity'])
     assert stored.member.role is SegmentMemberRole.ORIGINAL
     assert stored.member.ownership is OwnershipState.OWNED
     assert stored.member.completion is FileCompletionState.COMPLETE
     assert stored.member.size_bytes == 4096
+
+
+@pytest.mark.parametrize('damage', ['identity', 'foreign_action', 'wrong_role', 'ownership_missing',
+                                   'completion_unknown', 'size_missing', 'future_page', 'future_file'])
+def test_fixed_member_keeps_its_direct_qualification_checks(saved_member, damage):
+    db, row, file = saved_member
+    if damage == 'identity': file['identity_key'] = file_identity_key('camera', 'osmo', '/DCIM/other.OSV')
+    elif damage == 'foreign_action': file['source_action_id'] = 22
+    elif damage == 'wrong_role': file['role'] = int(enum_for('device_files.role').PREVIEW)
+    elif damage == 'ownership_missing': file['ownership_evidence_json'] = None
+    elif damage == 'completion_unknown': file['completion_state'] = int(enum_for('device_files.completion_state').WRITING)
+    elif damage == 'size_missing': file['size_bytes'] = None
+    elif damage == 'future_page': row['page_event_id'] = 886
+    else: row['file_event_id'] = 886
+    with pytest.raises(ConsistencyError): segments._read_member(db, row)
+
+
+@pytest.mark.parametrize('relation', [None, ('/DCIM/other.OSV',21,28),
+                                      ('/DCIM/DJI_20261025_0077_D.OSV',22,28),
+                                      ('/DCIM/DJI_20261025_0077_D.OSV',21,29)])
+def test_fixed_member_rejects_missing_or_foreign_direct_page_relation(saved_member, monkeypatch, relation):
+    db, row, file = saved_member
+    segments._one.return_value = relation
+    with pytest.raises(ConsistencyError): segments._read_member(db, row)
+
+
+def test_preview_candidate_rejects_fixed_file_link_to_another_original(monkeypatch):
+    db = _connection()
+    preview = StoredSegmentMember(8, 29, 872, 883,
+        SegmentMember('/DCIM/raw.LRF', None, SegmentMemberRole.PREVIEW, OwnershipState.OWNED,
+                      FileCompletionState.COMPLETE, 10, '/DCIM/raw.OSV', PreviewPairingState.PAIRED), None)
+    original = StoredSegmentMember(9, 30, 872, 880,
+        SegmentMember('/DCIM/raw.OSV', None, SegmentMemberRole.ORIGINAL, OwnershipState.OWNED,
+                      FileCompletionState.COMPLETE, 10), None)
+    monkeypatch.setattr(segments, 'read_fixed_file', create_autospec(segments.read_fixed_file,
+        return_value={'original_device_file_id': 31}))
+    profile = SimpleNamespace(classify_file=lambda identity: SimpleNamespace(key=1, pairing_identity='raw'))
+    monkeypatch.setattr(segments, 'profile_for_action', create_autospec(segments.profile_for_action,
+        return_value=profile))
+    with pytest.raises(ConsistencyError):
+        segments._output_candidate(db, {'id':4,'action_id':21}, preview,
+                                   paired_members={original.member.identity: original})
 
 
 @pytest.fixture
