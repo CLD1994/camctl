@@ -23,18 +23,18 @@ _RESIDUAL = (
 )
 
 
-def cleanup_item_batches(connection, *, batch_size=100):
+async def cleanup_item_batches(database, *, batch_size=100):
     """只保留当前成员页和稳定 id 续读位置，不一次保留全部责任。"""
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("清理发现批量必须是正整数")
     after = 0
     while True:
-        rows = connection.execute(
+        rows = await database.read(lambda owned: owned.connection.execute(
             "SELECT c.id FROM cleanup_items c WHERE c.id>? AND (c.status NOT IN (4,5,6) OR "
             + _RESIDUAL
             + ") ORDER BY c.id LIMIT ?",
             (after, batch_size),
-        ).fetchall()
+        ).fetchall(), description="分页发现清理责任")
         if not rows:
             return
         after = rows[-1][0]

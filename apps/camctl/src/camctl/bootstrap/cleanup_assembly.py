@@ -16,7 +16,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
 from camctl.bootstrap.capture_assembly import (
@@ -45,6 +45,8 @@ from camctl.outputs.cleanup_flow import (
     PendingCleanupCompanion, PendingCleanupQuery, PendingCleanupIntent,
     PendingCleanupDelete, advance_cleanup)
 from camctl.outputs.cleanup_ownership import PendingCleanupSave
+from camctl.persistence.models import DbReadError
+from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.scheduling.notifications import WakeReason
@@ -448,7 +450,7 @@ def session_cleanup_assembly(
     discovery_batch_size: int = 100,
     consumed_queries: dict | None = None,
     active_calls: set | None = None,
-) -> Callable[[Any], CleanupRuntime | None]:
+) -> Callable[[BusinessDatabase], Awaitable[CleanupRuntime | None]]:
     """构造会话级清理推进工厂：解析删除/查询协作者并组装运行时。
 
     会话共享重试间隔时间门槛；每个设备成员分别核对原绑定并选择
@@ -469,7 +471,7 @@ def session_cleanup_assembly(
     wall = occurred_at if occurred_at is not None \
         else (lambda: int(time.time() * 1_000_000))
 
-    def factory(owned: Any) -> CleanupRuntime:
+    async def factory(database) -> CleanupRuntime:
         device_ports = None
 
         def load_ports():
@@ -504,12 +506,18 @@ def session_cleanup_assembly(
 
         # 原历史与本地保存先交接；当前端口仅在需要新调用时解析。
         from camctl.outputs.cleanup_discovery import has_cleanup_handoff
-        if not any((queries, companions, intents, deletes, saves)) and not has_cleanup_handoff(owned.connection):
+        if not any((queries, companions, intents, deletes, saves)) and not await database.read(
+                lambda owned: has_cleanup_handoff(owned.connection), description="检查原清理交接责任"):
             load_ports()
+        async def binding_of(item_id):
+            return await database.read(
+                lambda owned: _member_binding(owned.connection, item_id),
+                description="读取清理文件原绑定")
+
         base = CleanupRuntime(
-            owned=owned, outputs=OutputsRepository(), operations=OperationRepository(),
+            database=database, outputs=OutputsRepository(), operations=OperationRepository(),
             driver=None, evidence=_LOCAL_EVIDENCE,
-            binding_of=lambda item_id: _member_binding(owned.connection, item_id),
+            binding_of=binding_of,
             binding_check=lambda saved: check_binding(saved, SimpleNamespace(devices=devices)),
             occurred_at=wall,
             local_files=(HostArtifacts(staging, file_executor)
@@ -531,8 +539,8 @@ def session_cleanup_assembly(
             discovery_batch_size=discovery_batch_size, active_calls=active,
         )
 
-        def for_item(item_id):
-            binding = base.binding_of(item_id)
+        async def for_item(item_id):
+            binding = await base.binding_of(item_id)
             if binding is None or binding_failure_details(check_binding(
                     binding, SimpleNamespace(devices=devices))) is not None:
                 return base
@@ -551,8 +559,8 @@ def session_cleanup_assembly(
                            delete_config=delete_config, query_config=query_config,
                            delete_supported=True, query_supported=True)
 
-        def for_operation(item_id, operation):
-            binding = base.binding_of(item_id)
+        async def for_operation(item_id, operation):
+            binding = await base.binding_of(item_id)
             if binding is None or binding_failure_details(check_binding(
                     binding, SimpleNamespace(devices=devices))) is not None:
                 return base
@@ -592,7 +600,7 @@ def _member_binding(connection, item_id: int) -> DeviceBinding | None:
 
 
 class _CleanupRound:
-    """持有单轮连接及全部原保存集合，直至实际调用可靠交接。"""
+    """持有异步数据库端口及全部原保存集合，直至实际调用可靠交接。"""
 
     def __init__(self, factory, pending_collections=None, *, state_db_errors=False):
         self._factory = factory
@@ -622,14 +630,10 @@ class _CleanupRound:
         self._active = True
         self._settled = asyncio.Event()
         try:
-            owned = context.open_connection()
-            try:
-                runtime = self._factory(owned)
-                if runtime is not None:
-                    await advance_cleanup(runtime)
-            finally:
-                owned.connection.close()
-        except (sqlite3.Error, ConsistencyError) as error:
+            runtime = await self._factory(context.database)
+            if runtime is not None:
+                await advance_cleanup(runtime)
+        except (sqlite3.Error, ConsistencyError, DbReadError) as error:
             if not self._state_db_errors:
                 raise
             from camctl.session.service import StateDbFailure

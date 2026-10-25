@@ -1,7 +1,7 @@
 """精确配置读取复用创建事实边界，数值沿用 AttemptConfig 校验。"""
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
@@ -54,7 +54,8 @@ def test_original_config_refuses_another_database_before_creation_read(monkeypat
 
 
 @pytest.mark.parametrize("mismatch", [None, "database", "item", "ticket", "target", "operation", "consumer"])
-def test_control_request_uses_matching_frozen_config_and_diagnoses_changed_intent(monkeypatch, mismatch):
+@pytest.mark.asyncio
+async def test_control_request_uses_matching_frozen_config_and_diagnoses_changed_intent(monkeypatch, mismatch):
     from dataclasses import replace
     from camctl.contracts.values import new_operation_key
     from camctl.devices.bindings import DeviceBinding
@@ -76,13 +77,16 @@ def test_control_request_uses_matching_frozen_config_and_diagnoses_changed_inten
         intent.request = replace(request, operation="query", kind=OperationKind.CHECK_FILE_EXISTS)
     elif mismatch == "consumer":
         intent.consumer = cleanup_flow.CleanupQueryConsumer.AFTER_DELETE
-    runtime = SimpleNamespace(owned=SimpleNamespace(metadata=SimpleNamespace(instance_id="database")),
-        pending_intents={7: intent}, binding_of=lambda item: DeviceBinding("camera", "driver"),
+    from camctl.persistence.business import BusinessDatabase
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.metadata = SimpleNamespace(instance_id="database")
+    database.read.side_effect = lambda callback, **kw: callback(SimpleNamespace(connection=object()))
+    runtime = SimpleNamespace(database=database,
+        pending_intents={7: intent}, binding_of=AsyncMock(return_value=DeviceBinding("camera", "driver")),
         delete_config=AttemptConfig(9, Decimal("99"), Decimal("12")))
     monkeypatch.setattr(cleanup_flow, "_target_params", lambda connection, item: {})
-    runtime.owned.connection = object()
     if mismatch is not None:
         with pytest.raises(ConsistencyError):
-            cleanup_flow._control_request(runtime, 7, "delete", TICKET)
+            await cleanup_flow._control_request(runtime, 7, "delete", TICKET)
     else:
-        assert cleanup_flow._control_request(runtime, 7, "delete", TICKET).timeout_s == Decimal("7.125")
+        assert (await cleanup_flow._control_request(runtime, 7, "delete", TICKET)).timeout_s == Decimal("7.125")

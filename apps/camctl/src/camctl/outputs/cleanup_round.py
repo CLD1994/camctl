@@ -34,18 +34,18 @@ def handed_off_this_round(runtime, item_id):
         and record is not None
         and record.round_token is runtime.round_token
         and record.result_identity is not None
-        and record.result_identity[:2] == (runtime.owned.metadata.instance_id, item_id)
+        and record.result_identity[:2] == (runtime.database.metadata.instance_id, item_id)
     )
 
 
-def operation_runtime(runtime, item_id, operation):
+async def operation_runtime(runtime, item_id, operation):
     """派生运行时保持同一轮次及同一会话消费事实。"""
     if runtime.for_item is None:
         return runtime
     if runtime.for_operation is not None:
-        derived = runtime.for_operation(item_id, operation)
+        derived = await runtime.for_operation(item_id, operation)
     else:
-        derived = runtime.for_item(item_id)
+        derived = await runtime.for_item(item_id)
     return replace(
         derived,
         round_token=runtime.round_token,
@@ -54,8 +54,8 @@ def operation_runtime(runtime, item_id, operation):
     )
 
 
-def operation_supported(runtime, item_id, operation):
-    if runtime.binding_of(item_id) is None:
+async def operation_supported(runtime, item_id, operation):
+    if await runtime.binding_of(item_id) is None:
         return True
     supported = (
         runtime.delete_supported if operation == "delete" else runtime.query_supported

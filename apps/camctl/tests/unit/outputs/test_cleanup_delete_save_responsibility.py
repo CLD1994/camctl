@@ -11,11 +11,11 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.operations.models import AttemptStatus, AttemptTicket
 from camctl.outputs.cleanup_flow import PendingCleanupDelete, _save_delete_return
 from camctl.persistence.repositories.outputs import OutputsRepository
-from .test_cleanup_query_save_responsibility import _runtime, _saved, original_config_reader
+from .test_cleanup_query_save_responsibility import _runtime, _saved, _set_database, original_config_reader
 
 
 def _pending(runtime, ticket):
-    return PendingCleanupDelete(runtime.owned.metadata.instance_id, 91, ticket,
+    return PendingCleanupDelete(runtime._test_owned.metadata.instance_id, 91, ticket,
         DeviceCallResult((DeviceObservation("file_absent", 1, {"cleanup_item_id": "91"}),),
             {"code": "local_io_failed", "stage": "unlink", "details": {"path": "file", "errno": 5}}),
         EvidenceRegistry((
@@ -24,12 +24,13 @@ def _pending(runtime, ticket):
         1_750_000_000_123_456, 300, new_operation_key())
 
 
-def test_delete_compatibility_result_preserves_original_error_and_observation():
+@pytest.mark.asyncio
+async def test_delete_compatibility_result_preserves_original_error_and_observation():
     runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
     runtime.outputs = create_autospec(OutputsRepository, instance=True)
     runtime.outputs.finish_cleanup_attempt.return_value = _saved(AttemptStatus.FAILED)
     pending = _pending(runtime, AttemptTicket(1, "delete", "91", "delete/91", 7))
-    assert _save_delete_return(runtime, pending) is None
+    assert (await _save_delete_return(runtime, pending)) is None
     outcome = runtime.outputs.finish_cleanup_attempt.call_args.args[0].outcome.outcome
     assert outcome.error.code == "local_io_failed"
     assert outcome.error.stage == "unlink"
@@ -42,15 +43,17 @@ def test_delete_compatibility_result_preserves_original_error_and_observation():
     AttemptTicket(1, "query", "91", "exists/91", 7),
     AttemptTicket(1, "delete", "91", "delete/92", 7),
 ])
-def test_delete_owner_refuses_foreign_ticket_before_saving(ticket):
+@pytest.mark.asyncio
+async def test_delete_owner_refuses_foreign_ticket_before_saving(ticket):
     runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
     pending = _pending(runtime, ticket)
     with pytest.raises(ConsistencyError):
-        _save_delete_return(runtime, pending)
+        (await _save_delete_return(runtime, pending))
     runtime.outputs.finish_cleanup_attempt.assert_not_called()
 
 
-def test_malformed_member_receipt_keeps_original_save_responsibility():
+@pytest.mark.asyncio
+async def test_malformed_member_receipt_keeps_original_save_responsibility():
     from camctl.outputs.cleanup_ownership import save_cleanup_request
     from camctl.outputs.cleanup_flow import FinishCleanupItem, CleanupOutcomeChoice
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -58,11 +61,11 @@ def test_malformed_member_receipt_keeps_original_save_responsibility():
     runtime.outputs.finish_cleanup_item.return_value = DbOutcome(DbOutcomeKind.COMPLETED, None)
     request = FinishCleanupItem(91, CleanupOutcomeChoice.DELETED, 1_750_000_000_123_456)
     with pytest.raises(ConsistencyError):
-        save_cleanup_request(runtime, "finish_cleanup_item", request)
+        (await save_cleanup_request(runtime, "finish_cleanup_item", request))
     original = runtime.outputs.finish_cleanup_item.call_args.args[:2]
     assert runtime.pending_saves[("finish_cleanup_item", 91)].request is request
     with pytest.raises(ConsistencyError):
-        save_cleanup_request(runtime, "finish_cleanup_item", replace(request, occurred_at=request.occurred_at + 1))
+        (await save_cleanup_request(runtime, "finish_cleanup_item", replace(request, occurred_at=request.occurred_at + 1)))
     assert runtime.outputs.finish_cleanup_item.call_args.args[:2] == original
 
 
@@ -91,29 +94,31 @@ async def test_driver_not_dispatched_return_cannot_replace_original_evidence_reg
     runtime.operations.finish_attempt.assert_not_called()
 
 
-def test_malformed_receipt_revokes_previous_reliable_disposition_basis():
+@pytest.mark.asyncio
+async def test_malformed_receipt_revokes_previous_reliable_disposition_basis():
     from camctl.outputs.cleanup_ownership import save_cleanup_request
     from camctl.outputs.cleanup_flow import FinishCleanupItem, CleanupOutcomeChoice
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
     request = FinishCleanupItem(91, CleanupOutcomeChoice.DELETED, 1_750_000_000_123_456)
     runtime.outputs.finish_cleanup_item.return_value = DbOutcome(DbOutcomeKind.ROLLED_BACK)
-    save_cleanup_request(runtime, "finish_cleanup_item", request)
+    (await save_cleanup_request(runtime, "finish_cleanup_item", request))
     pending = runtime.pending_saves[("finish_cleanup_item", 91)]
     assert pending.last_kind is DbOutcomeKind.ROLLED_BACK
     runtime.outputs.finish_cleanup_item.return_value = DbOutcome(DbOutcomeKind.COMPLETED, None)
     with pytest.raises(ConsistencyError):
-        save_cleanup_request(runtime, "finish_cleanup_item", request)
+        (await save_cleanup_request(runtime, "finish_cleanup_item", request))
     assert pending.last_kind is None
 
 
-def test_delete_owner_rejects_a_different_database_without_saving():
+@pytest.mark.asyncio
+async def test_delete_owner_rejects_a_different_database_without_saving():
     runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
     pending = _pending(runtime, AttemptTicket(1, "delete", "91", "delete/91", 7))
-    runtime.owned = replace(runtime.owned, metadata=replace(runtime.owned.metadata,
-        instance_id="abcdef1234567890abcdef1234567890"))
+    _set_database(runtime, replace(runtime._test_owned, metadata=replace(runtime._test_owned.metadata,
+        instance_id="abcdef1234567890abcdef1234567890")))
     with pytest.raises(ConsistencyError):
-        _save_delete_return(runtime, pending)
+        (await _save_delete_return(runtime, pending))
     runtime.outputs.finish_cleanup_attempt.assert_not_called()
 
 
@@ -160,7 +165,7 @@ async def test_pending_companion_requires_terminal_member_before_any_progress(en
     from camctl.outputs.cleanup_flow import (
         PendingCleanupCompanion, delete_source_file, advance_cleanup)
     runtime = _runtime(DeviceCallResult((), None), _saved(AttemptStatus.FAILED))
-    pending = PendingCleanupCompanion(runtime.owned.metadata.instance_id,
+    pending = PendingCleanupCompanion(runtime._test_owned.metadata.instance_id,
         StaleRunFinish(("exists/91",), RunOutcome.CANCELED, 1_750_000_000_123_456),
         new_operation_key())
     runtime.pending_companions[91] = pending
@@ -168,9 +173,9 @@ async def test_pending_companion_requires_terminal_member_before_any_progress(en
         from camctl.outputs.cleanup_ownership import PendingCleanupSave
         from camctl.outputs.cleanup_flow import FinishCleanupAction
         runtime.pending_saves[("finish_cleanup_action", 77)] = PendingCleanupSave(
-            runtime.owned.metadata.instance_id, "finish_cleanup_action",
+            runtime._test_owned.metadata.instance_id, "finish_cleanup_action",
             FinishCleanupAction(77, 1_750_000_000_123_456), new_operation_key())
-    original_read = runtime.owned.connection.execute.side_effect
+    original_read = runtime._test_owned.connection.execute.side_effect
 
     def member_read(statement, parameters=()):
         cursor = original_read(statement, parameters)
@@ -178,7 +183,7 @@ async def test_pending_companion_requires_terminal_member_before_any_progress(en
             cursor.fetchone.return_value = None if member_status is None else (member_status, None, None)
         return cursor
 
-    runtime.owned.connection.execute.side_effect = member_read
+    runtime._test_owned.connection.execute.side_effect = member_read
     with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
         if entry == "direct":
             await delete_source_file(runtime, 91)
@@ -186,7 +191,7 @@ async def test_pending_companion_requires_terminal_member_before_any_progress(en
             await advance_cleanup(runtime)
     assert runtime.pending_companions[91] is pending
     assert all(call.args[0].lstrip().upper().startswith("SELECT")
-               for call in runtime.owned.connection.execute.call_args_list)
+               for call in runtime._test_owned.connection.execute.call_args_list)
     assert runtime.outputs.mock_calls == []
     assert runtime.operations.mock_calls == []
     assert runtime.driver.mock_calls == []
