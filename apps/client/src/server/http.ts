@@ -1,4 +1,4 @@
-import { fileMediaType, previewKind } from "../shared/media";
+import { fileDisplayName, fileMediaType, previewKind } from "../shared/media";
 import { isCanonicalId } from "../shared/validation";
 import express from "express";
 import { createReadStream } from "node:fs";
@@ -254,7 +254,7 @@ export function createHttpApp(
       if (req.query.download === "true" || !previewKind(mediaType))
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename*=UTF-8''${encodeURIComponent(video.fileName)}`,
+          `attachment; filename*=UTF-8''${encodeURIComponent(fileDisplayName(application.snapshot(), video.fileName))}`,
         );
       else res.setHeader("Content-Disposition", "inline");
       res.type(

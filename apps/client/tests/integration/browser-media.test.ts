@@ -490,18 +490,17 @@ it("混合设备取回按每个产物的真实拍摄来源显示清理入口", a
   ]);
   const cleanup = async (index: number) => {
     const card = retrieval.locator(".product-card").nth(index);
-    await card.locator("details.advanced > summary").click();
-    return card.getByRole("button", { name: "准备清理源产物", exact: true });
+    return card.getByRole("button", { name: "清理产物", exact: true });
   };
   const outputAvailability = (index: number) =>
     retrieval
       .locator(".product-card")
       .nth(index)
-      .locator("details.advanced > .button-row .badge");
+      .locator(".product-actions .badge");
   await check(await cleanup(0)).toHaveCount(0);
   await check(await cleanup(1)).toHaveCount(0);
-  await check(outputAvailability(0)).toHaveText("可用");
-  await check(outputAvailability(1)).toHaveText("可用");
+  await check(outputAvailability(0)).toHaveCount(0);
+  await check(outputAvailability(1)).toHaveCount(0);
   await check(await cleanup(2)).toBeVisible();
   await check(await cleanup(3)).toBeVisible();
   await check(await cleanup(4)).toBeVisible();

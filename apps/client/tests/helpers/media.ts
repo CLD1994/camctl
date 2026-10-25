@@ -11,7 +11,7 @@ export async function makeMediaFixture(directory:string) {
   try {
     const page=await browser.newPage();
     const data=await page.evaluate(async()=>{
-      const canvas=document.createElement('canvas');canvas.width=480;canvas.height=270;
+      const canvas=document.createElement('canvas');canvas.width=480;canvas.height=270;document.body.append(canvas);
       const ctx=canvas.getContext('2d')!;const stream=canvas.captureStream(0);
       const track=stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
       const recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'});

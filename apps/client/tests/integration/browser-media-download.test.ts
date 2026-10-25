@@ -32,8 +32,12 @@ beforeAll(async () => {
         canvas.height = 270;
         document.body.append(canvas);
         const context = canvas.getContext("2d")!;
-        const stream = canvas.captureStream(10);
-        const recorder = new MediaRecorder(stream, { mimeType: "video/mp4;codecs=vp9" });
+        const stream = canvas.captureStream(0);
+        const track =
+          stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
+        const recorder = new MediaRecorder(stream, {
+          mimeType: "video/mp4;codecs=vp9",
+        });
         const chunks: Blob[] = [];
         const done = new Promise<Blob>((resolve) => {
           recorder.ondataavailable = (event) => chunks.push(event.data);
@@ -44,6 +48,7 @@ beforeAll(async () => {
         for (let frame = 0; frame < 30; frame++) {
           context.fillStyle = frame % 2 ? "blue" : "green";
           context.fillRect(0, 0, canvas.width, canvas.height);
+          track.requestFrame();
           await new Promise((resolve) => setTimeout(resolve, 85));
         }
         recorder.stop();
@@ -66,12 +71,28 @@ afterEach(async () => {
   for (const cleanup of clean.splice(0)) await cleanup();
 });
 
-async function setup(bytes: Buffer, fileName: string, mediaType?: string) {
+async function setup(
+  bytes: Buffer,
+  fileName: string,
+  mediaType?: string,
+  displayName = fileName,
+  availability: "available" | "cleaned" | "unknown" = "available",
+) {
   const directory = mkdtempSync(join(tmpdir(), "camctl-media-download-"));
   const snapshot = mediaSnapshot(bytes, fileName, mediaType);
+  snapshot.plans![0].actions![1].deliveries![0].display_name = displayName;
+  const output = snapshot.plans![0].actions![0].outputs![0];
+  output.availability = availability;
+  if (availability === "cleaned") output.cleanup = { status: "completed" };
+  if (availability === "unknown")
+    output.error = { code: "future_code", stage: "execution", details: {} };
   const application = new Application(directory);
   expect(application.store.initialize().state).toBe("ready");
   application.applyReports([reportInput(snapshot)]);
+  expect(
+    application.coverage(),
+    JSON.stringify(application.state().imports),
+  ).toBe(snapshot.to_wm);
   const files = new Files(application);
   const uploaded = files.createBatch([
     { fileName, size: bytes.length, kind: "media" },
@@ -121,35 +142,91 @@ it.each([
           ? mp4
           : Buffer.from("original");
     const fileName = `1.${extension}`;
-    const { page, card } = await setup(bytes, fileName, type);
+    const displayName = `原片-媒体查看-拍摄.${extension}`;
+    const { page, card, base, video } = await setup(
+      bytes,
+      fileName,
+      type,
+      displayName,
+    );
     const pending = page.waitForEvent("download");
     await card.getByRole("button", { name: label, exact: true }).click();
     const downloaded = await pending;
-    expect(downloaded.suggestedFilename()).toBe(fileName);
+    expect(downloaded.suggestedFilename()).toBe(displayName);
     expect(readFileSync((await downloaded.path())!)).toEqual(bytes);
+    const response = await fetch(
+      `${base}/api/media/${video.id}/content?download=true`,
+    );
+    expect(
+      decodeURIComponent(response.headers.get("content-disposition")!),
+    ).toContain(displayName);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
   },
 );
 
-it.each(["交付记录", "大图弹窗"])("%s 下载图片保留完整字节", async (entry) => {
-  const { page, card } = await setup(png, "1.png", "image/png");
-  if (entry === "交付记录")
-    await card.getByText("更多操作与交付记录", { exact: true }).click();
-  else
-    await card
-      .getByRole("button", { name: "查看图片 1.png", exact: true })
-      .click();
-  const button =
-    entry === "交付记录"
-      ? card.getByRole("button", { name: "下载此次交付", exact: true })
-      : page
-          .getByRole("dialog")
-          .getByRole("button", { name: "下载", exact: true });
+it("大图下载使用对应交付的可读名称并保留完整字节", async () => {
+  const { page, card } = await setup(
+    png,
+    "1.png",
+    "image/png",
+    "照片-媒体查看-拍摄.png",
+  );
+  await card
+    .getByRole("button", { name: "查看图片 1.png", exact: true })
+    .click();
+  const button = page
+    .getByRole("dialog")
+    .getByRole("button", { name: "下载", exact: true });
   const pending = page.waitForEvent("download");
   await button.click();
   const downloaded = await pending;
-  expect(downloaded.suggestedFilename()).toBe("1.png");
+  expect(downloaded.suggestedFilename()).toBe("照片-媒体查看-拍摄.png");
   expect(readFileSync((await downloaded.path())!)).toEqual(png);
 });
+
+it("产物只展示一行操作与一个技术详情入口", async () => {
+  const { card: action } = await setup(png, "1.png", "image/png");
+  const card = action.locator(".product-card");
+  await check(
+    card.getByRole("button", { name: "下载", exact: true }),
+  ).toBeVisible();
+  await check(
+    card.getByRole("button", { name: "清理产物", exact: true }),
+  ).toBeVisible();
+  await check(
+    card.getByRole("button", { name: "取回", exact: true }),
+  ).toHaveCount(0);
+  await check(card.locator(".badge").filter({ hasText: /^可用$/ })).toHaveCount(
+    0,
+  );
+  await card.locator("details > summary").click();
+  await check(card.locator("details > summary")).toHaveCount(1);
+  await check(card.locator("details button")).toHaveCount(0);
+  await check(card.locator("details")).toContainText("1.png");
+  await check(card.locator(".delivery .facts")).toBeVisible();
+});
+
+it.each(["cleaned", "unknown"] as const)(
+  "主机产物为 %s 时保留本地下载并显示状态",
+  async (availability) => {
+    const { card } = await setup(
+      png,
+      "1.png",
+      "image/png",
+      "照片-媒体查看-拍摄.png",
+      availability,
+    );
+    await check(
+      card.getByRole("button", { name: "下载", exact: true }),
+    ).toBeVisible();
+    await check(
+      card.getByRole("button", { name: "清理产物", exact: true }),
+    ).toHaveCount(0);
+    await check(card.locator(".product-actions .badge")).toHaveText(
+      availability === "cleaned" ? "已清理" : "未知",
+    );
+  },
+);
 
 it.each([
   ["LRF", undefined],

@@ -47,3 +47,13 @@ export function fileMediaType(
     delivery.file_name,
   );
 }
+
+/** 使用实际交付的可读名称；不改变传输与本地文件身份。 */
+export function fileDisplayName(snapshot: StatusReport, name: string): string {
+  for (const plan of snapshot.plans ?? [])
+    for (const action of plan.actions ?? []) {
+      const delivery = action.deliveries?.find((d) => d.file_name === name);
+      if (delivery) return delivery.display_name;
+    }
+  return name;
+}

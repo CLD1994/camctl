@@ -19,7 +19,6 @@ type Props = {
   active: boolean;
   follow: (f: Followup) => void;
   run: (fn: () => Promise<void>) => void;
-  open: (id: string) => void;
 };
 export function MediaResults({
   products,
@@ -28,7 +27,6 @@ export function MediaResults({
   sourceDevices,
   follow,
   run,
-  open,
   selected,
   setSelected,
 }: Props & {
@@ -150,7 +148,6 @@ export function MediaResults({
               sourceDevices,
               follow,
               run,
-              open,
               selected,
               change,
             }}
@@ -171,7 +168,6 @@ function ProductGroup({
   sourceDevices,
   follow,
   run,
-  open,
   selected,
   change,
   obtainProduct,
@@ -274,7 +270,7 @@ function ProductGroup({
             key={p.id}
             product={p}
             obtainProduct={obtainProduct}
-            {...{ active, capabilities, sourceDevices, follow, run, open }}
+            {...{ active, capabilities, sourceDevices, follow, run }}
             selected={selected.has(p.id)}
             select={(v) => change([p.id], v)}
             preview={(e) => {
@@ -332,7 +328,6 @@ function ProductCard({
   sourceDevices,
   follow,
   run,
-  open,
   selected,
   select,
   preview,
@@ -344,7 +339,6 @@ function ProductCard({
   sourceDevices: Map<string, string | undefined>;
   follow: Props["follow"];
   run: Props["run"];
-  open: Props["open"];
   selected: boolean;
   select: (v: boolean) => void;
   preview: (e: HTMLElement) => void;
@@ -410,27 +404,28 @@ function ProductCard({
           ，可以下载原文件查看。
         </p>
       )}
-      {video && (
-        <button
-          onClick={() =>
-            run(() =>
-              download(mediaPath(video.id) + "?download=true", video.fileName),
-            )
-          }
-        >
-          下载
-        </button>
-      )}
-      {!video && (
-        <button onClick={(event) => obtainProduct(p, event.currentTarget)}>
-          取回
-        </button>
-      )}
-      <details className="advanced">
-        <summary>更多操作与交付记录</summary>
-        {p.output && (
-          <div className="button-row">
-            <Badge value={p.output.availability} />
+      <div className="button-row product-actions">
+        {video && (
+          <button
+            onClick={() =>
+              run(() =>
+                download(
+                  mediaPath(video.id) + "?download=true",
+                  video.downloadName,
+                ),
+              )
+            }
+          >
+            下载
+          </button>
+        )}
+        {!video && (
+          <button onClick={(event) => obtainProduct(p, event.currentTarget)}>
+            取回
+          </button>
+        )}
+        {p.output?.availability === "available" && (
+          <>
             {(p.output.kind === "repaired" ||
               cleanupEntryVisible(
                 capabilities,
@@ -440,23 +435,29 @@ function ProductCard({
                 onClick={() =>
                   follow({
                     action: {
-                      name: "清理源产物",
+                      name: "清理产物",
                       type: "delete_action_outputs",
                       params: { output_ids: [p.id] },
                     },
-                    summary: `清理源文件 ${p.name}`,
+                    summary: `清理产物 ${p.name}`,
                   })
                 }
               >
-                准备清理源产物
+                清理产物
               </button>
             )}
-          </div>
+          </>
         )}
-        {p.deliveries.map(({ delivery: d, video: v, owner }) => (
+        {p.output && p.output.availability !== "available" && (
+          <Badge value={p.output.availability} />
+        )}
+      </div>
+      <details className="advanced product-technical">
+        <summary>技术详情</summary>
+        {p.output && <Facts value={p.output} business />}
+        {p.deliveries.map(({ delivery: d, video: v }) => (
           <section className="delivery" key={d.delivery_id}>
-            <strong>{d.display_name}</strong>
-            <Badge value={d.status} />
+            <h5>交付 {d.delivery_id}</h5>
             {!v && (
               <p>
                 本地文件：
@@ -465,39 +466,9 @@ function ProductCard({
             )}
             {v && <Badge value={v.status} />}
             {v?.message && <p>{v.message}</p>}
-            {owner?.request_id && (
-              <button onClick={() => open(owner?.request_id)}>
-                查看取回计划：{owner!.name}
-              </button>
-            )}
-            {v?.status === "verified" && (
-              <button
-                onClick={() =>
-                  run(() =>
-                    download(mediaPath(v.id) + "?download=true", v.fileName),
-                  )
-                }
-              >
-                下载此次交付
-              </button>
-            )}
-            <details>
-              <summary>技术详情</summary>
-              <Facts value={d} business />
-            </details>
+            <Facts value={d} business />
           </section>
         ))}
-        {p.sourcePlan && (
-          <button onClick={() => open(p.sourcePlan!.request_id)}>
-            查看来源计划：{p.sourcePlan.name}
-          </button>
-        )}
-        {p.output && (
-          <details>
-            <summary>产物技术详情</summary>
-            <Facts value={p.output} business />
-          </details>
-        )}
       </details>
     </article>
   );
@@ -608,7 +579,7 @@ function ImageDialog({
               run(() =>
                 download(
                   mediaPath(video.id) + "?download=true",
-                  video.fileName,
+                  video.downloadName,
                 ),
               )
             }

@@ -119,7 +119,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
       .first()
       .click();
   for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
+    .getByText("技术详情", { exact: true })
     .all())
     await summary.click();
   await browserExpect(page.getByTestId("download-request-button")).toHaveCount(
@@ -150,7 +150,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
         .first()
         .click();
     for (const summary of await page
-      .getByText("更多操作与交付记录", { exact: true })
+      .getByText("技术详情", { exact: true })
       .all())
       await summary.click();
     await page
@@ -161,7 +161,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
     await page.getByRole("button", { name: "加入草稿", exact: true }).click();
     await browserExpect(page.getByRole("dialog")).toHaveCount(0);
   };
-  await append("准备清理源产物");
+  await append("清理产物");
   await append("取消动作");
   await append("取消计划");
   await append("取回计划产物");
@@ -386,14 +386,14 @@ it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来�
     ["预览", "5"],
     ["修复成品", "6"],
   ]) {
-    for (const operation of ["取回", "准备清理源产物"]) {
+    for (const operation of ["取回", "清理产物"]) {
       await page.getByTestId("tab-records").click();
       await page.getByTestId("record-open-button").click();
       await page.getByRole("button", { name: /^展开动作 / }).click();
       const product = page
         .locator(".product-card")
         .filter({ has: page.getByText(name, { exact: true }) });
-      await product.getByText("更多操作与交付记录", { exact: true }).click();
+      await product.getByText("技术详情", { exact: true }).click();
       await product
         .getByRole("button", { name: operation, exact: true })
         .click();
@@ -547,7 +547,7 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
       .first()
       .click();
   for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
+    .getByText("技术详情", { exact: true })
     .all())
     await summary.click();
   const failed = page.locator(".delivery").filter({ hasText: "3.mp4" }).first();
@@ -621,7 +621,7 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
       .first()
       .click();
   for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
+    .getByText("技术详情", { exact: true })
     .all())
     await summary.click();
   const video = page.locator("video").first();

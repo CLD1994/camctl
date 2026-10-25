@@ -51,6 +51,7 @@ const videos = [
 it("本次取回的产物可使用其他交付的合格副本而不改变本次交付统计", () => {
   const products = resultProducts(obtain("d1"), plans, videos);
   expect(products[0].localCopy?.id).toBe("v2");
+  expect(products[0].localCopy?.downloadName).toBe("照片");
   expect(products[0].state).toBe("waiting");
 });
 it.each([

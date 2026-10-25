@@ -327,7 +327,6 @@ export function ActionResult({
             active={active && expanded}
             follow={follow}
             run={run}
-            open={open}
             selected={selected}
             setSelected={(update) =>
               updateView(action.action_instance_id, (old) => ({

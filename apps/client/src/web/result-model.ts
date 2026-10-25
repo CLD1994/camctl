@@ -300,7 +300,7 @@ export function resultNotes(
 }
 
 export interface Product {
-  localCopy?: Video;
+  localCopy?: Video & { downloadName: string };
   id: string;
   name: string;
   output?: Output;
@@ -374,12 +374,16 @@ export function resultProducts(
   )
     owners.push({ actions: [action] });
   const files = new Map(videos.map((v) => [v.fileName, v]));
-  const copies = new Map<string, Video>();
+  const copies = new Map<string, NonNullable<Product["localCopy"]>>();
   for (const { actions } of owners)
     for (const candidate of actions)
       for (const delivery of candidate.deliveries ?? []) {
         const copy = files.get(delivery.file_name);
-        if (copy?.status === "verified") copies.set(delivery.output_id, copy);
+        if (copy?.status === "verified")
+          copies.set(delivery.output_id, {
+            ...copy,
+            downloadName: delivery.display_name,
+          });
       }
   for (const { owner, actions } of owners)
     for (const a of actions)
