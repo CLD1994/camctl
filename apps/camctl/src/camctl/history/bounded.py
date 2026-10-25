@@ -600,11 +600,10 @@ class SegmentHistoryHandle:
 
     def _validate(self):
         from camctl.history.validators import EventContext,_resolve_owner_spec
-        from camctl.persistence.row_validation import ProjectionRowValidator
         from camctl.acceptance.definitions import read_action_spec
         registry = load_event_registry()['tables']
         context = EventContext(self.seed.snapshot.transaction if self.seed.snapshot else self._transaction(),{},_DiskState(self))
-        with ProjectionRowValidator(storage_path=Path(self._temporary.name)/'validation.db') as validator:
+        with self.repository.projection_validator(storage_path=Path(self._temporary.name)/'validation.db') as validator:
             previous = ('',0)
             while True:
                 with closing(self._db.execute('SELECT tab,id,body FROM rows WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as cursor:

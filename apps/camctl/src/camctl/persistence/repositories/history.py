@@ -12,8 +12,9 @@ import sqlite3
 import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from collections.abc import Iterator, Mapping, Sequence
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,7 +68,10 @@ from camctl.persistence.models import (
     DbPriority,
     DbExecutorError,
 )
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import (
+    DatabaseMetadata, DbConfig, DbOpenMode, OwnedConnection, open_existing,
+    verify_directory_binding,
+)
 from camctl.persistence.row_validation import ProjectionRowValidator
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
@@ -111,24 +115,72 @@ class _ObjectSeed:
 class HistoryRepository:
     """真实 SQLite 的历史读取仓储（报告进程使用只读连接）。"""
 
-    def __init__(self, path: Path, *, config: DbConfig | None = None) -> None:
+    def __init__(self, path: Path, *, config: DbConfig | None = None,
+                 expected_instance_id: str | None = None,
+                 expected_directories: tuple[str | Path, str | Path, str | Path] | None = None) -> None:
         self.path = Path(path)
         self._config = config if config is not None else DbConfig()
-        self._instance_id: str | None = None
+        self._instance_id = expected_instance_id
+        self._expected_directories = expected_directories
+        self._report_connection: sqlite3.Connection | None = None
+        self._report_resources: ExitStack | None = None
+        self._report_validator: ProjectionRowValidator | None = None
         # 不可变历史允许复用已核验的组；只保留固定 H 和上一页末组。
         self._validated_ranges: dict[int, TransactionRange] = {}
         self._current_range: TransactionRange | None = None
 
     def _connect(self) -> sqlite3.Connection:
+        return self._open_read_connection().connection
+
+    def _open_read_connection(self) -> OwnedConnection:
         owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
         try:
+            if self._instance_id is not None and owned.metadata.instance_id != self._instance_id:
+                raise ConsistencyError("历史读取的数据库实例身份发生变化")
+            if self._expected_directories is not None:
+                verify_directory_binding(owned.metadata, *self._expected_directories)
             owned.connection.execute("PRAGMA cache_size=-2048").close()
             owned.connection.execute("PRAGMA temp_store=FILE").close()
             owned.connection.execute("PRAGMA temp.cache_size=-2048").close()
-            return owned.connection
+            return owned
         except BaseException:
             owned.connection.close()
             raise
+
+    @contextmanager
+    def report_read_scope(self) -> Iterator[DatabaseMetadata]:
+        """单份报告持有读取资源；各页仍独立开始和结束事务。"""
+        if self._report_resources is not None:
+            raise ConsistencyError("报告读取资源不能跨报告嵌套使用")
+        try:
+            with ExitStack() as resources:
+                owned = self._open_read_connection()
+                resources.callback(owned.connection.close)
+                self._instance_id = owned.metadata.instance_id
+                self._report_connection = owned.connection
+                self._report_resources = resources
+                yield owned.metadata
+        finally:
+            self._report_connection = None
+            self._report_resources = None
+            self._report_validator = None
+            self._validated_ranges.clear()
+            self._current_range = None
+
+    @contextmanager
+    def projection_validator(self, storage_path=None) -> Iterator[ProjectionRowValidator]:
+        """对象独立核对唯一键；同份报告复用空结构与有限元数据。"""
+        resources = self._report_resources
+        if resources is None:
+            with ProjectionRowValidator(storage_path=storage_path) as validator:
+                yield validator
+            return
+        if self._report_validator is None:
+            directory = resources.enter_context(TemporaryDirectory(prefix="camctl-report-validation-"))
+            self._report_validator = resources.enter_context(ProjectionRowValidator(
+                storage_path=Path(directory) / "validation.db"))
+        with self._report_validator.object_scope() as validator:
+            yield validator
 
     def current_boundary(self) -> HistoryBoundary:
         with self._read_connection() as connection:
@@ -136,8 +188,9 @@ class HistoryRepository:
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
+        shared = self._report_connection is not None
         try:
-            connection = self._connect()
+            connection = self._report_connection if shared else self._connect()
         except BaseException:
             self._validated_ranges.clear()
             self._current_range = None
@@ -149,12 +202,20 @@ class HistoryRepository:
             yield connection
             with closing(connection.execute("COMMIT")):
                 pass
-        except BaseException:
+        except BaseException as error:
             self._validated_ranges.clear()
             self._current_range = None
+            if shared and connection.in_transaction:
+                try:
+                    with closing(connection.execute("ROLLBACK")):
+                        pass
+                except BaseException as rollback_error:
+                    error.add_note(f"报告短读事务回滚失败: {rollback_error}")
+                    raise error from rollback_error
             raise
         finally:
-            connection.close()
+            if not shared:
+                connection.close()
 
     def _bind_instance(self, connection, *, from_repository=False):
         instance_id = _one(connection, "SELECT instance_id FROM database_metadata")[0]
@@ -294,8 +355,7 @@ class HistoryRepository:
         不是完整已提交边界，按状态库一致性错误处理。
         """
         ObjectId(report_id)
-        connection = self._connect()
-        try:
+        with self._read_connection() as connection:
             with closing(connection.execute(
                     "SELECT from_wm, to_wm, frozen_event_id, format_version"
                     " FROM reports WHERE id = ?", (report_id,))) as cursor:
@@ -319,8 +379,6 @@ class HistoryRepository:
             return _FrozenRegistration(
                 from_wm=int(row[0]), to_wm=int(row[1]),
                 boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
-        finally:
-            connection.close()
 
     def open_report_selection(self, request: ReportScopeRequest) -> ReportEntitySelection:
         """打开固定 H/窗口的有界逐层实体选择会话。"""
@@ -982,7 +1040,7 @@ class HistoryRepository:
                 raise SnapshotMaintenanceError("快照正文头与固定元数据不一致")
             rows = {}
             registry = load_event_registry()["tables"]
-            with ProjectionRowValidator() as validator:
+            with self.projection_validator() as validator:
                 for record in decoded:
                     ObjectId(record.values.get("id"))
                     key = (record.table, record.row_id)

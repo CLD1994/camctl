@@ -1,6 +1,6 @@
 """用权威 SQLite 结构校验完整投影行，不保存业务事实。
 
-一次快照读取复用一个校验结构；增长对象的唯一键使用磁盘文件。
+单份报告复用空校验结构，各恢复对象独立保存唯一键；增长对象使用磁盘文件。
 原始类型先核对，SQL 参数仅作精确适配；每行在保存点内校验并
 回滚，调用者的原始映像保持不变。
 独立对象的外键与同边界归属由历史读取者核对，不复制外部对象。
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import re
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from types import TracebackType
@@ -45,7 +45,7 @@ def _schema_scripts() -> tuple[str, ...]:
 
 
 class ProjectionRowValidator:
-    """在一个快照读取范围内复用空结构和已查询的表元数据。"""
+    """复用空结构与有限表元数据，按恢复对象隔离唯一键。"""
 
     def __init__(self, *, storage_path=None) -> None:
         self._storage_path = storage_path
@@ -53,6 +53,7 @@ class ProjectionRowValidator:
         self._columns: dict[str, tuple[tuple[str, str, bool], ...]] = {}
         self._indexes: dict[str, tuple[_UniqueIndex, ...]] = {}
         self._index_count = 0
+        self._object_active = False
 
     def __enter__(self) -> ProjectionRowValidator:
         if self._connection is not None:
@@ -82,8 +83,32 @@ class ProjectionRowValidator:
         self._columns.clear()
         self._indexes.clear()
         self._index_count = 0
+        self._object_active = False
         if connection is not None:
             connection.close()
+
+    @contextmanager
+    def object_scope(self):
+        """唯一性账本只属于当前恢复对象，空结构及元数据保持可复用。"""
+        if self._connection is None:
+            raise ProjectionRowValidationError("对象校验要求已打开完整行校验结构")
+        if self._object_active:
+            raise ProjectionRowValidationError("完整行校验不能嵌套恢复不同对象")
+        self._object_active = True
+        try:
+            self._clear_unique_keys()
+            try:
+                yield self
+            finally:
+                self._clear_unique_keys()
+        finally:
+            self._object_active = False
+
+    def _clear_unique_keys(self) -> None:
+        for indexes in self._indexes.values():
+            for index in indexes:
+                with closing(self._connection.execute(f"DELETE FROM {index.cache_table}")):
+                    pass
 
     def validate(self, table: str, values: Mapping[str, Any]) -> None:
         """核对类型、SQL 约束与集合唯一键，仅保留必要索引键。"""
