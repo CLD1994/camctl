@@ -572,22 +572,28 @@ async def test_cancel_during_preparation_waits_for_source_owner_to_finish(tmp_pa
 async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp_path,monkeypatch,failure):
     import sqlite3
     from camctl.history.bounded import SegmentHistoryHandle
-    owned,_,_,ref,history,before,prepared=await _before_assessment(tmp_path)
+    owned,runtime,repo,ref,history,before,prepared=await _before_assessment(tmp_path)
     opened=[];original_init=SegmentHistoryHandle.__init__
     def capture(self,*args,**kwargs):
         original_init(self,*args,**kwargs);opened.append((self,Path(self._temporary.name)))
     monkeypatch.setattr(SegmentHistoryHandle,'__init__',capture)
     try:
+        if failure=='missing_event':
+            from .test_record_segment_history import _version
+            _version(owned,runtime,repo,ref,2)
         boundary=history.current_boundary()
         if failure=='missing_event':
-            event=owned.connection.execute('SELECT MAX(event_id) FROM entity_event_links WHERE entity_type=1 AND entity_id=?',(ref.action_id,)).fetchone()[0]
-            owned.connection.execute('DELETE FROM entity_event_links WHERE entity_type=1 AND entity_id=? AND event_id=?',(ref.action_id,event))
+            event=owned.connection.execute('SELECT MIN(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id>? AND event_id<?',
+                (prepared.entity_type,ref.action_id,before.last_event_id,boundary.last_event_id)).fetchone()[0]
+            assert event is not None
+            owned.connection.execute('DELETE FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',
+                (prepared.entity_type,ref.action_id,event))
             error=ConsistencyError
         else:
             def fail(*args,**kwargs):raise sqlite3.OperationalError('forward page read failed')
             monkeypatch.setattr(history,'_object_event_page',fail);error=sqlite3.OperationalError
         with pytest.raises(error):history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=1)
-        assert all(handle._db is None and not directory.exists() for handle,directory in opened)
+        assert opened and all(handle._db is None and not directory.exists() for handle,directory in opened)
     finally:prepared.close();owned.connection.close()
 
 
