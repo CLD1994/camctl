@@ -1385,13 +1385,16 @@ class CaptureRuntime(_FileObservationSaves):
             raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}")
         return await settle_required(save_and_apply())
 
-    async def resume_start_results(self, action_id: int) -> None:
+    async def resume_start_results(self, action_id: int) -> bool:
         """同会话原真实结果优先保存，包括动作已经终态的分区。"""
+        changed = False
         for identity, pending in tuple(self.pending_start_results.items()):
             if not pending.result_disposition_ready:
                 continue
             if (await self.action_id_of_ticket(pending.finish.ticket)) == action_id:
                 (await self._save_call_result(identity, pending))
+                changed |= self.pending_start_results.get(identity) is not pending
+        return changed
 
     async def retry_wait_remaining(self, responsibility: str,
                              interval_s: Decimal | None, *,
@@ -3554,8 +3557,11 @@ def _read_result_scope(runtime):
 
 
 async def _resume_internal_read_results(runtime):
-    if not runtime.pending_read_business and not runtime.pending_read_results and not runtime.pending_read_ends:
-        return
+    pending_maps = (runtime.pending_read_business, runtime.pending_read_results, runtime.pending_read_ends)
+    original = tuple(tuple(pending.items()) for pending in pending_maps)
+    if not any(original):
+        return False
+    continuations = dict(runtime.continuing_read_tickets)
     from camctl.capture.media_flow import _save_internal_read_and_settle
     from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
 
@@ -3564,21 +3570,31 @@ async def _resume_internal_read_results(runtime):
     for pending in tuple(scope.pending_read_results.values()):
         (await _save_internal_read_and_settle(scope, pending))
     await retry_read_ends(scope)
+    # 原申请被消费或替换才交付进展；保留原对象的强引用以比较实际拥有权。
+    if any(len(pending) != len(items)
+           or any(pending.get(identity) is not value for identity, value in items)
+           for pending, items in zip(pending_maps, original)):
+        return True
+    current = runtime.continuing_read_tickets
+    if current.keys() != continuations.keys():
+        return True
+    # 同一续读资格仅重建形成时刻时，仍等待原实际读取推进。
+    return any(replace(value, occurred_at=continuations[identity].occurred_at) != continuations[identity]
+               for identity, value in current.items())
 
 
 async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOutcome | None:
     pending_at_entry = any((
-        context.pending_result_closes, context.pending_capture_completions,
-        context.pending_baselines, context.pending_file_observations,
-        context.pending_start_results, context.pending_segment_writes,
-        context.pending_read_business, context.pending_read_results, context.pending_read_ends,
+        action_id in context.pending_result_closes, action_id in context.pending_capture_completions,
+        action_id in context.pending_baselines, action_id in context.pending_segment_writes,
+        any(identity[0] == action_id for identity in context.pending_file_observations),
     ))
     (await context.resume_result_check_closes(action_id))
     (await context.resume_capture_completions(action_id))
     (await context.resume_baselines(action_id))
     (await context.resume_file_observations(action_id))
-    await _resume_internal_read_results(context)
-    (await context.resume_start_results(action_id))
+    read_progress = await _resume_internal_read_results(context)
+    start_progress = (await context.resume_start_results(action_id)) is True
     action = (await context.action(action_id))
     if action["status"] in _ACTION_TERMINAL:
         if context.on_recording_deadline is not None:
@@ -3644,7 +3660,8 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOut
         # 等计时；在途停止由尝试收场后重入推进。
         if decision.phase is RecordingPhase.WAIT_RECORD:
             return HandlerOutcome("waiting", wakeup_required=(
-                pending_at_entry or open_start[0] == int(_ATTEMPT_STATUS.RUNNING)))
+                pending_at_entry or read_progress or start_progress
+                or open_start[0] == int(_ATTEMPT_STATUS.RUNNING)))
         return
     (await _conclude_activity(context, action_id))
     if canceled:
