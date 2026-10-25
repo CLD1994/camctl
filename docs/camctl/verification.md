@@ -44,6 +44,20 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 结果证明复用与报告按需维护（2026-10-25）
+
+人工环境计划 6 的延时动作 21 发布一份原片和一份预览，`finish_segment_recording` 仍执行 124176 次 SQL，经过 15.107 秒，实际提交仅 2.518 毫秒。调用剖析确认，规划、规范事件生成、独立封口及业务守卫多次展开同一结果页、固定文件及内部完成／配对证明。修复在一次完整事务内复用已成功核实的读取；本连接写入后失效，作用域退出后释放，原当前资格、历史完整性及实际共同发布核验保留。边界由[持久化设计](persistence-runtime.md#单次完整事务的读取复用)定义。
+
+同一固定数据库快照、保存请求及只读 `verify_segment_finish` 入口的 SQL 从 **38520 次降至 1416 次**，历史事件解码从 **8035 次降至 181 次**，启用调用剖析时的经过时间从 **10.805 秒降至 0.944 秒**。返回结果和快照 SHA-256 一致。该对照不是原完成写事务，不据此推算实际拍摄的净提速；原 79 秒总计时也不能事后拆解。基线、优化调用剖析及 `read-comparison.json` 保存在 `.local/verification/segment-query-amplification-20261025/`。
+
+报告后台拥有者在创建任务之前检查业务水位、首次恢复及到期同步。没有触发时不打开维护连接、不创建后台报告任务，也不进入 `_FreezeCommand`；已有会话连接仍保留默认 500 毫秒的一次索引水位查询，外部新计划的轻量发现继续执行。实际 SQLite 查询计划使用覆盖索引。失败后的新变化、尚未尝试的其他报告和最终关闭期间的新提交继续处理；仅等待 ACK 时正常退出。行为由[报告执行设计](report-runtime.md#报告维护的轻量观察与推进)维护。
+
+验证生产源码为 `76903bf49d8ba8a5ea0344cf63d4bb86a6cdfb3b`。Linux 开发容器、CPython 3.11.17、SQLite 3.53.1 下运行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，UTC 2026-10-25 05:25:17 至 05:27:22，结果为 **7993 项通过、1 项跳过、2 条既有 asyncio 标记警告，119.16 秒，退出 0**。独立复核未发现可达的实质缺陷；五个原证明读取函数的业务语法树保持一致。完整命令、版本、源码、退出码和日志位于上述目录的 `unit.json`、`unit.log`、`proof-review.json` 及 `agent-evidence/`。本轮未运行集成测试或相机命令。
+
+原人工环境 `/home/cld/.camctl/manual-validation-20261025` 已安装对应 wheel，SHA-256 为 `5231241fcb5e02d369a586cbb95b5b4fcfbf978eca2689e83b01cdf58f4cafba`。315 个生产 Python 文件和 27 份权威资源与源码、wheel、实际安装逐项相同；依赖检查及原配置下静态能力导出通过，能力说明与现有主机和客户端文件一致。安装前后配置、41 张业务表、元信息及实例身份相同，数据库继续使用 V5。交付清单位于 `.local/deployments/20261025-result-proof-reuse/delivery-manifest.json`。
+
+按用户要求停止原 camctl 后未重启，安装结束再次确认没有 camctl 进程、日志大小和修改时间未变化。人工环境 README 已更新。新录像写事务耗时、相机结果和后序动作启动由用户按[人工验证指南](../hardware/result-reading-performance-validation.md)继续核对。
+
 ## 录像结果事务成本计量的验证与安装（2026-10-25）
 
 本轮为录像结果完整事务增加阶段独占计时、线程 CPU 时间、SQL API 调用及行数聚合，并记录历史解码和校验的包含子调用明细。保存动作、方法和原操作键贯穿分段原保存及保存恢复；字段解释与新计划测量步骤见[人工验证指南](../hardware/result-reading-performance-validation.md#事务成本分解)。事务、批次、调度、重试和设备调用沿用原行为。
