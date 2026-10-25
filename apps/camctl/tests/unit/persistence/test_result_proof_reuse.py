@@ -329,13 +329,29 @@ def test_bounded_page_scope_rechecks_proof_warmed_in_generic_scope(proof_entry):
 
 
 @pytest.mark.parametrize("proof_entry", ["completion", "strict"], indirect=True)
-def test_bounded_page_scope_does_not_cache_current_file_qualification(proof_entry):
+def test_bounded_page_scope_reuses_small_verified_file_input(proof_entry):
     from camctl.persistence.page_read_cache import page_read_scope
+
+    with _scope(proof_entry.connection), page_read_scope(proof_entry.connection, 100):
+        first = proof_entry.call()
+        assert proof_entry.call() == first
+    assert proof_entry.reads == 1
+
+
+@pytest.mark.parametrize("proof_entry", ["completion", "strict"], indirect=True)
+@pytest.mark.parametrize("changed", ["write", "independent_phase"])
+def test_bounded_page_scope_rechecks_current_file_input_after_change(proof_entry, changed):
+    from camctl.persistence.page_read_cache import page_read_scope
+    from camctl.persistence.read_reuse import clear_read_reuse
 
     error = ConsistencyError("当前资格必须实际核实")
     with _scope(proof_entry.connection), page_read_scope(proof_entry.connection, 100):
         proof_entry.call()
         proof_entry.failure = error
+        if changed == "write":
+            proof_entry.connection.total_changes += 1
+        else:
+            clear_read_reuse(proof_entry.connection)
         with pytest.raises(ConsistencyError) as caught:
             proof_entry.call()
     assert caught.value is error

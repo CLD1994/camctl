@@ -15,7 +15,6 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.persistence.transaction import read_transaction_range, row_facts
 from camctl.persistence.read_reuse import reuse_read
-from camctl.persistence.page_read_cache import page_read_scope_active
 
 from . import capture, result_pages
 from .result_file_ownership import _proof
@@ -93,9 +92,6 @@ def _completion_page(connection, page, file, boundary):
 
 def load_completion_input(connection, page, file_id, boundary, *, current_boundary=None):
     """返回一个固定文件的引用及资格；不返回增长目录或候选数组。"""
-    if page_read_scope_active(connection):
-        return _load_completion_input(connection, page, file_id, boundary,
-                                      current_boundary=current_boundary)
     key = (__name__, "completion", _read_key(page), _read_key(file_id),
            _read_key(boundary), _read_key(current_boundary))
     return reuse_read(connection, key, lambda: _load_completion_input(
@@ -135,9 +131,6 @@ def _load_completion_input(connection, page, file_id, boundary, *, current_bound
 
 def load_strict_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None,
                                   current_boundary=None):
-    if page_read_scope_active(connection):
-        return _load_strict_result_file_input(connection, page, file_id, boundary,
-            pairing_fact_id=pairing_fact_id, current_boundary=current_boundary)
     key = (__name__, "strict", _read_key(page), _read_key(file_id), _read_key(boundary),
            _read_key(pairing_fact_id), _read_key(current_boundary))
     return reuse_read(connection, key, lambda: _load_strict_result_file_input(
