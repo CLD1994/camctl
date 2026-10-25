@@ -42,6 +42,26 @@ def _database_digest(path, *, immutable=False):
         return sha("\n".join(connection.iterdump()).encode())
 
 
+def _database_layout(path):
+    # immutable 读只用于完整内容核对；持久模式须沿普通只读连接核验。
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
+        journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
+        page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    return {"journal_mode": journal, "page_size": page_size,
+            "write_version": header[18], "read_version": header[19]}
+
+
+def _remove_closed_sidecars(path):
+    # 调用方已关闭所有连接，WAL 也已完整检查点；不能丢弃未并入主库的内容。
+    for suffix in ("-wal", "-journal"):
+        sidecar = Path(str(path) + suffix)
+        assert not sidecar.exists() or sidecar.stat().st_size == 0, sidecar
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(str(path) + suffix).unlink(missing_ok=True)
+
+
 def _root_users(root):
     """核对本世界的实际 cwd、命令参数和文件描述符，不按进程名猜测。"""
     prefix = str(root) + os.sep
@@ -95,6 +115,7 @@ class CompletedOsmoSource:
             patch.chdir(parent)
             assert _root_users(self.root) == []
         self.producer_seconds = time.monotonic() - started
+        snapshot_started = time.monotonic()
         self.databases = [Path("deployment/state.db"), Path("client-store/client.db")]
         assert all((self.root / path).is_file() for path in self.databases)
         sidecars = {self.root / (str(path) + suffix)
@@ -102,17 +123,33 @@ class CompletedOsmoSource:
         shutil.copytree(self.root, self.baseline, ignore=lambda directory, names: [
             name for name in names if Path(directory) / name in sidecars])
         self.database_digests = {}
+        self.database_layouts = {}
+        self.backup_database_layouts = {}
         for relative in self.databases:
             source, target = self.root / relative, self.baseline / relative
             expected = _database_digest(source)
+            layout = _database_layout(source)
+            if relative == Path("deployment/state.db"):
+                assert layout["journal_mode"] == "wal"
+                assert (layout["write_version"], layout["read_version"]) == (2, 2)
             target.unlink()
             with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True)) as reader:
                 with closing(sqlite3.connect(target)) as writer:
+                    writer.execute(f"PRAGMA page_size={layout['page_size']}")
+                    mode = layout["journal_mode"]
+                    assert writer.execute("PRAGMA journal_mode=" + mode).fetchone() == (mode,)
                     reader.backup(writer)
-                    # 备份已包含全部提交的 WAL；副本不携带旧连接的旁文件。
-                    assert writer.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
+                    assert not writer.in_transaction
+                    if mode == "wal":
+                        assert writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+            backup_layout = _database_layout(target)
+            assert backup_layout == layout
+            assert _root_users(self.baseline) == []
+            _remove_closed_sidecars(target)
             assert _database_digest(target, immutable=True) == expected
             self.database_digests[relative.as_posix()] = expected
+            self.database_layouts[relative.as_posix()] = layout
+            self.backup_database_layouts[relative.as_posix()] = backup_layout
         self.restore_inventory = _inventory(self.baseline)
         for relative, entry in self.restore_inventory.items():
             (self.baseline / relative).chmod(entry["mode"] & ~0o222)
@@ -127,6 +164,8 @@ class CompletedOsmoSource:
             "clock": json.loads(self.template.clock.read_text()),
             "stop_to_directory_ns": directory["started_ns"] - stop["returned_ns"],
             "database_digests": self.database_digests,
+            "source_database_layouts": self.database_layouts,
+            "backup_database_layouts": self.backup_database_layouts,
             "baseline_digest": _digest(self.readonly_inventory),
             "restore_inventory": self.restore_inventory,
             "source_actions": rows(self.template.db, "SELECT * FROM actions"),
@@ -136,6 +175,8 @@ class CompletedOsmoSource:
         }
         assert self.proof["stop_to_directory_ns"] >= 30_000_000_000
         self._assert_baseline()
+        self.proof["snapshot_seconds"] = time.monotonic() - snapshot_started
+        self.proof["shared_setup_seconds"] = time.monotonic() - started
         json_write(parent / "source-proof.json", self.proof)
 
     def _assert_baseline(self):
@@ -159,9 +200,16 @@ class CompletedOsmoSource:
             shutil.copytree(self.baseline, self.root)
             for relative, entry in self.restore_inventory.items():
                 (self.root / relative).chmod(entry["mode"])
-            assert _inventory(self.root) == self.restore_inventory
+            restored_layouts = {}
             for relative, expected in self.database_digests.items():
-                assert _database_digest(self.root / relative, immutable=True) == expected
+                database = self.root / relative
+                restored_layouts[relative] = _database_layout(database)
+                assert restored_layouts[relative] == self.database_layouts[relative]
+                assert _root_users(self.root) == []
+                _remove_closed_sidecars(database)
+                assert _database_digest(database, immutable=True) == expected
+            assert _inventory(self.root) == self.restore_inventory
+            evidence["restored_database_layouts"] = restored_layouts
             world = World(self.package, self.parent, self.host_demo, monkeypatch,
                           prepared=self.template, case_id=tmp_path.name)
             assert Path.cwd().samefile(self.root)
@@ -181,7 +229,11 @@ class CompletedOsmoSource:
             evidence["restore_seconds"] = time.monotonic() - started
             with world:
                 world.start()
-                yield world
+                body_started = time.monotonic()
+                try:
+                    yield world
+                finally:
+                    evidence["body_seconds"] = time.monotonic() - body_started
         finally:
             monkeypatch.chdir(self.parent)
             try:

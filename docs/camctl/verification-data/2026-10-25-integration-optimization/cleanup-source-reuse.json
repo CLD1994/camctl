@@ -41,11 +41,12 @@
   "copy_model": {
     "path": "同分片固定物理root；配置与database_metadata的三个绝对目录绑定均保留，不改业务行",
     "producer": "prepare_osmo完整执行真实START、唯一STOP、STOP后30秒实际driver等待、3秒双H264源及1秒修复媒体probe/全流解码；所有原断言后、最后普通host.start之前取得模板",
-    "databases": "已收场后对state.db和client.db使用SQLite backup纳入全部提交WAL；备份以DELETE journal组织，不携带旧连接WAL/SHM/journal。quick_check、foreign_key_check及全库iterdump摘要核对业务内容相同",
+    "databases": "已收场后对state.db和client.db使用SQLite backup纳入全部提交WAL；writer逐库保留源journal_mode及page_size，WAL完整检查点后显式close。普通只读连接与文件头18/19核对源/备份/恢复模式一致（state必须wal及2/2），确认无活跃连接、旁文件无尚未纳入主库的内容后移除空WAL/SHM；immutable只读可见的quick_check、foreign_key_check与全库iterdump摘要须相同。",
     "files": "复制整个world目录而非World.snapshot选表；远端、staging/ready/processing、正式源/工作文件、工具、配置、客户端数据、请求/凭据、时钟和原始日志全部保留",
     "template": "记录路径/类型/权限/字节SHA，再取消写权限；每次恢复前后核对模板只读摘要不变",
     "consumer": "迁出旧cwd，确认实际进程cwd/命令参数/FD不再使用本root；删除旧树后完整复制，恢复原权限、全树摘要和两DB逻辑摘要后再创建新World/start",
-    "archive": "每case独立case_id，原ARTIFACTS和该case的pytest tmp/world分别完整归档，完成后才可开始下一次恢复"
+    "archive": "每case独立case_id，原ARTIFACTS和该case的pytest tmp/world分别完整归档，完成后才可开始下一次恢复",
+    "measurement": "module fixture setup明确记录producer_seconds、snapshot_seconds、shared_setup_seconds；每consumer记录restore_seconds、body_seconds、consumer_seconds。完整pytest/runner成本须包含共享setup及构建，不能只比较case call下降。"
   },
   "memory_attributes": {
     "new_objects": [
@@ -84,18 +85,20 @@
     },
     "ast_parse_exit_code": 0,
     "diff_check_exit_code": 0,
-    "independent_readonly_review": "snapshot_report_speed已完整核对helper、接线和记录；无阻断。实际运行证据待测试槽。"
+    "independent_readonly_review": "snapshot_report_speed已完整核对helper、接线和持久WAL/文件头修正；无静态阻断。实际生产open_existing/旁文件与故障门证据待测试槽。"
   },
   "required_runtime_evidence": [
     "原11节点及其中9来源消费者并集保持",
     "每分片producer_runs=1、START/STOP各1、真实等待>=30秒",
     "消费者各自故障marker/新attempt/取消进程身份真实出现",
     "下例开始前完整DB/client/remote/日志/env恢复，模板摘要不变",
-    "记录producer、restore、消费者与归档耗时；不把准备搬入setup称为来源成本消失"
+    "记录producer、restore、消费者与归档耗时；不把准备搬入setup称为来源成本消失",
+    "state/client各自源、备份、恢复journal_mode/page_size和文件头read/write版本相同；state保持WAL且真实生产open_existing成功"
   ],
   "references": {
     "plan": "../../../superpowers/plans/2026-10-25-integration-test-optimization.md#s7复用清理链的只读完成来源",
     "binding": "../../../architecture/configuration.md#文件目录的绑定与变更",
-    "test_rule": "../../../../.agents/rules/testing.md#控制集成测试成本"
+    "test_rule": "../../../../.agents/rules/testing.md#控制集成测试成本",
+    "wal_contract": "../../history-storage.md"
   }
 }
