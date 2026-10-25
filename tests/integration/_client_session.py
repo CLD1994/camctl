@@ -191,6 +191,7 @@ class ClientSession:
             receipt = json.loads(output.read_text(), parse_float=Decimal)
             if not isinstance(receipt, dict):
                 raise SessionError("客户端业务回执不是对象")
+            self._browser_tickets()
             self._remaining(deadline)
             record.update(self._timing(started, "passed"))
             self._save()
@@ -205,6 +206,7 @@ class ClientSession:
             return
         started, deadline = time.monotonic_ns(), time.monotonic() + _TIMEOUT
         try:
+            self._capture()  # Node关闭组长前固定本会话的实际Chrome成员身份。
             reply = self._send(self.next_id, "close", [], deadline)
             if "receipt_path" in reply:
                 raise SessionError("close回执不应携带业务文件")
@@ -212,6 +214,10 @@ class ClientSession:
             assert self.process is not None
             if self.process.returncode != 0:
                 raise SessionError(f"客户端close后退出{self.process.returncode}；{self.stderr_path}")
+            data = self._browser_tickets()
+            if data.get("status") != "closed" or any(
+                    record.get("active") is not False for record in data.get("browser_processes", [])):
+                raise SessionError("客户端close没有保存已关闭的上下文事实")
             survivors = self._survivors()
             if survivors:
                 raise SessionError(f"客户端正常close后仍有进程：{survivors}")
@@ -231,6 +237,17 @@ class ClientSession:
         anchors = self.groups.setdefault(identity.pgid, [])
         if identity not in anchors:
             anchors.append(identity)
+
+    def _browser_tickets(self) -> dict:
+        assert self.process is not None
+        data = json.loads(self.node_metrics.read_text())
+        if data.get("session_id") != self.session_id or data.get("node_pid") != self.process.pid:
+            raise SessionError("Node进程归属记录与会话不符")
+        for record in data.get("browser_processes", []):
+            item = _process(record["pid"])
+            if item and (item.pgid, item.starttime) == (record["pgid"], record["starttime"]):
+                self._remember(item)
+        return data
 
     def _capture(self):
         """只在收场核验当前子树和TS明确记录的Chrome票据。"""
@@ -257,13 +274,7 @@ class ClientSession:
                             self._remember(item)
                             frontier.append(item.pid)
         if self.node_metrics.exists():
-            data = json.loads(self.node_metrics.read_text())
-            if data.get("session_id") != self.session_id or data.get("node_pid") != self.process.pid:
-                raise SessionError("Node进程归属记录与会话不符")
-            for record in data.get("browser_processes", []):
-                item = table.get(record["pid"])
-                if item and (item.pgid, item.starttime) == (record["pgid"], record["starttime"]):
-                    self._remember(item)
+            self._browser_tickets()
         # 已有准确身份仍存在时，该组的新成员仍属于同一持有组。
         for pgid, anchors in list(self.groups.items()):
             if any(_same(table.get(item.pid), item) for item in anchors):
