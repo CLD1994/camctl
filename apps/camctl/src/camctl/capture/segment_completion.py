@@ -738,6 +738,47 @@ def finish_segmented_cancellation(runtime, action_id):
 
 def finish_segmented_baseline_failure(runtime, action_id):
     """基准实际失败也发布明确的无 RESULTS 来源，不派发 START。"""
+    return _finish_segmented_setup_failure(runtime, action_id, preparation=False)
+
+
+def finish_segmented_preparation_failure(runtime, action_id):
+    """设置实际失败以原 PREPARE 结果发布无 RESULTS 结论。"""
+    return _finish_segmented_setup_failure(runtime, action_id, preparation=True)
+
+
+def resume_segmented_preparation_failure(runtime, action):
+    """原无 RESULTS 准备决定先发布，不让冷恢复取得新的设备资格。"""
+    if action["execution_spec_json"].get("result_policy") is None or action["cancel_requested"]:
+        return False
+    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action["id"])
+    repository = SegmentRepository()
+    ref = repository.read_prepared_result_ref(action["id"], runtime.owned)
+    if ref is None:
+        return False
+    row = repository.read_result_set(ref, runtime.owned)
+    if row["source_kind"] != int(enum_for("segment_sets.source_kind").NO_RESULTS):
+        return False
+    from camctl.capture.segment_models import ResultCheckEndReason
+    conclusion = runtime.owned.connection.execute(
+        "SELECT c.anchor_event_id FROM segment_check_conclusions c WHERE c.set_id=? AND c.reason=?",
+        (ref.set_id, int(enum_for("segment_check_conclusions.reason")[ResultCheckEndReason.NO_RESULT_WORK.name])),
+    ).fetchone()
+    if conclusion is None:
+        return False
+    prep = runtime.owned.connection.execute(
+        "SELECT r.id FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+        " WHERE r.action_id=? AND r.kind=? AND t.result_event_id=?",
+        (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE), conclusion[0]),
+    ).fetchone()
+    if prep is None:
+        return False
+    from camctl.persistence.repositories.segment_check_conclusions import no_result_preparation_failure
+    no_result_preparation_failure(runtime.owned.connection, row, conclusion[0])
+    finish_segmented_preparation_failure(runtime, action["id"])
+    return True
+
+
+def _finish_segmented_setup_failure(runtime, action_id, *, preparation):
     from camctl.capture.segment_storage import ResultCheckConclusionSave
     from camctl.capture.segment_models import ResultCheckEndReason
 
@@ -761,10 +802,17 @@ def finish_segmented_baseline_failure(runtime, action_id):
         ).fetchone()
         is None
     ):
-        (anchor,) = db.execute(
-            "SELECT result_event_id FROM baseline_read_calls WHERE action_id=? ORDER BY read_no DESC LIMIT 1",
-            (action_id,),
-        ).fetchone()
+        if preparation:
+            (anchor,) = db.execute(
+                "SELECT t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+                " WHERE r.action_id=? AND r.kind=? ORDER BY r.id DESC,t.attempt_no DESC LIMIT 1",
+                (action_id, int(enum_for("operation_runs.kind").PREPARE_CAPTURE)),
+            ).fetchone()
+        else:
+            (anchor,) = db.execute(
+                "SELECT result_event_id FROM baseline_read_calls WHERE action_id=? ORDER BY read_no DESC LIMIT 1",
+                (action_id,),
+            ).fetchone()
         _save(
             runtime,
             action_id,
@@ -797,7 +845,7 @@ def finish_segmented_baseline_failure(runtime, action_id):
                 "capture_failed",
                 {
                     "activity_id": str(row["activity_id"]),
-                    "reason": "baseline_read_failed",
+                    "reason": "device_failed" if preparation else "baseline_read_failed",
                 },
             ),
         ),

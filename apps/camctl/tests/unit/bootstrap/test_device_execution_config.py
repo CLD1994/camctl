@@ -13,6 +13,24 @@ def _load(section, field, value):
     }}}, ConfigDefaults()).devices["camera-1"][section][field]
 
 
+@pytest.mark.parametrize("value,expected", [(0, Decimal(0)), (2, Decimal(2)),
+    (Decimal("0.125"), Decimal("0.125")), ("0.0125", Decimal("0.0125"))])
+def test_explicit_prepare_lead_preserves_finite_nonnegative_seconds(value, expected):
+    assert _load("connection", "prepare_lead_s", value) == expected
+
+
+@pytest.mark.parametrize("value", [True, None, -1, "NaN", "Infinity", "later", 1.5])
+def test_prepare_lead_rejects_invalid_explicit_override(value):
+    with pytest.raises(ConfigError, match="prepare_lead_s"):
+        _load("connection", "prepare_lead_s", value)
+
+
+def test_omitted_prepare_lead_is_left_to_the_driver_default():
+    device = load_config({"devices": {"camera-1": {"kind": "camera", "driver": "adb"}}},
+                         ConfigDefaults()).devices["camera-1"]
+    assert "connection" not in device
+
+
 @pytest.mark.parametrize("section,field", [
     ("recording", "start_timeout_s"), ("recording", "stop_timeout_s"),
     ("result_check", "call_timeout_s"), ("copy", "read_idle_timeout_s"),

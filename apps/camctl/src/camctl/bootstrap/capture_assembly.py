@@ -707,6 +707,8 @@ def session_capture_assembly(
     pending_host_photo_completions: dict[int, Any] | None = None,
     start_entries=None,
     read_discovery_batch_size: int | None = None,
+    preparation_cache=None,
+    session_key: str | None = None,
 ) -> Callable[[Any, str], CaptureRuntime | None]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
@@ -735,6 +737,16 @@ def session_capture_assembly(
     """
 
     from camctl.devices.start_entry import StartEntryCoordinator
+    from camctl.capture.preparation import RuntimePreparationCache
+    from uuid import uuid4
+    preparation_cache = RuntimePreparationCache() if preparation_cache is None else preparation_cache
+    session_key = uuid4().hex if session_key is None else session_key
+    preparation_leads = {}
+    for device_id, declaration in devices.items():
+        entry = drivers.entry(declaration.get("driver"))
+        if entry is not None and getattr(entry.declaration, "capture_preparation_supported", False) is True:
+            preparation_leads[device_id] = declaration.get("connection", {}).get(
+                "prepare_lead_s", entry.driver.default_prepare_lead_s)
     start_entries = StartEntryCoordinator() if start_entries is None else start_entries
     anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
@@ -796,6 +808,8 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             start_entries=start_entries,
+            preparation_cache=preparation_cache,
+            session_key=session_key,
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
@@ -840,6 +854,8 @@ def session_capture_assembly(
             directory_port = port_for(entry, "directory")
         except CapabilityNotDeclaredError:
             directory_port = None
+        preparation_driver = (port_for(entry, "prepare_capture")
+            if getattr(entry.declaration, "capture_preparation_supported", False) is True else None)
         capture_repository = CaptureRepository()
         if results is not None:
             results_port: ResultFilesPort | None = results
@@ -912,6 +928,11 @@ def session_capture_assembly(
             recovery_evidence_for=original_recovery_evidence,
             pending_start_results=pending_start_results,
             start_entries=start_entries,
+            capture_preparation_supported=preparation_driver is not None,
+            preparation_driver=preparation_driver,
+            preparation_cache=preparation_cache,
+            session_key=session_key,
+            prepare_lead_s=preparation_leads.get(device_id, Decimal(0)),
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,
@@ -1001,6 +1022,7 @@ def session_capture_assembly(
         runtime.recording_state = SessionRecordingState(runtime, anchors)
         return runtime
 
+    factory.preparation_leads = preparation_leads
     return factory
 
 

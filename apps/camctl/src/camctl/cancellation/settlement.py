@@ -48,6 +48,7 @@ class TargetSettlement:
                  withdrawal_execute: Callable[[int], Awaitable[bool]] | None = None,
                  withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None,
                  cleanup_pending: Callable[[Any, int], bool] | None = None,
+                 preparation_pending: Callable[[int], bool] | None = None,
                  pending_origin_settlements: dict | None = None) -> None:
         self._owned = owned
         self._outputs = outputs
@@ -57,6 +58,7 @@ class TargetSettlement:
         self._withdrawal_execute = withdrawal_execute
         self._withdrawal_resume = withdrawal_resume
         self._cleanup_pending = cleanup_pending
+        self._preparation_pending = preparation_pending
         self._pending_origin_settlements = {} if pending_origin_settlements is None else pending_origin_settlements
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
@@ -91,13 +93,17 @@ class TargetSettlement:
 
     def _settle_capture(self, target_action_id: int, status: int) -> SettlementOutcome:
         """分别核对必要停止及延时文件核实，采用各自原处理结论。"""
-        if status not in _ACTION_TERMINAL:
+        if (status not in _ACTION_TERMINAL or self._preparation_pending is not None
+                and self._preparation_pending(target_action_id)):
             return SettlementOutcome(complete=False)
         connection = self._owned.connection
         action = row_facts(connection, "actions", target_action_id)
+        facts = load_start_facts(connection, action)
+        if (not facts.preparation_resolved or facts.not_started and facts.activity is not None
+                and facts.activity["occupancy_state"] == 1):
+            return SettlementOutcome(complete=False)
         if not action["cancel_requested"]:
             return SettlementOutcome(complete=True)
-        facts = load_start_facts(connection, action)
         with closing(connection.execute(
             "SELECT kind, action_id, activity_id, status FROM operation_runs"
             " WHERE responsibility_key = ?", (f"stop/{target_action_id}",),

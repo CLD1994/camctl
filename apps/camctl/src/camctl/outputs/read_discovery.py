@@ -4,7 +4,7 @@ from contextlib import closing
 from dataclasses import dataclass
 
 from camctl.contracts.pages import Page
-from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
+from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.contracts.enums import enum_for
 
 _INSPECTION_STATE = enum_for("segment_inspections.state")
@@ -329,18 +329,29 @@ class ReadDiscoveryOwner:
         self.accept(scope, page)
         return page
 
-    def captures(self, connection, now_us):
+    def captures(self, connection, now_us, preparation_leads=None):
         """拍摄入口按完整业务顺序续页，避免较晚动作先取得启动资格。"""
         database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
         scope = self.scope("capture", database, now_us)
         saved = self._positions.get("capture")
         order = "scheduled_at,plan_id,input_index,id"
-        query = (
-            "SELECT id,device_id,scheduled_at,plan_id,input_index FROM actions"
-            " WHERE type IN (1,2,3) AND status IN (1,2)"
-            " AND ((cancel_requested=0 AND scheduled_at<=?) OR (status=2 AND cancel_requested=1))"
-        )
+        eligibility = "(status IN (1,2) AND cancel_requested=0 AND scheduled_at<=?) OR (status=2 AND cancel_requested=1)"
         parameters = (scope.now_us,)
+        if preparation_leads:
+            for device_id, lead_s in preparation_leads.items():
+                horizon = min(MAX_OBJECT_ID, scope.now_us + int(lead_s * 1_000_000))
+                eligibility += " OR (type IN (2,3) AND status=1 AND cancel_requested=0 AND device_id=? AND scheduled_at<=?)"
+                parameters += device_id, horizon
+            at = next_preparation_at(connection, scope.now_us, preparation_leads)
+            if at is not None:
+                self._deadline = at if self._deadline is None else min(at, self._deadline)
+        from camctl.capture.preparation_discovery import preparation_responsibility_where
+        eligibility += (" OR EXISTS (SELECT 1 FROM device_activities d WHERE d.action_id=a.id AND "
+                        + preparation_responsibility_where(include_pending=True) + ")")
+        query = (
+            "SELECT id,device_id,scheduled_at,plan_id,input_index FROM actions a"
+            " WHERE type IN (1,2,3) AND (" + eligibility + ")"
+        )
         if saved is not None:
             query += f" AND ({order})>(?,?,?,?)"
             parameters += saved.after
@@ -352,3 +363,21 @@ class ReadDiscoveryOwner:
         page = Page(items=rows, next_cursor=next_cursor)
         self.accept(scope, page)
         return page
+
+
+def next_preparation_at(connection, now_us, preparation_leads):
+    """取尚未进入提前区间的最早时刻，不为已阻塞候选制造空转截止。"""
+    result = None
+    for device_id, lead_s in preparation_leads.items():
+        lead_us = int(lead_s * 1_000_000)
+        horizon = min(MAX_OBJECT_ID, now_us + lead_us)
+        with closing(connection.execute(
+            "SELECT MIN(scheduled_at) FROM actions WHERE type IN (2,3)"
+            " AND status=1 AND cancel_requested=0 AND device_id=? AND scheduled_at>?",
+            (device_id, horizon),
+        )) as cursor:
+            at = cursor.fetchone()[0]
+        if at is not None:
+            at -= lead_us
+            result = at if result is None else min(result, at)
+    return result

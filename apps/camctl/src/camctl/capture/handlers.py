@@ -136,7 +136,7 @@ from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.devices.directory import DirectoryReader
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import EvidenceError
-from camctl.devices.ports import ControlRequest, DeviceCallResult
+from camctl.devices.ports import CapturePreparationDriver, ControlRequest, DeviceCallResult
 from camctl.devices.recording_completion import is_completed_file_wait
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.attempts import (
@@ -898,6 +898,11 @@ class CaptureRuntime(_FileObservationSaves):
     pending_segment_writes: dict = field(default_factory=dict)
     baseline_directory: DirectoryReader | None = None
     start_entries: Any = field(default_factory=StartEntryCoordinator)
+    capture_preparation_supported: bool = False
+    preparation_driver: CapturePreparationDriver | None = None
+    preparation_cache: Any = None
+    session_key: str | None = None
+    prepare_lead_s: Decimal = Decimal(0)
 
     @property
     def baseline_timeout_s(self):
@@ -1587,8 +1592,23 @@ def _capture_dispatch_check(runtime, action_id):
 
     current = runtime.action(action_id)
     _preflight_capture_timing(runtime, current)
+    now = runtime.wall_us()
+    if current["cancel_requested"]:
+        return "canceled"
+    if now < current["scheduled_at"]:
+        return "before_start"
     return recheck_dispatch(canceled=bool(current["cancel_requested"]),
-        window=runtime.window_of(current), trusted_wall_now=runtime.wall_us()).reason
+        window=runtime.window_of(current), trusted_wall_now=now).reason
+
+
+def _prepared_start_ticket(runtime, action):
+    if getattr(runtime, "capture_preparation_supported", False) is not True or action["type"] not in (2, 3):
+        return None
+    from camctl.capture.preparation import prepared_by
+    ticket = prepared_by(runtime, action)
+    if ticket is None:
+        raise ConsistencyError("实际 START 缺少本会话可靠且匹配的准备凭据")
+    return ticket
 
 
 def _require_result_port(runtime, message: str) -> None:
@@ -1645,6 +1665,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
             ticket=ticket, timeout_s=_start_call_timeout(action),
             dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
             start_entry=permit,
+            prepared_by=_prepared_start_ticket(runtime, action),
         ))
     finally:
         if permit is not None:
@@ -1844,7 +1865,11 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
     from camctl.capture.baseline import PreparationPhase
     from camctl.scheduling.rules import WindowPhase, window_phase
 
-    result = await runtime.prepare_baseline(action["id"])
+    if getattr(runtime, "capture_preparation_supported", False) is True and action["type"] in (2, 3):
+        from camctl.capture.preparation import advance_preparation
+        result = await advance_preparation(runtime, action["id"])
+    else:
+        result = await runtime.prepare_baseline(action["id"])
     if result.phase is PreparationPhase.WAITING:
         return HandlerOutcome("not_granted", "baseline_pending")
     if result.phase is PreparationPhase.PENDING:
@@ -1928,7 +1953,8 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
                 "start_recording", _binding(action), action["effective_params_json"],
                 ticket=ticket, timeout_s=runtime.start_config.timeout_s,
                 start_return_meaning=action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED)),
-                dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"])))
+                dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
+                prepared_by=_prepared_start_ticket(runtime, action)))
             received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
             meaning = action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED))
             outcome, confirmed = _operation_outcome(result,

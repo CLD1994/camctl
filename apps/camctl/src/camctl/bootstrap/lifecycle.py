@@ -28,6 +28,7 @@ from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.clocks import SystemClock
 from camctl.bootstrap.config import ConfigSnapshot
 from camctl.capture.recovery import RecoveryBoundary
+from camctl.capture.preparation import RuntimePreparationCache, resume_preparation_saves
 from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.runtime import (
     DbConfig, DbOpenMode, DirectoryBindingError, OwnedConnection,
@@ -99,6 +100,7 @@ class RuntimeDeps:
     capture_file_observations: dict[tuple[int, str], PendingFileObservation] = field(default_factory=dict)
     #: 基准准备及原页保存由本会话持有，普通、残留与受限工厂共用。
     capture_baselines: dict = field(default_factory=dict)
+    capture_preparations: RuntimePreparationCache = field(default_factory=RuntimePreparationCache)
     #: 原结果页保存申请由普通、残留和受限工厂共享。
     capture_result_scans: dict = field(default_factory=dict)
     capture_segment_writes: dict = field(default_factory=dict)
@@ -138,6 +140,7 @@ def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
 
 def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     """核实原拍摄终态及附属收尾，取消入口不取得新的 READ 业务资格。"""
+    resume_preparation_saves(owned, deps.capture_preparations)
     from camctl.capture.handlers import (
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
     )
@@ -151,6 +154,8 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     from camctl.persistence.repositories.capture import CaptureRepository
 
     runtime = SimpleNamespace(owned=owned, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
+                              preparation_cache=deps.capture_preparations,
+                              session_key=deps.session_key,
                               wall_us=lambda: SystemClock().utc_micros())
     recover_terminal_baselines(runtime=runtime)
     for action_id in tuple(deps.capture_baselines):
@@ -788,6 +793,7 @@ def _report_assembly(
             resume_file_observations=resume_files,
             resume_capture_completions=partial(_resume_capture_requests, deps),
             cleanup_pending=partial(_cleanup_pending_for_action, deps),
+            preparation_pending=deps.capture_preparations.pending,
         ),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
@@ -803,6 +809,8 @@ def _report_assembly(
                 pending_capture_completions=deps.capture_completions,
                 pending_result_closes=deps.capture_result_closes,
                 pending_baselines=deps.capture_baselines,
+                preparation_cache=deps.capture_preparations,
+                session_key=deps.session_key,
                 pending_result_scans=deps.capture_result_scans,
                 pending_segment_writes=deps.capture_segment_writes,
                 pending_file_observations=deps.capture_file_observations,
@@ -838,6 +846,8 @@ def _report_assembly(
                 pending_capture_completions=deps.capture_completions,
                 pending_result_closes=deps.capture_result_closes,
                 pending_baselines=deps.capture_baselines,
+                preparation_cache=deps.capture_preparations,
+                session_key=deps.session_key,
                 pending_result_scans=deps.capture_result_scans,
                 pending_segment_writes=deps.capture_segment_writes,
                 pending_file_observations=deps.capture_file_observations,
@@ -1025,6 +1035,7 @@ async def execute_command(
                     resume_media_results=deps.work_files.resume_media_results,
                     resume_file_observations=resume_files,
                     resume_capture_completions=partial(_resume_capture_requests, deps),
+                    preparation_pending=deps.capture_preparations.pending,
                 ),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(
@@ -1038,6 +1049,8 @@ async def execute_command(
                         pending_capture_completions=deps.capture_completions,
                         pending_result_closes=deps.capture_result_closes,
                         pending_baselines=deps.capture_baselines,
+                        preparation_cache=deps.capture_preparations,
+                        session_key=deps.session_key,
                         pending_result_scans=deps.capture_result_scans,
                         pending_segment_writes=deps.capture_segment_writes,
                         pending_file_observations=deps.capture_file_observations,

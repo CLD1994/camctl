@@ -24,7 +24,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.wakeups import RecordingWakeups
@@ -138,9 +138,15 @@ class CaptureFlow:
         self._discovery = ReadDiscoveryOwner(read_discovery_batch_size)
         self._recording_wakeups = RecordingWakeups()
         self._notification_tasks: dict[str, asyncio.Task] = {}
+        leads = getattr(capture_factory, "preparation_leads", None)
+        self._preparation_leads = dict(leads) if isinstance(leads, Mapping) else {}
+        self._preparation_at = None
+        self._device_candidates: dict[str, tuple[int, ...]] = {}
 
     def next_wakeup_at(self, now, margin_s):
-        return self._recording_wakeups.next_at(now, margin_s)
+        recording = self._recording_wakeups.next_at(now, margin_s)
+        deadlines = [at for at in (recording, self._preparation_at) if at is not None]
+        return min(deadlines, default=None)
 
     def owns_device(self, device_id):
         owner = self._devices.get(device_id)
@@ -152,6 +158,7 @@ class CaptureFlow:
     def stop_new_work(self):
         self._stopping = True
         self._recording_wakeups.clear()
+        self._preparation_at = None
         CombinedLocalWork(tuple(self._devices.values())).stop_new_work()
 
     def check_completed(self):
@@ -187,7 +194,14 @@ class CaptureFlow:
             await _resume_actual_file_facts(owned, self._resume_files, self._resume_media, self._resume_reads)
             now = context.clock.utc_micros()
             self._discovery.begin_round(owned.connection, now)
-            page = self._discovery.captures(owned.connection, now)
+            if self._preparation_leads:
+                from camctl.outputs.read_discovery import next_preparation_at
+                page = self._discovery.captures(owned.connection, now, self._preparation_leads)
+                at = next_preparation_at(owned.connection, now, self._preparation_leads)
+                self._preparation_at = (None if at is None else
+                    asyncio.get_running_loop().time() + max(0, at - now) / 1_000_000)
+            else:
+                page = self._discovery.captures(owned.connection, now)
             self._observe_windows(context, owned, tuple(item[0] for item in page.items))
             device_ids = {}
             for action_id, device_id, *_ in page.items:
@@ -199,13 +213,15 @@ class CaptureFlow:
         finally:
             owned.connection.close()
         for device_id, action_ids in device_ids.items():
+            self._device_candidates[device_id] = tuple(action_ids)
             self.check_completed()
             if self._stopping:
                 return
             owner = self._devices.get(device_id)
             if owner is None:
-                async def advance(context, device_id=device_id, action_ids=tuple(action_ids)):
-                    await self._advance_device(context, device_id, action_ids)
+                async def advance(context, device_id=device_id):
+                    candidates = self._device_candidates[device_id]
+                    await self._advance_device(context, device_id, candidates)
                 owner = BackgroundFlow(advance)
                 self._devices[device_id] = owner
             await owner(context)
@@ -258,6 +274,25 @@ class CaptureFlow:
                     if changed and getattr(context, "wake", None) is not None:
                         context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
                 runtime.on_recording_deadline = recording_deadline
+            preparation_ready = None
+            if runtime is not None:
+                from camctl.capture.preparation import recover_preparation
+                for action_id in action_ids:
+                    if runtime.action(action_id)["status"] in (3, 4, 5, 6):
+                        recover_preparation(runtime, action_id)
+            if runtime is not None and runtime.capture_preparation_supported is True:
+                from camctl.capture.preparation import advance_preparation
+                from camctl.capture.baseline import PreparationPhase
+                preparation_ready = set()
+                for action_id in action_ids:
+                    if self._stopping:
+                        return
+                    from camctl.capture.residual import _original_binding_failure
+                    if _original_binding_failure(runtime, runtime.action(action_id)) is not None:
+                        continue
+                    prepared = await advance_preparation(runtime, action_id)
+                    if prepared.phase is PreparationPhase.READY:
+                        preparation_ready.add(action_id)
             pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
                 action_ids=action_ids, limit=self._discovery.batch_size)
             for action_id, _, scheduled_at, max_delay_ms in pending:
@@ -271,9 +306,14 @@ class CaptureFlow:
                         raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
                     continue
                 if runtime is not None:
-                    from camctl.capture.residual import pass_residual_gate
+                    from camctl.capture.residual import pass_residual_gate, _original_binding_failure
                     if not await pass_residual_gate(runtime, runtime.action(action_id)):
                         continue
+                    if (preparation_ready is not None and action_id not in preparation_ready
+                            and _original_binding_failure(runtime, runtime.action(action_id)) is None):
+                        prepared = await advance_preparation(runtime, action_id)
+                        if prepared.phase is not PreparationPhase.READY:
+                            continue
                 if self._stopping:
                     return
                 # 执行前查询可能等待；建立准备活动时重新使用实际窗口时刻。
@@ -289,6 +329,10 @@ class CaptureFlow:
             for action_id, outcome in await dispatch_ready(runtime, group):
                 if isinstance(outcome, BaseException):
                     raise outcome
+            if runtime.capture_preparation_supported is True:
+                from camctl.capture.preparation import discard_terminal_preparation
+                for action_id in action_ids:
+                    discard_terminal_preparation(runtime, action_id)
         except Exception as error:
             self._stopping = True
             try:
@@ -344,6 +388,18 @@ def winddown_flow(
         try:
             await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
                                             resume_read_results)
+            from camctl.capture.preparation_discovery import preparation_responsibility_where
+            with closing(owned.connection.execute(
+                    "SELECT a.id,a.device_id FROM actions a JOIN device_activities d ON d.action_id=a.id"
+                    " WHERE " + preparation_responsibility_where(include_pending=True) + " ORDER BY a.id")) as cursor:
+                preparations = cursor.fetchall()
+            for action_id, device_id in preparations:
+                if owns_device is not None and owns_device(device_id):
+                    continue
+                runtime = capture_factory(owned, device_id)
+                if runtime is not None:
+                    from camctl.capture.preparation import recover_preparation
+                    recover_preparation(runtime, action_id)
             with closing(owned.connection.execute(
                     "SELECT id FROM actions"
                     " WHERE type = 2 AND status = 2"
@@ -458,6 +514,7 @@ def cancel_flow(
     resume_file_observations=None,
     resume_capture_completions=None,
     cleanup_pending=None,
+    preparation_pending=None,
 ) -> Callable[[Any], Any]:
     """构造推进取消动作的会话流程。
 
@@ -532,6 +589,7 @@ def cancel_flow(
                 occurred_at=occurred, work_files=work_files,
                 withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
                 cleanup_pending=cleanup_pending,
+                preparation_pending=preparation_pending,
                 pending_origin_settlements=pending_origin_settlements)
             cancellation_runtime = CancellationRuntime(
                 owned=owned, repository=repository, settlement=settlement,

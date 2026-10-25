@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 from dataclasses import dataclass
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, create_autospec
 
@@ -31,6 +32,7 @@ class _Action:
     status: int = 1
     first_observed_at: int | None = None
     expiration_reason: int | None = None
+    execution_started: int = 0
 
 
 class _CaptureState:
@@ -56,6 +58,7 @@ class _CaptureState:
         self.repository.start_action.side_effect = self._start
         mocker.patch("camctl.bootstrap.flows.SchedulingRepository", return_value=self.repository)
         self.runtime = create_autospec(CaptureRuntime, instance=True)
+        self.runtime.binding_check = None
         self.factory = Mock(return_value=self.runtime)
         self.flow = CaptureFlow(self.factory)
         self.flow._discovery = self.discovery
@@ -103,6 +106,7 @@ class _CaptureState:
         else:
             assert action.first_observed_at is not None
             action.status = 2
+            action.execution_started = 1
             result = StartActionResult(StartOutcome.STARTED, action.identity)
         return DbOutcome(DbOutcomeKind.COMPLETED, result)
 
@@ -147,6 +151,85 @@ async def test_busy_device_observes_and_expires_pending_action_before_original_w
     finally:
         release.set()
         await state.flow.settle()
+
+
+async def test_later_discovery_page_on_same_device_uses_current_candidates(mocker):
+    first, second = _Action(1, 0, 1000), _Action(2, 0, 1000)
+    state = _CaptureState(mocker, (first, second))
+    state.discovery.captures.side_effect = [
+        Page(((1, "cam-1", 0, 1, 1),), None),
+        Page(((2, "cam-1", 0, 1, 2),), None),
+    ]
+    mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    await state.flow(state.context)
+    await state.flow.settle()
+    await state.flow(state.context)
+    await state.flow.settle()
+    assert first.status == 2 and second.status == 2
+    assert [call.args[0].action_id for call in state.repository.start_action.call_args_list] == [1, 2]
+
+
+@pytest.mark.parametrize("lead", [Decimal(0), Decimal(10)])
+async def test_preparation_task_returns_pending_and_start_waits_until_scheduled_time(mocker, lead):
+    from camctl.capture.baseline import BaselinePreparation, PreparationPhase
+
+    action = _Action(1, 10_000_000, 1000)
+    state = _CaptureState(mocker, (action,))
+    state.runtime.capture_preparation_supported = True
+    state.flow._preparation_leads = {"cam-1": lead}
+    state.discovery.captures.side_effect = lambda connection, now, leads: Page(tuple(
+        (item.identity, "cam-1", item.scheduled_at, 1, item.identity)
+        for item in state.actions.values() if item.scheduled_at <= now + int(lead * 1_000_000)), None)
+    mocker.patch("camctl.outputs.read_discovery.next_preparation_at", autospec=True, return_value=None)
+    prepare = mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True,
+        return_value=BaselinePreparation(PreparationPhase.READY))
+    mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    await state.flow(state.context)
+    await state.flow.settle()
+    assert action.status == 1 and action.execution_started == 0
+    assert state.flow.required_settlements() == 0
+    assert prepare.await_count == (1 if lead else 0)
+    state.repository.start_action.assert_not_called()
+    state.now = action.scheduled_at
+    await state.flow(state.context)
+    await state.flow.settle()
+    assert action.status == 2 and action.execution_started == 1
+    state.repository.start_action.assert_called_once()
+
+
+async def test_due_preparation_wait_still_advances_original_residual_gate(mocker):
+    from camctl.capture.baseline import BaselinePreparation, PreparationPhase
+
+    state = _CaptureState(mocker, (_Action(1, 0, 1000),))
+    state.runtime.capture_preparation_supported = True
+    prepare = mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True,
+        side_effect=[BaselinePreparation(PreparationPhase.WAITING), BaselinePreparation(PreparationPhase.READY)])
+    gate = mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    await state.flow(state.context)
+    await state.flow.settle()
+    gate.assert_awaited_once()
+    assert prepare.await_count == 2
+    state.repository.start_action.assert_called_once()
+
+
+async def test_due_binding_failure_reaches_original_local_failure_path_without_preparing(mocker):
+    from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
+
+    state = _CaptureState(mocker, (_Action(1, 0, 1000),))
+    state.runtime.capture_preparation_supported = True
+    state.runtime.action.return_value = {"id": 1, "device_id": "cam-1", "driver_id": "driver-1", "status": 1}
+    state.runtime.binding_check = lambda saved: BindingResult(BindingStatus.DRIVER_MISMATCH,
+        DeviceBinding("cam-1", "driver-1"), "driver-2")
+    prepare = mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True)
+    mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    await state.flow(state.context)
+    await state.flow.settle()
+    prepare.assert_not_called()
+    state.repository.start_action.assert_called_once()
 
 
 async def test_actual_start_rechecks_current_time_after_device_gate_wait(mocker):

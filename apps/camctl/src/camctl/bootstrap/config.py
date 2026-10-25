@@ -554,6 +554,9 @@ def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
         kind = _require_nonempty_str(declaration.get("kind"), f"devices.{device_id}.kind")
         driver_id = _require_nonempty_str(declaration.get("driver"), f"devices.{device_id}.driver")
         normalized = dict(declaration)
+        if "connection" in normalized:
+            normalized["connection"] = _validated_seconds_subtable(
+                device_id, normalized["connection"], "connection", ("prepare_lead_s",))
         if kind == "camera":
             video = _take(normalized.get("video", {}),
                           f"devices.{device_id}.video", ("result_mode",))

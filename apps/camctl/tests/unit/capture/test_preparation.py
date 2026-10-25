@@ -1,0 +1,379 @@
+"""设置准备的实际返回、可靠保存和当前会话凭据分别成立。"""
+
+import asyncio
+import sqlite3
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import create_autospec
+
+import pytest
+
+from camctl.capture.baseline import BaselinePreparation, PreparationPhase
+from camctl.capture.handlers import CaptureRuntime
+from camctl.capture.preparation import (
+    RuntimePreparationCache, advance_preparation, prepared_by, resume_preparation_saves,
+    _recover_old_preparation, settle_preparation,
+)
+from camctl.contracts.values import ConsistencyError
+from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
+from camctl.devices.ports import CapturePreparationDriver, ControlDriver, DeviceCallResult
+from camctl.operations.attempts import (
+    AttemptConfig, BeginAttemptResult, BeginDisposition, FinishAttemptResult, FinishDisposition,
+)
+from camctl.operations.models import (
+    AttemptTicket, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
+)
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.scheduling import SchedulingRepository
+from camctl.persistence.repositories.capture import CaptureRepository
+
+
+def _world(mocker, *, recover=True):
+    runtime = create_autospec(CaptureRuntime, instance=True)
+    runtime.owned = SimpleNamespace(connection=create_autospec(sqlite3.Connection, instance=True))
+    runtime.operations = create_autospec(OperationRepository, instance=True)
+    runtime.scheduling = create_autospec(SchedulingRepository, instance=True)
+    runtime.driver = create_autospec(ControlDriver, instance=True)
+    runtime.capture = create_autospec(CaptureRepository, instance=True)
+    runtime.preparation_driver = create_autospec(CapturePreparationDriver, instance=True)
+    runtime.preparation_driver.prepared_capture_matches.return_value = True
+    runtime.preparation_cache = RuntimePreparationCache()
+    runtime.pending_baselines = {}
+    runtime.pending_segment_writes = {}
+    runtime.owned.connection.in_transaction = False
+    runtime.recovery_max_event_id = 99
+    runtime.session_key = "a" * 32
+    runtime.prepare_lead_s = Decimal(10)
+    runtime.start_config = AttemptConfig(3, Decimal("0.5"), Decimal(3))
+    runtime.wall_us = create_autospec(lambda: 0, return_value=0)
+    runtime.last_attempt.return_value = None
+    action = {"id": 1, "type": 2, "device_id": "cam-1", "driver_id": "driver-1",
+              "scheduled_at": 10_000_000, "max_delay_ms": 1000, "status": 1,
+              "execution_started": 0, "cancel_requested": 0,
+              "effective_params_json": {"duration_s": 1}, "execution_spec_json": {}}
+    runtime.action.return_value = action
+    runtime.evidence = EvidenceRegistry((
+        EvidenceContract("returned", 1, "control", frozenset()),
+        EvidenceContract("capture_preparation_completed", 1, "control", frozenset({"activity_id"}),
+                         identity_field="activity_id"),
+        EvidenceContract("adb_foreground_recovery", 1, "control", frozenset()),
+        EvidenceContract("dispatch_prevented", 1, "control", frozenset()),
+    ))
+    ticket = AttemptTicket(1, "control", "7", f"prepare/7/{runtime.session_key}", 11)
+    runtime.operations.begin_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        BeginAttemptResult(BeginDisposition.GRANTED, ticket))
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        FinishAttemptResult(FinishDisposition.SAVED))
+    outcome = CallOutcome(effect=EffectState.CONFIRMED,
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("returned", 1)),
+        observations=(DeviceObservation("capture_preparation_completed", 1, {"activity_id": "7"}),))
+    runtime.preparation_driver.prepare_capture.return_value = DeviceCallResult.from_outcome(outcome)
+    runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
+    if recover:
+        mocker.patch("camctl.capture.preparation._recover_old_preparation", autospec=True, return_value=True)
+    mocker.patch("camctl.capture.preparation._activity", autospec=True,
+                 return_value={"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    return runtime, action, ticket
+
+
+@pytest.mark.asyncio
+async def test_preparation_ends_before_scheduled_time_without_starting_action(mocker):
+    runtime, action, ticket = _world(mocker)
+    result = await advance_preparation(runtime, 1)
+    assert result.phase is PreparationPhase.READY
+    assert action["status"] == 1 and action["execution_started"] == 0
+    assert runtime.preparation_cache.owners[1].task.done()
+    assert prepared_by(runtime, action) == ticket
+    request = runtime.operations.begin_attempt.call_args.args[0]
+    assert request.config == AttemptConfig(1, runtime.start_config.timeout_s)
+    runtime.scheduling.start_action.assert_not_called()
+    runtime.driver.control.assert_not_called()
+    await advance_preparation(runtime, 1)
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unknown_result_save_keeps_original_request_and_never_repeats_settings(mocker):
+    runtime, action, ticket = _world(mocker)
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("unknown"))
+    with pytest.raises(ConsistencyError, match="原完整申请"):
+        await advance_preparation(runtime, 1)
+    owner = runtime.preparation_cache.owners[1]
+    original, key = owner.finish, owner.result_key
+    assert prepared_by(runtime, action) is None
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        FinishAttemptResult(FinishDisposition.SAVED))
+    resume_preparation_saves(runtime.owned, runtime.preparation_cache, operations=runtime.operations)
+    assert runtime.operations.finish_attempt.call_args.args[:2] == (original, key)
+    assert prepared_by(runtime, action) == ticket
+    await advance_preparation(runtime, 1)
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("save_fails", [False, True])
+async def test_second_cancellation_waits_for_actual_result_save_before_connection_close(mocker, save_fails):
+    runtime, _, _ = _world(mocker)
+    entered, interrupted, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    result = runtime.preparation_driver.prepare_capture.return_value
+
+    async def call(request):
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            interrupted.set()
+            await release.wait()
+        return result
+
+    runtime.preparation_driver.prepare_capture.side_effect = call
+    if save_fails:
+        runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("unknown"))
+
+    async def advance_and_close():
+        try:
+            await advance_preparation(runtime, 1)
+        finally:
+            runtime.owned.connection.close()
+
+    task = asyncio.create_task(advance_and_close())
+    await entered.wait()
+    task.cancel()
+    await interrupted.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    runtime.owned.connection.close.assert_not_called()
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as failure:
+        await task
+    assert runtime.preparation_cache.owners[1].saved is not save_fails
+    if save_fails:
+        assert isinstance(failure.value.__cause__, ConsistencyError)
+    runtime.operations.finish_attempt.assert_called_once()
+    runtime.owned.connection.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_saved_preparation_without_current_driver_match_is_never_start_proof(mocker):
+    runtime, action, _ = _world(mocker)
+    await advance_preparation(runtime, 1)
+    runtime.preparation_driver.prepared_capture_matches.return_value = False
+    assert prepared_by(runtime, action) is None
+
+
+@pytest.mark.asyncio
+async def test_local_proof_check_receives_original_activity_ticket(mocker):
+    runtime, action, ticket = _world(mocker)
+    runtime.preparation_driver.prepared_capture_matches.side_effect = (
+        lambda request: request.ticket == ticket and request.prepared_by == ticket)
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert prepared_by(runtime, action) == ticket
+    runtime.preparation_driver.prepared_capture_matches.return_value = True
+    runtime.session_key = "b" * 32
+    assert prepared_by(runtime, action) is None
+
+
+def test_cold_preparation_recovers_original_responsibility_without_settings_or_success(mocker):
+    from camctl.operations.attempts import RunOutcome
+
+    runtime, action, _ = _world(mocker, recover=False)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchall.return_value = [(8, "prepare/7/" + "b" * 32, 7, 1, 1)]
+    runtime.owned.connection.execute.return_value = cursor
+    runtime._attempt_recovery_evidence.return_value = runtime.evidence
+    assert _recover_old_preparation(runtime, 1)
+    owner = runtime.preparation_cache.owners[1]
+    assert owner.saved and not owner.successful
+    assert owner.finish.run_finish.status is RunOutcome.UNCONFIRMED
+    assert owner.finish.recovery_max_event_id == 99
+    assert prepared_by(runtime, action) is None
+    runtime.preparation_driver.prepare_capture.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_existing_start_with_unknown_effect_stays_on_original_chain(mocker):
+    from camctl.persistence.repositories.capture_facts import StartFacts
+
+    runtime, action, _ = _world(mocker)
+    runtime.last_attempt.return_value = (1, 3, 0)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+                 return_value=StartFacts(None, None, 1, False, None))
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    runtime.preparation_driver.prepare_capture.assert_not_called()
+    runtime.prepare_baseline.assert_not_called()
+    runtime.operations.begin_attempt.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reliable_no_effect_start_can_prepare_without_resetting_execution(mocker):
+    from camctl.persistence.repositories.capture_facts import StartFacts
+
+    runtime, action, _ = _world(mocker)
+    action.update(status=2, execution_started=1)
+    runtime.last_attempt.return_value = (3, 2, 0)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+                 return_value=StartFacts(None, None, 1, True, 4))
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert action["status"] == 2 and action["execution_started"] == 1
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+    runtime.scheduling.start_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_terminal_preparation_releases_only_after_actual_settings_finish(mocker):
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, action, _ = _world(mocker)
+    entered, release = asyncio.Event(), asyncio.Event()
+    actual = runtime.preparation_driver.prepare_capture.return_value
+
+    async def call(request):
+        entered.set()
+        await release.wait()
+        return actual
+
+    runtime.preparation_driver.prepare_capture.side_effect = call
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    task = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    action.update(status=6, cancel_requested=1)
+    assert not settle_preparation(runtime, 1)
+    runtime.capture.release_occupancy.assert_not_called()
+    release.set()
+    assert (await task).phase is PreparationPhase.ABORTED
+    runtime.prepare_baseline.assert_not_called()
+    runtime.capture.release_occupancy.assert_called_once()
+    runtime.driver.control.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_aborted_baseline_without_changed_qualification_stops_with_diagnostic(mocker):
+    runtime, _, _ = _world(mocker)
+    runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.ABORTED)
+    with pytest.raises(ConsistencyError, match="没有取消、终态或窗口结束依据"):
+        await advance_preparation(runtime, 1)
+    runtime.prepare_baseline.assert_awaited_once()
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_actual_task_enters_saves_reliable_not_dispatched(mocker):
+    from camctl.capture.preparation import _wait_preparation_task
+
+    runtime, _, _ = _world(mocker)
+
+    async def cancel_before_entry(task):
+        task.cancel()
+        await _wait_preparation_task(task)
+
+    mocker.patch("camctl.capture.preparation._wait_preparation_task", autospec=True, side_effect=cancel_before_entry)
+    with pytest.raises(asyncio.CancelledError):
+        await advance_preparation(runtime, 1)
+    owner = runtime.preparation_cache.owners[1]
+    assert owner.saved and not owner.entered
+    assert owner.finish.outcome.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    runtime.preparation_driver.prepare_capture.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_start", [False, True])
+@pytest.mark.parametrize("policy", ["action6_video_segments_v1", "osmo360ii_record_segments_v1"])
+async def test_running_preparation_failure_publishes_real_no_result_conclusion(mocker, has_start, policy):
+    from camctl.capture.segment_models import SegmentSourceKind, PublicationKind, ResultCheckEndReason
+    from camctl.capture.segment_storage import SegmentResultRef, ResultSetCreate
+    from camctl.contracts.enums import enum_for
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.operations.attempts import OperationKind
+    from camctl.operations.models import AttemptStatus, ErrorValue
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+    from camctl.persistence.repositories.capture_facts import StartFacts
+    from camctl.persistence.repositories.segments import SegmentRepository
+
+    runtime, action, _ = _world(mocker)
+    action.update(status=2, execution_started=1, execution_spec_json={"result_policy": policy})
+    if has_start:
+        runtime.last_attempt.return_value = (3, 2, 0)
+        mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+            return_value=StartFacts(None, {"status": 2}, 1, True, 4))
+    runtime.preparation_driver.prepare_capture.return_value = DeviceCallResult.from_outcome(CallOutcome(
+        status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT, error=ErrorValue("setting_failed", "device"),
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("returned", 1))))
+    runtime.operations.finish_stale_runs.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    ref = SegmentResultRef(1, 3, 1)
+    repository = create_autospec(SegmentRepository, instance=True)
+    mocker.patch("camctl.capture.segment_completion.SegmentRepository", autospec=True, return_value=repository)
+    repository.read_prepared_result_ref.return_value = None
+    repository.prepare_result_set.return_value = ResultSetCreate(1, 7, None, SegmentSourceKind.NO_RESULTS,
+        HistoryBoundary(1, 9), None, PublicationKind.RESULT, None, None, 0)
+    repository.create_result_set.return_value = DbOutcome(DbOutcomeKind.COMPLETED, ref)
+    repository.read_result_set.return_value = {"activity_id": 7,
+        "state": int(enum_for("segment_sets.state").MEMBERS_FIXED)}
+    repository.conclude_result_check.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    repository.decide_result.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.side_effect = [None, (9,)]
+    runtime.owned.connection.execute.return_value = cursor
+
+    def finish(request, key, owned):
+        action["status"] = 4
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    runtime.capture.finish_segment_recording.side_effect = finish
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.FAILED
+    conclusion = repository.conclude_result_check.call_args.args[0]
+    assert conclusion.reason is ResultCheckEndReason.NO_RESULT_WORK
+    assert conclusion.anchor_event_id == 9
+    published = runtime.capture.finish_segment_recording.call_args.args[0]
+    assert published.failure.code == "capture_failed"
+    assert published.failure.details == {"activity_id": "7", "reason": "device_failed"}
+    assert action["status"] == 4 and action["execution_started"] == 1
+    assert runtime.operations.finish_stale_runs.call_count == (1 if has_start else 0)
+    assert runtime.operations.begin_attempt.call_args.args[0].kind is OperationKind.PREPARE_CAPTURE
+    runtime.scheduling.start_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cold_saved_preparation_conclusion_finishes_before_new_settings(mocker):
+    from camctl.capture.media import RecordingFailure
+    from camctl.capture.segment_storage import SegmentResultRef
+    from camctl.contracts.enums import enum_for
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+    from camctl.persistence.repositories.segments import SegmentRepository
+
+    runtime, action, _ = _world(mocker)
+    action.update(status=2, execution_started=1, execution_spec_json={"result_policy": "action6_video_segments_v1"})
+    ref = SegmentResultRef(1, 3, 1)
+    row = {"id": 3, "action_id": 1, "activity_id": 7, "run_id": None,
+        "source_txn_id": 1, "source_event_id": 9, "member_count": 0,
+        "source_kind": int(enum_for("segment_sets.source_kind").NO_RESULTS),
+        "state": int(enum_for("segment_sets.state").MEMBERS_FIXED)}
+    repository = create_autospec(SegmentRepository, instance=True)
+    mocker.patch("camctl.capture.segment_completion.SegmentRepository", autospec=True, return_value=repository)
+    repository.read_prepared_result_ref.return_value = ref
+    repository.read_result_set.return_value = row
+    repository.decide_result.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.side_effect = [(9,), (11,), (1,)]
+    runtime.owned.connection.execute.return_value = cursor
+    verify = mocker.patch("camctl.persistence.repositories.segment_check_conclusions.no_result_preparation_failure",
+        autospec=True, return_value=RecordingFailure("capture_failed", {"activity_id": "7", "reason": "device_failed"}))
+
+    def finish(request, key, owned):
+        action["status"] = 4
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    runtime.capture.finish_segment_recording.side_effect = finish
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.ABORTED
+    verify.assert_called_once_with(runtime.owned.connection, row, 9)
+    runtime.preparation_driver.prepare_capture.assert_not_called()
+    runtime.operations.begin_attempt.assert_not_called()
+    runtime.driver.control.assert_not_called()
+    repository.conclude_result_check.assert_not_called()
+    assert runtime.capture.finish_segment_recording.call_args.args[0].ref == ref

@@ -127,6 +127,10 @@ def query_work_facts(connection) -> "WorkFacts":
         " WHERE status = 1 OR (status = 2 AND type <> 7)")
     settlements = scalar(
         "SELECT COUNT(*) FROM operation_runs WHERE status IN (1, 2)")
+    from camctl.capture.preparation_discovery import preparation_responsibility_where
+    settlements += scalar(
+        "SELECT COUNT(*) FROM actions a JOIN device_activities d ON d.action_id=a.id WHERE "
+        + preparation_responsibility_where())
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='software_recoveries'").fetchone():
         phases = enum_for("software_recoveries.phase")
         settlements += scalar("SELECT COUNT(*) FROM software_recoveries r JOIN device_activities d ON d.id=r.activity_id"
