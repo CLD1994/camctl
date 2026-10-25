@@ -97,13 +97,12 @@ def test_preview_candidate_rejects_fixed_file_link_to_another_original(monkeypat
     original = StoredSegmentMember(9, 30, 872, 880,
         SegmentMember('/DCIM/raw.OSV', None, SegmentMemberRole.ORIGINAL, OwnershipState.OWNED,
                       FileCompletionState.COMPLETE, 10), None)
-    monkeypatch.setattr(segments, 'read_fixed_file', create_autospec(segments.read_fixed_file,
-        return_value={'original_device_file_id': 31}))
     profile = SimpleNamespace(classify_file=lambda identity: SimpleNamespace(key=1, pairing_identity='raw'))
     monkeypatch.setattr(segments, 'profile_for_action', create_autospec(segments.profile_for_action,
         return_value=profile))
     with pytest.raises(ConsistencyError):
-        segments._output_candidate(db, {'id':4,'action_id':21}, preview,
+        segments._output_candidate(db, {'id':4,'action_id':21},
+                                   segments._MemberFacts(preview, {'original_device_file_id': 31}, None),
                                    paired_members={original.member.identity: original})
 
 
@@ -203,6 +202,99 @@ def test_finish_candidates_carry_the_file_already_read_for_each_member(monkeypat
     assert [item.file['size_bytes'] for item in first.items+last.items] == [4096]*len(expected)
     assert first.next_cursor is not None and last.next_cursor is None
     assert port.call_count == 3
+    assert segments._set.call_count == 2
+
+
+@pytest.fixture
+def paired_candidate_inputs(saved_member, monkeypatch):
+    db, original, original_file = saved_member
+    original.update(id=9, file_event_id=880)
+    preview = {**original, 'id': 8, 'file_id': 29, 'file_event_id': 883,
+        'identity': original['identity'].replace('.OSV', '.LRF'),
+        'role': int(enum_for('segment_members.role').PREVIEW),
+        'pairing_identity': original['identity'],
+        'pairing_state': int(enum_for('segment_members.pairing_state').PAIRED),
+        'pairing_fact_id': 15}
+    preview_file = {**original_file, 'id': 29,
+        'identity_key': file_identity_key('camera', 'osmo', preview['identity']),
+        'role': int(enum_for('device_files.role').PREVIEW),
+        'original_device_file_id': 30}
+    rows = {8: preview, 9: original}
+    files_by_id = {29: preview_file, 30: original_file}
+    setrow = dict(id=4, action_id=21, run_id=28, source_event_id=885, member_count=2)
+    fact = dict(id=15, state=int(pairing._STATE.PAIRED),
+                original_file_id=30, original_file_event_id=880)
+    monkeypatch.setattr(segments, '_set', create_autospec(segments._set, return_value=setrow))
+    def row_facts(connection, table, identity):
+        return {'segment_sets': {4: setrow}, 'segment_members': rows,
+            'actions': {21: dict(execution_spec_json={})},
+            'device_file_pairing_facts': {15: fact}}[table][identity]
+    segments.row_facts.side_effect = row_facts
+    segments.read_fixed_file.side_effect = lambda connection, file_id, event_id: files_by_id[file_id]
+    def one(connection, sql, parameters):
+        if 'COUNT(*)' in sql: return (2,)
+        if 'FROM segment_members' in sql:
+            return next(((row['id'],) for row in rows.values() if row['identity'] == parameters[1]), None)
+        raise AssertionError(sql)
+    def relation(connection, sql, parameters):
+        if 'FROM result_page_files' in sql:
+            row = next(row for row in rows.values() if row['file_id'] == parameters[1])
+            return row['identity'], 21, 28
+        return one(connection, sql, parameters)
+    segments._one.side_effect = relation
+    def execute(sql, parameters=()):
+        query = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        query.description = tuple((name,) for name in preview)
+        selected = (row for row in rows.values() if row['set_id'] == parameters[0])
+        if 'identity IN' in sql:
+            selected = (row for row in selected if row['identity'] in parameters[1:])
+        else:
+            selected = (row for row in selected if row['id'] > parameters[4])
+        query.fetchmany.return_value = [tuple(row.values()) for row in selected]
+        return query
+    db.execute.side_effect = execute
+    from camctl.persistence import fact_reads
+    monkeypatch.setattr(fact_reads, 'read_event', create_autospec(fact_reads.read_event,
+        return_value=SimpleNamespace(transaction=TransactionRange(599, 883, 883))))
+    port = create_autospec(pairing.read_pairing_fact, return_value=fact)
+    monkeypatch.setattr(pairing, 'read_pairing_fact', port)
+    return db, rows, fact, port
+
+
+@pytest.mark.parametrize('entry', ['point', 'page', 'page_with_external_original'])
+def test_preview_candidate_consumes_the_pairing_fact_already_read_for_its_member(paired_candidate_inputs, entry):
+    db, rows, fact, port = paired_candidate_inputs
+    ref, owned = SegmentResultRef(21, 4, 1), SimpleNamespace(connection=db)
+    if entry == 'point':
+        result = segments.segment_output_candidate(ref, 8, owned)
+    else:
+        batch = 1 if entry == 'page_with_external_original' else 2
+        page = segments.read_segment_finish_candidates(ref, None, batch, owned)
+        result = next(item.candidate for item in page.items if item.candidate.file_id == 29)
+        assert (page.next_cursor is not None) == (batch == 1)
+    assert (result.member_id, result.file_id, result.original_member_id, result.original_file_id) == (8, 29, 9, 30)
+    port.assert_called_once_with(db, 15, 29, HistoryBoundary(599, 883))
+    assert not any(call.args[1] in ('segment_sets', 'device_file_pairing_facts')
+                   for call in segments.row_facts.call_args_list)
+    segments._set.assert_called_once_with(db, ref, fixed=True)
+
+
+@pytest.mark.parametrize('entry', ['point', 'page'])
+@pytest.mark.parametrize('damage', ['missing_pairing', 'unpaired_fact', 'foreign_original'])
+def test_shared_member_inputs_do_not_promote_invalid_preview_facts(paired_candidate_inputs, entry, damage):
+    db, rows, fact, port = paired_candidate_inputs
+    if damage == 'missing_pairing':
+        port.side_effect = ConsistencyError('固定配对事实缺失')
+    elif damage == 'unpaired_fact':
+        fact['state'] = int(pairing._STATE.UNPAIRED)
+    else:
+        rows[9]['set_id'] = 5
+    ref, owned = SegmentResultRef(21, 4, 1), SimpleNamespace(connection=db)
+    with pytest.raises(ConsistencyError):
+        if entry == 'point':
+            segments.segment_output_candidate(ref, 8, owned)
+        else:
+            segments.read_segment_finish_candidates(ref, None, 2, owned)
 
 
 @pytest.mark.parametrize('entry', ['fixed', 'boundary'])

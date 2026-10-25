@@ -186,6 +186,7 @@ def _position(row):
 class _MemberFacts:
     stored: StoredSegmentMember
     file: dict
+    pairing: dict | None
 
 
 @dataclass(frozen=True)
@@ -228,6 +229,7 @@ def _read_member_facts(db, row, *, setrow=None):
             and (file['completion_state'] != int(enum_for('device_files.completion_state').COMPLETE)
                  or file['size_bytes'] is None)):
         raise ConsistencyError('已完成成员没有固定完整文件大小')
+    fact = None
     if row['pairing_fact_id'] is not None:
         from camctl.persistence.fact_reads import read_event
         from .result_file_pairing import read_pairing_fact
@@ -245,7 +247,7 @@ def _read_member_facts(db, row, *, setrow=None):
                     or parse_exact_json(original['identity_key'])[2] != member.pairing_identity):
                 raise ConsistencyError('成员配对端点与固定文件关联不同')
     return _MemberFacts(StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],
-        row['file_event_id'], member,row['pairing_fact_id']), file)
+        row['file_event_id'], member,row['pairing_fact_id']), file, fact)
 
 
 def _eligible_original(member):
@@ -255,8 +257,9 @@ def _eligible_original(member):
         and member.size_bytes is not None and member.size_bytes>0)
 
 
-def _output_candidate(db,setrow,stored, *, paired_members=None, file=None):
+def _output_candidate(db,setrow,facts, *, paired_members=None):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
+    stored, file = facts.stored, facts.file
     member=stored.member
     if (member.role is SegmentMemberRole.OTHER
             and profile_for_action(db,setrow['action_id']).classify_file(member.identity).kind is SegmentFileKind.PHOTO
@@ -285,7 +288,7 @@ def _output_candidate(db,setrow,stored, *, paired_members=None, file=None):
         same_family = (left[0] is not None and left[:2] == right[:2]
                        and left[2] == int(_FAMILY_ROLE.PREVIEW)
                        and right[2] == int(_FAMILY_ROLE.ORIGINAL))
-        fact = row_facts(db, 'device_file_pairing_facts', stored.pairing_fact_id)
+        fact = facts.pairing
         same_family = (same_family and fact is not None
                        and fact['original_file_id'] == paired.file_id)
     else:
@@ -293,8 +296,6 @@ def _output_candidate(db,setrow,stored, *, paired_members=None, file=None):
         left=profile.classify_file(member.identity)
         right=profile.classify_file(paired.member.identity)
         same_family = left.key is not None and right.key is not None and left.pairing_identity == right.pairing_identity
-    if file is None:
-        file = read_fixed_file(db, stored.file_id, stored.file_event_id)
     if file['original_device_file_id'] != paired.file_id:
         raise ConsistencyError('预览固定文件关联与同集合实际原片不同')
     if paired.member.role is not SegmentMemberRole.ORIGINAL or not same_family:
@@ -318,14 +319,14 @@ def segment_output_candidate(ref,member_id,owned):
         member=row_facts(db,'segment_members',member_id)
         if member is None or member['set_id']!=row['id']:
             raise ConsistencyError('产物候选成员不属于原冻结集合')
-        return _output_candidate(db,row,_read_member(db,member))
+        return _output_candidate(db,row,_read_member_facts(db,member,setrow=row))
     finally:
         if opened: db.execute('ROLLBACK')
 
 
 def _candidate_page(ref, cursor, batch, db):
-    page = _read_segment_members(ref, cursor, batch, db, with_files=True)
     row = _set(db, ref, fixed=True)
+    page = _read_segment_members(ref, cursor, batch, db, setrow=row, with_files=True)
     paired = {fact.stored.member.identity: fact.stored for fact in page.items}
     wanted = {fact.stored.member.pairing_identity for fact in page.items
               if fact.stored.member.role is SegmentMemberRole.PREVIEW
@@ -342,7 +343,7 @@ def _candidate_page(ref, cursor, batch, db):
             paired[stored.member.identity] = stored
     values = []
     for fact in page.items:
-        candidate = _output_candidate(db, row, fact.stored, paired_members=paired, file=fact.file)
+        candidate = _output_candidate(db, row, fact, paired_members=paired)
         if candidate is not None:
             values.append(SavedSegmentCandidate(candidate, fact.file))
     return Page(tuple(values), page.next_cursor)
@@ -382,8 +383,8 @@ def read_segment_members(ref,cursor,batch,owned):
             db.execute('ROLLBACK')
 
 
-def _read_segment_members(ref, cursor, batch, db, *, with_files=False):
-    row = _set(db, ref, fixed=True)
+def _read_segment_members(ref, cursor, batch, db, *, setrow=None, with_files=False):
+    row = _set(db, ref, fixed=True) if setrow is None else setrow
     after=(0,0,'',0)
     if cursor is not None:
         if not isinstance(cursor,SegmentMemberCursor) or cursor.ref!=ref:
@@ -1046,7 +1047,8 @@ def _expected_scope_ids(db,setrow,count):
         ids=tuple(row[0] for row in reader.fetchmany(count))
     if len(ids)!=count:raise ConsistencyError('范围成员不能覆盖所请求的可靠连续次序')
     for identity in ids:
-        candidate=_output_candidate(db,setrow,_read_member(db,row_facts(db,'segment_members',identity)))
+        candidate=_output_candidate(db,setrow,_read_member_facts(
+            db,row_facts(db,'segment_members',identity),setrow=setrow))
         if candidate is None or candidate.kind is not OutputKind.ORIGINAL:
             raise ConsistencyError('范围成员不是冻结事实中的合格原片')
     return number,ids
@@ -1286,9 +1288,9 @@ class _Command:
                 for i,member_id in enumerate(payload):
                     member=row_facts(db,'segment_members',member_id)
                     if member is None or member['set_id']!=sid:raise ConsistencyError('范围成员来自其他集合')
-                    stored=_read_member(db,member)
-                    actual=stored.member
-                    candidate=_output_candidate(db,setrow,stored)
+                    facts=_read_member_facts(db,member,setrow=setrow)
+                    actual=facts.stored.member
+                    candidate=_output_candidate(db,setrow,facts)
                     if candidate is None or candidate.kind is not OutputKind.ORIGINAL or not selected.first_cursor<=actual.cursor<=selected.last_cursor:
                         raise ConsistencyError('范围成员不是已保存范围内合格原片')
                     rows.append(row_change('segment_scope_members',start+i,dict(set_id=sid,ordinal=number+i+1,member_id=member_id,output_id=None)))
