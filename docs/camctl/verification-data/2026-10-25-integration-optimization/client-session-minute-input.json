@@ -1,0 +1,62 @@
+{
+  "root": "/tmp/camctl-minute-control-mYwWWa",
+  "original_error": "locator.fill: Error: Malformed value\nCall log:\n\u001b[2m  - waiting for getByLabel('执行时间', { exact: true })\u001b[22m\n\u001b[2m    - locator resolved to <input step=\"1\" aria-label=\"执行时间\" type=\"datetime-local\" value=\"2026-10-25T00:00:01\" data-validation-path=\"/actions/0/scheduled_at\"/>\u001b[22m\n\u001b[2m    - fill(\"2026-10-25T01:56:00\")\u001b[22m\n\u001b[2m  - attempting fill action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and editable\u001b[22m\n",
+  "results": [
+    {
+      "business": "2026-10-25 01:56:00",
+      "control": "2026-10-25T01:56",
+      "input_value": "2026-10-25T01:56",
+      "actual_saved_draft": {
+        "name": "同步",
+        "type": "report_status",
+        "scheduled_at": "2026-10-25 01:56:00",
+        "params": {
+          "scope": "full"
+        }
+      }
+    },
+    {
+      "business": "2026-10-25 01:57:17",
+      "control": "2026-10-25T01:57:17",
+      "input_value": "2026-10-25T01:57:17",
+      "actual_saved_draft": {
+        "name": "同步",
+        "type": "report_status",
+        "scheduled_at": "2026-10-25 01:57:17",
+        "params": {
+          "scope": "full"
+        }
+      }
+    }
+  ],
+  "elapsed_seconds": 2.982866902,
+  "production_ui_matches_current_source": true,
+  "date_utc": "2026-10-25",
+  "scope": "仅测试控件输入格式；业务scheduledAt、实际保存断言和60000ms policy不变。",
+  "source_base": "f8121feb5bfcb2c38839cb5f240b7a4de32fca66",
+  "source_ui": [
+    {
+      "path": "apps/client/src/web/Editor.tsx",
+      "sha256": "9d58e92d71d74523cd84e72f416d8752f0930e867dafbd500ff39548a3533355"
+    },
+    {
+      "path": "apps/client/src/web/editing.ts",
+      "sha256": "d76a26a588fe44300321ff68d133184e24cbc9704a0c6b8d9e420d39653ed306"
+    }
+  ],
+  "method": "复用既有私有candidate真实首页，以UTC Chromium填写真实执行时间控件；原:00格式必须重现Malformed value，随后规范化整分钟值/保持非00秒值，读取实际Application.draft已保存正文分别核对原业务秒值。生产UI源码先与当前逐字节核对。浏览器、HTTP、Files和store已正常关闭。",
+  "input_normalization": "scheduledAt.replace(\" \", \"T\").replace(/:00$/, \"\")；只改变传给datetime-local的字符串。",
+  "command": [
+    "node",
+    "--import",
+    "tsx",
+    "minute-control.mts"
+  ],
+  "boundary": "动态2.983秒只证明控件格式与真实草稿保存，不是HB29或S5性能验收。",
+  "witness_steps": [
+    "create Application/Files/HTTP +真实已构建首页，createDraft report_status动作",
+    "UTC browser打开草稿，原始01:56:00 fill重现Malformed value",
+    "重新打开草稿，填01:56并轮询实际Application.draft，保存01:56:00",
+    "填01:57:17并轮询实际Application.draft，保存01:57:17"
+  ]
+}

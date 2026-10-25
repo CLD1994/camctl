@@ -914,9 +914,10 @@ async function browserPhotoExport(
       // 网页预设往返与截图均已完成，再为真实执行选择时间。
       const selected = new Date();
       const scheduledAt = selected.toISOString().slice(0, 19).replace("T", " ");
+      // datetime-local会将整分钟规范化为不带秒的控件值。
       await session.page
         .getByLabel("执行时间", { exact: true })
-        .fill(scheduledAt.replace(" ", "T"));
+        .fill(scheduledAt.replace(" ", "T").replace(/:00$/, ""));
       await settled();
       await session.check.poll(async () => {
         const state = await session.state();
