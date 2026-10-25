@@ -29,47 +29,56 @@ from camctl.persistence.transaction import row_facts
 from .segment_result_sets import _one
 
 
-def current_members(db, setrow):
-    """按已保存设备键逐成员核当前页；旧完成事实不能补当前页。"""
+def read_current_member_page(db, setrow, cursor, batch_size):
+    """读取一个冻结成员批次，并保留原当前扫描的逐文件资格规则。"""
     from .segments import read_segment_members
     from .segment_result_sets import _current_input
     from .result_pages import _at
     from camctl.capture.segment_storage import SegmentResultRef
+    from camctl.contracts.pages import Page
 
     ref = SegmentResultRef(setrow["action_id"], setrow["id"], setrow["version"])
     attempt = row_facts(db, "operation_attempts", setrow["current_attempt_id"])
     final, _ = _at(db, setrow["current_final_page_event_id"])
     boundary = HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"])
+    page = read_segment_members(ref, cursor, batch_size, SimpleNamespace(connection=db))
+    members = []
+    for stored in page.items:
+        actual = _one(
+            db,
+            "SELECT MAX(page_event_id) FROM result_page_files"
+            " WHERE attempt_id=? AND file_id=? AND created_event_id<=?",
+            (attempt["id"], stored.file_id, boundary.last_event_id),
+        )[0]
+        if actual is None:
+            continue
+        saved, _ = _at(db, actual)
+        item = _current_input(
+            db, saved.ref, stored.file_id, attempt, final.ref, boundary
+        )
+        entry = next(
+            entry
+            for entry in saved.page.entries
+            if entry.identity == stored.member.identity
+        )
+        members.append(replace(
+            stored.member,
+            role=item.role,
+            ownership=item.ownership,
+            completion=item.completion,
+            size_bytes=entry.size_bytes,
+            pairing_identity=item.pairing_identity,
+            pairing_state=item.pairing_state,
+        ))
+    return Page(tuple(members), page.next_cursor)
+
+
+def current_members(db, setrow):
+    """按已保存设备键逐成员核当前页；旧完成事实不能补当前页。"""
     cursor = None
     while True:
-        page = read_segment_members(ref, cursor, 128, SimpleNamespace(connection=db))
-        for stored in page.items:
-            actual = _one(
-                db,
-                "SELECT MAX(page_event_id) FROM result_page_files"
-                " WHERE attempt_id=? AND file_id=? AND created_event_id<=?",
-                (attempt["id"], stored.file_id, boundary.last_event_id),
-            )[0]
-            if actual is None:
-                continue
-            saved, _ = _at(db, actual)
-            item = _current_input(
-                db, saved.ref, stored.file_id, attempt, final.ref, boundary
-            )
-            entry = next(
-                entry
-                for entry in saved.page.entries
-                if entry.identity == stored.member.identity
-            )
-            yield replace(
-                stored.member,
-                role=item.role,
-                ownership=item.ownership,
-                completion=item.completion,
-                size_bytes=entry.size_bytes,
-                pairing_identity=item.pairing_identity,
-                pairing_state=item.pairing_state,
-            )
+        page = read_current_member_page(db, setrow, cursor, 128)
+        yield from page.items
         if page.next_cursor is None:
             return
         cursor = page.next_cursor
@@ -178,6 +187,27 @@ def current_assessment(db, setrow):
     return finish_segment_assessment(state, facts)
 
 
+def classify_action6_current_set(db, action, ref, setrow):
+    """同步仓储独立形成决定，按原冻结页向纯规则提供成员。"""
+    from camctl.capture.action6_completion import classify_action6_members
+    from .segments import read_segment_members
+
+    def members():
+        cursor = None
+        while True:
+            page = read_segment_members(ref, cursor, 128, SimpleNamespace(connection=db))
+            yield from (stored.member for stored in page.items)
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    return classify_action6_members(
+        action, ref, members(),
+        complete=setrow["source_kind"] == int(enum_for("segment_sets.source_kind").COMPLETE_SCAN)
+        and setrow["publication_kind"] == int(enum_for("segment_sets.publication_kind").RESULT),
+    )
+
+
 def current_decision(db, setrow):
     """返回当前结论及其有限错误；保留全集不参与当前成功判定。"""
     latest = _one(
@@ -215,10 +245,8 @@ def current_decision(db, setrow):
             enum_for("segment_sets.source_kind").COMPLETE_SCAN
         ):
             from .segment_result_sets import read_current_segment_ref
-            from .segments import SegmentRepository
             from camctl.capture.action6_completion import (
                 action6_decision_failure,
-                classify_action6_segment_set,
             )
 
             result_ref = SegmentResultRef(
@@ -237,9 +265,7 @@ def current_decision(db, setrow):
             )
             decision = stored if isinstance(stored, SegmentDecision) else None
             if decision is None:
-                facts = classify_action6_segment_set(
-                    action, ref, SegmentRepository(), reader
-                )
+                facts = classify_action6_current_set(db, action, ref, setrow)
                 decision = facts.decision
             status = decision.status
             result = (

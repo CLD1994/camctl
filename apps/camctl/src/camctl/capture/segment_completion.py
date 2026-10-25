@@ -30,7 +30,8 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import is_completed_file_wait
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.business import settle_required
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.persistence.transaction import row_facts
@@ -46,9 +47,11 @@ class PendingSegmentWrite:
     key: str
 
 
-def resume_segment_writes(owned, pending_writes, action_id=None):
-    if pending_writes and owned.connection.in_transaction:
-        owned.connection.rollback()
+async def resume_segment_writes(database, pending_writes, action_id=None):
+    return await settle_required(_resume_segment_writes(database, pending_writes, action_id))
+
+
+async def _resume_segment_writes(database, pending_writes, action_id):
     for identity in tuple(pending_writes):
         if action_id is not None and identity != action_id:
             continue
@@ -56,9 +59,7 @@ def resume_segment_writes(owned, pending_writes, action_id=None):
         with measure_performance("segment_save", action_id=identity,
                                  method=pending.method, resumed=True), db_operation_context(
                                      action_id=identity, method=pending.method, resumed=True):
-            receipt = getattr(pending.repository, pending.method)(
-                *pending.args, pending.key, owned
-            )
+            receipt = await _write_segment_request(database, pending_writes, identity, pending)
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             if receipt.kind is DbOutcomeKind.ROLLED_BACK:
                 del pending_writes[identity]
@@ -66,7 +67,23 @@ def resume_segment_writes(owned, pending_writes, action_id=None):
         del pending_writes[identity]
 
 
-def _save(runtime, action_id, repository, method, *args):
+async def _save(runtime, action_id, repository, method, *args):
+    return await settle_required(_save_segment_request(runtime, action_id, repository, method, args))
+
+
+async def _write_segment_request(database, pending_writes, action_id, pending):
+    try:
+        return await database.write(
+            lambda owned: getattr(pending.repository, pending.method)(*pending.args, pending.key, owned),
+            key=pending.key, description=f'分段保存:{pending.method}')
+    except BaseException as error:
+        receipt = db_outcome_for(error)
+        if receipt is not None and receipt.kind in (DbOutcomeKind.COMPLETED, DbOutcomeKind.ROLLED_BACK):
+            pending_writes.pop(action_id, None)
+        raise
+
+
+async def _save_segment_request(runtime, action_id, repository, method, args):
     if action_id in runtime.pending_segment_writes:
         raise ConsistencyError("须先核实原分段申请，不能替换未决保存")
     pending = PendingSegmentWrite(repository, method, args, new_operation_key())
@@ -74,7 +91,8 @@ def _save(runtime, action_id, repository, method, *args):
     with measure_performance("segment_save", action_id=action_id,
                              method=method, resumed=False), db_operation_context(
                                  action_id=action_id, method=method, resumed=False):
-        receipt = getattr(repository, method)(*args, pending.key, runtime.owned)
+        receipt = await _write_segment_request(
+            runtime.database, runtime.pending_segment_writes, action_id, pending)
     if receipt.kind is not DbOutcomeKind.COMPLETED:
         if receipt.kind is DbOutcomeKind.ROLLED_BACK:
             del runtime.pending_segment_writes[action_id]
@@ -83,9 +101,9 @@ def _save(runtime, action_id, repository, method, *args):
     return receipt.value
 
 
-def release_segment_occupancy(runtime, action_id):
+async def release_segment_occupancy(runtime, action_id):
     """沿原申请交接释放结果；条件不足时由既有仓储保持占用。"""
-    _save(
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -94,30 +112,30 @@ def release_segment_occupancy(runtime, action_id):
     )
 
 
-def register_segment_observations(runtime, action_id, listing):
+async def register_segment_observations(runtime, action_id, listing):
     """先保存全部原始 OSV/LRF 归属，再独立保存完成及跨页配对。"""
     from camctl.capture.result_scans import SavedResultEntries
 
     if not isinstance(listing.entries, SavedResultEntries):
         if (listing.entries == () and listing.already_saved
-                and runtime.capture.read_last_result_page(listing.ticket, runtime.owned) is None):
+                and (await runtime.database.read(lambda owned: runtime.capture.read_last_result_page(listing.ticket, owned))) is None):
             return
         raise ConsistencyError("分段策略要求可靠原始结果页")
-    source = runtime.capture.read_result_source(listing.ticket, runtime.owned)
+    source = await runtime.database.read(lambda owned: runtime.capture.read_result_source(listing.ticket, owned))
     context = source.context
     activity_id = int(listing.ticket.target_id)
-    activity = row_facts(runtime.owned.connection, "device_activities", activity_id)
-    for saved in listing.entries.pages():
+    activity = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id))
+    async for saved in listing.entries.pages():
         ids = dict(saved.file_ids)
         for entry in saved.page.entries:
             if entry.identity not in ids:
                 continue
             file_id = ids[entry.identity]
-            file = row_facts(runtime.owned.connection, "device_files", file_id)
+            file = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_files", file_id))
             if file["presence_state"] != int(
                 enum_for("device_files.presence_state").PRESENT
             ):
-                _save(
+                await _save(
                     runtime,
                     action_id,
                     runtime.capture,
@@ -128,7 +146,7 @@ def register_segment_observations(runtime, action_id, listing):
                         saved.occurred_at,
                     ),
                 )
-            _save(
+            await _save(
                 runtime,
                 action_id,
                 runtime.capture,
@@ -185,18 +203,18 @@ def register_segment_observations(runtime, action_id, listing):
                 )
             else:
                 continue
-            _save(runtime, action_id, runtime.capture, "save_file_completion", request)
+            await _save(runtime, action_id, runtime.capture, "save_file_completion", request)
     if listing.scan_complete and listing.set_finalized:
         from camctl.persistence.repositories.segment_result_sets import _boundary
         from camctl.persistence.repositories.result_file_pairing import (
             read_pairing_fact,
         )
 
-        for saved in listing.entries.pages():
+        async for saved in listing.entries.pages():
             for identity, file_id in saved.file_ids:
                 if identity.rpartition(".")[2].lower() != "lrf":
                     continue
-                existing = runtime.owned.connection.execute(
+                existing = await runtime.database.read(lambda owned: owned.connection.execute(
                     "SELECT p.id FROM device_file_pairing_facts p"
                     " JOIN operation_attempts a ON a.id=p.attempt_id"
                     " WHERE p.preview_file_id=? AND a.run_id=? AND a.attempt_no=?"
@@ -207,34 +225,35 @@ def register_segment_observations(runtime, action_id, listing):
                         listing.ticket.attempt_id,
                         listing.entries.last_ref.event_id,
                     ),
-                ).fetchone()
+                ).fetchone())
                 if existing is not None:
-                    read_pairing_fact(
-                        runtime.owned.connection,
+                    await runtime.database.read(lambda owned: read_pairing_fact(
+                        owned.connection,
                         existing[0],
                         file_id,
-                        _boundary(runtime.owned.connection),
-                    )
+                        _boundary(owned.connection),
+                    ))
                     continue
-                _save(
+                await _save(
                     runtime,
                     action_id,
                     runtime.capture,
                     "save_result_file_pairing",
-                    PairResultFilesSave(
+                    (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): PairResultFilesSave(
                         file_id,
                         listing.entries.last_ref,
-                        _boundary(runtime.owned.connection),
-                        runtime.wall_us(),
-                    ),
+                        _boundary(owned.connection),
+                        occurred_at,
+                    ))),
                 )
 
 
-def _members(repository, ref, runtime):
+async def _members(repository, ref, runtime):
     cursor = None
     while True:
-        page = repository.read_members(ref, cursor, 128, runtime.owned)
-        yield from page.items
+        page = await runtime.database.read(lambda owned: repository.read_members(ref, cursor, 128, owned))
+        for item in page.items:
+            yield item
         if page.next_cursor is None:
             return
         cursor = page.next_cursor
@@ -260,20 +279,20 @@ def _control_facts(runtime, action, activity):
     )
 
 
-def _prepare_members(runtime, repository, ref):
-    row = repository.read_result_set(ref, runtime.owned)
+async def _prepare_members(runtime, repository, ref):
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if row["state"] != int(enum_for("segment_sets.state").COLLECTING):
         return
     from camctl.capture.segment_storage import ResultMemberInputCursor
 
-    previous = runtime.owned.connection.execute(
+    previous = (await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT MAX(file_id) FROM segment_members WHERE set_id=?", (ref.set_id,)
-    ).fetchone()[0]
+    ).fetchone()))[0]
     cursor = None if previous is None else ResultMemberInputCursor(ref, previous)
     while True:
-        page = repository.read_result_member_inputs(ref, cursor, 128, runtime.owned)
+        page = await runtime.database.read(lambda owned: repository.read_result_member_inputs(ref, cursor, 128, owned))
         if page.items:
-            _save(
+            await _save(
                 runtime,
                 ref.action_id,
                 repository,
@@ -285,7 +304,7 @@ def _prepare_members(runtime, repository, ref):
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
-    _save(
+    await _save(
         runtime, ref.action_id, repository, "fix_result_members", ref, runtime.wall_us()
     )
 
@@ -295,14 +314,13 @@ async def advance_segmented_recording(runtime, action, decision):
     from camctl.capture import handlers as common
 
     action_id = action["id"]
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
-    activity = row_facts(
-        runtime.owned.connection,
-        "device_activities",
-        common._activity_id_of(runtime, action_id),
-    )
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
+    activity_id = await common._activity_id_of(runtime, action_id)
+    activity = await runtime.database.read(lambda owned: row_facts(
+        owned.connection, "device_activities", activity_id,
+    ))
     control, overrun = _control_facts(runtime, action, activity)
     from camctl.persistence.repositories.segment_current import current_decision
 
@@ -314,16 +332,16 @@ async def advance_segmented_recording(runtime, action, decision):
         ):
             return
         if listing.phase is common.ListingPhase.EXHAUSTED:
-            listing = common._saved_result_listing(runtime, action_id)
-        register_segment_observations(runtime, action_id, listing)
-        if runtime.action(action_id)["cancel_requested"]:
-            common._finish_listing_result(runtime, listing, finalize_output_set=True)
-            release_segment_occupancy(runtime, action_id)
-            finish_segmented_cancellation(runtime, action_id)
+            listing = await common._saved_result_listing(runtime, action_id)
+        await register_segment_observations(runtime, action_id, listing)
+        if (await runtime.action(action_id))["cancel_requested"]:
+            await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+            await release_segment_occupancy(runtime, action_id)
+            await finish_segmented_cancellation(runtime, action_id)
             return
-        used = row_facts(
-            runtime.owned.connection, "operation_runs", listing.ticket.run_id
-        )["attempts_used"]
+        used = (await runtime.database.read(lambda owned: row_facts(
+            owned.connection, "operation_runs", listing.ticket.run_id
+        )))["attempts_used"]
         explicit_error = (
             listing.outcome is not None and listing.outcome.error is not None
         )
@@ -334,40 +352,40 @@ async def advance_segmented_recording(runtime, action, decision):
         ):
             from camctl.capture.segment_preflight import assess_current_listing
 
-            assessment = assess_current_listing(
+            assessment = await assess_current_listing(
                 runtime, action, listing, control, overrun
             )
             if assessment is None or assessment.status not in (
                 SegmentAssessmentStatus.SUCCEEDED,
                 SegmentAssessmentStatus.FAILED,
             ):
-                common._finish_listing_result(runtime, listing, retry_wait=True)
+                await common._finish_listing_result(runtime, listing, retry_wait=True)
                 return
-        common._finish_listing_result(runtime, listing, finalize_output_set=True)
-        request = repository.prepare_result_set(
-            action_id, runtime.wall_us(), runtime.owned
-        )
-        ref = _save(runtime, action_id, repository, "create_result_set", request)
+        await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        request = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
+            action_id, occurred_at, owned
+        ))
+        ref = await _save(runtime, action_id, repository, "create_result_set", request)
     else:
         # 原组已开始固定后重入，目录结束仍沿原末页与原保存责任核实。
-        listing = common._saved_result_listing(runtime, action_id)
-        common._finish_listing_result(runtime, listing, finalize_output_set=True)
-    release_segment_occupancy(runtime, action_id)
-    _prepare_members(runtime, repository, ref)
-    scan_ref = repository.read_current_segment_ref(ref, runtime.owned)
-    setrow = repository.read_result_set(ref, runtime.owned)
+        listing = await common._saved_result_listing(runtime, action_id)
+        await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+    await release_segment_occupancy(runtime, action_id)
+    await _prepare_members(runtime, repository, ref)
+    scan_ref = await runtime.database.read(lambda owned: repository.read_current_segment_ref(ref, owned))
+    setrow = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     from camctl.capture.segment_storage import ResultCheckConclusionSave
 
-    reason, _, current_failure = current_decision(runtime.owned.connection, setrow)
-    found = runtime.owned.connection.execute(
+    reason, _, current_failure = await runtime.database.read(lambda owned: current_decision(owned.connection, setrow))
+    found = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT id FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-    ).fetchone()
+    ).fetchone())
     if found is None:
-        (anchor,) = runtime.owned.connection.execute(
+        (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT result_event_id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
             (setrow["run_id"],),
-        ).fetchone()
-        _save(
+        ).fetchone())
+        await _save(
             runtime,
             action_id,
             repository,
@@ -386,31 +404,39 @@ async def advance_segmented_recording(runtime, action, decision):
     if setrow["source_kind"] != int(
         enum_for("segment_sets.source_kind")[SegmentSourceKind.COMPLETE_SCAN.name]
     ):
-        from camctl.persistence.repositories.segment_current import current_gaps
-
-        saved_count = runtime.owned.connection.execute(
+        saved_count = (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT COUNT(*) FROM segment_gaps WHERE set_id=?", (ref.set_id,)
-        ).fetchone()[0]
+        ).fetchone()))[0]
         batch = []
         if setrow["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-            for number, gap in enumerate(
-                current_gaps(runtime.owned.connection, setrow)
-            ):
-                if number >= saved_count:
-                    batch.append(gap)
-                    if len(batch) == 128:
-                        _save(
-                            runtime,
-                            action_id,
-                            repository,
-                            "append_gaps",
-                            ref,
-                            tuple(batch),
-                            runtime.wall_us(),
-                        )
-                        batch.clear()
+            from camctl.persistence.repositories.segment_listing import materialized_current_members
+            from camctl.persistence.repositories.segment_current import current_assessment
+
+            current = await runtime.database.read(lambda owned: current_assessment(
+                owned.connection, setrow))
+            if current is not None and current.gap_count is not None:
+                async with materialized_current_members(runtime.database, setrow) as members:
+                    gaps = iter_segment_gaps(
+                        members(), last_nonzero_cursor=current.last_nonzero_cursor,
+                        last_owned_cursor=current.last_owned_cursor,
+                        start_key=current.confirmed_start_key,
+                    )
+                    for number, gap in enumerate(gaps):
+                        if number >= saved_count:
+                            batch.append(gap)
+                            if len(batch) == 128:
+                                await _save(
+                                    runtime,
+                                    action_id,
+                                    repository,
+                                    "append_gaps",
+                                    ref,
+                                    tuple(batch),
+                                    runtime.wall_us(),
+                                )
+                                batch.clear()
             if batch:
-                _save(
+                await _save(
                     runtime,
                     action_id,
                     repository,
@@ -424,10 +450,10 @@ async def advance_segmented_recording(runtime, action, decision):
             {"activity_id": str(activity["id"]), "reason": "outputs_unknown"},
         )
         if setrow["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-            _save(
+            await _save(
                 runtime, action_id, repository, "decide_result", ref, runtime.wall_us()
             )
-        _save(
+        await _save(
             runtime,
             action_id,
             runtime.capture,
@@ -438,9 +464,9 @@ async def advance_segmented_recording(runtime, action, decision):
         )
         return
     if setrow["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        start = repository.read_start(ref, runtime.owned)
-        stop = common._stop_confirmed_at(runtime, action_id) is not None
-        completion = common._record_file_completion_context(runtime, action_id)
+        start = await runtime.database.read(lambda owned: repository.read_start(ref, owned))
+        stop = (await common._stop_confirmed_at(runtime, action_id)) is not None
+        completion = await common._record_file_completion_context(runtime, action_id)
         wait = stop and (
             action["execution_spec_json"].get("file_completion_wait_ms") is None
             or completion is not None
@@ -459,41 +485,39 @@ async def advance_segmented_recording(runtime, action, decision):
             start.observation,
         )
         state = SegmentAccumulator(scan_ref, setrow["target_duration_ms"], start.key)
-        for stored in _members(repository, scan_ref, runtime):
+        async for stored in _members(repository, scan_ref, runtime):
             state = advance_segment_assessment(state, stored.member)
         assessment = finish_segment_assessment(state, facts)
-        saved_count = runtime.owned.connection.execute(
+        saved_count = (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT COUNT(*) FROM segment_gaps WHERE set_id=?", (ref.set_id,)
-        ).fetchone()[0]
+        ).fetchone()))[0]
         batch = []
         if assessment.gap_count is not None:
-            for number, gap in enumerate(
-                iter_segment_gaps(
-                    (
-                        stored.member
-                        for stored in _members(repository, scan_ref, runtime)
-                    ),
+            from camctl.persistence.repositories.segment_listing import materialized_segment_members
+
+            async with materialized_segment_members(runtime.database, repository, scan_ref) as members:
+                for number, gap in enumerate(iter_segment_gaps(
+                    (stored.member for stored in members()),
                     last_nonzero_cursor=assessment.last_nonzero_cursor,
                     last_owned_cursor=assessment.last_owned_cursor,
                     start_key=start.key,
-                )
-            ):
-                if number < saved_count:
-                    continue
-                batch.append(gap)
-                if len(batch) == 128:
-                    _save(
-                        runtime,
-                        action_id,
-                        repository,
-                        "append_gaps",
-                        scan_ref,
-                        tuple(batch),
-                        runtime.wall_us(),
-                    )
-                    batch.clear()
+                )):
+                    if number < saved_count:
+                        continue
+                    batch.append(gap)
+                    if len(batch) == 128:
+                        await _save(
+                            runtime,
+                            action_id,
+                            repository,
+                            "append_gaps",
+                            scan_ref,
+                            tuple(batch),
+                            runtime.wall_us(),
+                        )
+                        batch.clear()
         if batch:
-            _save(
+            await _save(
                 runtime,
                 action_id,
                 repository,
@@ -502,7 +526,7 @@ async def advance_segmented_recording(runtime, action, decision):
                 tuple(batch),
                 runtime.wall_us(),
             )
-        _save(
+        await _save(
             runtime,
             action_id,
             repository,
@@ -512,16 +536,16 @@ async def advance_segmented_recording(runtime, action, decision):
             assessment,
             runtime.wall_us(),
         )
-    assessment = repository.read_assessment(scan_ref, runtime.owned)
+    assessment = await runtime.database.read(lambda owned: repository.read_assessment(scan_ref, owned))
     if assessment.default_scope.state is DefaultScopeState.NONEMPTY:
-        count = runtime.owned.connection.execute(
+        count = (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members WHERE set_id=?", (ref.set_id,)
-        ).fetchone()[0]
+        ).fetchone()))[0]
         selected = 0
         batch = []
         from camctl.persistence.repositories.segments import _eligible_original
 
-        for stored in _members(repository, scan_ref, runtime):
+        async for stored in _members(repository, scan_ref, runtime):
             member = stored.member
             if (
                 not _eligible_original(member)
@@ -534,7 +558,7 @@ async def advance_segmented_recording(runtime, action, decision):
             if selected >= count:
                 batch.append(stored.member_id)
                 if len(batch) == 128:
-                    _save(
+                    await _save(
                         runtime,
                         action_id,
                         repository,
@@ -546,7 +570,7 @@ async def advance_segmented_recording(runtime, action, decision):
                     batch.clear()
             selected += 1
         if batch:
-            _save(
+            await _save(
                 runtime,
                 action_id,
                 repository,
@@ -560,10 +584,9 @@ async def advance_segmented_recording(runtime, action, decision):
         if assessment.reason is SegmentAssessmentReason.GAP:
             from camctl.persistence.repositories.segments import _eligible_original
 
-            original_count = sum(
-                _eligible_original(stored.member)
-                for stored in _members(repository, scan_ref, runtime)
-            )
+            original_count = 0
+            async for stored in _members(repository, scan_ref, runtime):
+                original_count += _eligible_original(stored.member)
             failure = RecordingFailure(
                 "capture_segment_gap",
                 segment_error_header(assessment, original_count).details(
@@ -595,7 +618,7 @@ async def advance_segmented_recording(runtime, action, decision):
                     else "outputs_unknown",
                 },
             )
-    _save(
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -606,32 +629,31 @@ async def advance_segmented_recording(runtime, action, decision):
     )
 
 
-def finish_segmented_cancellation(runtime, action_id):
+async def finish_segmented_cancellation(runtime, action_id):
     """取消接手同一原观察边界，发布零产物的明确取消版本。"""
     from camctl.capture.segment_storage import ResultCheckConclusionSave
     from camctl.capture.segment_models import PublicationKind, ResultCheckEndReason
     from camctl.contracts.history_values import HistoryBoundary
 
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
-    db = runtime.owned.connection
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     from camctl.operations.attempts import StaleRunFinish, RunOutcome
 
-    if db.execute(
+    if (await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
         " WHERE r.action_id=? AND t.status=1 LIMIT 1",
         (action_id,),
-    ).fetchone():
+    ).fetchone())):
         raise ConsistencyError("分段取消须先可靠结束原在途调用")
-    stale = tuple(
+    stale = await runtime.database.read(lambda owned: tuple(
         row[0]
-        for row in db.execute(
+        for row in owned.connection.execute(
             "SELECT responsibility_key FROM operation_runs"
             " WHERE action_id=? AND kind!=? AND status IN (1,2) ORDER BY id",
             (action_id, int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)),
         )
-    )
+    ))
     if stale:
-        _save(
+        await _save(
             runtime,
             action_id,
             runtime.operations,
@@ -639,29 +661,29 @@ def finish_segmented_cancellation(runtime, action_id):
             StaleRunFinish(stale, RunOutcome.CANCELED, runtime.wall_us()),
         )
     repository = SegmentRepository()
-    cancel = db.execute(
+    cancel = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
         "WHERE json_extract(r.value,'$.table')='actions' AND json_extract(r.value,'$.id')=? "
         "AND json_extract(r.value,'$.before.values.cancel_requested')=0 "
         "AND json_extract(r.value,'$.after.values.cancel_requested')=1 ORDER BY e.id DESC LIMIT 1",
         (action_id,),
-    ).fetchone()
+    ).fetchone())
     if cancel is None:
         raise ConsistencyError("分段取消缺少实际取消请求")
-    previous = repository.read_prepared_result_ref(action_id, runtime.owned)
+    previous = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     predecessor = None if previous is None else previous.set_id
-    ref = repository.find_canceled_result_ref(
-        action_id, predecessor, cancel[0], runtime.owned
-    )
+    ref = await runtime.database.read(lambda owned: repository.find_canceled_result_ref(
+        action_id, predecessor, cancel[0], owned
+    ))
     if ref is None:
-        request = repository.prepare_result_set(
-            action_id, runtime.wall_us(), runtime.owned
-        )
+        request = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
+            action_id, occurred_at, owned
+        ))
         if previous is not None:
-            row = repository.read_result_set(previous, runtime.owned)
+            row = await runtime.database.read(lambda owned: repository.read_result_set(previous, owned))
             from camctl.persistence.repositories.result_pages import _at
 
-            request = replace(
+            request = await runtime.database.read(lambda owned: replace(
                 request,
                 source_boundary=HistoryBoundary(
                     row["source_txn_id"], row["source_event_id"]
@@ -672,45 +694,45 @@ def finish_segmented_cancellation(runtime, action_id):
                 current_scan=(
                     None
                     if row["current_attempt_id"] is None
-                    else _at(db, row["current_final_page_event_id"])[0].ref
+                    else _at(owned.connection, row["current_final_page_event_id"])[0].ref
                 ),
-            )
+            ))
         request = replace(
             request,
             publication_kind=PublicationKind.CANCELED,
             predecessor_set_id=predecessor,
             cancel_event_id=cancel[0],
         )
-        ref = _save(runtime, action_id, repository, "create_result_set", request)
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
-    conclusion = db.execute(
+        ref = await _save(runtime, action_id, repository, "create_result_set", request)
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
+    conclusion = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT id FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-    ).fetchone()
+    ).fetchone())
     if conclusion is None:
         run = (
             None
             if row["run_id"] is None
-            else row_facts(db, "operation_runs", row["run_id"])
+            else (await runtime.database.read(lambda owned: row_facts(owned.connection, "operation_runs", row["run_id"])))
         )
         prior_end = None
         if run is not None and run["status"] not in (1, 2):
-            (prior_end,) = db.execute(
+            (prior_end,) = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
                 "WHERE json_extract(r.value,'$.table')='operation_runs' AND json_extract(r.value,'$.id')=? "
                 "AND json_extract(r.value,'$.before.values.status') IN (1,2) "
                 "AND json_extract(r.value,'$.after.values.status') IN (3,4,5,6,7) ORDER BY e.id DESC LIMIT 1",
                 (run["id"],),
-            ).fetchone()
+            ).fetchone())
         prior = (
             None
             if predecessor is None
-            else db.execute(
+            else (await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT id FROM segment_check_conclusions WHERE set_id=?",
                 (predecessor,),
-            ).fetchone()
+            ).fetchone()))
         )
-        _save(
+        await _save(
             runtime,
             action_id,
             repository,
@@ -727,8 +749,8 @@ def finish_segmented_cancellation(runtime, action_id):
             ),
         )
     if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
-    _save(
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -739,84 +761,83 @@ def finish_segmented_cancellation(runtime, action_id):
     )
 
 
-def finish_segmented_baseline_failure(runtime, action_id):
+async def finish_segmented_baseline_failure(runtime, action_id):
     """基准实际失败也发布明确的无 RESULTS 来源，不派发 START。"""
-    return _finish_segmented_setup_failure(runtime, action_id, preparation=False)
+    return await _finish_segmented_setup_failure(runtime, action_id, preparation=False)
 
 
-def finish_segmented_preparation_failure(runtime, action_id):
+async def finish_segmented_preparation_failure(runtime, action_id):
     """设置实际失败以原 PREPARE 结果发布无 RESULTS 结论。"""
-    return _finish_segmented_setup_failure(runtime, action_id, preparation=True)
+    return await _finish_segmented_setup_failure(runtime, action_id, preparation=True)
 
 
-def resume_segmented_preparation_failure(runtime, action):
+async def resume_segmented_preparation_failure(runtime, action):
     """原无 RESULTS 准备决定先发布，不让冷恢复取得新的设备资格。"""
     if action["execution_spec_json"].get("result_policy") is None or action["cancel_requested"]:
         return False
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action["id"])
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action["id"])
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action["id"], runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action["id"], owned))
     if ref is None:
         return False
-    row = repository.read_result_set(ref, runtime.owned)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if row["source_kind"] != int(enum_for("segment_sets.source_kind").NO_RESULTS):
         return False
     from camctl.capture.segment_models import ResultCheckEndReason
-    conclusion = runtime.owned.connection.execute(
+    conclusion = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT c.anchor_event_id FROM segment_check_conclusions c WHERE c.set_id=? AND c.reason=?",
         (ref.set_id, int(enum_for("segment_check_conclusions.reason")[ResultCheckEndReason.NO_RESULT_WORK.name])),
-    ).fetchone()
+    ).fetchone())
     if conclusion is None:
         return False
-    prep = runtime.owned.connection.execute(
+    prep = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT r.id FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
         " WHERE r.action_id=? AND r.kind=? AND t.result_event_id=?",
         (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE), conclusion[0]),
-    ).fetchone()
+    ).fetchone())
     if prep is None:
         return False
     from camctl.persistence.repositories.segment_check_conclusions import no_result_preparation_failure
-    no_result_preparation_failure(runtime.owned.connection, row, conclusion[0])
-    finish_segmented_preparation_failure(runtime, action["id"])
+    await runtime.database.read(lambda owned: no_result_preparation_failure(owned.connection, row, conclusion[0]))
+    await finish_segmented_preparation_failure(runtime, action["id"])
     return True
 
 
-def _finish_segmented_setup_failure(runtime, action_id, *, preparation):
+async def _finish_segmented_setup_failure(runtime, action_id, *, preparation):
     from camctl.capture.segment_storage import ResultCheckConclusionSave
     from camctl.capture.segment_models import ResultCheckEndReason
 
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
-    db = runtime.owned.connection
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     if ref is None:
-        ref = _save(
+        ref = await _save(
             runtime,
             action_id,
             repository,
             "create_result_set",
-            repository.prepare_result_set(action_id, runtime.wall_us(), runtime.owned),
+            (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(action_id, occurred_at, owned))),
         )
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if (
-        db.execute(
+        (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-        ).fetchone()
+        ).fetchone()))
         is None
     ):
         if preparation:
-            (anchor,) = db.execute(
+            (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
                 " WHERE r.action_id=? AND r.kind=? ORDER BY r.id DESC,t.attempt_no DESC LIMIT 1",
                 (action_id, int(enum_for("operation_runs.kind").PREPARE_CAPTURE)),
-            ).fetchone()
+            ).fetchone())
         else:
-            (anchor,) = db.execute(
+            (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT result_event_id FROM baseline_read_calls WHERE action_id=? ORDER BY read_no DESC LIMIT 1",
                 (action_id,),
-            ).fetchone()
-        _save(
+            ).fetchone())
+        await _save(
             runtime,
             action_id,
             repository,
@@ -833,8 +854,8 @@ def _finish_segmented_setup_failure(runtime, action_id, *, preparation):
             ),
         )
     if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
-    _save(
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -855,7 +876,7 @@ def _finish_segmented_setup_failure(runtime, action_id, *, preparation):
     )
 
 
-def finish_segmented_start_failure(runtime, action_id):
+async def finish_segmented_start_failure(runtime, action_id):
     """START 实际结束但没有 RESULTS 时，发布未知范围及原启动失败。"""
     from camctl.capture.segment_storage import ResultCheckConclusionSave
     from camctl.capture.segment_models import ResultCheckEndReason
@@ -863,35 +884,34 @@ def finish_segmented_start_failure(runtime, action_id):
         no_result_start_failure,
     )
 
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
-    if runtime.action(action_id)["status"] in (3, 4, 5, 6):
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
+    if (await runtime.action(action_id))["status"] in (3, 4, 5, 6):
         return
-    db = runtime.owned.connection
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     if ref is None:
-        ref = _save(
+        ref = await _save(
             runtime,
             action_id,
             repository,
             "create_result_set",
-            repository.prepare_result_set(action_id, runtime.wall_us(), runtime.owned),
+            (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(action_id, occurred_at, owned))),
         )
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
-    (anchor,) = db.execute(
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
+    (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT t.result_event_id FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
         " WHERE r.action_id=? AND r.kind=? ORDER BY t.attempt_no DESC LIMIT 1",
         (action_id, int(enum_for("operation_runs.kind").START)),
-    ).fetchone()
-    failure = no_result_start_failure(db, row, anchor)
+    ).fetchone())
+    failure = await runtime.database.read(lambda owned: no_result_start_failure(owned.connection, row, anchor))
     if (
-        db.execute(
+        (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-        ).fetchone()
+        ).fetchone()))
         is None
     ):
-        _save(
+        await _save(
             runtime,
             action_id,
             repository,
@@ -908,8 +928,8 @@ def finish_segmented_start_failure(runtime, action_id):
             ),
         )
     if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
-    _save(
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -920,54 +940,52 @@ def finish_segmented_start_failure(runtime, action_id):
     )
 
 
-def resume_closed_start(runtime, action):
+async def resume_closed_start(runtime, action):
     """冷恢复接手原 START 结束，不重新授予启动或更换已保存错误。"""
     if action["execution_spec_json"].get("result_policy") is None:
         return False
-    db = runtime.owned.connection
-    run = db.execute(
+    run = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT status FROM operation_runs WHERE action_id=? AND kind=?",
         (action["id"], int(enum_for("operation_runs.kind").START)),
-    ).fetchone()
-    results = db.execute(
+    ).fetchone())
+    results = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
         (action["id"], int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)),
-    ).fetchone()
+    ).fetchone())
     if run is None or run[0] not in (4, 6) or results is not None:
         return False
     if action["cancel_requested"]:
-        finish_segmented_cancellation(runtime, action["id"])
+        await finish_segmented_cancellation(runtime, action["id"])
     else:
-        finish_segmented_start_failure(runtime, action["id"])
+        await finish_segmented_start_failure(runtime, action["id"])
     return True
 
 
-def finish_segmented_external_failure(runtime, action_id, reason, failure, anchor=None):
+async def finish_segmented_external_failure(runtime, action_id, reason, failure, anchor=None):
     """外部收场仅接手已保存的观察，按同一发布边界保留合格文件。"""
     from camctl.capture.segment_storage import ResultCheckConclusionSave
     from camctl.capture.segment_models import ResultCheckEndReason
 
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
-    db = runtime.owned.connection
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     if ref is None:
-        ref = _save(
+        ref = await _save(
             runtime,
             action_id,
             repository,
             "create_result_set",
-            repository.prepare_result_set(action_id, runtime.wall_us(), runtime.owned),
+            (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(action_id, occurred_at, owned))),
         )
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if (
-        db.execute(
+        (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-        ).fetchone()
+        ).fetchone()))
         is None
     ):
-        _save(
+        await _save(
             runtime,
             action_id,
             repository,
@@ -984,8 +1002,8 @@ def finish_segmented_external_failure(runtime, action_id, reason, failure, ancho
             ),
         )
     if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
-    _save(
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+    await _save(
         runtime,
         action_id,
         runtime.capture,

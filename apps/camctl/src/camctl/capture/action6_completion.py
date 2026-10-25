@@ -273,12 +273,12 @@ def classify_action6_members(
     )
 
 
-def iter_action6_video_members(repository, ref, owned):
+async def iter_action6_video_members(repository, ref, database):
     """按冻结顺序逐页返回全部可用于 Action6 覆盖的主视频。"""
     profile = profile_for_policy(CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value)
     cursor = None
     while True:
-        page = repository.read_members(ref, cursor, 128, owned)
+        page = await database.read(lambda owned: repository.read_members(ref, cursor, 128, owned))
         for stored in page.items:
             member = stored.member
             if (
@@ -303,10 +303,9 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
     )
 
     action_id = action["id"]
-    db = runtime.owned.connection
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     if ref is None:
         if listing is None:
             listing = await common._listing_round(runtime, action_id)
@@ -314,45 +313,45 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
             return None
         exhausted = listing.phase is common.ListingPhase.EXHAUSTED
         if exhausted:
-            listing = common._saved_result_listing(runtime, action_id)
-        register_segment_observations(runtime, action_id, listing)
+            listing = await common._saved_result_listing(runtime, action_id)
+        await register_segment_observations(runtime, action_id, listing)
         finalized = common._listing_finalized(listing)
         if not finalized and not (exhausted or canceled):
-            common._finish_listing_result(runtime, listing, retry_wait=True)
+            await common._finish_listing_result(runtime, listing, retry_wait=True)
             return None
         if finalized:
-            common._finish_listing_result(runtime, listing, finalize_output_set=True)
-        request = repository.prepare_result_set(
-            action_id, runtime.wall_us(), runtime.owned
-        )
+            await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        request = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
+            action_id, occurred_at, owned
+        ))
         if canceled:
             from dataclasses import replace
             from camctl.capture.segment_models import PublicationKind
 
-            cancel = runtime.owned.connection.execute(
+            cancel = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
                 "WHERE json_extract(r.value,'$.table')='actions' AND json_extract(r.value,'$.id')=? "
                 "AND json_extract(r.value,'$.before.values.cancel_requested')=0 "
                 "AND json_extract(r.value,'$.after.values.cancel_requested')=1 "
                 "ORDER BY e.id DESC LIMIT 1",
                 (action_id,),
-            ).fetchone()
+            ).fetchone())
             if cancel is None:
                 raise ConsistencyError("原生延时取消缺少实际取消请求事件")
-            previous = repository.read_prepared_result_ref(action_id, runtime.owned)
+            previous = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
             predecessor = None if previous is None else previous.set_id
-            existing = repository.find_canceled_result_ref(
-                action_id, predecessor, cancel[0], runtime.owned
-            )
+            existing = await runtime.database.read(lambda owned: repository.find_canceled_result_ref(
+                action_id, predecessor, cancel[0], owned
+            ))
             if existing is not None:
                 ref = existing
-                _prepare_members(runtime, repository, ref)
-                return repository.read_current_segment_ref(ref, runtime.owned)
+                await _prepare_members(runtime, repository, ref)
+                return await runtime.database.read(lambda owned: repository.read_current_segment_ref(ref, owned))
             if previous is not None:
-                previous_row = repository.read_result_set(previous, runtime.owned)
+                previous_row = await runtime.database.read(lambda owned: repository.read_result_set(previous, owned))
                 from camctl.persistence.repositories.result_pages import _at
 
-                request = replace(
+                request = await runtime.database.read(lambda owned: replace(
                     request,
                     source_boundary=HistoryBoundary(
                         previous_row["source_txn_id"], previous_row["source_event_id"]
@@ -363,28 +362,28 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
                     current_scan=(
                         None
                         if previous_row["current_attempt_id"] is None
-                        else _at(db, previous_row["current_final_page_event_id"])[0].ref
+                        else _at(owned.connection, previous_row["current_final_page_event_id"])[0].ref
                     ),
-                )
+                ))
             request = replace(
                 request,
                 publication_kind=PublicationKind.CANCELED,
                 predecessor_set_id=predecessor,
                 cancel_event_id=cancel[0],
             )
-        ref = _save(
+        ref = await _save(
             runtime,
             action_id,
             repository,
             "create_result_set",
             request,
         )
-    _prepare_members(runtime, repository, ref)
-    scan_ref = repository.read_current_segment_ref(ref, runtime.owned)
+    await _prepare_members(runtime, repository, ref)
+    scan_ref = await runtime.database.read(lambda owned: repository.read_current_segment_ref(ref, owned))
     return scan_ref if scan_ref is not None else ref
 
 
-def finish_action6_retained_unconfirmed(runtime, action, ref):
+async def finish_action6_retained_unconfirmed(runtime, action, ref):
     """预算耗尽且没有完整当前扫描时，保留原已登记文件并明确报告未知。"""
     from camctl.capture import handlers as common
     from camctl.capture.media import RecordingFailure
@@ -396,42 +395,42 @@ def finish_action6_retained_unconfirmed(runtime, action, ref):
     if not isinstance(ref, SegmentResultRef):
         raise TypeError("Action6 未完成扫描必须沿保留来源引用收场")
     action_id = action["id"]
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if row["state"] == int(enum_for("segment_sets.state").MEMBERS_FIXED):
-        existing = runtime.owned.connection.execute(
+        existing = await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-        ).fetchone()
+        ).fetchone())
         if existing is None:
-            reason, _, _ = current_decision(runtime.owned.connection, row)
-            anchor = runtime.owned.connection.execute(
+            reason, _, _ = await runtime.database.read(lambda owned: current_decision(owned.connection, row))
+            anchor = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT result_event_id FROM operation_attempts WHERE run_id=? "
                 "ORDER BY attempt_no DESC LIMIT 1", (row["run_id"],)
-            ).fetchone()
+            ).fetchone())
             if anchor is None or anchor[0] is None:
                 raise ConsistencyError("Action6 耗尽来源缺少实际最后结果事件")
-            _save(
+            await _save(
                 runtime, action_id, repository, "conclude_result_check",
                 ResultCheckConclusionSave(
                     ref, reason, anchor[0], None, runtime.check_config, None, None,
                     runtime.wall_us(),
                 ),
             )
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
-        row = repository.read_result_set(ref, runtime.owned)
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+        row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if row["state"] != int(enum_for("segment_sets.state").ASSESSED):
         raise ConsistencyError("Action6 保留来源缺少可靠的有限未知结论")
     from camctl.persistence.repositories.segment_check_conclusions import read_fixed_result_check_conclusion
 
-    conclusion = read_fixed_result_check_conclusion(runtime.owned.connection, row)
+    conclusion = await runtime.database.read(lambda owned: read_fixed_result_check_conclusion(owned.connection, row))
     actual_failure = conclusion["current_failure_json"]
     failure = (None if actual_failure is None else RecordingFailure(**actual_failure)) or RecordingFailure(
         "capture_result_unconfirmed",
         {"activity_id": str(row["activity_id"]), "reason": "outputs_unknown"},
     )
-    _save(
+    await _save(
         runtime, action_id, runtime.capture, "finish_segment_recording",
         FinishSegmentRecording(
             ref, row["activity_id"], row["run_id"], runtime.wall_us(), failure,
@@ -439,11 +438,11 @@ def finish_action6_retained_unconfirmed(runtime, action, ref):
     )
 
 
-def classify_action6_segment_set(
+async def classify_action6_segment_set(
     action,
     ref: SegmentSetRef,
     repository,
-    owned,
+    database,
     *,
     coverage_status=CoverageStatus.NOT_PERFORMED,
     confirmed=None,
@@ -451,18 +450,9 @@ def classify_action6_segment_set(
     canceled=False,
     default_scope=None,
 ):
-    cursor = None
+    from camctl.persistence.repositories.segment_listing import materialized_segment_members
 
-    def members():
-        nonlocal cursor
-        while True:
-            page = repository.read_members(ref, cursor, 128, owned)
-            yield from (stored.member for stored in page.items)
-            if page.next_cursor is None:
-                return
-            cursor = page.next_cursor
-
-    setrow = repository.read_set(ref, owned)
+    setrow = await database.read(lambda owned: repository.read_set(ref, owned))
     complete = setrow["source_kind"] == int(
         enum_for("segment_sets.source_kind").COMPLETE_SCAN
     ) and setrow["publication_kind"] == int(
@@ -470,20 +460,16 @@ def classify_action6_segment_set(
     )
     if canceled:
         complete = True
-    return classify_action6_members(
-        action,
-        ref,
-        members(),
-        complete=complete,
-        coverage_status=coverage_status,
-        confirmed=confirmed,
-        checked_count=checked_count,
-        canceled=canceled,
-        default_scope=default_scope,
-    )
+    async with materialized_segment_members(database, repository, ref) as members:
+        return classify_action6_members(
+            action, ref, (stored.member for stored in members()),
+            complete=complete, coverage_status=coverage_status,
+            confirmed=confirmed, checked_count=checked_count, canceled=canceled,
+            default_scope=default_scope,
+        )
 
 
-def _conclude_action6_results(runtime, action, ref):
+async def _conclude_action6_results(runtime, action, ref):
     """按同一原 RESULTS 票保存既有有限检查责任结论。"""
     from camctl.capture.segment_completion import _save
     from camctl.capture.segment_models import ResultCheckEndReason
@@ -495,27 +481,26 @@ def _conclude_action6_results(runtime, action, ref):
     repository = SegmentRepository()
     canceled = bool(action["cancel_requested"])
     if canceled:
-        setrow = repository.read_set(ref, runtime.owned)
-        result_ref = repository.find_canceled_result_ref(
+        setrow = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
+        result_ref = await runtime.database.read(lambda owned: repository.find_canceled_result_ref(
             action["id"], setrow["predecessor_set_id"],
-            setrow["cancel_event_id"], runtime.owned,
-        )
+            setrow["cancel_event_id"], owned,
+        ))
     else:
-        result_ref = repository.read_prepared_result_ref(action["id"], runtime.owned)
+        result_ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action["id"], owned))
     if not isinstance(result_ref, SegmentResultRef):
         raise ConsistencyError("Action6 共同完成缺少已准备的原 RESULTS 集合")
-    if repository.read_current_segment_ref(result_ref, runtime.owned) != ref:
+    if (await runtime.database.read(lambda owned: repository.read_current_segment_ref(result_ref, owned))) != ref:
         raise ConsistencyError("Action6 结论与当前原 RESULTS 完整集合不一致")
-    db = runtime.owned.connection
-    if db.execute(
+    if (await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (result_ref.set_id,)
-    ).fetchone():
+    ).fetchone())):
         return
-    setrow = repository.read_result_set(result_ref, runtime.owned)
+    setrow = await runtime.database.read(lambda owned: repository.read_result_set(result_ref, owned))
     run = (
         None
         if setrow["run_id"] is None
-        else row_facts(db, "operation_runs", setrow["run_id"])
+        else (await runtime.database.read(lambda owned: row_facts(owned.connection, "operation_runs", setrow["run_id"])))
     )
     if run is None and not canceled:
         raise ConsistencyError("Action6 原 RESULTS 集合缺少核实责任")
@@ -528,10 +513,10 @@ def _conclude_action6_results(runtime, action, ref):
         prior_conclusion = (
             None
             if setrow["predecessor_set_id"] is None
-            else db.execute(
+            else (await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT id FROM segment_check_conclusions WHERE set_id=?",
                 (setrow["predecessor_set_id"],),
-            ).fetchone()
+            ).fetchone()))
         )
         prior_conclusion = None if prior_conclusion is None else prior_conclusion[0]
     else:
@@ -540,18 +525,18 @@ def _conclude_action6_results(runtime, action, ref):
             if action_type == "camera_timelapse"
             else ResultCheckEndReason.SEGMENTS_SUFFICIENT
         )
-        (anchor,) = db.execute(
+        (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT result_event_id FROM operation_attempts WHERE run_id=? "
             "ORDER BY attempt_no DESC LIMIT 1",
             (run["id"],),
-        ).fetchone()
+        ).fetchone())
         if anchor is None:
             raise ConsistencyError("Action6 原 RESULTS 责任缺少实际结束事件")
         prior_conclusion = None
     prior_end = None
     check_config = runtime.check_config if run is not None else None
     if run is not None and run["status"] not in (1, 2):
-        prior_end = db.execute(
+        prior_end = await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
             "WHERE json_extract(r.value,'$.table')='operation_runs' "
             "AND json_extract(r.value,'$.id')=? "
@@ -559,12 +544,12 @@ def _conclude_action6_results(runtime, action, ref):
             "AND json_extract(r.value,'$.after.values.status') IN (3,4,5,6,7) "
             "ORDER BY e.id DESC LIMIT 1",
             (run["id"],),
-        ).fetchone()
+        ).fetchone())
         if prior_end is None:
             raise ConsistencyError("Action6 原 RESULTS 结束缺少对应关闭事件")
         prior_end = prior_end[0]
         check_config = None
-    _save(
+    await _save(
         runtime,
         action["id"],
         repository,
@@ -582,23 +567,23 @@ def _conclude_action6_results(runtime, action, ref):
     )
 
 
-def publish_action6_segment_result(runtime, action, ref, decision, *, failure=None):
+async def publish_action6_segment_result(runtime, action, ref, decision, *, failure=None):
     """把决策、其有序默认范围、正式产物和动作终态放进共同事务。"""
     from camctl.capture.segment_completion import _save, resume_segment_writes
 
     action_id = action["id"]
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
     if not isinstance(decision, SegmentDecision) or decision.set_ref != ref:
         raise TypeError("Action6 发布必须引用相同的有限 SegmentDecision")
-    setrow = repository.read_set(ref, runtime.owned)
+    setrow = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
     # 取消结论要求原成员仍处于 MEMBERS_FIXED；先结论原 RESULTS
     # 责任，再将覆盖决策推进为 ASSESSED，避免状态顺序反转后无法收场。
     # 正常收场必须在保存 SegmentDecision 后结论，保证关闭事实与该决策一致。
     if action["cancel_requested"]:
-        _conclude_action6_results(runtime, action, ref)
+        await _conclude_action6_results(runtime, action, ref)
     if setrow["state"] != int(enum_for("segment_sets.state").ASSESSED):
-        _save(
+        await _save(
             runtime,
             action_id,
             repository,
@@ -608,21 +593,21 @@ def publish_action6_segment_result(runtime, action, ref, decision, *, failure=No
             runtime.wall_us(),
         )
     else:
-        persisted = repository.read_decision(ref, runtime.owned)
+        persisted = await runtime.database.read(lambda owned: repository.read_decision(ref, owned))
         if persisted != decision:
             raise ConsistencyError("原集合已有不同 Action6 决策")
     if decision.default_scope.state is DefaultScopeState.NONEMPTY:
-        row = repository.read_set(ref, runtime.owned)
-        saved = runtime.owned.connection.execute(
+        row = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
+        saved = (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members WHERE set_id=?",
             (setrow["id"],),
-        ).fetchone()[0]
+        ).fetchone()))[0]
         selected = 0
         batch = []
         profile = profile_for_policy(action["execution_spec_json"]["result_policy"])
         cursor = None
         while True:
-            page = repository.read_members(ref, cursor, 128, runtime.owned)
+            page = await runtime.database.read(lambda owned: repository.read_members(ref, cursor, 128, owned))
             for stored in page.items:
                 member = stored.member
                 if (
@@ -637,25 +622,25 @@ def publish_action6_segment_result(runtime, action, ref, decision, *, failure=No
                 if selected >= saved:
                     batch.append(stored.member_id)
                     if len(batch) == 128:
-                        _save(runtime, action_id, repository, "append_scope", ref, tuple(batch), runtime.wall_us())
+                        await _save(runtime, action_id, repository, "append_scope", ref, tuple(batch), runtime.wall_us())
                         batch.clear()
                 selected += 1
             if page.next_cursor is None:
                 break
             cursor = page.next_cursor
         if batch:
-            _save(runtime, action_id, repository, "append_scope", ref, tuple(batch), runtime.wall_us())
+            await _save(runtime, action_id, repository, "append_scope", ref, tuple(batch), runtime.wall_us())
         if selected != decision.default_scope.member_count:
             raise ConsistencyError("Action6 默认视频范围与冻结成员不同")
     elif decision.default_scope.state is DefaultScopeState.EMPTY:
-        if runtime.owned.connection.execute(
+        if (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_scope_members WHERE set_id=? LIMIT 1", (setrow["id"],)
-        ).fetchone():
+        ).fetchone())):
             raise ConsistencyError("空 Action6 视频范围不能已有成员")
 
-    setrow = repository.read_set(ref, runtime.owned)
+    setrow = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
     if not action["cancel_requested"]:
-        _conclude_action6_results(runtime, action, ref)
+        await _conclude_action6_results(runtime, action, ref)
     if failure is None and decision.status in (
         SegmentDecisionStatus.FAILED,
         SegmentDecisionStatus.UNCONFIRMED,
@@ -684,7 +669,7 @@ def publish_action6_segment_result(runtime, action, ref, decision, *, failure=No
         failure = RecordingFailure(code, details)
     if decision.status in (SegmentDecisionStatus.SUCCEEDED, SegmentDecisionStatus.CANCELED):
         failure = None
-    _save(
+    await _save(
         runtime,
         action_id,
         runtime.capture,
@@ -713,37 +698,36 @@ async def advance_action6_segmented_recording(runtime, action, decision):
             ref = await prepare_action6_segment_set(
                 runtime,
                 action,
-                common._saved_result_listing(runtime, action_id),
+                (await common._saved_result_listing(runtime, action_id)),
                 canceled=True,
             )
             if ref is None:
                 return
             repository = SegmentRepository()
-            facts = classify_action6_segment_set(
-                action, ref, repository, runtime.owned, canceled=True
+            facts = await classify_action6_segment_set(
+                action, ref, repository, runtime.database, canceled=True
             )
-            release_segment_occupancy(runtime, action_id)
-            publish_action6_segment_result(runtime, action, ref, facts.decision)
+            await release_segment_occupancy(runtime, action_id)
+            await publish_action6_segment_result(runtime, action, ref, facts.decision)
         else:
-            common._finish_canceled_capture(runtime, action_id)
+            await common._finish_canceled_capture(runtime, action_id)
         return
 
-    listing = common._local_recording_listing(runtime, action)
+    listing = await common._local_recording_listing(runtime, action)
     ref = await prepare_action6_segment_set(runtime, action, listing)
     if ref is None:
         return
     from camctl.capture.segment_storage import SegmentResultRef
     if isinstance(ref, SegmentResultRef):
-        finish_action6_retained_unconfirmed(runtime, action, ref)
+        await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
-    facts = classify_action6_segment_set(action, ref, repository, runtime.owned)
-    release_segment_occupancy(runtime, action_id)
-    activity = row_facts(
-        runtime.owned.connection,
-        "device_activities",
-        common._activity_id_of(runtime, action_id),
-    )
+    facts = await classify_action6_segment_set(action, ref, repository, runtime.database)
+    await release_segment_occupancy(runtime, action_id)
+    activity_id = await common._activity_id_of(runtime, action_id)
+    activity = await runtime.database.read(lambda owned: row_facts(
+        owned.connection, "device_activities", activity_id,
+    ))
     _, overrun = _control_facts(runtime, action, activity)
     # RESULTS 可能刚刚保存了本轮 STOP+filewait 证据。入口传入的 decision
     # 是读取之前的快照，需依据此刻持久化事实重算，不能因此把正常完成送去媒体检查。
@@ -751,7 +735,7 @@ async def advance_action6_segmented_recording(runtime, action, decision):
     from camctl.capture.recording import RecordingFacts, decide_recording_next
 
     current_decision = decide_recording_next(
-        _recording_port(runtime).recording_state(action_id), RecordingFacts()
+        (await _recording_port(runtime).recording_state(action_id)), RecordingFacts()
     )
     control_complete = (
         current_decision.phase is RecordingPhase.CONTROL_COMPLETE
@@ -775,7 +759,7 @@ async def advance_action6_segmented_recording(runtime, action, decision):
             ),
         )
     if control_complete and facts.decision.status is SegmentDecisionStatus.SUCCEEDED:
-        publish_action6_segment_result(runtime, action, ref, facts.decision)
+        await publish_action6_segment_result(runtime, action, ref, facts.decision)
         return
     from camctl.capture.action6_recovery import advance_action6_recovery
 
@@ -783,15 +767,15 @@ async def advance_action6_segmented_recording(runtime, action, decision):
 
 
 async def advance_action6_native_result(runtime, action_id, *, canceled=False):
-    action = runtime.action(action_id)
+    action = await runtime.action(action_id)
     if action["cancel_requested"]:
         canceled = True
     if canceled:
         from camctl.capture.action6_recovery import finalize_pending_action6_inspections
 
-        if not finalize_pending_action6_inspections(
+        if not (await finalize_pending_action6_inspections(
             runtime, action_id, reason="source_canceled"
-        ):
+        )):
             return
     from camctl.capture import handlers as common
     from camctl.capture.segment_completion import _save, release_segment_occupancy
@@ -804,24 +788,23 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
         if canceled:
             from camctl.capture.segment_completion import finish_segmented_cancellation
 
-            finish_segmented_cancellation(runtime, action_id)
+            await finish_segmented_cancellation(runtime, action_id)
         else:
-            finish_action6_retained_unconfirmed(runtime, action, ref)
+            await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
-    facts = classify_action6_segment_set(
-        action, ref, repository, runtime.owned, canceled=canceled
+    facts = await classify_action6_segment_set(
+        action, ref, repository, runtime.database, canceled=canceled
     )
-    activity = row_facts(
-        runtime.owned.connection,
-        "device_activities",
-        common._activity_id_of(runtime, action_id),
-    )
+    activity_id = await common._activity_id_of(runtime, action_id)
+    activity = await runtime.database.read(lambda owned: row_facts(
+        owned.connection, "device_activities", activity_id,
+    ))
     # 自然等待事件在本轮原始 RESULTS 完成后仍须按冻结合同验证；完整
     # 集合和分类结果由上方的 ref/facts 提供，不从单一活动状态字段推测。
-    normal_completion = common._natural_file_completion_context(
+    normal_completion = (await common._natural_file_completion_context(
         runtime, action_id
-    ) is not None
+    )) is not None
     if (
         not canceled
         and normal_completion
@@ -831,29 +814,29 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
         from camctl.capture.result_scans import SavedResultEntries
         from camctl.capture.segment_storage import SegmentResultRef
 
-        result_ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+        result_ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
         if not isinstance(result_ref, SegmentResultRef):
             raise ConsistencyError("Action6 自然完成缺少已准备的原 RESULTS 集合")
-        listing = common._saved_result_listing(runtime, action_id)
+        listing = await common._saved_result_listing(runtime, action_id)
         if not isinstance(listing.entries, SavedResultEntries):
             raise ConsistencyError("Action6 自然完成缺少可靠的原 RESULTS 页")
-        first = next(listing.entries.pages()).ref
-        result_set = repository.read_result_set(result_ref, runtime.owned)
+        first = (await anext(listing.entries.pages())).ref
+        result_set = await runtime.database.read(lambda owned: repository.read_result_set(result_ref, owned))
         observation = {
             "first_page_event_id": first.event_id,
             "last_page_event_id": listing.entries.last_ref.event_id,
             "file_count": result_set["member_count"],
         }
-        completion = runtime.capture.read_result_completion(
-            action_id, runtime.owned
-        )
+        completion = await runtime.database.read(lambda owned: runtime.capture.read_result_completion(
+            action_id, owned
+        ))
         if completion is None:
             completion = {
                 "method": common._TIME_AND_OUTPUTS_METHOD,
                 "wait_completed_event_id": activity["wait_completed_event_id"],
                 "observation": observation,
             }
-        _save(
+        await _save(
             runtime,
             action_id,
             runtime.capture,
@@ -868,12 +851,12 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
                 completion,
             ),
         )
-    release_segment_occupancy(runtime, action_id)
+    await release_segment_occupancy(runtime, action_id)
     if canceled or (
         normal_completion
         and facts.decision.status is SegmentDecisionStatus.SUCCEEDED
     ):
-        publish_action6_segment_result(runtime, action, ref, facts.decision)
+        await publish_action6_segment_result(runtime, action, ref, facts.decision)
         return
     from dataclasses import replace
 
