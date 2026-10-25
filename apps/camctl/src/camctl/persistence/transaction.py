@@ -59,7 +59,9 @@ from camctl.history.validators import (
 )
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.page_read_cache import clear_page_records, discard_page_records, page_read_scope
-from camctl.persistence.read_reuse import clear_read_reuse, read_reuse_scope
+from camctl.persistence.read_reuse import (
+    clear_read_reuse, read_reuse_scope, reuse_read, typed_read_key,
+)
 from camctl.logging_runtime.transaction_timing import (
     TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
 )
@@ -1123,6 +1125,11 @@ def event_envelope(
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
+    key = (__name__, "row_facts", typed_read_key(table), typed_read_key(row_id))
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+
+
+def _load_row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     with closing(connection.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))) as cursor:
         found = cursor.fetchone()
         if found is None:
@@ -1146,6 +1153,16 @@ def read_transaction_range(
     validated: TransactionRange | None = None,
 ) -> TransactionRange:
     """核实完整事务范围、前一边界及成员；复用范围只限已核验的不可变历史。"""
+    key = (__name__, "transaction_range", typed_read_key(transaction_id),
+           typed_read_key(validated))
+    return reuse_read(connection, key, lambda: _load_transaction_range(
+        connection, transaction_id, validated))
+
+
+def _load_transaction_range(
+    connection: sqlite3.Connection, transaction_id: int,
+    validated: TransactionRange | None,
+) -> TransactionRange:
     with closing(connection.execute(
         "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE id = ?",
         (transaction_id,),

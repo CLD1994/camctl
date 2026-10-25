@@ -36,6 +36,18 @@ _active_scope: ContextVar[_ReadReuseState | None] = ContextVar("read_reuse_scope
 _T = TypeVar("_T")
 
 
+def typed_read_key(value: Any) -> Any:
+    """保留读取输入及数据类字段的实际类型，不合并布尔值与整数。"""
+    if is_dataclass(value) and not isinstance(value, type):
+        return type(value), tuple(
+            (member.name, typed_read_key(getattr(value, member.name)))
+            for member in fields(value)
+        )
+    if isinstance(value, tuple):
+        return type(value), tuple(typed_read_key(item) for item in value)
+    return type(value), value
+
+
 @contextmanager
 def read_reuse_scope(connection: sqlite3.Connection) -> Iterator[None]:
     """建立当前连接的一次事务读取范围；相邻同连接嵌套共享缓存。"""
