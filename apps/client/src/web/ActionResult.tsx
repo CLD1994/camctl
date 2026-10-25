@@ -227,22 +227,24 @@ export function ActionResult({
               {utcToLocal(action.scheduled_at).replace("T", " ") || "时间无效"}
             </span>
           )}
-          <button
-            onClick={() =>
-              follow({
-                action: {
-                  name: `取消 ${action.name}`,
-                  type: "cancel_task",
-                  params: {
-                    target: { action_instance_id: action.action_instance_id },
+          {(action.status === "pending" || action.status === "running") && (
+            <button
+              onClick={() =>
+                follow({
+                  action: {
+                    name: `取消 ${action.name}`,
+                    type: "cancel_task",
+                    params: {
+                      target: { action_instance_id: action.action_instance_id },
+                    },
                   },
-                },
-                summary: `取消动作 ${action.name}`,
-              })
-            }
-          >
-            取消动作
-          </button>
+                  summary: `取消动作 ${action.name}`,
+                })
+              }
+            >
+              取消动作
+            </button>
+          )}
           {isCameraAction(action.type) && (
             <>
               <button

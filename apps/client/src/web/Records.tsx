@@ -109,7 +109,7 @@ export function RecordDetail({
             <strong>
               {plan ? "已取得计划受理及报告状态" : "尚无计划执行依据"}
             </strong>
-            {plan && <span>{plan.plan_instance_id}</span>}
+            {plan && <span>计划实例 ID：{plan.plan_instance_id}</span>}
           </div>
         </div>
         {request && (
@@ -196,23 +196,25 @@ export function RecordDetail({
                 >
                   清理计划产物
                 </button>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    follow({
-                      action: {
-                        name: `取消 ${plan.name}`,
-                        type: "cancel_task",
-                        params: {
-                          target: { plan_instance_id: plan.plan_instance_id },
+                {plan.status !== "completed" && (
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      follow({
+                        action: {
+                          name: `取消 ${plan.name}`,
+                          type: "cancel_task",
+                          params: {
+                            target: { plan_instance_id: plan.plan_instance_id },
+                          },
                         },
-                      },
-                      summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
-                    })
-                  }
-                >
-                  取消计划
-                </button>
+                        summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
+                      })
+                    }
+                  >
+                    取消计划
+                  </button>
+                )}
               </div>
             </div>
             {plan.status === "completed" && (
