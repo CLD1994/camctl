@@ -2,6 +2,7 @@
 import asyncio
 import sqlite3
 import threading
+from contextvars import Context, ContextVar
 from unittest.mock import create_autospec
 
 import pytest
@@ -63,6 +64,30 @@ async def test_confirmed_observer_only_receives_committed_business_write(owned, 
         observer.assert_called_once_with(owned, outcome, job.key)
     else:
         observer.assert_not_called()
+
+
+@pytest.mark.parametrize('priority', [DbPriority.BUSINESS, DbPriority.SNAPSHOT])
+async def test_queued_operations_keep_their_own_command_context(owned, priority, monkeypatch):
+    command = ContextVar('unit_db_command', default=None)
+    executor = DbExecutor(lambda: owned)
+    monkeypatch.setattr(executor, '_ensure_thread_locked', lambda: None)
+    futures = []
+    for index, name in enumerate(('first', 'second'), 1):
+        token = command.set(name)
+        try:
+            futures.append(executor.submit_read(DbJob(
+                OperationKey(str(index)*32), name, DbJobKind.READ, priority,
+                lambda connection: command.get())))
+        finally:
+            command.reset(token)
+    # 用空上下文执行实际队列条目，模拟数据库线程；不启动真实线程。
+    worker = Context()
+    while (job := executor._core.pop_next()) is not None:
+        worker.run(executor._execute, job, owned)
+        executor._core.complete(job.key)
+    assert [(await future).value for future in futures] == ['first', 'second']
+    assert worker.run(command.get) is None
+    assert command.get() is None
 
 
 async def test_observer_failure_preserves_commit_and_business_handoff(owned):

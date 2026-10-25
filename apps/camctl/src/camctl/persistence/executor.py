@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
+from contextvars import copy_context
 from dataclasses import replace
 from typing import Any, Callable
 
@@ -249,6 +250,11 @@ class DbExecutor:
     # -- 内部：提交路径 -----------------------------------------------
 
     def _submit(self, job: DbJob) -> asyncio.Future:
+        # 日志目标及操作计量属于本次调用，不能沿用worker的空上下文，
+        # 也不能在不同命令的排队条目之间共享可变Context。
+        context = copy_context()
+        execute = job.execute
+        job = replace(job, execute=lambda owned: context.run(execute, owned))
         result: asyncio.Future = self._loop.create_future()
         admission: _Admission | None = None
         with self._lock:
