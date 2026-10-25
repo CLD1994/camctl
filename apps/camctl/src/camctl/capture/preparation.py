@@ -25,7 +25,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.validation import validate_outcome
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import row_facts
@@ -52,6 +52,8 @@ class PendingPreparation:
     successful: bool = False
     refused: str | None = None
     entered: bool = False
+    intent_save: SharedSave = field(default_factory=SharedSave)
+    result_save: SharedSave = field(default_factory=SharedSave)
 
 
 @dataclass
@@ -61,6 +63,7 @@ class RuntimePreparationCache:
     owners: dict[int, PendingPreparation] = field(default_factory=dict)
     reservations: dict[int, tuple[Any, Any]] = field(default_factory=dict)
     endings: dict[int, tuple[str, Any, Any]] = field(default_factory=dict)
+    request_saves: dict[OperationKey, SharedSave] = field(default_factory=dict)
 
     def pending(self, action_id):
         owner = self.owners.get(action_id)
@@ -75,7 +78,7 @@ def _completed(receipt, message):
     return receipt.value
 
 
-async def _save_owner(owner, database, operations):
+async def _save_owner(owner, database, operations, *, retry=False):
     async def save_and_apply():
         notification_errors = []
 
@@ -125,7 +128,52 @@ async def _save_owner(owner, database, operations):
             owner.saved = True
         if notification_errors:
             raise notification_errors[0]
-    return await settle_required(save_and_apply())
+    if owner.ticket is not None and owner.actual is None and owner.finish is None:
+        return
+    saving = owner.intent_save if owner.ticket is None else owner.result_save
+    if retry:
+        saving.retry_failed()
+    return await saving.run(save_and_apply)
+
+
+async def _save_cached_request(database, cache, action_id, *, scheduling, capture, ending=False, retry=False):
+    requests = cache.endings if ending else cache.reservations
+    original = requests.get(action_id)
+    if original is None:
+        return
+    if ending:
+        kind, request, key = original
+        method = capture.release_occupancy if kind == "release" else getattr(scheduling, kind)
+        message = "原准备释放未可靠保存" if kind == "release" else "原准备收场未可靠保存"
+    else:
+        request, key = original
+        kind, method, message = None, scheduling.reserve_preparation, "原准备占用未可靠保存"
+
+    async def save_and_apply():
+        notification_error = None
+        try:
+            receipt = await database.write(lambda owned: method(request, key, owned), key=key)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            notification_error = error
+        value = _completed(receipt, message)
+        if kind == "release" and value.outcome.value == "rejected":
+            raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
+        del requests[action_id]
+        if notification_error is not None:
+            raise notification_error
+        return value
+
+    saving = cache.request_saves.setdefault(key, SharedSave())
+    if retry:
+        saving.retry_failed()
+    try:
+        return await saving.run(save_and_apply)
+    finally:
+        if requests.get(action_id) is not original and cache.request_saves.get(key) is saving:
+            del cache.request_saves[key]
 
 
 async def resume_preparation_saves(database, cache, *, operations=None, scheduling=None, capture=None):
@@ -138,34 +186,14 @@ async def resume_preparation_saves(database, cache, *, operations=None, scheduli
     capture = CaptureRepository() if capture is None else capture
 
     async def save_and_apply():
-        notification_errors = []
-
-        async def save(callback, *, key):
-            try:
-                return await database.write(callback, key=key)
-            except BaseException as error:
-                receipt = db_outcome_for(error)
-                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
-                    raise
-                notification_errors.append(error)
-                return receipt
-
         for owner in tuple(cache.owners.values()):
-            await _save_owner(owner, database, operations)
-        if cache.reservations:
-            for action_id, (request, key) in tuple(cache.reservations.items()):
-                _completed(await save(lambda owned: scheduling.reserve_preparation(request, key, owned), key=key), "原准备占用未可靠保存")
-                del cache.reservations[action_id]
-        for action_id, (kind, request, key) in tuple(cache.endings.items()):
-            if kind == "release":
-                value = _completed(await save(lambda owned: capture.release_occupancy(request, key, owned), key=key), "原准备释放未可靠保存")
-                if value.outcome.value == "rejected":
-                    raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
-            else:
-                _completed(await save(lambda owned: getattr(scheduling, kind)(request, key, owned), key=key), "原准备收场未可靠保存")
-            del cache.endings[action_id]
-        if notification_errors:
-            raise notification_errors[0]
+            await _save_owner(owner, database, operations, retry=True)
+        for action_id in tuple(cache.reservations):
+            await _save_cached_request(database, cache, action_id,
+                scheduling=scheduling, capture=capture, retry=True)
+        for action_id in tuple(cache.endings):
+            await _save_cached_request(database, cache, action_id,
+                scheduling=scheduling, capture=capture, ending=True, retry=True)
     return await settle_required(save_and_apply())
 
 
@@ -431,12 +459,11 @@ async def advance_preparation(runtime, action_id):
     activity = (await _activity(runtime, action_id))
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest
-        request = ReservePreparationRequest(action_id, now, now, runtime.prepare_lead_s)
-        cache.reservations[action_id] = request, new_operation_key()
-        _save_inputs = (request, cache.reservations[action_id][1])
-        _save_options = dict()
-        value = _completed((await runtime.database.write(lambda owned: runtime.scheduling.reserve_preparation(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实")), "准备占用未可靠保存")
-        del cache.reservations[action_id]
+        if action_id not in cache.reservations:
+            request = ReservePreparationRequest(action_id, now, now, runtime.prepare_lead_s)
+            cache.reservations[action_id] = request, new_operation_key()
+        value = await _save_cached_request(runtime.database, cache, action_id,
+            scheduling=runtime.scheduling, capture=runtime.capture)
         if value.outcome.value == "rejected":
             return BaselinePreparation(PreparationPhase.WAITING)
         activity = (await _activity(runtime, action_id))

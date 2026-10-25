@@ -19,7 +19,7 @@ from camctl.capture.preparation import (
     _recover_old_preparation, settle_preparation,
     preparation_dispatch_reason,
 )
-from camctl.contracts.values import ConsistencyError
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import CapturePreparationDriver, ControlDriver, DeviceCallResult
 from camctl.operations.attempts import (
@@ -28,7 +28,8 @@ from camctl.operations.attempts import (
 from camctl.operations.models import (
     AttemptTicket, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
 )
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome
+from camctl.persistence.business import BusinessDatabase, SharedSave
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.capture import CaptureRepository
@@ -106,6 +107,269 @@ def _photo_world(mocker):
         effective_params_json={"type": "hasselblad_photo", "format": "raw"},
         execution_spec_json={"output_storage": "host", "start_call_timeout_s": Decimal(180)})
     return runtime, action, ticket
+
+
+def _held_save(runtime, phase):
+    """在真实数据库端口的等待边界暂停；不运行执行器或访问数据库。"""
+    original = runtime.database
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.read.side_effect = original.read
+    entered, release = asyncio.Event(), asyncio.Event()
+    keys = []
+
+    async def write(callback, *, key, description="业务写入"):
+        cache = runtime.preparation_cache
+        owner = cache.owners.get(1)
+        target = ((phase == "intent" and owner is not None and key == owner.intent_key)
+                  or (phase == "result" and owner is not None and key == owner.result_key)
+                  or (phase == "reservation" and 1 in cache.reservations
+                      and key == cache.reservations[1][1])
+                  or (phase == "ending" and 1 in cache.endings and key == cache.endings[1][2]))
+        if target:
+            keys.append(key)
+            entered.set()
+            await release.wait()
+        return callback(runtime.owned)
+
+    database.write.side_effect = write
+    runtime.database = database
+    return entered, release, keys
+
+
+async def _resume_while_held(runtime):
+    task = asyncio.create_task(resume_preparation_saves(runtime.database,
+        runtime.preparation_cache, operations=runtime.operations,
+        scheduling=runtime.scheduling, capture=runtime.capture))
+    # 两个入口只等待受控事件；让可运行任务抵达同一保存等待点。
+    for _ in range(10):
+        await asyncio.sleep(0)
+    return task
+
+
+@pytest.mark.parametrize("phase", ["intent", "result"])
+async def test_device_preparation_and_recovery_join_one_original_save(mocker, phase):
+    from camctl.capture.handlers import _prepared_start_ticket
+
+    runtime, action, ticket = _world(mocker)
+    runtime.capture_preparation_supported = True
+    entered, release, keys = _held_save(runtime, phase)
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    owner = runtime.preparation_cache.owners[1]
+    assert not owner.saved
+    runtime.prepare_baseline.assert_not_awaited()
+    release.set()
+    result, _ = await asyncio.gather(device, recovered)
+
+    assert len(keys) == 1
+    assert result.phase is PreparationPhase.READY
+    assert owner.saved and owner.task.done()
+    assert _prepared_start_ticket(runtime, action) == ticket
+    runtime.prepare_baseline.assert_awaited_once_with(1)
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+    runtime.operations.begin_attempt.assert_called_once()
+    runtime.operations.finish_attempt.assert_called_once()
+
+
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_canceled_recovery_waiter_preserves_shared_actual_result_save(mocker, cancel_count):
+    runtime, _, _ = _world(mocker)
+    entered, release, keys = _held_save(runtime, "result")
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    for _ in range(cancel_count):
+        recovered.cancel()
+        await asyncio.sleep(0)
+    assert not recovered.done()
+    assert not runtime.preparation_cache.owners[1].saved
+    release.set()
+
+    assert (await device).phase is PreparationPhase.READY
+    with pytest.raises(asyncio.CancelledError):
+        await recovered
+    assert runtime.preparation_cache.owners[1].saved
+    assert len(keys) == 1
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+@pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK])
+async def test_concurrent_failed_save_keeps_original_request_for_later_recovery(mocker, kind):
+    runtime, action, ticket = _world(mocker)
+    runtime.operations.finish_attempt.return_value = DbOutcome(kind, error=RuntimeError("未确认"))
+    entered, release, keys = _held_save(runtime, "result")
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    owner = runtime.preparation_cache.owners[1]
+    original, key = owner.finish, owner.result_key
+    release.set()
+    results = await asyncio.gather(device, recovered, return_exceptions=True)
+
+    assert all(isinstance(result, ConsistencyError) for result in results)
+    assert len(keys) == 1 and not owner.saved
+    assert prepared_by(runtime, action) is None
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        FinishAttemptResult(FinishDisposition.SAVED))
+    await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+        operations=runtime.operations)
+    assert runtime.operations.finish_attempt.call_args.args[:2] == (original, key)
+    assert prepared_by(runtime, action) == ticket
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_reservation_and_recovery_join_one_original_request(mocker):
+    from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
+
+    runtime, _, _ = _world(mocker)
+    from camctl.capture import preparation
+    activity = preparation._activity
+    activity.return_value = None
+
+    def reserve(request, key, owned):
+        activity.return_value = {"id": 7, "occupancy_state": 1, "dispatch_state": 1}
+        return DbOutcome(DbOutcomeKind.COMPLETED,
+            ReservePreparationResult(ReservePreparationOutcome.RESERVED, 7))
+
+    runtime.scheduling.reserve_preparation.side_effect = reserve
+    entered, release, keys = _held_save(runtime, "reservation")
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    release.set()
+    result, _ = await asyncio.gather(device, recovered)
+
+    assert len(keys) == 1 and not runtime.preparation_cache.reservations
+    assert result.phase is PreparationPhase.READY
+    runtime.scheduling.reserve_preparation.assert_called_once()
+
+
+@pytest.mark.parametrize("kind", ["release", "fail_preparation", "expire_action"])
+async def test_ending_and_recovery_join_one_original_request(mocker, kind):
+    from camctl.capture.preparation import _end
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, _, _ = _world(mocker)
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    runtime.scheduling.fail_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    runtime.scheduling.expire_action.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    entered, release, keys = _held_save(runtime, "ending")
+    ending = asyncio.create_task(_end(runtime, 1, kind, object()))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    release.set()
+    await asyncio.gather(ending, recovered)
+
+    assert len(keys) == 1 and not runtime.preparation_cache.endings
+
+
+def _cached_request(runtime, phase):
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    request, key = object(), new_operation_key()
+    if phase == "reservation":
+        held = runtime.preparation_cache.reservations
+        held[1] = original = request, key
+        method = runtime.scheduling.reserve_preparation
+        completed = DbOutcome(DbOutcomeKind.COMPLETED)
+    else:
+        held = runtime.preparation_cache.endings
+        held[1] = original = "release", request, key
+        method = runtime.capture.release_occupancy
+        completed = DbOutcome(DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    method.return_value = completed
+    return held, original, method, completed
+
+
+@pytest.mark.parametrize("phase", ["reservation", "ending"])
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_canceled_cached_request_waiter_applies_original_before_cancel(mocker, phase, cancel_count):
+    runtime, _, _ = _world(mocker)
+    held, _, method, _ = _cached_request(runtime, phase)
+    entered, release, keys = _held_save(runtime, phase)
+    original = asyncio.create_task(resume_preparation_saves(runtime.database,
+        runtime.preparation_cache, scheduling=runtime.scheduling, capture=runtime.capture))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    for _ in range(cancel_count):
+        recovered.cancel()
+        await asyncio.sleep(0)
+    assert not recovered.done() and 1 in held
+    release.set()
+    await original
+    with pytest.raises(asyncio.CancelledError):
+        await recovered
+    assert not held and not runtime.preparation_cache.request_saves
+    assert len(keys) == 1
+    method.assert_called_once()
+
+
+@pytest.mark.parametrize("phase", ["reservation", "ending"])
+@pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED])
+async def test_cached_request_failure_recovers_same_input_and_key(mocker, phase, kind):
+    runtime, _, _ = _world(mocker)
+    held, original, method, completed = _cached_request(runtime, phase)
+    method.return_value = DbOutcome(kind, error=RuntimeError("未可靠保存"))
+    entered, release, keys = _held_save(runtime, phase)
+    pending = asyncio.create_task(resume_preparation_saves(runtime.database,
+        runtime.preparation_cache, scheduling=runtime.scheduling, capture=runtime.capture))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    release.set()
+    results = await asyncio.gather(pending, recovered, return_exceptions=True)
+    assert all(isinstance(result, ConsistencyError) for result in results)
+    assert held[1] is original and len(keys) == 1
+
+    method.return_value = completed
+    await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+        scheduling=runtime.scheduling, capture=runtime.capture)
+    assert not held and not runtime.preparation_cache.request_saves
+    assert keys == [original[-1], original[-1]]
+    assert method.call_args.args[:2] == (original[-2], original[-1])
+
+
+@pytest.mark.parametrize("phase", ["reservation", "ending"])
+async def test_cached_request_notification_failure_applies_once_before_delivery(mocker, phase):
+    runtime, _, _ = _world(mocker)
+    held, _, method, completed = _cached_request(runtime, phase)
+    failure = RuntimeError("提交后的通知错误")
+    _attach_db_outcome(failure, completed)
+    method.side_effect = failure
+    entered, release, keys = _held_save(runtime, phase)
+    pending = asyncio.create_task(resume_preparation_saves(runtime.database,
+        runtime.preparation_cache, scheduling=runtime.scheduling, capture=runtime.capture))
+    await entered.wait()
+    recovered = await _resume_while_held(runtime)
+    release.set()
+    assert await asyncio.gather(pending, recovered, return_exceptions=True) == [failure, failure]
+    assert not held and not runtime.preparation_cache.request_saves
+    await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+        scheduling=runtime.scheduling, capture=runtime.capture)
+    assert len(keys) == 1
+    method.assert_called_once()
+
+
+async def test_completed_cached_request_releases_its_save_when_next_phase_already_exists(mocker):
+    runtime, _, _ = _world(mocker)
+    held, original, _, _ = _cached_request(runtime, "ending")
+    replacement = "release", object(), new_operation_key()
+    saving = create_autospec(SharedSave, instance=True)
+
+    async def finish_then_begin_next(save_and_apply):
+        value = await save_and_apply()
+        held[1] = replacement
+        return value
+
+    saving.run.side_effect = finish_then_begin_next
+    runtime.preparation_cache.request_saves[original[-1]] = saving
+    await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+        scheduling=runtime.scheduling, capture=runtime.capture)
+
+    assert held[1] is replacement
+    assert original[-1] not in runtime.preparation_cache.request_saves
 
 
 @pytest.mark.asyncio
