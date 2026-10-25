@@ -160,13 +160,20 @@ def write_stub_launcher(deployment) -> str:
     头）。
     """
     python = Path(sys.executable)
+    clock_environment = deployment.clock_env()
+    clock_exports = "".join(
+        f"export {name}={shlex.quote(value)}\n"
+        for name, value in clock_environment.items())
+    forwarded = ":".join(("CAMCTL_TEST_DRIVER_SPEC", "CAMCTL_TEST_STATE_DB",
+                          *clock_environment))
     bridged = (
         f"export CAMCTL_TEST_DRIVER_SPEC='{deployment.driver_spec}'\n"
         f"export CAMCTL_TEST_STATE_DB='{deployment.state_db}'\n"
+        f"{clock_exports}"
         # WSL 启动 Windows 进程时只传递 WSLENV 声明的变量；装配桥的
-        # 两个输入都必须随 exec 到达 camctl 进程。
+        # 本部署输入必须随 exec 到达 camctl 进程。
         "export WSLENV=\"${WSLENV:+$WSLENV:}"
-        "CAMCTL_TEST_DRIVER_SPEC:CAMCTL_TEST_STATE_DB\"\n"
+        f"{forwarded}\"\n"
         f"exec {to_wsl(python)} '{_BRIDGE}' \"${{args[@]}}\"\n")
     launcher = deployment.root / "stub-launcher.sh"
     _write_launcher(to_wsl(launcher), _launcher_body(bridged))

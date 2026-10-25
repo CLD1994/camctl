@@ -71,7 +71,8 @@ class Deployment:
     """一个初始化前的部署目录：配置、计划文件与替身剧本。"""
 
     def __init__(self, root: Path, *, devices: bool = True,
-                 recording_margin_s: str | None = None) -> None:
+                 recording_margin_s: str | None = None,
+                 controlled_clock: bool = False) -> None:
         self.root = root
         self.home = root / "deployment"
         self.staging = self.home / "staging"
@@ -127,6 +128,66 @@ class Deployment:
             encoding="utf-8",
         )
         self.driver_spec = root / "driver-spec.json"
+        self._controlled_clock = controlled_clock
+        self.clock_state_path = root / "business-clock.json"
+        self.clock_log_path = root / "business-clock.jsonl"
+        if controlled_clock:
+            from _osmo_builtin_clock import set_frozen, whole_second_utc_us
+
+            set_frozen(self.clock_state_path, utc_us=whole_second_utc_us(),
+                       monotonic_ns=time.monotonic_ns())
+
+    def schedule(self, seconds: int) -> str:
+        """按本部署当前业务钟生成原格式 UTC；默认仍使用系统时间。"""
+        if not self._controlled_clock:
+            return future_schedule(seconds)
+        from _osmo_builtin_clock import format_utc, read_clock
+
+        reading = read_clock(self.clock_state_path)
+        return format_utc(reading["utc_us"] + seconds * 1_000_000)
+
+    def freeze_at(self, scheduled_at: str) -> dict:
+        """将业务 UTC 和单调钟按相同差量向前移到排期，再冻结。"""
+        from _osmo_builtin_clock import read_clock, set_frozen
+
+        if not self._controlled_clock:
+            raise ValueError("部署未启用受控业务钟")
+        target = datetime.strptime(scheduled_at, "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc)
+        target_us = int(target.timestamp()) * 1_000_000
+        reading = read_clock(self.clock_state_path)
+        delta_us = target_us - reading["utc_us"]
+        if delta_us < 0:
+            raise ValueError("受控业务钟不能向后移动")
+        return set_frozen(self.clock_state_path, utc_us=target_us,
+                          monotonic_ns=reading["monotonic_ns"] + delta_us * 1000)
+
+    def pause_clock(self) -> dict:
+        """在当前一对业务读数上暂停，不改变真实进程和工具计时。"""
+        from _osmo_builtin_clock import read_clock, set_frozen
+
+        if not self._controlled_clock:
+            raise ValueError("部署未启用受控业务钟")
+        reading = read_clock(self.clock_state_path)
+        return set_frozen(self.clock_state_path, utc_us=reading["utc_us"],
+                          monotonic_ns=reading["monotonic_ns"])
+
+    def resume_clock(self) -> dict:
+        """从当前一对业务读数恢复按真实经过时间推进。"""
+        from _osmo_builtin_clock import read_clock, set_running
+
+        if not self._controlled_clock:
+            raise ValueError("部署未启用受控业务钟")
+        reading = read_clock(self.clock_state_path)
+        return set_running(self.clock_state_path, utc_us=reading["utc_us"],
+                           monotonic_ns=reading["monotonic_ns"])
+
+    def clock_env(self) -> dict[str, str]:
+        """只向本部署的 CLI 与 C launcher 提供显式业务钟路径。"""
+        if not self._controlled_clock:
+            return {}
+        return {"CAMCTL_TEST_CLOCK_FILE": str(self.clock_state_path),
+                "CAMCTL_TEST_CLOCK_LOG": str(self.clock_log_path)}
 
     def set_min_plausible_date(self, date_text: str) -> None:
         """改写墙钟可信下界；未来日期使下次会话进入受限收场。"""
@@ -149,9 +210,15 @@ class Deployment:
         """运行真实 camctl CLI；driver 提供时经部署装配桥接入替身。"""
         environment = os.environ.copy()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
+        for name in ("CAMCTL_TEST_CLOCK_FILE", "CAMCTL_TEST_CLOCK_LOG"):
+            environment.pop(name, None)
+        environment.update(self.clock_env())
         if driver is not None:
             self._write_driver_spec(driver)
             environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+            command = [sys.executable, str(_BRIDGE), *args]
+        elif self._controlled_clock:
+            environment.pop("CAMCTL_TEST_DRIVER_SPEC", None)
             command = [sys.executable, str(_BRIDGE), *args]
         else:
             command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
@@ -168,9 +235,15 @@ class Deployment:
         """
         environment = os.environ.copy()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
+        for name in ("CAMCTL_TEST_CLOCK_FILE", "CAMCTL_TEST_CLOCK_LOG"):
+            environment.pop(name, None)
+        environment.update(self.clock_env())
         if driver is not None:
             self._write_driver_spec(driver)
             environment["CAMCTL_TEST_DRIVER_SPEC"] = str(self.driver_spec)
+            command = [sys.executable, str(_BRIDGE), *args]
+        elif self._controlled_clock:
+            environment.pop("CAMCTL_TEST_DRIVER_SPEC", None)
             command = [sys.executable, str(_BRIDGE), *args]
         else:
             command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
@@ -434,6 +507,9 @@ class _ScriptedStubDriver:
         if not gate:
             return
         target = self._gate_dir / gate
+        if os.environ.get("CAMCTL_TEST_CLOCK_FILE"):
+            (self._gate_dir / f"{gate}.entered").write_text(
+                json.dumps({"port": port, "pid": os.getpid()}), encoding="utf-8")
         deadline = time.monotonic() + _GATE_TIMEOUT_S
         while not target.exists():
             assert time.monotonic() < deadline, f"门超时: {target}"
