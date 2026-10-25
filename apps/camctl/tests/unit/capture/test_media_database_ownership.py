@@ -57,6 +57,10 @@ async def test_actual_source_dispatch_releases_marker_after_fact_read():
         if "FROM device_files" in query:
             assert parameters == (30,)
             cursor.fetchone.return_value = ("original", '{"path":"original"}', 20, 3)
+        elif query.startswith("SELECT 1"):
+            assert "FROM file_copies fc" in query
+            assert parameters == (9,)
+            cursor.fetchone.return_value = (1,)
         else:
             assert "JOIN file_copies" in query
             assert parameters == (1, 28, 9, "read/9")
