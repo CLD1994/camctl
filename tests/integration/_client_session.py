@@ -161,6 +161,7 @@ class ClientSession:
             error = SessionError("客户端命令失败：" + json.dumps(reply.get("error"), ensure_ascii=False))
             # Node在finally中关闭Files/浏览器/HTTP；等待仍使用本命令原截止。
             try:
+                self._close_connection()
                 self._wait_exit(deadline)
             except BaseException as closing:
                 error.add_note(f"Node错误收场：{closing}")
@@ -210,6 +211,7 @@ class ClientSession:
             reply = self._send(self.next_id, "close", [], deadline)
             if "receipt_path" in reply:
                 raise SessionError("close回执不应携带业务文件")
+            self._close_connection()  # 完整close回执已收到，释放FIN后再等Node退出。
             self._wait_exit(deadline)
             assert self.process is not None
             if self.process.returncode != 0:
