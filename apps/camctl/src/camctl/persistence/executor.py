@@ -328,12 +328,8 @@ class DbExecutor:
                     owned = self._factory()
                 except BaseException as error:
                     self._deliver_factory_failure(job, error)
-                    with self._lock:
-                        self._core.complete(job.key)
                     continue
             owned = self._execute(job, owned)
-            with self._lock:
-                self._core.complete(job.key)
         if owned is not None:
             try:
                 owned.connection.close()
@@ -405,7 +401,11 @@ class DbExecutor:
         return ReadReceipt(error=failure)
 
     def _finish(self, job: DbJob, payload: Any) -> None:
-        result = self._results.pop(job.key, None)
+        # 交付前原申请仍持有派发与结果责任；释放键时一并结束旧派发，
+        # 防止loop随即接纳的同键新申请被旧状态误判为已派发。
+        with self._lock:
+            self._core.complete(job.key)
+            result = self._results.pop(job.key, None)
         if result is not None and not result.done():
             result.set_result(payload)
 

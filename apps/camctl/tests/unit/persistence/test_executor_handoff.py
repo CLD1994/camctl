@@ -80,7 +80,6 @@ def _dispatch(executor):
 
 async def _execute_and_deliver(executor, job, owned):
     executor._execute(job, owned)
-    executor._core.complete(job.key)
     await asyncio.sleep(0)
 
 
@@ -94,7 +93,6 @@ async def test_duplicate_key_preserves_original_job_and_result(
     job = None if stage == 'queued' else _dispatch(executor)
     if stage == 'awaiting_delivery':
         executor._execute(job, owned)
-        executor._core.complete(job.key)
     queued = executor._core.queued_count()
 
     with pytest.raises(DbExecutorError):
@@ -280,7 +278,6 @@ async def test_failure_pending_delivery_preserves_original_handle(executor, owne
         executor._execute(job, owned)
     else:
         executor._deliver_factory_failure(job, error)
-    executor._core.complete(job.key)
     with pytest.raises(DbExecutorError):
         _submit(executor, _job(kind, 'replacement'))
     await asyncio.sleep(0)
@@ -293,3 +290,54 @@ async def test_failure_pending_delivery_preserves_original_handle(executor, owne
     retry = _submit(executor, _job(kind, 'verified'))
     await _execute_and_deliver(executor, _dispatch(executor), owned)
     assert retry.done() and retry.result().value == 'verified'
+
+
+@pytest.mark.parametrize('kind', list(DbJobKind))
+@pytest.mark.parametrize('completion', ['success', 'callback_failure', 'factory_failure'])
+async def test_delivered_result_allows_same_key_queued_application_to_be_withdrawn(
+    executor, owned, kind, completion,
+):
+    error = RuntimeError('original failure') if completion != 'success' else None
+    original = _submit(executor, _job(kind, 'original', error=error))
+    job = _dispatch(executor)
+    if completion == 'factory_failure':
+        executor._deliver_factory_failure(job, error)
+    else:
+        executor._execute(job, owned)
+    # worker发出交付通知后可能暂未继续；loop已能交付结果并接收同键新申请。
+    receipt = await original
+    assert receipt.value == ('original' if completion == 'success' else None)
+    if error is not None:
+        assert receipt.error is error or receipt.error.__cause__ is error
+    execute = create_autospec(lambda owned: None)
+    new_job = DbJob(job.key, 'new application', kind, DbPriority.BUSINESS, execute)
+    retry = _submit(executor, new_job)
+
+    withdrawal = await executor.withdraw(job.key)
+
+    assert withdrawal.status is WithdrawalStatus.WITHDRAWN
+    assert retry.done() and retry.result().kind is DbOutcomeKind.NOT_EXECUTED
+    assert executor._core.pop_next() is None
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize('kind', list(DbJobKind))
+@pytest.mark.parametrize('completion', ['success', 'callback_failure', 'factory_failure'])
+async def test_worker_keeps_original_withdrawal_scope_until_loop_delivers_result(
+    executor, owned, monkeypatch, kind, completion,
+):
+    error = RuntimeError('original failure') if completion != 'success' else None
+    if completion == 'factory_failure':
+        monkeypatch.setattr(executor, '_factory', create_autospec(lambda: None, side_effect=error))
+    original = _submit(executor, _job(kind, 'original', error=error))
+    # 在当前进程内驱动worker到退出，交付通知由loop下一轮处理。
+    executor._stopping = True
+    executor._run()
+
+    assert not original.done()
+    withdrawal = await executor.withdraw(OperationKey('1' * 32))
+    assert withdrawal.status is WithdrawalStatus.DISPATCHED
+    receipt = await original
+    assert receipt.value == ('original' if completion == 'success' else None)
+    with pytest.raises(DbExecutorError):
+        await executor.withdraw(OperationKey('1' * 32))
