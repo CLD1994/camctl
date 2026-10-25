@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 产物技术详情字段展示（2026-10-25）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。`output-facts` 与 `web-facts` 两个单元文件的 10 项通过，覆盖源文件 SHA-256、未检查与未知时长、零秒和精确数值、检查完成仍保留问题，以及清理与检查错误的原始诊断。首轮 7 项回归用例均在原嵌套呈现方式下失败，确认字段含义与表格层级问题。
+
+`browser-media-download` 的 11 项通过，覆盖技术详情的明确字段与单层双列、390 像素窄屏下长校验值换行，以及既有的可读名称、完整字节、LRF/OSV 播放和范围下载。首轮浏览器测试在准备阶段生成空 MP4，11 项未执行；装配改为读取项目生成的固定 32618 字节 VP9 MP4 夹具后，保留原播放和下载断言并全部通过。测试使用独立临时目录。
+
+本地服务继续使用原数据目录，在 Codex 内置浏览器的 `http://localhost:4310/` 展开真实 OSV 产物确认“源文件 SHA-256／尚未取得”“主机媒体检查／未执行”和“媒体时长／未知”均直接显示，没有中间状态列。日志位于 `tmp/output-facts-red.log`、`tmp/output-facts-unit.log`、`tmp/output-facts-typecheck.log`、`tmp/output-facts-build.log` 和 `tmp/output-facts-browser-final.log`，页面截图为 `tmp/output-facts-final.png`。本项没有递交设备请求，未运行完整客户端测试套件。
+
 ## 终态取消入口与计划标识（2026-10-25）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查与生产构建退出 0；`browser-workflow` 和 `browser-previews` 两个文件、45 项通过。新增用例覆盖三种计划状态、运行中计划内动作状态的独立判断，以及四种动作终态；终态取消入口隐藏后，取回入口仍可见。既有精确取消操作改用含待执行动作的运行中计划，仍核对导出目标 ID、原报告不变及草稿写入。

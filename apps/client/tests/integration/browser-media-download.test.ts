@@ -23,46 +23,10 @@ beforeAll(async () => {
     headless: true,
     channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
   });
-  const page = await browser.newPage();
-  try {
-    mp4 = Buffer.from(
-      await page.evaluate(async () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = 480;
-        canvas.height = 270;
-        document.body.append(canvas);
-        const context = canvas.getContext("2d")!;
-        const stream = canvas.captureStream(0);
-        const track =
-          stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
-        const recorder = new MediaRecorder(stream, {
-          mimeType: "video/mp4;codecs=vp9",
-        });
-        const chunks: Blob[] = [];
-        const done = new Promise<Blob>((resolve) => {
-          recorder.ondataavailable = (event) => chunks.push(event.data);
-          recorder.onstop = () =>
-            resolve(new Blob(chunks, { type: "video/mp4" }));
-        });
-        recorder.start();
-        for (let frame = 0; frame < 30; frame++) {
-          context.fillStyle = frame % 2 ? "blue" : "green";
-          context.fillRect(0, 0, canvas.width, canvas.height);
-          track.requestFrame();
-          await new Promise((resolve) => setTimeout(resolve, 85));
-        }
-        recorder.stop();
-        const blob = await done;
-        const bytes = await blob.arrayBuffer();
-        stream.getTracks().forEach((track) => track.stop());
-        return Array.from(new Uint8Array(bytes));
-      }),
-    );
-    expect(mp4.length).toBeGreaterThan(0);
-    expect(mp4.subarray(4, 8).toString()).toBe("ftyp");
-  } finally {
-    await page.close();
-  }
+  mp4 = readFileSync(
+    new URL("../fixtures/media/local-verification.mp4", import.meta.url),
+  );
+  expect(mp4.subarray(4, 8).toString()).toBe("ftyp");
 }, 20000);
 afterAll(async () => {
   await browser?.close();
@@ -185,7 +149,7 @@ it("大图下载使用对应交付的可读名称并保留完整字节", async (
 });
 
 it("产物只展示一行操作与一个技术详情入口", async () => {
-  const { card: action } = await setup(png, "1.png", "image/png");
+  const { card: action, page } = await setup(png, "1.png", "image/png");
   const card = action.locator(".product-card");
   await check(
     card.getByRole("button", { name: "下载", exact: true }),
@@ -204,6 +168,19 @@ it("产物只展示一行操作与一个技术详情入口", async () => {
   await check(card.locator("details button")).toHaveCount(0);
   await check(card.locator("details")).toContainText("1.png");
   await check(card.locator(".delivery .facts")).toBeVisible();
+  const facts = card.locator(".output-facts");
+  await check(facts).toContainText("源文件 SHA-256");
+  await check(facts).toContainText("主机媒体检查");
+  await check(facts).toContainText("媒体时长");
+  await check(facts.locator(".facts")).toHaveCount(0);
+  await check(facts.locator("dt").filter({ hasText: /^状态$/ })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await check(facts.getByText("源文件 SHA-256", { exact: true })).toBeVisible();
+  expect(
+    await facts.evaluate(
+      (element) => element.scrollWidth <= element.clientWidth,
+    ),
+  ).toBe(true);
 });
 
 it.each(["cleaned", "unknown"] as const)(

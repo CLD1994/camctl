@@ -5,7 +5,8 @@ import type { Followup } from "./Records";
 import { previewKind } from "../shared/media";
 import { download } from "./api";
 import { receivedOutputIds } from "./obtain";
-import { Badge, Facts } from "./common";
+import { Badge, Facts, label } from "./common";
+import { OutputFacts } from "./OutputFacts";
 import { cleanupEntryVisible } from "./device-options";
 import type { Capabilities } from "../shared/types";
 
@@ -454,7 +455,7 @@ function ProductCard({
       </div>
       <details className="advanced product-technical">
         <summary>技术详情</summary>
-        {p.output && <Facts value={p.output} business />}
+        {p.output && <OutputFacts output={p.output} />}
         {p.deliveries.map(({ delivery: d, video: v }) => (
           <section className="delivery" key={d.delivery_id}>
             <h5>交付 {d.delivery_id}</h5>
@@ -483,12 +484,7 @@ function ProductRelation({ product: p }: { product: Product }) {
   if (!p.output) return <p>产物角色尚未确认 · {p.id}</p>;
   return (
     <p className="product-relation">
-      {p.output.kind === "original"
-        ? "原文件"
-        : p.output.kind === "preview"
-          ? "预览文件"
-          : "修复成品"}{" "}
-      · {p.id}
+      {label(p.output.kind)} · {p.id}
       {p.original && (
         <>
           {" "}
