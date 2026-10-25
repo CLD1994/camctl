@@ -26,6 +26,7 @@ import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
 import type { EstimateReloadPhase } from "./video-estimate-state";
 import { StateObservations, SupersededStateReadError } from "./state-observations";
+import { stabilizeCapabilities } from "./capability-observation";
 import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
 import { stringifyJson } from "../shared/json";
@@ -98,6 +99,13 @@ export function App() {
         () => captureStateContext(),
         (value, { consumerId }) => {
           if (!mounted.current) return;
+          value = {
+            ...value,
+            capabilities: stabilizeCapabilities(
+              capabilityObservation.current,
+              value.capabilities,
+            ),
+          };
           // 对所有已打开会话消费同一份完整集合，可靠缺失和读取异常分别分类。
           for (const [id, session] of sessions.current)
             if (id !== consumerId)

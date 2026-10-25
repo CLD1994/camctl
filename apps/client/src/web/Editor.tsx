@@ -1,6 +1,6 @@
 import { Select, SelectItem, SelectFieldset } from "./Select";
 import { isCameraAction } from "../shared/actions";
-import { useState, useLayoutEffect, useRef } from "react";
+import { useState, useLayoutEffect, useRef, useMemo } from "react";
 import { useFeedback } from "./feedback";
 import type { DraftContent, Preset } from "../server/models";
 import type { Capabilities, Issue, ParameterType } from "../shared/types";
@@ -135,10 +135,16 @@ export function Editor(props: Props) {
       ),
     );
   const intent = previewIntent(content);
-  const previewIssues = coordinatePreviews(
-    content,
-    props.capabilityState,
-  ).issues;
+  const previewIssues = useMemo(
+    () => coordinatePreviews(content, props.capabilityState).issues,
+    [
+      content,
+      props.capabilityState.active,
+      props.capabilityState.error,
+      props.capabilityState.generation,
+      props.capabilityState.version,
+    ],
+  );
   const identity = (index: number) => actionIdentity.keys[index];
   const change = (
     next: DraftContent,
@@ -179,47 +185,54 @@ export function Editor(props: Props) {
       prepared,
     );
   };
-  let plan: ReturnType<typeof parseDraft> | undefined;
-  let problem = "";
-  let issues: Issue[] = [];
-  try {
-    plan = parseDraft(content);
-  } catch (error) {
-    problem = (error as Error).message;
-  }
-  try {
-    for (const [path, value] of Object.entries(content.pending ?? {}))
-      issues.push({
-        path,
-        code: "unfinished_input",
-        message: `尚未完成的${value.kind === "json" ? "JSON" : "数值"}输入：${value.text}`,
-      });
-    const value = parseJson(content.text);
-    if (!isObject(value))
+  const { plan, problem } = useMemo(() => {
+    try {
+      return { plan: parseDraft(content), problem: "" };
+    } catch (error) {
+      return { plan: undefined, problem: (error as Error).message };
+    }
+  }, [content]);
+  // 计划校验只消费报告身份及水位，轮询携带的其他报告字段不改变依据。
+  const reportBasis = JSON.stringify(
+    props.reports.map((r) => [r.report_id, r.to_wm]),
+  );
+  const issues = useMemo(() => {
+    const issues: Issue[] = [];
+    try {
+      for (const [path, value] of Object.entries(content.pending ?? {}))
+        issues.push({
+          path,
+          code: "unfinished_input",
+          message: `尚未完成的${value.kind === "json" ? "JSON" : "数值"}输入：${value.text}`,
+        });
+      const value = parseJson(content.text);
+      if (!isObject(value))
+        issues.push({
+          path: "",
+          code: "invalid_plan",
+          message: "计划必须是对象",
+        });
+      else
+        issues.push(
+          ...validatePlan(
+            {
+              ...value,
+              request_id: "1",
+              created_at: "2026-01-01 00:00:00",
+            },
+            capabilities,
+            { reports: props.reports, coverage: props.coverage },
+          ),
+        );
+    } catch (error) {
       issues.push({
         path: "",
-        code: "invalid_plan",
-        message: "计划必须是对象",
+        code: "invalid_json",
+        message: (error as Error).message,
       });
-    else
-      issues.push(
-        ...validatePlan(
-          {
-            ...value,
-            request_id: "1",
-            created_at: "2026-01-01 00:00:00",
-          },
-          capabilities,
-          { reports: props.reports, coverage: props.coverage },
-        ),
-      );
-  } catch (error) {
-    issues.push({
-      path: "",
-      code: "invalid_json",
-      message: (error as Error).message,
-    });
-  }
+    }
+    return issues;
+  }, [content, capabilities, reportBasis, props.coverage]);
   const add = () => {
     if (plan) {
       change(
@@ -237,23 +250,26 @@ export function Editor(props: Props) {
   const remove = (index: number) => {
     change(removeAction(content, index), { remove: index });
   };
-  const pendingLabels = new Map(
-    Object.keys(content.pending ?? {}).map((path, index) => [
-      path,
-      presentPendingInput(path, index + 1, plan, capabilities),
-    ]),
+  const pendingLabels = useMemo(
+    () =>
+      new Map(
+        Object.keys(content.pending ?? {}).map((path, index) => [
+          path,
+          presentPendingInput(path, index + 1, plan, capabilities),
+        ]),
+      ),
+    [content, plan, capabilities],
   );
-  const presentations: PresentedIssue[] = presentIssues(
-    issues,
-    plan,
-    capabilities,
-    content,
-  ).map((item) => ({
-    ...item,
-    ...(item.issue.code === "unfinished_input"
-      ? { location: pendingLabels.get(item.issue.path)! }
-      : {}),
-  }));
+  const presentations: PresentedIssue[] = useMemo(
+    () =>
+      presentIssues(issues, plan, capabilities, content).map((item) => ({
+        ...item,
+        ...(item.issue.code === "unfinished_input"
+          ? { location: pendingLabels.get(item.issue.path)! }
+          : {}),
+      })),
+    [issues, plan, capabilities, content, pendingLabels],
+  );
   const locate = (index: number) => {
     const target = presentations[index];
     const controls = Array.from(
@@ -375,53 +391,58 @@ export function Editor(props: Props) {
         />
         <div className="save-line">
           <div className="save-feedback">
-            <span data-testid="save-status" role="status">
-              {session.deletionState === "deleting"
-                ? "正在删除草稿…"
-                : session.deletionState === "unknown"
-                  ? "删除结果尚未确认"
-                  : saveStatusLabels[session.saveStatus]}
-            </span>
-            <span role="status" data-testid="input-save-fact">
-              {session.selectionDecision?.written &&
-              sameContent(content, session.selectionDecision.written.content)
-                ? "本页完整输入已可靠写入；本地显示接纳尚未完成。"
-                : sameContent(content, session.confirmedDraft.content)
-                  ? "本页完整输入已有可靠保存版本。"
-                  : "本页完整输入尚未可靠保存。"}
-            </span>
-            <span>
-              最后完整接纳的保存时间：{session.confirmedDraft.updatedAt}
-            </span>
-            {session.error && <span role="status">{session.error}</span>}
-            {session.saveDiagnostic && (
-              <span role="status">{session.saveDiagnostic}</span>
-            )}
-            {saveVerification && !session.selectionPendingDecision && (
-              <button
-                disabled={busy || session.saving}
-                onClick={() => {
-                  void session
-                    .verifySaveResult(saveVerification)
-                    .catch(() => {});
-                }}
-              >
-                核实保存结果
-              </button>
-            )}
-            {session.canSave &&
-              !session.saved &&
-              !session.saving &&
-              !saveVerification &&
-              !session.selectionPendingDecision && (
+            <div className="save-summary">
+              <span data-testid="save-status" role="status">
+                {session.deletionState === "deleting"
+                  ? "正在删除草稿…"
+                  : session.deletionState === "unknown"
+                    ? "删除结果尚未确认"
+                    : saveStatusLabels[session.saveStatus]}
+              </span>
+              <span role="status" data-testid="input-save-fact">
+                {session.selectionDecision?.written &&
+                sameContent(content, session.selectionDecision.written.content)
+                  ? "本页完整输入已可靠写入；本地显示接纳尚未完成。"
+                  : sameContent(content, session.confirmedDraft.content)
+                    ? "本页完整输入已有可靠保存版本。"
+                    : "本页完整输入尚未可靠保存。"}
+              </span>
+              <span>
+                最后完整接纳的保存时间：{session.confirmedDraft.updatedAt}
+              </span>
+              {session.error && <span role="status">{session.error}</span>}
+              {session.saveDiagnostic && (
+                <span role="status">{session.saveDiagnostic}</span>
+              )}
+            </div>
+            <div className="save-actions">
+              {saveVerification && !session.selectionPendingDecision && (
                 <button
-                  disabled={busy}
-                  onClick={() => void session.flush().catch(() => {})}
+                  disabled={busy || session.saving}
+                  onClick={() => {
+                    void session
+                      .verifySaveResult(saveVerification)
+                      .catch(() => {});
+                  }}
                 >
-                  {session.error || session.saveDiagnostic ? "重试保存" : "保存当前输入"}
+                  核实保存结果
                 </button>
               )}
-            {wholeAcceptance && (
+              {session.canSave &&
+                !session.saved &&
+                !session.saving &&
+                !saveVerification &&
+                !session.selectionPendingDecision && (
+                  <button
+                    disabled={busy}
+                    onClick={() => void session.flush().catch(() => {})}
+                  >
+                    {session.error || session.saveDiagnostic
+                      ? "重试保存"
+                      : "保存当前输入"}
+                  </button>
+                )}
+              {wholeAcceptance && (
                 <button
                   disabled={busy}
                   onClick={() => {
@@ -435,27 +456,28 @@ export function Editor(props: Props) {
                   重试完整接纳
                 </button>
               )}
-            {session.conflict && props.onConflict && (
-              <button
-                onClick={props.onConflict}
-                disabled={
-                  busy ||
-                  session.selectionPendingDecision ||
-                  session.copyPendingDecision
-                }
-              >
-                查看完整差异
-              </button>
-            )}
-            {(session.saveStatus === "deleted" ||
-              session.saveStatus === "exported") &&
-              props.onSaveAs &&
-              !session.selectionPendingDecision &&
-              !session.copyPendingDecision && (
-                <button disabled={busy} onClick={props.onSaveAs}>
-                  将本页另存为新草稿
+              {session.conflict && props.onConflict && (
+                <button
+                  onClick={props.onConflict}
+                  disabled={
+                    busy ||
+                    session.selectionPendingDecision ||
+                    session.copyPendingDecision
+                  }
+                >
+                  查看完整差异
                 </button>
               )}
+              {(session.saveStatus === "deleted" ||
+                session.saveStatus === "exported") &&
+                props.onSaveAs &&
+                !session.selectionPendingDecision &&
+                !session.copyPendingDecision && (
+                  <button disabled={busy} onClick={props.onSaveAs}>
+                    将本页另存为新草稿
+                  </button>
+                )}
+            </div>
           </div>
           <PreviewControl
             intent={intent}
@@ -854,9 +876,36 @@ function ActionEditor(
   const hasPending = Object.keys(content.pending ?? {}).some(
     (key) => key === pendingPath || key.startsWith(pendingPath + "/"),
   );
-  const currentParamsIssues = isCameraAction(action.type)
-    ? validateParams(action.device_id, action.type, action.params, capabilities)
-    : [];
+  const currentParamsIssues = useMemo(
+    () =>
+      isCameraAction(action.type)
+        ? validateParams(
+            action.device_id,
+            action.type,
+            action.params,
+            capabilities,
+          )
+        : [],
+    [action.device_id, action.type, action.params, capabilities],
+  );
+  const videoEstimate = useMemo(
+    () =>
+      estimateDraftAction(
+        content,
+        index,
+        props.capabilityState,
+        props.estimateReloadPhase,
+      ),
+    [
+      content,
+      index,
+      props.capabilityState.active,
+      props.capabilityState.error,
+      props.capabilityState.generation,
+      props.capabilityState.version,
+      props.estimateReloadPhase,
+    ],
+  );
   const save = async (update: boolean) => {
     if (hasPending) {
       setError("参数尚未完成，请先修正当前输入");
@@ -1186,14 +1235,7 @@ function ActionEditor(
                 参数 JSON 尚未完成，请在上方修正后继续使用表单。
               </p>
             )}
-            <VideoSizeEstimate
-              result={estimateDraftAction(
-                content,
-                index,
-                props.capabilityState,
-                props.estimateReloadPhase,
-              )}
-            />
+            <VideoSizeEstimate result={videoEstimate} />
             <details className="preset-box">
               <summary>拍摄参数预设</summary>
               <p className="muted">

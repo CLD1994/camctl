@@ -343,12 +343,25 @@ fieldset {
   align-items: flex-start;
 }
 .save-feedback {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  width: 100%;
+  gap: 8px 12px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.save-summary {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+.save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  min-height: 40px;
+  gap: 8px;
 }
 .preview-control {
   display: flex;
@@ -1568,10 +1581,10 @@ progress {
   max-height: calc(100dvh - 32px);
   overflow: auto;
 }
-.save-feedback {
-  flex-wrap: wrap;
-}
 @media (max-width: 650px) {
+  .save-feedback {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .draft-difference-sides {
     grid-template-columns: minmax(0, 1fr);
   }

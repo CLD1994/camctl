@@ -2,6 +2,18 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 草稿输入响应与保存布局（2026-10-25）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查和生产构建通过；构建保留既有主包超过 500 kB 的提示。`capability-observation`、`state-observations`、`preview-reload`、`web-session`、`draft-session-conflicts`、`validation-presentation`、`current-validation`、`preview-editor` 和 `video-estimate-state` 九个单元文件的 661 项通过。同版本能力复用用例先在原入口失败，覆盖版本切换、版本缺失、不可用变化与本次错误保留。
+
+新增 `browser-editor-responsiveness` 的三项使用真实客户端、独立临时数据库和 HTTP 保存接口。1416 与 390 像素视口的用例分别先复现 20 和 46.59375 像素移动；修复后，已保存、等待保存、保存中及后续轮询时的输入字段文档位置相同，且核对完整输入确实写入。另一项更改能力文件并成功重载，确认新版本仍重新校验当前输入。三个既有浏览器测试入口补齐可选的 `CAMCTL_TEST_BROWSER_CHANNEL`，与组件内其他入口一致；未设置时仍使用默认 Chromium。
+
+既有 `browser-validation`、`browser-video-estimate`、`browser-draft-conflict-ui`、`browser-previews` 和 `browser-workflow` 五个文件的 179 项全部通过，命令使用 `--maxWorkers=1` 与 `CAMCTL_TEST_BROWSER_CHANNEL=chrome`。该范围与新增三项合计 182 项浏览器用例，验证现有的未完成输入、保存恢复、冲突选择、预览协调、重载暂停和业务操作。独立只读评审核对能力版本来源、会话内容替换、报告校验依据和保存恢复按钮，未发现需要修复的问题。
+
+性能复测只复制当前服务草稿与能力到独立临时目录，未改写原资料。前后均使用 1416×1244 视口、同一包含录像和自动预览的草稿，等待页面就绪后记录 2.4 秒空闲，再依次输入计划名称和最大延迟。基线空闲时观察到三次 62、66、66 毫秒长任务；后续输入及等待阶段另有五次 58–67 毫秒长任务。修复后相同观察阶段均未出现超过 50 毫秒的长任务。计划名称字段在保存状态切换期间的文档纵坐标变化从 20 像素变为 0。输入事件至下一帧的采样前后仍约为 7–17 毫秒，不能把该指标解释为完整输入延迟或将单次结果外推到所有草稿与环境。
+
+本地服务提供新版构建，Codex 内置浏览器已刷新 `http://localhost:4310/`，重新打开原“新计划”草稿，核对保存依据和原参数。日志位于 `tmp/editor-cache-red.log`、`tmp/editor-cache-green.log`、`tmp/editor-layout-red.log`、`tmp/editor-layout-green.log`、`tmp/editor-unit.log`、`tmp/editor-browser-regression.log`、`tmp/editor-typecheck.log` 和 `tmp/editor-build.log`。性能原始数据分别为 `tmp/editor-input-before.json` 与 `tmp/editor-input-profile.json`，页面截图为 `tmp/editor-input-final.png`。文档本地文件链接检查的 5591 个链接通过，Git 差异空白检查通过。本项没有向设备递交请求，未执行完整客户端测试套件。
+
 ## 产物技术详情字段展示（2026-10-25）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。`output-facts` 与 `web-facts` 两个单元文件的 10 项通过，覆盖源文件 SHA-256、未检查与未知时长、零秒和精确数值、检查完成仍保留问题，以及清理与检查错误的原始诊断。首轮 7 项回归用例均在原嵌套呈现方式下失败，确认字段含义与表格层级问题。
