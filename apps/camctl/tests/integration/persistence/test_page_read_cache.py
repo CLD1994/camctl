@@ -240,7 +240,7 @@ async def test_three_page_strict_members_reuse_each_committed_page_within_scope(
                 assert facts['ownership_evidence_json'] == {
                     'method': method, 'result_page_event_id': page.ref.event_id}
         boundary = _boundary(owned)
-        inputs = tuple(runtime.capture.read_strict_result_file_input(
+        inputs = tuple(runtime.capture.read_saved_result_file_input(
             page.ref, file_id, boundary, owned)
             for page in pages for _, file_id in page.file_ids)
         assert all(segments._uses_strict_proof(

@@ -39,7 +39,7 @@ _READ_TRANSACTION_FUNCTIONS = {
     "module:read_segment_members",
     "module:read_segment_output_candidates",
     "module:segment_output_candidate",
-    "module:read_strict_result_file_input",
+    "module:read_saved_result_file_input",
     "module:verify_ownership_from_result_page",
     "module:verify_result_file_pairing",
     "module:_read_transaction",

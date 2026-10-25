@@ -404,7 +404,7 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
         fact = _ok(runtime.capture.save_result_file_pairing(
             _request(owned, runtime, saved, preview), new_operation_key(), owned))
         boundary = _boundary(owned)
-        member = runtime.capture.read_strict_result_file_input(
+        member = runtime.capture.read_saved_result_file_input(
             saved.ref, preview, boundary, owned, pairing_fact_id=fact)
         assert member.pairing_fact_id == fact
         assert member.pairing_state is PreviewPairingState.PAIRED
@@ -417,7 +417,7 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
         _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
             runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
             new_operation_key(), owned))
-        original_input = runtime.capture.read_strict_result_file_input(saved.ref, original, boundary, owned)
+        original_input = runtime.capture.read_saved_result_file_input(saved.ref, original, boundary, owned)
         key = new_operation_key()
         member_at = runtime.wall_us()
         if bounded:
@@ -535,7 +535,7 @@ async def test_strict_pair_reference_rejects_future_foreign_and_damaged_fact(tmp
             owned.connection.execute('UPDATE device_files SET pairing_evidence_json=? WHERE id=?',
                 (json.dumps({'method': 2, 'pairing_fact_id': fact + 1}), preview))
         with pytest.raises(ConsistencyError):
-            runtime.capture.read_strict_result_file_input(saved.ref, file_id, boundary, owned,
+            runtime.capture.read_saved_result_file_input(saved.ref, file_id, boundary, owned,
                 pairing_fact_id=fact + 1 if case == 'missing' else fact)
     finally:
         owned.connection.close()
@@ -556,7 +556,7 @@ async def test_unknown_strict_completion_remains_unknown_in_member_and_candidate
             new_operation_key(), owned))
         _ok(runtime.capture.save_file_completion(FileCompletionSave(original, 3, runtime.wall_us(),
             basis=1, observation={}, size_bytes=10), new_operation_key(), owned))
-        member = runtime.capture.read_strict_result_file_input(saved.ref, original, _boundary(owned), owned)
+        member = runtime.capture.read_saved_result_file_input(saved.ref, original, _boundary(owned), owned)
         assert member.completion is FileCompletionState.UNKNOWN
         source, attempt = owned.connection.execute('SELECT r.action_id,a.id FROM operation_attempts a'
             ' JOIN operation_runs r ON r.id=a.run_id WHERE r.id=? AND a.attempt_no=?',
@@ -595,7 +595,7 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
         before_pair = _boundary(owned)
         fact = _ok(runtime.capture.save_result_file_pairing(
             _request(owned, runtime, saved, preview), new_operation_key(), owned))
-        member = runtime.capture.read_strict_result_file_input(saved.ref, preview, _boundary(owned),
+        member = runtime.capture.read_saved_result_file_input(saved.ref, preview, _boundary(owned),
                                                               owned, pairing_fact_id=fact)
         source, attempt = owned.connection.execute('SELECT r.action_id,a.id FROM operation_attempts a'
             ' JOIN operation_runs r ON r.id=a.run_id WHERE r.id=? AND a.attempt_no=?',

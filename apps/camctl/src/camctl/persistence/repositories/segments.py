@@ -1,5 +1,6 @@
 """动作所属分段关系的有限事务与稳定分页；不执行终态发布用例。"""
 from contextlib import closing
+from dataclasses import dataclass
 from itertools import zip_longest
 
 from camctl.capture.segment_models import *
@@ -35,12 +36,12 @@ from camctl.history.events import load_event_registry, business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.history.validators import register_guard, EventValidationError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.page_read_cache import opened_read_page_scope
 from camctl.persistence.transaction import (
     CommandPlan, commit_operation, event_envelope, next_row_id, row_change, row_facts,
     saved_transaction_events, update_change, TransactionError, read_transaction_range,
 )
-from .result_pages import _at, read_pages
+from .result_pages import read_saved_page as _at, read_pages
+from .result_file_proofs import read_fixed_file
 
 _EVENT = load_event_registry()['events']['SEGMENT_FACTS']
 _STATE = enum_for('segment_sets.state')
@@ -83,6 +84,44 @@ def _set(db,ref, *, fixed=False):
     if _ref(row) != ref or fixed and row['state'] == _STATE.COLLECTING:
         raise ConsistencyError('原集合版本、扫描、末页或固定状态不同')
     return row
+
+
+@dataclass(frozen=True)
+class SegmentIdentity:
+    setrow: dict
+    action: dict
+    activity: dict | None
+    run: dict | None
+    attempt: dict | None
+
+
+def _check_member_count(db, setrow):
+    count = _one(db, 'SELECT COUNT(*) FROM segment_members WHERE set_id=?', (setrow['id'],))[0]
+    if setrow['member_count'] is None or count != setrow['member_count']:
+        raise ConsistencyError('固定集合成员数量与实际成员不同')
+
+
+def read_segment_identity(connection, ref, *, fixed=True):
+    """读取已保存集合的有限直接身份，不重新核创建来源或判断算法。"""
+    setrow = _set(connection, ref, fixed=fixed)
+    action = row_facts(connection, 'actions', setrow['action_id'])
+    activity = (None if setrow['activity_id'] is None else
+                row_facts(connection, 'device_activities', setrow['activity_id']))
+    run = (None if setrow['run_id'] is None else
+           row_facts(connection, 'operation_runs', setrow['run_id']))
+    attempt = (None if setrow['current_attempt_id'] is None else
+               row_facts(connection, 'operation_attempts', setrow['current_attempt_id']))
+    if (action is None or (setrow['activity_id'] is not None and
+            (activity is None or activity['action_id'] != action['id']))
+            or (setrow['run_id'] is not None and (run is None or run['action_id'] != action['id']
+                or run['activity_id'] != setrow['activity_id']))
+            or (setrow['current_attempt_id'] is not None and (attempt is None or run is None
+                or attempt['run_id'] != run['id']
+                or attempt['result_last_page_event_id'] != setrow['current_final_page_event_id']))):
+        raise ConsistencyError('固定集合的动作、活动、流程或实际尝试身份不同')
+    if fixed:
+        _check_member_count(connection, setrow)
+    return SegmentIdentity(setrow, action, activity, run, attempt)
 
 
 def _check_write_kind(db,setrow,kind):
@@ -143,27 +182,54 @@ def _position(row):
     return (row['directory_number'] or 0,row['segment_index'] or 0,row['identity'],row['id'])
 
 
-def _read_member(db, row, *, page_cache=None, current_boundary=None):
-    page_id = row['page_event_id']
-    saved_page = None if page_cache is None else page_cache.get(page_id)
-    if saved_page is None:
-        saved_page = _at(db, page_id)
-        if page_cache is not None:
-            page_cache[page_id] = saved_page
-    saved, _ = saved_page
-    entry = next((entry for entry in saved.page.entries if entry.identity==row['identity']),None)
-    if entry is None or (row['identity'],row['file_id']) not in saved.file_ids:
-        raise ConsistencyError('成员缺少原实际页和真实文件引用')
-    file=_fixed_file(db,row['file_id'],row['file_event_id'])
-    _verify_strict_member(db, _member_input_from_row(row), file, saved,
-                          current_boundary=current_boundary)
-    member=SegmentMember(row['identity'],None if row['directory_number'] is None else
+def _read_member(db, row, *, setrow=None):
+    """消费保存成员的固定文件与直接关系，不重复来源创建算法。"""
+    if setrow is None:
+        setrow = row_facts(db, 'segment_sets', row['set_id'])
+    if setrow is None or row['set_id'] != setrow['id']:
+        raise ConsistencyError('成员不属于实际保存集合')
+    relation = _one(db, 'SELECT identity,action_id,run_id FROM result_page_files'
+        ' WHERE page_event_id=? AND file_id=?', (row['page_event_id'], row['file_id']))
+    if (relation is None or relation != (row['identity'], setrow['action_id'], setrow['run_id'])
+            or row['page_event_id'] > setrow['source_event_id']
+            or row['file_event_id'] > setrow['source_event_id']):
+        raise ConsistencyError('成员没有同集合来源及固定边界内的实际文件页')
+    file = read_fixed_file(db, row['file_id'], row['file_event_id'])
+    if parse_exact_json(file['identity_key'])[2] != row['identity']:
+        raise ConsistencyError('成员与固定文件稳定身份不同')
+    member = SegmentMember(row['identity'], None if row['directory_number'] is None else
         SegmentKey(row['directory_number'],row['segment_index']),
         decode_enum(SegmentMemberRole,row['role']),decode_enum(OwnershipState,row['ownership']),
         decode_enum(FileCompletionState,row['completion']),file['size_bytes'],
         row['pairing_identity'],decode_enum(PreviewPairingState,row['pairing_state']))
-    return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],member,
-                               row['pairing_fact_id'])
+    if member.ownership is OwnershipState.OWNED:
+        role = int(enum_for('device_files.role').PREVIEW if member.role is SegmentMemberRole.PREVIEW
+                   else enum_for('device_files.role').ORIGINAL)
+        if (file['source_action_id'] != setrow['action_id'] or file['role'] != role
+                or file['ownership_evidence_json'] is None):
+            raise ConsistencyError('已归属成员与固定文件的来源或用途不同')
+    if (member.completion is FileCompletionState.COMPLETE
+            and (file['completion_state'] != int(enum_for('device_files.completion_state').COMPLETE)
+                 or file['size_bytes'] is None)):
+        raise ConsistencyError('已完成成员没有固定完整文件大小')
+    if row['pairing_fact_id'] is not None:
+        from camctl.persistence.fact_reads import read_event
+        from .result_file_pairing import read_pairing_fact
+        if member.role is not SegmentMemberRole.PREVIEW:
+            raise ConsistencyError('非预览成员不能引用配对事实')
+        transaction = read_event(db, row['file_event_id']).transaction
+        fact = read_pairing_fact(db, row['pairing_fact_id'], row['file_id'],
+            HistoryBoundary(transaction.txn_id, transaction.last_event_id))
+        paired = fact['state'] == int(enum_for('device_file_pairing_facts.state').PAIRED)
+        if paired != (member.pairing_state is PreviewPairingState.PAIRED):
+            raise ConsistencyError('成员配对状态与固定配对事实不同')
+        if paired:
+            original = read_fixed_file(db, fact['original_file_id'], fact['original_file_event_id'])
+            if (file['original_device_file_id'] != original['id']
+                    or parse_exact_json(original['identity_key'])[2] != member.pairing_identity):
+                raise ConsistencyError('成员配对端点与固定文件关联不同')
+    return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],
+                               member,row['pairing_fact_id'])
 
 
 def _eligible_original(member):
@@ -188,12 +254,12 @@ def _output_candidate(db,setrow,stored):
         return None
     paired=_read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity))
     if stored.pairing_fact_id is not None:
-        from .result_pages import _family_fields
+        from .result_pages import result_file_family
         action = row_facts(db, 'actions', setrow['action_id'])
         result_policy = action['execution_spec_json'].get('result_policy')
         left, right = (
-            _family_fields(member.identity, result_policy=result_policy),
-            _family_fields(paired.member.identity, result_policy=result_policy),
+            result_file_family(member.identity, result_policy=result_policy),
+            result_file_family(paired.member.identity, result_policy=result_policy),
         )
         same_family = (left[0] is not None and left[:2] == right[:2]
                        and left[2] == int(_FAMILY_ROLE.PREVIEW)
@@ -256,8 +322,7 @@ def read_segment_members(ref,cursor,batch,owned):
     if opened:
         db.execute('BEGIN')
     try:
-        with opened_read_page_scope(db, opened):
-            return _read_segment_members(ref, cursor, batch, db)
+        return _read_segment_members(ref, cursor, batch, db)
     finally:
         if opened:
             db.execute('ROLLBACK')
@@ -273,17 +338,15 @@ def _read_segment_members(ref, cursor, batch, db):
         found=row_facts(db,'segment_members',after[-1])
         if found is None or found['set_id']!=row['id'] or _position(found)!=after:
             raise ConsistencyError('分段游标不是原集合完整排序位置')
-    with closing(db.execute(f'SELECT id FROM segment_members WHERE set_id=? AND {_ORDER}>(?,?,?,?) ORDER BY {_ORDER[1:-1]} LIMIT ?',
-        (row['id'],*after,batch))) as reader:
-        ids=reader.fetchmany(batch)
-    # 缓存只服务本次快照中的一批成员，数量不超过 batch；不跨读取复用。
-    page_cache = {}
-    records=tuple(_read_member(db,row_facts(db,'segment_members',value[0]),
-                              page_cache=page_cache) for value in ids[:batch])
-    position=None if not ids else _position(row_facts(db,'segment_members',ids[-1][0]))
-    more=position is not None and len(ids)==batch and _one(db,f'SELECT 1 FROM segment_members WHERE set_id=? AND {_ORDER}>(?,?,?,?) LIMIT 1',(row['id'],*position)) is not None
-    last=SegmentMemberCursor(ref,position) if more else None
-    return Page(records,last)
+    _check_member_count(db, row)
+    with closing(db.execute(f'SELECT * FROM segment_members WHERE set_id=? AND {_ORDER}>(?,?,?,?) ORDER BY {_ORDER[1:-1]} LIMIT ?',
+        (row['id'],*after,batch+1))) as reader:
+        columns = tuple(column[0] for column in reader.description)
+        selected = tuple(dict(zip(columns, values)) for values in reader.fetchmany(batch+1))
+    records = tuple(_read_member(db, member, setrow=row) for member in selected[:batch])
+    following = (SegmentMemberCursor(ref, _position(selected[batch-1]))
+                 if len(selected) > batch else None)
+    return Page(records, following)
 
 
 def iter_segment_members(ref,owned):
@@ -362,6 +425,9 @@ def _stored_gaps(ref,owned):
 def _verify_assessment(db,setrow,facts,assessment):
     _check_write_kind(db,setrow,'ASSESS')
     from camctl.capture.segment_models import SegmentDecision
+    from .segment_transactions import verify_assessment_sources
+    class SourceReader: connection = db
+    verify_assessment_sources(setrow, facts, SourceReader)
     if isinstance(assessment, SegmentDecision):
         _verify_action6_decision(db, setrow, assessment)
         return
@@ -755,48 +821,8 @@ def _verify_action6_decision(db, setrow, decision):
         raise ConsistencyError('Action6 取消发布必须保存取消决策')
 
 
-def _fixed_file(db,file_id,file_event_id):
-    """在本次事务内复用相同固定文件事实，写入后重新核实。"""
-    from camctl.persistence.read_reuse import reuse_read
-
-    return reuse_read(db, (__name__, "fixed_file", type(file_id), file_id,
-                          type(file_event_id), file_event_id),
-                      lambda: _load_fixed_file(db, file_id, file_event_id))
-
-
-def _load_fixed_file(db,file_id,file_event_id):
-    """恢复独立文件到原固定事实事务；不读取整个动作。"""
-    from camctl.contracts.enums import load_registry
-    own_transaction=not db.in_transaction
-    if own_transaction:db.execute('BEGIN')
-    try:
-        current=row_facts(db,'device_files',file_id)
-        file_type=load_registry()['history_objects']['device_file']['id']
-        anchor=_one(db,'SELECT e.transaction_id FROM history_events e JOIN entity_event_links l ON l.event_id=e.id WHERE e.id=? AND l.entity_type=? AND l.entity_id=?',
-            (file_event_id,file_type,file_id))
-        if current is None or anchor is None:
-            raise ConsistencyError('固定文件位置没有同一真实文件的可靠自身历史')
-        transaction=read_transaction_range(db,anchor[0])
-        latest=_one(db,'SELECT MAX(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id<=?',(file_type,file_id,transaction.last_event_id))[0]
-        if latest!=file_event_id:
-            raise ConsistencyError('固定文件引用不是原完整事务内该文件的最后事实')
-        # 独立文件的当前值由自身最后事件固定。使用该事件的完整
-        # 事务作为C，避免为每份文件反复核实无关的增长完成事务。
-        head=_one(db,'SELECT t.id,t.last_event_id FROM history_events e '
-            'JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?',
-            (current['last_event_id'],))
-        if head is None:raise ConsistencyError('文件当前状态缺少自己的可靠最后事件')
-        frozen=read_row_values_at_boundary(db,owner=('device_file',file_id),table='device_files',row_id=file_id,
-            columns=business_columns('device_files'),current_values=current,
-            boundary=HistoryBoundary(transaction.txn_id,transaction.last_event_id),
-            current_boundary=HistoryBoundary(head[0],head[1]))
-        return {'id':file_id,**frozen,'last_event_id':file_event_id}
-    finally:
-        if own_transaction:db.execute('ROLLBACK')
-
-
 def _input_member(db,item, *, current_boundary=None):
-    file=_fixed_file(db,item.file_id,item.file_event_id)
+    file=read_fixed_file(db,item.file_id,item.file_event_id)
     saved,_=_at(db,item.page_event_id)
     identity=parse_exact_json(file['identity_key'])[2]
     entry=next((value for value in saved.page.entries if value.identity==identity),None)
@@ -820,14 +846,13 @@ def _uses_strict_proof(item, file):
 def _verify_strict_member(db, item, file, saved, *, current_boundary=None):
     if not _uses_strict_proof(item, file):
         return False
-    from .result_file_proofs import load_strict_result_file_input
+    from .result_file_proofs import read_result_file_input
     anchor = _one(db, 'SELECT transaction_id FROM history_events WHERE id=?', (item.file_event_id,))
     if anchor is None:
         raise ConsistencyError('严格成员没有真实文件自身事务')
     transaction = read_transaction_range(db, anchor[0])
-    actual = load_strict_result_file_input(db, saved.ref, item.file_id,
-        HistoryBoundary(transaction.txn_id, transaction.last_event_id), pairing_fact_id=item.pairing_fact_id,
-        current_boundary=current_boundary)
+    actual = read_result_file_input(db, saved.ref, item.file_id,
+        HistoryBoundary(transaction.txn_id, transaction.last_event_id), pairing_fact_id=item.pairing_fact_id)
     if actual != item:
         raise ConsistencyError('成员分类或配对事实与固定文件的严格证明不同')
     return True
@@ -1246,10 +1271,6 @@ def _verify_publication(db,ref,event,context,prior):
     if _one(db,'SELECT 1 FROM segment_sets WHERE action_id=? AND published_event_id IS NOT NULL',(ref.action_id,)):
         raise ConsistencyError('原动作已有唯一正式分段集合')
     assessment=assessment_from_document(setrow['assessment_json'])
-    from camctl.capture.segment_finish import FinishSegmentRecording
-    from .segment_transactions import verify_completion_proof
-    class ProofReader:connection=db
-    verify_completion_proof(FinishSegmentRecording(ref,setrow['activity_id'],setrow['run_id'],event.occurred_at),ProofReader)
     _verify_final_activation(ref,setrow,event,context)
     if event.reason==_EVENT['branches']['PUBLISH']['reason'] and assessment.default_scope.state is not DefaultScopeState.NONEMPTY:
         raise ConsistencyError('未知或空范围不能发布默认成员关联')
@@ -1342,7 +1363,6 @@ def _verify_publication(db,ref,event,context,prior):
     header=accepted.evidence.get('segment_finish_request')
     request=_header_request(header)
     _verify_qualification_header(header,_completion_qualification(db,request))
-    _verify_assessment(db,setrow,facts_from_document(setrow['facts_json']),assessment)
     _verify_scope_members(request,assessment,Reader)
     status,error,details=_failure(request,assessment,original_count,setrow,db,before_event_id=context.transaction.first_event_id)
     if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):

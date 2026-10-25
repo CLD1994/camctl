@@ -189,7 +189,7 @@ def register_segment_observations(runtime, action_id, listing):
     if listing.scan_complete and listing.set_finalized:
         from camctl.persistence.repositories.segment_result_sets import _boundary
         from camctl.persistence.repositories.result_file_pairing import (
-            verify_pairing_fact,
+            read_pairing_fact,
         )
 
         for saved in listing.entries.pages():
@@ -209,7 +209,7 @@ def register_segment_observations(runtime, action_id, listing):
                     ),
                 ).fetchone()
                 if existing is not None:
-                    verify_pairing_fact(
+                    read_pairing_fact(
                         runtime.owned.connection,
                         existing[0],
                         file_id,

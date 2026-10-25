@@ -29,11 +29,11 @@ def _expected_input(db,setrow,file_id):
     return _retained_input(db,file_id,page,boundary)
 
 
-def _member_values(db,setrow,item):
-    from .segments import _fixed_file
-    if not isinstance(item,SegmentMemberInput) or item!=_expected_input(db,setrow,item.file_id):
+def _member_values(db,setrow,item, *, check_expected=True):
+    from .result_file_proofs import read_fixed_file
+    if not isinstance(item,SegmentMemberInput) or (check_expected and item!=_expected_input(db,setrow,item.file_id)):
         raise ConsistencyError('结果成员没有保持原H0的文件、页和严格分类')
-    file=_fixed_file(db,item.file_id,item.file_event_id)
+    file=read_fixed_file(db,item.file_id,item.file_event_id)
     identity=parse_exact_json(file['identity_key'])[2]
     parsed=profile_for_action(db,setrow['action_id']).classify_file(identity)
     key=None if parsed is None else parsed.key
@@ -66,7 +66,7 @@ def _fixed_count(db,setrow):
                 row=row_facts(db,'segment_members',identity)
                 previous=row['file_id']
                 item=_member_input_from_row(row)
-                expected=_member_values(db,setrow,item)
+                expected=_member_values(db,setrow,item,check_expected=False)
                 if not json_equal({name:row[name] for name in expected},expected):
                     raise ConsistencyError('实际成员行与原固定来源不同')
                 yield item
