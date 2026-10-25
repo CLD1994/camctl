@@ -33,7 +33,7 @@ camctl --version
 
 首次部署由用户或部署人员显式建立运行目录和初始状态库。已有合法状态库保留身份与业务数据；配置要求更换交接目录时，只有原文件和相关责任全部处理完，才按[目录切换规则](configuration.md#文件目录的绑定与变更)共同更新绑定。无效或无法读取的库报错；目录、失败恢复和命令结果见[首次部署与初始化](initialization.md)。主程序不把该入口作为日常启动或数据库错误后的恢复动作。
 
-普通 `init` 只验证已有格式；`--upgrade-software-recovery` 显式请求 V2 到 V3，`--upgrade-capture-preparation` 显式请求 V3 到 V4。两个选项互斥，且不能与目录切换合并；目标不存在时创建当前格式。备份、内容保留、锁协调和失败核对见[初始化的格式升级规则](initialization.md#目录与状态库)。
+普通 `init` 只验证已有格式；`--upgrade-software-recovery` 显式请求 V2 到 V3，`--upgrade-capture-preparation` 显式请求 V3 或 V4 到当前 V5。两个选项互斥，且不能与目录切换合并；目标不存在时创建当前格式。备份、内容保留、锁协调和失败核对见[初始化的格式升级规则](initialization.md#目录与状态库)。
 
 ### `run`
 
