@@ -1,4 +1,4 @@
-"""ADB 相机的软件重启端口；只有固件合同明确配置后由恢复责任调用。"""
+"""ADB 相机的软件重启端口；由已保存的排他恢复责任调用。"""
 from contextvars import ContextVar
 from decimal import Decimal
 import shlex
@@ -32,6 +32,11 @@ class SoftwareRecoveryDriver:
 
     def release_recovery(self, device_id):
         self._recovery_devices.discard(device_id)
+
+    def recovery_qualification(self, binding, *, action_type, video_result_mode):
+        from .firmware_identity import recovery_qualification
+        return recovery_qualification(binding.driver_id, action_type=action_type,
+            video_result_mode=video_result_mode)
 
     def recovery_serial(self, binding):
         token = _RECOVERY_ACCESS.set((id(self), binding.device_id))

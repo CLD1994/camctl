@@ -59,6 +59,13 @@ def test_current_capture_execution_config_reaches_runtime(field, settings, expec
     assert getattr(_runtime(settings), field) == expected
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_software_recovery_enabled_reaches_the_production_runtime(enabled):
+    runtime = _runtime({"software_recovery": {"enabled": enabled, "max_checks": 7}})
+    assert runtime.software_recovery_config.enabled is enabled
+    assert runtime.software_recovery_config.max_checks == 7
+
+
 def test_recording_grant_saves_current_start_budget():
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.scheduling import GrantOutcome, GrantResult

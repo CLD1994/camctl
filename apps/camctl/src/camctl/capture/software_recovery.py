@@ -28,13 +28,30 @@ def recovery_state(row):
 
 @dataclass(frozen=True)
 class SoftwareRecoveryConfig:
-    verified_fingerprint: str = ""
+    enabled: bool = False
     max_reboots: int = 1
     timeout_s: Decimal = Decimal("10")
     deadline_s: Decimal = Decimal("180")
     retry_interval_s: Decimal = Decimal("3")
     max_checks: int = 64
     max_pages: int = 256
+
+
+@dataclass(frozen=True)
+class SoftwareRecoveryDiagnostic:
+    """新恢复资格不足的本地说明；不改变原动作或设备占用。"""
+
+    device_id: str
+    activity_id: int
+    fingerprint: str | None = None
+    scope_unverified: bool = False
+
+    @property
+    def message(self):
+        detail = "该固件尚未验证自动重启恢复"
+        if self.scope_unverified:
+            detail += "，原拍摄类型或结果模式没有适用的验证记录"
+        return detail
 
 
 def recovery_of(activity, connection):
@@ -131,7 +148,7 @@ async def advance_recovery(runtime, activity_id, trigger=None):
     if state is None:
         if runtime.owned.metadata.format_version < 3:
             return False
-        if trigger is None or not _eligible(runtime, trigger) or driver is None or not config.verified_fingerprint:
+        if trigger is None or not _eligible(runtime, trigger) or driver is None or config is None or not config.enabled:
             return False
         if activity["activity_state"] == 3:
             return False
@@ -148,12 +165,19 @@ async def advance_recovery(runtime, activity_id, trigger=None):
                 " ORDER BY id DESC LIMIT 1", (activity_id,)).fetchone()
             if original is None or original[0] in (1, 2, 3):
                 return False
+        qualification = driver.recovery_qualification(
+            DeviceBinding(owner["device_id"], owner["driver_id"]), action_type=owner["type"],
+            video_result_mode=owner["execution_spec_json"].get("video_result_mode"))
+        if qualification is None:
+            runtime.record_recovery_diagnostic(SoftwareRecoveryDiagnostic(
+                owner["device_id"], activity_id, scope_unverified=True))
+            return False
         serial = driver.recovery_serial(DeviceBinding(owner["device_id"], owner["driver_id"]))
         now = runtime.wall_us()
         state = {"version": 1, "phase": RecoveryPhase.CHECKING.value,
             "trigger_id": trigger["id"], "origin_trigger_id": trigger["id"], "device_id": owner["device_id"],
             "driver_id": owner["driver_id"], "serial": serial,
-            "fingerprint": config.verified_fingerprint,
+            "fingerprint": qualification.fingerprint,
             "created_at": now, "deadline_at": now + int(config.deadline_s * 1000000),
             "timeout_s": str(config.timeout_s), "retry_interval_s": str(config.retry_interval_s),
             "max_reboots": config.max_reboots, "max_checks": config.max_checks,
@@ -235,6 +259,9 @@ async def advance_recovery(runtime, activity_id, trigger=None):
         boot, fingerprint, serial = observed
         if (fingerprint != state["fingerprint"] or (state["reported_serial"] is not None
                 and serial is not None and state["reported_serial"] != serial)):
+            if fingerprint != state["fingerprint"]:
+                runtime.record_recovery_diagnostic(SoftwareRecoveryDiagnostic(
+                    state["device_id"], activity_id, fingerprint))
             _isolate(runtime, activity, "identity_mismatch")
             return False
         if phase is RecoveryPhase.CHECKING:
@@ -331,7 +358,7 @@ async def pass_software_recovery_gate(runtime, trigger):
     driver = getattr(runtime, "software_recovery_driver", None)
     config = getattr(runtime, "software_recovery_config", None)
     if state is None:
-        if driver is None or config is None or not config.verified_fingerprint:
+        if driver is None or config is None or not config.enabled:
             return None
         if runtime.state_query is not None:
             prior = runtime.owned.connection.execute("SELECT status FROM operation_runs WHERE kind=8 AND activity_id=? ORDER BY id DESC LIMIT 1", (activity["id"],)).fetchone()

@@ -287,11 +287,11 @@ config.log_path = "/home/user/.camctl/host.log";
 
 ### 相机软件重启恢复
 
-`devices.<id>.software_recovery` 只用于明确提供 OS 软件重启恢复端口的 Action6 与 OSMO 360 II。部署完成对应机型、固件的重启终止采集及控制、不会自动续拍核实后，填写 `verified_fingerprint` 精确值使能；省略该字段时不建立自动重启责任。它表示部署已核实该固件的恢复合同，不能仅为绕过占用填写设备当前指纹。
+`devices.<id>.software_recovery.enabled` 表达用户是否允许自动软件重启恢复，默认关闭。启用后，程序自行读取设备固件并精确核对驱动维护的已验证记录，同时按原活动的拍摄类型及结果模式核对适用范围。用户无需填写内部指纹。当前记录只覆盖 OSMO 360 II 构建增量 38390 的普通分段录像；Action6、照片、原生延时及其他结果模式没有适用记录。验收范围和已有责任的继续处理见[启用与固件核验设计](../superpowers/specs/2026-10-25-software-recovery-enablement-design.md)。
 
 | 字段 | 默认值及合法范围 |
 | --- | --- |
-| `verified_fingerprint` | 缺省不使能；提供时为带固件资料来源类型的完整指纹，与原绑定设备实际资料按同源规则计算的值精确比较。 |
+| `enabled` | 布尔值，默认 `false`；`true` 只授权在驱动核验通过后建立新恢复责任。 |
 | `max_reboots` | 正整数，默认 1，包含第一次；已可能派发的意图先核实，不自动补发。 |
 | `timeout_s` | 有限正秒数，默认 10；单次受管调用仍受整体剩余期限限制。 |
 | `deadline_s` | 有限正秒数，默认 180；首次建立责任时固定绝对期限。 |
@@ -299,15 +299,19 @@ config.log_path = "/home/user/.camctl/host.log";
 | `max_checks` | 正整数，默认 64；身份核实与准备轮次累计，不因重启 run 重置。 |
 | `max_pages` | 正整数，默认 256；限制目录调用及每次原基准批次读取。 |
 
-部署状态库须为 V3。已有 V2 库通过 `camctl init --upgrade-software-recovery --config <config.toml>` 显式升级；普通 `init`、`run` 和 `submit` 不升级。升级备份、事务与恢复规则见[数据库格式检查](persistence-runtime.md#数据库整体格式检查与显式升级)。
+部署状态库须为 V3 或更高格式。已有 V2 库通过 `camctl init --upgrade-software-recovery --config <config.toml>` 显式升级；普通 `init`、`run` 和 `submit` 不升级。升级备份、事务与恢复规则见[数据库格式检查](persistence-runtime.md#数据库整体格式检查与显式升级)。
 
-固件资料的读取方法与类型前缀由[驱动资料配置](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/firmware_identity.py)统一维护。Action6 使用完整固件 JSON，要求四段 `Version` 和完整构建资料；解析拒绝重复键、非有限数和多余正文，递归按 Unicode 键排序，保留全部成员及精确数值，以紧凑 UTF-8 JSON 编码且不加末尾换行，再取 SHA-256。结果使用 `action6-verinfo-json-sha256/v1:` 前缀和小写摘要。OSMO 360 II 使用非空单行 Android build fingerprint，移除行末换行后使用 `android-build-fingerprint/v1:` 前缀；裸属性文本不能作为配置值。读取、解析或匹配失败均保留诊断并拒绝重启，不降级为只核对 ADB 选择器。
+固件读取、编码及支持记录由[驱动固件模块](../../apps/camctl/src/camctl/devices/drivers/adb_cameras/firmware_identity.py)统一维护。程序在原恢复检查阶段实际核对同一设备的完整指纹，内部日志和恢复历史保留核对依据。无法读取、解析或精确匹配时保留诊断并拒绝重启；未知固件明确说明“该固件尚未验证自动重启恢复”，不把当前读数本身视为验证记录。
 
-部署可在保存的原始资料上调用同源纯函数计算值；该命令不访问设备。`<driver-id>` 为已验证的原绑定驱动，`<raw-firmware-stdout>` 为该驱动资料命令的原始标准输出：
+例如，允许下列 OSMO 部署在已验证的普通分段录像范围内使用恢复：
 
-```bash
-python -c 'from pathlib import Path; import sys; from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint; print(firmware_fingerprint(sys.argv[1], Path(sys.argv[2]).read_bytes()))' \
-  '<driver-id>' '<raw-firmware-stdout>'
+```toml
+[devices.osmo360ii.video]
+result_mode = "segmented"
+[devices.osmo360ii.software_recovery]
+enabled = true
 ```
+
+旧用户字段 `verified_fingerprint` 须删除，并用 `enabled = true` 保留原启用选择；加载器会给出迁移提示。关闭新责任时省略配置或使用 `enabled = false`。已经保存的恢复责任继续按原指纹、预算和期限处理，不因配置迁移重写。
 
 `ro.serialno` 是可选的额外观察；设备未提供该属性时，仍以原绑定、明确的 ADB transport 选择器、带来源的固件指纹和 `boot_id` 核实同一设备。重启前后都提供而不一致时拒绝恢复。

@@ -7,6 +7,8 @@ import re
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.json_encoding import encode_exact_json
 from .commands import CameraModel
+from camctl.contracts.enums import enum_for
+from camctl.devices.tasks import VideoResultMode
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,34 @@ _PROFILES = {
     CameraModel.ACTION6: FirmwareProfile("action6-verinfo-json-sha256/v1", "cat /firmware/verinfo/ver_info.txt"),
     CameraModel.OSMO360II: FirmwareProfile("android-build-fingerprint/v1", "getprop ro.build.fingerprint"),
 }
+
+
+@dataclass(frozen=True)
+class RecoveryQualification:
+    """驱动维护的精确固件及已验收的原拍摄范围。"""
+
+    driver_id: CameraModel
+    fingerprint: str
+    action_type: int
+    video_result_mode: VideoResultMode
+    evidence: str
+
+
+_RECOVERY_QUALIFICATIONS = (
+    RecoveryQualification(
+        CameraModel.OSMO360II,
+        "android-build-fingerprint/v1:e4/eagle4_oq102/eagle4_oq102:9/PD1A.180720.031/38390:userdebug/test-keys",
+        int(enum_for("actions.type").CAMERA_RECORD), VideoResultMode.SEGMENTED,
+        "docs/camctl/verification.md#容器与真机分段验证2026-10-23",
+    ),
+)
+
+
+def recovery_qualification(driver_id, *, action_type, video_result_mode):
+    """仅选择已登记的原动作范围，实际固件仍由恢复身份调用精确核对。"""
+    return next((record for record in _RECOVERY_QUALIFICATIONS
+        if record.driver_id == driver_id and record.action_type == action_type
+        and record.video_result_mode == video_result_mode), None)
 
 
 def firmware_profile(driver_id):

@@ -22,7 +22,10 @@ from decimal import Decimal
 from fractions import Fraction
 from enum import Enum
 import json
-from typing import Any, Callable, Iterable, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Protocol
+
+if TYPE_CHECKING:
+    from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.devices.start_entry import StartEntryCoordinator, EntryPhase, is_hasselblad_photo
@@ -883,9 +886,9 @@ class CaptureRuntime(_FileObservationSaves):
     pending_read_ends: dict = field(default_factory=dict)
     continuing_read_tickets: dict = field(default_factory=dict)
     #: 无恢复依据保留责任与诊断；成功核实后清除，仅供本地消费。
-    last_recovery_diagnostic: RecoveryDiagnostic | None = None
+    last_recovery_diagnostic: RecoveryDiagnostic | SoftwareRecoveryDiagnostic | None = None
     #: 诊断进入本地运行日志，不影响原业务责任；相同诊断不重复投递。
-    on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None
+    on_recovery_diagnostic: Callable[[RecoveryDiagnostic | SoftwareRecoveryDiagnostic], None] | None = None
     #: 已取得的媒体原申请由会话共享，保存资格独立于驱动和动作终态。
     pending_media_results: dict = field(default_factory=dict)
     file_executor: Any = None
@@ -931,7 +934,7 @@ class CaptureRuntime(_FileObservationSaves):
         if result is not None and result.phase is PreparationPhase.PENDING:
             raise ConsistencyError(f"原基准保存未可靠完成: {result.database_error}")
 
-    def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic) -> None:
+    def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic | SoftwareRecoveryDiagnostic) -> None:
         if diagnostic == self.last_recovery_diagnostic:
             return
         self.last_recovery_diagnostic = diagnostic

@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 from camctl.capture.recovery import RecoveryDiagnostic
+from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
 
@@ -12,8 +13,12 @@ def recovery_diagnostics_logger(
         fallback: Callable[[str], None] | None = None):
     """返回非阻塞的诊断入口；日志不提供调用结束或恢复许可。"""
 
-    def emit(diagnostic: RecoveryDiagnostic) -> None:
-        message = ("恢复依据不足，保留原调用责任。"
+    def emit(diagnostic: RecoveryDiagnostic | SoftwareRecoveryDiagnostic) -> None:
+        if isinstance(diagnostic, SoftwareRecoveryDiagnostic):
+            message = (f"{diagnostic.message}。device_id={diagnostic.device_id}"
+                       f" activity_id={diagnostic.activity_id} fingerprint={diagnostic.fingerprint}")
+        else:
+            message = ("恢复依据不足，保留原调用责任。"
                    f" run_id={diagnostic.run_id}"
                    f" attempt_no={diagnostic.attempt_id}"
                    f" reason={diagnostic.reason.value}")

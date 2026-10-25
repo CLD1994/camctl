@@ -598,22 +598,18 @@ def _validate_devices(raw: Any, defaults: ConfigDefaults) -> Mapping[str, Any]:
             normalized["recording"] = _validated_recording(
                 device_id, normalized["recording"])
         if "software_recovery" in normalized:
+            if isinstance(normalized["software_recovery"], Mapping) and "verified_fingerprint" in normalized["software_recovery"]:
+                raise ConfigError(f"devices.{device_id}.software_recovery 请用 enabled = true 表达启用选择；固件由程序自动核验")
             section = dict(_take(normalized["software_recovery"], f"devices.{device_id}.software_recovery",
-                ("verified_fingerprint", "max_reboots", "timeout_s", "deadline_s", "retry_interval_s", "max_checks", "max_pages")))
-            if "verified_fingerprint" in section:
-                _require_nonempty_str(section["verified_fingerprint"], f"devices.{device_id}.software_recovery.verified_fingerprint")
-            fingerprint = section.pop("verified_fingerprint", "")
-            if fingerprint:
-                from camctl.devices.drivers.adb_cameras.firmware_identity import validate_firmware_fingerprint
-                try:
-                    validate_firmware_fingerprint(driver_id, fingerprint)
-                except (ValueError, KeyError) as error:
-                    raise ConfigError(f"devices.{device_id}.software_recovery.verified_fingerprint 无效: {error}") from error
+                ("enabled", "max_reboots", "timeout_s", "deadline_s", "retry_interval_s", "max_checks", "max_pages")))
+            enabled = section.pop("enabled", False)
+            if type(enabled) is not bool:
+                raise ConfigError(f"devices.{device_id}.software_recovery.enabled 必须是布尔值")
             normalized["software_recovery"] = dict(_validated_seconds_subtable(device_id, section,
                 "software_recovery", ("timeout_s", "deadline_s", "retry_interval_s"),
                 positive_keys=("timeout_s", "deadline_s"),
                 integer_fields=(("max_reboots", 1), ("max_checks", 1), ("max_pages", 1))))
-            normalized["software_recovery"]["verified_fingerprint"] = fingerprint
+            normalized["software_recovery"]["enabled"] = enabled
         for section in ("query", "residual_stop"):
             if section in normalized:
                 normalized[section] = _validated_attempts_subtable(

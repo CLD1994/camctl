@@ -6,6 +6,7 @@ import pytest
 
 from camctl.devices.drivers.adb_cameras.firmware_identity import (
     firmware_fingerprint, firmware_profile, decode_identity, validate_firmware_fingerprint,
+    recovery_qualification,
 )
 
 
@@ -49,3 +50,24 @@ def test_identity_frame_preserves_complete_json_and_optional_serial():
     assert identity[0] == "00000000-0000-4000-8000-000000000001" and identity[2] is None
     assert identity[1] == firmware_fingerprint("dji-action6", _CANONICAL)
     with pytest.raises(ValueError): decode_identity("dji-action6", output[:-2])
+
+
+def test_osmo_qualified_record_is_an_exact_source_fingerprint_for_recording_segments():
+    record = recovery_qualification("dji-osmo360-ii", action_type=2, video_result_mode="segmented")
+    assert record is not None
+    validate_firmware_fingerprint("dji-osmo360-ii", record.fingerprint)
+    assert "/38390:" in record.fingerprint
+    assert record.evidence.startswith("docs/camctl/verification.md#")
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.drivers.adb_cameras.software_recovery import SoftwareRecoveryDriver
+    assert SoftwareRecoveryDriver().recovery_qualification(
+        DeviceBinding("camera", "dji-osmo360-ii"), action_type=2,
+        video_result_mode="segmented") is record
+
+
+@pytest.mark.parametrize("driver_id,action_type,mode", [
+    ("dji-action6", 2, "segmented"), ("dji-osmo360-ii", 1, "segmented"),
+    ("dji-osmo360-ii", 3, "segmented"), ("dji-osmo360-ii", 2, "single_file"),
+])
+def test_qualification_does_not_extend_to_unverified_capture_scopes(driver_id, action_type, mode):
+    assert recovery_qualification(driver_id, action_type=action_type, video_result_mode=mode) is None

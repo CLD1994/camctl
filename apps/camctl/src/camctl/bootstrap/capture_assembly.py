@@ -51,6 +51,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryCursor
 from camctl.devices.file_identity import FileIdentity
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recovery_registry
+from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
 from camctl.devices.drivers.registry import (
@@ -686,7 +687,7 @@ def session_capture_assembly(
     segment_size: int = 1024 * 1024,
     recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED,
     recovery_max_event_id: Callable[[], int | None] | None = None,
-    on_recovery_diagnostic: Callable[[RecoveryDiagnostic], None] | None = None,
+    on_recovery_diagnostic: Callable[[RecoveryDiagnostic | SoftwareRecoveryDiagnostic], None] | None = None,
     file_executor: FileTaskExecutor | None = None,
     pending_call_results: dict[tuple[int, int], PendingCallResult] | None = None,
     pending_capture_completions: dict[int, PendingCaptureCompletion] | None = None,

@@ -5,3 +5,9 @@ kind = "camera"
 driver = "dji-osmo360-ii"
 [devices.osmo360ii.adb]
 serial = "REPLACE_OSMO360II_SERIAL"
+
+[devices.osmo360ii.video]
+result_mode = "segmented"
+# 只允许驱动已验证固件的普通分段录像使用自动软件重启恢复。
+[devices.osmo360ii.software_recovery]
+enabled = true
