@@ -11,7 +11,8 @@ from camctl.contracts.values import ConsistencyError,OperationKey
 from camctl.history.events import load_event_registry
 from camctl.history.reads import ResultCheckWriteScope,SegmentReadScope
 from camctl.persistence.transaction import (
-    CommandPlan,TransactionScope,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change)
+    CommandPlan,TransactionScope,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change,
+    _read_sql_value)
 from .segment_result_sets import _boundary,_one,_read_transaction,read_result_set
 
 _EVENT=load_event_registry()['events']['SEGMENT_FACTS']
@@ -473,11 +474,13 @@ def verify_result_check_conclusion(request,key,owned,*,execution_finished=True):
 
 def read_fixed_result_check_conclusion(db, setrow):
     """读取集合已保存的不可变结论及其真实创建版本，不重演结论申请。"""
-    found = _one(db, "SELECT id FROM segment_check_conclusions WHERE set_id=?", (setrow["id"],))
-    if found is None:
-        raise ConsistencyError("结果发布缺少已保存的有限核实结论")
-    conclusion = row_facts(db, "segment_check_conclusions", found[0])
-    if conclusion is None or conclusion["set_id"] != setrow["id"]:
+    with closing(db.execute("SELECT * FROM segment_check_conclusions WHERE set_id=?", (setrow["id"],))) as cursor:
+        found = cursor.fetchone()
+        if found is None:
+            raise ConsistencyError("结果发布缺少已保存的有限核实结论")
+        conclusion = {column[0]: _read_sql_value("segment_check_conclusions", column[0], value)
+                      for column, value in zip(cursor.description, found)}
+    if conclusion["set_id"] != setrow["id"]:
         raise ConsistencyError("已保存结论不属于原固定集合")
     from camctl.persistence.fact_reads import read_event
     from camctl.history.events import business_columns

@@ -72,11 +72,14 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
     rows={table:row for table,row in rows.items() if row is not None}
     db=create_autospec(sqlite3.Connection,instance=True,spec_set=True)
     db.in_transaction=True
+    conclusion_reads=[]
     def execute(sql,parameters=()):
         cursor=create_autospec(sqlite3.Cursor,instance=True,spec_set=True)
         cursor.fetchone.return_value=None
         cursor.fetchmany.return_value=()
         cursor.description=()
+        if "FROM segment_check_conclusions" in sql and not sql.startswith("SELECT 1 "):
+            conclusion_reads.append((sql, parameters))
         if sql.startswith("SELECT * FROM ") and "WHERE id = ?" in sql:
             table=sql.split()[3]
             row=rows.get(table)
@@ -85,6 +88,10 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
                 cursor.fetchone.return_value=tuple(encode_json_value(value) if isinstance(value,(dict,list)) else value for value in row.values())
         elif sql.startswith("SELECT id FROM segment_check_conclusions WHERE set_id="):
             cursor.fetchone.return_value=None if conclusion is None else (12,)
+        elif sql == "SELECT * FROM segment_check_conclusions WHERE set_id=?":
+            if conclusion is not None and conclusion["set_id"] == parameters[0]:
+                cursor.description=tuple((name,) for name in conclusion)
+                cursor.fetchone.return_value=tuple(encode_json_value(value) if isinstance(value,(dict,list)) else value for value in conclusion.values())
         elif sql.startswith("SELECT COUNT(*)"):
             cursor.fetchone.return_value=(0,)
         elif sql.startswith("SELECT id FROM segment_sets WHERE action_id=? AND version=?"):
@@ -135,6 +142,8 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
         assert "accepted" not in state
         return
     first_reads.verify_segment_finish_event(events[0],context,1)
+    if defect is None:
+        assert len(conclusion_reads) == (0 if ref_kind == "scan" else 1)
     first=ValidatedEvent(events[0],"ACTION_FINISHED","CANCEL" if outcome[0]==6 else "FAIL",(),{})
     first_reads.seal_segment_finish(first)
     accepted.append(first)
@@ -156,6 +165,7 @@ def test_finite_proposal_real_guard_and_seal_chain(monkeypatch,defect,ref_kind):
     marker_reads.verify_segment_event(events[1],marker_context)
     marker_reads.seal_segment_finish(ValidatedEvent(events[1],"SEGMENT_FACTS","ACTIVATE",(),{}))
     assert "progress" not in state
+    assert len(conclusion_reads) == (0 if ref_kind == "scan" else 2)
 
 
 def test_constructor_proposal_cannot_replace_kernel_actual_prefix():

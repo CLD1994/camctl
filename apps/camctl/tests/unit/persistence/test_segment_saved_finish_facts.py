@@ -80,7 +80,7 @@ def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     assessment = SimpleNamespace(default_scope=SimpleNamespace(state=DefaultScopeState.UNKNOWN, member_count=None))
     port(monkeypatch, finish, "_one", return_value=None)
     port(monkeypatch, finish, "_identity", return_value=({"status": 2, "cancel_requested": 0, "plan_id": 6}, {},
-         {"id": 2, "published_event_id": None}, assessment))
+         {"id": 2, "published_event_id": None}, assessment, None))
     port(monkeypatch, finish, "_canceled_result", return_value=False)
     port(monkeypatch, finish, "_candidates", return_value=iter(()))
     port(monkeypatch, finish, "_scopes", return_value=iter(()))
@@ -145,16 +145,19 @@ def test_canonical_orders_originals_before_preview_and_uses_actual_mapping(wrong
             next(events)
 
 
-@pytest.mark.parametrize("defect", [None, "missing", "foreign_set", "changed_version", "other_branch"])
+@pytest.mark.parametrize("defect", [None, "missing", "foreign_set", "changed_version", "other_branch", "missing_event", "invalid_json"])
 def test_fixed_conclusion_checks_its_direct_creation_version(monkeypatch, defect):
     from camctl.history.events import business_columns
     from camctl.persistence import fact_reads
     from camctl.persistence.transaction import event_envelope, row_change
 
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    from camctl.persistence.transaction import encode_json_value
     values = {column: None for column in business_columns("segment_check_conclusions")}
     values.update(set_id=2, reason=int(enum_for("segment_check_conclusions.reason").NATIVE_RESULT_DECIDED))
     saved = {"id": 8, "created_event_id": 7, **values}
+    saved["current_failure_json"] = values["current_failure_json"] = {
+        "code": "capture_failed", "details": {"reason": "no_outputs"}}
     event = event_envelope(7, 3, conclusions._EVENT["id"], conclusions._REASON,
                            (row_change("segment_check_conclusions", 8, values),), 5)
     if defect == "foreign_set":
@@ -164,9 +167,15 @@ def test_fixed_conclusion_checks_its_direct_creation_version(monkeypatch, defect
     elif defect == "other_branch":
         from dataclasses import replace
         event = replace(event, reason=conclusions._EVENT["branches"]["DECIDE_RESULT"]["reason"])
-    port(monkeypatch, conclusions, "_one", return_value=None if defect == "missing" else (8,))
-    port(monkeypatch, conclusions, "row_facts", return_value=saved)
-    port(monkeypatch, fact_reads, "read_event", return_value=fact_reads.EventRecord((), event, TransactionRange(3, 7, 7)))
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    cursor.description = tuple((name,) for name in saved)
+    raw = [encode_json_value(value) if isinstance(value, dict) else value for value in saved.values()]
+    if defect == "invalid_json":
+        raw[list(saved).index("current_failure_json")] = "{"
+    cursor.fetchone.return_value = None if defect == "missing" else tuple(raw)
+    db.execute.return_value = cursor
+    port(monkeypatch, fact_reads, "read_event", side_effect=ConsistencyError("创建事件缺失") if defect == "missing_event" else None,
+         return_value=fact_reads.EventRecord((), event, TransactionRange(3, 7, 7)))
     old = port(monkeypatch, conclusions, "read_verified_conclusion", side_effect=AssertionError("重演原申请"))
     if defect is None:
         assert conclusions.read_fixed_result_check_conclusion(db, {"id": 2}) == saved
@@ -174,7 +183,34 @@ def test_fixed_conclusion_checks_its_direct_creation_version(monkeypatch, defect
         with pytest.raises(ConsistencyError):
             conclusions.read_fixed_result_check_conclusion(db, {"id": 2})
     old.assert_not_called()
-    db.execute.assert_not_called()
+    # 一次集合定位同时取得真实完整行；精确 JSON 解码和创建事件核对仍保留。
+    assert db.execute.call_count == 1
+    assert db.execute.call_args.args == ("SELECT * FROM segment_check_conclusions WHERE set_id=?", (2,))
+    cursor.close.assert_called_once()
+
+
+@pytest.mark.parametrize("defect", [None, "missing", "duplicate", "before", "after", "missing_event", "wrong_type", "foreign_transaction"])
+def test_created_output_reads_identity_and_actual_creation_in_one_query(defect):
+    db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    event_type = finish.load_event_registry()["events"]["OUTPUT_REGISTERED"]["id"]
+    row = (29, 11, event_type, 7)
+    if defect == "before": row = (29, 9, event_type, 7)
+    elif defect == "after": row = (29, 14, event_type, 7)
+    elif defect == "missing_event": row = (29, 11, None, None)
+    elif defect == "wrong_type": row = (29, 11, -1, 7)
+    elif defect == "foreign_transaction": row = (29, 11, event_type, 8)
+    cursor.fetchmany.return_value = [] if defect == "missing" else [row, row] if defect == "duplicate" else [row]
+    cursor.fetchone.return_value = (event_type, 7)
+    db.execute.return_value = cursor
+    if defect is None:
+        assert finish._created_output(db, TransactionRange(7, 10, 13), 1, 30, 1) == 29
+    else:
+        with pytest.raises(ConsistencyError):
+            finish._created_output(db, TransactionRange(7, 10, 13), 1, 30, 1)
+    assert db.execute.call_count == 1
+    assert db.execute.call_args.args[1] == (1, 30, 1)
+    cursor.close.assert_called_once()
 
 
 @pytest.mark.parametrize("forged", [False, True])
@@ -239,7 +275,7 @@ def test_original_key_verification_consumes_whole_exact_event_group(monkeypatch,
     first, marker = tuple(finish._canonical_events(request, tx, header, facts, qualification,
         lambda: iter(()), lambda: iter(()), lambda *_: pytest.fail("没有前序产物")))
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
-    port(monkeypatch, finish, "_identity", return_value=(facts.action, facts.run, facts.setrow, assessment))
+    port(monkeypatch, finish, "_identity", return_value=(facts.action, facts.run, facts.setrow, assessment, None))
     port(monkeypatch, finish, "_completion_qualification", return_value=qualification)
     port(monkeypatch, finish, "_verify_scope_members")
     port(monkeypatch, finish, "_failure", return_value=facts.outcome)
