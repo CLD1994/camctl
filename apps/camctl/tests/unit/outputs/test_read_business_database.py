@@ -121,6 +121,51 @@ async def test_read_intent_applies_granted_ticket_before_cancel_and_reuses_unkno
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_field", ["control", "observer_error", "handoff_error"])
+@pytest.mark.parametrize("kind", [DbOutcomeKind.COMPLETED, DbOutcomeKind.UNKNOWN])
+async def test_read_intent_applies_actual_completed_ticket_before_write_error(error_field, kind):
+    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, BeginAttemptResult, BeginDisposition, OperationKind
+    from camctl.operations.models import AttemptTicket
+    from camctl.persistence.models import db_outcome_for
+    from camctl.persistence.repositories.operations import OperationRepository
+    from camctl.outputs.read_attempts import acquire_read_attempt
+
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    cursor.fetchall.return_value = []
+    owned.connection.execute.return_value = cursor
+    repository = create_autospec(OperationRepository(), spec_set=True)
+    runtime = SimpleNamespace(database=inline_business_database(owned), operations=repository,
+        pending_read_business={}, continuing_read_tickets={})
+    intent = AttemptIntent("read", 3, OperationKind.READ_FILE, AttemptTarget(copy_id=2),
+        None, AttemptConfig(3), 9, copy_round=1)
+    ticket = AttemptTicket(1, "read", "2", "read/2", 5)
+    error = RuntimeError("实际回执交付中断")
+    actual = DbOutcome(kind,
+        value=BeginAttemptResult(BeginDisposition.GRANTED, ticket) if kind is DbOutcomeKind.COMPLETED else None,
+        **{error_field: error})
+    repository.begin_attempt.return_value = actual
+
+    with pytest.raises(RuntimeError) as raised:
+        await acquire_read_attempt(runtime, intent)
+    assert raised.value is error
+    assert db_outcome_for(error) is actual
+    if kind is DbOutcomeKind.COMPLETED:
+        assert runtime.continuing_read_tickets == {2: ticket}
+        assert runtime.pending_read_business == {}
+    else:
+        original = runtime.pending_read_business[(2, "read_intent")]
+        assert original.request is intent
+        assert runtime.continuing_read_tickets == {}
+        repository.begin_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+            value=BeginAttemptResult(BeginDisposition.GRANTED, ticket))
+        assert await acquire_read_attempt(runtime, intent) == (ticket, None)
+        assert repository.begin_attempt.call_args.args[:2] == (intent, original.key)
+        assert runtime.pending_read_business == {}
+
+
+@pytest.mark.asyncio
 async def test_result_save_and_loop_settlement_survive_cancel_as_one_phase():
     from camctl.operations.attempts import AttemptFinish, RetryWaitGate, RunFinish, RunOutcome
     from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis

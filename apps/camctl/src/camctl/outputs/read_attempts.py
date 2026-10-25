@@ -14,7 +14,7 @@ from camctl.operations.models import (
     EvidenceValue, Settlement, SettlementBasis,
 )
 from camctl.operations.validation import validate_outcome
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import settle_required
 from camctl.outputs.database_reads import read_one
 from camctl.devices.evidence import EvidenceError
@@ -173,14 +173,23 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
     if pending is None:
         pending = PendingReadBusiness(save, request, new_operation_key(), on_completed)
         runtime.pending_read_business[identity] = pending
-    async def save_and_apply():
-        receipt = await runtime.database.write(
-            lambda owned: pending.save(pending.request, pending.key, owned), key=pending.key)
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原读取业务结果未可靠保存（{receipt.kind.value}）: {receipt.error}")
+    def apply_completed(receipt):
         if pending.on_completed is not None:
             pending.on_completed(receipt.value)
         del runtime.pending_read_business[identity]
+
+    async def save_and_apply():
+        try:
+            receipt = await runtime.database.write(
+                lambda owned: pending.save(pending.request, pending.key, owned), key=pending.key)
+        except BaseException as error:
+            actual = db_outcome_for(error)
+            if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+                apply_completed(actual)
+            raise
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"原读取业务结果未可靠保存（{receipt.kind.value}）: {receipt.error}")
+        apply_completed(receipt)
         return receipt
     return await settle_required(save_and_apply())
 
