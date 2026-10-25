@@ -58,6 +58,7 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.read_reuse import read_reuse_scope
 from camctl.logging_runtime.transaction_timing import (
     TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
 )
@@ -684,6 +685,11 @@ def commit_operation(
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
     connection: sqlite3.Connection = timed_connection(owned.connection)
+    with read_reuse_scope(connection):
+        return _commit_operation(command, operation_key, connection)
+
+
+def _commit_operation(command, operation_key, connection) -> WriteReceipt:
     begun = False
     committing = False
     rollback_attempted = False

@@ -383,3 +383,32 @@ def test_disabled_timing_keeps_connection_and_original_sql_sequence(transaction_
     assert result.kind == "completed" and result.result == "reused"
     assert [name for name, _ in observed] == ["BEGIN", "SELECT", "SELECT", "ROLLBACK"]
     owned.connection.close.assert_not_called()
+
+
+@pytest.mark.parametrize("timing_enabled", [False, True])
+def test_complete_transaction_reuses_reads_and_releases_scope(transaction_ports, timing_enabled):
+    from camctl.persistence.read_reuse import reuse_read
+
+    owned, _, _, _ = transaction_ports
+    owned.connection.in_transaction = True
+    owned.connection.total_changes = 0
+    command = create_autospec(tx.AtomicCommand, instance=True, spec_set=True)
+    loaded = []
+
+    def load():
+        loaded.append(len(loaded) + 1)
+        return {"fact": loaded[-1]}
+
+    def plan(scope):
+        values = [reuse_read(scope.connection, ("proof", 1), load) for _ in range(2)]
+        return tx.CommandPlan((), {}, {}, values, read_only=True)
+
+    command.plan.side_effect = plan
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with performance_logging(channel if timing_enabled else None):
+        first = tx.commit_operation(command, new_operation_key(), owned)
+        second = tx.commit_operation(command, new_operation_key(), owned)
+    assert first.kind == second.kind == "completed"
+    assert first.result == [{"fact": 1}, {"fact": 1}]
+    assert second.result == [{"fact": 2}, {"fact": 2}]
+    assert loaded == [1, 2]

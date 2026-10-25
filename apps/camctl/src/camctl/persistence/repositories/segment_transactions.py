@@ -26,6 +26,7 @@ from camctl.history.events import load_event_registry, foreign_key_targets
 from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
+from camctl.persistence.read_reuse import read_reuse_scope
 from camctl.persistence.transaction import (
     BoundedCommandPlan, CommandPlan, TransactionError, commit_operation, row_facts,
     row_change, update_change, event_envelope, next_row_id, read_transaction_range,
@@ -1082,7 +1083,9 @@ def verify_segment_finish(request,key,reader,*,execution_finished,batch_size=128
     db=reader.connection
     opened=not db.in_transaction
     if opened:db.execute('BEGIN')
-    try:return _verify_segment_finish(request,key,reader,batch_size)
+    try:
+        with read_reuse_scope(db):
+            return _verify_segment_finish(request,key,reader,batch_size)
     finally:
         if opened:db.execute('ROLLBACK')
 
