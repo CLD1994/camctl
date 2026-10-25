@@ -63,15 +63,16 @@ class SharedSave:
         self._task: asyncio.Task | None = None
 
     async def run(self, save_and_apply: Callable[[], Awaitable[T]]) -> T:
-        """完整原申请保持不变；上次交付结束后可推进下一阶段或核实。"""
+        """保留原成功或失败结果；晚到等待者不能隐式重放保存。"""
         if self._task is None:
             self._task = asyncio.create_task(save_and_apply())
-        task = self._task
-        try:
-            return await settle_required(task)
-        finally:
-            if task.done() and self._task is task:
-                self._task = None
+        return await settle_required(self._task)
+
+    def reset(self) -> None:
+        """调用方明确开始下一阶段或核实；不能替换仍在进行的原保存。"""
+        if self._task is not None and not self._task.done():
+            raise DbExecutorError("原保存尚未完成，不能开始新的保存阶段")
+        self._task = None
 
 
 def _check_value(value):

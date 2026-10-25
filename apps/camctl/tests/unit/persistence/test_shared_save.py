@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from camctl.persistence import business
+from camctl.persistence.models import DbExecutorError
 
 pytestmark = pytest.mark.asyncio
 
@@ -82,10 +83,14 @@ async def test_actual_save_failure_is_shared_before_later_original_request_retry
 
     with pytest.raises(RuntimeError) as raised:
         await shared.run(save_and_apply)
+    assert raised.value is failure and attempts == ["original"]
+    shared.reset()
+    with pytest.raises(RuntimeError) as raised:
+        await shared.run(save_and_apply)
     assert raised.value is failure and attempts == ["original", "original"]
 
 
-async def test_completed_save_allows_same_owner_to_start_its_next_stage():
+async def test_completed_save_requires_explicit_next_stage_before_replacing_result():
     shared = business.SharedSave()
 
     async def intent():
@@ -95,7 +100,26 @@ async def test_completed_save_allows_same_owner_to_start_its_next_stage():
         return "result"
 
     assert await shared.run(intent) == "intent"
+    assert await shared.run(result) == "intent"
+    shared.reset()
     assert await shared.run(result) == "result"
+
+
+async def test_new_stage_cannot_reset_an_in_progress_original_save():
+    shared = business.SharedSave()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def save_and_apply():
+        entered.set()
+        await release.wait()
+        return "original"
+
+    first = asyncio.create_task(shared.run(save_and_apply))
+    await entered.wait()
+    with pytest.raises(DbExecutorError):
+        shared.reset()
+    release.set()
+    assert await first == "original"
 
 
 async def test_different_owners_do_not_wait_for_each_others_save():
