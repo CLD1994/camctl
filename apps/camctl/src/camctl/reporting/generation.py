@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Mapping, Protocol
@@ -78,6 +78,8 @@ class _ReportReader(Protocol):
 
     def restore_entity(self, entity: str, entity_id: int, boundary) -> dict: ...
 
+    def restore_primary_at_h(self, entity: str, entity_id: int, boundary) -> dict | None: ...
+
     def related_entity_ids(self, table: str, column: str, value: int) -> list[int]: ...
 
 
@@ -109,6 +111,13 @@ def generate_report_file(
     不进入发布流程。
     """
     repo = repository if repository is not None else HistoryRepository(spec.db_path)
+    scope = repo.report_read_scope() if isinstance(repo, HistoryRepository) else nullcontext()
+    with scope:
+        return _generate_report_file(spec, repo, buffer_size)
+
+
+def _generate_report_file(spec, repo, buffer_size) -> GeneratedFile:
+    """在调用者拥有的读取范围内写文件，并显式结束所有流式读取。"""
     boundary = verify_frozen_registration(repo, spec)
     document = ReportDocument(
         report_id=str(spec.report_id), from_wm=spec.from_wm, to_wm=spec.to_wm)
@@ -145,10 +154,12 @@ def generate_report_file(
                 yield from stream.section("plan_file_diagnostics", fragment)
             yield from stream.finish()
 
-        for chunk in chunk_bytes(tokens(), buffer_size=buffer_size):
-            handle.write(chunk)
-            digest.update(chunk)
-            size += len(chunk)
+        with closing(tokens()) as source:
+            with closing(chunk_bytes(source, buffer_size=buffer_size)) as chunks:
+                for chunk in chunks:
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
         handle.flush()
         os.fsync(handle.fileno())
     except BaseException:
@@ -228,7 +239,11 @@ def _merge_delivery(repo, facts: dict, delivery_id: int, boundary) -> None:
         raise ConsistencyError(f"交付 {delivery_id} 在 H 不存在")
     output_id = delivery.get("output_id")
     if output_id is not None:
-        _merge_output(repo, facts, int(output_id), boundary)
+        # 交付展示需要来源身份；源文件的完整展示由产物节点负责。
+        output = repo.restore_primary_at_h("output", int(output_id), boundary)
+        if output is None:
+            raise ConsistencyError(f"产物 {output_id} 在 H 不存在")
+        _merge(facts, {("outputs", int(output_id)): output})
     target_ids = sorted({
         int(copy["target_file_id"])
         for (table, _), copy in rows.items()
