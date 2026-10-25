@@ -1,6 +1,7 @@
 """报告有限事实和显式增长范围；不连接数据库或创建文件。"""
 from unittest.mock import create_autospec
 from types import SimpleNamespace
+from contextlib import contextmanager
 import sqlite3
 
 import pytest
@@ -51,6 +52,90 @@ def registration():
 def registered_scope(monkeypatch):
     monkeypatch.setattr(report_action, '_dependencies', create_autospec(
         report_action._dependencies, return_value=registration()))
+
+
+def test_forward_coverage_keeps_s_member_referenced_by_scope_created_before_h(monkeypatch):
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.history import snapshot_stream
+    from camctl.persistence.repositories.history import HistoryRepository
+    handle = report_action.ReportHistoryHandle.__new__(report_action.ReportHistoryHandle)
+    handle.entity, handle.action_id, handle.phase = 'action', 9, 'video_coverage'
+    handle.boundary, handle.batch_size, handle._forward = HistoryBoundary(5, 50), 2, True
+    handle.required_tables = frozenset({'actions', 'segment_sets', 'segment_members', 'segment_scope_members'})
+    handle._set_foreign_keys = {'segment_members': 'set_id', 'segment_scope_members': 'set_id'}
+    handle._published_identity = None
+    handle.seed = SimpleNamespace(ref=(1, 9), primary_table='actions', snapshot=SimpleNamespace(
+        boundary=HistoryBoundary(3, 31), position=(31, 3)))
+    selected = set()
+    handle._db = create_autospec(sqlite3.Connection, instance=True)
+    def local_execute(sql, args=()):
+        if sql.startswith('INSERT OR IGNORE'):
+            selected.add(args[0])
+        else:
+            assert sql.startswith('CREATE TABLE selected_members')
+        return create_autospec(sqlite3.Cursor, instance=True)
+    handle._db.execute.side_effect = local_execute
+    handle._one = create_autospec(handle._one, side_effect=lambda sql, args:
+        (1,) if args[0] in selected else None)
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    def source_execute(sql, args=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True)
+        if sql.startswith('SELECT id FROM segment_sets'):
+            assert args == (9, 50)
+            cursor.fetchall.return_value = [(4,)]
+        else:
+            assert sql.startswith('SELECT id,member_id FROM segment_scope_members')
+            assert 'created_event_id<=?' in sql
+            assert args[:2] == (4, 50)
+            # member 29 已存在于S；引用它的scope在S后、H前才创建。
+            cursor.fetchall.return_value = [(41, 29)] if args[2] == 0 else []
+        return cursor
+    connection.execute.side_effect = source_execute
+    handle.repository = create_autospec(HistoryRepository, instance=True)
+    @contextmanager
+    def read_connection():
+        yield connection
+    handle.repository._read_connection.side_effect = read_connection
+    rows = {}
+    handle._put = create_autospec(handle._put, side_effect=lambda table, identity, values:
+        rows.__setitem__((table, identity), values))
+    handle._get = create_autospec(handle._get, side_effect=lambda table, identity: rows.get((table, identity)))
+    records = [
+        {'format_version': 1, 'entity_type': 1, 'entity_id': 9, 'boundary_event_id': 31, 'change_count': 3},
+        {'table': 'actions', 'row': {'id': 9, 'last_event_id': 31, 'change_count': 3}},
+        {'table': 'segment_members', 'row': {'id': 29, 'set_id': 4, 'created_event_id': 20}},
+        {'table': 'segment_members', 'row': {'id': 30, 'set_id': 4, 'created_event_id': 20}},
+        {'table': 'segment_sets', 'row': {'id': 4, 'action_id': 9, 'created_event_id': 15, 'published_event_id': None}},
+    ]
+    monkeypatch.setattr(snapshot_stream, '_records', create_autospec(
+        snapshot_stream._records, return_value=(record for record in records)))
+    monkeypatch.setattr(snapshot_stream, '_chunks', create_autospec(snapshot_stream._chunks, return_value=()))
+    monkeypatch.setattr(snapshot_stream, 'load_event_registry', create_autospec(
+        snapshot_stream.load_event_registry, return_value={'tables': {
+            'actions': {'derived': ['id', 'last_event_id', 'change_count']},
+            'segment_members': {'derived': ['id'], 'immutable': ['set_id', 'created_event_id']},
+            'segment_sets': {'derived': ['id'], 'immutable': ['action_id', 'created_event_id'],
+                             'write_once': ['published_event_id']}}}))
+    handle._prepare_forward()
+    handle._load_snapshot()
+    assert ('segment_members', 29) in rows
+    assert ('segment_members', 30) not in rows
+    assert rows[('segment_sets', 4)]['published_event_id'] is None
+    assert not handle._selected_row('segment_sets', {'id': 5})
+    from camctl.history import bounded
+    from camctl.history.events import EventEnvelope, RowChange, RowImage
+    handle._forward_count = 4
+    monkeypatch.setattr(bounded, 'business_columns', create_autospec(
+        bounded.business_columns, return_value=frozenset({'published_event_id'})))
+    handle._forward_candidate = create_autospec(handle._forward_candidate,
+        side_effect=lambda table, identity: table == 'segment_sets' and identity == 4)
+    handle._apply(EventEnvelope(45, 4, 1, 1, 0, 1, None, 1, {}, (
+        RowChange('segment_sets', 4, RowImage(True, {'published_event_id': None}), RowImage(True, {'published_event_id': 45})),
+        RowChange('segment_sets', 5, RowImage(False, {}), RowImage(True, {'published_event_id': 70})),
+        RowChange('operation_attempts', 11, RowImage(False, {}), RowImage(True, {'reply_json': {}})),
+    )), True)
+    assert rows[('segment_sets', 4)]['published_event_id'] == 45
+    assert ('segment_sets', 5) not in rows and ('operation_attempts', 11) not in rows
 
 
 def test_finite_scope_does_not_reintroduce_growth_through_relation_endpoints():

@@ -59,7 +59,7 @@ def _event(changes, identity=41):
     return EventEnvelope(identity, 4, 1, 1, 0, 1, None, 1, {}, tuple(changes))
 
 
-def _forward_handle(monkeypatch, rows, owned=True):
+def _forward_handle(monkeypatch, rows, owned=True, columns=None):
     handle = SegmentHistoryHandle.__new__(SegmentHistoryHandle)
     handle._forward, handle._forward_count = True, 4
     handle.seed = SimpleNamespace(ref=(1, 9))
@@ -68,7 +68,8 @@ def _forward_handle(monkeypatch, rows, owned=True):
     handle._forward_candidate = create_autospec(handle._forward_candidate, return_value=owned)
     handle._one = create_autospec(handle._one, side_effect=AssertionError('正向行不得借用C候选'))
     monkeypatch.setattr(bounded, 'business_columns', create_autospec(
-        bounded.business_columns, return_value=frozenset({'once'})))
+        bounded.business_columns, side_effect=lambda table:
+            frozenset({'once'} if columns is None else columns[table])))
     return handle
 
 
@@ -98,6 +99,41 @@ def test_forward_create_uses_original_event_and_authoritative_derived_methods(mo
     assert rows[('actions', 9)] == {'id': 9, 'once': None, 'created_event_id': 41,
         'last_event_id': 41, 'change_count': 4}
     handle._one.assert_not_called()
+
+
+def test_forward_creates_member_and_scope_from_same_original_event(monkeypatch):
+    from camctl.persistence import transaction
+    rows = {}
+    after = {
+        'segment_members': {'set_id': 4, 'file_id': 7, 'created_event_id': 41},
+        'segment_scope_members': {'set_id': 4, 'member_id': 29, 'output_id': None, 'created_event_id': 41},
+    }
+    handle = _forward_handle(monkeypatch, rows, columns=after)
+    monkeypatch.setattr(transaction, 'load_enum_registry', create_autospec(
+        transaction.load_enum_registry, return_value={'history_objects': {'action': {'id': 1, 'table': 'actions'}}}))
+    monkeypatch.setattr(transaction, 'load_event_registry', create_autospec(
+        transaction.load_event_registry, return_value={'derived_history': {}}))
+    handle._apply(_event([
+        RowChange('segment_members', 29, RowImage(False, {}), RowImage(True, after['segment_members'])),
+        RowChange('segment_scope_members', 42, RowImage(False, {}), RowImage(True, after['segment_scope_members'])),
+    ]), True)
+    assert rows == {('segment_members', 29): {'id': 29, **after['segment_members']},
+        ('segment_scope_members', 42): {'id': 42, **after['segment_scope_members']}}
+    handle._one.assert_not_called()
+
+
+@pytest.mark.parametrize('after', [None, 7])
+def test_generic_forward_updates_snapshot_values_without_current_write_once(monkeypatch, after):
+    from camctl.persistence.repositories import history
+    repository = create_autospec(HistoryRepository, instance=True)
+    rows = {('outputs', 9): {'id': 9, 'once': None, 'created_event_id': 12}}
+    seed = SimpleNamespace(ref=(3, 9), rows={('outputs', 9): {'id': 9, 'once': 99, 'created_event_id': 999}})
+    monkeypatch.setattr(history, 'business_columns', create_autospec(
+        history.business_columns, return_value=frozenset({'once'})))
+    event = _event([RowChange('outputs', 9, RowImage(True, {'once': None}), RowImage(True, {'once': after}))])
+    HistoryRepository._apply_object_event(repository, seed, rows, event, forward=True)
+    assert rows[('outputs', 9)] == {'id': 9, 'once': after, 'created_event_id': 12}
+    repository._owns_row_identity.assert_not_called()
 
 
 @pytest.mark.parametrize('bad_creation', [False, True])

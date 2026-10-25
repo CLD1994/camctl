@@ -1,4 +1,4 @@
-"""P3b第一轮：原固定事实、受管线程和取消来源的独立回归。"""
+"""快照构建验收、正向读取、受管线程和取消来源的回归。"""
 import asyncio
 from pathlib import Path
 from threading import Event, get_ident
@@ -24,10 +24,21 @@ def _change_snapshot(owned, prepared, transform):
         ((''.join(encode_json_value(record)+'\n' for record in records)).encode(),))
 
 
+def _snapshot_matches_initial(owned, history, ref, prepared):
+    """构建验收独立回放S，并比较已登记快照的完整映像。"""
+    content = owned.connection.execute(
+        'SELECT content FROM entity_snapshots WHERE entity_type=? AND entity_id=? AND boundary_event_id=?',
+        (prepared.entity_type, prepared.entity_id, prepared.boundary.last_event_id)).fetchone()[0]
+    records = [parse_exact_json(line) for line in content.decode().splitlines()]
+    snapshot_rows = {(record['table'], record['row']['id']): record['row'] for record in records[1:]}
+    with history.open_segment_history(ref.action_id, prepared.boundary, strategy='initial', batch_size=2) as replay:
+        replay_rows = {(row.table, row.row_id): dict(row.values) for row in replay.iter_rows()}
+    return snapshot_rows == replay_rows
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('damage',['assessment_null','member_count_null','marker_null','marker_scope_null'])
-async def test_snapshot_cannot_erase_write_once_assignment(tmp_path,monkeypatch,damage):
-    from camctl.history.bounded import SegmentHistoryHandle
+async def test_snapshot_acceptance_compares_write_once_values_with_independent_replay(tmp_path,damage):
     if damage.startswith('marker'):
         from ..persistence.test_segment_storage import _assessed_world,_completion_command
         from camctl.capture.segment_models import DefaultScopeState
@@ -45,6 +56,7 @@ async def test_snapshot_cannot_erase_write_once_assignment(tmp_path,monkeypatch,
             prepared=prepare_snapshot(handle)
         try:
             await _save(history,prepared)
+            assert _snapshot_matches_initial(owned,history,ref,prepared)
             def change(records):
                 saved=next(row['row'] for row in records if row.get('table')=='segment_sets')
                 if damage in ('assessment_null','member_count_null'):
@@ -56,15 +68,7 @@ async def test_snapshot_cannot_erase_write_once_assignment(tmp_path,monkeypatch,
                         for row in records:
                             if row.get('table')=='segment_scope_members':row['row']['output_id']=None
             _change_snapshot(owned,prepared,change)
-            opened=[]
-            original=SegmentHistoryHandle.__init__
-            def capture(self,*args,**kwargs):
-                original(self,*args,**kwargs)
-                opened.append((self,Path(self._temporary.name)))
-            monkeypatch.setattr(SegmentHistoryHandle,'__init__',capture)
-            with pytest.raises(ConsistencyError):
-                history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2)
-            assert opened and all(handle._db is None and not path.exists() for handle,path in opened)
+            assert not _snapshot_matches_initial(owned,history,ref,prepared)
             assert history.current_boundary()==boundary
         finally:prepared.close()
     finally:owned.connection.close()
@@ -99,7 +103,7 @@ async def test_snapshot_null_before_assignment_is_valid_at_original_h(tmp_path,a
 
 
 @pytest.mark.asyncio
-async def test_snapshot_cannot_borrow_a_future_assessment_equal_to_current(tmp_path):
+async def test_snapshot_acceptance_compares_assessment_at_s_with_independent_replay(tmp_path):
     owned,runtime,repo,ref,history,before,prepared=await _before_assessment(tmp_path)
     try:
         current=repo.read_set(ref,owned)
@@ -107,15 +111,14 @@ async def test_snapshot_cannot_borrow_a_future_assessment_equal_to_current(tmp_p
             saved=next(row['row'] for row in records if row.get('table')=='segment_sets')
             saved.update(state=3,facts_json=current['facts_json'],assessment_json=current['assessment_json'])
         _change_snapshot(owned,prepared,change)
-        with pytest.raises(ConsistencyError):
-            history.open_segment_history(ref.action_id,before,strategy='snapshot',batch_size=1)
+        assert not _snapshot_matches_initial(owned,history,ref,prepared)
     finally:
         prepared.close();owned.connection.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('future',['marker_and_outputs','outputs_only'])
-async def test_snapshot_cannot_borrow_future_publication_values(tmp_path,future):
+async def test_snapshot_acceptance_compares_publication_at_s_with_independent_replay(tmp_path,future):
     from ..persistence.test_segment_storage import _assessed_world,_completion_command
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.persistence.transaction import commit_operation
@@ -136,7 +139,7 @@ async def test_snapshot_cannot_borrow_future_publication_values(tmp_path,future)
                     if record.get('table')=='segment_sets' and future=='marker_and_outputs':record['row']['published_event_id']=marker
                     elif record.get('table')=='segment_scope_members':record['row']['output_id']=outputs[record['row']['id']]
             _change_snapshot(owned,prepared,change)
-            with pytest.raises(ConsistencyError):history.open_segment_history(ref.action_id,before,strategy='snapshot',batch_size=1)
+            assert not _snapshot_matches_initial(owned,history,ref,prepared)
         finally:prepared.close()
     finally:owned.connection.close()
 
@@ -565,8 +568,8 @@ async def test_cancel_during_preparation_waits_for_source_owner_to_finish(tmp_pa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure',['missing_assignment','query_error'])
-async def test_write_once_proof_missing_evidence_never_returns_a_partial_handle(tmp_path,monkeypatch,failure):
+@pytest.mark.parametrize('failure',['missing_event','query_error'])
+async def test_forward_delta_missing_evidence_never_returns_a_partial_handle(tmp_path,monkeypatch,failure):
     import sqlite3
     from camctl.history.bounded import SegmentHistoryHandle
     owned,_,_,ref,history,before,prepared=await _before_assessment(tmp_path)
@@ -575,14 +578,15 @@ async def test_write_once_proof_missing_evidence_never_returns_a_partial_handle(
         original_init(self,*args,**kwargs);opened.append((self,Path(self._temporary.name)))
     monkeypatch.setattr(SegmentHistoryHandle,'__init__',capture)
     try:
-        if failure=='missing_assignment':
+        boundary=history.current_boundary()
+        if failure=='missing_event':
             event=owned.connection.execute('SELECT MAX(event_id) FROM entity_event_links WHERE entity_type=1 AND entity_id=?',(ref.action_id,)).fetchone()[0]
             owned.connection.execute('DELETE FROM entity_event_links WHERE entity_type=1 AND entity_id=? AND event_id=?',(ref.action_id,event))
             error=ConsistencyError
         else:
-            def fail(*args,**kwargs):raise sqlite3.OperationalError('proof page read failed')
+            def fail(*args,**kwargs):raise sqlite3.OperationalError('forward page read failed')
             monkeypatch.setattr(history,'_object_event_page',fail);error=sqlite3.OperationalError
-        with pytest.raises(error):history.open_segment_history(ref.action_id,before,strategy='snapshot',batch_size=1)
+        with pytest.raises(error):history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=1)
         assert all(handle._db is None and not directory.exists() for handle,directory in opened)
     finally:prepared.close();owned.connection.close()
 
@@ -791,7 +795,7 @@ async def test_actual_unframed_blob_never_reads_a_whole_row_and_closes_tempfile(
 
 
 @pytest.mark.asyncio
-async def test_snapshot_cannot_borrow_member_count_fixed_after_s(tmp_path):
+async def test_snapshot_null_and_acceptance_member_count_use_s(tmp_path):
     from ..persistence.test_segment_storage import _world,_ok
     owned,runtime,repo,ref,members=await _world(tmp_path,indexes=(1,2))
     _ok(repo.append_members(ref,members,runtime.wall_us(),new_operation_key(),owned))
@@ -807,13 +811,13 @@ async def test_snapshot_cannot_borrow_member_count_fixed_after_s(tmp_path):
             def change(records):
                 next(row['row'] for row in records if row.get('table')=='segment_sets').update(state=2,member_count=2)
             _change_snapshot(owned,prepared,change)
-            with pytest.raises(ConsistencyError):history.open_segment_history(ref.action_id,before,strategy='snapshot',batch_size=1)
+            assert not _snapshot_matches_initial(owned,history,ref,prepared)
         finally:prepared.close()
     finally:owned.connection.close()
 
 
 @pytest.mark.asyncio
-async def test_snapshot_write_once_proof_also_covers_other_action_owned_tables(tmp_path):
+async def test_snapshot_acceptance_compares_other_owned_write_once_values(tmp_path):
     owned,_,_,ref,history=await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
@@ -824,25 +828,27 @@ async def test_snapshot_write_once_proof_also_covers_other_action_owned_tables(t
                 target=next(row['row'] for row in records if row.get('table')=='operation_attempts' and row['row']['result_last_page_event_id'] is not None)
                 target.update(result_first_page_event_id=None,result_last_page_event_id=None)
             _change_snapshot(owned,prepared,change)
-            with pytest.raises(ConsistencyError):history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=1)
+            assert not _snapshot_matches_initial(owned,history,ref,prepared)
         finally:prepared.close()
     finally:owned.connection.close()
 
 
 @pytest.mark.asyncio
-async def test_snapshot_proof_decodes_required_interval_once_and_replays_disk_evidence(tmp_path,monkeypatch):
+async def test_snapshot_decodes_only_forward_s_to_h_interval_once(tmp_path,monkeypatch):
     from camctl.persistence.repositories import history as module
     from .test_record_segment_history import _version,_rows
     owned,runtime,repo,ref,history,before,prepared=await _before_assessment(tmp_path)
     try:
         boundary=history.current_boundary()
         _version(owned,runtime,repo,ref,2)
-        count=owned.connection.execute('SELECT change_count FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
+        count=owned.connection.execute('SELECT change_count FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id<=? ORDER BY event_id DESC LIMIT 1',
+            (prepared.entity_type,ref.action_id,boundary.last_event_id)).fetchone()[0]
         original=module.decode_event_row;previous=None;decoded=0
         def decode(*args,**kwargs):
             nonlocal previous,decoded
             value=original(*args,**kwargs)
-            assert previous is None or value.event_id<previous
+            assert previous is None or value.event_id>previous
+            assert before.last_event_id<value.event_id<=boundary.last_event_id
             previous=value.event_id;decoded+=1
             return value
         monkeypatch.setattr(module,'decode_event_row',decode)
