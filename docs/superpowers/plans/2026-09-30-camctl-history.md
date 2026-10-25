@@ -190,7 +190,7 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 ### H7 全部事件覆盖与查询规模
 
-- [ ] 分段对象快照校验的实际读取成本与所选恢复路径闭合，避免为证明一次赋值事实逆扫整个快照后缀；所需事实定位结构及已有库接续范围按[历史性能补全计划](2026-10-25-history-performance-closure.md)先完成设计。
+- [ ] 分段对象快照读取与所选恢复路径闭合：快照自身提供 S 状态，S＝H 直接使用，正向只读取 `(S,H]`；读取核验与构建完整性验收按[历史性能补全计划](2026-10-25-history-performance-closure.md)落实。
 
 **预计文件：** `apps/camctl/src/camctl/history/queries.py`、`apps/camctl/src/camctl/history/replay.py`；测试为 `apps/camctl/tests/integration/history/test_complete_history.py`。
 

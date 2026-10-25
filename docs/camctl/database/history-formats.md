@@ -316,7 +316,7 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 
 正向回放先验证 `before`，再应用 `after`；逆向按事件和行的相反顺序验证 `after` 并恢复 `before`。逆向遇到创建事实只从查询副本移除该行，不删除真实数据库记录。事件结束后按实际变化对象派生目录及历史元数据；事务尚未读完时不交付中间状态。未知类型、版本、缺失旧值或矛盾状态均报历史错误，不跳过。
 
-`entity_snapshots` 保存对象类型、ID、完整边界 `boundary_event_id`、该边界的 `change_count`、`format_version` 和二进制列 `content`。内容是 UTF-8 JSON Lines（每行一个 JSON 值，以 LF 结束），首行固定为 `{"format_version":1,"entity_type":1,"entity_id":8,"boundary_event_id":120,"change_count":64}` 这样的头记录；后续每行使用 `{"table":"actions","row":{...}}` 保存一个完整投影行。表按表名的固定字典序、行按 ID 升序排列；JSON 行使用项目的精确确定编码，不包含派生目录和快照表。`row` 包含主键及该行完整投影列，包括主对象的历史元数据；JSON 列解码为结构化值，SQL 空值编码为 `null`。读取时核对头信息、对象归属和行结构，不把快照内容当成无需校验的任意 SQL。
+`entity_snapshots` 保存对象类型、ID、完整边界 `boundary_event_id`、该边界的 `change_count`、`format_version` 和二进制列 `content`。内容是 UTF-8 JSON Lines（每行一个 JSON 值，以 LF 结束），首行固定为 `{"format_version":1,"entity_type":1,"entity_id":8,"boundary_event_id":120,"change_count":64}` 这样的头记录；后续每行使用 `{"table":"actions","row":{...}}` 保存一个完整投影行。表按表名的固定字典序、行按 ID 升序排列；JSON 行使用项目的精确确定编码，不包含派生目录和快照表。`row` 包含主键及该行完整投影列，包括主对象的历史元数据；JSON 列解码为结构化值，SQL 空值编码为 `null`。读取时核对头信息、对象归属和行结构，不把快照内容当成无需校验的任意 SQL。读取、构建及独立回放验收的具体职责由[历史查询](../historical-state-query.md#快照读取构建与验收的责任)统一规定。
 
 快照包含主对象及上文归属表定义的自身记录及稳定引用；各文件快照保存文件自身行，不递归包含引用的独立对象。设备基准保留指向不可变事件分块的范围，不复制旧设备目录。保存时先在事务外流式编码临时文件，取得长度后在维护事务内插入 `zeroblob`，使用标准库 `sqlite3.Connection.blobopen` 分块写入；默认缓冲为 64 KiB，不先把整个对象拼成一个 Python 字符串。快照和进度必须一起提交；未完成的 BLOB 写入回滚，不向读取者公开部分内容。
 
