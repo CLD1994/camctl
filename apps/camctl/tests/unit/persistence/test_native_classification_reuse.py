@@ -7,7 +7,9 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.capture import native_segments
+from camctl.capture.media import RecordingFailure
 from camctl.capture.segment_models import CurrentSegmentResult
+from camctl.contracts.enums import enum_for
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.read_reuse import clear_read_reuse, read_reuse_scope
@@ -105,3 +107,48 @@ def test_outside_scope_keeps_original_classification(classification):
     segment_native.native_classification(s.db, s.row)
     segment_native.native_classification(s.db, s.row)
     assert s.classify.call_count == 2
+
+
+def test_second_member_pass_failure_is_not_cached(classification):
+    s = classification
+    error = sqlite3.OperationalError("第二遍成员读取失败")
+    s.members.side_effect = [Page((), None), error]
+    with read_reuse_scope(s.db):
+        with pytest.raises(sqlite3.OperationalError) as caught:
+            segment_native.native_classification(s.db, s.row)
+        assert caught.value is error
+        s.members.side_effect = None
+        assert segment_native.native_classification(s.db, s.row) == s.result
+        assert segment_native.native_classification(s.db, s.row) == s.result
+    assert s.classify.call_count == 2
+
+
+def test_new_attempt_after_write_rechecks_explicit_failure(classification, monkeypatch):
+    s = classification
+    facts = create_autospec(segment_native.row_facts, return_value={
+        "status": int(enum_for("operation_attempts.status").FAILED),
+        "error_json": {"code": "device_error"},
+    })
+    monkeypatch.setattr(segment_native, "row_facts", facts)
+    with read_reuse_scope(s.db):
+        segment_native.native_classification(s.db, s.row)
+        assert s.classify.call_args.kwargs["explicit_error"] is False
+        s.latest.return_value = (9,)
+        s.db.total_changes += 1
+        segment_native.native_classification(s.db, s.row)
+        assert s.classify.call_args.kwargs["explicit_error"] is True
+    facts.assert_called_once_with(s.db, "operation_attempts", 9)
+
+
+def test_cached_classification_has_independent_failure_details(classification):
+    s = classification
+    s.result = native_segments.NativeClassification(CurrentSegmentResult.UNMET, 0, None,
+        RecordingFailure("capture_failed", {"activity_id": "1", "reason": "device_failed"}))
+    with read_reuse_scope(s.db):
+        first = segment_native.native_classification(s.db, s.row)
+        first.failure.details["reason"] = "changed"
+        second = segment_native.native_classification(s.db, s.row)
+        assert second.failure.details["reason"] == "device_failed"
+        second.failure.details["reason"] = "changed_again"
+        assert segment_native.native_classification(s.db, s.row).failure.details["reason"] == "device_failed"
+    assert s.classify.call_count == 1
