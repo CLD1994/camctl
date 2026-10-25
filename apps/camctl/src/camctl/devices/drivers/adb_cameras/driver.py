@@ -13,6 +13,7 @@ from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
+from camctl.logging_runtime.performance import measure_performance
 from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
     EvidenceValue, Settlement, SettlementBasis)
 from camctl.operations.process import RawToolOutcome, ToolStartError
@@ -184,8 +185,13 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 and request.operation in self.contract.setting_call_history_operations)
             raw_capture = [] if record_setting_call else None
             try:
-                outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
-                                             raw_capture=raw_capture)
+                with measure_performance(
+                        "camera_start_command" if kind is CameraCall.START else "camera_setting",
+                        device_id=request.binding.device_id,
+                        activity_id=request.ticket.target_id,
+                        attempt_id=request.ticket.attempt_id):
+                    outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
+                                                 raw_capture=raw_capture)
             except ToolStartError as error:
                 if (request.operation not in self.contract.setting_call_history_operations
                         or (not record_setting_call and kind is not CameraCall.START)):
