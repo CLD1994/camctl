@@ -212,6 +212,104 @@ async def test_cancel_during_request_reads_keeps_ticket_undispatched(monkeypatch
     runtime.driver.query_file.assert_not_awaited()
 
 
+@pytest.mark.parametrize("operation", ["delete", "query"])
+@pytest.mark.parametrize("change", ["cancel", "stop", "terminal", "missing"])
+@pytest.mark.parametrize("dispatched,unsettled,cancel_query_available", [
+    (False, False, True), (True, True, True), (True, False, False), (True, False, True),
+])
+async def test_dispatch_rechecks_facts_after_request_preparation(
+        monkeypatch, operation, change, dispatched, unsettled, cancel_query_available):
+    from camctl.contracts.values import new_operation_key
+    from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
+    from camctl.operations.models import AttemptTicket, SettlementBasis
+    from camctl.persistence.repositories import outputs
+
+    calls_allowed = (operation == "query" and change == "cancel"
+                     and dispatched and not unsettled and cancel_query_available)
+    runtime = _runtime(_actual_result(True), _saved(
+        AttemptStatus.SUCCEEDED if calls_allowed else AttemptStatus.FAILED))
+    runtime.driver = create_autospec(cleanup_flow.DeleteDriverPort, instance=True)
+    runtime.driver.query_file.return_value = _actual_result(True)
+    runtime.outputs.finish_cleanup_attempt.side_effect = lambda finish, key, owned: _saved(finish.outcome.outcome.status)
+    runtime.operations.finish_attempt.side_effect = lambda finish, key, owned: _saved(finish.outcome.outcome.status)
+    runtime.driver.delete.return_value = cleanup_flow._not_dispatched("delete")
+    ticket = AttemptTicket(2, operation, str(_ITEM_ID),
+        f"{'delete' if operation == 'delete' else 'exists'}/{_ITEM_ID}", 7)
+    runtime.evidence = cleanup_flow._not_dispatched_evidence(runtime.evidence, ticket)
+    consumer = (None if operation == "delete"
+                else cleanup_flow.CleanupQueryConsumer.BEFORE_DELETE)
+    request = AttemptIntent(operation=operation, action_id=11,
+        kind=(OperationKind.DELETE_FILE if operation == "delete"
+              else OperationKind.CHECK_FILE_EXISTS),
+        target=AttemptTarget(cleanup_item_id=_ITEM_ID), query_purpose=None,
+        config=runtime.query_config, occurred_at=1)
+    intent = cleanup_flow.PendingCleanupIntent(runtime.database.metadata.instance_id,
+        _ITEM_ID, request, new_operation_key(), consumer, ticket=ticket)
+    runtime.pending_intents[_ITEM_ID] = intent
+    canceled = False
+    member_status = 3
+    original_read = runtime._test_owned.connection.execute.side_effect
+
+    def read(statement, parameters=()):
+        cursor = original_read(statement, parameters)
+        if "SELECT action_id,status FROM cleanup_items" in statement:
+            cursor.fetchone.return_value = (None if member_status is None else (11, member_status))
+        elif "SELECT status FROM cleanup_items" in statement:
+            cursor.fetchone.return_value = (3,)
+        elif "SELECT action_id FROM cleanup_items" in statement:
+            cursor.fetchone.return_value = (11,)
+        elif "SELECT cancel_requested FROM actions" in statement:
+            cursor.fetchone.return_value = (int(canceled),)
+        return cursor
+
+    runtime._test_owned.connection.execute.side_effect = read
+    monkeypatch.setattr(outputs, "_member_delete_dispatch_state",
+        create_autospec(outputs._member_delete_dispatch_state,
+            return_value=(dispatched, unsettled)))
+    monkeypatch.setattr(cleanup_results, "cleanup_cancel_query_available",
+        create_autospec(cleanup_results.cleanup_cancel_query_available,
+            return_value=cancel_query_available))
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_prepare = cleanup_flow._prepare_cleanup_call
+
+    async def prepare(*args):
+        prepared = await original_prepare(*args)
+        entered.set()
+        await release.wait()
+        return prepared
+
+    monkeypatch.setattr(cleanup_flow, "_prepare_cleanup_call",
+        create_autospec(original_prepare, side_effect=prepare))
+    monkeypatch.setattr(cleanup_flow, "_consume_delete_return",
+        create_autospec(cleanup_flow._consume_delete_return,
+            return_value=cleanup_flow.CleanupStep("saved")))
+    task = asyncio.create_task(
+        cleanup_flow._delete_once(runtime, _ITEM_ID, 11, 71) if operation == "delete"
+        else cleanup_flow._run_query(runtime, ticket, _ITEM_ID))
+    await asyncio.wait_for(entered.wait(), 1)
+    if change == "cancel":
+        canceled = True
+    elif change == "stop":
+        runtime.allow_new_calls = False
+    elif change == "terminal":
+        member_status = 4
+    else:
+        member_status = None
+    release.set()
+    await task
+    if calls_allowed:
+        runtime.driver.query_file.assert_awaited_once()
+        assert intent.dispatched is True
+    else:
+        runtime.driver.delete.assert_not_awaited()
+        runtime.driver.query_file.assert_not_awaited()
+        assert intent.dispatched is False
+        pending = (runtime.pending_deletes[_ITEM_ID] if operation == "delete"
+                   else runtime.pending_queries[(ticket.run_id, ticket.attempt_id)])
+        assert pending.actual.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert runtime.active_calls == set()
+
+
 async def test_discovery_reads_one_finite_page_before_delivering_and_closes_early():
     runtime = _runtime(_actual_result(False), _saved(AttemptStatus.SUCCEEDED))
     connection = runtime._test_owned.connection

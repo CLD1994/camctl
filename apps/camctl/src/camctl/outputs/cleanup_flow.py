@@ -1530,13 +1530,19 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                     runtime, item_id, intent.ticket, 'delete')
             except LocalArtifactTargetError as error:
                 local_target_error = error
-            if local_target_error is not None:
+            can_dispatch = (local_target_error is None and await _read_cleanup(
+                runtime, lambda connection: _cleanup_dispatch_allowed(
+                    connection, item_id, intent.ticket)))
+            if local_target_error is not None or not can_dispatch or not runtime.allow_new_calls:
                 from camctl.operations.models import ErrorValue
-                actual = _not_dispatched("delete", ErrorValue(
+                error = (ErrorValue(
                     "file_delete_failed", "delete", {"output_id": str(output_id),
-                                                        "reason": str(local_target_error)}))
+                                                        "reason": str(local_target_error)})
+                         if local_target_error is not None else None)
+                actual = _not_dispatched("delete", error)
                 evidence = _not_dispatched_evidence(runtime.evidence, intent.ticket)
             else:
+                check_call_interruption()
                 intent.dispatched = True
                 identity = (runtime.database.metadata.instance_id,intent.ticket.run_id,intent.ticket.attempt_id)
                 runtime.active_calls.add(identity)
@@ -1813,12 +1819,18 @@ async def _run_query(
                     runtime, item_id, ticket, 'query')
             except LocalArtifactTargetError as error:
                 local_target_error = error
-            if local_target_error is not None:
+            can_dispatch = (local_target_error is None and await _read_cleanup(
+                runtime, lambda connection: _cleanup_dispatch_allowed(
+                    connection, item_id, ticket)))
+            if local_target_error is not None or not can_dispatch or not runtime.allow_new_calls:
                 from camctl.operations.models import ErrorValue
-                actual = _not_dispatched("query", ErrorValue(
-                    "file_delete_failed", "query", {"reason": str(local_target_error)}))
+                error = (ErrorValue("file_delete_failed", "query",
+                                    {"reason": str(local_target_error)})
+                         if local_target_error is not None else None)
+                actual = _not_dispatched("query", error)
                 evidence = _not_dispatched_evidence(runtime.evidence, ticket)
             else:
+                check_call_interruption()
                 if intent is not None:
                     intent.dispatched = True
                 active = (database_id,ticket.run_id,ticket.attempt_id)
@@ -2130,6 +2142,24 @@ async def _control_request(runtime: CleanupRuntime, item_id: int, operation: str
         intent.consumer if intent is not None and operation == "query" else None)
     config = await _original_cleanup_config(runtime, item_id, ticket, original)
     return ControlRequest(operation=operation, binding=await runtime.binding_of(item_id), params=await _read_cleanup(runtime, lambda connection: _target_params(connection, item_id)), ticket=ticket, timeout_s=config.timeout_s)
+
+
+def _cleanup_dispatch_allowed(connection, item_id, ticket):
+    """全部请求读取完成后，取得派发所需的最新持久事实。"""
+    row = connection.execute(
+        "SELECT action_id,status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+    if row is None or row[1] in _MEMBER_TERMINAL:
+        return False
+    if not _cancel_requested(connection, row[0]):
+        return True
+    if ticket.operation == "delete":
+        return False
+    from camctl.persistence.repositories.outputs import _member_delete_dispatch_state
+    from camctl.outputs.cleanup_results import cleanup_cancel_query_available
+
+    dispatched, unsettled = _member_delete_dispatch_state(connection, item_id)
+    return (dispatched and not unsettled
+            and cleanup_cancel_query_available(connection, item_id, ticket=ticket))
 
 
 async def _prepare_cleanup_call(runtime: CleanupRuntime, item_id: int, ticket, operation):

@@ -149,6 +149,7 @@ def _runtime(
         cursor.fetchone.return_value = (
             (5, "file-5", '{"path":"/DCIM/file.MP4"}')
             if "JOIN device_files f ON f.id = o.device_file_id" in statement
+            else (11, 3) if "SELECT action_id,status FROM cleanup_items" in statement
             else None
         )
         cursor.fetchall.return_value = []
