@@ -42,6 +42,14 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 准备占用的报告事实切片修复（2026-10-25）
+
+人工验证的 host 诊断记录显示，计划 4 的 `run` 在准备占用保存阶段以 `state_db_error` 退出，原因为报告关联解析缺少 `device_activities` 事实。新准备活动的生产者只提供动作行，报告目标派生则在应用事件新行前读取事务前切片；缺少来源表声明使事务回滚。该计划没有保存准备活动或新设备调用，录像与延时动作均未派发 START。
+
+生产修复 `45635231` 在新建准备活动路径显式提供空的 `device_activities` 事务前切片，完整活动仍由事件新行提供。照片、录像和延时的回归直接调用真实 `ReservePreparationCommand.plan()` 和 `event_report_targets()`；修复前 3 项均复现原错误，修复后与历史派生及准备事件相关范围合计 **50 项通过，0.77 秒，退出 0**。命令、环境、源码及日志收据保存在 `.local/verification/preparation-report-facts-20261025/unit.json`。独立静态复核通过；未运行集成测试或真实相机命令。
+
+对应安装包已更新原人工验证环境，源码、wheel 与安装文件逐项一致；313 个生产 Python 文件和 27 项权威资源核对通过。安装前没有在途调用、拍摄占用或 CLI `run`，保留 4 个待执行动作。安装前后 41 张业务表和元信息均未改变，数据库继续使用 V5，配置保持原值。安装包 SHA-256 及完整核对由 `.local/deployments/20261025-preparation-report-facts/delivery-manifest.json` 记录。原计划窗口已经结束，人工测试使用新的计划时间及 `request_id`。
+
 ## 公共拍摄准备与哈苏接入（2026-10-25）
 
 验证源码为 `8d89fa1112e8474b751a62d416b2ccd9084da667`，范围为公共准备合同、哈苏独立设置与实际 START、照片调度及仓储、V5 格式与保留历史升级，以及准备返回后的取消、过期和真实错误保存。MF 的 `focus` 与 AF-S 的 `autofocus` 保留在实际 START 内，准备恢复不重放镜头操作或已存在的照片 START。
