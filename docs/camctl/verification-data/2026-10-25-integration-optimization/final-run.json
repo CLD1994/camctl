@@ -1,5 +1,5 @@
 {
-  "status": "running",
+  "status": "finished",
   "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
   "source_snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
   "source_status": "",
@@ -55,5 +55,51 @@
     "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
     "node": "v24.22.1",
     "git": "git version 2.43.0"
-  }
+  },
+  "finished_utc": "2026-10-25T00:13:41.245689+00:00",
+  "exit_code": 1,
+  "wall_seconds": 2820.160148387993,
+  "task_outcomes": {
+    "passed": 56,
+    "failed": 28
+  },
+  "actual_collected_primary_count": 10339,
+  "actual_primary_count": 10339,
+  "actual_complete_primary_count": 10339,
+  "actual_outcomes": {
+    "passed": 10290,
+    "failed": 44,
+    "skipped": 5
+  },
+  "actual_by_scope": {
+    "camctl": {
+      "passed": 9930,
+      "failed": 18,
+      "skipped": 3
+    },
+    "root": {
+      "passed": 242,
+      "failed": 26,
+      "skipped": 2
+    },
+    "node": {
+      "passed": 118,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "collection_complete": true,
+  "execution_reporting_complete": true,
+  "validation_passed": false,
+  "actual_subchecks": {
+    "passed": 342
+  },
+  "missing_primary_count": 0,
+  "duplicate_primary_count": 0,
+  "audit_file": "final-audit.json",
+  "cases_file": "final-run-cases.csv",
+  "files_file": "final-run-files.csv",
+  "subchecks_file": "final-run-subchecks.csv",
+  "manifest_file": "final-run-manifest.json",
+  "interpretation": "48d2ee64冻结完整运行：范围及报告完整，44项测试失败，整体退出1。后续测试夹具修正的独立补测另记，不覆盖本轮结果与墙钟；47分钟不代表等价通过下的稳定提速倍数。"
 }
