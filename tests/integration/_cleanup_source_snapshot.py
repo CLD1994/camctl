@@ -12,7 +12,9 @@ import time
 
 import pytest
 
-from _cleanup_roundtrip_support import ARTIFACTS, World, json_write, records, rows, sha
+from _cleanup_roundtrip_support import (
+    ARTIFACTS, World, json_write, process_identity, records, rows, sha,
+)
 
 
 def _inventory(root):
@@ -63,25 +65,51 @@ def _remove_closed_sidecars(path):
 
 
 def _root_users(root):
-    """核对本世界的实际 cwd、命令参数和文件描述符，不按进程名猜测。"""
+    """只核父 pytest、已登记拥有者及参数明确引用本世界的进程。"""
     prefix = str(root) + os.sep
     found = []
+    identities = {}
+    groups = {}
+    for path in root.glob("settled-*.json"):
+        settled = json.loads(path.read_text())
+        for actor in settled["old"]:
+            identities[actor["pid"]] = actor["starttime"]
+            if actor["pid"] in settled["groups"]:
+                groups[actor["pid"]] = actor["starttime"]
 
     def belongs(value):
         return value == str(root) or value.startswith(prefix)
 
     for process in Path("/proc").glob("[0-9]*"):
         try:
-            if process.stat().st_uid != os.geteuid():
+            pid = int(process.name)
+            identity = process_identity(pid)
+            if identity["state"] in ("Z", "X"):
                 continue
-            reasons = []
+            owned = identities.get(pid) == identity["starttime"]
+            if identity["pgid"] in groups:
+                try:
+                    leader = process_identity(identity["pgid"])
+                except FileNotFoundError:
+                    owned = True  # 原组长已退出，原组仍有成员。
+                else:
+                    owned = owned or leader["starttime"] == groups[identity["pgid"]]
+            reasons = ([{"owned_pid": pid, "starttime": identity["starttime"]}]
+                       if owned else [])
+            if not owned and pid != os.getpid():
+                if process.stat().st_uid != os.geteuid():
+                    continue
+                try:
+                    arguments = (process / "cmdline").read_bytes().split(b"\0")
+                except PermissionError:
+                    continue  # 未登记、也没有可读的本世界参数，不检查私有句柄。
+                reasons.extend({"argument": os.fsdecode(value)} for value in arguments
+                               if belongs(os.fsdecode(value)))
+                if not reasons:
+                    continue
             cwd = os.readlink(process / "cwd")
             if belongs(cwd):
                 reasons.append({"cwd": cwd})
-            for argument in (process / "cmdline").read_bytes().split(b"\0"):
-                text = os.fsdecode(argument)
-                if belongs(text):
-                    reasons.append({"argument": text})
             for descriptor in (process / "fd").iterdir():
                 try:
                     target = os.readlink(descriptor)
@@ -94,23 +122,6 @@ def _root_users(root):
         if reasons:
             found.append({"pid": int(process.name), "uses": reasons})
     return found
-
-
-def _actor_modes(world):
-    actors = {"python": world.package.python, "camctl": world.package.cli,
-              "host": Path(world.demo_path), "shell": Path("/bin/sh"),
-              "clock_cli": world.clock_cli, "adb": world.tools / "adb"}
-    for name in ("ffmpeg", "ffprobe", "node"):
-        environment = world.package.env if name == "node" else world.env
-        executable = shutil.which(name, path=environment["PATH"])
-        assert executable is not None, name
-        actors[name] = Path(executable)
-    result = {}
-    for name, path in actors.items():
-        mode = stat.S_IMODE(path.resolve().stat().st_mode)
-        assert mode & (stat.S_ISUID | stat.S_ISGID) == 0, path
-        result[name] = {"path": str(path), "mode": mode}
-    return result
 
 
 class CompletedOsmoSource:
@@ -180,8 +191,9 @@ class CompletedOsmoSource:
         self.proof = {
             "producer_runs": 1, "producer_seconds": self.producer_seconds,
             "process_scan": {"euid": os.geteuid(),
-                             "scope": "同euid进程的cwd、命令参数及FD；同用户权限错误显式失败",
-                             "actor_modes": _actor_modes(self.template)},
+                             "pytest_pid": os.getpid(),
+                             "scope": "父pytest、settled登记PID/starttime及执行组；其他进程仅在可读cmdline明确引用本root时纳入。父进程及拥有者权限错误显式失败。",
+                             "node": "同步客户端命令实际退出后返回；不扫描无本root参数的其他用户会话"},
             "root": str(self.root), "params": deepcopy(self.template.params),
             "clock": json.loads(self.template.clock.read_text()),
             "stop_to_directory_ns": directory["started_ns"] - stop["returned_ns"],
