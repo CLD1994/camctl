@@ -7,6 +7,9 @@ from types import MappingProxyType
 from typing import Awaitable, Callable, Mapping, Any
 
 from camctl.devices.adb_transport import DeviceCommand
+from camctl.devices.capture_preparation import (
+    CAPTURE_PREPARATION_COMPLETED, DEFAULT_PREPARE_LEAD_S,
+)
 from camctl.devices.drivers.registry import DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
@@ -31,11 +34,6 @@ class CameraCall(StrEnum):
 CommandFactory = Callable[[ControlRequest, str, tuple[str, ...] | None, int | None], DeviceCommand]
 
 
-CAPTURE_PREPARATION_COMPLETED = EvidenceContract(
-    "capture_preparation_completed", 1, "control", frozenset({"activity_id"}),
-    identity_field="activity_id")
-
-
 @dataclass(frozen=True)
 class CameraContract:
     driver_id: CameraModel
@@ -54,7 +52,7 @@ class CameraContract:
     session_once_commands: frozenset[Command] = frozenset()
     non_blocking_setting_commands: frozenset[tuple[str, Command]] = frozenset()
     setting_call_history_operations: frozenset[str] = frozenset()
-    default_prepare_lead_s: Decimal = Decimal("10")
+    default_prepare_lead_s: Decimal = DEFAULT_PREPARE_LEAD_S
 
     @staticmethod
     def source_storage_resolver(_declaration: Mapping[str, object]) -> CaptureStorage:

@@ -3,20 +3,20 @@
 import asyncio
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from decimal import Decimal
 import shlex
 from types import SimpleNamespace
 
-from camctl.contracts.json_values import json_equal
 from camctl.devices.adb_transport import invoke, ManagedTransport
-from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, BindingStatus, check_binding
+from camctl.devices.bindings import DeviceConfigurationError, BindingStatus, check_binding
+from camctl.devices.capture_preparation import PreparedCaptureCache
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
 from camctl.logging_runtime.performance import measure_performance
-from camctl.operations.models import (AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue,
+from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
     EvidenceValue, Settlement, SettlementBasis)
 from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.operations.result_format import error_document, result_document
@@ -47,15 +47,6 @@ class _RawOutcomeCapture:
         return raw
 
 
-@dataclass(frozen=True)
-class _PreparedCapture:
-    binding: DeviceBinding
-    serial: str
-    operation: str
-    params: Mapping
-    ticket: AttemptTicket
-
-
 class AdbCameraDriver(SoftwareRecoveryDriver):
     def __init__(self, contract, devices, transport, *, terminate_grace_s, monotonic_ns):
         self.contract = contract
@@ -66,7 +57,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         self.monotonic_ns = monotonic_ns
         self._configured_settings = set()
         self._recovery_devices = set()
-        self._prepared_captures: dict[str, _PreparedCapture] = {}
+        self._prepared_captures = PreparedCaptureCache()
 
     @property
     def default_prepare_lead_s(self):
@@ -79,18 +70,10 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         self._prepared_captures.clear()
 
     def _clear_prepared_capture(self, binding):
-        self._prepared_captures.pop(binding.device_id, None)
+        self._prepared_captures.clear(binding)
 
     def _prepared_capture_matches(self, request, serial):
-        ready = self._prepared_captures.get(request.binding.device_id)
-        return (ready is not None and request.ticket is not None
-                and request.prepared_by is not None
-                and request.ticket.operation == "control"
-                and ready.binding == request.binding and ready.serial == serial
-                and ready.ticket == request.prepared_by
-                and ready.ticket.target_id == request.ticket.target_id
-                and ready.operation == request.operation
-                and json_equal(ready.params, request.params))
+        return self._prepared_captures.matches(request, serial)
 
     def prepared_capture_matches(self, request):
         """只检查本会话内存与本地绑定，不查询或设置设备。"""
@@ -304,8 +287,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             CAPTURE_PREPARATION_COMPLETED.type, CAPTURE_PREPARATION_COMPLETED.version,
             {"activity_id": request.ticket.target_id}),))
         result = self._with_attached_calls(request, completed, attached_calls)
-        self._prepared_captures[request.binding.device_id] = _PreparedCapture(
-            request.binding, serial, request.operation, params, request.ticket)
+        self._prepared_captures.remember(replace(request, params=params), serial)
         return result
 
     async def stop(self, request):
