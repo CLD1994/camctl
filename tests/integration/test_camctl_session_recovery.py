@@ -411,17 +411,17 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
 
 def test_future_action_waits_and_past_window_expires(
         tmp_path: Path) -> None:
-    """未来动作不阻塞会话退出；启动窗口已过的动作按过期收场。"""
+    """驻留会话等到未来时间再启动；窗口已过的动作按过期收场。"""
     deployment = Deployment(tmp_path)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
     spec = stub_driver_spec({"1": [photo_file("shot-1")]})
-    deployment.install_client_capabilities(spec)
 
-    future_path, _ = deployment.export_plan_with_client({
-        "request_id": "0",
+    # 本例核对真实 CLI 的时间窗口；客户端导出由完整交付链独立覆盖。
+    future_path = deployment.write_plan({
+        "request_id": "1",
         "created_at": "2026-01-15 08:00:00",
         "name": "far-future",
         "actions": [{
@@ -453,10 +453,14 @@ def test_future_action_waits_and_past_window_expires(
     assert _query(
         state_db, "SELECT status FROM actions WHERE name = 'shoot-future'"
     ) == [(3,)]
+    assert _query(state_db,
+        "SELECT first_window_observed_at BETWEEN scheduled_at"
+        " AND scheduled_at + 5000000 FROM actions WHERE name='shoot-future'"
+    ) == [(1,)]
 
     # 启动窗口已过且从未派发：按过期收场，不执行设备调用。
-    past_path, _ = deployment.export_plan_with_client({
-        "request_id": "1",
+    past_path = deployment.write_plan({
+        "request_id": "2",
         "created_at": "2026-01-15 08:00:00",
         "name": "missed-window",
         "actions": [{
