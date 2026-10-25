@@ -12,6 +12,11 @@ from camctl.logging_runtime.service import LogRecord
 _channel = ContextVar("camctl_performance_channel", default=None)
 
 
+def performance_enabled() -> bool:
+    """只判断是否存在当前命令的辅助日志目标，不执行投递。"""
+    return _channel.get() is not None
+
+
 @contextmanager
 def performance_logging(channel):
     """限定当前命令及其子任务的投递目标，结束时恢复原上下文。"""
