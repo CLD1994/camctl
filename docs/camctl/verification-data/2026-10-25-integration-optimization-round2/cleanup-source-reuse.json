@@ -1,0 +1,642 @@
+{
+  "date": "2026-10-25",
+  "base_commit": "f8121feb5bfcb2c38839cb5f240b7a4de32fca66",
+  "status": "P1/P2/在途取消同分片三消费者功能验收通过；完整11项独占组合由协调者安排，尚未计为本次通过",
+  "scope": [
+    "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "tests/integration/_cleanup_roundtrip_support.py",
+    "tests/integration/_cleanup_source_snapshot.py"
+  ],
+  "source_partition": {
+    "consumer_count": 9,
+    "same_initial_parameters": {
+      "osmo": true,
+      "params": {
+        "type": "osmo360ii_record",
+        "duration_s": 1,
+        "bitrate": "high",
+        "exposure": {
+          "mode": "auto"
+        }
+      },
+      "cleanup": {
+        "max_delete_attempts": 3,
+        "max_query_attempts": 3,
+        "delete_timeout_s": "10",
+        "query_timeout_s": "10",
+        "delete_retry_interval_s": "0",
+        "query_retry_interval_s": "0"
+      }
+    },
+    "consumers": {
+      "test_exact_outputs_and_non_cascade": "来源恢复后独立准备HB、五份取回和逐份精确清理",
+      "test_cleanup_new_request_for_cleaned_output": "独立首次清理，再导出新请求验证ALREADY_CLEANED",
+      "test_cleanup_interrupted_delete_absent": "独立after删除故障、UNKNOWN原尝试和存在性恢复",
+      "test_cleanup_query_present_or_unknown[P1/P2/P3]": "三个独立before故障和各自恢复预算/未知查询",
+      "test_cleanup_saved_result_and_terminal_companions[commit_unknown/terminal_companions]": "两种独立持久化故障门、原操作key及结果恢复",
+      "test_cleanup_cancel_inflight_delete_recover": "独立真实在途DELETE、取消提交、旧组收场和原尝试恢复"
+    },
+    "excluded": "osmo=False的混合Hasselblad源保持独立真实准备；工具拒绝契约测试不使用此模板"
+  },
+  "copy_model": {
+    "path": "同分片固定物理root；配置与database_metadata的三个绝对目录绑定均保留，不改业务行",
+    "producer": "prepare_osmo完整执行真实START、唯一STOP、STOP后30秒实际driver等待、3秒双H264源及1秒修复媒体probe/全流解码；所有原断言后、最后普通host.start之前取得模板",
+    "databases": "已收场后对state.db和client.db使用SQLite backup纳入全部提交WAL；writer逐库保留源journal_mode及page_size，WAL完整检查点后显式close。普通只读连接与文件头18/19核对源/备份/恢复模式一致（state必须wal及2/2），确认无活跃连接、旁文件无尚未纳入主库的内容后移除空WAL/SHM；immutable只读可见的quick_check、foreign_key_check与全库iterdump摘要须相同。",
+    "files": "复制整个world目录而非World.snapshot选表；远端、staging/ready/processing、正式源/工作文件、工具、配置、客户端数据、请求/凭据、时钟和原始日志全部保留",
+    "template": "记录路径/类型/权限/字节SHA，再取消写权限；每次恢复前后核对模板只读摘要不变",
+    "consumer": "迁出旧cwd，确认父pytest、已登记World拥有者及同euid且命令参数明确引用本root的进程不再使用此目录；删除旧树后完整复制，恢复原权限、全树摘要和两DB逻辑摘要后再创建新World/start",
+    "archive": "每case独立case_id，原ARTIFACTS和该case的pytest tmp/world分别完整归档，完成后才可开始下一次恢复",
+    "measurement": "module fixture setup明确记录producer_seconds、snapshot_seconds、shared_setup_seconds；每consumer记录restore_seconds、body_seconds、consumer_seconds。完整pytest/runner成本须包含共享setup及构建，不能只比较case call下降。"
+  },
+  "memory_attributes": {
+    "new_objects": [
+      "World",
+      "deployment浅副本；其字段为同路径Path/布尔，run_client_driver重新绑定新World.client",
+      "monkeypatch函数夹具"
+    ],
+    "new_mutable_values": {
+      "env": "从静止producer.env独立dict复制，无上一case故障环境",
+      "sources": "由恢复后的真实outputs/device_files重新查询，值与producer相同，容器独立",
+      "params": "每个World重新创建相同参数及嵌套exposure对象",
+      "frozen": "空dict",
+      "members": "空dict",
+      "host": "None，消费者start创建新HostDemo及CLI进程",
+      "config_extra": "空字符串",
+      "copies/frozen_history/frozen_transactions": "开始时不存在",
+      "host_log_offset": "新start按恢复后的模板日志长度重新计算"
+    },
+    "immutable_values": [
+      "同Package安装物和demo路径",
+      "同root及db/tools/remote/clock/calls_path/manifest/marker/clock_cli的Path",
+      "producer初始化前的config_original字符串，避免重复追加TOML设备段"
+    ]
+  },
+  "closure": {
+    "queries": "rows辅助显式close，不依赖SQLite上下文或gc释放连接",
+    "processes": "World.stop先冻结host，再按冻结后的实际直属组及成员交给既有HostDemo.stop终止/wait并核starttime。恢复前仅核父pytest自身、settled登记PID/starttime与原执行组，以及同euid且可读cmdline明确引用本root的未登记进程；不读取无本root参数的其他用户会话私有cwd/FD。self/owned权限错误保持显式失败。",
+    "node": "现有export/import是同步Node命令，服务显式close后实际进程返回；未修改client_driver.ts",
+    "clock": "来源本身冻结的UTC/mono/epoch文件完整恢复，同一对读数且无旧活跃读者；父进程/host/故障门继续真实计时"
+  },
+  "static_checks": {
+    "all_original_case_assertions_and_parameter_decorators": "AST逐项相同",
+    "producer_assert_counts": {
+      "prepare_osmo": 13,
+      "probe": 7
+    },
+    "ast_parse_exit_code": 0,
+    "diff_check_exit_code": 0,
+    "independent_readonly_review": "snapshot_report_speed最终对照实际summary/cases/source-proof/三consumer receipts、marker/adb/final-db/settled及当前helper和FD/cwd探针；无新阻断，可交协调者完整11项独占验收。尚未覆盖的6来源消费者及osmo=False/工具2项不计本次通过。"
+  },
+  "required_runtime_evidence": [
+    "原11节点及其中9来源消费者并集保持",
+    "每分片producer_runs=1、START/STOP各1、真实等待>=30秒",
+    "消费者各自故障marker/新attempt/取消进程身份真实出现",
+    "下例开始前完整DB/client/remote/日志/env恢复，模板摘要不变",
+    "记录producer、restore、消费者与归档耗时；不把准备搬入setup称为来源成本消失",
+    "state/client各自源、备份、恢复journal_mode/page_size和文件头read/write版本相同；state保持WAL且真实生产open_existing成功"
+  ],
+  "references": {
+    "plan": "../../../superpowers/plans/2026-10-25-integration-test-optimization.md#s7复用清理链的只读完成来源",
+    "binding": "../../../architecture/configuration.md#文件目录的绑定与变更",
+    "test_rule": "../../../../.agents/rules/testing.md#控制集成测试成本",
+    "wal_contract": "../../history-storage.md"
+  },
+  "stable_source_commit": "ff44355ae1df01a13f8ef7e3914a0120542c71cd",
+  "runtime_validation": {
+    "scope_note": "jobs=1/root-shards=1，只运行原P1/P2和在途取消三节点；本轮非独占、允许S5功能任务同期，不作before/after提速结论。",
+    "exit_code": 0,
+    "pytest_seconds_printed": 136.88,
+    "runner_wall_seconds": 149.80333521399734,
+    "outer_command": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "scripts/run-integration.py",
+        "--scope",
+        "root",
+        "--jobs",
+        "1",
+        "--root-shards",
+        "1",
+        "--python",
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "--node-modules",
+        "/tmp/camctl-itopt-runner-npm-client/node_modules",
+        "--output",
+        "/tmp/camctl-itopt-cleanup-source-narrow3-20261025",
+        "--target",
+        "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+        "--target",
+        "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+        "--target",
+        "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+      ],
+      "cwd": "/tmp/camctl-itopt-cleanup-source",
+      "source": "ff44355ae1df01a13f8ef7e3914a0120542c71cd",
+      "started_utc": "2026-10-25T02:19:57.905215+00:00",
+      "load_note": "非独占功能验收，允许S5任务同期；不作before/after性能对照",
+      "pid": 684429,
+      "exit_code": 0,
+      "wall_seconds": 150.01767580100568,
+      "finished_utc": "2026-10-25T02:22:28.666440+00:00"
+    },
+    "source": {
+      "root": "/tmp/camctl-itopt-cleanup-source",
+      "head": "ff44355ae1df01a13f8ef7e3914a0120542c71cd",
+      "status": "",
+      "snapshot_sha256": "9308e7c16befdabff2b4e91a52ca529b37d03f3bc57e92de8a69daf6988bae03"
+    },
+    "cases": [
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 68.7768511779941
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 23.103858349000802
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005523910003830679
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 91.88126191799529
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0011812110024038702
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 20.029378677994828
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006212809967109933
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 20.031181169993943
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0015132139960769564
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 24.71744414600107
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.036268302996177226
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 24.755225662993325
+      }
+    ],
+    "source_proof": {
+      "producer_runs": 1,
+      "producer_seconds": 46.97223879399826,
+      "process_scan": {
+        "euid": 1002,
+        "pytest_pid": 684731,
+        "scope": "父pytest、settled登记PID/starttime及执行组；其他进程仅在可读cmdline明确引用本root时纳入。父进程及拥有者权限错误显式失败。",
+        "node": "同步客户端命令实际退出后返回；不扫描无本root参数的其他用户会话"
+      },
+      "root": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world",
+      "params": {
+        "type": "osmo360ii_record",
+        "duration_s": 1,
+        "bitrate": "high",
+        "exposure": {
+          "mode": "auto"
+        }
+      },
+      "clock": {
+        "mode": "frozen",
+        "epoch": 2,
+        "utc_us": 1792894835000000,
+        "monotonic_ns": 46098876617525
+      },
+      "stop_to_directory_ns": 30241977833,
+      "database_digests": {
+        "deployment/state.db": "fcb84a8736dd7b68a1f47e196cc3cd8abe5304cd87a466560562298d4b1909fb",
+        "client-store/client.db": "349bec686367bcd57a8aa24ca8ee62ab453e8f4eeffee6cf216d7ee35ddb893f"
+      },
+      "source_database_layouts": {
+        "deployment/state.db": {
+          "journal_mode": "wal",
+          "page_size": 4096,
+          "write_version": 2,
+          "read_version": 2
+        },
+        "client-store/client.db": {
+          "journal_mode": "wal",
+          "page_size": 4096,
+          "write_version": 2,
+          "read_version": 2
+        }
+      },
+      "backup_database_layouts": {
+        "deployment/state.db": {
+          "journal_mode": "wal",
+          "page_size": 4096,
+          "write_version": 2,
+          "read_version": 2
+        },
+        "client-store/client.db": {
+          "journal_mode": "wal",
+          "page_size": 4096,
+          "write_version": 2,
+          "read_version": 2
+        }
+      },
+      "baseline_digest": "241fd8f6d3580e95ad9a1e014590bbf75cd16ebbd05bb8566521cd1559ac919d",
+      "bindings": [
+        {
+          "id": 1,
+          "application_id": "camctl",
+          "instance_id": "3044e1a2aa994b36ac44ff0d1e62c46a",
+          "format_version": 3,
+          "staging_path": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world/deployment/staging",
+          "ready_path": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world/deployment/ready",
+          "processing_path": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world/deployment/processing"
+        }
+      ],
+      "snapshot_seconds": 0.11546392099990044,
+      "shared_setup_seconds": 47.08770806300163
+    },
+    "baseline_inventory_file_count": 44,
+    "baseline_unchanged": true,
+    "source_calls": {
+      "start": 1,
+      "stop": 1,
+      "cleanup": 0
+    },
+    "consumers": [
+      {
+        "receipt": {
+          "case": "test_cleanup_query_present_or_0",
+          "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+          "baseline_digest": "241fd8f6d3580e95ad9a1e014590bbf75cd16ebbd05bb8566521cd1559ac919d",
+          "restored_database_layouts": {
+            "deployment/state.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            },
+            "client-store/client.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            }
+          },
+          "restore_seconds": 0.09101610200013965,
+          "body_seconds": 22.889776379000978,
+          "consumer_seconds": 23.088881033996586,
+          "final_inventory_digest": "62751f9623dabc6c9e4c703c725fb0d8a5787d47637ca8e9cd7e33cd78ae612c"
+        },
+        "db_sha256": "39587c932bd78f5dd9be4c4d74730c8bc104ac316749b86066c303812f770e34",
+        "cleanup_item": {
+          "id": 1,
+          "action_id": 2,
+          "requested_output_id": 2,
+          "output_id": 2,
+          "status": 4,
+          "restriction_state": 4,
+          "outcome": 1,
+          "final_event_id": 112,
+          "error_code": null,
+          "error_details_json": null
+        },
+        "operations": [
+          "delete",
+          "query",
+          "delete"
+        ],
+        "marker": {
+          "pid": 687633,
+          "pgid": 687529,
+          "starttime": 4614924,
+          "request_id": "3506401792841079674",
+          "item_id": 1
+        },
+        "attempts": [
+          {
+            "id": 5,
+            "run_id": 5,
+            "attempt_no": 1,
+            "status": 4,
+            "result_event_id": 103,
+            "responsibility_key": "delete/1"
+          },
+          {
+            "id": 6,
+            "run_id": 6,
+            "attempt_no": 1,
+            "status": 2,
+            "result_event_id": 107,
+            "responsibility_key": "exists/1"
+          },
+          {
+            "id": 7,
+            "run_id": 5,
+            "attempt_no": 2,
+            "status": 2,
+            "result_event_id": 110,
+            "responsibility_key": "delete/1"
+          }
+        ],
+        "source_history_prefix_unchanged": true,
+        "archived_full_world": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/test_cleanup_query_present_or_0/world"
+      },
+      {
+        "receipt": {
+          "case": "test_cleanup_query_present_or_1",
+          "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+          "baseline_digest": "241fd8f6d3580e95ad9a1e014590bbf75cd16ebbd05bb8566521cd1559ac919d",
+          "restored_database_layouts": {
+            "deployment/state.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            },
+            "client-store/client.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            }
+          },
+          "restore_seconds": 0.053727197999251075,
+          "body_seconds": 19.8600254089979,
+          "consumer_seconds": 20.01795683099772,
+          "final_inventory_digest": "1a603aea7a6223172f29129682794636efc8148f1a947d1387d39eb5db0b4c2f"
+        },
+        "db_sha256": "b73d2d6457f9423d5a36fbd9ce4399720ab8b10e5c74bd905270add021d461b7",
+        "cleanup_item": {
+          "id": 1,
+          "action_id": 2,
+          "requested_output_id": 2,
+          "output_id": 2,
+          "status": 5,
+          "restriction_state": 4,
+          "outcome": null,
+          "final_event_id": 109,
+          "error_code": 2,
+          "error_details_json": "{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}"
+        },
+        "operations": [
+          "delete",
+          "query"
+        ],
+        "marker": {
+          "pid": 688199,
+          "pgid": 688115,
+          "starttime": 4617115,
+          "request_id": "8713240298163296283",
+          "item_id": 1
+        },
+        "attempts": [
+          {
+            "id": 5,
+            "run_id": 5,
+            "attempt_no": 1,
+            "status": 4,
+            "result_event_id": 103,
+            "responsibility_key": "delete/1"
+          },
+          {
+            "id": 6,
+            "run_id": 6,
+            "attempt_no": 1,
+            "status": 2,
+            "result_event_id": 107,
+            "responsibility_key": "exists/1"
+          }
+        ],
+        "source_history_prefix_unchanged": true,
+        "archived_full_world": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/test_cleanup_query_present_or_1/world"
+      },
+      {
+        "receipt": {
+          "case": "test_cleanup_cancel_inflight_d0",
+          "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+          "baseline_digest": "241fd8f6d3580e95ad9a1e014590bbf75cd16ebbd05bb8566521cd1559ac919d",
+          "restored_database_layouts": {
+            "deployment/state.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            },
+            "client-store/client.db": {
+              "journal_mode": "wal",
+              "page_size": 4096,
+              "write_version": 2,
+              "read_version": 2
+            }
+          },
+          "restore_seconds": 0.050421043000824284,
+          "body_seconds": 24.48192052500235,
+          "consumer_seconds": 24.702096173998143,
+          "final_inventory_digest": "2a753bf311b9352fdafd94d5b94d8ff6a5ba72d0831a664edff9a092de4954f6"
+        },
+        "db_sha256": "721df7d795c18bbacb22a1c4caed68c0fb0978634f3dff86cac77a6369f2f5cc",
+        "cleanup_item": {
+          "id": 1,
+          "action_id": 2,
+          "requested_output_id": 2,
+          "output_id": 2,
+          "status": 6,
+          "restriction_state": 4,
+          "outcome": null,
+          "final_event_id": 123,
+          "error_code": 6,
+          "error_details_json": "{\"output_id\":\"2\"}"
+        },
+        "operations": [
+          "delete",
+          "query"
+        ],
+        "marker": {
+          "pid": 688900,
+          "pgid": 688711,
+          "starttime": 4619130,
+          "request_id": "880850007230132999",
+          "item_id": 1
+        },
+        "attempts": [
+          {
+            "id": 5,
+            "run_id": 5,
+            "attempt_no": 1,
+            "status": 4,
+            "result_event_id": 117,
+            "responsibility_key": "delete/1"
+          },
+          {
+            "id": 6,
+            "run_id": 6,
+            "attempt_no": 1,
+            "status": 2,
+            "result_event_id": 121,
+            "responsibility_key": "exists/1"
+          }
+        ],
+        "source_history_prefix_unchanged": true,
+        "archived_full_world": "/tmp/camctl-itopt-cleanup-source-narrow3-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/test_cleanup_cancel_inflight_d0/world"
+      }
+    ],
+    "audit": {
+      "method": "普通Python只读原始source-proof、consumer receipts、完整只读模板及已归档数据库；无额外pytest或生产调用",
+      "exit_code": 0,
+      "checks": [
+        "唯一producer的START/STOP各1，真实STOP等待>=30秒",
+        "源/备份/三个恢复库WAL、page_size、文件头版本一致",
+        "只读baseline全树类型/模式/字节摘要在三例后相同",
+        "三例各自marker PID/starttime与本例首次DELETE一致；P1 D/Q/D，P2 D/Q，取消D/Q",
+        "每例完整world先独立归档；来源history_events/history_transactions前缀逐行不变",
+        "三例旧尝试均保存结果，无额外来源准备或上一例cleanup调用继承"
+      ],
+      "script_sha256": "fb5560eb8909da6ebbecb863024b0d62722e98f2f72a58ab255775a5a461f335"
+    },
+    "process_scan_scope_note": "原始proof列出root参数纳入条件；实际_root_users对未登记进程还先筛同euid。self及settled登记拥有者不受此gate，权限错误均显式失败。",
+    "independent_review": "3项setup/call/teardown完整通过；来源1次、真实30.241977833秒；两个DB源/备份/三恢复布局相同；三request/marker PID不同，旧组active_after为空，探针helper SHA与测试源码一致。"
+  },
+  "process_boundary_probe": {
+    "method": "仅加载实际helper函数AST，不导入生产资源、不构建/不执行pytest；现成已完成旧World只读探针",
+    "root": "/tmp/camctl-itopt-cleanup-source-narrow2-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world",
+    "helper_sha256": "edd644674a4543d9004a8af075f90d79878f6b5dc968d5b3648f101d31c81e55",
+    "pid": 682637,
+    "quiescent": [],
+    "parent_open_fd": [
+      {
+        "pid": 682637,
+        "uses": [
+          {
+            "fd": "3",
+            "target": "/tmp/camctl-itopt-cleanup-source-narrow2-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world/deployment/config.toml"
+          }
+        ]
+      }
+    ],
+    "parent_cwd": [
+      {
+        "pid": 682637,
+        "uses": [
+          {
+            "cwd": "/tmp/camctl-itopt-cleanup-source-narrow2-20261025/tasks/001-root-test_device_file_cleanup_roundtrip/tmp/pytest/r6-completed-osmo0/world"
+          }
+        ]
+      }
+    ],
+    "after_release": []
+  },
+  "validation_history": [
+    {
+      "run": "camctl-itopt-cleanup-source-narrow-20261025",
+      "source": "f9d18dd87e326afac8450c3455cd5c1bea492739",
+      "phase": "setup",
+      "passed": 0,
+      "errors": 3,
+      "exit_code": 1,
+      "pytest_seconds_printed": 56.06,
+      "runner_wall_seconds": 63.992920026998036,
+      "outer_command": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "scripts/run-integration.py",
+          "--scope",
+          "root",
+          "--jobs",
+          "1",
+          "--root-shards",
+          "1",
+          "--python",
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "--node-modules",
+          "/tmp/camctl-itopt-runner-npm-client/node_modules",
+          "--output",
+          "/tmp/camctl-itopt-cleanup-source-narrow-20261025",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+        ],
+        "cwd": "/tmp/camctl-itopt-cleanup-source",
+        "source": "f9d18dd87e326afac8450c3455cd5c1bea492739",
+        "started_utc": "2026-10-25T02:08:25.124554+00:00",
+        "load_note": "与S5一个功能任务同期运行；仅功能验收，不作before/after性能对照",
+        "pid": 667627,
+        "exit_code": 1,
+        "wall_seconds": 64.10598071799905,
+        "finished_utc": "2026-10-25T02:09:29.811291+00:00"
+      },
+      "reason": "无本root参数的系统进程/proc/34/cwd权限错误，首次静止检查停止；尚未备份或进入case",
+      "log_sha256": "584beade427063b7827a35c3c21e808fc1fede65ce611ad1f432417e4929163f",
+      "classification": "测试收场证明边界错误，未得到功能或性能通过结论"
+    },
+    {
+      "run": "camctl-itopt-cleanup-source-narrow2-20261025",
+      "source": "19f146d66f58d7efc6339f6e3375d6c43bc28646",
+      "phase": "setup",
+      "passed": 0,
+      "errors": 3,
+      "exit_code": 1,
+      "pytest_seconds_printed": 114.62,
+      "runner_wall_seconds": 130.15681652600324,
+      "outer_command": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "scripts/run-integration.py",
+          "--scope",
+          "root",
+          "--jobs",
+          "1",
+          "--root-shards",
+          "1",
+          "--python",
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "--node-modules",
+          "/tmp/camctl-itopt-runner-npm-client/node_modules",
+          "--output",
+          "/tmp/camctl-itopt-cleanup-source-narrow2-20261025",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+          "--target",
+          "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+        ],
+        "cwd": "/tmp/camctl-itopt-cleanup-source",
+        "source": "19f146d66f58d7efc6339f6e3375d6c43bc28646",
+        "started_utc": "2026-10-25T02:11:57.721680+00:00",
+        "load_note": "S7功能定向，允许与S5一个功能任务同期；不作before/after性能对照",
+        "pid": 672239,
+        "exit_code": 1,
+        "wall_seconds": 130.38604837899766,
+        "finished_utc": "2026-10-25T02:14:08.625833+00:00"
+      },
+      "reason": "无本root参数的旧用户会话/proc/242768/cwd权限错误，首次静止检查停止；尚未备份或进入case",
+      "log_sha256": "3edd02607c7a6a9f425a173447259eebb491559e99b8713b5763adc74b77dbc1",
+      "classification": "测试收场证明边界错误，未得到功能或性能通过结论"
+    }
+  ],
+  "measurement_limit": "来源prepare在module fixture setup中真实执行；首次setup68.776851秒包含安装/构建及共享来源准备。三例call之和不能当作完整成本。本轮3节点与原11项/4任务基线范围及同期负载不同，不计算性能比例。"
+}
