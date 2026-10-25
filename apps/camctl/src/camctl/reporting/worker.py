@@ -22,6 +22,7 @@ from camctl.contracts.public_projection import PublicProjectionError
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import HistoryEventError
 from camctl.history.replay import ReplayError
+from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import (
     DbConfig,
     DbOpenMode,
@@ -203,6 +204,12 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
                 staging_path=temporary,
                 entity_batch_size=job.entity_batch_size,
                 event_batch_size=job.event_batch_size,
+            ),
+            repository=HistoryRepository(
+                Path(job.db_path),
+                config=DbConfig(busy_timeout_ms=job.busy_timeout_ms),
+                expected_instance_id=job.instance_id,
+                expected_directories=(job.staging_root, job.ready_root, job.processing_root),
             ),
         )
         from camctl.reporting.publication import report_file_name
