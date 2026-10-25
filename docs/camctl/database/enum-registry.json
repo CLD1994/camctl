@@ -368,7 +368,8 @@
         "QUERY_ACTIVITY": 6,
         "CHECK_CAPTURE_RESULTS": 7,
         "STOP_RESIDUAL": 8,
-        "EMERGENCY_STOP": 9
+        "EMERGENCY_STOP": 9,
+        "PREPARE_CAPTURE": 10
       }
     },
     "operation_runs.query_purpose": {

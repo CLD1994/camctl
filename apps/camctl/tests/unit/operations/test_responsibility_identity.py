@@ -70,3 +70,44 @@ def test_only_file_check_accepts_obtain_owner(kind):
     with pytest.raises(AttemptConfigError):
         attempts.operation_responsibility_key(kind, 7, AttemptTarget(obtain_item_id=29),
             QueryPurpose.BEFORE_EXECUTION if kind is OperationKind.QUERY_ACTIVITY else None)
+
+
+def test_preparation_responsibility_is_bound_to_activity_and_session():
+    kind = OperationKind.PREPARE_CAPTURE
+    target = AttemptTarget(activity_id=4)
+    key = attempts.operation_responsibility_key(kind, 7, target, None, session_key="a" * 32)
+    assert key == "prepare/4/" + "a" * 32
+    assert attempts.operation_responsibility_key(kind, 7, target, None, session_key="b" * 32) != key
+
+
+@pytest.mark.parametrize("session_key", [None, "", "a" * 31, "A" * 32, "g" * 32, False])
+def test_preparation_rejects_missing_or_invalid_session(session_key):
+    with pytest.raises(AttemptConfigError):
+        attempts.operation_responsibility_key(OperationKind.PREPARE_CAPTURE, 7,
+            AttemptTarget(activity_id=4), None, session_key=session_key)
+
+
+def test_other_operations_reject_session_identity():
+    with pytest.raises(AttemptConfigError):
+        attempts.operation_responsibility_key(OperationKind.START, 7,
+            AttemptTarget(activity_id=4), None, session_key="a" * 32)
+
+
+def test_preparation_intent_has_one_control_call_and_no_retry():
+    intent = attempts.AttemptIntent("control", 7, OperationKind.PREPARE_CAPTURE,
+        AttemptTarget(activity_id=4), None, attempts.AttemptConfig(1, "5"), 11,
+        session_key="a" * 32)
+    assert attempts.responsibility_key(intent) == "prepare/4/" + "a" * 32
+    assert attempts.ticket_target_id(intent) == "4"
+
+
+@pytest.mark.parametrize("operation,config", [
+    ("query", attempts.AttemptConfig(1, "5")),
+    ("control", attempts.AttemptConfig(2, "5")),
+    ("control", attempts.AttemptConfig(1)),
+    ("control", attempts.AttemptConfig(1, "5", "0")),
+])
+def test_preparation_rejects_wrong_operation_or_budget(operation, config):
+    with pytest.raises(AttemptConfigError):
+        attempts.AttemptIntent(operation, 7, OperationKind.PREPARE_CAPTURE,
+            AttemptTarget(activity_id=4), None, config, 11, session_key="a" * 32)

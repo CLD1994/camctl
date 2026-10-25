@@ -58,6 +58,7 @@ class OperationKind(Enum):
     QUERY_ACTIVITY = "query"
     CHECK_CAPTURE_RESULTS = "results"
     STOP_RESIDUAL = "followup"
+    PREPARE_CAPTURE = "prepare"
 
 
 class QueryPurpose(Enum):
@@ -84,7 +85,8 @@ class RunStatus(Enum):
 
 #: 以活动为目标的种类；其余种类按目标列互斥规则使用文件或查询目标。
 _ACTIVITY_KINDS = frozenset(
-    {OperationKind.START, OperationKind.STOP, OperationKind.CHECK_CAPTURE_RESULTS}
+    {OperationKind.START, OperationKind.STOP, OperationKind.CHECK_CAPTURE_RESULTS,
+     OperationKind.PREPARE_CAPTURE}
 )
 
 
@@ -186,6 +188,7 @@ _KIND_TARGET_COLUMNS = {
     OperationKind.QUERY_ACTIVITY: None,  # 按用途分两类，见 _QUERY_PURPOSE_COLUMNS。
     OperationKind.CHECK_CAPTURE_RESULTS: frozenset({"activity_id"}),
     OperationKind.STOP_RESIDUAL: frozenset({"activity_id"}),
+    OperationKind.PREPARE_CAPTURE: frozenset({"activity_id"}),
 }
 
 _QUERY_PURPOSE_COLUMNS = {
@@ -209,6 +212,7 @@ class AttemptIntent:
     config: AttemptConfig
     occurred_at: int
     copy_round: int | None = None
+    session_key: str | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.action_id, "action_id")
@@ -221,7 +225,13 @@ class AttemptIntent:
         if not isinstance(self.config, AttemptConfig):
             raise AttemptConfigError(f"config 必须是 AttemptConfig: {self.config!r}")
         _utc_micros(self.occurred_at)
-        operation_responsibility_key(self.kind, self.action_id, self.target, self.query_purpose)
+        operation_responsibility_key(self.kind, self.action_id, self.target, self.query_purpose,
+                                     session_key=self.session_key)
+        if self.kind is OperationKind.PREPARE_CAPTURE and (
+            self.operation != "control" or self.config.max_attempts != 1
+            or self.config.timeout_s is None or self.config.retry_interval_s is not None
+        ):
+            raise AttemptConfigError("设置准备要求一次有超时的 control 调用，且不适用重试间隔")
         if self.kind is OperationKind.READ_FILE:
             _positive_int(self.copy_round, "copy_round")
         elif self.copy_round is not None:
@@ -245,16 +255,24 @@ def query_responsibility_key(
 
 def responsibility_key(intent: AttemptIntent) -> str:
     """按登记格式推导操作责任键；ID 使用无前导零十进制表示。"""
-    return operation_responsibility_key(intent.kind, intent.action_id, intent.target, intent.query_purpose)
+    return operation_responsibility_key(intent.kind, intent.action_id, intent.target, intent.query_purpose,
+                                        session_key=intent.session_key)
 
 
 def operation_responsibility_key(
-    kind: OperationKind, action_id: int, target: AttemptTarget, query_purpose: QueryPurpose | None
+    kind: OperationKind, action_id: int, target: AttemptTarget, query_purpose: QueryPurpose | None,
+    *, session_key: str | None = None,
 ) -> str:
     """核对固定身份组合并生成责任键，不依赖调用配置或事实时刻。"""
     _positive_int(action_id, "action_id")
     if not isinstance(kind, OperationKind) or not isinstance(target, AttemptTarget):
         raise AttemptConfigError("固定责任必须填写 OperationKind 和 AttemptTarget")
+    if kind is OperationKind.PREPARE_CAPTURE:
+        if (not isinstance(session_key, str) or len(session_key) != 32
+                or any(character not in "0123456789abcdef" for character in session_key)):
+            raise AttemptConfigError("设置准备要求32位小写十六进制会话身份")
+    elif session_key is not None:
+        raise AttemptConfigError("只有设置准备保存会话身份")
     if kind is OperationKind.QUERY_ACTIVITY:
         if not isinstance(query_purpose, QueryPurpose):
             raise AttemptConfigError("查询责任必须填写 QueryPurpose")
@@ -274,6 +292,8 @@ def operation_responsibility_key(
     if kind is OperationKind.QUERY_ACTIVITY:
         return query_responsibility_key(action_id, query_purpose, target.activity_id)
     if kind in _ACTIVITY_KINDS:
+        if kind is OperationKind.PREPARE_CAPTURE:
+            return f"prepare/{target.activity_id}/{session_key}"
         if kind is OperationKind.CHECK_CAPTURE_RESULTS:
             return f"results/{target.activity_id}"
         return f"{kind.value}/{action_id}"
