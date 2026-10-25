@@ -5,7 +5,8 @@ from camctl.capture.baseline_models import (BaselineChunkResult, BaselineChunkSa
     BaselineFixSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
     BaselineReadState, BaselineReadUnconfirmedSave, BaselineRef, BaselineState)
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.business import settle_required
+from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
 
 
 @dataclass(frozen=True)
@@ -39,44 +40,61 @@ class BaselineSaveOwner:
             self.pending = PendingBaselineSave(request, key if key is not None else new_operation_key())
         return self.pending
 
-    def save(self, repository, owned) -> DbOutcome[BaselineChunkResult | BaselineRef | BaselineReadCallView]:
-        pending = self.pending
-        if pending is None:
-            raise ConsistencyError("没有待保存的原基准申请")
-        if pending.response is not None:
-            return DbOutcome(DbOutcomeKind.COMPLETED, value=pending.response)
-        if isinstance(pending.request,BaselineReadIntent):
-            method=repository.save_baseline_read_intent
-        elif isinstance(pending.request,BaselineReadReturn):
-            method=repository.save_baseline_read_return
-        elif isinstance(pending.request,BaselineReadUnconfirmedSave):
-            method=repository.save_baseline_read_unconfirmed
-        else:
-            method = (repository.append_baseline if isinstance(pending.request, BaselineChunkSave)
-                      else repository.fix_baseline)
-        receipt = method(pending.request, pending.key, owned)
-        if receipt.kind is DbOutcomeKind.COMPLETED:
-            response = receipt.value
-            if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)):
-                self._check_call_response(pending.request,response)
-                self.pending=replace(pending,response=response)
-                return receipt
-            expected = BaselineChunkResult if isinstance(pending.request, BaselineChunkSave) else BaselineRef
-            if not isinstance(response, expected) or response.activity_id != pending.request.activity_id:
-                raise ConsistencyError("基准保存回执不属于原完整申请")
-            if isinstance(response, BaselineChunkResult):
-                if response.chunk_no != pending.request.chunk_no:
-                    raise ConsistencyError("基准保存回执不是原批次")
-                try:
-                    ObjectId(response.event_id)
-                except ValueError as error:
-                    raise ConsistencyError("基准保存回执缺少实际事件身份") from error
-            elif (response.state is not BaselineState.FIXED
-                    or (response.chunk_count, response.entry_count) !=
-                    (pending.request.chunk_count, pending.request.entry_count)):
-                raise ConsistencyError("基准保存回执没有可靠固定原计数")
-            self.pending = replace(pending, response=response)
-        return receipt
+    async def save(self, repository, database) -> DbOutcome[BaselineChunkResult | BaselineRef | BaselineReadCallView]:
+        async def save_and_apply():
+            _delivery_error = None
+            pending = self.pending
+            if pending is None:
+                raise ConsistencyError("没有待保存的原基准申请")
+            if pending.response is not None:
+                if _delivery_error is not None:
+                    raise _delivery_error
+                return DbOutcome(DbOutcomeKind.COMPLETED, value=pending.response)
+            if isinstance(pending.request,BaselineReadIntent):
+                method=repository.save_baseline_read_intent
+            elif isinstance(pending.request,BaselineReadReturn):
+                method=repository.save_baseline_read_return
+            elif isinstance(pending.request,BaselineReadUnconfirmedSave):
+                method=repository.save_baseline_read_unconfirmed
+            else:
+                method = (repository.append_baseline if isinstance(pending.request, BaselineChunkSave)
+                          else repository.fix_baseline)
+            try:
+                receipt = await database.write(
+                    lambda owned: method(pending.request, pending.key, owned),
+                    key=pending.key, description="保存原基准申请")
+            except BaseException as failure:
+                receipt = db_outcome_for(failure)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                _delivery_error = failure
+            if receipt.kind is DbOutcomeKind.COMPLETED:
+                response = receipt.value
+                if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)):
+                    self._check_call_response(pending.request,response)
+                    self.pending=replace(pending,response=response)
+                    if _delivery_error is not None:
+                        raise _delivery_error
+                    return receipt
+                expected = BaselineChunkResult if isinstance(pending.request, BaselineChunkSave) else BaselineRef
+                if not isinstance(response, expected) or response.activity_id != pending.request.activity_id:
+                    raise ConsistencyError("基准保存回执不属于原完整申请")
+                if isinstance(response, BaselineChunkResult):
+                    if response.chunk_no != pending.request.chunk_no:
+                        raise ConsistencyError("基准保存回执不是原批次")
+                    try:
+                        ObjectId(response.event_id)
+                    except ValueError as error:
+                        raise ConsistencyError("基准保存回执缺少实际事件身份") from error
+                elif (response.state is not BaselineState.FIXED
+                        or (response.chunk_count, response.entry_count) !=
+                        (pending.request.chunk_count, pending.request.entry_count)):
+                    raise ConsistencyError("基准保存回执没有可靠固定原计数")
+                self.pending = replace(pending, response=response)
+            if _delivery_error is not None:
+                raise _delivery_error
+            return receipt
+        return await settle_required(save_and_apply())
 
     @staticmethod
     def _check_call_response(request,response):

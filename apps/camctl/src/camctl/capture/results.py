@@ -173,83 +173,79 @@ class CaptureAssessment:
     read_error_count: int = 0
 
 
-def assess_capture_files(
-    files: CaptureFileSet, requirements: ProductRequirements
-) -> CaptureAssessment:
-    """按归属、写完与集合要求分别判定产物状态。"""
-    read_errors, ownership_pending, incomplete = [], [], []
-    file_count = incomplete_count = ownership_count = error_count = 0
-    confirmed_kinds = set()
-    counts = [0] * len(requirements.rules)
-    unknown_rules, failed_rules = set(), set()
-    for file in files.files:
-        file_count += 1
+class CaptureFileAssessment:
+    """逐文件累计纯判断，只保留固定计数和至多128个诊断身份。"""
+
+    def __init__(self, requirements: ProductRequirements, *, set_finalized: bool):
+        self.requirements, self.set_finalized = requirements, set_finalized
+        self.read_errors, self.ownership_pending, self.incomplete = ([], [], [])
+        self.file_count = self.incomplete_count = self.ownership_count = self.error_count = 0
+        self.confirmed_kinds = set()
+        self.counts = [0] * len(self.requirements.rules)
+        self.unknown_rules, self.failed_rules = (set(), set())
+
+    def add(self, file: CaptureFile) -> None:
+        self.file_count += 1
         if file.read_error:
-            error_count += 1
-            if len(read_errors) < 128:
-                read_errors.append(file.file_id)
+            self.error_count += 1
+            if len(self.read_errors) < 128:
+                self.read_errors.append(file.file_id)
         if not file.ownership_confirmed:
-            ownership_count += 1
-            if len(ownership_pending) < 128:
-                ownership_pending.append(file.file_id)
+            self.ownership_count += 1
+            if len(self.ownership_pending) < 128:
+                self.ownership_pending.append(file.file_id)
         if not file.complete:
-            incomplete_count += 1
-            if len(incomplete) < 128:
-                incomplete.append(file.file_id)
+            self.incomplete_count += 1
+            if len(self.incomplete) < 128:
+                self.incomplete.append(file.file_id)
         if file.ownership_confirmed:
-            confirmed_kinds.add(file.kind)
-        for index, rule in enumerate(requirements.rules):
+            self.confirmed_kinds.add(file.kind)
+        for index, rule in enumerate(self.requirements.rules):
             if file.kind is not rule.kind:
                 continue
             if rule.format_id is not None:
                 if file.format_id is None:
-                    unknown_rules.add(index)
+                    self.unknown_rules.add(index)
                     continue
                 if file.format_id != rule.format_id:
                     continue
-            counts[index] += 1
+            self.counts[index] += 1
             if rule.require_pairing:
                 if file.pairing_confirmed is None:
-                    unknown_rules.add(index)
+                    self.unknown_rules.add(index)
                 elif not file.pairing_confirmed:
-                    failed_rules.add(index)
+                    self.failed_rules.add(index)
             if rule.min_size_bytes is not None:
                 if file.size_bytes is None:
-                    unknown_rules.add(index)
+                    self.unknown_rules.add(index)
                 elif file.size_bytes < rule.min_size_bytes:
-                    failed_rules.add(index)
-    missing = tuple(
-        kind
-        for kind in sorted(requirements.required_kinds, key=lambda k: k.value)
-        if kind not in confirmed_kinds
-    )
-    unresolved = not files.set_finalized or bool(error_count or ownership_count or incomplete_count)
-    rules = []
-    for index, rule in enumerate(requirements.rules):
-        if unresolved or index in unknown_rules:
-            state = RuleState.UNKNOWN
-        elif (counts[index] < rule.min_count
-                or (rule.exact_count is not None and counts[index] != rule.exact_count)
-                or index in failed_rules):
-            state = RuleState.FAILED
-        else:
-            state = RuleState.PASSED
-        rules.append(ProductRuleResult(rule, counts[index], state))
-    unresolved = unresolved or any(rule.state is RuleState.UNKNOWN for rule in rules)
-    unmet = bool(missing) or any(rule.state is RuleState.FAILED for rule in rules)
-    complete = not unresolved and not unmet
-    explicitly_unmet = not unresolved and unmet
-    return CaptureAssessment(
-        is_complete=complete,
-        explicitly_unmet=explicitly_unmet,
-        missing_kinds=missing,
-        incomplete_files=tuple(incomplete),
-        ownership_pending=tuple(ownership_pending),
-        read_errors=tuple(read_errors),
-        rules=tuple(rules), file_count=file_count,
-        incomplete_count=incomplete_count, ownership_pending_count=ownership_count,
-        read_error_count=error_count,
-    )
+                    self.failed_rules.add(index)
+
+    def finish(self) -> CaptureAssessment:
+        missing = tuple((kind for kind in sorted(self.requirements.required_kinds, key=lambda k: k.value) if kind not in self.confirmed_kinds))
+        unresolved = not self.set_finalized or bool(self.error_count or self.ownership_count or self.incomplete_count)
+        rules = []
+        for index, rule in enumerate(self.requirements.rules):
+            if unresolved or index in self.unknown_rules:
+                state = RuleState.UNKNOWN
+            elif self.counts[index] < rule.min_count or (rule.exact_count is not None and self.counts[index] != rule.exact_count) or index in self.failed_rules:
+                state = RuleState.FAILED
+            else:
+                state = RuleState.PASSED
+            rules.append(ProductRuleResult(rule, self.counts[index], state))
+        unresolved = unresolved or any((rule.state is RuleState.UNKNOWN for rule in rules))
+        unmet = bool(missing) or any((rule.state is RuleState.FAILED for rule in rules))
+        complete = not unresolved and (not unmet)
+        explicitly_unmet = not unresolved and unmet
+        return CaptureAssessment(is_complete=complete, explicitly_unmet=explicitly_unmet, missing_kinds=missing, incomplete_files=tuple(self.incomplete), ownership_pending=tuple(self.ownership_pending), read_errors=tuple(self.read_errors), rules=tuple(rules), file_count=self.file_count, incomplete_count=self.incomplete_count, ownership_pending_count=self.ownership_count, read_error_count=self.error_count)
+
+
+def assess_capture_files(files: CaptureFileSet, requirements: ProductRequirements) -> CaptureAssessment:
+    """按归属、写完与集合要求分别判定产物状态。"""
+    state = CaptureFileAssessment(requirements, set_finalized=files.set_finalized)
+    for file in files.files:
+        state.add(file)
+    return state.finish()
 
 
 class ActivityState(Enum):

@@ -2,7 +2,7 @@
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
-from typing import Callable, Mapping
+from typing import Awaitable, Callable, Mapping
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.results import FileKind
@@ -15,7 +15,8 @@ from camctl.devices.recording_completion import completed_file_wait_source
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.owned_calls import check_call_interruption
 from camctl.operations.validation import validate_outcome
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.business import settle_required
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.logging_runtime.performance import measure_performance
 
 
@@ -53,21 +54,21 @@ class PendingResultScan:
         self.reading_context.close()
 
 
-def resume_result_page_saves(owned, *, pending_scans, repository):
+async def resume_result_page_saves(database, *, pending_scans, repository):
     """只核实原页；设备绑定、时钟和新的业务资格不参与原申请。"""
     for pending in pending_scans.values():
         if pending.saves.pending is None:
             continue
         with measure_performance("result_page_save", run_id=pending.ticket.run_id,
                 attempt_no=pending.ticket.attempt_id, page_no=pending.saves.pending.request.page_no):
-            receipt = pending.saves.save(repository, owned)
+            receipt = (await pending.saves.save(repository, database))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}")
 
 
 async def advance_result_scan(pending: PendingResultScan, *, runtime,
-        can_read: Callable[[], bool] | None = None,
-        page_qualified: Callable[[SavedResultPage], bool] | None = None) -> bool:
+        can_read: Callable[[], Awaitable[bool]] | None = None,
+        page_qualified: Callable[[SavedResultPage], Awaitable[bool]] | None = None) -> bool:
     """可靠交接后继续原轮次；实际错误或中断不产生隐式重读。"""
     if pending.finished:
         pending.close()
@@ -78,29 +79,9 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         return False
     while True:
         if pending.saves.pending is not None:
-            original = pending.saves.pending.request
-            with measure_performance("result_page_save", run_id=pending.ticket.run_id,
-                    attempt_no=pending.ticket.attempt_id, page_no=original.page_no):
-                receipt = pending.saves.save(runtime.capture, runtime.owned)
-            if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}")
-            page = page_from_outcome(original.ticket, original.outcome.outcome, cursor=original.cursor)
-            pending.last_ref = pending.saves.take()
-            _retain_completed_wait(pending, SavedResultPage(pending.last_ref, page, original.occurred_at),
-                runtime=runtime)
-            pending.last_outcome = original.outcome
-            pending.last_cursor = original.cursor
-            pending.occurred_at = original.occurred_at
-            pending.cursor = page.next_cursor
-            pending.finished = page.next_cursor is None or page.outcome.error is not None
-            if page_qualified is not None and not page_qualified(
-                    SavedResultPage(pending.last_ref, page, original.occurred_at)):
-                pending.finished = True
-            if pending.finished:
-                pending.close()
+            if await settle_required(_accept_saved_page(pending, runtime, page_qualified)):
                 return True
-            pending.page_no += 1
-        if can_read is not None and not can_read():
+        if can_read is not None and not await can_read():
             return False
         check_call_interruption()
         pending.in_call = True
@@ -133,6 +114,40 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
             raise
         finally:
             pending.in_call = False
+
+
+async def _accept_saved_page(pending, runtime, page_qualified):
+    original = pending.saves.pending.request
+    delivery_error = None
+    try:
+        with measure_performance("result_page_save", run_id=pending.ticket.run_id,
+                attempt_no=pending.ticket.attempt_id, page_no=original.page_no):
+            receipt = await pending.saves.save(runtime.capture, runtime.database)
+    except BaseException as error:
+        receipt = db_outcome_for(error)
+        if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise
+        delivery_error = error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise ConsistencyError(f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}")
+    page = page_from_outcome(original.ticket, original.outcome.outcome, cursor=original.cursor)
+    # 所有读取完成后一次交接该页；读取失败仍保留原response供下次恢复。
+    saved = SavedResultPage(pending.saves.pending.response, page, original.occurred_at)
+    await _retain_completed_wait(pending, saved, runtime=runtime)
+    qualified = page_qualified is None or await page_qualified(saved)
+    pending.last_ref = pending.saves.take()
+    pending.last_outcome = original.outcome
+    pending.last_cursor = original.cursor
+    pending.occurred_at = original.occurred_at
+    pending.cursor = page.next_cursor
+    pending.finished = page.next_cursor is None or page.outcome.error is not None or not qualified
+    if pending.finished:
+        pending.close()
+    else:
+        pending.page_no += 1
+    if delivery_error is not None:
+        raise delivery_error
+    return pending.finished
 
 
 def completed_wait_from_page(saved: SavedResultPage, context, *, repository, owned) -> dict | None:
@@ -174,10 +189,10 @@ def completed_wait_from_page(saved: SavedResultPage, context, *, repository, own
     return {"result_page_event_id": actual_source, "evidence": deepcopy(data["file_completion"])}
 
 
-def _retain_completed_wait(pending: PendingResultScan, saved: SavedResultPage, *, runtime) -> None:
+async def _retain_completed_wait(pending: PendingResultScan, saved: SavedResultPage, *, runtime) -> None:
     """后续页沿用原实际等待来源，文件集合完成仍独立判定。"""
-    completion = completed_wait_from_page(saved, pending.completion_context,
-        repository=runtime.capture, owned=runtime.owned)
+    completion = await runtime.database.read(lambda owned: completed_wait_from_page(
+        saved, pending.completion_context, repository=runtime.capture, owned=owned))
     if completion is None:
         return
     pending.completion_context = {**pending.completion_context, "prior_completion": completion}
@@ -186,14 +201,15 @@ def _retain_completed_wait(pending: PendingResultScan, saved: SavedResultPage, *
 class SavedResultEntries:
     """沿可靠范围重复按页读取原输入，只保留一页及计数。"""
 
-    def __init__(self, repository, owned, last_ref: ResultPageRef):
-        self.repository, self.owned, self.last_ref = repository, owned, last_ref
+    def __init__(self, repository, database, last_ref: ResultPageRef):
+        self.repository, self.database, self.last_ref = repository, database, last_ref
         self._count = None
 
-    def pages(self):
+    async def pages(self):
         cursor = None
         while True:
-            batch = self.repository.read_result_pages(self.last_ref.ticket, cursor, 1, self.owned)
+            batch = await self.database.read(lambda owned: self.repository.read_result_pages(
+                self.last_ref.ticket, cursor, 1, owned), description="读取一页可靠结果")
             for saved in batch.items:
                 if saved.ref.event_id > self.last_ref.event_id:
                     raise ConsistencyError("结果输入超出原可靠页范围")
@@ -204,43 +220,51 @@ class SavedResultEntries:
                 return
             cursor = batch.next_cursor
 
-    @property
-    def last_page(self):
-        return self.repository.read_result_page(self.last_ref, self.owned).page
+    async def last_page(self):
+        saved = await self.database.read(lambda owned: self.repository.read_result_page(self.last_ref, owned))
+        return saved.page
 
-    @property
-    def completion_page(self):
+    async def completion_page(self):
         """完成观察可以来自任一可靠页，不要求末页重复提供。"""
-        return next((saved for saved in self.pages()
-                     if saved.page.completion_evidence is not None), None)
+        async for saved in (self.pages()):
+            if saved.page.completion_evidence is not None:
+                return saved
+        return None
 
-    def __iter__(self):
-        for saved in self.pages():
+    async def __aiter__(self):
+        async for saved in self.pages():
             identities = {identity for identity, _ in saved.file_ids}
-            yield from (entry for entry in saved.page.entries if entry.identity in identities)
+            for entry in saved.page.entries:
+                if entry.identity in identities:
+                    yield entry
 
-    def __len__(self):
+    async def count(self):
         if self._count is None:
-            self._count = sum(len(saved.file_ids) for saved in self.pages())
+            count = 0
+            async for saved in (self.pages()):
+                count += len(saved.file_ids)
+            self._count = count
         return self._count
 
-    def find(self, identity, *, allow_missing=False):
-        return self.repository.read_result_file_input(self.last_ref, identity, self.owned,
-                                                    allow_missing=allow_missing)
+    async def find(self, identity, *, allow_missing=False):
+        return await self.database.read(lambda owned: self.repository.read_result_file_input(
+            self.last_ref, identity, owned, allow_missing=allow_missing))
 
 
 class QualifiedResultEntries(SavedResultEntries):
     """逐页筛选原时刻；坏页仍由未筛选的原输入保存和核对。"""
 
     def __init__(self, entries: SavedResultEntries, lower_bound: int, *, source_qualified=True):
-        super().__init__(entries.repository, entries.owned, entries.last_ref)
+        super().__init__(entries.repository, entries.database, entries.last_ref)
         self.lower_bound, self.source_qualified = lower_bound, source_qualified
 
-    def pages(self):
-        return (saved for saved in super().pages() if self.source_qualified and saved.occurred_at >= self.lower_bound)
+    async def pages(self):
+        async for saved in (super().pages()):
+            if self.source_qualified and saved.occurred_at >= self.lower_bound:
+                yield saved
 
-    def find(self, identity, *, allow_missing=False):
-        for saved in self.pages():
+    async def find(self, identity, *, allow_missing=False):
+        async for saved in (self.pages()):
             identifiers = dict(saved.file_ids)
             if identity in identifiers:
                 entry = next(entry for entry in saved.page.entries if entry.identity == identity)
@@ -253,17 +277,18 @@ class QualifiedResultEntries(SavedResultEntries):
 class SourceResultEntries:
     """按物理文件身份分页消费全部原轮次已经可靠确认的来源事实。"""
 
-    def __init__(self, repository, owned, ticket, *, current_entries=None):
-        self.repository, self.owned, self.ticket = repository, owned, ticket
+    def __init__(self, repository, database, ticket, *, current_entries=None):
+        self.repository, self.database, self.ticket = repository, database, ticket
         self.current_entries = current_entries
 
-    def records(self):
+    async def records(self):
         cursor = None
         while True:
-            page = self.repository.read_result_sources(self.ticket, cursor, 32, self.owned)
+            page = await self.database.read(lambda owned: self.repository.read_result_sources(
+                self.ticket, cursor, 32, owned), description="读取一批已保存文件来源")
             for entry, file, file_id in page.items:
                 if self.current_entries is not None:
-                    current = self.current_entries.find(entry.identity, allow_missing=True)
+                    current = await self.current_entries.find(entry.identity, allow_missing=True)
                     if current is None:
                         continue
                     original_pair = entry.paired_identity
@@ -272,7 +297,7 @@ class SourceResultEntries:
                         raise ConsistencyError("当前原页改变已登记文件身份")
                     if entry.paired_identity != original_pair:
                         raise ConsistencyError("当前原页改变已登记文件配对")
-                    if (entry.paired_identity is not None and self.current_entries.find(
+                    if (entry.paired_identity is not None and await self.current_entries.find(
                             entry.paired_identity, allow_missing=True) is None):
                         continue
                     complete = entry.complete and file.complete and entry.size_bytes == file.size_bytes
@@ -285,8 +310,9 @@ class SourceResultEntries:
                 return
             cursor = page.next_cursor
 
-    def __iter__(self):
-        return (entry for entry, _, _ in self.records())
+    async def __aiter__(self):
+        async for entry, _, _ in self.records():
+            yield entry
 
 
 class ObservedResultEntries:
@@ -298,30 +324,32 @@ class ObservedResultEntries:
         self.current_entries = tuple(replace(entry, complete=file.complete,
             size_bytes=file.size_bytes) for entry, (file, _) in zip(entries, registered, strict=True))
 
-    def records(self):
-        return ((entry, file, file_id) for entry, (file, file_id)
-            in zip(self.current_entries, self.registered, strict=True))
+    async def records(self):
+        for entry, (file, file_id) in zip(self.current_entries, self.registered, strict=True):
+            yield entry, file, file_id
 
-    def __iter__(self):
-        return iter(self.current_entries)
+    async def __aiter__(self):
+        for entry in self.current_entries:
+            yield entry
 
 
 class RegisteredSourceFiles:
     def __init__(self, entries: SourceResultEntries | ObservedResultEntries):
         self.entries = entries
 
-    def __iter__(self):
-        return ((file, file_id) for _, file, file_id in self.entries.records())
+    async def __aiter__(self):
+        async for _, file, file_id in self.entries.records():
+            yield file, file_id
 
 
 class TerminalResultEntries(SourceResultEntries):
     """终态逐文件合并原保留来源与合格当前观察，不改变原完成事实。"""
 
-    def records(self):
-        retained = SourceResultEntries(self.repository, self.owned, self.ticket)
-        for entry, file, file_id in retained.records():
+    async def records(self):
+        retained = SourceResultEntries(self.repository, self.database, self.ticket)
+        async for entry, file, file_id in (retained.records()):
             if self.current_entries is not None:
-                current = (self.current_entries.find(entry.identity, allow_missing=True)
+                current = (await self.current_entries.find(entry.identity, allow_missing=True)
                     if isinstance(self.current_entries, SavedResultEntries) else
                     next(((item, file_id) for item in self.current_entries if item.identity == entry.identity), None))
                 if current is not None:
@@ -342,3 +370,50 @@ class TerminalResultEntries(SourceResultEntries):
                         file = replace(file, kind=entry.kind, format_id=entry.format_id,
                             pairing_confirmed=True if entry.paired_identity is not None else None)
             yield entry, file, file_id
+
+
+async def iter_result_entries(entries):
+    """原实际返回为有限元组，可靠历史按异步页顺序读取。"""
+    if hasattr(entries, "__aiter__"):
+        async for item in entries:
+            yield item
+    else:
+        for item in entries:
+            yield item
+
+
+async def result_entry_count(entries):
+    if isinstance(entries, SavedResultEntries):
+        return await entries.count()
+    return len(entries)
+
+
+async def assess_registered_files(registered, requirements, *, set_finalized):
+    from camctl.capture.results import CaptureFileAssessment
+    state = CaptureFileAssessment(requirements, set_finalized=set_finalized)
+    async for file, _ in (await iter_result_entries(registered)):
+        state.add(file)
+    return state.finish()
+
+
+async def max_result_value(values, *, default=None):
+    result = default
+    async for value in values:
+        result = value if result is None else max(result, value)
+    return result
+
+
+async def any_result(values):
+    async for value in values:
+        if value:
+            return True
+    return False
+
+
+async def registered_observations(registered, entries):
+    if isinstance(registered, RegisteredSourceFiles):
+        async for entry, file, file_id in registered.entries.records():
+            yield (file, file_id), entry
+    else:
+        for pair, entry in zip(registered, entries, strict=True):
+            yield pair, entry
