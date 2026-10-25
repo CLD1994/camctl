@@ -141,18 +141,21 @@ def test_timelapse_recovers_remaining_wait(tmp_path: Path) -> None:
     第一个 run 会话启动拍摄后中断（等待安排已保存）；第二个会话
     恢复剩余等待，动作按时间与产物完成判定成功并登记产物。
     """
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
-    plan = deployment.write_plan(timelapse_plan("42", future_schedule(1)))
+    scheduled_at = deployment.schedule(1)
+    plan = deployment.write_plan(timelapse_plan("42", scheduled_at))
     spec = stub_driver_spec({"1": [video_file("seq-1")]})
     submitted = deployment.camctl(
         "submit", str(plan), "--config", str(deployment.config_path),
         driver=spec)
     assert submitted.exit_code == 0, submitted.stderr
 
+    # 受理完成后进入原启动窗口；CLI 准备不消耗业务窗口。
+    deployment.freeze_at(scheduled_at)
     state_db = deployment.state_db
     spec = stub_driver_spec({"1": [video_file("seq-1")]})
     first = deployment.start_camctl("run", "--config", str(deployment.config_path),
@@ -163,6 +166,7 @@ def test_timelapse_recovers_remaining_wait(tmp_path: Path) -> None:
             state_db,
             "SELECT 1 FROM history_events WHERE event_type = 15"
             " AND json_extract(body_json, '$.reason') = 1")
+        deployment.resume_clock()
     finally:
         first.terminate()
         first.wait(timeout=30)

@@ -1,0 +1,555 @@
+{
+  "date": "2026-10-25",
+  "status": "两项隔离窄选通过；不替代原完整运行结果",
+  "base_commit": "c4f1ae10f5ccd59608fe7a5c7350aa57da29f1eb",
+  "clock_core_commit": "b01e0040",
+  "local_clock_core_commit": "99f04a39",
+  "scope": "只修改两项START前过期测试及media共用helper的显式可选输入；未修改生产代码或其他测试默认钟。Action6两缺陷仅归档，无补测。",
+  "references": {
+    "original_csv": "../2026-10-25-integration-timing/cross-component-cases.csv",
+    "first_full_cases": "first-run-cases.csv",
+    "final_full": "final-run.json",
+    "action6_diagnostics": "action6-maintenance-diagnostics.json"
+  },
+  "environment": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "sqlite": "3.53.1",
+    "isolated_worktree": "/tmp/camctl-itopt-start-clock",
+    "source_resources": "本工作树src/camctl/_resources，sync_resources.py同步27项退出0；未sync共享虚拟环境",
+    "python_cache": "/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock/python-cache",
+    "temporary_root": "/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock/tmp"
+  },
+  "command_receipt": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+      "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+      "-q",
+      "--durations=0",
+      "--basetemp=/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock/tmp",
+      "--junitxml=/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock/narrow.xml"
+    ],
+    "cwd": "/tmp/camctl-itopt-start-clock",
+    "started_utc": "2026-10-25T00:28:17.007243+00:00",
+    "environment": {
+      "PYTHONPATH": "/tmp/camctl-itopt-start-clock/apps/camctl/src",
+      "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock/python-cache",
+      "TMPDIR": "/tmp/camctl-itopt-start-clock/.local/verification/itopt/start-clock"
+    },
+    "pid": 525141,
+    "exit_code": 0,
+    "wall_seconds": 35.85729671000445,
+    "finished_utc": "2026-10-25T00:28:52.986237+00:00"
+  },
+  "result": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "pytest_seconds_printed": 34.58,
+    "exit_code": 0,
+    "wall_seconds": 35.85729671000445,
+    "log_sha256": "93985e291f87c53a1cdba05dc348f71100a0033a6237be5d5016c6d1a028cf6e",
+    "junit_sha256": "4b6e58e619ddc9942b489ef92b64f9827257a2e9073f892f930584700b5d00f4",
+    "junit_seconds": 34.579
+  },
+  "clock_protocol": [
+    "Deployment(controlled_clock=True)的初始业务钟冻结；真实媒体准备、init和submit照旧执行。",
+    "按原相对排程S=deployment.schedule(1)形成请求；media取回仍为S+1秒。受理成功后freeze_at(S)按相同差量前移UTC和单调钟。",
+    "真实run在冻结的S进入原5000毫秒窗口。media等待真实device_activities.started_at；timelapse等待真实CAPTURE_WAIT_CHANGED首次安排。",
+    "同步点可靠保存后resume_clock()从同一对业务读数按真实经过时间推进；原终止/重开和1秒、3秒业务等待不跳时，父进程与工具计时保持真实钟。"
+  ],
+  "cases": {
+    "media_insufficient": {
+      "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+      "call_seconds_printed": 23.65,
+      "original_csv": {
+        "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+        "status": "passed",
+        "call_s": "14.723853206000058",
+        "total_s": "14.724570159996802"
+      },
+      "first_full_before": {
+        "run": "camctl-itopt-full-20261025",
+        "task": "036-root-test_camctl_media_roundtrip",
+        "facts": {
+          "db_sha256": "31a2d34f3b9559792ff9ff51a99f33728e00e9e27d61e601763b7c0a92a222e6",
+          "source_action": {
+            "id": 1,
+            "status": 5,
+            "scheduled_at": 1792881936000000,
+            "max_delay_ms": 5000,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 10,
+            "accepted_at": 1792881936523039,
+            "last_changed_at": 1792881942583064
+          },
+          "all_action_statuses": [
+            5,
+            4
+          ],
+          "plan_statuses": [
+            3
+          ],
+          "device_activities": [],
+          "start_attempts": [],
+          "wait_events": [],
+          "output_count": 0,
+          "device_file_sizes": [],
+          "copy_progress": []
+        },
+        "case": {
+          "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+          "outcome": "failed",
+          "duration_seconds": 62.65463561700744,
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0020412270023371093
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 62.65139893200103
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0011954580040764995
+            }
+          }
+        }
+      },
+      "final_full_before": {
+        "run": "camctl-itopt-final-20261025",
+        "task": "041-root-test_camctl_media_roundtrip-shard-2",
+        "facts": {
+          "db_sha256": "cbd95e34b9e29c825820d6a751e43a2bcf88cd73ed916db69f43daf552a4b924",
+          "source_action": {
+            "id": 1,
+            "status": 5,
+            "scheduled_at": 1792886765000000,
+            "max_delay_ms": 5000,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 10,
+            "accepted_at": 1792886765977196,
+            "last_changed_at": 1792886770029730
+          },
+          "all_action_statuses": [
+            5,
+            4
+          ],
+          "plan_statuses": [
+            3
+          ],
+          "device_activities": [],
+          "start_attempts": [],
+          "wait_events": [],
+          "output_count": 0,
+          "device_file_sizes": [],
+          "copy_progress": []
+        },
+        "case": {
+          "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+          "outcome": "failed",
+          "duration_seconds": 62.40513998700044,
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0013494490049197339
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 62.40319251299661
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0005980249989079311
+            }
+          }
+        }
+      },
+      "after": {
+        "db_sha256": "92674558ec71a20647d5f9b80f7367242cc1827ec2f8a652df920adf6d9e5cf1",
+        "source_action": {
+          "id": 1,
+          "status": 3,
+          "scheduled_at": 1792888099000000,
+          "max_delay_ms": 5000,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888099000000,
+          "expiration_reason": null,
+          "created_event_id": 1,
+          "last_event_id": 67,
+          "accepted_at": 1792888098000000,
+          "last_changed_at": 1792888108455372
+        },
+        "all_action_statuses": [
+          3,
+          3
+        ],
+        "plan_statuses": [
+          3
+        ],
+        "device_activities": [
+          {
+            "id": 1,
+            "sent_at": 1792888099000000,
+            "started_at": 1792888099000000,
+            "expected_check_at": null,
+            "wait_completed_event_id": null
+          }
+        ],
+        "start_attempts": [
+          {
+            "intent_event_id": 14,
+            "result_event_id": 15,
+            "intent_at": 1792888099000000,
+            "result_at": 1792888099000000
+          }
+        ],
+        "wait_events": [],
+        "output_count": 2,
+        "device_file_sizes": [
+          22171
+        ],
+        "copy_progress": [
+          {
+            "committed_bytes": 22171,
+            "source_size": 22171,
+            "target_sha256": "4a23585e40f0f72611048e2eeb579c5ea0646fe9f55da953b1e50bcc5056f219"
+          },
+          {
+            "committed_bytes": 16246,
+            "source_size": 16246,
+            "target_sha256": "400ad3a1005fc0f72240f18035eddeaee4e8fbd00f1714626564388823f355a8"
+          }
+        ],
+        "recording_processing": {
+          "check_state": 3,
+          "repair_state": 5,
+          "media_json": "{\"check_status\":\"completed\",\"duration\":{\"status\":\"available\",\"seconds\":5.000000}}",
+          "repair_basis_json": "{\"reason\":2,\"target_duration_ms\":3000,\"threshold_s\":3.5,\"actual_duration_s\":5.000000}"
+        }
+      },
+      "clock_epochs": [
+        {
+          "epoch": 1,
+          "mode": "frozen",
+          "read_count": 1,
+          "pid_set": [
+            525313
+          ],
+          "first_pair": {
+            "utc_us": 1792888098000000,
+            "monotonic_ns": 39390543317379
+          },
+          "last_pair": {
+            "utc_us": 1792888098000000,
+            "monotonic_ns": 39390543317379
+          },
+          "distinct_pair_count": 1,
+          "real_first_ns": 39394908150002,
+          "real_last_ns": 39394908150002
+        },
+        {
+          "epoch": 2,
+          "mode": "frozen",
+          "read_count": 22,
+          "pid_set": [
+            525410
+          ],
+          "first_pair": {
+            "utc_us": 1792888099000000,
+            "monotonic_ns": 39391543317379
+          },
+          "last_pair": {
+            "utc_us": 1792888099000000,
+            "monotonic_ns": 39391543317379
+          },
+          "distinct_pair_count": 1,
+          "real_first_ns": 39397091057485,
+          "real_last_ns": 39400173046292
+        },
+        {
+          "epoch": 3,
+          "mode": "running",
+          "read_count": 80,
+          "pid_set": [
+            525522,
+            525668
+          ],
+          "first_pair": {
+            "utc_us": 1792888099876021,
+            "monotonic_ns": 39392419338517
+          },
+          "last_pair": {
+            "utc_us": 1792888112607119,
+            "monotonic_ns": 39405150437120
+          },
+          "distinct_pair_count": 80,
+          "real_first_ns": 39401049898634,
+          "real_last_ns": 39413780997237
+        }
+      ],
+      "running_anchor": {
+        "mode": "running",
+        "epoch": 3,
+        "utc_anchor_us": 1792888099000000,
+        "monotonic_anchor_ns": 39391543317379,
+        "real_monotonic_anchor_ns": 39400173877496
+      },
+      "unchanged_original_assert_count": 17
+    },
+    "timelapse": {
+      "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+      "call_seconds_printed": 10.84,
+      "original_csv": {
+        "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+        "status": "passed",
+        "call_s": "6.747350499997992",
+        "total_s": "6.748118077000981"
+      },
+      "first_full_before": {
+        "run": "camctl-itopt-full-20261025",
+        "task": "040-root-test_camctl_capture_roundtrip",
+        "facts": {
+          "db_sha256": "cc3202bb9b43fee4d67220db101fe3df1e8c2847dbebb56bfb86e4e98524a30a",
+          "source_action": {
+            "id": 1,
+            "status": 5,
+            "scheduled_at": 1792882040000000,
+            "max_delay_ms": 5000,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "accepted_at": 1792882041532996,
+            "last_changed_at": 1792882047598120
+          },
+          "all_action_statuses": [
+            5
+          ],
+          "plan_statuses": [
+            3
+          ],
+          "device_activities": [],
+          "start_attempts": [],
+          "wait_events": [],
+          "output_count": 0,
+          "device_file_sizes": [],
+          "copy_progress": []
+        },
+        "case": {
+          "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+          "outcome": "failed",
+          "duration_seconds": 34.64403222400142,
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0016352020029444247
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 34.640042320002976
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0023547019955003634
+            }
+          }
+        }
+      },
+      "final_full_before": {
+        "run": "camctl-itopt-final-20261025",
+        "task": "045-root-test_camctl_capture_roundtrip",
+        "facts": {
+          "db_sha256": "cfc351061c005477b4cd28f55a7af35fba6553ee499a3deb9c8a5aa9db62d16a",
+          "source_action": {
+            "id": 1,
+            "status": 5,
+            "scheduled_at": 1792886819000000,
+            "max_delay_ms": 5000,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "accepted_at": 1792886819795487,
+            "last_changed_at": 1792886825059049
+          },
+          "all_action_statuses": [
+            5
+          ],
+          "plan_statuses": [
+            3
+          ],
+          "device_activities": [],
+          "start_attempts": [],
+          "wait_events": [],
+          "output_count": 0,
+          "device_file_sizes": [],
+          "copy_progress": []
+        },
+        "case": {
+          "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+          "outcome": "failed",
+          "duration_seconds": 31.662499397003558,
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0006319280000752769
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 31.659740736002277
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.002126733001205139
+            }
+          }
+        }
+      },
+      "after": {
+        "db_sha256": "5750fb64f3b81137d71be035ca70764b4e9b959d323a13d5e55d1407f0421708",
+        "source_action": {
+          "id": 1,
+          "status": 3,
+          "scheduled_at": 1792888123000000,
+          "max_delay_ms": 5000,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888123000000,
+          "expiration_reason": null,
+          "created_event_id": 1,
+          "last_event_id": 34,
+          "accepted_at": 1792888122000000,
+          "last_changed_at": 1792888126331215
+        },
+        "all_action_statuses": [
+          3
+        ],
+        "plan_statuses": [
+          3
+        ],
+        "device_activities": [
+          {
+            "id": 1,
+            "sent_at": 1792888123000000,
+            "started_at": null,
+            "expected_check_at": 1792888126000000,
+            "wait_completed_event_id": 22
+          }
+        ],
+        "start_attempts": [
+          {
+            "intent_event_id": 12,
+            "result_event_id": 13,
+            "intent_at": 1792888123000000,
+            "result_at": 1792888123000000
+          }
+        ],
+        "wait_events": [
+          {
+            "id": 16,
+            "occurred_at": 1792888123000000,
+            "reason": 1,
+            "expected_check_at": 1792888126000000
+          },
+          {
+            "id": 22,
+            "occurred_at": 1792888126120018,
+            "reason": 3,
+            "expected_check_at": null
+          }
+        ],
+        "output_count": 1,
+        "device_file_sizes": [
+          8192
+        ],
+        "copy_progress": []
+      },
+      "clock_epochs": [
+        {
+          "epoch": 1,
+          "mode": "frozen",
+          "read_count": 1,
+          "pid_set": [
+            525867
+          ],
+          "first_pair": {
+            "utc_us": 1792888122000000,
+            "monotonic_ns": 39414198886233
+          },
+          "last_pair": {
+            "utc_us": 1792888122000000,
+            "monotonic_ns": 39414198886233
+          },
+          "distinct_pair_count": 1,
+          "real_first_ns": 39416050902612,
+          "real_last_ns": 39416050902612
+        },
+        {
+          "epoch": 2,
+          "mode": "frozen",
+          "read_count": 24,
+          "pid_set": [
+            525918
+          ],
+          "first_pair": {
+            "utc_us": 1792888123000000,
+            "monotonic_ns": 39415198886233
+          },
+          "last_pair": {
+            "utc_us": 1792888123000000,
+            "monotonic_ns": 39415198886233
+          },
+          "distinct_pair_count": 1,
+          "real_first_ns": 39417972822198,
+          "real_last_ns": 39421130963815
+        },
+        {
+          "epoch": 3,
+          "mode": "running",
+          "read_count": 35,
+          "pid_set": [
+            526022
+          ],
+          "first_pair": {
+            "utc_us": 1792888123748578,
+            "monotonic_ns": 39415947464479
+          },
+          "last_pair": {
+            "utc_us": 1792888126527353,
+            "monotonic_ns": 39418726239719
+          },
+          "distinct_pair_count": 35,
+          "real_first_ns": 39421880915956,
+          "real_last_ns": 39424659691196
+        }
+      ],
+      "running_anchor": {
+        "mode": "running",
+        "epoch": 3,
+        "utc_anchor_us": 1792888123000000,
+        "monotonic_anchor_ns": 39415198886233,
+        "real_monotonic_anchor_ns": 39421132337710
+      },
+      "wait_elapsed_us": 3120018,
+      "unchanged_original_assert_count": 8
+    }
+  },
+  "measurement_limit": "原CSV、两轮全量与本次窄选负载、缓存准备和时钟安排不同；失败等待耗时减少不作为稳定提速比例。",
+  "independent_review": {
+    "scope": "两测试完整diff、补测JSON与实际log/XML",
+    "method": "独立只读审查；未另跑测试",
+    "blocking_findings": 0,
+    "conclusion": "目标场景在真实START/首次等待事实后恢复业务钟；其他测试默认路径、原预算、真实媒体、终止重开与成功断言保持。"
+  }
+}
