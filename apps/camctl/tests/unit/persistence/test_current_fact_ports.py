@@ -1,4 +1,5 @@
-"""当前行每次直读；固定历史只在内核C0范围共享。"""
+"""当前行仅在实际前序未变化时共享；固定历史限定内核C0。"""
+from contextlib import nullcontext
 from decimal import Decimal
 import sqlite3
 from unittest.mock import create_autospec
@@ -47,16 +48,18 @@ def database(monkeypatch):
 
 
 @pytest.mark.parametrize('missing', [False, True])
-def test_current_row_and_missing_result_are_read_again(database, missing):
+@pytest.mark.parametrize('scoped,queries', [(False, 2), (True, 1)])
+def test_current_row_and_missing_result_share_only_kernel_owned_scope(database, missing, scoped, queries):
     connection, state = database
     if missing:
         state['row'] = None
-    with fact_reads.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+    with (fact_reads.operation_fact_scope(connection, HistoryBoundary(0, 0))
+          if scoped else nullcontext()):
         first = transaction.row_facts(connection, 'sample', 1)
         second = transaction.row_facts(connection, 'sample', 1)
     assert first == second == (None if missing else {
         'id': 1, 'payload_json': {'values': [Decimal('1.0000000000000001')]}})
-    assert connection.execute.call_count == 2
+    assert connection.execute.call_count == queries
     for cursor in state['cursors']:
         cursor.close.assert_called_once_with()
 

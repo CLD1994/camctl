@@ -1118,7 +1118,9 @@ def event_envelope(
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
-    return _load_row_facts(connection, table, row_id)
+    from camctl.persistence.fact_reads import _reuse_current_row
+    return _reuse_current_row(connection, table, row_id,
+                              lambda: _load_row_facts(connection, table, row_id))
 
 
 def _load_row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:

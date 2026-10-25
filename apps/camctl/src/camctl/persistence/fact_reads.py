@@ -1,4 +1,4 @@
-"""一次真实操作内的C0固定事实；当前行与业务通过结论不进入此范围。"""
+"""一次真实操作的固定历史及实际写入前序输入，不保存业务通过结论。"""
 from collections import OrderedDict
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
@@ -31,11 +31,13 @@ class _Facts:
     entries: OrderedDict = field(default_factory=OrderedDict)
     retained_bytes: int = 0
     active: bool = True
+    current_version: int | None = None
 
     def discard(self):
         self.entries.clear()
         self.retained_bytes = 0
         self.active = False
+        self.current_version = None
 
 
 _CURRENT = ContextVar('operation_facts', default=None)
@@ -86,6 +88,33 @@ def operation_fact_boundary(connection):
     """返回内核拥有的C0，不提供推进或登记结论的接口。"""
     state = _facts(connection)
     return None if state is None else state.boundary
+
+
+def _reuse_current_row(connection, table, row_id, loader):
+    """共享本连接尚未再次写入时的完整实际行，不能由提案登记输入。
+
+    事务视图隔离其他连接的提交；本连接任意行写入都会推进
+    total_changes，因此实际投影、派生列和缺失行均在写后重新读取。
+    集合查询不进入此接口；固定旧事实不随当前行失效。
+    """
+    state = _facts(connection)
+    if state is None:
+        return loader()
+    version = connection.total_changes
+    if version != state.current_version:
+        for key in tuple(state.entries):
+            if key[0] == 'current_row':
+                _, removed = state.entries.pop(key)
+                state.retained_bytes -= removed
+        state.current_version = version
+    key = ('current_row', typed_read_key(table), typed_read_key(row_id))
+    cached = _cached(state, key)
+    if cached is not None:
+        return cached[0]
+    value = loader()
+    # 外层元组区分“尚未读取”与数据库实际不存在的行。
+    _remember(state, key, (value,))
+    return value
 
 
 @contextmanager

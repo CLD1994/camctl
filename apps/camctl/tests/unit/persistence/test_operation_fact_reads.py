@@ -1,4 +1,4 @@
-"""内核C0固定事实跨判断和写入复用，当前行保持直读。"""
+"""内核固定历史及同一实际写入前序的行输入，独立判断共享事实。"""
 from importlib import import_module
 from unittest.mock import create_autospec
 import sqlite3
@@ -62,12 +62,61 @@ def facts(monkeypatch):
     return module
 
 
-def test_current_rows_are_direct_inside_operation_scope(database, facts):
+def test_current_rows_share_actual_input_until_the_connection_changes(database, facts):
     connection, state = database
     with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
         assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
         assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
+        assert connection.execute.call_count == 1
+        state['current'] = 2
+        connection.total_changes += 1
+        assert transaction.row_facts(connection, 'sample', 1)['value'] == 2
+        assert transaction.row_facts(connection, 'sample', 1)['value'] == 2
     assert connection.execute.call_count == 2
+
+
+def test_current_row_results_cannot_be_mutated_by_another_judgment(database, facts):
+    connection, _ = database
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        transaction.row_facts(connection, 'sample', 1)['value'] = 99
+        assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
+    assert connection.execute.call_count == 1
+
+
+def test_current_row_is_read_again_after_scope_exit(database, facts):
+    connection, state = database
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
+    state['current'] = 2
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        assert transaction.row_facts(connection, 'sample', 1)['value'] == 2
+    assert connection.execute.call_count == 2
+
+
+def test_missing_current_row_is_refreshed_after_an_insert(database, facts, monkeypatch):
+    connection, _ = database
+    load = create_autospec(transaction._load_row_facts, side_effect=[None, {'id': 1, 'value': 2}])
+    monkeypatch.setattr(transaction, '_load_row_facts', load)
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        assert transaction.row_facts(connection, 'sample', 1) is None
+        assert transaction.row_facts(connection, 'sample', 1) is None
+        assert load.call_count == 1
+        connection.total_changes += 1
+        assert transaction.row_facts(connection, 'sample', 1) == {'id': 1, 'value': 2}
+    assert load.call_count == 2
+
+
+def test_derived_history_changes_invalidate_current_row_input(database, facts, monkeypatch):
+    connection, _ = database
+    load = create_autospec(transaction._load_row_facts, side_effect=[
+        {'id': 1, 'value': 1, 'last_event_id': 3, 'change_count': 1},
+        {'id': 1, 'value': 1, 'last_event_id': 4, 'change_count': 2}])
+    monkeypatch.setattr(transaction, '_load_row_facts', load)
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
+        assert transaction.row_facts(connection, 'sample', 1)['last_event_id'] == 3
+        connection.total_changes += 1
+        assert transaction.row_facts(connection, 'sample', 1)['change_count'] == 2
+    assert load.call_count == 2
 
 
 def test_committed_event_survives_independent_judgments_and_later_writes(database, facts):
