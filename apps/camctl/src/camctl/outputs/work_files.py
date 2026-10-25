@@ -688,13 +688,14 @@ async def _owned_deletion(
 
 async def clean_one_work_file(
     file_id: int, context: WorkFileContext,
-) -> WorkFileSingleResult:
+) -> WorkFileSingleResult | None:
     """清理单个中间文件；本次运行中新形成的责任经此入口首次清理。
 
     判定不可清理时保留文件并返回原因；可清理时先保存释放（归属
     终态且操作停止才允许），再按意图、删除、结果的顺序推进。首次
     清理不推进历史游标，也不占用历史扫描额度；本次已处理过的文件
-    直接复用会话结果。
+    直接复用会话结果。维护停止时尚未接纳的新任务返回 None，保留
+    文件身份；已持有的原结果仍先完成保存。
     """
     ObjectId(file_id)
     cached = context.processed.get(file_id)
@@ -712,6 +713,8 @@ async def clean_one_work_file(
     facts = await context.database.read(
         lambda owned: context.repository.load_work_file_state(file_id, owned),
         description="中间文件状态读取")
+    if context.stop_requested is not None and context.stop_requested():
+        return None
     assert context.executor is not None
     if file_id in context.executor.unfinished_files():
         facts = replace(facts, operations_stopped=False)
@@ -787,6 +790,9 @@ async def clean_work_files(context: WorkFileContext) -> WorkFileCleanupResult:
                 facts = await context.database.read(
                     lambda owned: repository.load_work_file_state(file_id, owned),
                     description="中间文件状态读取")
+                if context.stop_requested is not None and context.stop_requested():
+                    history.scan = scan
+                    return WorkFileCleanupResult(cleaned + kept + failed, cleaned, kept, failed)
                 assert context.executor is not None
                 if file_id in context.executor.unfinished_files():
                     facts = replace(facts, operations_stopped=False)

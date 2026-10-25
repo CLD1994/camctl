@@ -90,6 +90,7 @@ class WorkFileRuntime:
                 return SettlementOutcome(complete=False)
             try:
                 result = await clean_one_work_file(file_id, work)
+                assert result is not None  # 首次必要清理没有维护停止条件。
             except Exception as error:
                 raise StateDbFailure(f"取消中间文件的首次结果未可靠保存: {error}") from error
             failed = failed or result.outcome is WorkFileSingleOutcome.FAILED
@@ -164,10 +165,13 @@ class WorkFileRuntime:
             facts = await context.database.read(
                 lambda owned: self.repository.load_work_file_state(file_id, owned),
                 description="中间文件首次责任状态读取")
+            if self._stopping:
+                break
             if (file_id in self.executor.unfinished_files()
                     or classify_work_file(facts).action is WorkFileAction.KEEP_IN_USE):
                 continue
-            await clean_one_work_file(file_id, work)
+            if await clean_one_work_file(file_id, work) is None:
+                break
             self._first_files.discard(file_id)
         if not self._stopping:
             await clean_work_files(work)
