@@ -117,6 +117,37 @@ it("报告类型未知不从文件名猜测图片", () => {
   )[0];
   expect(row.group).toBe("other");
 });
+it.each(["LRF", "osv"])("%s 原片归入视频并提供预览类型", (extension) => {
+  const row = resultProducts(
+    {
+      ...capture,
+      outputs: [
+        {
+          ...output,
+          original_name: `拍摄.${extension}`,
+          media_type: "application/octet-stream",
+        },
+      ],
+    },
+    [],
+    [],
+  )[0];
+  expect(row.group).toBe("video");
+  expect(row.mediaType).toBe("video/mp4");
+  expect(row.output!.media_type).toBe("application/octet-stream");
+});
+it("没有来源快照时使用交付名称识别 OSV 视频", () => {
+  const action = obtain("d1");
+  action.deliveries![0].file_name = "d1.OSV";
+  const row = resultProducts(
+    action,
+    [],
+    [{ ...videos[0], fileName: "d1.OSV" }],
+  )[0];
+  expect(row.group).toBe("video");
+  expect(row.mediaType).toBe("video/mp4");
+  expect(row.state).toBe("ready");
+});
 it("没有来源快照的交付仍可查看状态", () => {
   const rows = resultProducts(obtain("d2"), [], videos);
   expect(rows[0].output).toBeUndefined();

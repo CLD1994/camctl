@@ -25,7 +25,10 @@ import { loadCapabilities } from "../../src/shared/capabilities";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
+  });
 });
 afterAll(async () => {
   await browser.close();
@@ -131,15 +134,17 @@ it("自动取回归并后百张图片分页，刷新保持选择与页码并验�
   await page.reload();
   await page.getByRole("tab", { name: /计划记录/ }).click();
   await page.getByTestId("record-open-button").first().click();
-  const card = page.locator(".result-card").filter({
-    has: page.getByRole("heading", { name: obtain.name, exact: true }),
-  });
+  const card = page.locator(`[data-action-id="${capture.action_instance_id}"]`);
   await check(
-    card.getByRole("button", { name: `展开动作 ${obtain.name}` }),
+    card.getByRole("button", { name: `展开动作 ${capture.name}`, exact: true }),
   ).toBeVisible();
   await check(page.locator("img[data-thumbnail]")).toHaveCount(0);
-  await card.getByRole("button", { name: `展开动作 ${obtain.name}` }).click();
-  await check(card).toHaveClass(/automatic-result/);
+  await card
+    .getByRole("button", { name: `展开动作 ${capture.name}`, exact: true })
+    .click();
+  await check(
+    page.locator(`[data-action-id="${obtain.action_instance_id}"]`),
+  ).not.toBeVisible();
   await check(card.locator("img[data-thumbnail]")).toHaveCount(12);
   if (process.env.CAMCTL_VISUAL_OUTPUT) {
     mkdirSync(process.env.CAMCTL_VISUAL_OUTPUT, { recursive: true });
@@ -156,7 +161,10 @@ it("自动取回归并后百张图片分页，刷新保持选择与页码并验�
         .evaluate((img: HTMLImageElement) => img.naturalWidth),
     )
     .toBeGreaterThan(0);
-  await card.getByLabel("选择 图片0.png", { exact: true }).check();
+  await card
+    .locator(":scope > div > .media-results")
+    .getByLabel("选择 图片0.png", { exact: true })
+    .check();
   await card.getByRole("button", { name: "图片下一页", exact: true }).click();
   await check(card).toContainText("已选择 1");
   const newer = {
@@ -171,11 +179,14 @@ it("自动取回归并后百张图片分页，刷新保持选择与页码并验�
     String(newer.to_wm),
   );
   await check(card).toContainText("第 2 / 9 页");
-  await page.getByRole("button", { name: "查看全部动作", exact: true }).click();
-  await check(card).toContainText("已选择 1");
-  await page
-    .getByRole("button", { name: "按拍摄归并自动取回", exact: true })
+  await card
+    .getByRole("button", { name: `折叠动作 ${capture.name}`, exact: true })
     .click();
+  await check(page.locator("img[data-thumbnail]")).toHaveCount(0);
+  await card
+    .getByRole("button", { name: `展开动作 ${capture.name}`, exact: true })
+    .click();
+  await check(card).toContainText("已选择 1");
   await check(card).toContainText("第 2 / 9 页");
   await check(card.locator("img[data-thumbnail]")).toHaveCount(2);
   await card
@@ -186,7 +197,10 @@ it("自动取回归并后百张图片分页，刷新保持选择与页码并验�
   await check(page.getByRole("dialog")).toContainText("图片11.png");
   await page.keyboard.press("Escape");
   await check(page.getByRole("dialog")).toHaveCount(0);
-  await choose(card.getByLabel("图片筛选"), "ready");
+  await choose(
+    card.locator(":scope > div > .media-results").getByLabel("图片筛选"),
+    "ready",
+  );
   await check(card.locator("img[data-thumbnail]")).toHaveCount(12);
   await page.setViewportSize({ width: 390, height: 844 });
   await card

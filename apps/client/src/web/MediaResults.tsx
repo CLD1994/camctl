@@ -9,7 +9,8 @@ import { cleanupEntryVisible } from "./device-options";
 import type { Capabilities } from "../shared/types";
 
 const groupNames = { video: "视频", image: "图片", other: "其他文件" };
-const source = (id: string) => `/api/media/${encodeURIComponent(id)}/content`;
+const mediaPath = (id: string) => `/media/${encodeURIComponent(id)}/content`;
+const source = (id: string) => `/api${mediaPath(id)}`;
 type Props = {
   products: Product[];
   capabilities: Capabilities | null;
@@ -27,8 +28,12 @@ export function MediaResults({
   follow,
   run,
   open,
-}: Props) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  selected,
+  setSelected,
+}: Props & {
+  selected: Set<string>;
+  setSelected: (update: (previous: Set<string>) => Set<string>) => void;
+}) {
   const chosen = products.filter((p) => selected.has(p.id));
   const change = (ids: string[], value: boolean) =>
     setSelected((old) => {
@@ -68,7 +73,7 @@ export function MediaResults({
         </button>
         <button
           disabled={!chosen.length}
-          onClick={() => setSelected(new Set())}
+          onClick={() => setSelected(() => new Set())}
         >
           清空选择
         </button>
@@ -374,7 +379,7 @@ function ProductCard({
         <button
           onClick={() =>
             run(() =>
-              download(source(video.id) + "?download=true", video.fileName),
+              download(mediaPath(video.id) + "?download=true", video.fileName),
             )
           }
         >
@@ -454,7 +459,7 @@ function ProductCard({
               <button
                 onClick={() =>
                   run(() =>
-                    download(source(v.id) + "?download=true", v.fileName),
+                    download(mediaPath(v.id) + "?download=true", v.fileName),
                   )
                 }
               >
@@ -588,7 +593,10 @@ function ImageDialog({
           <button
             onClick={() =>
               run(() =>
-                download(source(video.id) + "?download=true", video.fileName),
+                download(
+                  mediaPath(video.id) + "?download=true",
+                  video.fileName,
+                ),
               )
             }
           >

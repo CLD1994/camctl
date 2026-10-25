@@ -11,6 +11,7 @@ import { utcToLocal } from "./editing";
 import { Badge, Facts, Empty } from "./common";
 import { stringifyJson } from "../shared/json";
 import { resultActionRows } from "./result-model";
+import type { ActionView } from "./ActionResult";
 export type Followup = {
   action: Record<string, unknown>;
   summary: string;
@@ -38,7 +39,13 @@ export function RecordDetail({
 }: Props) {
   const { request, plan } = record;
   const [expanded, setExpanded] = useState(true);
-  const [allActions, setAllActions] = useState(false);
+  // 以动作身份保留展开与选择，来源报告晚到后移入技术详情时也不丢失。
+  const [views, setViews] = useState<Record<string, ActionView>>({});
+  const updateView = (id: string, update: (view: ActionView) => ActionView) =>
+    setViews((old) => ({
+      ...old,
+      [id]: update(old[id] ?? { expanded: false, selected: new Set() }),
+    }));
   const allPlans = state.snapshot?.plans ?? [];
   const diagnostics =
     state.snapshot?.plan_file_diagnostics?.filter(
@@ -133,12 +140,6 @@ export function RecordDetail({
               <h3>执行与结果</h3>
               <div className="button-row">
                 <button
-                  aria-pressed={allActions}
-                  onClick={() => setAllActions(!allActions)}
-                >
-                  {allActions ? "按拍摄归并自动取回" : "查看全部动作"}
-                </button>
-                <button
                   disabled={busy}
                   onClick={() =>
                     follow({
@@ -197,13 +198,14 @@ export function RecordDetail({
               </p>
             )}
             <Suspense fallback={<p>正在加载动作摘要…</p>}>
-              {resultActionRows(plan, allActions).map(
-                ({ action, source, association }) => (
+              {resultActionRows(plan).map(
+                ({ action, automaticActions, association }) => (
                   <ActionResult
                     key={action.action_instance_id}
                     action={action}
-                    source={source}
-                    merged={!!source && !allActions}
+                    automaticActions={automaticActions}
+                    views={views}
+                    updateView={updateView}
                     association={association}
                     motorInputText={
                       state.motorInputTexts?.[action.action_instance_id]

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 /** 生成实际可播放的浏览器视频及匹配报告；不把任意媒体冒充规格中的占位摘要。 */
 export async function makeMediaFixture(directory:string) {
   await mkdir(directory,{recursive:true});
-  const browser=await chromium.launch({headless:true});
+  const browser=await chromium.launch({headless:true,channel:process.env.CAMCTL_TEST_BROWSER_CHANNEL});
   let video:Buffer;
   try {
     const page=await browser.newPage();
