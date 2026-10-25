@@ -1,0 +1,6 @@
+[
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+]

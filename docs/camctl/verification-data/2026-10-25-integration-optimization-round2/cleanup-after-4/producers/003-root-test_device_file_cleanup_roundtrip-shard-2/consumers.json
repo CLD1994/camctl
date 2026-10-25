@@ -1,0 +1,48 @@
+[
+  {
+    "case": "test_exact_outputs_and_non_cas0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.08037176299694693,
+    "body_seconds": 167.82320165599958,
+    "consumer_seconds": 168.02639055599866,
+    "final_inventory_digest": "6222636459a9f4527ba7c61c5fcdaca6a912ab07e8ebcbe3d76fe3a88b8f69aa"
+  },
+  {
+    "case": "test_cleanup_saved_result_and_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+    "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.04115396899578627,
+    "body_seconds": 17.806658205998247,
+    "consumer_seconds": 17.937618835996545,
+    "final_inventory_digest": "dc959b5dbd3663391708e9188dd035bf68e2bbade017c8ef05cba3bc68025c01"
+  }
+]

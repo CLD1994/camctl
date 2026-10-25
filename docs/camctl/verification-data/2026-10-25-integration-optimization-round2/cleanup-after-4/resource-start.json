@@ -1,0 +1,36 @@
+{
+  "collector_pid": 694118,
+  "runner_pid": 694125,
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-final",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "--jobs",
+    "4",
+    "--output",
+    "/tmp/camctl-itopt-round2-cleanup-after-4"
+  ],
+  "cwd": "/tmp/camctl-itopt-round2-final",
+  "source_head": "8164851c8d5aa2a25f7bbd59bd09a6d970b38369",
+  "started_utc": "2026-10-25T02:26:08.910278+00:00",
+  "children_before": {
+    "ru_utime": 0.001362,
+    "ru_stime": 0.005299,
+    "ru_maxrss": 16988,
+    "ru_inblock": 0,
+    "ru_oublock": 0,
+    "ru_minflt": 715,
+    "ru_majflt": 0,
+    "ru_nvcsw": 6,
+    "ru_nivcsw": 0
+  },
+  "sampling_interval_seconds": 0.25
+}

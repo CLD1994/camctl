@@ -1,0 +1,86 @@
+{
+  "id": "root/test_device_file_cleanup_roundtrip/shard-4",
+  "scope": "root",
+  "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+  "targets": [
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]"
+  ],
+  "estimated_seconds": 11.285482661998685,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_device_file_cleanup_roundtrip",
+  "shard": 4,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-round2-cleanup-after-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+  "collected_nodes": 11,
+  "status": "running",
+  "number": 2,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/artifacts",
+  "cwd": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/source",
+  "started_utc": "2026-10-25T02:26:11.251494+00:00",
+  "command": [
+    "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-round2-cleanup-after-4/control:/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-round2-cleanup-after-4/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-round2-cleanup-after-4/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-round2-cleanup-after-4/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/source",
+      "started_utc": "2026-10-25T02:26:25.043696+00:00",
+      "pid": 694510,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:26:25.147001+00:00",
+      "wall_seconds": 0.10331946500082267
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 694510,
+  "pid": 694516,
+  "execution_started_utc": "2026-10-25T02:26:25.149124+00:00",
+  "progress": {
+    "status": "starting",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py"
+  },
+  "source": "adc908968f11d3f9baf35589aa632fe7ad0b5b02bb2845cf077cf8c4c180bab3",
+  "versions": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "version": [
+      3,
+      11
+    ],
+    "sqlite": "3.53.1",
+    "pytest": "9.1.1",
+    "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+    "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+    "node": "v24.22.1",
+    "git": "git version 2.43.0"
+  }
+}

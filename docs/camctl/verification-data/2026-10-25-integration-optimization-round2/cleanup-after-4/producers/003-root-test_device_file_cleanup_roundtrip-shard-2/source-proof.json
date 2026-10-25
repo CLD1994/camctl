@@ -1,0 +1,540 @@
+{
+  "producer_runs": 1,
+  "producer_seconds": 48.101657653001894,
+  "process_scan": {
+    "euid": 1002,
+    "pytest_pid": 694523,
+    "scope": "父pytest、settled登记PID/starttime及执行组；其他进程仅在可读cmdline明确引用本root时纳入。父进程及拥有者权限错误显式失败。",
+    "node": "同步客户端命令实际退出后返回；不扫描无本root参数的其他用户会话"
+  },
+  "root": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest/r6-completed-osmo0/world",
+  "params": {
+    "type": "osmo360ii_record",
+    "duration_s": 1,
+    "bitrate": "high",
+    "exposure": {
+      "mode": "auto"
+    }
+  },
+  "clock": {
+    "mode": "frozen",
+    "epoch": 2,
+    "utc_us": 1792895212000000,
+    "monotonic_ns": 46474059616803
+  },
+  "stop_to_directory_ns": 30193107038,
+  "database_digests": {
+    "deployment/state.db": "d7ffe6598d19da5d7c9fabc9b64d08fd68809f7661f1262bcf223570b789280b",
+    "client-store/client.db": "a76fbe711a98b346b59abf93036d7947e0a0dd3126ff8396cc12b11bf4ada6d2"
+  },
+  "source_database_layouts": {
+    "deployment/state.db": {
+      "journal_mode": "wal",
+      "page_size": 4096,
+      "write_version": 2,
+      "read_version": 2
+    },
+    "client-store/client.db": {
+      "journal_mode": "wal",
+      "page_size": 4096,
+      "write_version": 2,
+      "read_version": 2
+    }
+  },
+  "backup_database_layouts": {
+    "deployment/state.db": {
+      "journal_mode": "wal",
+      "page_size": 4096,
+      "write_version": 2,
+      "read_version": 2
+    },
+    "client-store/client.db": {
+      "journal_mode": "wal",
+      "page_size": 4096,
+      "write_version": 2,
+      "read_version": 2
+    }
+  },
+  "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+  "restore_inventory": {
+    ".": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "adb.jsonl": {
+      "mode": 384,
+      "type": "file",
+      "size": 41610,
+      "sha256": "f74ddb26b9ce99dec5e4c3e8c421bbf94d279b4749faf3a581f0baea4340a6b8"
+    },
+    "client-export.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 109,
+      "sha256": "f7a61cb51e056438508f2216d9644a4622f72061e209c76933a08ada9333a54f"
+    },
+    "client-plan-1.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 336,
+      "sha256": "7b768b710394a76408c4ff232a98195161762a50912445a9bac38bb03c449df3"
+    },
+    "client-store": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "client-store/client.db": {
+      "mode": 420,
+      "type": "file",
+      "size": 32768,
+      "sha256": "26a4686e3e39a8d0ace523f3d13f18cc29d3c55a40061acff002801395fa6a2e"
+    },
+    "client-store/device-capabilities.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 7793,
+      "sha256": "990a95be40f88582b647f6286f5a02153249413936be2aa424cc8e21ccc3e358"
+    },
+    "clock-cli.jsonl": {
+      "mode": 384,
+      "type": "file",
+      "size": 9131,
+      "sha256": "58220873ea6ce373e76edde08753124df51c9add5feb10a2aa98ef5123945d0d"
+    },
+    "clock-reads.jsonl": {
+      "mode": 384,
+      "type": "file",
+      "size": 1623303,
+      "sha256": "741b16de8455cea16688c83cd870954519afa45018a48eeb570b47e8849a0476"
+    },
+    "clock.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 83,
+      "sha256": "e45af0e821936427680b26992f287162a197e9d397cd4849660e1b5b5b838b25"
+    },
+    "commands": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "commands/command-0001.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 2976,
+      "sha256": "d751ad0d60bcefb8036f165000cd4e4d82c71559e5d6a8b9db242d3d77be884e"
+    },
+    "commands/command-0002.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 11332,
+      "sha256": "5a4038e3b66b90cfc4993640e6d36b8edfb9e829d5522baeb95eabf4cadb7e3c"
+    },
+    "commands/command-0003.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 9713,
+      "sha256": "344d3a5b6be24901310f6974f017bf100063aa5c90edd97b906ea8d1f5677944"
+    },
+    "commands/command-0004.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 3798,
+      "sha256": "e57cb942e7b23df928e06def04847504666b1ed2645e1f475c5974824aab8393"
+    },
+    "commands/command-0005.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 2904,
+      "sha256": "461f702af1350244110b0838f486e1b67c260cb24da9232f2acb2789a421f23d"
+    },
+    "commands/command-0006.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 1879,
+      "sha256": "9c9bcecf4aa17b36d04bd97b7d061f3af6efe1e31791395151a7b0716f109a00"
+    },
+    "commands/command-0007.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 3820,
+      "sha256": "b250b994710dd2d6cd43df59a26e2cf773b243661025352f9f0566536e48b33c"
+    },
+    "commands/command-0008.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 2926,
+      "sha256": "7873350d3151d45b2f48b0bc6124d578c1f1961dfcc290c113230e3334004566"
+    },
+    "deployment": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/config.toml": {
+      "mode": 420,
+      "type": "file",
+      "size": 1206,
+      "sha256": "2f45bbec8b7e06a1eae6f4892b5c627f440b01098afb1dc26e88d9e98c934a5c"
+    },
+    "deployment/processing": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/ready": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/ready/status-report-5-7d355a6afaeb0eca5b6362a995ad187a93c0cf7924290245304448f96f6ef68a.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 586,
+      "sha256": "7d355a6afaeb0eca5b6362a995ad187a93c0cf7924290245304448f96f6ef68a"
+    },
+    "deployment/staging": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/capture-originals": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/capture-previews": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/capture-work": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/deliveries": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/derived": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/derived/2.mp4": {
+      "mode": 420,
+      "type": "file",
+      "size": 3252,
+      "sha256": "cc7e186b24ef445731c713313f233ed2df01a067cdde7b519b6f0925d6135e94"
+    },
+    "deployment/staging/logs": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/processing-temp": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/recording-inputs": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/recording-inputs/1.osv": {
+      "mode": 384,
+      "type": "file",
+      "size": 4384,
+      "sha256": "26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e"
+    },
+    "deployment/staging/reports": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "deployment/staging/reports/report-6-c496bbd083627af07b700e9d48125b92.tmp": {
+      "mode": 420,
+      "type": "file",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "deployment/state.db": {
+      "mode": 420,
+      "type": "file",
+      "size": 839680,
+      "sha256": "32ce0cf070f164c20435de982c129e8f779d49b6934dc4389759e428c0445edb"
+    },
+    "deployment/state.db.admission.lock": {
+      "mode": 420,
+      "type": "file",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "deployment/state.db.report.lock": {
+      "mode": 420,
+      "type": "file",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "deployment/state.db.session.lock": {
+      "mode": 420,
+      "type": "file",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gates": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "host-0.log": {
+      "mode": 420,
+      "type": "file",
+      "size": 933,
+      "sha256": "7a5c924131943ad15cde0677c851a5a08f7de9a8eb1bfd80f25a00b6c5461e74"
+    },
+    "host-1.log": {
+      "mode": 420,
+      "type": "file",
+      "size": 1078,
+      "sha256": "2e46f3eac0c9b2abffa5deeaf08006b397af4b66f10c72fd85efed590f153544"
+    },
+    "module.log": {
+      "mode": 384,
+      "type": "file",
+      "size": 1078,
+      "sha256": "2e46f3eac0c9b2abffa5deeaf08006b397af4b66f10c72fd85efed590f153544"
+    },
+    "plan-body.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 289,
+      "sha256": "cb3279e3fa1d26fd8af1757132e7c11583372c95931aea9290bfdb0e293c795d"
+    },
+    "remote": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt/media_rw": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt/media_rw/emulated": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt/media_rw/emulated/DCIM": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt/media_rw/emulated/DCIM/OSMO_0001": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "remote/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF": {
+      "mode": 420,
+      "type": "file",
+      "size": 36,
+      "sha256": "fa82bc5db5491f30c5dd8af08ba941c0912fdbc4d2e00eb7dd8bfc9491651c5c"
+    },
+    "remote/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV": {
+      "mode": 420,
+      "type": "file",
+      "size": 4384,
+      "sha256": "26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e"
+    },
+    "request-8456018624582964723.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 336,
+      "sha256": "7b768b710394a76408c4ff232a98195161762a50912445a9bac38bb03c449df3"
+    },
+    "sample.OSV": {
+      "mode": 420,
+      "type": "file",
+      "size": 4384,
+      "sha256": "26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e"
+    },
+    "sample.lrf": {
+      "mode": 420,
+      "type": "file",
+      "size": 36,
+      "sha256": "fa82bc5db5491f30c5dd8af08ba941c0912fdbc4d2e00eb7dd8bfc9491651c5c"
+    },
+    "settled-0.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 717,
+      "sha256": "e49ef0f22cf659afbfe1eba6fb5eea829bac992e2d2a1378fb6f367ad6ad42a2"
+    },
+    "settled-1.json": {
+      "mode": 420,
+      "type": "file",
+      "size": 717,
+      "sha256": "2c48c7e461889bb66e73873e97da96a796d845bbf4c097ed60a0a7f55ef60944"
+    },
+    "tools": {
+      "mode": 493,
+      "type": "directory"
+    },
+    "tools/_cleanup_roundtrip_adb.py": {
+      "mode": 420,
+      "type": "file",
+      "size": 5700,
+      "sha256": "44e50dcc6474056f361102fa0a8783c740092b08f15cdab9b0b89f269ba93606"
+    },
+    "tools/_cleanup_roundtrip_fault.py": {
+      "mode": 420,
+      "type": "file",
+      "size": 6310,
+      "sha256": "bbcb223730c0827709fd70914aaf44a0249b7d45c7de080118199680e0562504"
+    },
+    "tools/_osmo_builtin_adb.py": {
+      "mode": 420,
+      "type": "file",
+      "size": 12899,
+      "sha256": "b8666bc986b8d9546ca0ba90f6e489c1e1963f8d20cfd23e3a823a896f6900ce"
+    },
+    "tools/_osmo_builtin_clock.py": {
+      "mode": 420,
+      "type": "file",
+      "size": 5106,
+      "sha256": "44e7c84881c82c7e30d4bb3f2ec22b6d1350ce26493ac2cde2d47e8760f87e77"
+    },
+    "tools/_osmo_builtin_clock_entry.py": {
+      "mode": 420,
+      "type": "file",
+      "size": 4275,
+      "sha256": "f37a5f606fa4b598f547db2f6a92383a8f708bfe8d47f512f8440fe621afaf0f"
+    },
+    "tools/adb": {
+      "mode": 493,
+      "type": "file",
+      "size": 322,
+      "sha256": "9a6f3dc4d57dea5a3882d0a12847f1994e9ccfbdf2c7131832e0244388399499"
+    },
+    "tools/clock-cli": {
+      "mode": 493,
+      "type": "file",
+      "size": 330,
+      "sha256": "6a7cfd0c6648d72aa6ba54fe85d652cf8a4833384e62b63b869721e0762f6270"
+    }
+  },
+  "source_actions": [
+    {
+      "id": 1,
+      "plan_id": 1,
+      "input_index": 0,
+      "name": "capture-osmo",
+      "type": 2,
+      "device_id": "osmo",
+      "scheduled_at": 1792895209000000,
+      "group_name": null,
+      "input_fields_json": "{\"params\":{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}},\"policy\":{\"max_delay_ms\":60000}}",
+      "effective_params_json": "{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}}",
+      "driver_id": "dji-osmo360-ii",
+      "max_delay_ms": 60000,
+      "execution_spec_json": "{\"target_duration_ms\":1000,\"video_result_mode\":\"single_file\",\"ownership_mode\":2,\"output_scope\":{\"directories\":[\"/mnt/media_rw/emulated/DCIM\"]},\"product_rules\":[{\"kind\":\"video\",\"format_id\":\"osv\",\"min_count\":1,\"exact_count\":1,\"require_pairing\":false,\"min_size_bytes\":1}],\"file_completion_wait_ms\":30000,\"start_return_meaning\":1,\"startup_margin_ms\":0}",
+      "status": 3,
+      "execution_started": 1,
+      "cancel_requested": 0,
+      "error_code": null,
+      "error_details_json": null,
+      "first_window_observed_at": 1792895209000000,
+      "expiration_reason": null,
+      "source_resolution_state": null,
+      "resolved_source_plan_id": null,
+      "target_selection_state": null,
+      "created_event_id": 1,
+      "last_event_id": 78,
+      "change_count": 36
+    }
+  ],
+  "bindings": [
+    {
+      "id": 1,
+      "application_id": "camctl",
+      "instance_id": "c59db22ccadd4e059c1cc2b2c87ce2b2",
+      "format_version": 3,
+      "staging_path": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest/r6-completed-osmo0/world/deployment/staging",
+      "ready_path": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest/r6-completed-osmo0/world/deployment/ready",
+      "processing_path": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest/r6-completed-osmo0/world/deployment/processing"
+    }
+  ],
+  "producer_processes": [
+    {
+      "old": [
+        {
+          "pid": 696853,
+          "state": "T",
+          "ppid": 694523,
+          "pgid": 694523,
+          "starttime": 4647603,
+          "utc_ns": 1792895221813732779
+        },
+        {
+          "pid": 696858,
+          "state": "D",
+          "ppid": 696853,
+          "pgid": 696858,
+          "starttime": 4647603,
+          "utc_ns": 1792895221817748543
+        },
+        {
+          "pid": 696909,
+          "state": "S",
+          "ppid": 696858,
+          "pgid": 696858,
+          "starttime": 4647765,
+          "utc_ns": 1792895221817853952
+        },
+        {
+          "pid": 696910,
+          "state": "S",
+          "ppid": 696858,
+          "pgid": 696858,
+          "starttime": 4647765,
+          "utc_ns": 1792895221817886785
+        }
+      ],
+      "groups": [
+        696858
+      ],
+      "active_after": []
+    },
+    {
+      "old": [
+        {
+          "pid": 697194,
+          "state": "T",
+          "ppid": 694523,
+          "pgid": 694523,
+          "starttime": 4648322,
+          "utc_ns": 1792895257710138552
+        },
+        {
+          "pid": 697199,
+          "state": "R",
+          "ppid": 697194,
+          "pgid": 697199,
+          "starttime": 4648322,
+          "utc_ns": 1792895257712852144
+        },
+        {
+          "pid": 697236,
+          "state": "S",
+          "ppid": 697199,
+          "pgid": 697199,
+          "starttime": 4648417,
+          "utc_ns": 1792895257713011920
+        },
+        {
+          "pid": 697237,
+          "state": "S",
+          "ppid": 697199,
+          "pgid": 697199,
+          "starttime": 4648417,
+          "utc_ns": 1792895257713043671
+        }
+      ],
+      "groups": [
+        697199
+      ],
+      "active_after": []
+    }
+  ],
+  "snapshot_seconds": 0.21166036300564883,
+  "shared_setup_seconds": 48.316243745000975
+}

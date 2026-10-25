@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 70.8036351769988
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.380242776001978
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005499859980773181
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 93.18442793899885
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013333589959074743
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.292550453996228
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039805200503906235
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 22.294281864997174
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008565160023863427
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 21.279404729000817
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00043015200208174065
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 21.280691397005285
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008521760028088465
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 21.355842741999368
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.024309820000780746
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 21.381004738002957
+  }
+]

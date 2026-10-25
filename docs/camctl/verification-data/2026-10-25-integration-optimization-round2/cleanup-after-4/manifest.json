@@ -1,0 +1,364 @@
+{
+  "purpose": "S7最终冻结源码cleanup完整11项四路after；来源复用及九个独立消费者真实验证。",
+  "source": {
+    "root": "/tmp/camctl-itopt-round2-final",
+    "head": "8164851c8d5aa2a25f7bbd59bd09a6d970b38369",
+    "status": "",
+    "snapshot_sha256": "adc908968f11d3f9baf35589aa632fe7ad0b5b02bb2845cf077cf8c4c180bab3"
+  },
+  "run_root": "/tmp/camctl-itopt-round2-cleanup-after-4",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-final",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "--jobs",
+    "4",
+    "--output",
+    "/tmp/camctl-itopt-round2-cleanup-after-4"
+  ],
+  "exec_session": 51035,
+  "runner_pid": 694125,
+  "status": "finished",
+  "exit_code": 0,
+  "jobs": 4,
+  "root_shards": 4,
+  "task_count": 4,
+  "task_outcomes": {
+    "passed": 4
+  },
+  "primary_count": 11,
+  "unique_primary_count": 11,
+  "complete_primary_count": 11,
+  "primary_outcomes": {
+    "passed": 11
+  },
+  "all_progress_finished": true,
+  "timing": {
+    "runner_wall_seconds": 274.861842848004,
+    "collector_monotonic_wall_seconds": 275.0264543309968,
+    "task_wall_sum_seconds": 696.0062742310038,
+    "pytest_phase_seconds": {
+      "setup": 234.40654123799322,
+      "call": 397.59360992800794,
+      "teardown": 0.07605774501280393
+    },
+    "pytest_phase_sum_seconds": 632.076208911014,
+    "preparations": {
+      "package-resources": {
+        "count": 4,
+        "wall_sum_seconds": 0.4649045210026088
+      }
+    }
+  },
+  "osmo_producers": {
+    "actual_runs": 3,
+    "containing_shards": 3,
+    "by_task_directory": {
+      "002-root-test_device_file_cleanup_roundtrip-shard-4": 4,
+      "003-root-test_device_file_cleanup_roundtrip-shard-2": 2,
+      "004-root-test_device_file_cleanup_roundtrip-shard-3": 3
+    },
+    "consumer_count": 9,
+    "unique_consumer_nodeids": 9,
+    "stop_to_directory_monotonic_seconds": [
+      30.239177867,
+      30.193107038,
+      30.236443233
+    ],
+    "producer_seconds_sum": 144.77896368400252,
+    "snapshot_seconds_sum": 0.4487236050044885,
+    "shared_setup_seconds_sum": 145.23062791999837,
+    "proof": "producer-proof.json",
+    "consumers": "consumers.json",
+    "scope": "仅primary r6-completed-osmo fixture真实路径计producer；.local中的consumer证明仅作九消费者原记录，不再作为producer重复计数。三份基线adb各START/STOP一次及真实ffmpeg生成均成功；原至少30秒STOP等待保持。每个consumer保存其nodeid、同基线摘要、恢复WAL布局和独立最终摘要。"
+  },
+  "resource_scope": "Metadata git rev-parse/status children finish before children_before and start time. The measured interval has exactly one runner child; CPU/I/O deltas exclude prior metadata usage. RUSAGE_CHILDREN contains waited descendant usage propagated by child reaping. Raw ru_maxrss is the lifetime maximum single descendant process (including prior metadata git); children_before retains its prior value. It is not concurrent tree memory. inblock/oublock are raw kernel block-operation counts, not bytes. No complete per-process CPU/I/O sample or device-throughput claim.",
+  "browser_observation": {
+    "interval_seconds": 0.25,
+    "samples": 1084,
+    "scan_wall_seconds": 3.8141886468947632,
+    "read_races": 57,
+    "observed_browser_roots_count": 0,
+    "roots": [],
+    "coverage": "Observed unique PID/start_ticks among runner descendants whose executable-name/argv satisfy the Chromium-name and no --type filter. This argv classification may miss processes or misclassify fork/exec transitions; it is not a verified browser-root, launch, or session count. Explicit S5/S6 lifecycle recorders are authoritative for optimization counts. The 0.25 second wait follows each scan, so actual intervals also include scan and scheduling time. Roots shorter than actual intervals, between scans, or reparented before observation can be missed."
+  },
+  "comparison_limits": [
+    "与同b82 before完整11身份、同四路及锁定依赖比较；记录单次观察，不外推稳定比例或其他模块。",
+    "来源构造移至module fixture，使pytest setup/call边界改变；必须比较完整phase合计及真实producer次数，不能只看call下降。",
+    "源码物理根恢复的每个consumer保留独立证明；来自相同source的日志副本不重复算producer。"
+  ],
+  "dependencies": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "node": "v24.22.1",
+    "node_modules": "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "node_package_lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+    "playwright_core": "1.63.0",
+    "chromium_revision": "1243",
+    "uv_cache_source": "/home/cld/.cache/uv"
+  },
+  "files": [
+    {
+      "path": "cases.json",
+      "sha256": "e6d05eb356c9b5250c2caeee5c70de638907b1a6234af1dd9c4541e07a0f3b80",
+      "bytes": 6570
+    },
+    {
+      "path": "collector-source.txt",
+      "sha256": "bb3571f2c51c3e5855ccbeade4e8fce348096b432d63478cd5168971f5edb406",
+      "bytes": 6534
+    },
+    {
+      "path": "consumers.json",
+      "sha256": "e2d5f5957813b95aa703172bf1ca10ffc6275eb8500d2761e35b37a91cd6fcb8",
+      "bytes": 8267
+    },
+    {
+      "path": "driver.log",
+      "sha256": "826b52d33d7ea324d95fc4ae3abb3b03465c466607abdfd43d1985390efe1da0",
+      "bytes": 8485
+    },
+    {
+      "path": "plan.json",
+      "sha256": "bb7e0998d1208790b4572a173caef1d30a267058155914a22943c33e7ba73053",
+      "bytes": 3317
+    },
+    {
+      "path": "producer-proof.json",
+      "sha256": "d1e244bcf9dfe889ea8a8ff09ebd40fe3a6ac50194c44f55ae59c5863cfeb94e",
+      "bytes": 1949
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/adb.jsonl",
+      "sha256": "79cf47d09a30564ba25586b4b8cd6bd1bc109e023d8de3d1d001cca251c13842",
+      "bytes": 41610
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/consumers.json",
+      "sha256": "fe0a38e82df16c5484d1f389e61a1f2c655c6de0fffdb5f7e3e2056271575d04",
+      "bytes": 3345
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/media-producer-command.json",
+      "sha256": "54e138a2d2f99247bb037e365c2d22bf499a90e59869cb59308b31cde32fb29d",
+      "bytes": 9713
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/source-proof.json",
+      "sha256": "e51004ed9f4f7c0c8bde425041176f69ffaa339a68f26caa9f75b709252c4746",
+      "bytes": 16170
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/adb.jsonl",
+      "sha256": "f74ddb26b9ce99dec5e4c3e8c421bbf94d279b4749faf3a581f0baea4340a6b8",
+      "bytes": 41610
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/consumers.json",
+      "sha256": "9abb3946cd34c9b1fd1de8765736634db82483314f03682688358e28a73c623d",
+      "bytes": 1691
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/media-producer-command.json",
+      "sha256": "344d3a5b6be24901310f6974f017bf100063aa5c90edd97b906ea8d1f5677944",
+      "bytes": 9713
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/source-proof.json",
+      "sha256": "4bea8913fe1dca7508d2b30e8fa5c80ccba3842d5fc5968636836eeb6e123ff5",
+      "bytes": 15942
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/adb.jsonl",
+      "sha256": "482fb15e46df7c423fe32914bae9d6b2bebc5b90317868fd3dfb0a2de7334be1",
+      "bytes": 41610
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/consumers.json",
+      "sha256": "3c4d5ff7794d1915b8aa95c64a2bc12aafa3be6f61327c384bb85ad8a47f2b88",
+      "bytes": 2541
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/media-producer-command.json",
+      "sha256": "edf38b5be9a40b63bb5e1d9dd7b66c89433baa61a24fec9dc70c2c59e85e448b",
+      "bytes": 9713
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/source-proof.json",
+      "sha256": "fcaf076b83191648ba86e3bf26e2fe1b3ea96e3fc2bc1776e7de0b3eb076aab5",
+      "bytes": 15939
+    },
+    {
+      "path": "resource-start.json",
+      "sha256": "5687d355813f8daed70e2c00ea4ac9023f3aaec407c9d2260fa985fb57caabf6",
+      "bytes": 967
+    },
+    {
+      "path": "resource.json",
+      "sha256": "c633fc2c411848b3f203669222eb6f5c311b63094868386f6d8333c6373cdc8c",
+      "bytes": 3090
+    },
+    {
+      "path": "source.json",
+      "sha256": "5ca030f0e4b85fcd8d1621850475896c1352b18bafd8807e999af90848d823a3",
+      "bytes": 346812
+    },
+    {
+      "path": "summary.json",
+      "sha256": "4ef9064272454810b8ba57f7b32e3caf766ec7735833eebc71dba8a738de5547",
+      "bytes": 17160
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/cases.json",
+      "sha256": "419b7f5c02977bb49b8d8c17563c937695dfab57b4cf174857e398de5e7d185e",
+      "bytes": 540
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/command.json",
+      "sha256": "91874ec617f422a5e2b016b7116c4651d3d63bfeb6d35483e46dd439f4fe42e9",
+      "bytes": 3605
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/events.jsonl",
+      "sha256": "5be882eef2517c7776f1888791792ac15d3200f8169bdc7483b9b8ba487668bb",
+      "bytes": 2488
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/inventory.json",
+      "sha256": "3e489f7efb06e387d4a33f268eecb274af583eb6b21bcce6499e12e8ace19f69",
+      "bytes": 120
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/output.log",
+      "sha256": "44b4bf88840915b43fe9a074e2c3ec50b568500a45de5b17f46aeda67683b5ec",
+      "bytes": 512
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/progress.json",
+      "sha256": "d684c0cc22104e93860339dc618aca3ff117f7d957c2948a1f542932967f7014",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/result.json",
+      "sha256": "e16f3b21213ff1fc005f7db29b6f8bed18362ef75220fee57ad0daedab73c89a",
+      "bytes": 3319
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/cases.json",
+      "sha256": "0f7b783cf9204b591185292a63a84c9b62a9f3a7a3211d8cc105bdc221b6bfdb",
+      "bytes": 2111
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/command.json",
+      "sha256": "395f609d4656152e947c6bdc0848e9ac1a137286727c780e3f1261e86f6291d7",
+      "bytes": 4209
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/events.jsonl",
+      "sha256": "c8d305e2acd5542a92763f0e05e97581e4e282008185f894e54a747e230a422f",
+      "bytes": 7826
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/inventory.json",
+      "sha256": "4dc731ef383326ef01ec94750fba217fec9a2e943102605b92156febf9d77445",
+      "bytes": 416
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/output.log",
+      "sha256": "b9bcf62993b86216d65d1a2a45c8135ec5348d7f67cafa86887e4587990e00ef",
+      "bytes": 940
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/progress.json",
+      "sha256": "c13d89a6e94874da6f08caeb13bae57270ceb15a0aeb1de11a4805ffc360da96",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/result.json",
+      "sha256": "9fdd723b9012d3bd90d225fb26eec3d86c240c5d33f08a7d8615b19eae574f15",
+      "bytes": 3923
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/cases.json",
+      "sha256": "4b013c7003d34dfad48d1fa60791bf383e74d8c47254a39a739cf84af8114ed8",
+      "bytes": 1074
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/command.json",
+      "sha256": "45fbf284b533d42687a4a5fa03877cb54defcc3245f2a3e904fc8b81d9b07a0c",
+      "bytes": 3824
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/events.jsonl",
+      "sha256": "79285aa2747f7efe4dbdce1555952a1a8f4697016092032907f982e9485a74a2",
+      "bytes": 4341
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/inventory.json",
+      "sha256": "1e6c7fd1bc208316cfe2a07d70375a206a208edb8826625285bb895ae411dcc3",
+      "bytes": 228
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/output.log",
+      "sha256": "0195ad5e65211ca7aa58f3a56f1bcff0760b19f314be3fed4fbbc0d94e94f375",
+      "bytes": 751
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/progress.json",
+      "sha256": "15de10f7e7e2e0440a183cabddf6dd2815c808591cda98a2918fd288d26973f0",
+      "bytes": 220
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/result.json",
+      "sha256": "7b0b2a81d1ee40845c14631af5bdad7358bc2bf28d931e3cc11a6e36776c43c5",
+      "bytes": 3537
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/cases.json",
+      "sha256": "6b86416751369c1bbbe092e573dd27f196f1ac6bf0811705ecde86a9e473c537",
+      "bytes": 2161
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/command.json",
+      "sha256": "e553b20b5b878f520ba582e67b5992e8c601aa436e2bf796a035120b2e10265e",
+      "bytes": 4312
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/events.jsonl",
+      "sha256": "749548497ab4f04ffb3e0f669393695e68b8ec08151e86f37543b7f86375f14c",
+      "bytes": 8238
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/inventory.json",
+      "sha256": "ae22d79d037c082b7462ddfa1788b1aca7ad29442eb4751db4bb7b281b243a46",
+      "bytes": 468
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/output.log",
+      "sha256": "22940b546e5111458fa81d1435f7424cab96b9251419d7ff7c617326a03f5bcf",
+      "bytes": 998
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/progress.json",
+      "sha256": "f7b55373b93dc7c509b36758cf36f94479ac5aff1bfeefc13ff75fecc9926465",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/result.json",
+      "sha256": "490a9dba3cd111561043b5018a0a8a6e80e53e1b81d60d74458448d41f46f188",
+      "bytes": 4026
+    },
+    {
+      "path": "tasks.csv",
+      "sha256": "6de08f035341c493e19d57e3fa723f6fa850a2f7d26e02639bb6f3014edba862",
+      "bytes": 475
+    }
+  ]
+}

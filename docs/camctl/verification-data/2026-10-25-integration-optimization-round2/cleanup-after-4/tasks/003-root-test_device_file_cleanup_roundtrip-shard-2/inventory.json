@@ -1,0 +1,4 @@
+[
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+  "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]"
+]

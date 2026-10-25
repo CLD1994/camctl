@@ -1,0 +1,38 @@
+[
+  {
+    "task_directory": "002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "source_root": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/tmp/pytest/r6-completed-osmo0/world",
+    "archive": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "producer_runs": 1,
+    "producer_seconds": 48.3762966180002,
+    "snapshot_seconds": 0.12101873799838359,
+    "shared_setup_seconds": 48.497322641997016,
+    "stop_to_directory_monotonic_ns": 30239177867,
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "consumer_count": 4
+  },
+  {
+    "task_directory": "003-root-test_device_file_cleanup_roundtrip-shard-2",
+    "source_root": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest/r6-completed-osmo0/world",
+    "archive": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2",
+    "producer_runs": 1,
+    "producer_seconds": 48.101657653001894,
+    "snapshot_seconds": 0.21166036300564883,
+    "shared_setup_seconds": 48.316243745000975,
+    "stop_to_directory_monotonic_ns": 30193107038,
+    "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+    "consumer_count": 2
+  },
+  {
+    "task_directory": "004-root-test_device_file_cleanup_roundtrip-shard-3",
+    "source_root": "/tmp/camctl-itopt-round2-cleanup-after-4/tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/tmp/pytest/r6-completed-osmo0/world",
+    "archive": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3",
+    "producer_runs": 1,
+    "producer_seconds": 48.30100941300043,
+    "snapshot_seconds": 0.11604450400045607,
+    "shared_setup_seconds": 48.41706153300038,
+    "stop_to_directory_monotonic_ns": 30236443233,
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "consumer_count": 3
+  }
+]
