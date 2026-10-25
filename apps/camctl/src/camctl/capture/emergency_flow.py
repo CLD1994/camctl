@@ -25,7 +25,8 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.result_format import error_document, result_document
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.business import BusinessDatabase, settle_required
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.capture import CaptureRepository
 
 _ACTION_TYPE = enum_for("actions.type")
@@ -180,8 +181,8 @@ class EmergencySettlement:
     """一次会话错误收场的应急停止执行器。
 
     stop_config 按 device_id 提供本会话停止配置（max_attempts、
-    timeout_s、retry_interval_s）；registry 提供 StopDriver；open_owned
-    为读取与补记打开独立连接。每个目标独立停止、补记并形成一条
+    timeout_s、retry_interval_s）；registry 提供 StopDriver；database
+    为读取与补记提供共享业务队列。每个目标独立停止、补记并形成一条
     诊断；单目标失败不阻止其余目标。
     """
 
@@ -189,7 +190,7 @@ class EmergencySettlement:
     anchors: Mapping[int, Any]
     stop_config: Mapping[str, Mapping[str, Any]]
     registry: Any
-    open_owned: Callable[[], Any]
+    database: BusinessDatabase
     wall_us: Callable[[], int]
     repository: CaptureRepository = field(default_factory=CaptureRepository)
     entries: list[dict] = field(default_factory=list)
@@ -197,15 +198,11 @@ class EmergencySettlement:
     async def settle(self) -> list[dict]:
         """执行全部可识别目标的应急停止；返回诊断条目。"""
         try:
-            owned = self.open_owned()
+            anchors = dict(self.anchors)
+            targets = await self.database.read(lambda owned: discover_targets(
+                owned.connection, anchors, self.session_key), description="读取应急目标")
         except Exception as error:
             return self._unreadable(error)
-        try:
-            targets = discover_targets(owned.connection, self.anchors, self.session_key)
-        except Exception as error:
-            return self._unreadable(error)
-        finally:
-            owned.connection.close()
         for target in targets:
             await self._settle_one(target)
         return list(self.entries)
@@ -257,7 +254,7 @@ class EmergencySettlement:
         entry["attempts_used"] = record.attempts_used
         entry["outcome"] = record.outcome.value
         entry["record_status"] = RecordStatus.NOT_RECORDED.value
-        self._record(target, record, attempts, config, entry)
+        await self._record(target, record, attempts, config, entry)
 
     def _stopper_of(self, target: EmergencyTarget):
         if self.registry is None:
@@ -267,34 +264,35 @@ class EmergencySettlement:
             return None
         return registered.driver
 
-    def _record(self, target: EmergencyTarget, record: EmergencyRecord,
+    async def _record(self, target: EmergencyTarget, record: EmergencyRecord,
                 attempts: tuple[dict, ...], config: Mapping[str, Any],
                 entry: dict[str, Any]) -> None:
-        """按实际保存结果补记并更新诊断；保存失败不改写停止事实。"""
-        try:
-            owned = self.open_owned()
-        except Exception as error:
-            entry["error"] = f"补记连接打开失败: {error}"
-            return
-        try:
-            receipt = self.repository.save_emergency(
-                session_key=self.session_key,
-                action_id=target.action_id,
-                activity_id=target.activity_id,
-                record=record,
-                attempts=attempts,
-                occurred_at=self.wall_us(),
-                key=new_operation_key(),
-                owned=owned,
-                timeout_s=config.get("timeout_s"),
-                retry_interval_s=config.get("retry_interval_s"),
-            )
-        except Exception as error:
-            entry["error"] = f"补记失败: {error}"
-            return
-        finally:
-            owned.connection.close()
-        if receipt.kind is DbOutcomeKind.COMPLETED:
-            entry["record_status"] = RecordStatus.RECORDED.value
-        elif receipt.kind is DbOutcomeKind.UNKNOWN:
-            entry["record_status"] = RecordStatus.UNKNOWN.value
+        """原真实停止结果入队补记，诊断在事件循环接手实际回执。"""
+        key, occurred_at = new_operation_key(), self.wall_us()
+        async def save_and_apply():
+            failure = None
+            try:
+                receipt = await self.database.write(lambda owned: self.repository.save_emergency(
+                    session_key=self.session_key, action_id=target.action_id,
+                    activity_id=target.activity_id, record=record, attempts=attempts,
+                    occurred_at=occurred_at, key=key, owned=owned,
+                    timeout_s=config.get("timeout_s"), retry_interval_s=config.get("retry_interval_s")),
+                    key=key, description="补记原应急停止结果")
+            except BaseException as error:
+                receipt = db_outcome_for(error)
+                if receipt is None:
+                    if isinstance(error, Exception):
+                        entry["error"] = f"补记失败: {error}"
+                        return
+                    raise
+                failure = error
+            if receipt.kind is DbOutcomeKind.COMPLETED:
+                entry["record_status"] = RecordStatus.RECORDED.value
+            elif receipt.kind is DbOutcomeKind.UNKNOWN:
+                entry["record_status"] = RecordStatus.UNKNOWN.value
+            if failure is not None:
+                if isinstance(failure, Exception):
+                    entry["error"] = f"补记交接失败: {failure}"
+                else:
+                    raise failure
+        await settle_required(save_and_apply())

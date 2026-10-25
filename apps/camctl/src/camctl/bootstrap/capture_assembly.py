@@ -270,27 +270,27 @@ class DriverResultListing:
     def __init__(
         self, driver: Any, binding: DeviceBinding, evidence: Any,
         *, capture_repository: CaptureRepository | None = None,
-        owned: Any | None = None,
+        database: Any | None = None,
     ) -> None:
-        if (capture_repository is None) != (owned is None):
-            raise ValueError("结果历史读取必须同时取得原结果仓储和 owned 连接")
+        if (capture_repository is None) != (database is None):
+            raise ValueError("结果历史读取必须同时取得原结果仓储和数据库端口")
         self._driver = driver
         self._binding = binding
         self._evidence = evidence
         self._capture_repository = capture_repository
-        self._owned = owned
+        self._database = database
         self._history_owner = object()
         self._reading_context: ResultReadingContext | None = None
 
-    def _saved_result_pages(self, ticket: AttemptTicket) -> Iterator[Any]:
+    async def _saved_result_pages(self, ticket: AttemptTicket) -> Iterator[Any]:
         """按原尝试逐页读取已可靠保存的历史，不缓存目录或页集合。"""
-        if self._capture_repository is None or self._owned is None:
+        if self._capture_repository is None or self._database is None:
             raise ConsistencyError("结果历史读取缺少原结果仓储")
         event_cursor = None
         first = True
         while True:
-            pages = self._capture_repository.read_result_pages(
-                ticket, event_cursor, 1, self._owned)
+            pages = await self._database.read(lambda owned: self._capture_repository.read_result_pages(
+                ticket, event_cursor, 1, owned), description="读取一页原结果历史")
             if not pages.items:
                 if first:
                     return
@@ -304,7 +304,7 @@ class DriverResultListing:
             event_cursor = pages.next_cursor
             first = False
 
-    def _prior_result_entries(
+    async def _prior_result_entries(
         self, ticket: AttemptTicket, cursor: DirectoryCursor | None,
         output_scope: Mapping | None, context: ResultReadingContext,
     ) -> Callable[[], Iterator[Mapping[str, Any]]] | None:
@@ -312,14 +312,17 @@ class DriverResultListing:
         if self._capture_repository is None:
             return None
         if cursor is None:
-            saved = next(self._saved_result_pages(ticket), None)
+            saved = await anext(self._saved_result_pages(ticket), None)
             if saved is not None:
                 raise ConsistencyError("已有可靠结果页后不能重开原尝试首页")
             if context.history_initialized:
                 raise ConsistencyError("原结果页尚未可靠保存，不能重新派发首页")
             context.history_initialized = True
             context.history_owner = self._history_owner
-            return lambda: iter(())
+            async def empty():
+                if False:
+                    yield
+            return empty
         directories = None if not isinstance(output_scope, Mapping) else output_scope.get("directories")
         if (not isinstance(directories, (list, tuple)) or not directories
                 or any(not isinstance(directory, str) or not directory for directory in directories)
@@ -332,14 +335,15 @@ class DriverResultListing:
         expected_page_no = 1 if previous_ref is None else previous_ref.page_no + 1
         last_ref = previous_ref
         if incremental:
-            pages = self._capture_repository.read_result_pages(
-                ticket, None if previous_ref is None else previous_ref.event_id, 1, self._owned)
+            pages = await self._database.read(lambda owned: self._capture_repository.read_result_pages(
+                ticket, None if previous_ref is None else previous_ref.event_id, 1, owned))
             if len(pages.items) != 1 or pages.next_cursor is not None:
                 raise ConsistencyError("下一次结果调用之前必须恰好可靠保存原当前页")
-            history = iter(pages.items)
+            history = pages.items
         else:
             history = self._saved_result_pages(ticket)
-        for saved in history:
+        from camctl.capture.result_scans import iter_result_entries
+        async for saved in iter_result_entries(history):
             page = saved.page
             if saved.ref.ticket != ticket or saved.page.outcome.error is not None:
                 raise ConsistencyError("前页没有同尝试的无错误可靠实际结果")
@@ -370,9 +374,9 @@ class DriverResultListing:
         context.history_owner = self._history_owner
         context.verified_last_ref = last_ref
 
-        def entries() -> Iterator[Mapping[str, Any]]:
+        async def entries():
             observed_last_event_id = None
-            for saved in self._saved_result_pages(ticket):
+            async for saved in self._saved_result_pages(ticket):
                 if saved.ref.event_id > last_ref.event_id:
                     raise ConsistencyError("前页历史读取超出原可靠末引用")
                 if saved.page.outcome.error is not None:
@@ -392,11 +396,13 @@ class DriverResultListing:
         if self._capture_repository is None:
             return None
 
-        def candidates(identities):
+        async def candidates(identities):
             began = time.monotonic_ns()
-            activity = row_facts(self._owned.connection, "device_activities", int(ticket.target_id))
-            action = (None if activity is None else
-                row_facts(self._owned.connection, "actions", activity["action_id"]))
+            def read_identity(owned):
+                activity = row_facts(owned.connection, "device_activities", int(ticket.target_id))
+                action = None if activity is None else row_facts(owned.connection, "actions", activity["action_id"])
+                return activity, action
+            activity, action = await self._database.read(read_identity)
             if (activity is None or action is None
                     or DeviceBinding(action["device_id"], action["driver_id"]) != self._binding
                     or activity["ownership_mode"] != int(enum_for("device_activities.ownership_mode").BASELINE_COMPARISON)):
@@ -406,7 +412,7 @@ class DriverResultListing:
                 original_scope = parse_exact_json(original_scope)
             if original_scope != output_scope:
                 raise ConsistencyError("候选筛选改变原活动的完整结果范围")
-            ref = self._capture_repository.baseline_ref(int(ticket.target_id), self._owned)
+            ref = await self._database.read(lambda owned: self._capture_repository.baseline_ref(int(ticket.target_id), owned))
             if ref.state is not BaselineState.FIXED or ref.activity_id != int(ticket.target_id):
                 raise ConsistencyError("候选筛选要求原活动已经固定的基准")
             if context.baseline_ref is None:
@@ -420,10 +426,10 @@ class DriverResultListing:
                     context.baseline_chunk = None
                     context.baseline_index = 0
 
-            def original():
+            async def original():
                 while context.baseline_chunk is None and not context.baseline_exhausted:
-                    page = self._capture_repository.read_baseline(
-                        ref, context.baseline_cursor, 1, self._owned)
+                    page = await self._database.read(lambda owned: self._capture_repository.read_baseline(
+                        ref, context.baseline_cursor, 1, owned))
                     if len(page.items) > 1:
                         raise ConsistencyError("基准读取没有遵守单批上限")
                     context.baseline_chunk = page.items[0] if page.items else None
@@ -440,10 +446,10 @@ class DriverResultListing:
                         and identity.sort_key <= context.candidate_last_key):
                     raise ConsistencyError("候选身份没有保持原范围和单调扫描次序")
                 context.candidate_last_key = identity.sort_key
-                item = original()
+                item = await original()
                 while item is not None and item.sort_key < identity.sort_key:
                     advance()
-                    item = original()
+                    item = await original()
                 if item is None or item.sort_key != identity.sort_key:
                     selected.append(identity)
                 else:
@@ -517,7 +523,7 @@ class DriverResultListing:
             raise ConsistencyError("结果读取上下文改变原绑定或完整目录范围")
         try:
             with measure_performance("prior_result_history", run_id=ticket.run_id, attempt_no=ticket.attempt_id):
-                prior_result_entries = self._prior_result_entries(ticket, cursor, output_scope, context)
+                prior_result_entries = await self._prior_result_entries(ticket, cursor, output_scope, context)
         except BaseException as error:
             try:
                 context.close()
@@ -598,12 +604,12 @@ class DriverResultListing:
 
 
 def _digest_reader_factory(
-    owned: Any, driver: Any, binding: DeviceBinding, evidence: Any,
+    database: Any, driver: Any, binding: DeviceBinding, evidence: Any,
 ) -> Callable[[int], DriverDigestReader]:
     """构造按源设备文件解析的源端摘要读取工厂。"""
 
-    def resolve(source_device_file_id: int) -> DriverDigestReader:
-        source = load_confirmed_source(owned, source_device_file_id)
+    async def resolve(source_device_file_id: int) -> DriverDigestReader:
+        source = await database.read(lambda owned: load_confirmed_source(owned, source_device_file_id))
         return DriverDigestReader(
             driver, binding, evidence, source, str(source_device_file_id))
 
@@ -648,30 +654,6 @@ def _window_of(action: Mapping[str, Any]) -> LaunchWindow:
         window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000)
 
 
-def _host_photo_operation_verifier(
-    owned: Any,
-) -> Callable[[Any, Any, Any], Any]:
-    """在装配层为未知主机拍摄回执创建独立只读核实连接。"""
-    def verify(request, key, repository):
-        with closing(owned.connection.execute("PRAGMA database_list")) as cursor:
-            rows = cursor.fetchall()
-        main = next((row[2] for row in rows if row[1] == "main"), None)
-        if not main:
-            raise ConsistencyError("原主机拍摄事务无法取得状态库路径以独立核实")
-
-        verifier = open_existing(Path(main), DbOpenMode.EXISTING_RO, DbConfig())
-        try:
-            verifier.connection.execute("PRAGMA query_only = ON").close()
-            with closing(verifier.connection.execute("PRAGMA query_only")) as cursor:
-                if cursor.fetchone() != (1,):
-                    raise ConsistencyError("主机拍摄核实连接未进入 query_only 模式")
-            return repository.verify_operation(request, key, verifier)
-        finally:
-            verifier.connection.close()
-
-    return verify
-
-
 def session_capture_assembly(
     *,
     devices: Mapping[str, Mapping[str, Any]],
@@ -704,6 +686,7 @@ def session_capture_assembly(
     pending_baselines: dict | None = None,
     pending_result_scans: dict | None = None,
     pending_segment_writes: dict | None = None,
+    pending_segment_inspection_results: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
     pending_host_photo_completions: dict[int, Any] | None = None,
     start_entries=None,
@@ -760,6 +743,7 @@ def session_capture_assembly(
     baselines = {} if pending_baselines is None else pending_baselines
     result_scans = {} if pending_result_scans is None else pending_result_scans
     segment_writes = {} if pending_segment_writes is None else pending_segment_writes
+    inspection_results = {} if pending_segment_inspection_results is None else pending_segment_inspection_results
     host_photo_prepares = ({} if pending_host_photo_prepares is None
                            else pending_host_photo_prepares)
     host_photo_completions = ({} if pending_host_photo_completions is None
@@ -786,10 +770,10 @@ def session_capture_assembly(
     def fixed_recovery_boundary() -> int | None:
         return None if recovery_max_event_id is None else recovery_max_event_id()
 
-    def binding_only_runtime(owned: Any) -> CaptureRuntime:
+    def binding_only_runtime(database: Any) -> CaptureRuntime:
         """缺少设备声明仍装配局部失败责任，不取得设备端口。"""
         return CaptureRuntime(
-            owned=owned,
+            database=database,
             scheduling=SchedulingRepository(),
             operations=OperationRepository(),
             capture=CaptureRepository(),
@@ -798,7 +782,6 @@ def session_capture_assembly(
             results=None,
             roots=roots,
             host_capture=HostCaptureRepository(),
-            host_photo_operation_verifier=_host_photo_operation_verifier(owned),
             evidence=None,
             wall_us=wall,
             monotonic_ns=monotonic,
@@ -819,6 +802,7 @@ def session_capture_assembly(
             pending_baselines=baselines,
             pending_result_scans=result_scans,
             pending_segment_writes=segment_writes,
+            pending_segment_inspection_results=inspection_results,
             retry_gate=retry_gate,
             pending_read_results=pending_read_results,
             pending_read_business=pending_read_business,
@@ -830,10 +814,10 @@ def session_capture_assembly(
             binding_check=lambda saved: check_binding(saved, current_config),
         )
 
-    def factory(owned: Any, device_id: str) -> CaptureRuntime | None:
+    async def factory(database: Any, device_id: str) -> CaptureRuntime | None:
         declaration = devices.get(device_id)
         if not isinstance(declaration, Mapping):
-            return binding_only_runtime(owned)
+            return binding_only_runtime(database)
         driver_id = declaration.get("driver")
         entry = drivers.entry(driver_id) if isinstance(driver_id, str) else None
         if entry is None:
@@ -871,11 +855,11 @@ def session_capture_assembly(
                     DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
                     entry.evidence,
                     capture_repository=capture_repository,
-                    owned=owned,
+                    database=database,
                 )
         media = (
             _media_flow_with(
-                owned, entry, device_id, str(driver_id), tools, staging,
+                database, entry, device_id, str(driver_id), tools, staging,
                 wall, declaration, retry_gate, monotonic, executor,
                 read_discovery_batch_size=read_discovery_batch_size)
             if media_enabled else None)
@@ -890,6 +874,7 @@ def session_capture_assembly(
             media.pending_read_business = pending_read_business
             media.pending_read_ends = pending_read_ends
             media.pending_media_results = media_results
+            media.pending_segment_inspection_results = inspection_results
 
         def current_wait_config(action):
             extra_wait = declaration.get("capture", {}).get("extra_wait_ms", 0)
@@ -900,15 +885,15 @@ def session_capture_assembly(
         recovery_driver = (entry.driver if isinstance(entry.driver, AdbCameraDriver)
             and entry.driver.declaration.os_reboot_recovery_supported else None)
         recovery_config = SoftwareRecoveryConfig(**dict(declaration.get("software_recovery", {})))
-        if recovery_driver is not None and owned.metadata.format_version >= 3:
-            row = owned.connection.execute("SELECT 1 FROM software_recoveries r JOIN actions a ON a.id=r.action_id"
-                " JOIN device_activities d ON d.id=r.activity_id WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (device_id,)).fetchone()
+        if recovery_driver is not None and database.metadata.format_version >= 3:
+            row = await database.read(lambda owned: owned.connection.execute("SELECT 1 FROM software_recoveries r JOIN actions a ON a.id=r.action_id"
+                " JOIN device_activities d ON d.id=r.activity_id WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (device_id,)).fetchone())
             if row is not None:
                 recovery_driver.hold_recovery(device_id)
         runtime = CaptureRuntime(
             software_recovery_driver=recovery_driver,
             software_recovery_config=recovery_config,
-            owned=owned,
+            database=database,
             scheduling=SchedulingRepository(),
             operations=OperationRepository(),
             capture=capture_repository,
@@ -917,7 +902,6 @@ def session_capture_assembly(
             results=results_port,
             roots=roots,
             host_capture=HostCaptureRepository(),
-            host_photo_operation_verifier=_host_photo_operation_verifier(owned),
             evidence=entry.evidence,
             wall_us=wall,
             monotonic_ns=monotonic,
@@ -943,6 +927,7 @@ def session_capture_assembly(
             baseline_directory=directory_port,
             pending_result_scans=result_scans,
             pending_segment_writes=segment_writes,
+            pending_segment_inspection_results=inspection_results,
             pending_read_results=pending_read_results,
             pending_read_business=pending_read_business,
             pending_read_ends=pending_read_ends,
@@ -1028,7 +1013,7 @@ def session_capture_assembly(
 
 
 def _media_flow_with(
-    owned: Any,
+    database: Any,
     entry: Any,
     device_id: str,
     driver_id: str,
@@ -1054,12 +1039,12 @@ def _media_flow_with(
     binding = DeviceBinding(device_id=device_id, driver_id=driver_id)
     digest_supported = entry.declaration.digest_supported
     digest_for = (
-        _digest_reader_factory(owned, entry.driver, binding, entry.evidence)
+        _digest_reader_factory(database, entry.driver, binding, entry.evidence)
         if digest_supported else None)
     return MediaFlow(
-        owned=owned,
+        database=database,
         roots=BoundDirectories(staging=staging),
-        sessions=DriverReadSessions(owned, read_port, ticket=None),
+        sessions=DriverReadSessions(database, read_port, ticket=None),
         tools=tools,
         policy=MediaPolicy(repair_margin_s=_repair_margin_s(declaration)),
         occurred_at=occurred_at,

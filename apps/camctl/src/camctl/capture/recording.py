@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Awaitable, Any, Callable, Protocol
 
 from camctl.contracts.values import DurationMillis
 from camctl.devices.evidence import DeviceObservation
@@ -370,15 +370,15 @@ class StartDispatch:
 class GrantPort(Protocol):
     """首次启动机会授予端口（Q4 完整事务的入口）。"""
 
-    def grant(self, request: Any) -> GrantDecision: ...
+    async def grant(self, request: Any) -> GrantDecision: ...
 
 
 class FinishPort(Protocol):
     """尝试结束结果保存端口（O2 完整结果事务的入口）。"""
 
-    def finish(self, ticket: Any, outcome: CallOutcome) -> None: ...
+    async def finish(self, ticket: Any, outcome: CallOutcome) -> None: ...
 
-    def finish_prevented(self, ticket: Any, reason: str) -> None: ...
+    async def finish_prevented(self, ticket: Any, reason: str) -> None: ...
 
 
 class StartDriverPort(Protocol):
@@ -408,7 +408,7 @@ class CaptureContext:
     driver: StartDriverPort
     finishes: FinishPort
     canceled: bool = False
-    canceled_now: Callable[[], bool] | None = None
+    canceled_now: Callable[[], Awaitable[bool]] | None = None
     startup_margin_ms: int = 0
 
 
@@ -449,7 +449,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
     窗口在授予事务内与派发前分别核对；窗口内派发后取得的确认
     不再受窗口约束。所有结束结果按各自分区保存，次数不退还。
     """
-    decision = context.grants.grant(context)
+    decision = (await context.grants.grant(context))
     if not decision.granted:
         return CaptureStep(
             phase=RecordingPhase.NOT_GRANTED,
@@ -462,10 +462,10 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
         window=context.window,
         trusted_wall_now=context.wall.now_us(),
         canceled=(context.canceled if context.canceled_now is None
-                  else context.canceled_now()),
+                  else await context.canceled_now()),
     )
     if not check.allowed:
-        context.finishes.finish_prevented(ticket, check.reason or "prevented")
+        (await context.finishes.finish_prevented(ticket, check.reason or "prevented"))
         return CaptureStep(
             phase=RecordingPhase.DISPATCH_PREVENTED, ticket=ticket, reason=check.reason
         )
@@ -489,7 +489,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
             error=dispatch.error,
             observations=dispatch.observations,
         )
-        context.finishes.finish(ticket, outcome)
+        (await context.finishes.finish(ticket, outcome))
         phase = (
             RecordingPhase.START_CONFIRMED
             if dispatch.error is None
@@ -507,7 +507,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
             error=None,
             observations=(),
         )
-        context.finishes.finish(ticket, outcome)
+        (await context.finishes.finish(ticket, outcome))
         return CaptureStep(phase=RecordingPhase.SENT_ONLY, ticket=ticket)
     if dispatch.rejected_no_effect:
         outcome = dispatch.outcome or _outcome(
@@ -518,7 +518,7 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
             error=dispatch.error,
             observations=(),
         )
-        context.finishes.finish(ticket, outcome)
+        (await context.finishes.finish(ticket, outcome))
         return CaptureStep(
             phase=RecordingPhase.REJECTED_NO_EFFECT, ticket=ticket
         )
@@ -530,5 +530,5 @@ async def start_recording(context: CaptureContext) -> CaptureStep:
         error=dispatch.error,
         observations=dispatch.observations,
     )
-    context.finishes.finish(ticket, outcome)
+    (await context.finishes.finish(ticket, outcome))
     return CaptureStep(phase=RecordingPhase.START_UNKNOWN, ticket=ticket)

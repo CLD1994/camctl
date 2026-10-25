@@ -25,6 +25,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.validation import validate_outcome
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import row_facts
@@ -74,98 +75,102 @@ def _completed(receipt, message):
     return receipt.value
 
 
-def _save_owner(owner, owned, operations):
-    if owner.refused is not None:
-        return
-    if owner.ticket is None:
-        result = _completed(operations.begin_attempt(owner.intent, owner.intent_key, owned),
-                            "设置准备意图未可靠保存")
-        if result.ticket is None:
-            owner.refused = result.reason
-            owner.saved = True
+async def _save_owner(owner, database, operations):
+    async def save_and_apply():
+        if owner.refused is not None:
             return
-        owner.ticket = result.ticket
-    if owner.actual is not None and owner.finish is None:
-        actual = owner.actual
-        if actual.outcome is None:
-            raise ConsistencyError("设置准备没有交回完整的实际控制结果")
-        if actual.diagnostics_check is not None:
-            actual.diagnostics_check(actual.outcome)
-        validated = validate_outcome(owner.ticket, actual.outcome, owner.evidence)
-        owner.successful = (actual.outcome.status is AttemptStatus.SUCCEEDED
-                            and actual.outcome.effect is EffectState.CONFIRMED
-                            and actual.outcome.error is None
-                            and any(item.type == "capture_preparation_completed"
-                                    and item.data.get("activity_id") == str(owner.activity_id)
-                                    for item in actual.observations))
-        end = (RunFinish(RunOutcome.SUCCEEDED) if owner.successful else
-               RunFinish(RunOutcome.UNCONFIRMED if actual.outcome.status is AttemptStatus.UNKNOWN
-                         else RunOutcome.FAILED,
-                         actual.outcome.error or ErrorValue("device_error", "device")))
-        owner.finish = AttemptFinish(owner.ticket, validated, owner.returned_at, run_finish=end)
-    if owner.finish is not None and not owner.saved:
-        _completed(operations.finish_attempt(owner.finish, owner.result_key, owned),
-                   "设置准备结果未可靠保存")
-        owner.saved = True
+        if owner.ticket is None:
+            result = _completed(await database.write(lambda owned: operations.begin_attempt(owner.intent, owner.intent_key, owned), key=owner.intent_key),
+                                "设置准备意图未可靠保存")
+            if result.ticket is None:
+                owner.refused = result.reason
+                owner.saved = True
+                return
+            owner.ticket = result.ticket
+        if owner.actual is not None and owner.finish is None:
+            actual = owner.actual
+            if actual.outcome is None:
+                raise ConsistencyError("设置准备没有交回完整的实际控制结果")
+            if actual.diagnostics_check is not None:
+                actual.diagnostics_check(actual.outcome)
+            validated = validate_outcome(owner.ticket, actual.outcome, owner.evidence)
+            owner.successful = (actual.outcome.status is AttemptStatus.SUCCEEDED
+                                and actual.outcome.effect is EffectState.CONFIRMED
+                                and actual.outcome.error is None
+                                and any(item.type == "capture_preparation_completed"
+                                        and item.data.get("activity_id") == str(owner.activity_id)
+                                        for item in actual.observations))
+            end = (RunFinish(RunOutcome.SUCCEEDED) if owner.successful else
+                   RunFinish(RunOutcome.UNCONFIRMED if actual.outcome.status is AttemptStatus.UNKNOWN
+                             else RunOutcome.FAILED,
+                             actual.outcome.error or ErrorValue("device_error", "device")))
+            owner.finish = AttemptFinish(owner.ticket, validated, owner.returned_at, run_finish=end)
+        if owner.finish is not None and not owner.saved:
+            _completed(await database.write(lambda owned: operations.finish_attempt(owner.finish, owner.result_key, owned), key=owner.result_key),
+                       "设置准备结果未可靠保存")
+            owner.saved = True
+    return await settle_required(save_and_apply())
 
 
-def resume_preparation_saves(owned, cache, *, operations=None, scheduling=None, capture=None):
+async def resume_preparation_saves(database, cache, *, operations=None, scheduling=None, capture=None):
     """只核原申请；不读取时钟、不取得设备资格、不重新设置。"""
-    operations = OperationRepository() if operations is None else operations
-    for owner in tuple(cache.owners.values()):
-        _save_owner(owner, owned, operations)
-    if cache.reservations:
-        from camctl.persistence.repositories.scheduling import SchedulingRepository
-        scheduling = SchedulingRepository() if scheduling is None else scheduling
-        for action_id, (request, key) in tuple(cache.reservations.items()):
-            _completed(scheduling.reserve_preparation(request, key, owned), "原准备占用未可靠保存")
-            del cache.reservations[action_id]
-    for action_id, (kind, request, key) in tuple(cache.endings.items()):
-        if kind == "release":
-            from camctl.persistence.repositories.capture import CaptureRepository
-            capture = CaptureRepository() if capture is None else capture
-            value = _completed(capture.release_occupancy(request, key, owned), "原准备释放未可靠保存")
-            if value.outcome.value == "rejected":
-                raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
-        else:
+    async def save_and_apply():
+        operations = OperationRepository() if operations is None else operations
+        for owner in tuple(cache.owners.values()):
+            await _save_owner(owner, database, operations)
+        if cache.reservations:
             from camctl.persistence.repositories.scheduling import SchedulingRepository
             scheduling = SchedulingRepository() if scheduling is None else scheduling
-            _completed(getattr(scheduling, kind)(request, key, owned), "原准备收场未可靠保存")
-        del cache.endings[action_id]
+            for action_id, (request, key) in tuple(cache.reservations.items()):
+                _completed(await database.write(lambda owned: scheduling.reserve_preparation(request, key, owned), key=key), "原准备占用未可靠保存")
+                del cache.reservations[action_id]
+        for action_id, (kind, request, key) in tuple(cache.endings.items()):
+            if kind == "release":
+                from camctl.persistence.repositories.capture import CaptureRepository
+                capture = CaptureRepository() if capture is None else capture
+                value = _completed(await database.write(lambda owned: capture.release_occupancy(request, key, owned), key=key), "原准备释放未可靠保存")
+                if value.outcome.value == "rejected":
+                    raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
+            else:
+                from camctl.persistence.repositories.scheduling import SchedulingRepository
+                scheduling = SchedulingRepository() if scheduling is None else scheduling
+                _completed(await database.write(lambda owned: getattr(scheduling, kind)(request, key, owned), key=key), "原准备收场未可靠保存")
+            del cache.endings[action_id]
+    return await settle_required(save_and_apply())
 
 
-def preparation_dispatch_reason(runtime, action_id):
+async def preparation_dispatch_reason(runtime, action_id):
     """设置允许提前；每次真实设置前核取消、原占用和窗口上界。"""
-    action = runtime.action(action_id)
+    action = (await runtime.action(action_id))
     if action["status"] in (3, 4, 5, 6):
         return "terminal"
     if action["cancel_requested"]:
         return "canceled"
     if runtime.wall_us() > action["scheduled_at"] + action["max_delay_ms"] * 1000:
         return "window_ended"
-    activity = _activity(runtime, action_id)
+    activity = (await _activity(runtime, action_id))
     if activity is None or activity["occupancy_state"] != 1:
         return "occupancy_released"
-    if _start_precedes_preparation(runtime, action):
+    if (await _start_precedes_preparation(runtime, action)):
         return "already_dispatched"
     return None
 
 
-def _activity(runtime, action_id):
-    with closing(runtime.owned.connection.execute(
-        "SELECT id FROM device_activities WHERE action_id=?", (action_id,),
-    )) as cursor:
-        found = cursor.fetchone()
-    return None if found is None else row_facts(runtime.owned.connection, "device_activities", found[0])
+async def _activity(runtime, action_id):
+    def read(owned, parameters=(action_id,)):
+        with closing(owned.connection.execute("SELECT id FROM device_activities WHERE action_id=?", parameters)) as cursor:
+            return cursor.fetchone()
+    found = await runtime.database.read(read, description="读取拍摄直接事实")
+    return None if found is None else (await runtime.database.read(lambda owned, inputs=("device_activities", found[0]), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
 
 
-def _start_precedes_preparation(runtime, action):
-    if runtime.last_attempt(f"start/{action['id']}") is None:
+async def _start_precedes_preparation(runtime, action):
+    if (await runtime.last_attempt(f"start/{action['id']}")) is None:
         return False
     if action["type"] == int(enum_for("actions.type").CAMERA_TAKE_PHOTO):
         return True
     from camctl.persistence.repositories.capture_facts import load_start_facts
-    facts = load_start_facts(runtime.owned.connection, action)
+    facts = (await runtime.database.read(lambda owned, inputs=(action,), options=dict(): load_start_facts(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     return (not facts.not_started or facts.run is not None and facts.run["status"] not in (1, 2)
             or facts.attempts_used >= runtime.start_config.max_attempts)
 
@@ -196,18 +201,17 @@ async def _call_prepare(owner, runtime, request):
     if not isinstance(owner.actual, DeviceCallResult):
         raise ConsistencyError("设置准备没有交回实际控制结果")
     owner.returned_at = runtime.wall_us()
-    _save_owner(owner, runtime.owned, runtime.operations)
+    (await _save_owner(owner, runtime.database, runtime.operations))
 
 
-def _recover_old_preparation(runtime, action_id):
+async def _recover_old_preparation(runtime, action_id):
     """旧意图只恢复原责任；没有真实返回时不声称设置成功。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT r.id,r.responsibility_key,r.activity_id,t.attempt_no,t.status"
+    def read(owned, parameters=(action_id, _PREPARE_KIND)):
+        with closing(owned.connection.execute("SELECT r.id,r.responsibility_key,r.activity_id,t.attempt_no,t.status"
         " FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
-        " WHERE r.action_id=? AND r.kind=? AND r.status IN (1,2) ORDER BY r.id,t.attempt_no",
-        (action_id, _PREPARE_KIND),
-    )) as cursor:
-        rows = cursor.fetchall()
+        " WHERE r.action_id=? AND r.kind=? AND r.status IN (1,2) ORDER BY r.id,t.attempt_no", parameters)) as cursor:
+            return cursor.fetchall()
+    rows = await runtime.database.read(read, description="读取拍摄直接事实")
     for run_id, key, activity_id, attempt_no, status in rows:
         local = runtime.preparation_cache.owners.get(action_id)
         if local is not None and local.ticket is not None and local.ticket.run_id == run_id:
@@ -215,7 +219,7 @@ def _recover_old_preparation(runtime, action_id):
                 return False
             continue
         ticket = AttemptTicket(attempt_no, "control", str(activity_id), key, run_id)
-        evidence = runtime._attempt_recovery_evidence(ticket)
+        evidence = (await runtime._attempt_recovery_evidence(ticket))
         if evidence is None:
             return False
         from camctl.capture.handlers import _recovered_call_outcome
@@ -225,26 +229,26 @@ def _recover_old_preparation(runtime, action_id):
             run_finish=RunFinish(RunOutcome.UNCONFIRMED, actual.error),
             recovery_max_event_id=runtime.recovery_max_event_id)
         runtime.preparation_cache.owners[action_id] = owner
-        _save_owner(owner, runtime.owned, runtime.operations)
+        (await _save_owner(owner, runtime.database, runtime.operations))
     return True
 
 
-def _end(runtime, action_id, kind, request):
+async def _end(runtime, action_id, kind, request):
     cache = runtime.preparation_cache
     if action_id not in cache.endings:
         cache.endings[action_id] = kind, request, new_operation_key()
-    resume_preparation_saves(runtime.owned, cache, operations=runtime.operations,
-                             scheduling=runtime.scheduling, capture=runtime.capture)
+    (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
+                             scheduling=runtime.scheduling, capture=runtime.capture))
 
 
-def _fail_preparation(runtime, action_id, reason, error=None):
-    action = runtime.action(action_id)
+async def _fail_preparation(runtime, action_id, reason, error=None):
+    action = (await runtime.action(action_id))
     if action["status"] == 2:
         from camctl.capture.handlers import StartCloseRequest
         from camctl.outputs.catalog import OutputCatalogFacts
         from camctl.operations.attempts import StaleRunFinish
         from camctl.persistence.repositories.capture import FinishCapture, RecordingFailure
-        activity = _activity(runtime, action_id)
+        activity = (await _activity(runtime, action_id))
         now = runtime.wall_us()
         details = {"activity_id": str(activity["id"]), "reason": reason}
         finish = FinishCapture(action_id, (), OutputCatalogFacts(action_id, True), now,
@@ -254,86 +258,86 @@ def _fail_preparation(runtime, action_id, reason, error=None):
                 _save, finish_segmented_baseline_failure, finish_segmented_preparation_failure,
                 resume_segment_writes,
             )
-            resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
+            (await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id))
             if reason == "baseline_read_failed":
                 finish_segmented_baseline_failure(runtime, action_id)
             else:
-                if runtime.last_attempt(f"start/{action_id}") is not None:
-                    _save(runtime, action_id, runtime.operations, "finish_stale_runs",
+                if (await runtime.last_attempt(f"start/{action_id}")) is not None:
+                    (await _save(runtime, action_id, runtime.operations, "finish_stale_runs",
                         StaleRunFinish((f"start/{action_id}",), RunOutcome.FAILED, now,
-                                       ErrorValue("capture_failed", "execution", details)))
+                                       ErrorValue("capture_failed", "execution", details))))
                 finish_segmented_preparation_failure(runtime, action_id)
-        elif runtime.last_attempt(f"start/{action_id}") is None:
-            runtime.save_capture_completion(finish)
+        elif (await runtime.last_attempt(f"start/{action_id}")) is None:
+            (await runtime.save_capture_completion(finish))
         else:
-            runtime.save_capture_completion(StartCloseRequest(
+            (await runtime.save_capture_completion(StartCloseRequest(
                 StaleRunFinish((f"start/{action_id}",), RunOutcome.FAILED, now,
-                               ErrorValue("capture_failed", "execution", details)), finish))
+                               ErrorValue("capture_failed", "execution", details)), finish)))
     else:
         from camctl.persistence.repositories.scheduling import FailPreparationRequest
-        _end(runtime, action_id, "fail_preparation", FailPreparationRequest(
-            action_id, runtime.wall_us(), reason))
-    settle_preparation(runtime, action_id)
+        (await _end(runtime, action_id, "fail_preparation", FailPreparationRequest(
+            action_id, runtime.wall_us(), reason)))
+    (await settle_preparation(runtime, action_id))
 
 
-def settle_preparation(runtime, action_id):
+async def settle_preparation(runtime, action_id):
     """实际调用与原保存收场后才关闭目录缓存并释放准备占用。"""
     cache = runtime.preparation_cache
-    resume_preparation_saves(runtime.owned, cache, operations=runtime.operations,
-                             scheduling=runtime.scheduling, capture=runtime.capture)
-    if cache.pending(action_id) or not _recover_old_preparation(runtime, action_id):
+    (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
+                             scheduling=runtime.scheduling, capture=runtime.capture))
+    if cache.pending(action_id) or not (await _recover_old_preparation(runtime, action_id)):
         return False
     pending = runtime.pending_baselines.get(action_id)
     if pending is not None:
         if pending.in_call:
             return False
-        runtime.resume_baselines(action_id)
+        (await runtime.resume_baselines(action_id))
         pending = runtime.pending_baselines.get(action_id)
         if pending is not None:
             if pending.read_owner is not None or pending.saves.pending is not None:
                 return False
-    action = runtime.action(action_id)
+    action = (await runtime.action(action_id))
     if action["status"] not in (3, 4, 5, 6):
         if action["cancel_requested"]:
             from camctl.capture.handlers import _finish_canceled_capture
-            _finish_canceled_capture(runtime, action_id, unstarted=True)
-        if runtime.action(action_id)["status"] not in (3, 4, 5, 6):
+            (await _finish_canceled_capture(runtime, action_id, unstarted=True))
+        if (await runtime.action(action_id))["status"] not in (3, 4, 5, 6):
             return False
     if runtime.pending_baselines.get(action_id) is not None:
-        runtime.resume_baselines(action_id)
+        (await runtime.resume_baselines(action_id))
         if runtime.pending_baselines.get(action_id) is not None:
             return False
-    activity = _activity(runtime, action_id)
+    activity = (await _activity(runtime, action_id))
     if activity is not None and activity["occupancy_state"] == 1 and activity["dispatch_state"] in (1, 4):
-        _end(runtime, action_id, "release", ActivityReleaseSave(
-            action_id, runtime.wall_us(), preparation_resolved=True))
+        (await _end(runtime, action_id, "release", ActivityReleaseSave(
+            action_id, runtime.wall_us(), preparation_resolved=True)))
     cache.owners.pop(action_id, None)
     return True
 
 
-def recover_preparation(runtime, action_id):
+async def recover_preparation(runtime, action_id):
     """受限会话只核原保存和旧调用；未终态准备继续保留原活动。"""
     cache = runtime.preparation_cache
-    resume_preparation_saves(runtime.owned, cache, operations=runtime.operations,
-                             scheduling=runtime.scheduling, capture=runtime.capture)
-    if cache.pending(action_id) or not _recover_old_preparation(runtime, action_id):
+    (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
+                             scheduling=runtime.scheduling, capture=runtime.capture))
+    if cache.pending(action_id) or not (await _recover_old_preparation(runtime, action_id)):
         return False
-    action = runtime.action(action_id)
+    action = (await runtime.action(action_id))
     if action["status"] in (3, 4, 5, 6) or action["cancel_requested"]:
-        return settle_preparation(runtime, action_id)
+        return (await settle_preparation(runtime, action_id))
     return True
 
 
-def _abort_if_required(runtime, action):
+async def _abort_if_required(runtime, action):
     action_id = action["id"]
     if action["status"] in (3, 4, 5, 6) or action["cancel_requested"]:
-        settle_preparation(runtime, action_id)
+        (await settle_preparation(runtime, action_id))
         return BaselinePreparation(PreparationPhase.ABORTED)
     now = runtime.wall_us()
     if now > action["scheduled_at"] + action["max_delay_ms"] * 1000:
         from camctl.persistence.repositories.scheduling import ExpireActionRequest
-        _end(runtime, action_id, "expire_action", ExpireActionRequest(action_id, now, now))
-        settle_preparation(runtime, action_id)
+        (await _end(runtime, action_id, "expire_action", ExpireActionRequest(action_id, now, now)))
+        (await settle_preparation(runtime, action_id))
         return BaselinePreparation(PreparationPhase.ABORTED)
     return None
 
@@ -341,37 +345,38 @@ def _abort_if_required(runtime, action):
 async def advance_preparation(runtime, action_id):
     """推进一次完整准备；READY 后交回调度器等待计划时间。"""
     cache = runtime.preparation_cache
-    resume_preparation_saves(runtime.owned, cache, operations=runtime.operations,
-                             scheduling=runtime.scheduling, capture=runtime.capture)
-    action = runtime.action(action_id)
+    (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
+                             scheduling=runtime.scheduling, capture=runtime.capture))
+    action = (await runtime.action(action_id))
     if action["type"] not in CAPTURE_ACTION_TYPES:
         return BaselinePreparation(PreparationPhase.READY)
     if action["status"] == 2 and action["execution_spec_json"].get("result_policy") is not None:
         from camctl.capture.segment_completion import resume_segmented_preparation_failure
         if resume_segmented_preparation_failure(runtime, action):
-            settle_preparation(runtime, action_id)
+            (await settle_preparation(runtime, action_id))
             return BaselinePreparation(PreparationPhase.ABORTED)
-    if _start_precedes_preparation(runtime, action):
+    if (await _start_precedes_preparation(runtime, action)):
         return BaselinePreparation(PreparationPhase.READY)
-    if not _recover_old_preparation(runtime, action_id):
+    if not (await _recover_old_preparation(runtime, action_id)):
         return BaselinePreparation(PreparationPhase.WAITING)
-    aborted = _abort_if_required(runtime, action)
+    aborted = (await _abort_if_required(runtime, action))
     if aborted is not None:
         return aborted
     now = runtime.wall_us()
     if now < action["scheduled_at"] - runtime.prepare_lead_s * 1_000_000:
         return BaselinePreparation(PreparationPhase.WAITING)
-    activity = _activity(runtime, action_id)
+    activity = (await _activity(runtime, action_id))
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest
         request = ReservePreparationRequest(action_id, now, now, runtime.prepare_lead_s)
         cache.reservations[action_id] = request, new_operation_key()
-        value = _completed(runtime.scheduling.reserve_preparation(
-            request, cache.reservations[action_id][1], runtime.owned), "准备占用未可靠保存")
+        _save_inputs = (request, cache.reservations[action_id][1])
+        _save_options = dict()
+        value = _completed((await runtime.database.write(lambda owned: runtime.scheduling.reserve_preparation(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实")), "准备占用未可靠保存")
         del cache.reservations[action_id]
         if value.outcome.value == "rejected":
             return BaselinePreparation(PreparationPhase.WAITING)
-        activity = _activity(runtime, action_id)
+        activity = (await _activity(runtime, action_id))
     if activity is None:
         raise ConsistencyError("准备占用已可靠取得但原活动缺失")
     if prepared_by(runtime, action) is None:
@@ -384,7 +389,7 @@ async def advance_preparation(runtime, action_id):
             owner = PendingPreparation(action_id, activity["id"], runtime.session_key,
                                        intent, runtime.evidence, runtime.preparation_driver)
             cache.owners[action_id] = owner
-            _save_owner(owner, runtime.owned, runtime.operations)
+            (await _save_owner(owner, runtime.database, runtime.operations))
         if owner.task is None and owner.actual is None and owner.finish is None:
             if owner.refused is not None:
                 cache.owners.pop(action_id)
@@ -402,41 +407,41 @@ async def advance_preparation(runtime, action_id):
                                               EvidenceValue("dispatch_prevented", 1))))
                     owner.returned_at = runtime.wall_us()
                     try:
-                        _save_owner(owner, runtime.owned, runtime.operations)
+                        (await _save_owner(owner, runtime.database, runtime.operations))
                     except BaseException as error:
                         raise interrupted from error
                 raise
         if not owner.saved:
             return BaselinePreparation(PreparationPhase.WAITING)
-        aborted = _abort_if_required(runtime, runtime.action(action_id))
+        aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
         if aborted is not None:
             return aborted
         if not owner.successful:
-            _fail_preparation(runtime, action_id, "device_failed")
+            (await _fail_preparation(runtime, action_id, "device_failed"))
             return BaselinePreparation(PreparationPhase.FAILED)
         if prepared_by(runtime, action) is None:
             raise ConsistencyError("本会话设置成功但驱动未保留匹配准备凭据")
-    reason = preparation_dispatch_reason(runtime, action_id)
+    reason = (await preparation_dispatch_reason(runtime, action_id))
     if reason in ("terminal", "canceled", "window_ended"):
-        aborted = _abort_if_required(runtime, runtime.action(action_id))
+        aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
         return aborted if aborted is not None else BaselinePreparation(PreparationPhase.WAITING)
     if reason is not None:
         return BaselinePreparation(PreparationPhase.WAITING)
     baseline = await runtime.prepare_baseline(action_id)
     if baseline.phase not in (PreparationPhase.PENDING, PreparationPhase.WAITING):
-        aborted = _abort_if_required(runtime, runtime.action(action_id))
+        aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
         if aborted is not None:
             return aborted
     if baseline.phase is PreparationPhase.FAILED:
-        _fail_preparation(runtime, action_id, "baseline_read_failed", baseline.error)
+        (await _fail_preparation(runtime, action_id, "baseline_read_failed", baseline.error))
     elif baseline.phase is PreparationPhase.ABORTED:
         raise ConsistencyError("目录准备已中止，但原动作没有取消、终态或窗口结束依据")
     return baseline
 
 
-def discard_terminal_preparation(runtime, action_id):
+async def discard_terminal_preparation(runtime, action_id):
     cache = runtime.preparation_cache
-    if cache is not None and runtime.action(action_id)["status"] in (3, 4, 5, 6) and not cache.pending(action_id):
+    if cache is not None and (await runtime.action(action_id))["status"] in (3, 4, 5, 6) and not cache.pending(action_id):
         cache.owners.pop(action_id, None)
 
 

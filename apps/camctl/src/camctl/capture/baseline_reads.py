@@ -9,6 +9,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryRead
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.recovery import RecoveryBoundary
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
 
 
@@ -37,29 +38,31 @@ class PendingBaselineRead:
     aborted_before_call: bool=False
 
 
-def resume_baseline_read_save(owner,*,capture,owned):
+async def resume_baseline_read_save(owner,*,capture,database):
     """只保存原申请；没有目录端口和时钟，不重做实际调用。"""
-    if owner.result is not None:
-        return owner.result
-    if owner.saves.pending is None:
-        return None
-    if (isinstance(owner.saves.pending.request,BaselineReadReturn)
-            and owner.task is not None and not owner.task.done()):
-        return None
-    receipt=owner.saves.save(capture,owned)
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        owner.diagnostic=receipt.error
-        return None
-    request=owner.saves.pending.request
-    response=owner.saves.take()
-    if isinstance(request,BaselineReadIntent):
-        owner.intent_view=response
-        return None
-    owner.result=response
-    return response
+    async def save_and_apply():
+        if owner.result is not None:
+            return owner.result
+        if owner.saves.pending is None:
+            return None
+        if (isinstance(owner.saves.pending.request,BaselineReadReturn)
+                and owner.task is not None and not owner.task.done()):
+            return None
+        receipt=(await owner.saves.save(capture,database))
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            owner.diagnostic=receipt.error
+            return None
+        request=owner.saves.pending.request
+        response=owner.saves.take()
+        if isinstance(request,BaselineReadIntent):
+            owner.intent_view=response
+            return None
+        owner.result=response
+        return response
+    return await settle_required(save_and_apply())
 
 
-def abort_unstarted_baseline_read(owner, *, capture, owned, wall_us):
+async def abort_unstarted_baseline_read(owner, *, capture, database, wall_us):
     """实际调用尚未创建时结束原意图，不伪造一次目录返回。"""
     if not owner.locally_created or owner.task is not None:
         return
@@ -73,7 +76,7 @@ def abort_unstarted_baseline_read(owner, *, capture, owned, wall_us):
             owner.intent_view.call_id, owner.settlement_at
         )
         owner.saves.begin(owner.unconfirmed_request, key=owner.intent.result_save_key)
-    resume_baseline_read_save(owner, capture=capture, owned=owned)
+    (await resume_baseline_read_save(owner, capture=capture, database=database))
 
 
 @owned_tool_call
@@ -91,27 +94,27 @@ async def _read_and_freeze(owner,directory,wall_us,baseline=None):
     owner.actual_return=None
 
 
-async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read,baseline=None):
+async def advance_baseline_read(owner,*,directory,capture,database,wall_us,can_read,baseline=None):
     """原实际Task收场、返回冻结和保存交接后才传播等待者取消。"""
-    result=resume_baseline_read_save(owner,capture=capture,owned=owned)
+    result=(await resume_baseline_read_save(owner,capture=capture,database=database))
     if result is not None:
         return result
     if owner.task is not None:
         if not owner.task.done() or owner.return_request is None:
             return None
-        return resume_baseline_read_save(owner,capture=capture,owned=owned)
+        return (await resume_baseline_read_save(owner,capture=capture,database=database))
     if owner.saves.pending is not None:
         return None
     if owner.intent_view is None:
-        if not can_read():
-            abort_unstarted_baseline_read(owner, capture=capture, owned=owned, wall_us=wall_us)
+        if not await can_read():
+            (await abort_unstarted_baseline_read(owner, capture=capture, database=database, wall_us=wall_us))
             return None
         owner.saves.begin(owner.intent,key=owner.intent.call_key)
-        resume_baseline_read_save(owner,capture=capture,owned=owned)
+        (await resume_baseline_read_save(owner,capture=capture,database=database))
         if owner.intent_view is None:
             return None
-    if not can_read():
-        abort_unstarted_baseline_read(owner, capture=capture, owned=owned, wall_us=wall_us)
+    if not await can_read():
+        (await abort_unstarted_baseline_read(owner, capture=capture, database=database, wall_us=wall_us))
         return owner.result
     if not owner.locally_created:
         return None
@@ -133,7 +136,7 @@ async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read
             call_error=error
             owner.diagnostic=error
             break
-    result=resume_baseline_read_save(owner,capture=capture,owned=owned)
+    result=(await resume_baseline_read_save(owner,capture=capture,database=database))
     if interrupted is not None:
         raise interrupted from call_error
     if call_error is not None:
@@ -150,15 +153,15 @@ class BaselineReadRecoveryContext:
     startup_max_event_id: int|None
 
 
-def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
+async def resume_baseline_read_call(owner,context,*,capture,database,wall_us):
     """先接手原返回或原结果键，再依据既有主机边界处理不可恢复返回。"""
     intent=context.intent_view
-    if (context.instance_id != owned.metadata.instance_id or context.instance_id != reader.metadata.instance_id
+    if (context.instance_id != database.metadata.instance_id
             or context.local_owners.get(intent.request.activity_id) is not owner
             or owner.intent != intent.request or owner.intent_view != intent):
         raise ConsistencyError('基准恢复上下文不属于原数据库和实际调用拥有者')
     try:
-        actual=capture.read_baseline_call(intent.call_id,intent.boundary,reader)
+        actual=await database.read(lambda owned: capture.read_baseline_call(intent.call_id,intent.boundary,owned))
     except Exception as error:
         owner.diagnostic=error
         raise
@@ -169,15 +172,15 @@ def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
     if owner.return_request is not None:
         if owner.saves.pending is None and owner.result is None:
             owner.saves.begin(owner.return_request,key=owner.intent.result_save_key)
-        return resume_baseline_read_save(owner,capture=capture,owned=owned)
+        return (await resume_baseline_read_save(owner,capture=capture,database=database))
     if owner.actual_return is not None:
         return None
     if owner.unconfirmed_request is not None:
         if owner.saves.pending is None and owner.result is None:
             owner.saves.begin(owner.unconfirmed_request,key=owner.intent.result_save_key)
-        return resume_baseline_read_save(owner,capture=capture,owned=owned)
+        return (await resume_baseline_read_save(owner,capture=capture,database=database))
     try:
-        saved=capture.read_baseline_call_result(intent.call_id,reader)
+        saved=await database.read(lambda owned: capture.read_baseline_call_result(intent.call_id,owned))
     except Exception as error:
         owner.diagnostic=error
         raise
@@ -199,4 +202,4 @@ def resume_baseline_read_call(owner,context,*,capture,owned,reader,wall_us):
     except Exception as error:
         owner.diagnostic=error
         raise
-    return resume_baseline_read_save(owner,capture=capture,owned=owned)
+    return (await resume_baseline_read_save(owner,capture=capture,database=database))

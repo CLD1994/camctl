@@ -20,13 +20,14 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
-from camctl.persistence.runtime import OwnedConnection
+
+pytestmark = pytest.mark.asyncio
 
 
 def _runtime_with_saved_ownership():
     repository = create_autospec(CaptureRepository, instance=True)
     runtime = CaptureRuntime(
-        owned=create_autospec(OwnedConnection, instance=True),
+        database=object(),
         scheduling=create_autospec(SchedulingRepository, instance=True),
         operations=create_autospec(OperationRepository, instance=True),
         capture=repository,
@@ -52,25 +53,25 @@ def _runtime_with_saved_ownership():
     return runtime, repository, fact
 
 
-def test_saved_file_fact_rejects_json_integer_replacing_original_boolean():
+async def test_saved_file_fact_rejects_json_integer_replacing_original_boolean():
     runtime, repository, original = _runtime_with_saved_ownership()
     changed = replace(original.command,
                       observation={"flag": 1, "camera": {"channel": 1}})
 
     with pytest.raises(ConsistencyError):
-        runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP, changed)
+        await runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP, changed)
 
     assert runtime.pending_file_observations[(1, "original")].facts[
         FileFactStage.OWNERSHIP] is original
     repository.save_file_ownership.assert_not_called()
 
 
-def test_saved_file_fact_reuses_response_when_only_json_member_order_changes():
+async def test_saved_file_fact_reuses_response_when_only_json_member_order_changes():
     runtime, repository, original = _runtime_with_saved_ownership()
     reordered = replace(original.command,
                         observation={"camera": {"channel": 1}, "flag": True})
 
-    runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP, reordered)
+    await runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP, reordered)
 
     assert runtime.pending_file_observations[(1, "original")].facts[
         FileFactStage.OWNERSHIP] is original
@@ -90,7 +91,7 @@ def test_saved_file_fact_reuses_response_when_only_json_member_order_changes():
     (FileFactStage.COMPLETION, FileCompletionSave(3, 4, 100, error={
         "code": "device_error", "stage": "device", "details": {"flag": True}}), "error"),
 ])
-def test_saved_file_fact_rejects_changed_json_type_in_each_request(stage, command, field):
+async def test_saved_file_fact_rejects_changed_json_type_in_each_request(stage, command, field):
     runtime, repository, _ = _runtime_with_saved_ownership()
     original = PendingFileFact(command, new_operation_key(),
                               ObservationOutcome(ObservationDisposition.SAVED, 3))
@@ -100,7 +101,7 @@ def test_saved_file_fact_rejects_changed_json_type_in_each_request(stage, comman
                      if field == "error" else {"flag": 1})
 
     with pytest.raises(ConsistencyError):
-        runtime._save_file_fact((1, "original"), stage, replace(command, **{field: changed_value}))
+        await runtime._save_file_fact((1, "original"), stage, replace(command, **{field: changed_value}))
 
     assert runtime.pending_file_observations[(1, "original")].facts[stage] is original
     repository.save_file_presence.assert_not_called()
@@ -108,11 +109,11 @@ def test_saved_file_fact_rejects_changed_json_type_in_each_request(stage, comman
     repository.save_file_completion.assert_not_called()
 
 
-def test_saved_file_fact_rejects_changed_non_json_fact_time():
+async def test_saved_file_fact_rejects_changed_non_json_fact_time():
     runtime, repository, original = _runtime_with_saved_ownership()
 
     with pytest.raises(ConsistencyError):
-        runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP,
+        await runtime._save_file_fact((1, "original"), FileFactStage.OWNERSHIP,
                                replace(original.command, occurred_at=101))
 
     assert runtime.pending_file_observations[(1, "original")].facts[
@@ -121,7 +122,7 @@ def test_saved_file_fact_rejects_changed_non_json_fact_time():
 
 
 @pytest.mark.parametrize("field", ["locator", "evidence"])
-def test_file_discovery_rejects_json_integer_replacing_original_boolean(field):
+async def test_file_discovery_rejects_json_integer_replacing_original_boolean(field):
     runtime, repository, _ = _runtime_with_saved_ownership()
     entry = ObservedFile("original", {"flag": True}, {"flag": True}, False, None)
     original = PendingFileObservation(
@@ -131,7 +132,7 @@ def test_file_discovery_rejects_json_integer_replacing_original_boolean(field):
     runtime.pending_file_observations[(1, "original")] = original
 
     with pytest.raises(ConsistencyError):
-        _register_observed(runtime, 1, (replace(entry, **{field: {"flag": 1}}),),
+        await _register_observed(runtime, 1, (replace(entry, **{field: {"flag": 1}}),),
                            occurred_at=100)
 
     assert runtime.pending_file_observations[(1, "original")] is original

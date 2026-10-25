@@ -13,6 +13,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest, DirectoryScan
 from camctl.operations.models import ErrorValue
 from camctl.operations.owned_calls import check_call_interruption
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import row_facts
 
@@ -92,7 +93,7 @@ def close_baseline(action_id, *, runtime):
         del runtime.pending_baselines[action_id]
 
 
-def recover_terminal_baselines(*, runtime, limit=None):
+async def recover_terminal_baselines(*, runtime, limit=None):
     """接手已结束目录调用的未派发终态范围，不据空内存推断调用已结束。"""
     from contextlib import closing
     from camctl.capture.baseline_models import BaselineReadState
@@ -101,10 +102,10 @@ def recover_terminal_baselines(*, runtime, limit=None):
     from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
 
     limit = positive_limit(DEFAULT_BATCH_SIZE if limit is None else limit)
-    db = runtime.owned.connection
     after = (0, 0)
     while True:
-        with closing(db.execute(
+        def read(owned):
+            with closing(owned.connection.execute(
             "SELECT d.action_id,d.id,b.id FROM device_activities d INDEXED BY activities_occupancy"
             " JOIN actions a ON a.id=d.action_id JOIN baseline_read_calls b ON b.id=("
             "SELECT MAX(last.id) FROM baseline_read_calls last"
@@ -114,16 +115,17 @@ def recover_terminal_baselines(*, runtime, limit=None):
             " AND (d.action_id,d.id)>(?,?) ORDER BY d.action_id,d.id LIMIT ?",
             (int(BaselineReadState.RETURNED), int(BaselineReadState.UNCONFIRMED), *after, limit),
         )) as cursor:
-            candidates = cursor.fetchall()
+                return cursor.fetchall()
+        candidates = await runtime.database.read(read)
         if not candidates:
             return
         for action_id, activity_id, call_id in candidates:
             after = (action_id, activity_id)
             if action_id in runtime.pending_baselines:
                 continue
-            action = row_facts(db, "actions", action_id)
-            activity = row_facts(db, "device_activities", activity_id)
-            view = runtime.capture.read_baseline_call(call_id, _boundary(db), runtime.owned)
+            action = (await runtime.database.read(lambda owned: row_facts(owned.connection, "actions", action_id)))
+            activity = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))
+            view = (await runtime.database.read(lambda owned, inputs=(call_id, (await runtime.database.read(lambda owned: _boundary(owned.connection)))), options=dict(): runtime.capture.read_baseline_call(*inputs, owned, **options), description="读取已保存拍摄事实"))
             scope = activity["output_scope_json"]
             if isinstance(scope, str):
                 scope = parse_exact_json(scope)
@@ -134,65 +136,69 @@ def recover_terminal_baselines(*, runtime, limit=None):
                     view.request, intent_view=view, result=view, locally_created=False,
                 ),
             )
-            result = resume_baseline_settlement(action_id, runtime=runtime)
+            result = (await resume_baseline_settlement(action_id, runtime=runtime))
             if result is not None and result.phase is PreparationPhase.PENDING:
                 raise ConsistencyError(f"原基准收场仍未可靠完成: {result.database_error}")
 
 
-def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
+async def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     """恢复原完整申请，不依赖当前驱动、绑定或动作是否已有终态。"""
-    pending = runtime.pending_baselines.get(action_id)
-    if pending is None:
-        return None
-    if pending.completed:
-        close_baseline(action_id, runtime=runtime)
-        return BaselinePreparation(PreparationPhase.READY)
-    if pending.in_call:
-        # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
-        return BaselinePreparation(PreparationPhase.WAITING)
-    if pending.read_owner is not None:
-        from camctl.capture.segment_baseline import consume_read
+    async def save_and_apply():
+        pending = runtime.pending_baselines.get(action_id)
+        if pending is None:
+            return None
+        if pending.completed:
+            close_baseline(action_id, runtime=runtime)
+            return BaselinePreparation(PreparationPhase.READY)
+        if pending.in_call:
+            # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
+            return BaselinePreparation(PreparationPhase.WAITING)
+        if pending.read_owner is not None:
+            from camctl.capture.segment_baseline import consume_read
 
-        if not consume_read(pending, runtime):
-            if pending.read_owner.saves.pending is None:
-                return BaselinePreparation(PreparationPhase.WAITING)
-            return BaselinePreparation(
-                PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
-            )
-    if pending.release is not None:
-        from camctl.persistence.repositories.capture import ReleaseOutcome
-        request, key = pending.release
-        receipt = runtime.capture.release_occupancy(request, key, runtime.owned)
+            if not (await consume_read(pending, runtime)):
+                if pending.read_owner.saves.pending is None:
+                    return BaselinePreparation(PreparationPhase.WAITING)
+                return BaselinePreparation(
+                    PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
+                )
+        if pending.release is not None:
+            from camctl.persistence.repositories.capture import ReleaseOutcome
+            request, key = pending.release
+            _save_inputs = (request, key)
+            _save_options = dict()
+            receipt = (await runtime.database.write(lambda owned: runtime.capture.release_occupancy(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
+            if receipt.value.outcome is ReleaseOutcome.REJECTED:
+                raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
+            pending.completed = True
+            close_baseline(action_id, runtime=runtime)
+            return BaselinePreparation(PreparationPhase.READY)
+        if pending.saves.pending is None:
+            return None
+        original = pending.saves.pending.request
+        receipt = (await pending.saves.save(runtime.capture, runtime.database))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
-        if receipt.value.outcome is ReleaseOutcome.REJECTED:
-            raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
-        pending.completed = True
-        close_baseline(action_id, runtime=runtime)
-        return BaselinePreparation(PreparationPhase.READY)
-    if pending.saves.pending is None:
+        pending.saves.take()
+        if isinstance(original, BaselineFixSave):
+            pending.completed = True
+            close_baseline(action_id, runtime=runtime)
+            return BaselinePreparation(PreparationPhase.READY)
+        pending.chunks = original.chunk_no
+        pending.entries += len(original.entries)
+        pending.cursor = pending.next_cursor
         return None
-    original = pending.saves.pending.request
-    receipt = pending.saves.save(runtime.capture, runtime.owned)
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
-    pending.saves.take()
-    if isinstance(original, BaselineFixSave):
-        pending.completed = True
-        close_baseline(action_id, runtime=runtime)
-        return BaselinePreparation(PreparationPhase.READY)
-    pending.chunks = original.chunk_no
-    pending.entries += len(original.entries)
-    pending.cursor = pending.next_cursor
-    return None
+    return await settle_required(save_and_apply())
 
 
-def release_preparation(action_id, *, runtime):
+async def release_preparation(action_id, *, runtime):
     """实际拥有者确认准备已收场后，持有原释放申请直到可靠回执。"""
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
-    if not runtime.capture.preparation_calls_resolved(pending.activity_id, runtime.owned):
+    if not (await runtime.database.read(lambda owned, inputs=(pending.activity_id,), options=dict(): runtime.capture.preparation_calls_resolved(*inputs, owned, **options), description="读取已保存拍摄事实")):
         return BaselinePreparation(PreparationPhase.WAITING)
     if pending.in_call or pending.saves.pending is not None or pending.read_owner is not None:
         raise ConsistencyError("准备调用或原页保存仍未完成，不能形成释放申请")
@@ -200,43 +206,43 @@ def release_preparation(action_id, *, runtime):
         pending.release = (ActivityReleaseSave(action_id, runtime.wall_us(), preparation_resolved=True,
                                                preparation_error=pending.error),
                            new_operation_key())
-    return resume_baseline_save(action_id, runtime=runtime)
+    return (await resume_baseline_save(action_id, runtime=runtime))
 
 
-def resume_baseline_settlement(action_id, *, runtime):
+async def resume_baseline_settlement(action_id, *, runtime):
     """先核原保存，再为已有终态且实际收场的准备解除适用占用。"""
-    result = resume_baseline_save(action_id, runtime=runtime)
+    result = (await resume_baseline_save(action_id, runtime=runtime))
     if result is not None and result.phase in (PreparationPhase.PENDING, PreparationPhase.WAITING):
         return result
     pending = runtime.pending_baselines.get(action_id)
     if pending is None or pending.in_call:
         return result
-    action = row_facts(runtime.owned.connection, "actions", action_id)
+    action = (await runtime.database.read(lambda owned, inputs=("actions", action_id), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
     if action is None:
         raise ConsistencyError("原基准准备缺少所属动作")
     if action["status"] not in (3, 4, 5, 6):
         return result
     from camctl.persistence.repositories.capture_facts import load_start_facts
-    facts = load_start_facts(runtime.owned.connection, action)
+    facts = (await runtime.database.read(lambda owned, inputs=(action,), options=dict(): load_start_facts(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if (facts.not_started and facts.activity is not None and facts.activity["ownership_mode"] == 2
             and facts.activity["occupancy_state"] == 1):
-        return release_preparation(action_id, runtime=runtime)
+        return (await release_preparation(action_id, runtime=runtime))
     close_baseline(action_id, runtime=runtime)
     return result
 
 
 async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> BaselinePreparation:
-    resumed = resume_baseline_save(action_id, runtime=runtime)
+    resumed = (await resume_baseline_save(action_id, runtime=runtime))
     if resumed is not None:
         return resumed
-    activity = row_facts(runtime.owned.connection, "device_activities", activity_id)
-    action = row_facts(runtime.owned.connection, "actions", action_id)
+    activity = (await runtime.database.read(lambda owned, inputs=("device_activities", activity_id), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
+    action = (await runtime.database.read(lambda owned, inputs=("actions", action_id), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
     if activity is None or action is None or activity["action_id"] != action_id:
         raise ConsistencyError("基准准备缺少原动作及活动身份")
     ownership = enum_for("device_activities.ownership_mode")
     if activity["ownership_mode"] != int(ownership.BASELINE_COMPARISON):
         return BaselinePreparation(PreparationPhase.READY)
-    ref = runtime.capture.baseline_ref(activity_id, runtime.owned)
+    ref = (await runtime.database.read(lambda owned, inputs=(activity_id,), options=dict(): runtime.capture.baseline_ref(*inputs, owned, **options), description="读取已保存拍摄事实"))
     if ref.state is BaselineState.FIXED:
         close_baseline(action_id, runtime=runtime)
         return BaselinePreparation(PreparationPhase.READY)
@@ -264,7 +270,7 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
     while True:
         check_call_interruption()
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
-        current = row_facts(runtime.owned.connection, "actions", action_id)
+        current = (await runtime.database.read(lambda owned, inputs=("actions", action_id), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
         window = LaunchWindow(current["scheduled_at"], current["scheduled_at"] + current["max_delay_ms"] * 1000)
         if (current["cancel_requested"] or current["status"] in (3, 4, 5, 6)
                 or window_phase(window, runtime.wall_us()) is WindowPhase.AFTER_WINDOW):
@@ -295,6 +301,6 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
                 continue
             pending.saves.begin(BaselineChunkSave(activity_id, pending.chunks + 1,
                                                  page.items, runtime.wall_us()))
-        resumed = resume_baseline_save(action_id, runtime=runtime)
+        resumed = (await resume_baseline_save(action_id, runtime=runtime))
         if resumed is not None:
             return resumed
