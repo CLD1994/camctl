@@ -44,6 +44,7 @@ def _owned():
     connection = create_autospec(sqlite3.Connection, instance=True)
     cursor = create_autospec(sqlite3.Cursor, instance=True)
     cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = None
     connection.execute.return_value = cursor
     return OwnedConnection(connection, DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
 

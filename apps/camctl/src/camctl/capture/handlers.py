@@ -491,6 +491,19 @@ async def resume_capture_completions(
             stop_only = stop_close and pending.request.action_finish is None
             if pending.input_reads is None:
                 receipt = await _write_capture_completion(database, pending, repository, scheduling)
+                if (receipt.kind in (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED)
+                        and type(pending.request) is FinishCapture
+                        and pending.request.failure is None and pending.request.baseline_error is None):
+                    # 原普通完成确定未提交；同一已取得产物按新取消事实形成另一份申请。
+                    current = await database.read(lambda owned: row_facts(owned.connection, "actions", identity))
+                    if current is not None and current["status"] == 2 and current["cancel_requested"]:
+                        command = pending.request
+                        pending = PendingCaptureCompletion(new_operation_key(), FinishCanceledCapture(
+                            action_id=command.action_id, occurred_at=command.occurred_at,
+                            drafts=command.drafts, catalog_facts=command.catalog_facts))
+                        pending_capture_completions[identity] = pending
+                        canceled = True
+                        receipt = await _write_capture_completion(database, pending, repository, scheduling)
                 notification_error = receipt.handoff_error
                 if receipt.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(

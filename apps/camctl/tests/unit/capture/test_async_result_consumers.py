@@ -7,6 +7,7 @@ import pytest
 
 from camctl.capture.handlers import _catalog_drafts
 from camctl.capture.host_photo import _device_drafts
+from camctl.capture.host_photo import _persist_outputs
 from camctl.capture.result_scans import assess_registered_files
 from camctl.capture.results import CaptureFile, FileKind, ProductRequirements
 from camctl.devices.drivers.hasselblad.files import CameraFileLocator, CameraLocatorStatus
@@ -57,3 +58,21 @@ async def test_device_photo_drafts_register_finite_pair_with_one_activity_read(m
     assert entries[1].paired_identity == entries[0].identity
     assert isinstance(result, tuple) and len(result) == 2
     activity.assert_awaited_once_with(runtime, 21)
+
+
+async def test_device_photo_reads_cancellation_after_registering_output_facts(mocker):
+    from camctl.persistence.repositories.capture import FinishCanceledCapture
+
+    before = {"type": 1, "cancel_requested": 0, "execution_spec_json": {"output_storage": "device"}}
+    after = {**before, "cancel_requested": 1}
+    runtime = SimpleNamespace(action=AsyncMock(side_effect=(before, after)),
+        save_capture_completion=AsyncMock())
+    drafts = ()
+    register = mocker.patch("camctl.capture.host_photo._device_drafts", autospec=True, return_value=drafts)
+
+    await _persist_outputs(runtime, 21, (), (), 1000, object())
+
+    register.assert_awaited_once()
+    command = runtime.save_capture_completion.call_args.args[0]
+    assert isinstance(command, FinishCanceledCapture)
+    assert command.occurred_at == 1000 and command.drafts == drafts

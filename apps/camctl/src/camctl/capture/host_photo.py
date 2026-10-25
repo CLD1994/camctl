@@ -397,6 +397,7 @@ async def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_a
     action = (await runtime.action(action_id))
     drafts = (_drafts(files, artifacts) if is_saved_host_photo(action)
               else (await _device_drafts(runtime, action_id, artifacts, occurred_at, outcome)))
+    action = await runtime.action(action_id)
     request_type = FinishCanceledCapture if action["cancel_requested"] else FinishCapture
     (await runtime.save_capture_completion(request_type(
         action_id=action_id, drafts=drafts, catalog_facts=OutputCatalogFacts(action_id, True),

@@ -24,7 +24,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, AsyncIterator, Awaitable, Callable, Mapping
 
 from camctl.capture.handlers import (
     CaptureRuntime,
@@ -282,7 +282,7 @@ class DriverResultListing:
         self._history_owner = object()
         self._reading_context: ResultReadingContext | None = None
 
-    async def _saved_result_pages(self, ticket: AttemptTicket) -> Iterator[Any]:
+    async def _saved_result_pages(self, ticket: AttemptTicket) -> AsyncIterator[Any]:
         """按原尝试逐页读取已可靠保存的历史，不缓存目录或页集合。"""
         if self._capture_repository is None or self._database is None:
             raise ConsistencyError("结果历史读取缺少原结果仓储")
@@ -307,7 +307,7 @@ class DriverResultListing:
     async def _prior_result_entries(
         self, ticket: AttemptTicket, cursor: DirectoryCursor | None,
         output_scope: Mapping | None, context: ResultReadingContext,
-    ) -> Callable[[], Iterator[Mapping[str, Any]]] | None:
+    ) -> Callable[[], AsyncIterator[Mapping[str, Any]]] | None:
         """先建立完整可靠链，之后只读取刚保存的新页。"""
         if self._capture_repository is None:
             return None
@@ -605,7 +605,7 @@ class DriverResultListing:
 
 def _digest_reader_factory(
     database: Any, driver: Any, binding: DeviceBinding, evidence: Any,
-) -> Callable[[int], DriverDigestReader]:
+) -> Callable[[int], Awaitable[DriverDigestReader]]:
     """构造按源设备文件解析的源端摘要读取工厂。"""
 
     async def resolve(source_device_file_id: int) -> DriverDigestReader:
@@ -693,7 +693,7 @@ def session_capture_assembly(
     read_discovery_batch_size: int | None = None,
     preparation_cache=None,
     session_key: str | None = None,
-) -> Callable[[Any, str], CaptureRuntime | None]:
+) -> Callable[[Any, str], Awaitable[CaptureRuntime | None]]:
     """构造会话级拍摄推进工厂：按设备解析登记驱动端口并组装运行时。
 
     会话共享录像锚点表、结果列举缓存与媒体任务执行器；每个推进轮

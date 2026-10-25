@@ -34,11 +34,12 @@ from camctl.operations.attempts import (
     RunOutcome,
     StaleRunFinish,
 )
-from camctl.operations.models import ErrorValue
+from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
+from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 from camctl.persistence.repositories.operations import (
@@ -469,7 +470,8 @@ async def _stop_residual(
 
     responsibility = _winddown_key(trigger_id, candidate.activity_id)
     existing = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _run_row(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
-    if existing is None or existing[2] == 0:
+    first_stop = existing is None or existing[2] == 0
+    if first_stop:
         # 首次停止前重新核对当前触发资格；查询等待期间可能已经取消或超窗。
         trigger = (await runtime.action(trigger_id))
         if (trigger["cancel_requested"] or trigger["status"] in _TRIGGER_TERMINAL
@@ -496,7 +498,23 @@ async def _stop_residual(
             (await _finish_winddown_exhausted(runtime, responsibility, candidate))
         return
     ticket = begin.value.ticket
-    owner = (await runtime.action(candidate.action_id))
+    def read_dispatch_facts(owned):
+        return (row_facts(owned.connection, "actions", candidate.action_id),
+            row_facts(owned.connection, "actions", trigger_id) if first_stop else None)
+
+    owner, trigger = await runtime.database.read(read_dispatch_facts,
+        description="读取残留停止派发资格")
+    if first_stop:
+        expired = window_phase(runtime.window_of(trigger), runtime.wall_us()) is WindowPhase.AFTER_WINDOW
+        if trigger["cancel_requested"] or trigger["status"] in _TRIGGER_TERMINAL or expired:
+            reason = "window_ended" if not trigger["cancel_requested"] and (trigger["status"] == 5 or expired) else "canceled"
+            prevented = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue(reason, "dispatch"),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                    EvidenceValue("dispatch_prevented", 1, {})))
+            await runtime.finish(ticket, prevented,
+                end_run=RunOutcome.EXPIRED if reason == "window_ended" else RunOutcome.CANCELED)
+            return
     response = await runtime.stopper.stop(ControlRequest(
         operation="stop_recording", binding=_binding(owner),
         params=owner["effective_params_json"], ticket=ticket,
