@@ -254,6 +254,10 @@ class PhotoCase:
 NORMAL_CASES = tuple(PhotoCase(fmt, source, shutter)
                      for fmt in ("raw", "jpeg") for source in ("host", "device")
                      for shutter in ("0.000667", "0.000333", "0.00025"))
+FULL_UI_CASE_NAMES = frozenset((
+    "raw-host-0.000667", "raw-device-0.000333", "raw-host-0.00025",
+    "jpeg-device-0.000667", "jpeg-host-0.000333", "jpeg-device-0.00025",
+))
 
 
 def _tool_source():
@@ -422,19 +426,67 @@ class PhotoWorld:
     def argv(self):
         return [json.loads(line) for line in self.argv_log.read_text().splitlines()]
 
-    def export_photo(self):
+    def export_photo(self, *, browser_prefix=False):
         input_path = self.root / "photo-input.json"
-        input_path.write_text(json.dumps({
+        photo_input = {
             "device_id": "hb-host", "action_type": "camera_take_photo", "action_name": "capture",
             "case_name": self.case.name, "params_text": self.case.params_text,
             "scheduled_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "refresh_scheduled_at": True,
-        }))
+        }
+        input_path.write_text(json.dumps(photo_input))
         plan = self.root / "photo-request.json"
-        self.browser = self.client("browser-photo-export", str(input_path), str(plan),
-                                   output=self.root / "photo-browser.json")
+        mode = "browser" if browser_prefix else "application"
+        receipt = self.client(f"{mode}-photo-export", str(input_path), str(plan),
+                              output=self.root / f"photo-{mode}.json")
+        assert receipt["export_mode"] == mode
+        assert plan.read_text() == receipt["request_text"]
+        assert receipt["capabilities_sha256"] == hashlib.sha256(
+            (self.store / "device-capabilities.json").read_bytes()).hexdigest()
+        request = json.loads(receipt["request_text"], parse_float=Decimal)
+        assert str(request["request_id"]) == receipt["request_id"]
+        assert request["name"] == f"{self.case.name}-applied"
+        assert len(request["actions"]) == 1
+        refresh = receipt["schedule_refresh"]
+        assert refresh["previous_scheduled_at"] == photo_input["scheduled_at"]
+        assert refresh["scheduled_at"] == datetime.fromisoformat(
+            refresh["selected_utc"]).strftime("%Y-%m-%d %H:%M:%S")
+        expected = json.loads(self.case.params_text, parse_float=Decimal)
+        assert request["actions"][0] == {
+            "name": "capture", "type": "camera_take_photo", "device_id": "hb-host",
+            "scheduled_at": refresh["scheduled_at"], "policy": {"max_delay_ms": 60000}, "params": expected,
+        }
+        fields = (("source_draft_text", "reopened_draft_text", "applied_draft_text", "request_text")
+                  if browser_prefix else ("draft_text", "request_text"))
+        for field in fields:
+            assert _token(receipt[field], ("actions", 0, "params", "exposure", "shutter_s")) == self.case.shutter
+            assert json.loads(receipt[field], parse_float=Decimal)["actions"][0]["params"] == expected
+        if browser_prefix:
+            assert receipt["source_draft_id"] != receipt["applied_draft_id"]
+            assert receipt["preset_id"] == receipt["reopened_preset_id"]
+            assert receipt["server_open_count"] == 2
+            assert receipt["preset_http_status"] == 201
+            for field in ("preset_params_text", "reopened_preset_params_text"):
+                assert _token(receipt[field], ("exposure", "shutter_s")) == self.case.shutter
+                assert json.loads(receipt[field], parse_float=Decimal) == expected
+            assert _token(receipt["preset_http_text"], ("params", "exposure", "shutter_s")) == self.case.shutter
+            assert json.loads(receipt["preset_http_text"], parse_float=Decimal)["params"] == expected
+            source_action = json.loads(receipt["source_draft_text"], parse_float=Decimal)["actions"][0]
+            assert json.loads(receipt["reopened_draft_text"], parse_float=Decimal)["actions"][0] == source_action
+            assert json.loads(receipt["applied_draft_text"], parse_float=Decimal)["actions"][0] == request["actions"][0]
+            assert request["actions"][0] == {**source_action, "scheduled_at": refresh["scheduled_at"]}
+        else:
+            assert receipt["preview_intent"] == "disabled"
+            assert receipt["draft_request_id"] == receipt["request_id"]
+            assert receipt["request_draft_id"] == receipt["draft_id"]
+            assert json.loads(receipt["draft_text"], parse_float=Decimal) == {
+                "name": request["name"], "actions": request["actions"],
+            }
+            saved = json.loads(receipt["request_body_text"], parse_float=Decimal)
+            ack = {"last_report_id": receipt["last_report_id"]} if receipt["has_ack"] else {}
+            assert request == {**saved, **ack}
         self.photo_plan = plan
-        self._remember_request("capture", self.browser)
+        self._remember_request("capture", receipt)
         return plan
 
     def export_plan(self, name: str, action: dict):
@@ -530,11 +582,6 @@ class PhotoWorld:
 
     def assert_precision_and_sources(self, report_path, capture):
         expected = json.loads(self.case.params_text, parse_float=Decimal)
-        for field in ("source_draft_text", "reopened_draft_text", "applied_draft_text", "request_text"):
-            assert _token(self.browser[field], ("actions", 0, "params", "exposure", "shutter_s")) == self.case.shutter
-        for field in ("preset_params_text", "reopened_preset_params_text"):
-            assert _token(self.browser[field], ("exposure", "shutter_s")) == self.case.shutter
-        assert _token(self.browser["preset_http_text"], ("params", "exposure", "shutter_s")) == self.case.shutter
         action_id = int(capture["action_instance_id"])
         row, = _rows(self.deployment.state_db, "SELECT * FROM actions WHERE id=?", (action_id,))
         assert _token(row["input_fields_json"], ("params", "exposure", "shutter_s")) == self.case.shutter
@@ -663,7 +710,7 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
     monkeypatch.chdir(tmp_path)
     world.start()
     try:
-        world.host.submit(world.export_photo())
+        world.host.submit(world.export_photo(browser_prefix=case.name in FULL_UI_CASE_NAMES))
         report_path, report, capture = world.report("capture")
         assert "result" not in capture
         assert not {"steps", "diagnostics", "observations", "call_info"} & capture.keys()

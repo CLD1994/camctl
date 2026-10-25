@@ -1,0 +1,99 @@
+{
+  "date_utc": "2026-10-25T02:18:14.541737+00:00",
+  "stage": "S6初版静态核对",
+  "source_parent": "1760cf32903d66703d66125b01bd47b501a3b000",
+  "s5_dependencies": [
+    "2c1384536110f9a5aec84b9671a38b5d53272bd2",
+    "d20c8273618b02eac265681e931bbeedfdebc6aa",
+    "2ba56ef4ecd7c3a63529b450d28d451bebefcb0a",
+    "f626c1e1e52f4c79b3e98c3ca908100f0205a6bc"
+  ],
+  "coverage_mapping_commit": "8505041fd1cb132b3fa65deb5c56103c2bae297b",
+  "files": [
+    {
+      "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+      "sha256": "250084980a82e46c4c972d594b50e2192b83ab8b9a23645b4a3d8d5efdddf6d7"
+    },
+    {
+      "path": "tests/integration/client_driver.ts",
+      "sha256": "89aafc14ad3e200f40c6eb48a11a39ab4f0472e7267ca3f3ce5f153b5abae21a"
+    },
+    {
+      "path": "tests/integration/README.md",
+      "sha256": "f9f49df2b8c3dde7f811efa2c7de2fe7b2c8a69b6b5c97aab39dab690a637c6d"
+    }
+  ],
+  "static_checks": {
+    "python_compile": "passed",
+    "typescript_parse": "passed",
+    "test_bodies_and_PhotoCase": "AST等同S5，只有正常入口增加选择前缀的keyword",
+    "other_PhotoWorld_methods": "AST等同S5，只有UI词元块迁移至提交前的export_photo",
+    "ui_selection_matches_mapping": true,
+    "pytest_identities_unchanged": 29,
+    "independent_worlds_unchanged": 18,
+    "normal_ui": 6,
+    "normal_application": 6,
+    "fault_application": 6,
+    "directed_ui_unchanged": 3,
+    "s5_close_fix_helper_compile": "passed"
+  },
+  "commands": [
+    {
+      "argv": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "Python 3.11.17\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "node",
+        "--input-type=module",
+        "-e",
+        "import {createRequire} from 'node:module';import{readFileSync}from'node:fs';const require=createRequire('/tmp/camctl-itopt-runner-npm-client/package.json');const esbuild=require('esbuild');const result=esbuild.transformSync(readFileSync('tests/integration/client_driver.ts','utf8'),{loader:'ts',sourcefile:'tests/integration/client_driver.ts',format:'esm',target:'esnext'});if(result.warnings.length)throw new Error(JSON.stringify(result.warnings));process.stdout.write(JSON.stringify({parser:'esbuild',version:esbuild.version,node:process.version,emitted_files:0,application_started:false}));"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"parser\":\"esbuild\",\"version\":\"0.28.2\",\"node\":\"v24.22.1\",\"emitted_files\":0,\"application_started\":false}",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "runtime_tests": 0,
+  "builds": 0,
+  "typecheck_run": false,
+  "runtime_status": "待最终统一HB29四路及同源6/8路验收；静态检查不代表运行通过",
+  "receipt_contract": {
+    "browser": {
+      "file": "photo-browser.json",
+      "export_mode": "browser",
+      "operation": "browser-photo-export"
+    },
+    "application": {
+      "file": "photo-application.json",
+      "export_mode": "application",
+      "operation": "application-photo-export"
+    },
+    "identity": [
+      "pytest nodeid",
+      "canonical world root"
+    ],
+    "expected_successful_session_photo_operations": {
+      "browser-photo-export": 6,
+      "application-photo-export": 12
+    },
+    "expected_world_context_starts": 24,
+    "counts_are_runtime_expectations_not_measured": true
+  },
+  "s5_close_helper_sha256": "af9ea7d89f848d246b2c1d87bff12009f7c5779f53eb87cc6c3ede26e79360c3"
+}

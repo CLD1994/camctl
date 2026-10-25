@@ -57,6 +57,7 @@ import {
   validateParams,
 } from "../../apps/client/src/shared/capabilities";
 import { estimateVideoAction } from "../../apps/client/src/shared/video-size-estimate";
+import { initializePreviewMetadata } from "../../apps/client/src/shared/automatic-previews";
 import { Files } from "../../apps/client/src/server/files";
 import { createHttpApp } from "../../apps/client/src/server/http";
 import {
@@ -801,6 +802,72 @@ async function browserPlanExport(
   }
 }
 
+type PhotoInput = {
+  device_id: string;
+  action_type: string;
+  action_name: string;
+  case_name: string;
+  params_text: string;
+  scheduled_at: string;
+  refresh_scheduled_at?: boolean;
+};
+
+async function applicationPhotoExport(
+  storeDir: string,
+  inputPath: string,
+  planPath: string,
+  receiptPath: string,
+  owner: WorldClient,
+) {
+  const { app } = await owner.browser();
+  const input = JSON.parse(readFileSync(inputPath, "utf8")) as PhotoInput;
+  const selected = input.refresh_scheduled_at ? new Date() : undefined;
+  const scheduledAt = selected
+    ? selected.toISOString().slice(0, 19).replace("T", " ")
+    : input.scheduled_at;
+  const draft = app.createDraft(initializePreviewMetadata({
+    text: stringifyJson({
+      name: `${input.case_name}-applied`,
+      actions: [{
+        name: input.action_name,
+        type: input.action_type,
+        device_id: input.device_id,
+        scheduled_at: scheduledAt,
+        policy: { max_delay_ms: 60000 },
+        params: parseClientJson(input.params_text),
+      }],
+    }),
+  }, "disabled", randomUUID()));
+  const exported = app.exportDraft(draft.id, draft.revision, draft.content);
+  const saved = app.draft(draft.id);
+  const request = app.request(exported.id);
+  const body = app.downloadRequest(request.id);
+  const requestText = stringifyJson(body);
+  writeFileSync(planPath, requestText, "utf8");
+  writeFileSync(receiptPath, stringifyJson({
+    export_mode: "application",
+    capabilities_sha256: createHash("sha256")
+      .update(readFileSync(join(storeDir, "device-capabilities.json"))).digest("hex"),
+    draft_id: saved.id,
+    draft_revision: saved.revision,
+    draft_text: saved.content.text,
+    preview_intent: saved.content.automaticPreviews?.intent,
+    draft_request_id: saved.exportedRequestId,
+    request_draft_id: request.draftId,
+    request_body_text: stringifyJson(request.body),
+    request_id: request.id,
+    request_text: requestText,
+    created_at: request.body.created_at,
+    has_ack: Object.hasOwn(body, "last_report_id"),
+    last_report_id: body.last_report_id ?? null,
+    ...(selected ? { schedule_refresh: {
+      previous_scheduled_at: input.scheduled_at,
+      scheduled_at: scheduledAt,
+      selected_utc: selected.toISOString(),
+    } } : {}),
+  }));
+}
+
 async function browserPhotoExport(
   storeDir: string,
   inputPath: string,
@@ -808,15 +875,7 @@ async function browserPhotoExport(
   receiptPath: string,
   owner?: WorldClient,
 ) {
-  const input = JSON.parse(readFileSync(inputPath, "utf8")) as {
-    device_id: string;
-    action_type: string;
-    action_name: string;
-    case_name: string;
-    params_text: string;
-    scheduled_at: string;
-    refresh_scheduled_at?: boolean;
-  };
+  const input = JSON.parse(readFileSync(inputPath, "utf8")) as PhotoInput;
   const params = parseClientJson(input.params_text) as any;
   const capabilitiesText = readFileSync(
     join(storeDir, "device-capabilities.json"),
@@ -835,6 +894,7 @@ async function browserPhotoExport(
     await import("../../apps/client/tests/integration/select-support");
   let session = owner ? await owner.browser() : await openBrowserStore(storeDir);
   const receipt: Record<string, any> = {
+    export_mode: "browser",
     capabilities_sha256: createHash("sha256")
       .update(capabilitiesText)
       .digest("hex"),
@@ -1154,6 +1214,8 @@ async function worldClientSession(
         }
         if (message.operation === "browser-photo-export" && args.length === 3)
           await browserPhotoExport(storeDir, args[0], args[1], args[2], owner);
+        else if (message.operation === "application-photo-export" && args.length === 3)
+          await applicationPhotoExport(storeDir, args[0], args[1], args[2], owner);
         else if (message.operation === "browser-plan-export" && args.length === 3)
           await browserPlanExport(storeDir, args[0], args[1], args[2], owner);
         else if (message.operation === "upload-files" && args.length === 2)
