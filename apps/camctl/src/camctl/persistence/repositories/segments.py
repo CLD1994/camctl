@@ -1128,7 +1128,7 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
     if branch!='CREATE':
         _check_write_kind(db,_set(db,ref),branch)
     if event.reason in (_EVENT['branches']['PUBLISH']['reason'],_EVENT['branches']['ACTIVATE']['reason']):
-        _verify_publication(db,ref,event,context,prior_events)
+        return _verify_publication(db,ref,event,context,prior_events)
     if any(not change.before.exists and change.after.values.get('created_event_id')!=event.event_id for change in event.rows):
         raise ConsistencyError('分段所属行必须引用自己的实际创建事件')
     if event.reason==_EVENT['branches']['SCOPE']['reason']:
@@ -1151,9 +1151,9 @@ def verify_segment_event(db,ref,event,context,*,prior_events=()):
             if values['set_id']!=setrow['id']:raise ConsistencyError('分段事件混入其他集合')
             if change.table=='segment_members':
                 if setrow['state']!=_STATE.COLLECTING:raise ConsistencyError('固定集合不能追加成员')
-                from .result_file_ownership import _guard_boundary
-                pending_boundary = _guard_boundary(db, event, context.transaction)
-                stored=_read_member(db,{'id':change.row_id,**values},current_boundary=pending_boundary)
+                from .result_file_ownership import ownership_guard_boundary
+                pending_boundary = ownership_guard_boundary(db, event, context.transaction)
+                stored=_read_member(db,{'id':change.row_id,**values},setrow=setrow)
                 expected={**_member_row(db,setrow,_member_input_from_row(values),current_boundary=pending_boundary),'created_event_id':values['created_event_id']}
                 from camctl.contracts.enums import load_registry
                 file_type=load_registry()['history_objects']['device_file']['id']
@@ -1353,130 +1353,9 @@ def _verify_final_activation(ref,setrow,event,context):
 
 
 def _verify_publication(db,ref,event,context,prior):
-    """只承认本完成事务中已验证事件，不以当前终态代替同组证明。"""
-    if getattr(context.current_reads,'proposal_event',None) is not None:
-        from .segment_transactions import verify_publication
-        return verify_publication(db,ref,event,context)
-    def events():
-        return (accepted.envelope for accepted in prior)
-    setrow=_set(db,ref,fixed=True)
-    if setrow['state']!=_STATE.ASSESSED or setrow['published_event_id'] is not None:
-        raise ConsistencyError('发布缺少尚未正式发布的完整判断')
-    if _one(db,'SELECT 1 FROM segment_sets WHERE action_id=? AND published_event_id IS NOT NULL',(ref.action_id,)):
-        raise ConsistencyError('原动作已有唯一正式分段集合')
-    assessment=assessment_from_document(setrow['assessment_json'])
-    _verify_final_activation(ref,setrow,event,context)
-    if event.reason==_EVENT['branches']['PUBLISH']['reason'] and assessment.default_scope.state is not DefaultScopeState.NONEMPTY:
-        raise ConsistencyError('未知或空范围不能发布默认成员关联')
-    terminal=any(accepted.event_type==load_event_registry()['events']['ACTION_FINISHED']['id']
-        and any(row.table=='actions' and row.row_id==ref.action_id and row.after.values.get('status') in (3,4,5,6)
-            for row in accepted.rows) for accepted in events())
-    if not terminal:
-        raise ConsistencyError('分段发布必须与原来源终态在同一完成事务')
-    action=context.state_rows.get('actions',{}).get(ref.action_id)
-    if action is None:raise ConsistencyError('完成组没有来源动作状态')
-    if action['status']==3 and assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
-        raise ConsistencyError('来源成功与原分段判断不一致')
-    if assessment.gap_count is None and (action['status']==3 or assessment.default_scope.state is not DefaultScopeState.UNKNOWN):
-        raise ConsistencyError('缺口分类未知不能发布成功或可靠默认范围')
-    def created_output(file_id,kind):
-        result=None
-        for accepted in events():
-            if accepted.event_type!=load_event_registry()['events']['OUTPUT_REGISTERED']['id']:continue
-            for change in accepted.rows:
-                if change.table=='outputs' and not change.before.exists:
-                    values=change.after.values
-                    if values.get('source_action_id')==ref.action_id and values.get('device_file_id')==file_id and values.get('kind')==kind:
-                        if result is not None:raise ConsistencyError('完成组为同一成员重复登记产物')
-                        result=change.row_id
-        return result
-    for accepted in events():
-        if accepted.event_type!=load_event_registry()['events']['OUTPUT_REGISTERED']['id']:continue
-        for change in accepted.rows:
-            values=change.after.values
-            if change.table!='outputs' or change.before.exists or values.get('source_action_id')!=ref.action_id:continue
-            found=_one(db,'SELECT id FROM segment_members WHERE set_id=? AND file_id=?',(setrow['id'],values.get('device_file_id')))
-            if found is None:raise ConsistencyError('完成组产物不属于原完整冻结成员')
-            candidate=_output_candidate(db,setrow,_read_member(db,row_facts(db,'segment_members',found[0])))
-            if candidate is None or values.get('kind')!=int(enum_for('outputs.kind')[candidate.kind.name]):
-                raise ConsistencyError('完成组登记了不合格冻结成员')
-    # PUBLISH 的每个 output 必须来自同组已验证创建事件。
-    for change in event.rows:
-        if change.table=='segment_scope_members':
-            member=row_facts(db,'segment_members',row_facts(db,'segment_scope_members',change.row_id)['member_id'])
-            if created_output(member['file_id'],1)!=change.after.values['output_id']:
-                raise ConsistencyError('默认关联不是本完成事务创建的实际原片')
-    if event.reason!=_EVENT['branches']['ACTIVATE']['reason']:return
-    if len(event.rows)!=1 or event.rows[0].row_id!=setrow['id'] or event.rows[0].after.values.get('published_event_id')!=event.event_id:
-        raise ConsistencyError('正式引用必须精确绑定自己的发布事件')
-    class Reader:connection=db
-    original_count=0
-    cursor=None
-    while True:
-        page=read_segment_members(ref,cursor,128,Reader)
-        for stored in page.items:
-            candidate=_output_candidate(db,setrow,stored)
-            if candidate is None:continue
-            if candidate.kind is OutputKind.ORIGINAL:original_count+=1
-            kind=int(enum_for('outputs.kind')[candidate.kind.name])
-            identity=created_output(candidate.file_id,kind)
-            if identity is None:raise ConsistencyError('完成组遗漏应保留的实际原片或预览')
-            if candidate.kind is OutputKind.PREVIEW:
-                original=created_output(candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
-                if original is None or not any(row.table=='output_origins' and not row.before.exists and row.after.values.get('output_id')==identity and row.after.values.get('original_output_id')==original for accepted in events() for row in accepted.rows):
-                    raise ConsistencyError('完成组预览缺少同一真实原片的origin')
-        if page.next_cursor is None:break
-        cursor=page.next_cursor
-    from camctl.contracts.workflow_errors import registered_error
-    if action.get('error_code')==registered_error('capture_segment_gap')['action_error_id']:
-        from camctl.capture.segment_errors import validate_segment_error_header,segment_error_header
-        header=validate_segment_error_header('capture_segment_gap',action['error_details_json'])
-        if header!=segment_error_header(assessment,original_count):
-            raise ConsistencyError('来源缺口错误头与原判断或保留原片数量不同')
-    expected=assessment.default_scope.member_count or 0
-    count=0;cursor=None
-    while True:
-        page=_relation_page(ref,cursor,128,Reader,'segment_scope_members',SegmentScopeCursor,'ordinal')
-        for row in page.items:
-            count+=1
-            output_id=row['output_id']
-            for accepted in events():
-                for changed in accepted.rows:
-                    if changed.table=='segment_scope_members' and changed.row_id==row['id']:
-                        output_id=changed.after.values.get('output_id',output_id)
-            member=row_facts(db,'segment_members',row['member_id'])
-            if output_id is None or output_id!=created_output(member['file_id'],1):
-                raise ConsistencyError('正式集合缺少完整实际默认 output 关联')
-        if page.next_cursor is None:break
-        cursor=page.next_cursor
-    if count!=expected:raise ConsistencyError('正式默认范围数量与原判断不一致')
-    # 有限直接提案也必须完整履行原申请；不能把新仓储的complete回调当守卫。
-    from .segment_transactions import _header_request,_failure,_read_failure_sources,_verify_scope_members,_completion_qualification,_verify_qualification_header
-    accepted=next(item for item in events() if item.event_type==load_event_registry()['events']['ACTION_FINISHED']['id']
-        and any(row.table=='actions' and row.row_id==ref.action_id for row in item.rows))
-    header=accepted.evidence.get('segment_finish_request')
-    request=_header_request(header)
-    _verify_qualification_header(header,_completion_qualification(db,request))
-    _verify_scope_members(request,assessment,Reader)
-    status,error,details=_failure(request,assessment,original_count,setrow,
-        _read_failure_sources(request,assessment,setrow,db),before_event_id=context.transaction.first_event_id)
-    if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):
-        raise ConsistencyError('直接完成组来源结果与原有限实际失败不同')
-    registry=load_event_registry()['events']
-    if header['finish_run']:
-        run=row_facts(db,'operation_runs',request.run_id)
-        expected_row=update_change('operation_runs',run['id'],{name:run[name] for name in ('status','retry_wait_required','error_json')},
-            {'status':3,'retry_wait_required':0,'error_json':None})
-        evidence={'stale_run_request':{'kind':'stale_run_finish','responsibility_keys':[run['responsibility_key']],'status':3,'error':None}}
-        if not any(item.event_type==registry['OPERATION_CONFIGURED']['id'] and item.reason==3 and item.rows==(expected_row,)
-                and item.occurred_at==request.occurred_at and json_equal(item.evidence,evidence) for item in events()):
-            raise ConsistencyError('直接完成组没有共同结束原RESULTS责任')
-    if header['complete_plan']:
-        plan=row_facts(db,'plans',action['plan_id'])
-        expected_row=update_change('plans',plan['id'],{'status':plan['status']},{'status':3})
-        if not any(item.event_type==registry['PLAN_STATUS_CHANGED']['id'] and item.reason==2 and item.rows==(expected_row,)
-                and item.occurred_at==request.occurred_at for item in events()):
-            raise ConsistencyError('直接完成组没有共同结束适用父计划')
+    """有限与有界发布统一消费内核实际已验证前序。"""
+    from .segment_transactions import verify_publication
+    return verify_publication(db,ref,event,context)
 
 
 def segment_scope_publication_rows(ref,bindings,owned):

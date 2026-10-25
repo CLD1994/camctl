@@ -12,15 +12,17 @@ from camctl.history.events import load_event_registry
 from camctl.history.reads import CaptureResultReadScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.event_reads import SqlEventReads
-from camctl.persistence.fact_reads import read_event, read_transaction
+from camctl.persistence.fact_reads import (
+    opened_operation_fact_scope, read_event, read_operation_transaction, read_transaction,
+)
 from camctl.persistence.transaction import (
     CommandPlan, TransactionError, event_envelope, next_row_id, read_transaction_range,
     row_change, row_facts, update_change,
 )
 from . import result_pages as pages
 from .result_file_ownership import (
-    _guard_boundary, _proof, _request_from_event as ownership_request,
-    _saved_range, request_document as ownership_document,
+    ownership_guard_boundary, ownership_request_from_event as ownership_request,
+    request_document as ownership_document,
 )
 from .result_file_proofs import read_file_at_boundary, read_fixed_file, read_result_file_input
 
@@ -218,7 +220,7 @@ def _pairing_guard(event, context):
         raise EventValidationError('扫描配对缺少实际 SQL 读取端口')
     try:
         request = _request(event)
-        boundary = _guard_boundary(reads.connection, event, context.transaction)
+        boundary = ownership_guard_boundary(reads.connection, event, context.transaction)
         before = pages._page_before_boundary(reads.connection, context.transaction)
         if request.source_boundary != before:
             raise ConsistencyError('配对申请的原文件边界不是本次保存前完整边界')
@@ -248,7 +250,7 @@ class PairResultFilesCommand:
 
     def plan(self, scope):
         connection, request = scope.connection, self.request
-        if _saved_range(connection, self.key) is not None:
+        if read_operation_transaction(connection, self.key) is not None:
             return CommandPlan((), {}, {}, result=_verify(request, self.key, connection), read_only=True)
         if pages._latest_history_boundary(connection) != request.source_boundary:
             raise ConsistencyError('新配对申请不能更换原保存前文件边界')
@@ -275,7 +277,7 @@ class PairResultFilesCommand:
 
 
 def _verify(request, key, connection, *, current_boundary=None):
-    transaction = _saved_range(connection, key)
+    transaction = read_operation_transaction(connection, key)
     if transaction is None:
         return None
     if transaction.first_event_id != transaction.last_event_id:
@@ -308,7 +310,8 @@ def verify_result_file_pairing(request, key, reader, *, execution_finished=True)
     if opened:
         connection.execute('BEGIN')
     try:
-        return _verify(request, key, connection)
+        with opened_operation_fact_scope(connection, opened):
+            return _verify(request, key, connection)
     finally:
         if opened:
             connection.execute('ROLLBACK')
