@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,7 +55,7 @@ def json_write(path, data):
 
 
 def rows(database, sql, params=()):
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=30) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=30)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(sql, params)]
 
@@ -321,19 +322,23 @@ max_query_attempts={max_q}
             return
         identities = []
         host_pid = self.host._host_pid
+        # 先固定主程序的子进程集合，后续收场和验收采用同一组身份。
+        os.kill(host_pid, signal.SIGSTOP)
         identities.append(process_identity(host_pid))
+        observed = []
         for path in Path("/proc").glob("[0-9]*/stat"):
             try:
                 item = process_identity(int(path.parent.name))
             except (OSError, ValueError):
                 continue
-            if item["ppid"] == host_pid or item["pgid"] in {row["pgid"] for row in identities if row["ppid"] == host_pid}:
-                identities.append(item)
+            observed.append(item)
+        groups = {item["pgid"] for item in observed if item["ppid"] == host_pid}
+        identities.extend(item for item in observed
+                          if item["ppid"] == host_pid or item["pgid"] in groups)
         log = self.host.log_path.read_bytes() if self.host.log_path.exists() else b""
         (self.root / f"host-{len(list(self.root.glob('host-*.log')))}.log").write_bytes(log)
         self.host.stop()
         self.host = None
-        groups = {item["pid"] for item in identities if item["pid"] == item["pgid"] and item["ppid"] == host_pid}
         def active():
             found = []
             for path in Path("/proc").glob("[0-9]*/stat"):
