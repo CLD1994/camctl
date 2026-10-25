@@ -10,6 +10,7 @@ from camctl.contracts.json_values import json_equal,parse_exact_json
 from camctl.contracts.values import ConsistencyError,OperationKey
 from camctl.history.events import load_event_registry
 from camctl.history.reads import ResultCheckWriteScope,SegmentReadScope
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.transaction import (
     CommandPlan,TransactionScope,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change)
 from .segment_result_sets import _boundary,_one,_read_transaction,read_result_set
@@ -473,6 +474,11 @@ def verify_result_check_conclusion(request,key,owned,*,execution_finished=True):
 
 def read_verified_conclusion(db, setrow):
     """按决定的原完整申请核实配置、真实轮次及责任关闭。"""
+    key = (__name__, "read_verified_conclusion", typed_read_key(setrow["id"]))
+    return reuse_read(db, key, lambda: _load_verified_conclusion(db, setrow))
+
+
+def _load_verified_conclusion(db, setrow):
     from types import SimpleNamespace
     from camctl.history.decoding import decode_event_row
     from .result_pages import _COLUMNS
