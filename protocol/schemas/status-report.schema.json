@@ -1339,6 +1339,9 @@
         },
         "device_execution": {
           "$ref": "#/$defs/device_execution"
+        },
+        "status_history": {
+          "$ref": "#/$defs/action_status_history"
         }
       },
       "required": [
@@ -2380,6 +2383,9 @@
           "items": {
             "$ref": "#/$defs/action"
           }
+        },
+        "status_history": {
+          "$ref": "#/$defs/plan_status_history"
         }
       },
       "required": [
@@ -2598,6 +2604,76 @@
         }
       ],
       "description": "取消要求涉及的拍摄内容处理结果；状态与错误来自实际处理事实。"
+    },
+    "clock_status": {
+      "type": "string",
+      "enum": [
+        "unchecked",
+        "trusted",
+        "invalid"
+      ]
+    },
+    "plan_status_history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "changed_at",
+          "clock_status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/$defs/plan_status"
+          },
+          "changed_at": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clock_status": {
+            "$ref": "#/$defs/clock_status"
+          }
+        }
+      }
+    },
+    "action_status_history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "changed_at",
+          "clock_status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/$defs/action_status"
+          },
+          "changed_at": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clock_status": {
+            "$ref": "#/$defs/clock_status"
+          }
+        }
+      }
     }
   }
 }

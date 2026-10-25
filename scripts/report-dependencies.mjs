@@ -15,6 +15,7 @@ const grammar = {
     expression: { discriminator: { propertyName: 'op' }, oneOf: [
       operation('literal', { value: {} }), operation('omit'), operation('error', { code: { const: 'state_database_error' } }),
       operation('read', { column, encoding: { enum: ['identity', 'id', 'utc_seconds', 'json'] }, schema: text }, ['column', 'encoding']),
+      operation('status_history', { column, schema: text }),
       operation('enum', { column, map: { type: 'object', minProperties: 1, additionalProperties: text } }),
       operation('enum_is', { column, members: { ...strings, minItems: 1 } }),
       operation('json_enum', {
@@ -45,7 +46,7 @@ const grammar = {
     relations: { type: 'object', additionalProperties: object({ from: column, to: column, cardinality: { enum: ['one', 'optional_one', 'many'] } }) },
     projections: { type: 'object', additionalProperties: object({
       schema: text, root_table: text, entity: text, relations: strings, when: expression,
-      fields: { type: 'object', minProperties: 1, additionalProperties: object({ when: expression, value: expression }) },
+      fields: { type: 'object', minProperties: 1, additionalProperties: object({ when: expression, value: expression, minimum_format: { const: 2 } }, ['when', 'value']) },
       assertions: strings, empty: { const: 'omit' }
     }, ['schema', 'root_table', 'entity', 'relations', 'when', 'fields']) },
     assertions: { type: 'object', additionalProperties: object({ columns: { type: 'array', minItems: 1, items: column, uniqueItems: true }, contract: text }) },
@@ -221,6 +222,14 @@ export function validateRegistration(registry, schema, { enums, errors, tables, 
     if (node.column) checkColumn(node.column, scope);
     if (node.schema) { pointer(schema, node.schema); cover(node.schema); compatible(node.schema, fieldSchema, parent); }
     switch (node.op) {
+      case 'status_history': {
+        assert.equal(node.column, `${registry.projections[parent].root_table}.status`);
+        const status = registry.projections[parent].fields.status.value;
+        assert.equal(status.op, 'enum');
+        const item = pointer(schema, node.schema).items;
+        for (const value of Object.values(status.map)) validateValue(value, item.properties.status, node.column);
+        break;
+      }
       case 'read':
         assert(node.encoding !== 'json' || node.schema, `${node.column} 的 JSON 缺少公共结构引用`);
         assert(!(node.schema || structuredValue(fieldSchema, schema)) || node.encoding === 'json', `${node.column} 的结构化值必须解码 JSON`);

@@ -354,6 +354,18 @@
             "empty": "omit",
             "encoding_order": 1
           }
+        },
+        "status_history": {
+          "minimum_format": 2,
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "status_history",
+            "column": "plans.status",
+            "schema": "#/$defs/plan_status_history"
+          }
         }
       }
     },
@@ -832,6 +844,18 @@
           "value": {
             "op": "project",
             "projection": "device_execution"
+          }
+        },
+        "status_history": {
+          "minimum_format": 2,
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "status_history",
+            "column": "actions.status",
+            "schema": "#/$defs/action_status_history"
           }
         }
       },
