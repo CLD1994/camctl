@@ -14,12 +14,15 @@ from camctl.persistence.repositories.preparation import PreparationReads
 from camctl.persistence.transaction import event_envelope, row_change, update_change
 
 
-def _database():
+def _database(*, start_recorded=False):
     connection = create_autospec(sqlite3.Connection, instance=True)
-    cursor = create_autospec(sqlite3.Cursor, instance=True)
-    cursor.fetchone.return_value = None
-    cursor.__iter__.return_value = iter(())
-    connection.execute.return_value = cursor
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True)
+        cursor.fetchone.return_value = ((1,) if start_recorded
+            and "FROM operation_runs WHERE action_id" in sql else None)
+        cursor.__iter__.return_value = iter(())
+        return cursor
+    connection.execute.side_effect = execute
     return connection
 
 
@@ -32,7 +35,7 @@ def _intent():
         result_event_id=None, result_json=None, error_json=None, copy_round=None)
     event = event_envelope(21, 8, 11, 1,
         (row_change("operation_attempts", 5, attempt), row_change("operation_runs", 3, run)), 10)
-    state = {"actions": {7: dict(id=7, status=1, execution_started=0, cancel_requested=0,
+    state = {"actions": {7: dict(id=7, type=1, status=1, execution_started=0, cancel_requested=0,
         device_id="cam", scheduled_at=20, max_delay_ms=3)},
         "device_activities": {11: dict(id=11, action_id=7, occupancy_state=1, dispatch_state=1,
             activity_state=1, ownership_mode=1, output_scope_json={})}}
@@ -44,6 +47,13 @@ def test_preparation_intent_needs_the_original_connection_reader():
     with pytest.raises(EventValidationError):
         _attempt_intent_guard(event, context)
     _attempt_intent_guard(event, replace(context, preparation_reads=PreparationReads(_database())))
+
+
+def test_photo_preparation_intent_cannot_follow_original_start():
+    event, context = _intent()
+    context = replace(context, preparation_reads=PreparationReads(_database(start_recorded=True)))
+    with pytest.raises(EventValidationError):
+        _attempt_intent_guard(event, context)
 
 
 @pytest.mark.parametrize("observations", [[], [dict(type="setting_applied", version=1, data={})],

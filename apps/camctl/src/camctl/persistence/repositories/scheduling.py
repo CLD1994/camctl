@@ -30,6 +30,7 @@ from camctl.contracts.values import (
     UtcMicros,
 )
 from camctl.capture.models import activity_capabilities
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -74,9 +75,7 @@ _WINDOW_OBSERVED_EVENT = 7
 _ACTION_FINISHED_EVENT = 8
 _PLAN_STATUS_EVENT = 9
 
-#: 拍摄动作类型编号到能力模块使用的字面名称。
-_CAMERA_TYPE_NAMES = {1: "camera_take_photo", 2: "camera_record",
-                      3: "camera_timelapse"}
+_CAPTURE_TYPE_PLACEHOLDERS = ",".join("?" for _ in CAPTURE_ACTION_TYPES)
 
 #: 动作状态：终态集合。
 _ACTION_TERMINAL = (3, 4, 5, 6)
@@ -89,9 +88,6 @@ _RUN_UPDATE_COLUMNS = (
     "retry_interval_s_json",
     "retry_wait_required",
 )
-
-#: 动作类型编号：三种拍摄动作共用设备占用竞争。
-_CAMERA_ACTION_TYPES = (1, 2, 3)
 
 #: 动作类型编号：camera_record（启动机会持有者推导范围）。
 _CAMERA_RECORD_TYPE = 2
@@ -263,11 +259,11 @@ class StartActionCommand:
                              row_facts(connection, "device_activities", activity_id))
         if action["cancel_requested"]:
             return self._rejected("canceled")
-        literal = _CAMERA_TYPE_NAMES.get(action["type"])
-        if literal is None:
+        if action["type"] not in CAPTURE_ACTION_TYPES:
             raise TransactionError(
                 f"开始事务只适用于拍摄动作: {request.action_id}"
                 f" type={action['type']!r}")
+        literal = decode_member("actions.type", action["type"]).name.lower()
         if not isinstance(action["device_id"], str) or not action["device_id"]:
             raise TransactionError(f"拍摄动作缺少设备绑定: {request.action_id}")
         if not isinstance(action["driver_id"], str) or not action["driver_id"]:
@@ -302,8 +298,9 @@ class StartActionCommand:
             mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
             with closing(connection.execute(
                 "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                " WHERE device_id=? AND type IN (1,2,3) AND status IN (1,2) AND cancel_requested=0"
-                " ORDER BY scheduled_at,plan_id,input_index", (action["device_id"],),
+                f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
+                " AND status IN (1,2) AND cancel_requested=0"
+                " ORDER BY scheduled_at,plan_id,input_index", (action["device_id"], *CAPTURE_ACTION_TYPES),
             )) as cursor:
                 for scheduled, plan_id, input_index, maximum in cursor:
                     if (scheduled, plan_id, input_index) >= mine:
@@ -519,7 +516,7 @@ class ObserveWindowCommand:
             raise TransactionError(
                 f"观察事务要求动作存在: {request.action_id}")
         self._state["actions"] = {request.action_id: action}
-        if action["type"] not in (*_CAMERA_ACTION_TYPES, 8):
+        if action["type"] not in (*CAPTURE_ACTION_TYPES, 8):
             return self._rejected("not_timed")
         if action["status"] in _ACTION_TERMINAL:
             return self._rejected("terminal")
@@ -660,7 +657,7 @@ class ExpireActionCommand:
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["plans"] = {plan["id"]: plan}
-        if action["type"] not in (*_CAMERA_ACTION_TYPES, 8):
+        if action["type"] not in (*CAPTURE_ACTION_TYPES, 8):
             return self._rejected("not_timed")
         if action["status"] in _ACTION_TERMINAL:
             return self._rejected("terminal")
@@ -851,7 +848,7 @@ class GrantStartCommand:
         self._state["actions"] = {request.action_id: action}
         if action["device_id"] != request.device_id:
             raise TransactionError("启动授予的设备与动作保存的设备不符")
-        if action["type"] not in _CAMERA_ACTION_TYPES:
+        if action["type"] not in CAPTURE_ACTION_TYPES:
             raise TransactionError(
                 f"启动授予只适用于拍摄动作: {request.action_id}"
             )
@@ -1073,11 +1070,11 @@ class GrantStartCommand:
         with closing(connection.execute(
             "SELECT a.id, a.scheduled_at"
             " FROM actions a"
-            " WHERE a.type IN (1, 2, 3) AND a.status = ? AND a.cancel_requested = 0"
+            f" WHERE a.type IN ({_CAPTURE_TYPE_PLACEHOLDERS}) AND a.status = ? AND a.cancel_requested = 0"
             " AND a.device_id = ? AND a.scheduled_at<=?"
             " AND (a.scheduled_at,a.plan_id,a.input_index)<(?,?,?)"
             " ORDER BY a.scheduled_at,a.plan_id,a.input_index LIMIT 1",
-            (_ACTION_RUNNING, request.device_id, request.trusted_wall_now,
+            (*CAPTURE_ACTION_TYPES, _ACTION_RUNNING, request.device_id, request.trusted_wall_now,
              action["scheduled_at"], action["plan_id"], action["input_index"]),
         )) as cursor:
             return cursor.fetchone() is None
@@ -1178,13 +1175,13 @@ class SchedulingRepository:
     """调度开始、观察、过期与授予事务的 SQLite 仓储。"""
 
     def reserve_preparation(self, request, key, owned):
-        from camctl.persistence.runtime import require_capture_preparation_format
-        require_capture_preparation_format(owned.metadata.format_version)
+        from .preparation import require_action_preparation_format
+        require_action_preparation_format(owned, request.action_id)
         return _preparation_outcome(commit_operation(ReservePreparationCommand(request, key), key, owned))
 
     def fail_preparation(self, request, key, owned):
-        from camctl.persistence.runtime import require_capture_preparation_format
-        require_capture_preparation_format(owned.metadata.format_version)
+        from .preparation import require_action_preparation_format
+        require_action_preparation_format(owned, request.action_id)
         return _preparation_outcome(commit_operation(FailPreparationCommand(request, key), key, owned))
 
     def start_action(
@@ -1300,14 +1297,17 @@ class ReservePreparationCommand:
             return result(ReservePreparationOutcome.REJECTED, reason="canceled")
         if action["status"] != 1 or action["execution_started"] != 0:
             return result(ReservePreparationOutcome.REJECTED, reason="not_pending")
-        if action["type"] not in (2, 3):
-            raise TransactionError("只有录像和延时动作使用独立设置准备")
+        if action["type"] not in CAPTURE_ACTION_TYPES:
+            raise TransactionError("只有拍摄动作使用独立设置准备")
+        from .preparation import photo_start_recorded
+        if photo_start_recorded(connection, action):
+            return result(ReservePreparationOutcome.REJECTED, reason="not_pending")
         lower = Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
         if Decimal(request.trusted_wall_now) < lower:
             return result(ReservePreparationOutcome.REJECTED, reason="too_early")
         if request.trusted_wall_now > action["scheduled_at"] + action["max_delay_ms"] * 1000:
             return result(ReservePreparationOutcome.REJECTED, reason="window_ended")
-        capabilities = activity_capabilities(_CAMERA_TYPE_NAMES[action["type"]],
+        capabilities = activity_capabilities(decode_member("actions.type", action["type"]).name.lower(),
             StartActionCommand._decoded_spec(action["execution_spec_json"]))
         existing = StartActionCommand._existing_activity_id(connection, action["id"])
         if existing is not None:
@@ -1327,9 +1327,10 @@ class ReservePreparationCommand:
         mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
         with closing(connection.execute(
                 "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                " WHERE device_id=? AND type IN (2,3) AND status=1 AND execution_started=0"
+                f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
+                " AND status=1 AND execution_started=0"
                 " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
-                (action["device_id"],))) as cursor:
+                (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
             for scheduled, plan_id, index, delay in cursor:
                 if (scheduled, plan_id, index) >= mine:
                     break
@@ -1420,7 +1421,7 @@ class FailPreparationCommand:
             return CommandPlan((), owners, state, FailPreparationResult(FailPreparationOutcome.ALREADY), read_only=True)
         if action["cancel_requested"]:
             return reject("canceled")
-        if action["type"] not in (2, 3) or action["status"] != 1 or action["execution_started"] != 0:
+        if action["type"] not in CAPTURE_ACTION_TYPES or action["status"] != 1 or action["execution_started"] != 0:
             return reject("not_pending")
         facts = load_start_facts(connection, action)
         if not facts.not_started or facts.activity is None:

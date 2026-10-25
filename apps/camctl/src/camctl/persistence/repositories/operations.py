@@ -1520,8 +1520,8 @@ class OperationRepository:
         self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[BeginAttemptResult]:
         if intent.kind is OperationKind.PREPARE_CAPTURE:
-            from camctl.persistence.runtime import require_capture_preparation_format
-            require_capture_preparation_format(owned.metadata.format_version)
+            from .preparation import require_action_preparation_format
+            require_action_preparation_format(owned, intent.action_id)
         receipt = commit_operation(BeginAttemptCommand(intent, key), key, owned)
         return _outcome_of(receipt)
 

@@ -1,5 +1,18 @@
 """原事务独立核对设置准备调用，不从固定基准推断调用结束。"""
+from camctl.contracts.enums import decode_member, enum_for
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+
 from .capture_facts import preparation_calls_resolved
+
+
+def require_action_preparation_format(owned, action_id):
+    """准备写入口按原动作类型核对其所需的数据库格式。"""
+    from camctl.persistence.runtime import require_capture_preparation_format
+    from camctl.persistence.transaction import TransactionError, row_facts
+    action = row_facts(owned.connection, "actions", action_id)
+    if action is None:
+        raise TransactionError("拍摄准备缺少原动作")
+    require_capture_preparation_format(owned.metadata.format_version, action_type=action["type"])
 
 
 class PreparationReads:
@@ -32,20 +45,23 @@ class PreparationReads:
         from camctl.contracts.values import ConsistencyError
         from camctl.contracts.json_values import json_equal
         from camctl.capture.models import activity_capabilities
-        from .scheduling import ReservePreparationRequest, _CAMERA_TYPE_NAMES
+        from .scheduling import ReservePreparationRequest
         raw = event.evidence.get("preparation_request")
         from camctl.history.validators import parse_preparation_request
         request = ReservePreparationRequest(**parse_preparation_request(raw))
         action = context.state_rows.get("actions", {}).get(request.action_id)
         if (action is None or (action.get("status"), action.get("execution_started")) != (1, 0)
-                or action.get("cancel_requested") != 0 or action.get("type") not in (2, 3)
+                or action.get("cancel_requested") != 0 or action.get("type") not in CAPTURE_ACTION_TYPES
                 or row.after.values.get("action_id") != request.action_id
                 or event.occurred_at != request.occurred_at):
             raise ConsistencyError("准备活动不属于原pending拍摄动作")
+        if photo_start_recorded(self.connection, action):
+            raise ConsistencyError("已有照片START责任不能建立准备活动")
         if not (Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
                 <= request.trusted_wall_now <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
             raise ConsistencyError("准备活动没有原提前区间的时间资格")
-        capabilities = activity_capabilities(_CAMERA_TYPE_NAMES[action["type"]], action["execution_spec_json"])
+        capabilities = activity_capabilities(decode_member("actions.type", action["type"]).name.lower(),
+                                            action["execution_spec_json"])
         for column in ("state_query_supported", "stop_supported", "safe_repeat_stop", "start_return_meaning",
                        "completion_mode", "ownership_mode", "output_scope_json"):
             if not json_equal(row.after.values.get(column), getattr(capabilities, column)):
@@ -62,8 +78,10 @@ class PreparationReads:
         mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
         with closing(self.connection.execute(
                 "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                " WHERE device_id=? AND type IN (2,3) AND status=1 AND execution_started=0"
-                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index", (action["device_id"],))) as cursor:
+                f" WHERE device_id=? AND type IN ({','.join('?' for _ in CAPTURE_ACTION_TYPES)})"
+                " AND status=1 AND execution_started=0"
+                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
+                (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
             for scheduled, plan_id, index, delay in cursor:
                 if (scheduled, plan_id, index) >= mine:
                     break
@@ -90,7 +108,8 @@ class PreparationReads:
 
 
 def preparation_action_eligible(connection, action, activity):
-    if action.get("cancel_requested"):
+    if (action.get("type") not in CAPTURE_ACTION_TYPES or action.get("cancel_requested")
+            or photo_start_recorded(connection, action)):
         return False
     if (action.get("status"), action.get("execution_started")) == (1, 0):
         return True
@@ -102,12 +121,25 @@ def preparation_action_eligible(connection, action, activity):
             and facts.not_started)
 
 
+def photo_start_recorded(connection, action):
+    """照片已有START责任时只沿原单次拍摄收场，不重新准备。"""
+    from contextlib import closing
+    if action.get("type") != int(enum_for("actions.type").CAMERA_TAKE_PHOTO):
+        return False
+    with closing(connection.execute(
+            "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? LIMIT 1",
+            (action["id"], int(enum_for("operation_runs.kind").START)))) as cursor:
+        return cursor.fetchone() is not None
+
+
 def verify_failure_source(connection, action, facts, reason):
     """准备失败只能引用真实失败；未返回的责任继续等待。"""
     from contextlib import closing
     from camctl.contracts.values import ConsistencyError
     if facts.activity is None or not facts.not_started or not facts.preparation_resolved:
         raise ConsistencyError("准备失败缺少已收场且无启动效果的原活动")
+    if photo_start_recorded(connection, action):
+        raise ConsistencyError("已有照片START责任不能保存准备失败")
     activity_id = facts.activity["id"]
     with closing(connection.execute(
             "SELECT 1 FROM baseline_read_calls WHERE activity_id=? AND state=1 LIMIT 1",
@@ -118,7 +150,6 @@ def verify_failure_source(connection, action, facts, reason):
                                     (action["id"],))) as cursor:
         if cursor.fetchone() is not None:
             raise ConsistencyError("未启动的准备失败不能已有正式产物")
-    from camctl.contracts.enums import enum_for
     if reason == "device_failed":
         with closing(connection.execute(
                 "SELECT r.status,t.status,t.error_json,t.result_event_id FROM operation_runs r"

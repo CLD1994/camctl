@@ -42,10 +42,37 @@ def test_current_failed_or_unconfirmed_result_preserves_its_classification(reaso
     verify_failure_source(connection, {"id": 7}, facts, reason)
 
 
-def test_running_activity_before_first_start_remains_preparable(mocker):
+@pytest.mark.parametrize("action_type", [1, 2])
+def test_running_activity_before_first_start_remains_preparable(mocker, action_type):
     from camctl.persistence.repositories.preparation import preparation_action_eligible
     facts = StartFacts({"id": 11}, None, 0, True, 1, preparation_resolved=True)
     mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", return_value=facts)
     connection = create_autospec(sqlite3.Connection, instance=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.return_value = None
+    connection.execute.return_value = cursor
     assert preparation_action_eligible(connection,
-        {"id": 7, "status": 2, "execution_started": 1, "cancel_requested": 0}, {"id": 11})
+        {"id": 7, "type": action_type, "status": 2, "execution_started": 1, "cancel_requested": 0}, {"id": 11})
+
+
+def test_recording_with_reliably_ineffective_start_remains_preparable(mocker):
+    from camctl.persistence.repositories.preparation import preparation_action_eligible
+    facts = StartFacts({"id": 11}, {"id": 3}, 1, True, 4, preparation_resolved=True)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", return_value=facts)
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    assert preparation_action_eligible(connection,
+        {"id": 7, "type": 2, "status": 2, "execution_started": 1, "cancel_requested": 0}, {"id": 11})
+
+
+@pytest.mark.parametrize("status,execution_started", [(1, 0), (2, 1)])
+def test_photo_with_original_start_responsibility_cannot_prepare_again(mocker, status, execution_started):
+    from camctl.persistence.repositories.preparation import preparation_action_eligible
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    cursor.fetchone.return_value = (1,)
+    connection.execute.return_value = cursor
+    facts = StartFacts({"id": 11}, {"id": 3}, 1, True, 4, preparation_resolved=True)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", return_value=facts)
+    assert not preparation_action_eligible(connection,
+        {"id": 7, "type": 1, "status": status, "execution_started": execution_started,
+         "cancel_requested": 0}, {"id": 11})

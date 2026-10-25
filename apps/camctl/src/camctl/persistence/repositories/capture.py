@@ -27,6 +27,7 @@ from camctl.capture.models import (
     ResultSetSave,
     validate_capture_result,
 )
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.capture.baseline_models import (
     BaselineChunk, BaselineChunkResult, BaselineChunkSave, BaselineFixSave, BaselineRef,
 )
@@ -723,7 +724,7 @@ def _action_finish_guard(event, context) -> None:
             action = _guard_facts(context, "actions", row.row_id)
             details = row.after.values.get("error_details_json")
             if (action.get("status") != 1 or action.get("execution_started") != 0
-                    or action.get("type") not in (2, 3) or action.get("cancel_requested") != 0
+                    or action.get("type") not in CAPTURE_ACTION_TYPES or action.get("cancel_requested") != 0
                     or action.get("execution_spec_json") is None
                     or row.after.values.get("error_code") != action_error_id("capture_failed")):
                 raise EventValidationError("准备失败要求尚未开始的合法拍摄动作")
