@@ -1125,8 +1125,7 @@ def event_envelope(
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
-    key = (__name__, "row_facts", typed_read_key(table), typed_read_key(row_id))
-    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+    return _load_row_facts(connection, table, row_id)
 
 
 def _load_row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
