@@ -11,7 +11,7 @@ import uuid
 
 from camctl.persistence.initialization import _fsync_directory
 from camctl.persistence.runtime import (
-    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION,
+    CURRENT_FORMAT_VERSION,
     DatabaseMetadata,
     DbConfig,
     DbOpenMode,
@@ -94,7 +94,7 @@ def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None
         )
         with closing(source.execute(_row_query(table, columns, writable=True))) as cursor:
             while rows := cursor.fetchmany(_BATCH_SIZE):
-                rows = _with_format(rows, table, names, CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION)
+                rows = _with_format(rows, table, names, CURRENT_FORMAT_VERSION)
                 with closing(target.executemany(insert, rows)):
                     pass
 
@@ -163,7 +163,7 @@ def _verify_copy(path, original, source, *, target_format: int) -> None:
 
 def _backup(source, state_db: Path, original: DatabaseMetadata) -> Path:
     backup = state_db.parent / (
-        f"{state_db.name}.before-capture-preparation-v{CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION}"
+        f"{state_db.name}.before-capture-preparation-v{CURRENT_FORMAT_VERSION}"
         f"-{uuid.uuid4().hex}.sqlite"
     )
     try:
@@ -212,7 +212,7 @@ def _prepare(source, prepared: Path, original: DatabaseMetadata) -> None:
         target.close()
     try:
         _verify_copy(prepared, original, source,
-                     target_format=CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION)
+                     target_format=CURRENT_FORMAT_VERSION)
     except (OSError, sqlite3.Error, StateDatabaseError) as error:
         if commit_error is not None:
             raise StateDatabaseError(f"升级副本提交结果未能核实: {error}") from commit_error
@@ -225,20 +225,20 @@ def _verify_published(state_db: Path, backup: Path, original: DatabaseMetadata) 
     saved = open_existing(backup, DbOpenMode.EXISTING_RO, DbConfig())
     try:
         _verify_copy(state_db, original, saved.connection,
-                     target_format=CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION)
+                     target_format=CURRENT_FORMAT_VERSION)
     finally:
         saved.connection.close()
 
 
 def upgrade_capture_preparation(owned: OwnedConnection, state_db: Path) -> Path | None:
-    """在初始化持有稳定会话锁时，将 V3 的完整事实升级到准备格式。"""
+    """在初始化持有稳定会话锁时，将 V3/V4 的完整事实升级到当前格式。"""
     source = owned.connection
     original = owned.metadata
-    target_format = CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION
+    target_format = CURRENT_FORMAT_VERSION
     if original.format_version == target_format:
         _integrity(source)
         return None
-    if original.format_version != int(_FORMAT_VERSIONS.V3):
+    if original.format_version not in (int(_FORMAT_VERSIONS.V3), int(_FORMAT_VERSIONS.V4)):
         raise StateDatabaseError("拍摄准备升级要求先完成格式 V3 的已有升级路径")
     _integrity(source)
     backup = _backup(source, state_db, original)

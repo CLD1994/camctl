@@ -36,6 +36,8 @@ SUPPORTED_FORMAT_VERSIONS = frozenset(int(member) for member in _FORMAT_VERSIONS
 CURRENT_FORMAT_VERSION = max(SUPPORTED_FORMAT_VERSIONS)
 HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
 CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
+_ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
 _INSTANCE_ID = re.compile(r"\A[0-9a-f]{32}\Z")
@@ -249,17 +251,24 @@ def require_host_photo_format(format_version: int | None) -> None:
         )
 
 
-def require_capture_preparation_format(format_version: int | None) -> None:
+def require_capture_preparation_format(
+    format_version: int | None, *, action_type: int | None = None,
+) -> None:
     """准备尝试及尚未开始的拍摄失败只写入支持该组合的整体格式。"""
+    minimum = (
+        PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION
+        if action_type == int(_ACTION_TYPES.CAMERA_TAKE_PHOTO)
+        else CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION
+    )
     if (
         isinstance(format_version, bool)
         or not isinstance(format_version, int)
         or format_version not in SUPPORTED_FORMAT_VERSIONS
-        or format_version < CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION
+        or format_version < minimum
     ):
         raise DatabaseUnsupportedFormatError(
             f"数据库整体格式 {format_version!r} 不支持拍摄提前准备；"
-            f"至少需要格式 {CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION}"
+            f"至少需要格式 {minimum}"
         )
 
 
