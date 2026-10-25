@@ -615,8 +615,10 @@ def _initialize_recovery(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     """在会话锁内固定旧历史边界，业务事务不得提前发生。"""
     from contextlib import closing
     from camctl.devices.drivers.adb_cameras.registration import begin_builtin_camera_session
+    from camctl.devices.drivers.hasselblad.registration import begin_builtin_hasselblad_session
 
     begin_builtin_camera_session()
+    begin_builtin_hasselblad_session()
     if owned.metadata.format_version >= 3:
         from camctl.devices.drivers.runtime import current_registry
         from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
