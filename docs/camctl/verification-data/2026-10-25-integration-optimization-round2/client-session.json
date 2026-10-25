@@ -1,0 +1,1244 @@
+{
+  "date_utc": "2026-10-25",
+  "stage": "S5客户端生命周期功能阶段；最终29项由S5/S6合并树同档位回归验收。",
+  "implementation_commits": [
+    "d20c8273618b02eac265681e931bbeedfdebc6aa",
+    "2ba56ef4ecd7c3a63529b450d28d451bebefcb0a",
+    "f626c1e1e52f4c79b3e98c3ca908100f0205a6bc"
+  ],
+  "minute_input_fix": "client-session-minute-input.json；独立commit2c1384536110f9a5aec84b9671a38b5d53272bd2；仅规范化控件00秒格式，业务UTC值不变。",
+  "source": {
+    "head": "f626c1e1e52f4c79b3e98c3ca908100f0205a6bc",
+    "status": "",
+    "snapshot_sha256": "c7fbf4efa34fe44a24729e7d7ff62b4e02e175d3a4226b5c8cce703696eb6ebe"
+  },
+  "source_files": [
+    {
+      "path": "tests/integration/_client_session.py",
+      "sha256": "af9ea7d89f848d246b2c1d87bff12009f7c5779f53eb87cc6c3ede26e79360c3"
+    },
+    {
+      "path": "tests/integration/client_driver.ts",
+      "sha256": "a747c9cea1e80f568e55dca20e1706bd75fef461df82d52051d6b7ce738bb57b"
+    },
+    {
+      "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+      "sha256": "9d5801b8f07e7e3ab8b2ce690b7e5cc29b7ffa98461d91cfbae044c8097be552"
+    }
+  ],
+  "contract": {
+    "world_isolation": "每个PhotoWorld独立Node/loopback连接/store/日志；message只含id/operation/路径，业务正文和receipt仍读写原文文件。",
+    "operation_authority": "TS dispatch独占操作和参数数目定义；Python不抄arity表。",
+    "lifecycle": "photo保持真实Application/Files/HTTP/browser close/reopen两次，后续plan/upload/ACK使用同一第二上下文的Application与Files；没有并发重开同一store。",
+    "budget_seconds": {
+      "startup": 180,
+      "operation": 180,
+      "normal_close": 180,
+      "failure_TERM_grace": 3,
+      "failure_KILL_grace": 3
+    },
+    "close": "合法close或失败回执读完后Python先关闭控制连接再等Node退出；Node正常close先Files.idle并完成browser/server/store；SQLite backup两连接显式closing。",
+    "errors": "主操作与Node收场错误聚合传回；stdout/stderr直接文件；异常只按Popen和TS Chrome PID/pgid/starttime票据以及当前后代收场。",
+    "preserved_scope": "test函数与parametrize未变；S5不作代表选择，不减少原21个完整photo前缀、原12执行组合或原UI/业务断言。顶部3预设与2纯上传定向用例保留one-shot重启/导入边界。"
+  },
+  "first_attempt": {
+    "output": "/tmp/camctl-itopt-s5-representative",
+    "source": {
+      "head": "2ba56ef4ecd7c3a63529b450d28d451bebefcb0a",
+      "status": "",
+      "snapshot_sha256": "ad5cd1eaddd813bb6f59e164a6756f9af5a7fd71a1ac9b249a95ce7b00326b91"
+    },
+    "status": "interrupted",
+    "exit_code": 130,
+    "reason": "真实closed Node等待Python FIN，而Python先等Node退出，close半关闭互等；按协调者指示中断，不等待180秒并不继续第二例。",
+    "partial_facts": {
+      "client_business_commands_passed": 8,
+      "node_status": "closed",
+      "close_operation": {
+        "id": 9,
+        "operation": "close",
+        "arguments": [],
+        "started_monotonic_ns": "45811988288818",
+        "outcome": "passed",
+        "contexts_before": {
+          "node_process_starts": 1,
+          "application_starts": 2,
+          "files_starts": 2,
+          "http_server_starts": 2,
+          "browser_starts": 2
+        },
+        "finished_monotonic_ns": "45812098182113",
+        "elapsed_seconds": 0.109893295,
+        "node_cpu_microseconds": {
+          "user": 10574,
+          "system": 18847
+        },
+        "contexts_after": {
+          "node_process_starts": 1,
+          "application_starts": 2,
+          "files_starts": 2,
+          "http_server_starts": 2,
+          "browser_starts": 2
+        }
+      }
+    },
+    "boundary": "pytest主实例未完成，不能把这些客户端子命令当正常用例通过。"
+  },
+  "representative_run": {
+    "output": "/tmp/camctl-itopt-s5-representative-fixed",
+    "runner_command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "scripts/run-integration.py",
+      "--python",
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "--node-modules",
+      "/tmp/camctl-itopt-runner-npm-client/node_modules",
+      "--jobs",
+      "1",
+      "--root-shards",
+      "1",
+      "--scope",
+      "root",
+      "--target",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "--target",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+      "--output",
+      "/tmp/camctl-itopt-s5-representative-fixed"
+    ],
+    "status": "finished",
+    "exit_code": 0,
+    "runner_monotonic_seconds": 186.09426955699746,
+    "cases": [
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 14.182853208003507
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 78.883677961996
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.003188793998560868
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 93.06971996399807
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.005468237999593839
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 73.98829844700231
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0023341650012298487
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 73.99610085000313
+      }
+    ],
+    "worlds": [
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+        "world_root": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0",
+        "session_id": "83adced7-5866-40c6-af64-0f1387b4b069",
+        "node_pid": 685212,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 2,
+          "files_starts": 2,
+          "http_server_starts": 2,
+          "browser_starts": 2
+        },
+        "browser_processes": [
+          {
+            "pid": 685261,
+            "pgid": 685261,
+            "starttime": "4608491",
+            "active": false
+          },
+          {
+            "pid": 685934,
+            "pgid": 685934,
+            "starttime": "4610034",
+            "active": false
+          }
+        ],
+        "startup": {
+          "started_monotonic_ns": 46082199166668,
+          "finished_monotonic_ns": 46083674709983,
+          "elapsed_seconds": 1.475543315,
+          "outcome": "passed"
+        },
+        "business_commands": [
+          {
+            "id": 1,
+            "operation": "browser-photo-export",
+            "elapsed_seconds": 26.537505479,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 0,
+              "files_starts": 0,
+              "http_server_starts": 0,
+              "browser_starts": 0
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 2,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.455716028,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 3,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.506240693,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 4,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 2.096202912,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 5,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.302459866,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          }
+        ],
+        "normal_close": {
+          "started_monotonic_ns": 46154555980199,
+          "finished_monotonic_ns": 46154840309088,
+          "elapsed_seconds": 0.284328889,
+          "outcome": "passed"
+        },
+        "all_later_operations_reuse_photo_second_context": true,
+        "preset_actual_server_open_count": 2,
+        "source_draft_unchanged_after_reopen": true,
+        "node_cpu_at_ready_microseconds": {
+          "user": 1894167,
+          "system": 261625
+        },
+        "node_cpu_total_microseconds": {
+          "user": 7654309,
+          "system": 805180
+        },
+        "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "world_root": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0",
+        "session_id": "f1a07319-cb70-4c60-9281-de5fe5d50c05",
+        "node_pid": 682771,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 2,
+          "files_starts": 2,
+          "http_server_starts": 2,
+          "browser_starts": 2
+        },
+        "browser_processes": [
+          {
+            "pid": 682850,
+            "pgid": 682850,
+            "starttime": "4600609",
+            "active": false
+          },
+          {
+            "pid": 683168,
+            "pgid": 683168,
+            "starttime": "4601561",
+            "active": false
+          }
+        ],
+        "startup": {
+          "started_monotonic_ns": 46003214300206,
+          "finished_monotonic_ns": 46004926529942,
+          "elapsed_seconds": 1.712229736,
+          "outcome": "passed"
+        },
+        "business_commands": [
+          {
+            "id": 1,
+            "operation": "browser-photo-export",
+            "elapsed_seconds": 27.330816749,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 0,
+              "files_starts": 0,
+              "http_server_starts": 0,
+              "browser_starts": 0
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 2,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.692309488,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 3,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.532828156,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 4,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.546803896,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 5,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.320140889,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 6,
+            "operation": "upload-files",
+            "elapsed_seconds": 0.069368673,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 7,
+            "operation": "upload-files",
+            "elapsed_seconds": 0.584182519,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          },
+          {
+            "id": 8,
+            "operation": "browser-plan-export",
+            "elapsed_seconds": 1.716878657,
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 2,
+              "files_starts": 2,
+              "http_server_starts": 2,
+              "browser_starts": 2
+            }
+          }
+        ],
+        "normal_close": {
+          "started_monotonic_ns": 46080586423030,
+          "finished_monotonic_ns": 46080820831854,
+          "elapsed_seconds": 0.234408824,
+          "outcome": "passed"
+        },
+        "all_later_operations_reuse_photo_second_context": true,
+        "preset_actual_server_open_count": 2,
+        "source_draft_unchanged_after_reopen": true,
+        "node_cpu_at_ready_microseconds": {
+          "user": 2272463,
+          "system": 181797
+        },
+        "node_cpu_total_microseconds": {
+          "user": 8557700,
+          "system": 740570
+        },
+        "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。"
+      }
+    ],
+    "performance_boundary": "该轮与S7独立功能代表并行，仅正确性验收；不能当严格性能对照或完整HB29通过。",
+    "derived_counters": {
+      "canonical_world_count": 2,
+      "context_start_totals": {
+        "node_process_starts": 2,
+        "application_starts": 4,
+        "files_starts": 4,
+        "http_server_starts": 4,
+        "browser_starts": 4
+      },
+      "business_operation_totals": {
+        "browser-photo-export": 2,
+        "browser-plan-export": 9,
+        "upload-files": 2
+      },
+      "basis": "按上述两个pytest nodeid及实际world_root去重，不使用pytest *current别名；数字只覆盖本次两代表，不冒充最终29项计数。"
+    }
+  },
+  "failure_probes": {
+    "source": "f626c1e1e52f4c79b3e98c3ca908100f0205a6bc",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "session-failures.py"
+    ],
+    "method": [
+      "每个探针先真实browser-plan-export成功，确认browser_starts=1且存在active Chrome票据，再施加错误。",
+      "业务失败：upload-files传不存在media；测试进程--import的HTTP Server.close钩子对实际服务过GET /的服务器在完成真实close后返回指定错误。验证ENOENT与close错误均在聚合回执和stderr。",
+      "超时：第二份plan正文为FIFO，Node在真实Chrome已启动后阻塞readFileSync；仅探针把Python命令截止改为1秒，正常源常量仍180秒。",
+      "错位回执：实际导出后仅在Python读取的控制消息中把command id改为999，必须拒绝；未修改业务回执文件。"
+    ],
+    "normal_timeout_seconds": 180,
+    "intentional_nonterminating_probe_timeout_seconds": 1,
+    "close_fault_import_source": "import { Server } from 'node:http';\nconst product = new WeakSet();\nconst emit = Server.prototype.emit;\nServer.prototype.emit = function (event, ...args) {\n  if (event === 'request' && args[0]?.url === '/') product.add(this);\n  return emit.call(this, event, ...args);\n};\nconst close = Server.prototype.close;\nServer.prototype.close = function (callback) {\n  return close.call(this, error => callback?.(error ?? (product.has(this) ? new Error('S5 injected HTTP close failure') : undefined)));\n};\n",
+    "results": [
+      {
+        "kind": "business_error_plus_close_error",
+        "root": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close",
+        "error": "客户端命令失败：{\"message\": \"客户端命令与收场均失败\", \"stack\": \"AggregateError: 客户端命令与收场均失败\\n    at worldClientSession (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1172:21)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\\n    at async main (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1208:5)\", \"causes\": [{\"message\": \"ENOENT: no such file or directory, stat '/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/absent.jpg'\", \"stack\": \"Error: ENOENT: no such file or directory, stat '/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/absent.jpg'\\n    at async stat (node:internal/fs/promises:1750:18)\\n    at async uploadFiles (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:574:20)\\n    at async worldClientSession (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1160:11)\\n    at async main (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1208:5)\"}, {\"message\": \"客户端会话收场失败\", \"stack\": \"AggregateError: 客户端会话收场失败\\n    at WorldClient.close (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:762:32)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\\n    at async worldClientSession (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1171:15)\\n    at async main (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1208:5)\", \"causes\": [{\"message\": \"客户端上下文收场失败\", \"stack\": \"AggregateError: 客户端上下文收场失败\\n    at <anonymous> (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:679:32)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\\n    at async WorldClient.close (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:759:13)\\n    at async worldClientSession (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1171:15)\\n    at async main (/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/tests/integration/client_driver.ts:1208:5)\", \"causes\": [{\"message\": \"S5 injected HTTP close failure\", \"stack\": \"Error: S5 injected HTTP close failure\\n    at Server.<anonymous> (file:///tmp/camctl-itopt-client-session/.local/verification/client-session/close-fault.mjs:10:77)\\n    at Server.wrapper (node:events:639:12)\\n    at Server.emit (node:events:514:28)\\n    at Server.emit (file:///tmp/camctl-itopt-client-session/.local/verification/client-session/close-fault.mjs:6:15)\\n    at emitCloseNT (node:net:2941:8)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)\"}]}]}]}",
+        "error_notes": [
+          "完整stderr：/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session.stderr.log",
+          "stdout=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session.stdout.log; stderr=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session.stderr.log"
+        ],
+        "elapsed_seconds": 0.1523573939994094,
+        "node_exit_code": 1,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 1,
+          "browser_starts": 1
+        },
+        "browser_processes": [
+          {
+            "pid": 689445,
+            "pgid": 689445,
+            "starttime": "4621197",
+            "active": false
+          }
+        ],
+        "cleanup": {
+          "survivors": [],
+          "notes": [],
+          "owned_processes": [
+            {
+              "pid": 689342,
+              "ppid": 689340,
+              "pgid": 689342,
+              "starttime": "4620923",
+              "state": "R"
+            },
+            {
+              "pid": 689445,
+              "ppid": 689342,
+              "pgid": 689445,
+              "starttime": "4621197",
+              "state": "S"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "blocked_file_timeout_after_real_browser",
+        "root": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser",
+        "error": "客户端会话超过1秒预算；/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session.stderr.log",
+        "error_notes": [
+          "stdout=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session.stdout.log; stderr=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session.stderr.log"
+        ],
+        "elapsed_seconds": 4.110598753999511,
+        "node_exit_code": -9,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 1,
+          "browser_starts": 1
+        },
+        "browser_processes": [
+          {
+            "pid": 689632,
+            "pgid": 689632,
+            "starttime": "4621656",
+            "active": true
+          }
+        ],
+        "cleanup": {
+          "survivors": [],
+          "notes": [],
+          "owned_processes": [
+            {
+              "pid": 689546,
+              "ppid": 689340,
+              "pgid": 689546,
+              "starttime": "4621439",
+              "state": "Z"
+            },
+            {
+              "pid": 689632,
+              "ppid": 689546,
+              "pgid": 689632,
+              "starttime": "4621656",
+              "state": "Z"
+            },
+            {
+              "pid": 689559,
+              "ppid": 689546,
+              "pgid": 689546,
+              "starttime": "4621456",
+              "state": "Z"
+            },
+            {
+              "pid": 689634,
+              "ppid": 689632,
+              "pgid": 689632,
+              "starttime": "4621659",
+              "state": "R"
+            },
+            {
+              "pid": 689635,
+              "ppid": 689632,
+              "pgid": 689632,
+              "starttime": "4621659",
+              "state": "R"
+            },
+            {
+              "pid": 689651,
+              "ppid": 689632,
+              "pgid": 689632,
+              "starttime": "4621661",
+              "state": "Z"
+            },
+            {
+              "pid": 689689,
+              "ppid": 689635,
+              "pgid": 689632,
+              "starttime": "4621669",
+              "state": "Z"
+            },
+            {
+              "pid": 689649,
+              "ppid": 689634,
+              "pgid": 689632,
+              "starttime": "4621661",
+              "state": "Z"
+            }
+          ]
+        }
+      },
+      {
+        "kind": "wrong_command_id_after_real_browser",
+        "root": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id",
+        "error": "客户端命令回执身份或结果字段不符",
+        "error_notes": [
+          "stdout=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/client-session.stdout.log; stderr=/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/client-session.stderr.log"
+        ],
+        "elapsed_seconds": 1.7833617540018167,
+        "node_exit_code": 1,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 1,
+          "browser_starts": 1
+        },
+        "browser_processes": [
+          {
+            "pid": 689928,
+            "pgid": 689928,
+            "starttime": "4622547",
+            "active": false
+          }
+        ],
+        "cleanup": {
+          "survivors": [],
+          "notes": [],
+          "owned_processes": [
+            {
+              "pid": 689841,
+              "ppid": 689340,
+              "pgid": 689841,
+              "starttime": "4622305",
+              "state": "R"
+            },
+            {
+              "pid": 689928,
+              "ppid": 689841,
+              "pgid": 689928,
+              "starttime": "4622547",
+              "state": "Z"
+            },
+            {
+              "pid": 689868,
+              "ppid": 689841,
+              "pgid": 689841,
+              "starttime": "4622327",
+              "state": "Z"
+            },
+            {
+              "pid": 689930,
+              "ppid": 689928,
+              "pgid": 689928,
+              "starttime": "4622549",
+              "state": "Z"
+            },
+            {
+              "pid": 689931,
+              "ppid": 689928,
+              "pgid": 689928,
+              "starttime": "4622549",
+              "state": "Z"
+            },
+            {
+              "pid": 689949,
+              "ppid": 689928,
+              "pgid": 689928,
+              "starttime": "4622552",
+              "state": "Z"
+            },
+            {
+              "pid": 689980,
+              "ppid": 689931,
+              "pgid": 689928,
+              "starttime": "4622558",
+              "state": "Z"
+            },
+            {
+              "pid": 689947,
+              "ppid": 689930,
+              "pgid": 689928,
+              "starttime": "4622551",
+              "state": "Z"
+            }
+          ]
+        }
+      }
+    ],
+    "startup_exit_probe": {
+      "phase": "startup_before_ready",
+      "child_exit_code": 7,
+      "error": "客户端提前退出7；/tmp/camctl-itopt-client-session/.local/verification/client-session/startup-error/client-session.stderr.log",
+      "elapsed_seconds": 0.11191182400216348,
+      "cleanup": {
+        "survivors": [],
+        "notes": [],
+        "owned_processes": [
+          {
+            "pid": 692946,
+            "ppid": 692945,
+            "pgid": 692946,
+            "starttime": "4638722",
+            "state": "R"
+          }
+        ]
+      }
+    },
+    "registered_group_ids_checked_after_all_probes": [
+      682771,
+      682850,
+      683168,
+      685212,
+      685261,
+      685934,
+      689342,
+      689445,
+      689546,
+      689632,
+      689841,
+      689928
+    ],
+    "registered_group_non_z_x_members": [],
+    "inputs": {
+      "initial_browser_plan_body": {
+        "name": "会话故障边界",
+        "actions": [
+          {
+            "name": "sync",
+            "type": "report_status",
+            "params": {
+              "scope": "full"
+            }
+          }
+        ]
+      },
+      "capabilities": "逐字节复制代表normal world实际describe能力文件，sha256见raw_evidence。",
+      "business_error_manifest": [
+        {
+          "path": "<probe-world>/absent.jpg",
+          "kind": "media"
+        }
+      ],
+      "timeout": "第二份body路径是无writer的FIFO；正常命令常量180s不变，当前Python探针进程内改为1s并在finally恢复180s。",
+      "wrong_id_body": {
+        "name": "错位回执",
+        "actions": [
+          {
+            "name": "sync",
+            "type": "report_status",
+            "params": {
+              "scope": "full"
+            }
+          }
+        ]
+      },
+      "wrong_id": "成功导出后仅把Python读到的控制result.id覆为999；实际业务文件不变。",
+      "startup": "node -e process.exit(7)，必须在ready前拒绝。"
+    }
+  },
+  "static_checks": [
+    "Python ast.parse与TypeScript esbuild语法转换/node --check通过；未运行产品构建作为静态检查。",
+    "原test函数名和全部parametrize AST与阶段前一致。",
+    "独立源码审查核同一Files/服务、预设实际关闭重建、错误+close聚合、连接FIN顺序和显式SQLite关闭。"
+  ],
+  "deferred_acceptance": "按协调者排程，S5/S6最终同一合并树执行完整HB29/jobs4，再与同档位before比较；生命周期和预设去重计数分别派生，不隔离宣称S5单项性能百分比。",
+  "evidence_boundary": "本JSON保存必要源码、案例、启动/操作/close单调区间和实际错误收场事实，临时路径只用于原始执行定位，不作为理解结论的必需脚本。Node CPU仅当前Node，不能当整个浏览器或整轮CPU。",
+  "raw_evidence": {
+    "hash_algorithm": "SHA-256",
+    "note": "路径只定位原始运行文件；必要输入、错误、计数和结果已保存在本JSON。FIFO不是常规文件，因此仅记录其创建方式，不读取或散列。",
+    "files": [
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/close-fault.mjs",
+        "bytes": 494,
+        "sha256": "ed290f19693366783d60a1dbd8eaa85eecb65f155f3c96154e73d9701d3ecf3e"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session-node.json",
+        "bytes": 6858,
+        "sha256": "e9df2388b02ccf2b61ce66624b7be2d5628b756fe98778b295ae61aa183d5e8d"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session-python.json",
+        "bytes": 6007,
+        "sha256": "550185f86cdf440165a23b7759c0bb7f588b428dc9f43ec3cc6d80a6e374460c"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/client-session.stderr.log",
+        "bytes": 4326,
+        "sha256": "ac8e60135fc020c60000a47b7128a4511e63919188f2ad68b85b751ae3ab258b"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/manifest.json",
+        "bytes": 142,
+        "sha256": "e8ea3c6da54421323ba97c36119daaa33ad32353dd7715dd2167c73955376893"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/open-body.json",
+        "bytes": 133,
+        "sha256": "b6f068fda0cb9145f16ceb0d3987e2e21fa5e9df1adf1afcbf179b2334408b10"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/open-plan.json",
+        "bytes": 248,
+        "sha256": "84fe9beac592aad1b35fbf031c4a2aa3f9077c278df2a2ace11119a292750787"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/business-plus-close/open-receipt.json",
+        "bytes": 366,
+        "sha256": "ccedfa1507dce0e200bb5be50b8e9ef8457c212b89c18f9e174d29f5f12b2160"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session-node.json",
+        "bytes": 2552,
+        "sha256": "8a65b8c4a55444e9bc2a8beffeebdc23b4ae350644a4413fafb4a94c1c3b2cae"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session-python.json",
+        "bytes": 3311,
+        "sha256": "2d4b1702cb7f8e52ed1d80759821fde8b6eadaecf49dde996d74d7cf4c429075"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/client-session.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/open-body.json",
+        "bytes": 133,
+        "sha256": "b6f068fda0cb9145f16ceb0d3987e2e21fa5e9df1adf1afcbf179b2334408b10"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/open-plan.json",
+        "bytes": 248,
+        "sha256": "6181ee1dabdeac6660f9aa5df63c71ecd250fd9a9782dbc5ebba4697f425d096"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/timeout-after-browser/open-receipt.json",
+        "bytes": 366,
+        "sha256": "7722633745614c7050f65f189a713076df7a0d5e9a9e0c868d2123f92a646757"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/client-session-node.json",
+        "bytes": 2996,
+        "sha256": "5969505d89c350a935427fe1b6865840d4ffdebcef9eb038230de5d4662b56dc"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/client-session-python.json",
+        "bytes": 3151,
+        "sha256": "3d885588857d8eb7983e28688493323e20e7b135a7bfc33dd9cac4ac0346ae97"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/client-session.stderr.log",
+        "bytes": 474,
+        "sha256": "16444d6b24361b9790c26975107c03277caa146f15cd78679e5321dd851784d1"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/id-body.json",
+        "bytes": 121,
+        "sha256": "25ac4248bd36687908aba2e05e2a9a3bf19ce91e574ff354ea23fe472045237f"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/id-plan.json",
+        "bytes": 242,
+        "sha256": "9ab6a17fd1cbd87c3d3c99a4344692d307505c87c4dd1855a53c63d35342efaa"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/id-receipt.json",
+        "bytes": 360,
+        "sha256": "ca1e58ebea44a5c21fd64db4f3f69efc842cc830753710cf4e36803f9701cb50"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/open-body.json",
+        "bytes": 133,
+        "sha256": "b6f068fda0cb9145f16ceb0d3987e2e21fa5e9df1adf1afcbf179b2334408b10"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/open-plan.json",
+        "bytes": 248,
+        "sha256": "e9d5931f520007b10e7b010c4980bc080c2f866335299735ec078adb9ffa45f4"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/fault-worlds/wrong-command-id/open-receipt.json",
+        "bytes": 366,
+        "sha256": "3135385c810a6a7460870f273241f3af9f411a824ee4404045c948e7ba12cfdd"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/minute-control.json",
+        "bytes": 1356,
+        "sha256": "323b5b0e4ff467e3751597f2ea351080de087a835000edfe7e674f7501235971"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/minute-control.mts",
+        "bytes": 3804,
+        "sha256": "bfd25aa3f9fdce12beb28819d8d2aeeb049f3c2d022380c44bf86e9ae7b18b28"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/session-failures.json",
+        "bytes": 15337,
+        "sha256": "d96ab13e67a29a16384780ef46a1e32fb20764a200367c3e3d2c8b7c17dfbcf4"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/session-failures.py",
+        "bytes": 4301,
+        "sha256": "df0b766a45216208f37ca167ceb81761a8b70366f1cdb2b6dee524f6cb2145a4"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/startup-error/client-session-python.json",
+        "bytes": 821,
+        "sha256": "cc45a0a17c96bfc38ffc64edc46a4bca8ad9ad45a89b1b599c4301c84ae3650d"
+      },
+      {
+        "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/startup-error/result.json",
+        "bytes": 480,
+        "sha256": "2486859740c3e74a05304d6e715c7d6badeca6e6d0da2c0ad448f39047ac4795"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative/source.json",
+        "bytes": 317184,
+        "sha256": "3f9cba623b53eb88963fde65e2f4ef6e337e9d201c04aef314557f641985ca4e"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative/summary.json",
+        "bytes": 5649,
+        "sha256": "22aad81050ab48e3bfba3e59e4b213ec69efc4c524348c404c99fe1024844b2e"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/source.json",
+        "bytes": 317184,
+        "sha256": "8fd15739b3fa2a06a5c734dbf397beb048743a9f1b5f76488cdfdcba9a3da870"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/summary.json",
+        "bytes": 5713,
+        "sha256": "cd5b248d5d1ca0d2b7d62029b6e5356a1f20fdb1ef5567a6bc884d449d10246c"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+        "bytes": 1116,
+        "sha256": "3b7694a15953a207822d248fd781bb08016ab4f2be1897393ea6a52294329b76"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/client-session-node.json",
+        "bytes": 8022,
+        "sha256": "c1c3e972f53984f68be5bc4cabc47d742f591c56dc43d06588fb4e955ef9932a"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/client-session-python.json",
+        "bytes": 5761,
+        "sha256": "53ce612862b2735926b56f282185feb7dbb7885e8d81761a2cc88eb5de9fdc48"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/client-store/device-capabilities.json",
+        "bytes": 8761,
+        "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-1-original-body.json",
+        "bytes": 250,
+        "sha256": "c20560d541aeaedc1875749a7c1841df2e47a147969cfeff9997340ac8c941e3"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-1-original-browser.json",
+        "bytes": 562,
+        "sha256": "b8a9ae64f142c25f7bdbedc119bc45db17c9334ef75d3b440a7778208c44c1c2"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-1-original-request.json",
+        "bytes": 425,
+        "sha256": "b2a1420c3d37ef9a97103915f27681a68342699233df7920539830828b13e312"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-2-preview-body.json",
+        "bytes": 248,
+        "sha256": "1f09326dd6773db2f64395cb36e18062344880d0a750494a94ac1d560e597f7a"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-2-preview-browser.json",
+        "bytes": 560,
+        "sha256": "1fa1f878357673a7a0ac51fa7997ccd89d93b502bc0504302215bb014af821a2"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-2-preview-request.json",
+        "bytes": 423,
+        "sha256": "9635cc556d1b25f8dabf12e9542a220a6ce4c61a2a51faa94dc29d8f557ec4d5"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-3-original-body.json",
+        "bytes": 250,
+        "sha256": "78dc75454cb6de1e65ba433ff3c1937f6c5309837af9cf5f1ad2db2da732869e"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-3-original-browser.json",
+        "bytes": 562,
+        "sha256": "eeeb26d2bfc0bc57c8db78f103c198e7d6a2fcfaff44c8d115daa93ed37e364c"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-3-original-request.json",
+        "bytes": 425,
+        "sha256": "0e3553c2353ff50e7b4563ad6e9b56031366466d74873fb9c6928aaa9921c0c7"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-4-preview-body.json",
+        "bytes": 248,
+        "sha256": "de59e6420627511a1a4ce036b473167a25bf917bf5a747aa840fd9723169b467"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-4-preview-browser.json",
+        "bytes": 558,
+        "sha256": "bfe9b918d1800aa57325588ca30f50bb11173eee7fb079001cb6d8098a3876a9"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/fault-obtain-4-preview-request.json",
+        "bytes": 422,
+        "sha256": "13c6d3e7235eafbc40df9d3618c804983734f21ae4c970ad42e3c7cd06c53014"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/photo-browser.json",
+        "bytes": 4460,
+        "sha256": "f82eee6d1d230d543d041bba4a3afdd1ca2ccb0b783b88b1e4215df9bd7a9bc1"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/photo-input.json",
+        "bytes": 403,
+        "sha256": "0c654195966b2b4900faf79b4061d48739b250f6d3c630adf990c08471547554"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_comp0/photo-request.json",
+        "bytes": 670,
+        "sha256": "f24f572cb7d00d174ff7830613f43bd722bd190cc616e4d5f61f58e68cce96f1"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/ack-body.json",
+        "bytes": 99,
+        "sha256": "34a314cd69265b96276badd5d4d53212503be8ea8711241e70fab54ab5a3f3e3"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/ack-browser.json",
+        "bytes": 381,
+        "sha256": "9572b7b5434e4f86a2c927f90736100c87efa5785e82ed3aacee9923d3adffc9"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/ack-request.json",
+        "bytes": 258,
+        "sha256": "5436840dd2bdffb9f2f3092e7b966f05c84d1e253ddc1c6cec0d44efc21d4a18"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/client-session-node.json",
+        "bytes": 11352,
+        "sha256": "755d27297b012713c717ea5de639784a9925dd886786c3a0516619c690bd8600"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/client-session-python.json",
+        "bytes": 7766,
+        "sha256": "91d02289f7033f62bee22c08b8006e1a6648048a8470ae6567c5a7839d075124"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+        "bytes": 8761,
+        "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/media-before-report-manifest.json",
+        "bytes": 704,
+        "sha256": "788925d88f9612baa42678aad121619e470bb6729d25513a1ffa2aa9a7604c61"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/media-before-report-receipt.json",
+        "bytes": 3183,
+        "sha256": "867dab128f7c5ca29a398c17ea5f2544e690ea44dfba928b37796757a2afcf73"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-body.json",
+        "bytes": 238,
+        "sha256": "c9c06fb6af0f9d672906c74448603535a2c44760c6c78249c516e8a599c373e8"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-browser.json",
+        "bytes": 546,
+        "sha256": "7cb2a624ecf27773ecdaa548a605fcbbf5ede35145fc134ebb525508ca2b5599"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-request.json",
+        "bytes": 411,
+        "sha256": "6a82ef4e192d90a56d6529ea1d9d6d5e4b0aedba86b20d3b7f9d205e853b25a5"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-body.json",
+        "bytes": 236,
+        "sha256": "ab25e7d6864ffc7eeb4f902fcdba5770fae8940bdbb5de34d678d47229fe6ce8"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-browser.json",
+        "bytes": 548,
+        "sha256": "469481efde2408ae05561cefd33792f239c68b0e94fdf283241c5307c82a7f21"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-request.json",
+        "bytes": 411,
+        "sha256": "74659ca87ea72cf5fa0717b5f2e96180419c081843252ccbc19a21c387af420c"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-body.json",
+        "bytes": 238,
+        "sha256": "7ef7a490abd4ed73ff2a4d94562e9427e93df9d55cdf0e89a343992522851e14"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-browser.json",
+        "bytes": 550,
+        "sha256": "5fd2746eb360e8ebc66d6e91d0688cc1fa5515496aa2a5080792c0e2647e0184"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-request.json",
+        "bytes": 413,
+        "sha256": "d0cde07f8a55024062369eddfefff59644939081a36fbd67797402bbfecd6566"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-body.json",
+        "bytes": 236,
+        "sha256": "f22fee91fa60f3c08b9a4bc78b832b17d5350ceb5f12a499976fece2f7c714ec"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-browser.json",
+        "bytes": 548,
+        "sha256": "84c5d15ed62540c0db73ee616da36734d8235e1ef72c1e8534173de04564fa47"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-request.json",
+        "bytes": 411,
+        "sha256": "177f0bf8ed350a56149bd0f790e0985836112c00d73e28b23a997462f6e5893b"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/photo-browser.json",
+        "bytes": 4460,
+        "sha256": "af682e4e1a615ca42666d7da3decc2e2d0549d3b75b77e7efa2a8e55278a3a82"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+        "bytes": 403,
+        "sha256": "e28e4da9404f6106e3ea9ed271b93dfcd603b1b7935e22ac4ab7d22695075729"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json",
+        "bytes": 670,
+        "sha256": "9926fcbd8945a5ef88492d2f189389f99fabdb3951fdb41e95b3b7e00a9e3f24"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/reports-after-media-manifest.json",
+        "bytes": 1287,
+        "sha256": "ae17904844bff63a94297391318c72365a17fbaeab7d49622b8256317eaf58c2"
+      },
+      {
+        "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/reports-after-media-receipt.json",
+        "bytes": 10128,
+        "sha256": "99f18ec0d012afcfcffdccaab9e76fc5b4f8217160cc5f05b3cea07c8c313574"
+      }
+    ]
+  }
+}

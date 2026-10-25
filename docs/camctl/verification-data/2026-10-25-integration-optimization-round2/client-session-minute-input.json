@@ -58,5 +58,17 @@
     "UTC browser打开草稿，原始01:56:00 fill重现Malformed value",
     "重新打开草稿，填01:56并轮询实际Application.draft，保存01:56:00",
     "填01:57:17并轮询实际Application.draft，保存01:57:17"
+  ],
+  "raw_evidence": [
+    {
+      "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/minute-control.json",
+      "bytes": 1356,
+      "sha256": "323b5b0e4ff467e3751597f2ea351080de087a835000edfe7e674f7501235971"
+    },
+    {
+      "path": "/tmp/camctl-itopt-client-session/.local/verification/client-session/minute-control.mts",
+      "bytes": 3804,
+      "sha256": "bfd25aa3f9fdce12beb28819d8d2aeeb049f3c2d022380c44bf86e9ae7b18b28"
+    }
   ]
 }
