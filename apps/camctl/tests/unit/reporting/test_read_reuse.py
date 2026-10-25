@@ -9,6 +9,10 @@ import pytest
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError
 from camctl.history.bounded import SegmentHistoryHandle
+from camctl.history.report_action import ReportHistoryHandle
+from camctl.contracts.report_reads import ReportExpansionRequest
+from camctl.contracts.segment_errors import SegmentErrorHeader
+from camctl.contracts.segment_values import DefaultScopeState
 from camctl.history.snapshots import SnapshotRow
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting import bounded_generation as generation
@@ -221,7 +225,7 @@ def test_failure_union_rejects_broken_h_associations(failures, damage):
 
 def _writer(monkeypatch, *, kind):
     repo = create_autospec(HistoryRepository, instance=True)
-    handle = create_autospec(SegmentHistoryHandle, instance=True)
+    handle = create_autospec(ReportHistoryHandle, instance=True)
     handle.action_id = 8
     handle.__enter__.return_value = handle
     repo.open_report_action.return_value = handle
@@ -283,28 +287,33 @@ def test_segment_expansion_reuses_only_its_source_at_the_same_h(
     monkeypatch, source_id, existing_boundary, reused
 ):
     repo = create_autospec(HistoryRepository, instance=True)
-    current = create_autospec(SegmentHistoryHandle, instance=True)
+    current = create_autospec(ReportHistoryHandle, instance=True)
     current.action_id, current.boundary = 8, existing_boundary
     current.__enter__.return_value = current
-    other = create_autospec(SegmentHistoryHandle, instance=True)
+    other = create_autospec(ReportHistoryHandle, instance=True)
     other.__enter__.return_value = other
     repo.open_report_action.return_value = other
+    growth = create_autospec(ReportHistoryHandle, instance=True)
+    growth.__enter__.return_value = growth
     for handle in (current, other):
         handle.primary.return_value = {"type": 2, "execution_started": True, "status": 3}
         handle.active_result_ref.return_value = object()
-    header = SimpleNamespace(source_action_id=source_id, first_gap=None)
-    validate = create_autospec(generation.validate_segment_error_header, return_value=header)
-    monkeypatch.setattr(generation, "validate_segment_error_header", validate)
+        handle.open_expansion.return_value = growth
+    header = SegmentErrorHeader(source_id, 0, DefaultScopeState.UNKNOWN, None, 0)
+    request = ReportExpansionRequest('segment_error', source_id, header)
+    validate = create_autospec(generation.report_expansion_request, return_value=request)
+    monkeypatch.setattr(generation, "report_expansion_request", validate)
     error = {"code": "default_segment_scope_empty", "details": {}}
 
     with ExitStack() as stack:
         stack.enter_context(current)
         expansion = generation._SegmentExpansion(
             repo, H, object(), error, stack, source_handle=current)
-        assert expansion.handle is (current if reused else other)
+        assert expansion.handle is growth
+        (current if reused else other).open_expansion.assert_called_once_with(request)
         expansion.handle.read_result.assert_called_once_with(expansion.ref)
 
-    validate.assert_called_once_with(error["code"], error["details"])
+    validate.assert_called_once_with('error', error)
     current.__exit__.assert_called_once()
     if reused:
         repo.open_report_action.assert_not_called()
@@ -322,8 +331,9 @@ def test_action_writer_reuses_the_open_source_for_segment_error(monkeypatch):
     project.side_effect = lambda *args: {
         "type": "record_video", "error": {
             "code": "default_segment_scope_empty", "details": {}}}
-    monkeypatch.setattr(generation, "validate_segment_error_header", lambda *args:
-                        SimpleNamespace(source_action_id=8, first_gap=None))
+    header = SegmentErrorHeader(8, 0, DefaultScopeState.UNKNOWN, None, 0)
+    monkeypatch.setattr(generation, "report_expansion_request", lambda kind, value, **kwargs:
+                        ReportExpansionRequest('segment_error', 8, header) if value else None)
 
     list(generation._write_action(repo, object(), stream, plan, object(), 8, H))
 
@@ -341,8 +351,9 @@ def test_reused_segment_source_keeps_source_type_and_published_set_checks(
     handle.action_id, handle.boundary = 8, H
     handle.primary.return_value = {"type": source_type, "execution_started": True, "status": 3}
     handle.active_result_ref.return_value = object() if has_result else None
-    monkeypatch.setattr(generation, "validate_segment_error_header", lambda *args:
-                        SimpleNamespace(source_action_id=8, first_gap=None))
+    header = SegmentErrorHeader(8, 0, DefaultScopeState.UNKNOWN, None, 0)
+    monkeypatch.setattr(generation, "report_expansion_request", lambda *args:
+                        ReportExpansionRequest('segment_error', 8, header))
 
     with ExitStack() as stack, pytest.raises(ConsistencyError):
         generation._SegmentExpansion(repo, H, object(), {

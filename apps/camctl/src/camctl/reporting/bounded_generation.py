@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import islice, chain
 
-from camctl.contracts.segment_errors import public_gap, validate_segment_error_header
+from camctl.contracts.segment_errors import public_gap
+from camctl.contracts.report_reads import report_expansion_request
 from camctl.contracts.segment_values import (
     SegmentGap,
     SegmentGapKind,
@@ -222,25 +223,20 @@ class _SegmentExpansion:
     def __post_init__(self):
         self.ends = {}
         self.handle = self.ref = self.header = None
-        if self.error is None or self.error["code"] not in (
-            "capture_segment_gap",
-            "default_segment_scope_empty",
-            "default_segment_scope_unconfirmed",
-        ):
+        request = report_expansion_request('error', self.error)
+        if request is None:
             return
-        self.header = validate_segment_error_header(
-            self.error["code"], self.error["details"]
-        )
+        self.header = request.header
         if (self.source_handle is not None
                 and self.source_handle.action_id == self.header.source_action_id
                 and self.source_handle.boundary == self.boundary):
-            self.handle = self.source_handle
+            finite = self.source_handle
         else:
-            self.handle = self.stack.enter_context(
+            finite = self.stack.enter_context(
                 self.repo.open_report_action(self.header.source_action_id, self.boundary)
             )
-        self.ref = self.handle.active_result_ref()
-        source = self.handle.primary()
+        self.ref = finite.active_result_ref()
+        source = finite.primary()
         if source["type"] not in (2, 3):
             raise ConsistencyError("分段公开详情必须属于普通录像或原生延时")
         if (
@@ -250,13 +246,20 @@ class _SegmentExpansion:
             and self.ref is None
         ):
             raise ConsistencyError("已执行分段来源缺少正式发布集合")
-        if self.ref is not None:
-            self.handle.read_result(self.ref)
+        if self.ref is None:
+            if (self.header.first_gap is not None or self.header.gap_count not in (None, 0)
+                    or self.header.retained_original_count != 0 or self.header.scope_count not in (None, 0)):
+                raise ConsistencyError('同 H 没有正式集合却声明非空分段详情')
+            # 空关系的依据是有限阶段已证明没有正式集合，未读取的表不参与判断。
+            return
+        self.handle = self.stack.enter_context(finite.open_expansion(request))
+        self.handle.read_result(self.ref)
         if self.header.first_gap is not None:
             first = next(_rows(self.handle, "segment_gaps", self.ref), None)
             if first is None:
                 raise ConsistencyError("首缺口没有同 H 的实际关系")
-            self.error["details"]["first_gap"] = self._gap(first.values)
+            self.error["details"]["first_gap"] = self._gap(
+                first.values, expected=self.header.first_gap)
 
     def _output(self, identity, file_id=None):
         output = self.repo.restore_primary_at_h("output", identity, self.boundary)
@@ -270,7 +273,7 @@ class _SegmentExpansion:
             raise ConsistencyError("分段详情引用不属于同 H 的实际原片")
         return output
 
-    def _gap(self, values):
+    def _gap(self, values, *, expected=None):
         def member(name):
             identity = values[name]
             return (
@@ -293,6 +296,8 @@ class _SegmentExpansion:
             decode_text_enum(SegmentGapNeighborState, values["neighbors_json"]["right"], column="segment_gaps.neighbors_json.state"),
             None if empty is None else empty["identity"],
         )
+        if expected is not None and gap != expected:
+            raise ConsistencyError('原有限头首缺口与同 H 完整缺口第一项不同')
         result = public_gap(gap)
         for side, neighbor in (("left", left), ("right", right)):
             if neighbor is None:
@@ -403,6 +408,7 @@ class _CoverageExpansion:
     boundary: object
     binding: object
     public: dict | None
+    stack: object = None
     ends: dict = None
     consumed: bool = False
 
@@ -423,6 +429,11 @@ class _CoverageExpansion:
         if not isinstance(self.decision, SegmentDecision):
             raise ConsistencyError("公开覆盖没有 Action6 公共分段判断")
         self._validate_projection()
+        if self.stack is None:
+            raise ConsistencyError('公开覆盖增长恢复缺少报告资源作用域')
+        request = report_expansion_request('video_coverage', self.public,
+            source_action_id=self.handle.action_id)
+        self.handle = self.stack.enter_context(self.handle.open_expansion(request))
 
     def _validate_projection(self):
         from camctl.contracts.segment_values import DefaultScopeState
@@ -718,6 +729,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
             boundary,
             binding,
             finite.get("result", {}).get("coverage"),
+            stack=stack,
         )
         gate = plan.begin(binding, finite)
         arrays = _expansion_arrays(expansion, stream, gate)
