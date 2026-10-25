@@ -22,6 +22,7 @@ from camctl.persistence.runtime import (
     CURRENT_FORMAT_VERSION, DatabaseMetadata, OwnedConnection,
 )
 from camctl.outputs.read_discovery import ReadDiscoveryOwner
+from camctl.scheduling.notifications import WakeReason, WorkNotifier
 from support.business_database import inline_business_database
 
 pytestmark = pytest.mark.asyncio
@@ -36,6 +37,7 @@ class _Action:
     first_observed_at: int | None = None
     expiration_reason: int | None = None
     execution_started: int = 0
+    cancel_requested: int = 0
 
 
 class _CaptureState:
@@ -85,8 +87,11 @@ class _CaptureState:
         selected = [action for action in self.actions.values()
                     if action.identity in identities and action.scheduled_at <= now]
         if query.startswith("SELECT id, device_id, scheduled_at, max_delay_ms"):
-            rows = [(action.identity, "cam-1", action.scheduled_at, action.max_delay_ms)
-                    for action in selected if action.status == 1]
+            rows = [(action.identity, "cam-1", action.scheduled_at, action.max_delay_ms,
+                     action.first_observed_at)
+                    for action in selected if action.status == 1 and action.cancel_requested == 0]
+            if "first_window_observed_at" not in query:
+                rows = [row[:4] for row in rows]
         else:
             assert query.startswith("SELECT id, type FROM actions WHERE status = 2")
             rows = [(action.identity, 2) for action in selected if action.status == 2]
@@ -119,6 +124,99 @@ class _CaptureState:
             action.execution_started = 1
             result = StartActionResult(StartOutcome.STARTED, action.identity)
         return DbOutcome(DbOutcomeKind.COMPLETED, result)
+
+
+@pytest.mark.parametrize("observed,now,observations,expirations", [
+    (None, 999, 0, 0),
+    (None, 1000, 1, 0),
+    (None, 2000, 1, 0),
+    (1000, 1000, 0, 0),
+    (1000, 1500, 0, 0),
+    (1000, 2000, 0, 0),
+    (None, 2001, 0, 1),
+    (1000, 2001, 0, 1),
+])
+async def test_window_changes_only_write_at_first_observation_or_after_inclusive_end(
+        mocker, observed, now, observations, expirations):
+    action = _Action(1, 1000, 1, first_observed_at=observed)
+    state = _CaptureState(mocker, (action,))
+    state.now = now
+
+    await state.flow._observe_windows(state.context, state.database, (1,))
+
+    assert state.repository.observe_window.call_count == observations
+    assert state.repository.expire_action.call_count == expirations
+    assert action.first_observed_at == (now if observations else observed)
+    if expirations:
+        assert action.expiration_reason == (1 if observed is None else 2)
+
+
+@pytest.mark.parametrize("rounds", [145, 414])
+async def test_repeated_window_checks_save_one_observation(mocker, rounds):
+    action = _Action(1, 1000, 1000)
+    state = _CaptureState(mocker, (action,))
+    state.now = 1000
+
+    for _ in range(rounds):
+        await state.flow._observe_windows(state.context, state.database, (1,))
+
+    assert state.repository.observe_window.call_count == 1
+    state.repository.expire_action.assert_not_called()
+    assert action.first_observed_at == 1000
+
+
+@pytest.mark.parametrize("status,cancel_requested", [
+    (1, 1), (2, 0), (3, 0), (4, 0), (5, 0), (6, 1),
+])
+async def test_window_scan_does_not_write_for_cancelled_or_nonpending_actions(
+        mocker, status, cancel_requested):
+    state = _CaptureState(mocker, (
+        _Action(1, 1000, 1, status=status, cancel_requested=cancel_requested),))
+    state.now = 1500
+
+    await state.flow._observe_windows(state.context, state.database, (1,))
+
+    state.repository.observe_window.assert_not_called()
+    state.repository.expire_action.assert_not_called()
+
+
+async def test_saved_observation_does_not_hide_new_candidate_or_actual_task_completion(mocker):
+    first = _Action(1, 0, 1000, status=2)
+    state = _CaptureState(mocker, (first,))
+    state.context.wake = WorkNotifier()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def finish_actual_work(runtime, descriptors):
+        entered.set()
+        await release.wait()
+        first.status = 3
+        return []
+
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True,
+                 side_effect=finish_actual_work)
+    try:
+        await state.flow(state.context)
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        later = _Action(2, 1000, 1000)
+        state.actions[2] = later
+        state.now = 1000
+        await state.flow(state.context)
+        assert later.first_observed_at == 1000
+        await state.flow(state.context)
+        assert state.repository.observe_window.call_count == 1
+
+        token = state.context.wake.snapshot()
+        release.set()
+        notice = await asyncio.wait_for(state.context.wake.wait_changed(token), timeout=1)
+        assert WakeReason.ACTIVITY_FINISHED in notice.reasons
+        mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+        await state.flow(state.context)
+        await state.flow.settle()
+        assert later.status == 2
+        assert state.repository.observe_window.call_count == 1
+    finally:
+        release.set()
+        await state.flow.settle()
 
 
 async def test_busy_device_observes_and_expires_pending_action_before_original_work_ends(mocker):

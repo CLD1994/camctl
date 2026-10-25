@@ -97,9 +97,9 @@ async def _resume_actual_file_facts(database, resume_file_observations, resume_m
 def _due_pending_actions(
     connection: Any, now_us: int, *, device_id: str | None = None,
     action_ids=None, limit=DEFAULT_BATCH_SIZE,
-) -> list[tuple[int, str, int, int]]:
+) -> list[tuple[int, str, int, int, int | None]]:
     """从当前投影取到期拍摄动作及窗口事实：待执行、未取消且已到时间。"""
-    query = ("SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"
+    query = ("SELECT id, device_id, scheduled_at, max_delay_ms, first_window_observed_at FROM actions"
         " WHERE status = 1 AND cancel_requested = 0"
         " AND type IN (1, 2, 3) AND scheduled_at <= ?")
     parameters = (now_us,)
@@ -112,7 +112,7 @@ def _due_pending_actions(
         query += " AND id IN (" + ",".join("?" for _ in action_ids) + ")"
         parameters += tuple(action_ids)
     with closing(connection.execute(query + " ORDER BY plan_id, input_index LIMIT ?", (*parameters, limit))) as cursor:
-        return [(int(row[0]), row[1], int(row[2]), int(row[3]))
+        return [(int(row[0]), row[1], int(row[2]), int(row[3]), row[4])
                 for row in cursor.fetchall()]
 
 
@@ -264,16 +264,18 @@ class CaptureFlow:
         pending = await database.read(lambda owned: _due_pending_actions(
             owned.connection, now, action_ids=action_ids,
             limit=self._discovery.batch_size))
-        for action_id, _, scheduled_at, max_delay_ms in pending:
+        for action_id, _, scheduled_at, max_delay_ms, first_observed_at in pending:
             current = context.clock.utc_micros()
             if current > scheduled_at + max_delay_ms * 1000:
                 outcome = await _save_command(database, scheduling.expire_action,
                     ExpireActionRequest(action_id, current, current))
                 operation = "动作过期"
-            else:
+            elif first_observed_at is None:
                 outcome = await _save_command(database, scheduling.observe_window,
                     ObserveWindowRequest(action_id, current, current))
                 operation = "窗口观察"
+            else:
+                continue
             if outcome.kind is not DbOutcomeKind.COMPLETED:
                 raise StateDbFailure(f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}")
 
@@ -317,7 +319,7 @@ class CaptureFlow:
             now = context.clock.utc_micros()
             pending = await database.read(lambda owned: _due_pending_actions(owned.connection, now, device_id=device_id,
                 action_ids=action_ids, limit=self._discovery.batch_size))
-            for action_id, _, scheduled_at, max_delay_ms in pending:
+            for action_id, _, scheduled_at, max_delay_ms, _ in pending:
                 if self._stopping:
                     return
                 current = context.clock.utc_micros()
