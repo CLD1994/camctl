@@ -56,7 +56,7 @@ class PendingResultScan:
 
 async def resume_result_page_saves(database, *, pending_scans, repository):
     """只核实原页；设备绑定、时钟和新的业务资格不参与原申请。"""
-    for pending in pending_scans.values():
+    for pending in tuple(pending_scans.values()):
         if pending.saves.pending is None:
             continue
         with measure_performance("result_page_save", run_id=pending.ticket.run_id,

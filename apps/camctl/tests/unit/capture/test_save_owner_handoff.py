@@ -427,3 +427,33 @@ async def test_actual_cancel_with_committed_baseline_receipt_applies_before_prop
         await baseline.resume_baseline_save(7, runtime=runtime)
     assert pending.saves.pending is None
     assert (pending.chunks, pending.entries) == (1, 1)
+
+
+@pytest.mark.parametrize('change', ['add', 'remove'])
+async def test_result_page_recovery_snapshots_scans_across_original_save(change):
+    request = _request()
+    response = result_pages.ResultPageRef(request.ticket, 1, 10,
+        page_from_outcome(request.ticket, request.outcome.outcome).next_cursor)
+    database, repository, entered, release = _gate(response)
+    original = result_scans.PendingResultScan(request.ticket, None, Decimal('3'))
+    held = original.saves.begin(request)
+    scans = {(request.ticket.run_id, request.ticket.attempt_id): original}
+    recovery = asyncio.create_task(result_scans.resume_result_page_saves(
+        database, pending_scans=scans, repository=repository))
+    await entered.wait()
+    next_ticket = replace(request.ticket, run_id=request.ticket.run_id + 1)
+    later = result_scans.PendingResultScan(next_ticket, None, Decimal('3'))
+    later.saves.begin(replace(request, ticket=next_ticket,
+        outcome=replace(request.outcome, ticket=next_ticket)))
+    if change == 'add':
+        scans[(next_ticket.run_id, next_ticket.attempt_id)] = later
+    else:
+        scans.pop((request.ticket.run_id, request.ticket.attempt_id))
+    release.set()
+    await recovery
+    assert database.write.await_count == 1
+    assert original.saves.pending.response == response
+    assert original.saves.pending.save is held.save
+    assert (await original.saves.save(repository, database)).value == response
+    assert database.write.await_count == 1
+    assert later.saves.pending.response is None
