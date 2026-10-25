@@ -1,5 +1,7 @@
 """固定设置在会话内按设备复用，动作码率始终重新设置。"""
 
+from unittest.mock import AsyncMock
+
 from dataclasses import replace
 
 import pytest
@@ -98,8 +100,8 @@ async def test_unknown_initial_setting_is_not_skipped_on_next_authorized_start(f
 async def test_cancellation_after_fixed_setup_prevents_start_and_preserves_accepted_settings():
     transport = Transport()
     driver = _driver(transport)
-    selected = replace(request("record"), dispatch_check=lambda: "canceled"
-                       if len(transport.commands) >= len(INITIAL_SETTINGS) else None)
+    selected = replace(request("record"), dispatch_check=AsyncMock(side_effect=lambda: "canceled"
+                       if len(transport.commands) >= len(INITIAL_SETTINGS) else None))
     assert (await driver.control(selected)).error is not None
     assert transport.commands == INITIAL_SETTINGS
     assert (await driver.control(request("record"))).error is None

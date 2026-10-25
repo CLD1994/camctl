@@ -1,5 +1,7 @@
 """独立设置准备只授权匹配原活动的后续 START。"""
 
+from unittest.mock import AsyncMock
+
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
@@ -159,13 +161,33 @@ async def test_incomplete_preparation_retains_last_result_and_cannot_authorize_s
     transport = Transport(fail_at=1 if reason == "setting_failed" else None, after_call=after_call)
     driver = _driver(CameraModel.ACTION6, transport, clock=lambda: now[0])
     monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
-    request = _preparation(replace(_request(), dispatch_check=lambda:
-        "window_closed" if reason == "window" and transport.calls else None))
+    request = _preparation(replace(_request(), dispatch_check=AsyncMock(side_effect=lambda:
+        "window_closed" if reason == "window" and transport.calls else None)))
     result = await driver.prepare_capture(request)
     assert result.outcome.status is AttemptStatus.FAILED
     assert result.outcome.effect is EffectState.NO_EFFECT
     assert result.outcome.call_info.local_exit_code == 0
     assert len(transport.calls) == 1
+    assert not driver.prepared_capture_matches(_start(request))
+
+
+@pytest.mark.asyncio
+async def test_interruption_during_dispatch_query_prevents_the_next_device_call(monkeypatch):
+    scope = SimpleNamespace(interrupted=None)
+    transport = Transport()
+    driver = _driver(CameraModel.ACTION6, transport)
+    monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
+
+    async def check():
+        scope.interrupted = object()
+        return None
+
+    request = _preparation(replace(_request(), dispatch_check=check))
+    result = await driver.prepare_capture(request)
+
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.code == "transport_cancelled"
+    assert transport.calls == []
     assert not driver.prepared_capture_matches(_start(request))
 
 
@@ -178,7 +200,7 @@ async def test_prepared_start_checks_dispatch_and_uses_its_own_deadline():
     await driver.prepare_capture(preparation)
     start = _start(preparation)
     before = len(transport.calls)
-    blocked = await driver.control(replace(start, dispatch_check=lambda: "window_closed"))
+    blocked = await driver.control(replace(start, dispatch_check=AsyncMock(side_effect=lambda: "window_closed")))
     assert blocked.error["code"] == "window_closed"
     assert len(transport.calls) == before
     now[0] += 100_000_000_000
@@ -318,8 +340,8 @@ async def test_loss_of_qualification_after_last_setting_does_not_complete_prepar
     transport = Action6ContractTransport(on_command=lambda command:
         now.__setitem__(0, 20_000_000_000) if command[:3] == ("simulate_device", "-s", "bitrate") else None)
     driver = _action6_contract_driver(transport, clock=lambda: now[0] if gate == "timeout" else 0)
-    request = _preparation(replace(_request(), dispatch_check=lambda:
-        "window_closed" if gate == "window" and now[0] else None))
+    request = _preparation(replace(_request(), dispatch_check=AsyncMock(side_effect=lambda:
+        "window_closed" if gate == "window" and now[0] else None)))
     result = await driver.prepare_capture(request)
     assert result.outcome.status is AttemptStatus.FAILED
     assert all(item.type != "capture_preparation_completed" for item in result.observations)

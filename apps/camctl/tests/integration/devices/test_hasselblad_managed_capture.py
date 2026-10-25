@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import hashlib
 import json
 import os
@@ -199,7 +201,7 @@ def _harness(
             run_id=1,
         ),
         timeout_s=Decimal("180"),
-        dispatch_check=lambda: None,
+        dispatch_check=AsyncMock(side_effect=lambda: None),
     )
     workspace = staging / "capture-work" / _ACTIVITY_ID
     return driver, request, roots, executable, call_log, workspace

@@ -1,5 +1,7 @@
 """Hasselblad 控制只在身份、调用与主机文件事实齐备时确认拍摄。"""
 
+from unittest.mock import AsyncMock
+
 import asyncio
 from decimal import Decimal
 from pathlib import Path
@@ -100,7 +102,7 @@ def _request(*, device_id="camera-1", params=None, timeout=Decimal("180"),
         _photo_params() if params is None else params,
         ticket=AttemptTicket(1, "control", ACTIVITY_ID, "capture/1", 9) if ticket is None else ticket,
         timeout_s=timeout,
-        dispatch_check=dispatch_check,
+        dispatch_check=AsyncMock(side_effect=dispatch_check),
     )
 
 

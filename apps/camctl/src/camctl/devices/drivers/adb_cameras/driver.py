@@ -216,9 +216,12 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             if once and session_key in self._configured_settings:
                 continue
             argv = shell_argv(serial, shlex.join(command))
-            reason = request.dispatch_check()
+            reason = await request.dispatch_check()
             if reason is not None:
                 return self._prevented(request, reason, previous, attached_calls)
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return self._prevented(request, "transport_cancelled", previous, attached_calls)
             remaining = request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000)
             if remaining <= 0:
                 return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
@@ -276,9 +279,12 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 return self._with_attached_calls(request, failed, attached_calls)
         if not prepare_only or previous is None or preparation_basis is None:
             raise AssertionError("相机调用组合缺少实际设置或启动步骤")
-        reason = request.dispatch_check()
+        reason = await request.dispatch_check()
         if reason is not None:
             return self._prevented(request, reason, previous, attached_calls)
+        scope = current_call_scope()
+        if scope is not None and scope.interrupted is not None:
+            return self._prevented(request, "transport_cancelled", previous, attached_calls)
         if request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000) <= 0:
             return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
         # 组合完成由全部必需设置的可靠结果承载。非阻断调用的原失败

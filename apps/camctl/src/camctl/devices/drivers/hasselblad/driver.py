@@ -434,8 +434,8 @@ class HasselbladDriver:
             # 实际调用/解释失败已取得，照片是否未知不改变这次失败的确定性。
             return finish(AttemptStatus.FAILED, effect, error=ErrorValue(code, stage, details))
 
-        def remaining(name):
-            reason = request.dispatch_check()
+        async def remaining(name):
+            reason = await request.dispatch_check()
             if reason is not None:
                 if not isinstance(reason, str) or not reason:
                     raise ValueError("派发检查必须返回非空原因或 None")
@@ -453,7 +453,7 @@ class HasselbladDriver:
 
         for command in commands:
             name, args = command.name.value, command.argv
-            budget = remaining(name)
+            budget = await remaining(name)
             if isinstance(budget, DeviceCallResult):
                 return budget
             if command.name is PhotoStep.CAPTURE:
@@ -462,7 +462,7 @@ class HasselbladDriver:
                 except (CaptureFileError, OSError) as error:
                     return failed("prepare_workspace", getattr(error, "stage", "workspace_prepare_failed"),
                                   extra={"workspace_error": str(error)})
-                budget = remaining(name)
+                budget = await remaining(name)
                 if isinstance(budget, DeviceCallResult):
                     return budget
                 args = (*args, "--output", str(workspace))
@@ -508,7 +508,7 @@ class HasselbladDriver:
                     steps[-1]["lens_operation_returned"] = True
 
         if prepare_only:
-            budget = remaining("preparation_completed")
+            budget = await remaining("preparation_completed")
             if isinstance(budget, DeviceCallResult):
                 return budget
             observation = DeviceObservation(

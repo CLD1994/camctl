@@ -173,7 +173,7 @@ class _PhotoDriver:
             result = self.before_dispatch(request)
             if asyncio.iscoroutine(result):
                 await result
-        reason = request.dispatch_check() if request.dispatch_check is not None else None
+        reason = await request.dispatch_check() if request.dispatch_check is not None else None
         if reason is not None:
             return DeviceCallResult.from_outcome(CallOutcome(
                 status=AttemptStatus.FAILED,

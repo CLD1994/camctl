@@ -1,5 +1,7 @@
 """同一 OSMO 合同提供录像与有限原生延时，不缩减公共时间参数。"""
 
+from unittest.mock import AsyncMock
+
 from decimal import Decimal
 import shlex
 
@@ -125,7 +127,7 @@ def _request(action="record", mode="manual", dispatch_check=lambda: None):
         params.update(interval_s=2)
     return ControlRequest("start_recording" if action == "record" else "start_timelapse",
         DeviceBinding("camera", "dji-osmo360-ii"), params,
-        AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), dispatch_check)
+        AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), AsyncMock(side_effect=dispatch_check))
 
 
 @pytest.mark.asyncio
