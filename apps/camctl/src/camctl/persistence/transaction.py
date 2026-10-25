@@ -58,6 +58,9 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
+from camctl.logging_runtime.transaction_timing import (
+    TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
+)
 
 
 class TransactionError(ValueError):
@@ -280,93 +283,124 @@ def _finish_result_check_group(group):
     if group is not None:group.finish()
 
 
+def _timed_events(events):
+    """逐次计量原迭代协议，处理完本事件后再继续生成。"""
+    with db_phase(TransactionPhase.EVENT_GENERATION):
+        iterator = iter(events)
+    while True:
+        with db_phase(TransactionPhase.EVENT_GENERATION):
+            try:
+                event = next(iterator)
+            except StopIteration:
+                return
+        yield event
+
+
 def _write_bounded_plan(plan, scope, operation_key):
     connection = scope.connection
-    allocation = scope.allocation
-    if allocation is None:
-        raise TransactionError("有界命令没有分配完整编号范围")
-    transaction = TransactionRange(allocation.txn_id, allocation.first_event_id, allocation.last_event_id)
-    connection.execute(
-        "INSERT INTO history_transactions(id,operation_key,first_event_id,last_event_id) VALUES(?,?,?,?)",
-        (allocation.txn_id,str(operation_key),allocation.first_event_id,allocation.last_event_id))
-    sequence = _scalar(connection,"SELECT MAX(change_seq) FROM history_events")
-    expected = allocation.first_event_id
-    segment_guard_state = {}
-    source_guard_state = {}
-    result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction,connection)
-    baseline_read_group = _baseline_read_group(plan,transaction,connection,operation_key)
-    result_check_group = _result_check_group(plan,transaction,connection)
-    for proposed in plan.events:
-        if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
-            raise TransactionError("实际有界事件与预分配完整范围不符")
-        if len(proposed.rows) > 128:
-            raise TransactionError("有界事件超过128行")
-        context = plan.context(proposed, transaction)
-        context, reads = _bind_event_reads(
-            context, proposed, transaction, segment_guard_state,
-            source_guard_state, connection, operation_key,
-            plan.result_page_write_scope, result_page_guard_state, bounded=True,
-            baseline_read_group=baseline_read_group,result_check_group=result_check_group)
-        targets = event_report_targets(proposed, context.state_rows)
-        if targets:
-            sequence += 1
-            from camctl.contracts.values import ObjectId
-            ObjectId(sequence)
-        event = replace(proposed,change_seq=sequence if targets else None)
-        validated = validate_event(event,context)
-        _seal_event_reads(reads, validated, source_guard_state,baseline_read_group,result_check_group)
-        refs = set(validated.row_owners.values())
-        before_counts = {}
-        for ref in refs:
-            row = connection.execute(
-                "SELECT MAX(change_count) FROM entity_event_links WHERE entity_type=? AND entity_id=?",ref).fetchone()
-            if row[0] is not None:
-                before_counts[ref] = row[0]
-            from camctl.contracts.values import ObjectId
-            ObjectId(before_counts.get(ref,0)+1)
-        # 这两个切片只包含当前事件的有限关联行；没有事务级工作副本。
-        after = _copy_rows(context.state_rows)
-        _apply_rows(after,(event,))
-        changes = derive_changes((validated,),StateSlice(context.state_rows,before_counts),
-            StateSlice(after,{ref:before_counts.get(ref,0)+1 for ref in refs}))
+    with db_phase(TransactionPhase.FINAL_CHECKS):
+        allocation = scope.allocation
+        if allocation is None:
+            raise TransactionError("有界命令没有分配完整编号范围")
+        transaction = TransactionRange(allocation.txn_id, allocation.first_event_id, allocation.last_event_id)
+    with db_phase(TransactionPhase.WRITE):
         connection.execute(
-            "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
-            (event.event_id,event.transaction_id,event.event_type,event.event_version,event.occurred_at,event.clock_status,event.change_seq,_encode_body(event)))
-        for link in changes.links:
-            connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
-                (link.entity_type,link.entity_id,link.event_id,link.change_count))
-        for link in changes.report_changes:
-            connection.execute("INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)",
-                (link.entity_type,link.entity_id,link.event_id,link.change_seq))
-        for progress in changes.progress_updates:
+            "INSERT INTO history_transactions(id,operation_key,first_event_id,last_event_id) VALUES(?,?,?,?)",
+            (allocation.txn_id,str(operation_key),allocation.first_event_id,allocation.last_event_id))
+    with db_phase(TransactionPhase.READ_STATE):
+        sequence = _scalar(connection,"SELECT MAX(change_seq) FROM history_events")
+    with db_phase(TransactionPhase.CONTEXT):
+        expected = allocation.first_event_id
+        segment_guard_state = {}
+        source_guard_state = {}
+        result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction,connection)
+        baseline_read_group = _baseline_read_group(plan,transaction,connection,operation_key)
+        result_check_group = _result_check_group(plan,transaction,connection)
+    for proposed in _timed_events(plan.events):
+        with db_phase(TransactionPhase.FINAL_CHECKS):
+            if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
+                raise TransactionError("实际有界事件与预分配完整范围不符")
+            if len(proposed.rows) > 128:
+                raise TransactionError("有界事件超过128行")
+        db_count("events")
+        db_count("row_changes", len(proposed.rows))
+        with db_phase(TransactionPhase.CONTEXT):
+            context = plan.context(proposed, transaction)
+            context, reads = _bind_event_reads(
+                context, proposed, transaction, segment_guard_state,
+                source_guard_state, connection, operation_key,
+                plan.result_page_write_scope, result_page_guard_state, bounded=True,
+                baseline_read_group=baseline_read_group,result_check_group=result_check_group)
+        with db_phase(TransactionPhase.REPORT_TARGETS):
+            targets = event_report_targets(proposed, context.state_rows)
+            if targets:
+                sequence += 1
+                from camctl.contracts.values import ObjectId
+                ObjectId(sequence)
+            event = replace(proposed,change_seq=sequence if targets else None)
+        with db_phase(TransactionPhase.VALIDATE):
+            validated = validate_event(event,context)
+        with db_phase(TransactionPhase.CONTEXT):
+            _seal_event_reads(reads, validated, source_guard_state,baseline_read_group,result_check_group)
+        with db_phase(TransactionPhase.READ_STATE):
+            refs = set(validated.row_owners.values())
+            before_counts = {}
+            for ref in refs:
+                row = connection.execute(
+                    "SELECT MAX(change_count) FROM entity_event_links WHERE entity_type=? AND entity_id=?",ref).fetchone()
+                if row[0] is not None:
+                    before_counts[ref] = row[0]
+                from camctl.contracts.values import ObjectId
+                ObjectId(before_counts.get(ref,0)+1)
+        with db_phase(TransactionPhase.DERIVE):
+            # 这两个切片只包含当前事件的有限关联行；没有事务级工作副本。
+            after = _copy_rows(context.state_rows)
+            _apply_rows(after,(event,))
+            changes = derive_changes((validated,),StateSlice(context.state_rows,before_counts),
+                StateSlice(after,{ref:before_counts.get(ref,0)+1 for ref in refs}))
+        with db_phase(TransactionPhase.WRITE):
             connection.execute(
-                "INSERT INTO entity_snapshot_progress(entity_type,entity_id,current_change_count,snapshot_change_count,latest_snapshot_id) VALUES(?,?,?,0,NULL) "
-                "ON CONFLICT(entity_type,entity_id) DO UPDATE SET current_change_count=excluded.current_change_count",
-                (progress.entity_type,progress.entity_id,progress.current_change_count))
-        derived = _derived_map((event,),changes.links,changes.change_counts)
-        _write_projections(connection,(event,),derived)
-        _write_derived_history(connection,(event,),derived)
+                "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
+                (event.event_id,event.transaction_id,event.event_type,event.event_version,event.occurred_at,event.clock_status,event.change_seq,_encode_body(event)))
+            for link in changes.links:
+                connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
+                    (link.entity_type,link.entity_id,link.event_id,link.change_count))
+            for link in changes.report_changes:
+                connection.execute("INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)",
+                    (link.entity_type,link.entity_id,link.event_id,link.change_seq))
+            for progress in changes.progress_updates:
+                connection.execute(
+                    "INSERT INTO entity_snapshot_progress(entity_type,entity_id,current_change_count,snapshot_change_count,latest_snapshot_id) VALUES(?,?,?,0,NULL) "
+                    "ON CONFLICT(entity_type,entity_id) DO UPDATE SET current_change_count=excluded.current_change_count",
+                    (progress.entity_type,progress.entity_id,progress.current_change_count))
+        with db_phase(TransactionPhase.DERIVE):
+            derived = _derived_map((event,),changes.links,changes.change_counts)
+        with db_phase(TransactionPhase.WRITE):
+            _write_projections(connection,(event,),derived)
+            _write_derived_history(connection,(event,),derived)
         expected += 1
-    if expected != allocation.last_event_id+1:
-        raise TransactionError("实际有界事件少于预分配完整范围")
-    _finish_baseline_read_group(baseline_read_group)
-    _finish_result_check_group(result_check_group)
-    _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
-    from camctl.persistence.repositories.source_transactions import finish_stream
-    finish_stream(source_guard_state)
-    from camctl.persistence.repositories.segment_selections import (
-        finish as finish_selection,
-    )
+    with db_phase(TransactionPhase.FINAL_CHECKS):
+        if expected != allocation.last_event_id+1:
+            raise TransactionError("实际有界事件少于预分配完整范围")
+        _finish_baseline_read_group(baseline_read_group)
+        _finish_result_check_group(result_check_group)
+        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
+        from camctl.persistence.repositories.source_transactions import finish_stream
+        finish_stream(source_guard_state)
+        from camctl.persistence.repositories.segment_selections import (
+            finish as finish_selection,
+        )
 
-    finish_selection(source_guard_state)
-    from camctl.persistence.repositories.admission_sources import finish as finish_admission
-    finish_admission(connection, transaction, None, source_guard_state)
-    plan.complete(connection)
-    _finish_baseline_read_group(baseline_read_group)
-    _finish_result_check_group(result_check_group)
-    _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
+        finish_selection(source_guard_state)
+        from camctl.persistence.repositories.admission_sources import finish as finish_admission
+        finish_admission(connection, transaction, None, source_guard_state)
+        plan.complete(connection)
+        _finish_baseline_read_group(baseline_read_group)
+        _finish_result_check_group(result_check_group)
+        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
-        connection.execute("COMMIT")
+        with db_phase(TransactionPhase.COMMIT):
+            connection.execute("COMMIT")
     except Exception as error:
         return WriteReceipt(kind="unknown",error=error)
     except BaseException as control:
@@ -638,6 +672,7 @@ def _write_derived_history(
         )
 
 
+@trace_transaction
 def commit_operation(
     command: AtomicCommand,
     operation_key: OperationKey,
@@ -648,7 +683,7 @@ def commit_operation(
     返回已提交、确认回滚或结果未知；提交成功携带完整历史边界与
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
-    connection: sqlite3.Connection = owned.connection
+    connection: sqlite3.Connection = timed_connection(owned.connection)
     begun = False
     committing = False
     rollback_attempted = False
@@ -666,15 +701,18 @@ def commit_operation(
         _rollback_control_or_unknown(connection, control)
 
     try:
-        connection.execute("BEGIN IMMEDIATE")
+        with db_phase(TransactionPhase.BEGIN):
+            connection.execute("BEGIN IMMEDIATE")
         begun = True
-        scope = TransactionScope(
-            connection,
-            _scalar(connection, "SELECT MAX(id) FROM history_transactions"),
-            _scalar(connection, "SELECT MAX(id) FROM history_events"),
-        )
+        with db_phase(TransactionPhase.READ_STATE):
+            scope = TransactionScope(
+                connection,
+                _scalar(connection, "SELECT MAX(id) FROM history_transactions"),
+                _scalar(connection, "SELECT MAX(id) FROM history_events"),
+            )
         try:
-            plan = command.plan(scope)
+            with db_phase(TransactionPhase.PLAN):
+                plan = command.plan(scope)
         except SchemaRuleError:
             raise
         except Exception as error:
@@ -687,32 +725,36 @@ def commit_operation(
                 raise
             except Exception as error:
                 return rollback_error(error)
-        events = plan.events
-        scopes = (
-            plan.software_recovery_read_scope, plan.product_read_scope, plan.plan_read_scope,
-            plan.capture_result_read_scope, plan.segment_read_scope,
-            plan.source_read_scope, plan.result_page_write_scope,
-        )
-        if sum(value is not None for value in (*scopes, plan.baseline_read_write_scope)) > 1:
-            raise TransactionError("同一命令不能混用结果页写范围与其他事实读取范围")
+        with db_phase(TransactionPhase.FINAL_CHECKS):
+            events = plan.events
+            scopes = (
+                plan.software_recovery_read_scope, plan.product_read_scope, plan.plan_read_scope,
+                plan.capture_result_read_scope, plan.segment_read_scope,
+                plan.source_read_scope, plan.result_page_write_scope,
+            )
+            if sum(value is not None for value in (*scopes, plan.baseline_read_write_scope)) > 1:
+                raise TransactionError("同一命令不能混用结果页写范围与其他事实读取范围")
         if len(events) == 0:
-            if not plan.read_only:
-                raise TransactionError("写事务没有权威事件")
-            if (plan.result_page_write_scope is not None or plan.baseline_read_write_scope is not None
-                    or plan.result_check_write_scope is not None):
-                raise TransactionError("结果页写入范围不能用于只读命令")
+            with db_phase(TransactionPhase.FINAL_CHECKS):
+                if not plan.read_only:
+                    raise TransactionError("写事务没有权威事件")
+                if (plan.result_page_write_scope is not None or plan.baseline_read_write_scope is not None
+                        or plan.result_check_write_scope is not None):
+                    raise TransactionError("结果页写入范围不能用于只读命令")
             try:
-                result = (
-                    plan.complete_result(connection, plan.result)
-                    if plan.complete_result else plan.result
-                )
+                with db_phase(TransactionPhase.FINAL_CHECKS):
+                    result = (
+                        plan.complete_result(connection, plan.result)
+                        if plan.complete_result else plan.result
+                    )
             except SchemaRuleError:
                 raise
             except Exception as error:
                 return rollback_error(error)
             try:
                 rollback_attempted = True
-                connection.execute("ROLLBACK")
+                with db_phase(TransactionPhase.ROLLBACK):
+                    connection.execute("ROLLBACK")
             except Exception as rollback_error:
                 # 该回滚已经尝试过；不重复发送 ROLLBACK，也不把只读
                 # 命令称为已完成。
@@ -721,181 +763,202 @@ def commit_operation(
                 _attach_control_receipt(control, "unknown")
                 raise
             return WriteReceipt(kind="completed", result=result)
-        allocation = scope.allocation
-        if allocation is None:
-            raise TransactionError("命令没有分配编号范围")
-        count = len(events)
-        if (
-            allocation.txn_id != scope.max_txn_id + 1
-            or allocation.first_event_id != scope.max_event_id + 1
-        ):
-            raise TransactionError("编号范围没有紧接已提交历史")
-        if allocation.last_event_id - allocation.first_event_id + 1 != count:
-            raise TransactionError(
-                f"事件数量 {count} 与分配范围 {allocation.first_event_id}~{allocation.last_event_id} 不符"
-            )
-        for index, event in enumerate(events):
-            expected_id = allocation.first_event_id + index
-            if event.event_id != expected_id or event.transaction_id != allocation.txn_id:
+        with db_phase(TransactionPhase.FINAL_CHECKS):
+            allocation = scope.allocation
+            if allocation is None:
+                raise TransactionError("命令没有分配编号范围")
+            count = len(events)
+            if (
+                allocation.txn_id != scope.max_txn_id + 1
+                or allocation.first_event_id != scope.max_event_id + 1
+            ):
+                raise TransactionError("编号范围没有紧接已提交历史")
+            if allocation.last_event_id - allocation.first_event_id + 1 != count:
                 raise TransactionError(
-                    f"第 {index} 条事件的编号 {event.event_id}/{event.transaction_id}"
-                    f" 与分配 {expected_id}/{allocation.txn_id} 不符"
+                    f"事件数量 {count} 与分配范围 {allocation.first_event_id}~{allocation.last_event_id} 不符"
                 )
+            for index, event in enumerate(events):
+                expected_id = allocation.first_event_id + index
+                if event.event_id != expected_id or event.transaction_id != allocation.txn_id:
+                    raise TransactionError(
+                        f"第 {index} 条事件的编号 {event.event_id}/{event.transaction_id}"
+                        f" 与分配 {expected_id}/{allocation.txn_id} 不符"
+                    )
 
-        max_change_seq = _scalar(connection, "SELECT MAX(change_seq) FROM history_events")
-        working = _copy_rows(plan.state_rows)
-        sequenced: list[EventEnvelope] = []
+        with db_phase(TransactionPhase.READ_STATE):
+            max_change_seq = _scalar(connection, "SELECT MAX(change_seq) FROM history_events")
+        with db_phase(TransactionPhase.DERIVE):
+            working = _copy_rows(plan.state_rows)
+            sequenced: list[EventEnvelope] = []
         for event in events:
-            targets = event_report_targets(event, working)
-            change_seq = None
-            if targets:
-                max_change_seq += 1
-                change_seq = max_change_seq
-            sequenced.append(replace(event, change_seq=change_seq))
-            _apply_rows(working, (event,))
+            db_count("events")
+            db_count("row_changes", len(event.rows))
+            with db_phase(TransactionPhase.REPORT_TARGETS):
+                targets = event_report_targets(event, working)
+                change_seq = None
+                if targets:
+                    max_change_seq += 1
+                    change_seq = max_change_seq
+                sequenced.append(replace(event, change_seq=change_seq))
+            with db_phase(TransactionPhase.DERIVE):
+                _apply_rows(working, (event,))
 
-        validation_state = _copy_rows(plan.state_rows)
-        validated: list[ValidatedEvent] = []
-        transaction_range = TransactionRange(
-            txn_id=allocation.txn_id,
-            first_event_id=allocation.first_event_id,
-            last_event_id=allocation.last_event_id,
-        )
-        from camctl.persistence.event_reads import SqlEventReads
-
-        read_scope = next((value for value in scopes if value is not None), None)
-        if isinstance(read_scope, ResultPageWriteScope):
-            read_scope = None
-        segment_guard_state = {}
-        source_guard_state = {}
-        result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction_range,connection)
-        baseline_read_group = _baseline_read_group(plan,transaction_range,connection,operation_key)
-        result_check_group = _result_check_group(plan,transaction_range,connection)
-        for event in sequenced:
-            context = EventContext(
-                transaction=transaction_range,
-                owners=plan.owners,
-                state_rows=validation_state,
-                transaction_rows=working,
-                read_coverage=plan.read_coverage,
-                baseline_reads=plan.baseline_reads,
-                current_reads=(None if read_scope is None else
-                               SqlEventReads(connection, read_scope, validated, sequenced)),
+        with db_phase(TransactionPhase.CONTEXT):
+            validation_state = _copy_rows(plan.state_rows)
+            validated: list[ValidatedEvent] = []
+            transaction_range = TransactionRange(
+                txn_id=allocation.txn_id,
+                first_event_id=allocation.first_event_id,
+                last_event_id=allocation.last_event_id,
             )
-            context, reads = _bind_event_reads(
-                context, event, transaction_range, segment_guard_state,
-                source_guard_state, connection, operation_key,
-                plan.result_page_write_scope, result_page_guard_state,
-                validated=validated, planned_events=sequenced,
-                baseline_read_group=baseline_read_group,result_check_group=result_check_group)
-            accepted = validate_event(event, context)
-            _seal_event_reads(reads, accepted, source_guard_state,baseline_read_group,result_check_group)
-            validated.append(accepted)
-            _apply_rows(validation_state, (event,))
+            from camctl.persistence.event_reads import SqlEventReads
 
-        _finish_baseline_read_group(baseline_read_group)
-        _finish_result_check_group(result_check_group)
-        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
-        from camctl.persistence.repositories.source_transactions import finish_stream
-        finish_stream(source_guard_state)
-        from camctl.persistence.repositories.segment_selections import (
-            finish as finish_selection,
-        )
+            read_scope = next((value for value in scopes if value is not None), None)
+            if isinstance(read_scope, ResultPageWriteScope):
+                read_scope = None
+            segment_guard_state = {}
+            source_guard_state = {}
+            result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction_range,connection)
+            baseline_read_group = _baseline_read_group(plan,transaction_range,connection,operation_key)
+            result_check_group = _result_check_group(plan,transaction_range,connection)
+        for event in sequenced:
+            with db_phase(TransactionPhase.CONTEXT):
+                context = EventContext(
+                    transaction=transaction_range,
+                    owners=plan.owners,
+                    state_rows=validation_state,
+                    transaction_rows=working,
+                    read_coverage=plan.read_coverage,
+                    baseline_reads=plan.baseline_reads,
+                    current_reads=(None if read_scope is None else
+                                   SqlEventReads(connection, read_scope, validated, sequenced)),
+                )
+                context, reads = _bind_event_reads(
+                    context, event, transaction_range, segment_guard_state,
+                    source_guard_state, connection, operation_key,
+                    plan.result_page_write_scope, result_page_guard_state,
+                    validated=validated, planned_events=sequenced,
+                    baseline_read_group=baseline_read_group,result_check_group=result_check_group)
+            with db_phase(TransactionPhase.VALIDATE):
+                accepted = validate_event(event, context)
+            with db_phase(TransactionPhase.CONTEXT):
+                _seal_event_reads(reads, accepted, source_guard_state,baseline_read_group,result_check_group)
+            with db_phase(TransactionPhase.DERIVE):
+                validated.append(accepted)
+                _apply_rows(validation_state, (event,))
 
-        finish_selection(source_guard_state)
-        from camctl.persistence.repositories.admission_sources import finish as finish_admission
-        finish_admission(connection, transaction_range, validated, source_guard_state)
+        with db_phase(TransactionPhase.FINAL_CHECKS):
+            _finish_baseline_read_group(baseline_read_group)
+            _finish_result_check_group(result_check_group)
+            _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
+            from camctl.persistence.repositories.source_transactions import finish_stream
+            finish_stream(source_guard_state)
+            from camctl.persistence.repositories.segment_selections import (
+                finish as finish_selection,
+            )
 
-        touched = {
-            (entity_type, entity_id)
-            for validated_event in validated
-            for entity_type, entity_id in validated_event.row_owners.values()
-        }
-        before_counts: dict[tuple[int, int], int] = {}
-        for entity_type, entity_id in touched:
-            row = connection.execute(
-                "SELECT MAX(change_count) FROM entity_event_links"
-                " WHERE entity_type = ? AND entity_id = ?",
-                (entity_type, entity_id),
-            ).fetchone()
-            if row is not None and row[0] is not None:
-                before_counts[(entity_type, entity_id)] = row[0]
-        before_slice = StateSlice(rows=_copy_rows(plan.state_rows), change_counts=before_counts)
-        after_counts = dict(before_counts)
-        for link_event in validated:
-            refs = {
-                entity_ref
-                for entity_ref in link_event.row_owners.values()
+            finish_selection(source_guard_state)
+            from camctl.persistence.repositories.admission_sources import finish as finish_admission
+            finish_admission(connection, transaction_range, validated, source_guard_state)
+
+        with db_phase(TransactionPhase.READ_STATE):
+            touched = {
+                (entity_type, entity_id)
+                for validated_event in validated
+                for entity_type, entity_id in validated_event.row_owners.values()
             }
-            for entity_ref in refs:
-                after_counts[entity_ref] = after_counts.get(entity_ref, 0) + 1
-        after_slice = StateSlice(rows=validation_state, change_counts=after_counts)
-        change_set = derive_changes(tuple(validated), before_slice, after_slice)
+            before_counts: dict[tuple[int, int], int] = {}
+            for entity_type, entity_id in touched:
+                row = connection.execute(
+                    "SELECT MAX(change_count) FROM entity_event_links"
+                    " WHERE entity_type = ? AND entity_id = ?",
+                    (entity_type, entity_id),
+                ).fetchone()
+                if row is not None and row[0] is not None:
+                    before_counts[(entity_type, entity_id)] = row[0]
+        with db_phase(TransactionPhase.DERIVE):
+            before_slice = StateSlice(rows=_copy_rows(plan.state_rows), change_counts=before_counts)
+            after_counts = dict(before_counts)
+            for link_event in validated:
+                refs = {
+                    entity_ref
+                    for entity_ref in link_event.row_owners.values()
+                }
+                for entity_ref in refs:
+                    after_counts[entity_ref] = after_counts.get(entity_ref, 0) + 1
+            after_slice = StateSlice(rows=validation_state, change_counts=after_counts)
+            change_set = derive_changes(tuple(validated), before_slice, after_slice)
 
-        connection.execute(
-            "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
-            " VALUES (?, ?, ?, ?)",
-            (allocation.txn_id, str(operation_key), allocation.first_event_id, allocation.last_event_id),
-        )
-        for event in sequenced:
+        with db_phase(TransactionPhase.WRITE):
             connection.execute(
-                "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
-                " occurred_at, clock_status, change_seq, body_json)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    event.event_id,
-                    event.transaction_id,
-                    event.event_type,
-                    event.event_version,
-                    event.occurred_at,
-                    event.clock_status,
-                    event.change_seq,
-                    _encode_body(event),
-                ),
-            )
-        for link in change_set.links:
-            connection.execute(
-                "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count)"
+                "INSERT INTO history_transactions (id, operation_key, first_event_id, last_event_id)"
                 " VALUES (?, ?, ?, ?)",
-                (link.entity_type, link.entity_id, link.event_id, link.change_count),
+                (allocation.txn_id, str(operation_key), allocation.first_event_id, allocation.last_event_id),
             )
-        for report_change in change_set.report_changes:
-            connection.execute(
-                "INSERT INTO report_entity_changes (entity_type, entity_id, event_id, change_seq)"
-                " VALUES (?, ?, ?, ?)",
-                (
-                    report_change.entity_type,
-                    report_change.entity_id,
-                    report_change.event_id,
-                    report_change.change_seq,
-                ),
-            )
-        for progress in change_set.progress_updates:
-            connection.execute(
-                "INSERT INTO entity_snapshot_progress (entity_type, entity_id,"
-                " current_change_count, snapshot_change_count, latest_snapshot_id)"
-                " VALUES (?, ?, ?, 0, NULL)"
-                " ON CONFLICT(entity_type, entity_id)"
-                " DO UPDATE SET current_change_count = excluded.current_change_count",
-                (progress.entity_type, progress.entity_id, progress.current_change_count),
-            )
-        derived = _derived_map(tuple(sequenced), change_set.links, change_set.change_counts)
-        _write_projections(connection, tuple(sequenced), derived)
-        _write_derived_history(connection, tuple(sequenced), derived)
+            for event in sequenced:
+                connection.execute(
+                    "INSERT INTO history_events (id, transaction_id, event_type, event_version,"
+                    " occurred_at, clock_status, change_seq, body_json)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event.event_id,
+                        event.transaction_id,
+                        event.event_type,
+                        event.event_version,
+                        event.occurred_at,
+                        event.clock_status,
+                        event.change_seq,
+                        _encode_body(event),
+                    ),
+                )
+            for link in change_set.links:
+                connection.execute(
+                    "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count)"
+                    " VALUES (?, ?, ?, ?)",
+                    (link.entity_type, link.entity_id, link.event_id, link.change_count),
+                )
+            for report_change in change_set.report_changes:
+                connection.execute(
+                    "INSERT INTO report_entity_changes (entity_type, entity_id, event_id, change_seq)"
+                    " VALUES (?, ?, ?, ?)",
+                    (
+                        report_change.entity_type,
+                        report_change.entity_id,
+                        report_change.event_id,
+                        report_change.change_seq,
+                    ),
+                )
+            for progress in change_set.progress_updates:
+                connection.execute(
+                    "INSERT INTO entity_snapshot_progress (entity_type, entity_id,"
+                    " current_change_count, snapshot_change_count, latest_snapshot_id)"
+                    " VALUES (?, ?, ?, 0, NULL)"
+                    " ON CONFLICT(entity_type, entity_id)"
+                    " DO UPDATE SET current_change_count = excluded.current_change_count",
+                    (progress.entity_type, progress.entity_id, progress.current_change_count),
+                )
+        with db_phase(TransactionPhase.DERIVE):
+            derived = _derived_map(tuple(sequenced), change_set.links, change_set.change_counts)
+        with db_phase(TransactionPhase.WRITE):
+            _write_projections(connection, tuple(sequenced), derived)
+            _write_derived_history(connection, tuple(sequenced), derived)
 
         try:
-            result = (
-                plan.complete_result(connection, plan.result)
-                if plan.complete_result else plan.result
-            )
+            with db_phase(TransactionPhase.FINAL_CHECKS):
+                result = (
+                    plan.complete_result(connection, plan.result)
+                    if plan.complete_result else plan.result
+                )
         except SchemaRuleError:
             raise
         except Exception as error:
             return rollback_error(error)
-        _finish_baseline_read_group(baseline_read_group)
-        _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
+        with db_phase(TransactionPhase.FINAL_CHECKS):
+            _finish_baseline_read_group(baseline_read_group)
+            _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         committing = True
-        connection.execute("COMMIT")
+        with db_phase(TransactionPhase.COMMIT):
+            connection.execute("COMMIT")
         return WriteReceipt(
             kind="completed",
             result=result,
@@ -935,7 +998,8 @@ def _rollback_control_or_unknown(
 ) -> None:
     """回滚一次并在原控制对象上附加实际事务结果。"""
     try:
-        connection.execute("ROLLBACK")
+        with db_phase(TransactionPhase.ROLLBACK):
+            connection.execute("ROLLBACK")
     except BaseException as rollback_error:
         _attach_control_receipt(control, "unknown", (rollback_error,))
     else:
@@ -949,7 +1013,8 @@ def _rollback_or_unknown(
     if not begun:
         return WriteReceipt(kind="rolled_back", error=error)
     try:
-        connection.execute("ROLLBACK")
+        with db_phase(TransactionPhase.ROLLBACK):
+            connection.execute("ROLLBACK")
     except BaseException as rollback_error:
         if not isinstance(rollback_error, Exception):
             if isinstance(error, Exception):
