@@ -35,6 +35,7 @@ from camctl.history.events import (
     load_event_registry,
     write_once_columns,
 )
+from camctl.logging_runtime.transaction_timing import trace_detail
 
 Guard = Callable[[EventEnvelope, "EventContext"], None]
 
@@ -560,6 +561,7 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的伴随收场错误必须是完整结构化错误或显式 null")
 
 
+@trace_detail("history_structure_validation")
 def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[str, Any]]:
     """保存与历史读取共用格式、分支及行权限，不执行业务守卫。"""
     try:
@@ -636,6 +638,7 @@ def validate_event_structure(event: EventEnvelope) -> tuple[str, str, Mapping[st
     return event_name, branch_name, branch
 
 
+@trace_detail("history_event_validation")
 def validate_event(event: EventEnvelope, context: EventContext) -> ValidatedEvent:
     """完整结构校验后执行业务守卫，再解析实际对象引用。"""
     event_name, branch_name, branch = validate_event_structure(event)

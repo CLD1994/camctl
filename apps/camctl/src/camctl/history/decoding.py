@@ -7,6 +7,7 @@ from camctl.contracts.json_values import is_json_integer, parse_exact_json
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import validate_event_structure
+from camctl.logging_runtime.transaction_timing import trace_detail
 
 
 def _json_identity(value: Any) -> int:
@@ -30,6 +31,7 @@ def _image(value: Any) -> RowImage:
     return RowImage(exists, columns)
 
 
+@trace_detail("history_decode")
 def decode_event_row(row: Sequence[Any]) -> EventEnvelope:
     """解码 SQL 行并校验可解释结构；坏事实明确归为状态库错误。"""
     try:
