@@ -648,72 +648,81 @@ class SegmentHistoryHandle:
     def _row_owner(self):
         return 'action',self.action_id
 
-    def _validate_sets(self):
-        from camctl.capture.segment_models import (
-            DefaultScopeState, SegmentDecision, SegmentSetRef,
-        )
+    def _set_validation_scope(self):
+        return 'complete'
+
+    def _validate_set_header(self, values):
+        """有限头只核自身决定，不把尚未读取的集合解释为零行。"""
+        from camctl.capture.segment_models import DefaultScopeState, SegmentDecision, SegmentSetRef
         from camctl.capture.segment_storage import assessment_from_document, facts_from_document
-        previous=0
+        if values['facts_json'] is not None:
+            facts_from_document(values['facts_json'])
+        if values['assessment_json'] is None:
+            return None
+        assessment = assessment_from_document(values['assessment_json'])
+        ref = SegmentSetRef(self.action_id, values['current_attempt_id'],
+                            values['current_final_page_event_id'], values['version'])
+        if isinstance(assessment, SegmentDecision):
+            if assessment.set_ref != ref or assessment.default_scope.set_ref != ref:
+                raise ConsistencyError('H处公共判断改变原集合')
+            scope = assessment.default_scope
+            expected = (0 if scope.state in (DefaultScopeState.UNKNOWN, DefaultScopeState.EMPTY)
+                        else scope.member_count)
+            if type(expected) is not int or expected < 0:
+                raise ConsistencyError('H处公共判断的默认范围数量无效')
+            if assessment.checked_count > expected:
+                raise ConsistencyError('H处检查前缀超过公共判断')
+            if scope.state is DefaultScopeState.UNKNOWN and assessment.checked_count:
+                raise ConsistencyError('H处未知公共范围不能包含已检查前缀')
+        elif assessment.set_ref != ref or assessment.target_duration_ms != values['target_duration_ms']:
+            raise ConsistencyError('H处判断改变原集合或目标')
+        return assessment
+
+    def _validate_sets(self):
+        from camctl.capture.segment_models import DefaultScopeState, SegmentDecision
+        validation = self._set_validation_scope()
+        previous = 0
         while True:
             with closing(self._db.execute("SELECT id,body FROM rows WHERE tab='segment_sets' AND id>? ORDER BY id LIMIT ?",
-                    (previous,self.batch_size))) as cursor:
-                selected=cursor.fetchall()
+                    (previous, self.batch_size))) as cursor:
+                selected = cursor.fetchall()
             if not selected:
                 return
-            for identity,body in selected:
-                values=parse_exact_json(body)
+            for identity, body in selected:
+                values = parse_exact_json(body)
+                assessment = self._validate_set_header(values)
+                if validation == 'finite':
+                    continue
                 def count(table):
-                    return self._one('SELECT COUNT(*),MIN(k1),MAX(k1) FROM row_order WHERE tab=? AND set_id=?',(table,identity))
-                members=count('segment_members')[0]
-                if values['member_count'] is not None and members != values['member_count']:
-                    raise ConsistencyError('H处完整成员数量与固定集合计数不同')
-                gaps=count('segment_gaps')
-                scope=count('segment_scope_members')
-                for summary in (gaps,scope):
-                    if summary[0] and summary[1:] != (1,summary[0]):
-                        raise ConsistencyError('H处缺口或范围保存序号不完整')
-                if values['facts_json'] is not None:
-                    facts_from_document(values['facts_json'])
-                if values['assessment_json'] is not None:
-                    assessment=assessment_from_document(values['assessment_json'])
-                    ref=SegmentSetRef(self.action_id,values['current_attempt_id'],values['current_final_page_event_id'],values['version'])
-                    if isinstance(assessment, SegmentDecision):
-                        if assessment.set_ref != ref or assessment.default_scope.set_ref != ref:
-                            raise ConsistencyError('H处公共判断改变原集合')
-                        selected_scope = assessment.default_scope
-                        expected = (
-                            0 if selected_scope.state in (
-                                DefaultScopeState.UNKNOWN, DefaultScopeState.EMPTY
-                            ) else selected_scope.member_count
-                        )
-                        if type(expected) is not int or expected < 0:
-                            raise ConsistencyError('H处公共判断的默认范围数量无效')
-                        if assessment.checked_count > expected or scope[0] > expected:
-                            raise ConsistencyError('H处检查前缀或范围超过公共判断')
-                        if selected_scope.state is DefaultScopeState.UNKNOWN and assessment.checked_count:
-                            raise ConsistencyError('H处未知公共范围不能包含已检查前缀')
-                        if values['published_event_id'] is not None:
-                            if scope[0] != expected:
-                                raise ConsistencyError('H处正式公共范围缺少成员')
-                            missing=self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1",(identity,))
-                            if missing:
-                                raise ConsistencyError('H处正式公共范围尚未关联真实产物')
-                        continue
-                    if assessment.set_ref != ref or assessment.target_duration_ms != values['target_duration_ms']:
-                        raise ConsistencyError('H处判断改变原集合或目标')
-                    if gaps[0] != (0 if assessment.gap_count is None else assessment.gap_count):
-                        raise ConsistencyError('H处完整缺口与nullable摘要计数不同')
-                    expected=(0 if assessment.default_scope.state is DefaultScopeState.UNKNOWN
-                              else assessment.default_scope.member_count)
+                    return self._one('SELECT COUNT(*),MIN(k1),MAX(k1) FROM row_order WHERE tab=? AND set_id=?', (table, identity))
+                if validation == 'complete':
+                    members = count('segment_members')[0]
+                    if values['member_count'] is not None and members != values['member_count']:
+                        raise ConsistencyError('H处完整成员数量与固定集合计数不同')
+                    gaps = count('segment_gaps')
+                    if gaps[0] and gaps[1:] != (1, gaps[0]):
+                        raise ConsistencyError('H处缺口保存序号不完整')
+                scope = count('segment_scope_members')
+                if scope[0] and scope[1:] != (1, scope[0]):
+                    raise ConsistencyError('H处范围保存序号不完整')
+                if assessment is None:
+                    continue
+                expected = (0 if assessment.default_scope.state is DefaultScopeState.UNKNOWN
+                            else assessment.default_scope.member_count)
+                if isinstance(assessment, SegmentDecision):
                     if scope[0] > expected:
-                        raise ConsistencyError('H处范围包含原判断以外的成员')
-                    if values['published_event_id'] is not None:
-                        if scope[0] != expected:
-                            raise ConsistencyError('H处正式范围缺少成员')
-                        missing=self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1",(identity,))
-                        if missing:
-                            raise ConsistencyError('H处正式范围尚未关联真实产物')
-            previous=selected[-1][0]
+                        raise ConsistencyError('H处范围超过公共判断')
+                elif validation == 'complete' and gaps[0] != (0 if assessment.gap_count is None else assessment.gap_count):
+                    raise ConsistencyError('H处完整缺口与nullable摘要计数不同')
+                if scope[0] > expected:
+                    raise ConsistencyError('H处范围包含原判断以外的成员')
+                if values['published_event_id'] is not None:
+                    if scope[0] != expected:
+                        raise ConsistencyError('H处正式范围缺少成员')
+                    missing = self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1", (identity,))
+                    if missing:
+                        raise ConsistencyError('H处正式范围尚未关联真实产物')
+            previous = selected[-1][0]
 
     def _transaction(self):
         from camctl.persistence.repositories.history import _transaction_range

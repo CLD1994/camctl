@@ -8,6 +8,7 @@ const expression = { $ref: '#/$defs/expression' };
 const text = { type: 'string', minLength: 1 };
 const strings = { type: 'array', items: text, uniqueItems: true };
 const column = { type: 'string', pattern: '^[a-z_][a-z0-9_]*\\.[a-z_][a-z0-9_]*$' };
+const readPhase = { ...strings, minItems: 1 };
 const object = (properties, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });
 const operation = (op, properties = {}, required = Object.keys(properties)) => object({ op: { const: op }, ...properties }, ['op', ...required]);
 const grammar = {
@@ -42,13 +43,19 @@ const grammar = {
     format_version: { const: 1 }, public_schema: text, enum_registry: text, error_registry: text, contract: text,
     boundary: object({ history: { const: 'same_frozen_h' }, impact: { const: 'event_before_and_after' }, missing_required: { const: 'state_database_error' }, compare: { const: 'public_value_and_presence' }, internal_only: { const: 'no_report_target' }, parent_fill: { const: 'no_additional_change_seq' } }),
     entities: { type: 'object', additionalProperties: object({ table: text, identity: text, target: { type: 'boolean' }, parent: object({ entity: text, foreign_key: text }) }, ['table', 'identity', 'target']) },
-    relations: { type: 'object', additionalProperties: object({ from: column, to: column, cardinality: { enum: ['one', 'optional_one', 'many'] } }) },
+    relations: { type: 'object', additionalProperties: object({ from: column, to: column, cardinality: { enum: ['one', 'optional_one', 'many'] }, read_phase: readPhase }, ['from','to','cardinality']) },
     projections: { type: 'object', additionalProperties: object({
       schema: text, root_table: text, entity: text, relations: strings, when: expression,
       fields: { type: 'object', minProperties: 1, additionalProperties: object({ when: expression, value: expression }) },
       assertions: strings, empty: { const: 'omit' }
     }, ['schema', 'root_table', 'entity', 'relations', 'when', 'fields']) },
-    assertions: { type: 'object', additionalProperties: object({ columns: { type: 'array', minItems: 1, items: column, uniqueItems: true }, contract: text }) },
+    assertions: { type: 'object', additionalProperties: object({ columns: { type: 'array', minItems: 1, items: column, uniqueItems: true }, contract: text, read_phase: readPhase }, ['columns','contract']) },
+    read_expansions: { type: 'object', additionalProperties: object({
+      trigger: { oneOf: [object({kind:{const:'projection'},projection:text}),
+        object({kind:{const:'registered_error'},details_schema:text})] },
+      relations: { ...strings, minItems: 1 }, assertion: text,
+      members: object({ relation: text, selection: {enum:['all','referenced']} })
+    }) },
     routes: { type: 'object', additionalProperties: { type: 'object' } },
     sql_pending: { type: 'object', additionalProperties: object({ columns: { ...strings, minItems: 1 }, specification: text,
       foreign_keys: { type: 'array', items: object({ column: text, references: column }) }
@@ -58,6 +65,28 @@ const grammar = {
 };
 const ajv = new Ajv({ strict: false, allErrors: true, discriminator: true });
 const validateShape = ajv.compile(grammar);
+
+export function validateReadScopes(registry, errors) {
+  const expansions = registry.read_expansions ?? {};
+  for (const rule of [...Object.values(registry.relations), ...Object.values(registry.assertions)]) {
+    for (const phase of rule.read_phase ?? []) assert(Object.hasOwn(expansions, phase), `未登记的报告读取阶段：${phase}`);
+  }
+  for (const [phase, spec] of Object.entries(expansions)) {
+    assert(phase !== 'finite', '有限读取不能登记为增长阶段');
+    const trigger = spec.trigger;
+    if (trigger.kind === 'projection') assert(registry.projections[trigger.projection], `未知增长投影：${trigger.projection}`);
+    else pointer(errors, trigger.details_schema);
+    assert(registry.assertions[spec.assertion]?.read_phase?.includes(phase), `增长断言没有同一读取阶段：${phase}`);
+    for (const name of spec.relations) {
+      const relation = registry.relations[name];
+      assert(relation, `未知增长关联：${name}`);
+      assert(!relation.read_phase || relation.read_phase.includes(phase), `增长关联读取阶段不同：${name}`);
+    }
+    assert(spec.relations.includes(spec.members.relation), `成员关联没有登记于增长范围：${phase}`);
+    const relation = registry.relations[spec.members.relation];
+    assert(spec.members.selection !== 'referenced' || relation.to.endsWith('.id') && !relation.from.endsWith('.id'), `成员引用必须沿外键定位永久身份：${phase}`);
+  }
+}
 
 export function pointer(document, path) {
   assert(path === '#' || path.startsWith('#/'), `仅允许文档内 JSON Pointer：${path}`);
@@ -133,6 +162,7 @@ function generatedLiterals(node) {
 export function validateRegistration(registry, schema, { enums, errors, tables, foreignKeys, schemas = {} }) {
   schema = withLocalSchemas(schema, schemas);
   assert(validateShape(registry), `登记格式错误：${ajv.errorsText(validateShape.errors)}`);
+  validateReadScopes(registry, errors);
   const usedColumns = new Set(), pendingSql = new Set(), usedPending = new Set();
   const usedEntities = new Set(['report']), referencedProjections = new Set(['report']);
   const schemaCoverage = new Set(), projectionEdges = new Map();

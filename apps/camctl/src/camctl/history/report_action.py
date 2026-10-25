@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import closing
 
 from camctl.contracts.public_projection import _dependencies, projection_read_tables
+from camctl.contracts.report_reads import ReportExpansionRequest
 from camctl.contracts.values import ConsistencyError
 from camctl.history.bounded import SegmentHistoryHandle, _event_limit, _limit, _ownership_branches
 from camctl.history.events import business_tables_for_format, foreign_key_targets
@@ -24,11 +25,11 @@ def report_restore_strategy(seed):
     return 'current'
 
 
-def _required_tables(entity, primary_table):
+def _required_tables(entity, primary_table, *, phase='finite'):
     registry = _dependencies()
     projections = registry['projections']
     if entity in projections:
-        required = set(projection_read_tables(entity, _registry=registry)) | {primary_table}
+        required = set(projection_read_tables(entity, phase=phase, _registry=registry)) | {primary_table}
     else:
         # 文件等非公开对象只保留实际公开依赖；归属在候选查询中再次收窄。
         required = {primary_table}
@@ -48,14 +49,18 @@ def _required_tables(entity, primary_table):
 
 
 def open_report_history(repository, entity, identity, boundary, *,
-                        event_batch_size=256, row_batch_size=128):
+                        event_batch_size=256, row_batch_size=128, request=None):
     _event_limit(event_batch_size)
     _limit(row_batch_size)
+    if request is not None and (not isinstance(request, ReportExpansionRequest)
+            or entity != 'action' or identity != request.source_action_id):
+        raise ConsistencyError('报告增长请求不属于源动作')
+    phase = 'finite' if request is None else request.phase
     with repository._read_connection() as connection:
         seed = repository._object_seed(connection, entity, identity, boundary,
             event_batch_size=event_batch_size, primary_only=True)
     handle = ReportHistoryHandle(repository, seed, entity=entity,
-        tables=_required_tables(entity, seed.primary_table),
+        tables=_required_tables(entity, seed.primary_table, phase=phase), phase=phase,
         event_batch_size=event_batch_size, row_batch_size=row_batch_size)
     try:
         return handle.restore(report_restore_strategy(seed))
@@ -73,8 +78,9 @@ class ReportHistoryHandle(SegmentHistoryHandle):
     """与报告既有分页端口兼容，只恢复权威投影闭包内的自身行。"""
 
     def __init__(self, repository, seed, *, entity, tables,
-                 event_batch_size=256, row_batch_size=128):
+                 event_batch_size=256, row_batch_size=128, phase='finite'):
         self.entity = entity
+        self.phase = phase
         self.required_tables = frozenset(tables)
         self._published_identity = None
         self._set_foreign_keys = {
@@ -86,6 +92,54 @@ class ReportHistoryHandle(SegmentHistoryHandle):
         self._require_ready()
         return self._get(self.seed.primary_table, self.seed.ref[1])
 
+    def open_expansion(self, request):
+        """独立恢复所请求的增长关系，保留原有限句柄及其游标。"""
+        self._require_ready()
+        if (not isinstance(request, ReportExpansionRequest) or self.entity != 'action'
+                or request.source_action_id != self.action_id):
+            raise ConsistencyError('报告增长请求不属于源动作')
+        child = open_report_history(self.repository, self.entity, self.action_id, self.boundary,
+            request=request, event_batch_size=self.event_batch_size, row_batch_size=self.batch_size)
+        try:
+            if (child.instance_id != self.instance_id or child.boundary != self.boundary
+                    or child.active_result_ref() != self.active_result_ref()):
+                raise ConsistencyError('增长关系与有限事实不属于同实例/H/正式集合')
+            return child
+        except BaseException:
+            child.close()
+            raise
+
+    def _require_table(self, table):
+        if table not in self.required_tables:
+            raise ConsistencyError('报告尚未读取该增长关系')
+
+    def row(self, table, identity):
+        self._require_table(table)
+        return super().row(table, identity)
+
+    def related_rows(self, table, column=None, value=None):
+        self._require_table(table)
+        yield from super().related_rows(table, column, value)
+
+    def read_page(self, table, *, ref=None, cursor=None, limit=128):
+        self._require_table(table)
+        return super().read_page(table, ref=ref, cursor=cursor, limit=limit)
+
+    def _set_validation_scope(self):
+        if self.phase == 'finite':
+            return 'finite'
+        return ('scope' if _dependencies()['read_expansions'][self.phase]
+                ['members']['selection'] == 'referenced' else 'complete')
+
+    def _member_reference(self):
+        phase = getattr(self, 'phase', 'finite')
+        if phase == 'finite':
+            return None
+        spec = _dependencies().get('read_expansions', {}).get(phase)
+        if spec is None or spec['members']['selection'] != 'referenced':
+            return None
+        return _dependencies()['relations'][spec['members']['relation']]
+
     def _row_owner(self):
         return self.entity, self.seed.ref[1]
 
@@ -94,6 +148,9 @@ class ReportHistoryHandle(SegmentHistoryHandle):
             return False
         if table == 'segment_sets':
             return values['id'] == self._published_identity
+        reference = self._member_reference()
+        if reference is not None and table == reference['to'].partition('.')[0]:
+            return self._get(table, values['id'], 'candidates') is not None
         column = self._set_foreign_keys.get(table)
         return column is None or (
             self._published_identity is not None and values.get(column) == self._published_identity)
@@ -107,6 +164,13 @@ class ReportHistoryHandle(SegmentHistoryHandle):
         elif table in self._set_foreign_keys:
             column = self._set_foreign_keys[table]
             sql = f'SELECT id FROM ({sql}) WHERE id IN (SELECT id FROM {table} WHERE {column}=?)'
+            parameters += (self._published_identity,)
+        reference = self._member_reference()
+        if reference is not None and table == reference['to'].partition('.')[0]:
+            source, _, column = reference['from'].partition('.')
+            set_column = self._set_foreign_keys[source]
+            sql = (f'SELECT id FROM ({sql}) WHERE id IN '
+                   f'(SELECT {column} FROM {source} WHERE {set_column}=?)')
             parameters += (self._published_identity,)
         return sql, parameters
 

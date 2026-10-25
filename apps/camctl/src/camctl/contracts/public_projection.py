@@ -118,11 +118,17 @@ def projection_structure(entity: str) -> ProjectionStructure:
                                tuple((name, child) for _, name, child in children))
 
 
-def projection_read_tables(entity: str, *, _registry=None) -> frozenset[str]:
+def projection_read_tables(entity: str, *, phase=None, _registry=None) -> frozenset[str]:
     """从投影、关系及前置校验派生保守表闭包，保留独立实体边界。"""
     registry = _dependencies() if _registry is None else _registry
     tables: set[str] = set()
     visited: set[str] = set()
+
+    if phase not in (None, 'finite') and phase not in registry.get('read_expansions', {}):
+        raise PublicProjectionError(f'未登记的报告读取阶段: {phase}')
+
+    def included(spec):
+        return phase is None or 'read_phase' not in spec or phase in spec['read_phase']
 
     def column(value):
         if isinstance(value, str) and "." in value:
@@ -132,6 +138,8 @@ def projection_read_tables(entity: str, *, _registry=None) -> frozenset[str]:
         spec = registry["relations"].get(name)
         if spec is None:
             raise PublicProjectionError(f"报告读取引用未登记的关联: {name}")
+        if not included(spec):
+            return
         column(spec["from"])
         column(spec["to"])
 
@@ -169,9 +177,15 @@ def projection_read_tables(entity: str, *, _registry=None) -> frozenset[str]:
             requirement = registry.get("assertions", {}).get(assertion)
             if requirement is None:
                 raise PublicProjectionError(f"报告读取引用未登记的前置校验: {assertion}")
-            walk(requirement)
+            if included(requirement):
+                walk(requirement)
 
     projection(entity)
+    if phase not in (None, 'finite'):
+        expansion = registry['read_expansions'][phase]
+        for name in expansion['relations']:
+            relation(name)
+        walk(registry['assertions'][expansion['assertion']])
     return frozenset(tables)
 
 
