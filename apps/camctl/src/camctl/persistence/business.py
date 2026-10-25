@@ -46,20 +46,39 @@ def _attach_actual(error, outcome):
             break
 
 
-async def settle_required(awaitable: Awaitable[T]) -> T:
-    """完整必需阶段先完成DB及loop状态应用，再传播原取消。"""
-    result, cancelled = await _settle(asyncio.ensure_future(awaitable))
-    if cancelled is not None:
-        if isinstance(result, DbOutcome):
-            _attach_actual(cancelled, result)
-        raise cancelled
-    return result
-
-
 @dataclass(frozen=True)
-class _SharedSaveResult:
+class _RequiredResult:
     value: object = None
     error: BaseException | None = None
+
+
+async def _complete_required(awaitable):
+    try:
+        return _RequiredResult(value=await awaitable)
+    except BaseException as error:
+        # Task 的取消状态不保留重复观察同一控制错误的语义。
+        return _RequiredResult(error=error)
+
+
+async def _deliver_required(task):
+    result, cancelled = await _settle(task)
+    if result.error is not None:
+        if cancelled is not None:
+            raise result.error from cancelled
+        raise result.error
+    if cancelled is not None:
+        if isinstance(result.value, DbOutcome):
+            _attach_actual(cancelled, result.value)
+        raise cancelled
+    return result.value
+
+
+async def settle_required(awaitable: Awaitable[T]) -> T:
+    """完整必需阶段先应用实际结果，再传播原错误或等待取消。
+
+    协程由本边界包装；外部 Task 的原控制错误由其拥有者稳定保存。
+    """
+    return await _deliver_required(asyncio.create_task(_complete_required(awaitable)))
 
 
 class SharedSave:
@@ -71,23 +90,8 @@ class SharedSave:
     async def run(self, save_and_apply: Callable[[], Awaitable[T]]) -> T:
         """保留原成功或失败结果；晚到等待者不能隐式重放保存。"""
         if self._task is None:
-            async def apply():
-                try:
-                    return _SharedSaveResult(value=await save_and_apply())
-                except BaseException as error:
-                    # Task 的取消状态不保留重复观察同一控制错误的语义。
-                    return _SharedSaveResult(error=error)
-            self._task = asyncio.create_task(apply())
-        result, cancelled = await _settle(self._task)
-        if result.error is not None:
-            if cancelled is not None:
-                raise result.error from cancelled
-            raise result.error
-        if cancelled is not None:
-            if isinstance(result.value, DbOutcome):
-                _attach_actual(cancelled, result.value)
-            raise cancelled
-        return result.value
+            self._task = asyncio.create_task(_complete_required(save_and_apply()))
+        return await _deliver_required(self._task)
 
     def reset(self) -> None:
         """调用方明确开始下一阶段或核实；不能替换仍在进行的原保存。"""

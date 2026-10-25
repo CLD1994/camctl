@@ -137,6 +137,77 @@ async def test_required_phase_inner_cancellation_ends_wait():
         await settle_required(future)
 
 
+@pytest.mark.parametrize("error_type", [asyncio.CancelledError, KeyboardInterrupt, RuntimeError])
+@pytest.mark.parametrize("cancel_count", [0, 1, 2])
+async def test_required_actual_control_error_preserves_original_receipts(error_type, cancel_count):
+    from camctl.persistence.business import settle_required
+    from camctl.persistence.models import _attach_db_outcome, db_outcome_for
+    from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt, write_receipt_for
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    actual = error_type("实际保存控制错误")
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value="saved")
+    receipt = WriteReceipt("completed", result="saved")
+    _attach_db_outcome(actual, outcome)
+    _attach_write_receipt(actual, receipt)
+    applied = []
+
+    async def phase():
+        entered.set()
+        await release.wait()
+        applied.append("saved")
+        raise actual
+
+    async def receive():
+        try:
+            await settle_required(phase())
+        except BaseException as error:
+            return error
+
+    task = asyncio.create_task(receive())
+    await entered.wait()
+    for n in range(cancel_count):
+        task.cancel(f"原等待取消{n}")
+        await asyncio.sleep(0)
+    assert not task.done() and not applied
+    release.set()
+    result = await task
+
+    assert result is actual
+    assert db_outcome_for(result) is outcome and write_receipt_for(result) is receipt
+    assert applied == ["saved"]
+    if cancel_count:
+        assert actual.__cause__.args == ("原等待取消0",)
+
+
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_required_successful_outcome_attaches_actual_classification_before_cancel(cancel_count):
+    from camctl.persistence.business import settle_required
+    from camctl.persistence.models import db_outcome_for
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value="saved")
+    applied = []
+
+    async def phase():
+        entered.set()
+        await release.wait()
+        applied.append("saved")
+        return outcome
+
+    task = asyncio.create_task(settle_required(phase()))
+    await entered.wait()
+    for n in range(cancel_count):
+        task.cancel(f"取消{n}")
+        await asyncio.sleep(0)
+    assert not task.done() and not applied
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await task
+    assert raised.value.args == ("取消0",)
+    assert db_outcome_for(raised.value) is outcome and applied == ["saved"]
+
+
 async def test_write_cancel_withdraws_unstarted_job_and_attaches_not_executed(ports):
     from camctl.persistence.business import BusinessDatabase
     from camctl.persistence.models import db_outcome_for
