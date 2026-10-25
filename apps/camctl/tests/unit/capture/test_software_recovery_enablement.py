@@ -6,6 +6,7 @@ from unittest.mock import create_autospec
 import sqlite3
 
 import pytest
+from support.capture_database import capture_database
 
 from camctl.capture import software_recovery as recovery
 from camctl.capture.handlers import CaptureRuntime
@@ -23,6 +24,7 @@ def session(monkeypatch):
     runtime = create_autospec(CaptureRuntime, instance=True)
     runtime.owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    runtime.database = capture_database(runtime.owned)
     runtime.software_recovery_config = recovery.SoftwareRecoveryConfig(enabled=True)
     runtime.binding_check = runtime.state_query = None
     runtime.wall_us = lambda: 1_000_000
