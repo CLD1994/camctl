@@ -498,6 +498,21 @@ class HistoryRepository:
         table = load_enum_registry()["history_objects"][entity]["table"]
         return rows.get((table,entity_id))
 
+    def open_report_action(self, action_id, boundary, *, event_batch_size=256, row_batch_size=128):
+        """按报告依赖恢复动作，保留有限事实与增长关系的分页端口。"""
+        from camctl.history.report_action import open_report_history
+        return open_report_history(self, 'action', action_id, boundary,
+            event_batch_size=event_batch_size, row_batch_size=row_batch_size)
+
+    def restore_report_entity(self, entity, entity_id, boundary, *, event_batch_size=256):
+        """报告普通对象的有限自身映像；动作增长关系由专用句柄交付。"""
+        from camctl.history.report_action import open_report_history
+        if entity == 'action':
+            raise ConsistencyError('报告动作须使用有界报告句柄')
+        with open_report_history(self, entity, entity_id, boundary,
+                event_batch_size=event_batch_size) as handle:
+            return {(row.table, row.row_id): dict(row.values) for row in handle.iter_rows()}
+
     def related_primary_rows_at_h(
         self, entity, column, value, boundary, *, batch_size=128, event_batch_size=128
     ):

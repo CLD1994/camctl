@@ -28,6 +28,7 @@ __all__ = [
     "PublicProjectionError",
     "ProjectionStructure",
     "projection_structure",
+    "projection_read_tables",
     "project_public",
     "public_changed",
 ]
@@ -115,6 +116,63 @@ def projection_structure(entity: str) -> ProjectionStructure:
         raise PublicProjectionError(f"投影 {entity} 的子集合编码顺序必须唯一且连续")
     return ProjectionStructure(identities[0] if identities else None,
                                tuple((name, child) for _, name, child in children))
+
+
+def projection_read_tables(entity: str, *, _registry=None) -> frozenset[str]:
+    """从投影、关系及前置校验派生保守表闭包，保留独立实体边界。"""
+    registry = _dependencies() if _registry is None else _registry
+    tables: set[str] = set()
+    visited: set[str] = set()
+
+    def column(value):
+        if isinstance(value, str) and "." in value:
+            tables.add(value.partition(".")[0])
+
+    def relation(name):
+        spec = registry["relations"].get(name)
+        if spec is None:
+            raise PublicProjectionError(f"报告读取引用未登记的关联: {name}")
+        column(spec["from"])
+        column(spec["to"])
+
+    def walk(node):
+        if isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, Mapping):
+            if node.get("op") == "entities":
+                return
+            if "projection" in node:
+                projection(node["projection"])
+            for name in node.get("relations", ()):
+                relation(name)
+            if isinstance(node.get("table"), str):
+                tables.add(node["table"])
+            for key, value in node.items():
+                if key == "column" or key.endswith("_column") or key == "identity":
+                    column(value)
+                elif key in ("columns", "order_by"):
+                    for item in value if isinstance(value, list) else (value,):
+                        column(item)
+                walk(value)
+
+    def projection(name):
+        if name in visited:
+            return
+        spec = registry["projections"].get(name)
+        if spec is None:
+            raise PublicProjectionError(f"未登记的公开实体投影: {name}")
+        visited.add(name)
+        tables.add(spec["root_table"])
+        walk(spec)
+        for assertion in spec.get("assertions", ()):
+            requirement = registry.get("assertions", {}).get(assertion)
+            if requirement is None:
+                raise PublicProjectionError(f"报告读取引用未登记的前置校验: {assertion}")
+            walk(requirement)
+
+    projection(entity)
+    return frozenset(tables)
 
 
 def _enum_member(column: str, value: int) -> str:

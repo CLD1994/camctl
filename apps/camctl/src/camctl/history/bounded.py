@@ -489,12 +489,16 @@ class SegmentHistoryHandle:
         if strategy != 'current':
             self._verify_complete_keys()
             self._verify_fixed_values()
-        primary = self._get('actions',self.action_id)
+        primary = self._get(self.seed.primary_table,self.seed.ref[1])
         if self.seed.floor[1]:
             if primary is None:
                 raise ConsistencyError('H处对象缺少主行')
-            primary.update(last_event_id=self.seed.floor[0],change_count=self.seed.floor[1])
-            self._put('actions',self.action_id,primary)
+            derived = load_event_registry()['tables'][self.seed.primary_table]['derived']
+            if 'last_event_id' in derived:
+                primary['last_event_id'] = self.seed.floor[0]
+            if 'change_count' in derived:
+                primary['change_count'] = self.seed.floor[1]
+            self._put(self.seed.primary_table,self.seed.ref[1],primary)
         elif self._one('SELECT 1 FROM rows LIMIT 1'):
             raise ConsistencyError('H处对象尚未创建但仍有自身行')
         self._validate()
@@ -620,7 +624,7 @@ class SegmentHistoryHandle:
                 for table,identity,body in selected:
                     values = parse_exact_json(body)
                     validator.validate(table,values)
-                    if _resolve_owner_spec(registry[table]['owner'],table,values,context,{}) != ('action',self.action_id):
+                    if _resolve_owner_spec(registry[table]['owner'],table,values,context,{}) != self._row_owner():
                         raise ConsistencyError('恢复行归属不属于同H动作')
                     if table == 'actions':
                         read_action_spec(values)
@@ -640,6 +644,9 @@ class SegmentHistoryHandle:
                         self._db.execute('INSERT INTO row_order VALUES (?,?,?,?,?,?)',
                             (table,values['set_id'],*position)).close()
                 previous = selected[-1][:2]
+
+    def _row_owner(self):
+        return 'action',self.action_id
 
     def _validate_sets(self):
         from camctl.capture.segment_models import (
