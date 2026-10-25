@@ -54,6 +54,7 @@ class PendingPreparation:
     entered: bool = False
     intent_save: SharedSave = field(default_factory=SharedSave)
     result_save: SharedSave = field(default_factory=SharedSave)
+    canceled_before_dispatch_at: int | None = None
 
 
 @dataclass
@@ -79,6 +80,8 @@ def _completed(receipt, message):
 
 
 async def _save_owner(owner, database, operations, *, retry=False):
+    saving_intent = owner.ticket is None
+
     async def save_and_apply():
         notification_errors = []
 
@@ -104,6 +107,13 @@ async def _save_owner(owner, database, operations, *, retry=False):
                     raise notification_errors[0]
                 return
             owner.ticket = result.ticket
+        if saving_intent:
+            if notification_errors:
+                raise notification_errors[0]
+            return
+        if owner.canceled_before_dispatch_at is not None and not owner.entered and owner.actual is None:
+            owner.actual = _not_dispatched_preparation()
+            owner.returned_at = owner.canceled_before_dispatch_at
         if owner.actual is not None and owner.finish is None:
             actual = owner.actual
             if actual.outcome is None:
@@ -128,12 +138,16 @@ async def _save_owner(owner, database, operations, *, retry=False):
             owner.saved = True
         if notification_errors:
             raise notification_errors[0]
-    if owner.ticket is not None and owner.actual is None and owner.finish is None:
+    if (owner.ticket is not None and owner.actual is None and owner.finish is None
+            and owner.canceled_before_dispatch_at is None):
         return
-    saving = owner.intent_save if owner.ticket is None else owner.result_save
+    saving = owner.intent_save if saving_intent else owner.result_save
     if retry:
         saving.retry_failed()
-    return await saving.run(save_and_apply)
+    result = await saving.run(save_and_apply)
+    if saving_intent and owner.ticket is not None and owner.canceled_before_dispatch_at is not None:
+        return await _save_owner(owner, database, operations, retry=retry)
+    return result
 
 
 async def _save_cached_request(database, cache, action_id, *, scheduling, capture, ending=False, retry=False):
@@ -295,15 +309,21 @@ async def _call_prepare(owner, runtime, request):
     (await _save_owner(owner, runtime.database, runtime.operations))
 
 
-async def _save_unentered_preparation(owner, runtime):
-    if owner.ticket is None or owner.entered or owner.actual is not None:
-        return
-    owner.actual = DeviceCallResult.from_outcome(CallOutcome(
+def _not_dispatched_preparation():
+    return DeviceCallResult.from_outcome(CallOutcome(
         status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
         error=ErrorValue("canceled", "dispatch"),
         settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
                               EvidenceValue("dispatch_prevented", 1))))
-    owner.returned_at = runtime.wall_us()
+
+
+async def _save_unentered_preparation(owner, runtime):
+    if owner.entered or owner.actual is not None:
+        return
+    if owner.canceled_before_dispatch_at is None:
+        owner.canceled_before_dispatch_at = runtime.wall_us()
+    if owner.ticket is None:
+        return
     await _save_owner(owner, runtime.database, runtime.operations)
 
 
@@ -493,11 +513,13 @@ async def advance_preparation(runtime, action_id):
             cache.owners[action_id] = owner
             try:
                 await _save_owner(owner, runtime.database, runtime.operations)
-            except asyncio.CancelledError as interrupted:
-                try:
-                    await _save_unentered_preparation(owner, runtime)
-                except BaseException as error:
-                    raise interrupted from error
+            except BaseException as interrupted:
+                if (isinstance(interrupted, asyncio.CancelledError)
+                        or isinstance(interrupted.__cause__, asyncio.CancelledError)):
+                    try:
+                        await _save_unentered_preparation(owner, runtime)
+                    except BaseException as error:
+                        raise interrupted from error
                 raise
         if owner.task is None and owner.actual is None and owner.finish is None:
             if owner.refused is not None:

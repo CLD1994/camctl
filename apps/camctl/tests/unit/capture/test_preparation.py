@@ -223,6 +223,56 @@ async def test_cancel_during_intent_save_closes_unentered_preparation_before_rel
     runtime.capture.release_occupancy.assert_called_once()
 
 
+async def test_canceled_unknown_intent_closes_only_after_original_ticket_is_confirmed(mocker):
+    from camctl.capture.preparation import recover_preparation
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, action, ticket = _world(mocker)
+    runtime.operations.begin_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN,
+        error=RuntimeError("意图结果未知"))
+    entered, release, keys = _held_save(runtime, "intent")
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    device.cancel("原准备等待取消")
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(ConsistencyError) as failed:
+        await device
+    assert isinstance(failed.value.__cause__, asyncio.CancelledError)
+    owner = runtime.preparation_cache.owners[1]
+    assert owner.ticket is None and owner.finish is None
+    runtime.operations.finish_attempt.assert_not_called()
+
+    runtime.wall_us.return_value = 50_000_000
+    action.update(status=6, cancel_requested=1)
+    runtime.operations.begin_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        BeginAttemptResult(BeginDisposition.GRANTED, ticket))
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    assert await recover_preparation(runtime, 1)
+
+    assert owner.saved and owner.finish.ticket == ticket
+    assert owner.returned_at == 0
+    assert owner.finish.outcome.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert owner.finish.outcome.outcome.error.code == "canceled"
+    assert keys == [owner.intent_key, owner.intent_key]
+    assert runtime.operations.finish_attempt.call_args.args[1] == owner.result_key
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+    runtime.capture.release_occupancy.assert_called_once()
+
+
+async def test_unknown_intent_without_waiter_cancel_does_not_invent_cancel_result(mocker):
+    runtime, _, _ = _world(mocker)
+    runtime.operations.begin_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN,
+        error=RuntimeError("意图结果未知"))
+    with pytest.raises(ConsistencyError):
+        await advance_preparation(runtime, 1)
+    owner = runtime.preparation_cache.owners[1]
+    assert owner.ticket is None and owner.actual is None and owner.finish is None
+    runtime.operations.finish_attempt.assert_not_called()
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+
 @pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK])
 async def test_concurrent_failed_save_keeps_original_request_for_later_recovery(mocker, kind):
     runtime, action, ticket = _world(mocker)
