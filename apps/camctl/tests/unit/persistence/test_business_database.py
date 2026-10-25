@@ -73,3 +73,13 @@ async def test_known_completed_receipt_is_preserved_when_value_cannot_leave_work
     assert actual.kind is DbOutcomeKind.COMPLETED and actual.value is None
     assert actual.handoff_error is caught.value
     owned.connection.close.assert_not_called()
+
+
+@pytest.fixture
+def inline_port(ports):
+    from support.business_database import inline_business_database
+    return inline_business_database(ports[1])
+
+
+async def test_inline_port_can_be_constructed_by_sync_unit_fixture(inline_port):
+    assert await inline_port.read(lambda owned: owned.metadata) is inline_port.metadata
