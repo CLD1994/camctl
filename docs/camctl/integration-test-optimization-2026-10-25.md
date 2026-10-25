@@ -6,6 +6,8 @@
 
 本阶段保持 Hasselblad 原 29 项与清理原 11 项的身份和业务分区。每个拍摄世界复用真实客户端服务，六类参数保留完整网页预设往返；清理消费者从同一路径的完整只读基线恢复独立副本。生产代码、公共协议及运行脚本相对第二轮基线 `b82d96e0` 保持一致，最终测试源码冻结于 `8164851c`。
 
+[40 项逐例耗时 CSV](verification-data/2026-10-25-integration-optimization-round2/case-times.csv)按实际 nodeid 保存前后结果及 setup／call／teardown；清理未运行六路和八路，对应列留空。单行 setup 会受到共享 fixture 首次归属的影响。所有输入摘要、相同通过集合及并发结论由[第二轮汇总](verification-data/2026-10-25-integration-optimization-round2/comparison.json)维护。
+
 ### Hasselblad 29 项的覆盖与四路对照
 
 最终四路为 **29 passed，退出 0，入口墙钟 390.592 秒**。十二个正常拍摄组合、六个独立故障世界、三项定向预设及其余原实例保持；每个拍摄世界只有一次真实 capture，独立取回、原来源、固定 H、报告导入和网页累计 ACK 的断言继续执行。
