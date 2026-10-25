@@ -22,7 +22,7 @@ class RetainedResultDisposition:
         return SimpleNamespace(state=DefaultScopeState.UNKNOWN, member_count=None)
 
 
-def retained_disposition(ref, db):
+def verify_retained_disposition_sources(ref, db):
     """核实原 H0、完整成员及原实际预算关闭，不用旧完整扫描补当前。"""
     if not isinstance(ref, SegmentResultRef):
         raise TypeError("跨轮保留处置必须引用实际集合")
@@ -84,17 +84,45 @@ def retained_disposition(ref, db):
     return RetainedResultDisposition()
 
 
+def read_saved_result_disposition(ref, db):
+    """消费固定集合和已保存有限结论，只检查本次直接身份及适用分区。"""
+    if not isinstance(ref, SegmentResultRef):
+        raise TypeError("保存结果处置必须引用实际集合")
+    from .segments import read_segment_identity
+    from .segment_check_conclusions import read_fixed_result_check_conclusion
+    identity = read_segment_identity(db, ref, fixed=True)
+    setrow = identity.setrow
+    return saved_result_disposition(setrow, read_fixed_result_check_conclusion(db, setrow))
+
+
+def saved_result_disposition(setrow, conclusion):
+    """对显式固定行执行本次处置判断，不取得来源或重新分类。"""
+    canceled = setrow["publication_kind"] == int(enum_for("segment_sets.publication_kind").CANCELED)
+    reasons = enum_for("segment_check_conclusions.reason")
+    external = conclusion["reason"] in (int(reasons.BINDING_UNAVAILABLE), int(reasons.STOP_UNCONFIRMED_CLOSED))
+    native = conclusion["reason"] in (int(reasons.NATIVE_RESULT_DECIDED), int(reasons.NATIVE_FINITE_CANCEL_END))
+    if ((not canceled and setrow["publication_kind"] != int(enum_for("segment_sets.publication_kind").RESULT))
+            or (not (canceled or external or native) and setrow["source_kind"] not in (
+                int(enum_for("segment_sets.source_kind").RETAINED_SOURCES), int(enum_for("segment_sets.source_kind").NO_RESULTS)))
+            or setrow["state"] not in (int(enum_for("segment_sets.state").MEMBERS_FIXED), int(enum_for("segment_sets.state").ASSESSED))
+            or setrow["facts_json"] is not None or setrow["assessment_json"] is not None):
+        raise ConsistencyError("保存结果的决定与固定集合适用分区不同")
+    if native:
+        from .segment_native import native_classification_from_saved_conclusion
+        return native_classification_from_saved_conclusion(conclusion)
+    return RetainedResultDisposition()
+
+
 def retained_failure(request, setrow, db):
-    retained_disposition(request.ref, db)
+    from .segment_check_conclusions import read_fixed_result_check_conclusion
+    conclusion = read_fixed_result_check_conclusion(db, setrow)
+    saved_result_disposition(setrow, conclusion)
     if setrow["publication_kind"] == int(
         enum_for("segment_sets.publication_kind").CANCELED
     ):
         if request.failure is not None or request.failure_event_id is not None:
             raise ConsistencyError("普通录像取消不携带产物或执行失败")
         return 6, None, None
-    from .segment_check_conclusions import read_verified_conclusion
-
-    conclusion = read_verified_conclusion(db, setrow)
     raw = conclusion["current_failure_json"]
     current_failure = None if raw is None else RecordingFailure(**raw)
     reasons = enum_for("segment_check_conclusions.reason")
@@ -119,12 +147,6 @@ def retained_failure(request, setrow, db):
                     "reason": "baseline_read_failed",
                 },
             )
-        else:
-            from .segment_check_conclusions import no_result_failure
-
-            current_failure = no_result_failure(
-                db, setrow, conclusion["anchor_event_id"]
-            )
     expected = current_failure or RecordingFailure(
         "capture_result_unconfirmed",
         {"activity_id": str(setrow["activity_id"]), "reason": "outputs_unknown"},
@@ -146,7 +168,7 @@ def verify_disposition_event(db, ref, event):
     from camctl.history.events import load_event_registry
     from camctl.persistence.transaction import update_change
 
-    retained_disposition(ref, db)
+    read_saved_result_disposition(ref, db)
     expected = update_change("segment_sets", ref.set_id, {"state": 2}, {"state": 3})
     if (
         event.reason
@@ -182,7 +204,7 @@ class DecideResultCommand:
         )
 
         db, ref = scope.connection, self.ref
-        retained_disposition(ref, db)
+        read_saved_result_disposition(ref, db)
         registry = load_event_registry()["events"]["SEGMENT_FACTS"]
         reason = registry["branches"]["DECIDE_RESULT"]["reason"]
         evidence = {"segment_request": {"ref": document(ref), "input": None}}

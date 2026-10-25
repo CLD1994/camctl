@@ -347,13 +347,13 @@ class SqlEventReads:
         self._segment_guard_state=state
         self._segment_guard_transaction=transaction
 
-    def prepare_segment_finish(self,event,transaction,header,qualification):
+    def prepare_segment_finish(self,event,transaction,header,qualification,facts):
         if self._segment_guard_state is None or self._segment_guard_transaction!=transaction:
             raise ConsistencyError('分段F没有唯一事务内核绑定的原组进度')
         from camctl.persistence.transaction import encode_json_value
         self._segment_guard_state.pop('accepted',None)
         self._segment_guard_state['pending']=(self.scope,transaction,event,
-            encode_json_value(header),MappingProxyType(dict(qualification)))
+            encode_json_value(header),MappingProxyType(dict(qualification)),facts)
 
     def seal_segment_finish(self,validated):
         """全部具名守卫通过后，逐条封存实际事件的完整规范身份。"""
@@ -362,14 +362,17 @@ class SqlEventReads:
         pending=state.pop('pending',None)
         event=validated.envelope
         if pending is not None:
-            scope,transaction,first,header,qualification=pending
+            scope,transaction,first,header,qualification,facts=pending
             if scope!=self.scope or event!=first or event.event_id!=transaction.first_event_id:
                 raise ConsistencyError('原F资格没有当前scope实际通过的首事件')
-            from camctl.persistence.repositories.segment_transactions import _canonical_events,_header_request
+            from camctl.persistence.repositories.segment_transactions import _canonical_events,_header_request,_finish_event_inputs
             from camctl.contracts.json_values import parse_exact_json
             raw=parse_exact_json(header)
             state['accepted']=_ValidatedSegmentFinish(scope,transaction,event.event_id,header,qualification)
-            state['progress']=iter(_canonical_events(_header_request(raw),transaction,raw,self,qualification))
+            request=_header_request(raw)
+            candidates,scopes=_finish_event_inputs(request,self,raw['batch_size'])
+            created=lambda file_id,kind: self.segment_created_output(transaction,request.ref.action_id,file_id,kind)
+            state['progress']=iter(_canonical_events(request,transaction,raw,facts,qualification,candidates,scopes,created))
         proof=state.get('accepted')
         if not isinstance(proof,_ValidatedSegmentFinish):return
         if proof.scope!=self.scope:raise ConsistencyError('实际事件改变原完成读范围')

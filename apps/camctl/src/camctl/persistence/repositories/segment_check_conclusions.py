@@ -10,7 +10,6 @@ from camctl.contracts.json_values import json_equal,parse_exact_json
 from camctl.contracts.values import ConsistencyError,OperationKey
 from camctl.history.events import load_event_registry
 from camctl.history.reads import ResultCheckWriteScope,SegmentReadScope
-from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.transaction import (
     CommandPlan,TransactionScope,event_envelope,next_row_id,row_change,row_facts,saved_transaction_events,update_change)
 from .segment_result_sets import _boundary,_one,_read_transaction,read_result_set
@@ -472,10 +471,30 @@ def verify_result_check_conclusion(request,key,owned,*,execution_finished=True):
         return plan.result
 
 
+def read_fixed_result_check_conclusion(db, setrow):
+    """读取集合已保存的不可变结论及其真实创建版本，不重演结论申请。"""
+    found = _one(db, "SELECT id FROM segment_check_conclusions WHERE set_id=?", (setrow["id"],))
+    if found is None:
+        raise ConsistencyError("结果发布缺少已保存的有限核实结论")
+    conclusion = row_facts(db, "segment_check_conclusions", found[0])
+    if conclusion is None or conclusion["set_id"] != setrow["id"]:
+        raise ConsistencyError("已保存结论不属于原固定集合")
+    from camctl.persistence.fact_reads import read_event
+    from camctl.history.events import business_columns
+
+    event = read_event(db, conclusion["created_event_id"]).event
+    expected = row_change("segment_check_conclusions", conclusion["id"], {
+        name: conclusion[name] for name in business_columns("segment_check_conclusions")
+    })
+    if (event.event_type != _EVENT["id"] or event.reason != _REASON
+            or event.rows != (expected,)):
+        raise ConsistencyError("已保存结论与实际不可变创建版本不同")
+    return conclusion
+
+
 def read_verified_conclusion(db, setrow):
     """按决定的原完整申请核实配置、真实轮次及责任关闭。"""
-    key = (__name__, "read_verified_conclusion", typed_read_key(setrow["id"]))
-    return reuse_read(db, key, lambda: _load_verified_conclusion(db, setrow))
+    return _load_verified_conclusion(db, setrow)
 
 
 def _load_verified_conclusion(db, setrow):
