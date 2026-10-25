@@ -74,6 +74,12 @@ class SharedSave:
             raise DbExecutorError("原保存尚未完成，不能开始新的保存阶段")
         self._task = None
 
+    def retry_failed(self) -> None:
+        """明确恢复原申请；成功与尚在进行的保存继续保留原任务。"""
+        task = self._task
+        if task is not None and task.done() and (task.cancelled() or task.exception() is not None):
+            self._task = None
+
 
 def _check_value(value):
     # callback自身负责既定有限值类型；端口不反射遍历业务对象图。

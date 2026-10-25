@@ -122,6 +122,57 @@ async def test_new_stage_cannot_reset_an_in_progress_original_save():
     assert await first == "original"
 
 
+async def test_explicit_recovery_retries_failed_save_once_for_concurrent_waiters():
+    shared = business.SharedSave()
+    calls = []
+    failure = RuntimeError("原结果未知")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def failed():
+        calls.append("failed")
+        raise failure
+
+    with pytest.raises(RuntimeError):
+        await shared.run(failed)
+    shared.retry_failed()
+
+    async def recovered():
+        calls.append("recovered")
+        entered.set()
+        await release.wait()
+        return "saved"
+
+    async def resume():
+        shared.retry_failed()
+        return await shared.run(recovered)
+
+    first = asyncio.create_task(resume())
+    await entered.wait()
+    second = asyncio.create_task(resume())
+    await asyncio.sleep(0)
+    release.set()
+    assert await asyncio.gather(first, second) == ["saved", "saved"]
+    shared.retry_failed()
+    assert await shared.run(failed) == "saved"
+    assert calls == ["failed", "recovered"]
+
+
+async def test_explicit_recovery_can_retry_original_task_cancellation():
+    shared = business.SharedSave()
+
+    async def canceled():
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await shared.run(canceled)
+    shared.retry_failed()
+
+    async def recovered():
+        return "saved"
+
+    assert await shared.run(recovered) == "saved"
+
+
 async def test_different_owners_do_not_wait_for_each_others_save():
     first, second = business.SharedSave(), business.SharedSave()
     entered, release = asyncio.Event(), asyncio.Event()
