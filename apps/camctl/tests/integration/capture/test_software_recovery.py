@@ -2,6 +2,7 @@
 from dataclasses import replace
 from decimal import Decimal
 import json
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -27,7 +28,9 @@ register_capture_guards()
 register_operation_guards()
 _BEFORE = "00000000-0000-4000-8000-000000000001"
 _AFTER = "00000000-0000-4000-8000-000000000002"
-from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint
+from camctl.devices.drivers.adb_cameras.firmware_identity import firmware_fingerprint, RecoveryQualification
+from camctl.devices.drivers.adb_cameras.commands import CameraModel
+from camctl.devices.tasks import VideoResultMode
 _FIRMWARE_SAMPLE = {"Version": "v1.2.3.4", "Metabuild_Info": {
     "Meta_Build_ID": "software-test-build", "Product_Flavor": "asic", "Time_Stamp": "2026-10-20 19:32:30"}}
 _FINGERPRINT = firmware_fingerprint("dji-action6", json.dumps(_FIRMWARE_SAMPLE).encode())
@@ -96,12 +99,16 @@ async def failed_world(owned, tmp_path, *, baseline=()):
     driver = AdbCameraDriver(action6_record_contract(),
         {"cam-1": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "camera-serial"}}},
         transport, terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
+    # 合成固件资格只用于本软件组合，不声明生产 Action6 已完成硬件验收。
+    driver.recovery_qualification = create_autospec(driver.recovery_qualification,
+        return_value=RecoveryQualification(CameraModel.ACTION6, _FINGERPRINT, 2,
+            VideoResultMode.SINGLE_FILE, "software-test-fixture"))
     runtime = _runtime(owned, None, driver)
     runtime.evidence = driver.contract.evidence
     runtime.stopper = driver
     runtime.software_recovery_driver = driver
     runtime.software_recovery_config = SoftwareRecoveryConfig(
-        verified_fingerprint=_FINGERPRINT, retry_interval_s=Decimal("0"))
+        enabled=True, retry_interval_s=Decimal("0"))
     runtime.stop_config = AttemptConfig(1, Decimal("0.001"), Decimal("0"))
     await capture_handler("camera_record")(1, runtime)
     # 正式驱动保留受管工具超时与未知效果，有限流程原样结算失败。
@@ -389,14 +396,14 @@ async def test_recovery_history_restores_responsibility_and_legacy_v2_without_ta
         legacy.connection.close()
 
 
-async def test_session_assembly_consumes_verified_deployment_config_in_formal_gate(owned, tmp_path):
+async def test_session_assembly_consumes_enabled_deployment_config_in_formal_gate(owned, tmp_path):
     runtime, driver, transport, activity = await failed_world(owned, tmp_path)
     from camctl.bootstrap.config import load_config, ConfigDefaults
     from camctl.bootstrap.capture_assembly import session_capture_assembly, execution_wait_config
     from camctl.devices.drivers.registry import DriverEntry, DriverRegistry
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": "dji-action6",
         "adb": {"serial": "camera-serial"}, "recording": {"stop_timeout_s": Decimal("0.001"), "max_stop_attempts": 1},
-        "software_recovery": {"verified_fingerprint": _FINGERPRINT, "retry_interval_s": 0}}}}, ConfigDefaults())
+        "software_recovery": {"enabled": True, "retry_interval_s": 0}}}}, ConfigDefaults())
     entry = DriverEntry("dji-action6", driver, driver.declaration, driver.contract.evidence, driver.contract.status)
     factory = session_capture_assembly(devices=config.devices, drivers=DriverRegistry((entry,)),
         staging=tmp_path, wait_config=execution_wait_config,
