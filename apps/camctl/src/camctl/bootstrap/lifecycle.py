@@ -12,6 +12,7 @@ from camctl.devices.start_entry import StartEntryCoordinator
 
 import os
 import stat
+import json
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 from functools import partial
@@ -48,6 +49,7 @@ from camctl.session.service import (
     SessionContext, SessionPaths, _trigger_failure_log, run_session,
 )
 from camctl.session.work import WorkFacts
+from camctl.operations.error_diagnostics import exception_diagnostic
 
 __all__ = ["RuntimeDeps", "build_runtime", "close_runtime", "execute_command"]
 
@@ -437,18 +439,28 @@ def _log_wiring(
 
 
 async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
-    """会话失败事实经异步入口记 ERROR；日志失败不改变业务结果。"""
-    from camctl.logging_runtime.models import LogLevel
-    from camctl.logging_runtime.service import LogRecord
+    """会话诊断等待实际写入凭据，不可用时沿原入口转交 stderr。"""
+    await _emit_log_diagnostic(deps, message)
 
-    if deps.log_runtime is None:
+
+def _format_session_exception(error: BaseException) -> str:
+    """可读摘要后附完整异常图，不使用异常组默认排版的宽深限制。"""
+    encoded = json.dumps(exception_diagnostic(error), ensure_ascii=False, separators=(",", ":"))
+    return f"{type(error).__name__}: {error}\n异常诊断: {encoded}"
+
+
+def _attach_session_diagnostic_error(target: BaseException, label: str, error: BaseException) -> None:
+    """诊断自身失败时，将实际异常完整附在继续传播的原对象上。"""
+    if target is error:
         return
-    if deps.log_path_unsafe:
-        _write_stderr_diagnostic(deps, message)
-        return
-    await deps.log_runtime.channel.alog(
-        LogRecord(level=LogLevel.ERROR, message=message)
-    )
+    note = f"{label}: {_format_session_exception(error)}"
+    if note not in tuple(getattr(target, "__notes__", ())):
+        target.add_note(note)
+
+
+def _failed_outcome_message(deps: RuntimeDeps, outcome: SessionOutcome) -> str:
+    details = json.dumps(dict(outcome.details), ensure_ascii=False, separators=(",", ":"))
+    return f"{deps.mode.value} 会话失败: {outcome.reason}\n诊断详情: {details}"
 
 
 async def _emit_log_diagnostic(
@@ -465,10 +477,10 @@ async def _emit_log_diagnostic(
                 LogRecord(level=LogLevel.ERROR, message=message))
             if result.delivered is True:
                 return
-        except Exception:
+        except Exception as error:
             # deliver_important 等待监听线程凭据，异常代表文件通道不
             # 可用；不能仅凭 alog 入队结果宣称诊断已写出。
-            pass
+            message += f"\n日志诊断写入异常: {_format_session_exception(error)}"
     _write_stderr_diagnostic(deps, message)
 
 
@@ -509,6 +521,8 @@ def _attach_runtime_close_note(
     existing = set(tuple(getattr(target, "__notes__", ())))
     messages = [f"{label}: {type(error).__name__}: {error}"]
     messages.extend(f"{label}附注: {note}" for note in notes)
+    # 原异常可能经 context 指向 target；在增加任何附注前固定完整诊断。
+    messages.append(f"{label}完整诊断: {_format_session_exception(error)}")
     for message in messages:
         if message not in existing:
             target.add_note(message)
@@ -532,6 +546,8 @@ async def _close_log_runtime(
         )
         if notes:
             diagnostic += f"; notes={notes}"
+        diagnostic += "\n异常诊断: " + json.dumps(
+            exception_diagnostic(error), ensure_ascii=False, separators=(",", ":"))
         try:
             _write_stderr_diagnostic(deps, diagnostic)
         except BaseException as diagnostic_error:
@@ -968,7 +984,7 @@ async def execute_command(
     if deps.startup_error is not None and not minimal_bad_database_run:
         if deps.log_runtime is not None:
             try:
-                await _emit_session_error(deps, f"{deps.mode.value} 会话失败: {deps.startup_error.reason}")
+                await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error))
             finally:
                 await _close_log_runtime(deps)
         return deps.startup_error
@@ -1183,8 +1199,14 @@ async def execute_command(
         outcome = await run_session(context, source)
     except BaseException as error:
         primary_error = error
-        if isinstance(error, Exception):
-            await _emit_session_error(deps, f"{type(error).__name__}: {error}")
+        try:
+            await _emit_session_error(deps, _format_session_exception(error))
+        except BaseException as diagnostic_error:
+            if isinstance(error, Exception) and not isinstance(diagnostic_error, Exception):
+                _attach_session_diagnostic_error(diagnostic_error, "此前会话异常", error)
+                primary_error = diagnostic_error
+                raise
+            _attach_session_diagnostic_error(error, "会话失败诊断异常", diagnostic_error)
         raise
     finally:
         selected_control = (
@@ -1242,7 +1264,7 @@ async def execute_command(
         if outcome is not None and not outcome.succeeded:
             try:
                 await _emit_session_error(
-                    deps, f"{deps.mode.value} 会话失败: {outcome.reason}"
+                    deps, _failed_outcome_message(deps, outcome)
                 )
             except BaseException as error:
                 remember_cleanup_error("会话失败诊断异常", error)
@@ -1448,7 +1470,7 @@ def close_runtime(
         _write_stderr_diagnostic(
             deps,
             f"{label}: outcome=unknown; "
-            f"error={type(error).__name__}: {error}",
+            f"error={_format_session_exception(error)}",
         )
         if primary_control is None and not isinstance(error, Exception):
             primary_control = error

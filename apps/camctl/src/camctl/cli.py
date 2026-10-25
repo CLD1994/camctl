@@ -295,10 +295,30 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
         with performance_logging(None if log_runtime is None else log_runtime.channel):
             outcome = asyncio.run(execute_command(deps, source))
     except BaseException as error:  # 装配后异常也须先释放 CLI 所有资源。
-        close_runtime(deps, primary_error=error)
+        from camctl.bootstrap.lifecycle import (
+            _attach_session_diagnostic_error, _format_session_exception,
+        )
+
+        selected_error = error
+        try:
+            close_runtime(deps, primary_error=error)
+        except BaseException as close_error:
+            if isinstance(error, Exception) and not isinstance(close_error, Exception):
+                selected_error = close_error
+                _attach_session_diagnostic_error(selected_error, "此前命令异常", error)
+            else:
+                _attach_session_diagnostic_error(error, "命令资源关闭异常", close_error)
+        try:
+            print(f"camctl {command.kind.value}: 会话错误: {_format_session_exception(selected_error)}", file=err)
+        except BaseException as diagnostic_error:
+            if isinstance(selected_error, Exception) and not isinstance(diagnostic_error, Exception):
+                _attach_session_diagnostic_error(diagnostic_error, "此前命令异常", selected_error)
+                raise
+            _attach_session_diagnostic_error(selected_error, "会话错误诊断写入异常", diagnostic_error)
+        if selected_error is not error:
+            raise selected_error.with_traceback(selected_error.__traceback__)
         if not isinstance(error, Exception):
             raise
-        print(f"camctl {command.kind.value}: 会话错误: {error}", file=err)
         return 1
     close_runtime(deps)
     try:
