@@ -535,7 +535,8 @@ class SegmentHistoryHandle:
         from camctl.acceptance.definitions import read_action_spec
         registry = load_event_registry()['tables']
         context = EventContext(self.seed.snapshot.transaction if self.seed.snapshot else self._transaction(),{},_DiskState(self))
-        with self.repository.projection_validator(storage_path=Path(self._temporary.name)/'validation.db') as validator:
+        filename = 'validation.db' if build_indexes else 'snapshot-validation.db'
+        with self.repository.projection_validator(storage_path=Path(self._temporary.name)/filename) as validator:
             previous = ('',0)
             while True:
                 with closing(self._db.execute('SELECT tab,id,body FROM rows WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as cursor:
