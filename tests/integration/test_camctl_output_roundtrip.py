@@ -62,13 +62,16 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 
 def _await_row(state_db: Path, sql: str, params=(), *,
-               timeout_s: float = 30.0) -> list[tuple]:
+               timeout_s: float = 30.0, process=None) -> list[tuple]:
     """轮询查询直到出现行；同步点，不使用随机 sleep。"""
     deadline = time.monotonic() + timeout_s
     while True:
         rows = _query(state_db, sql, params)
         if rows:
             return rows
+        if process is not None and process.poll() is not None:
+            raise AssertionError(
+                f"本次 run 已退出，退出码={process.returncode}，尚未保存所等事实: {sql}")
         assert time.monotonic() < deadline, f"等待超时: {sql}"
 
 
@@ -95,7 +98,7 @@ def _run_capture_at_schedule(
             "SELECT r.id FROM operation_runs r"
             " JOIN actions a ON a.id = r.action_id"
             " WHERE a.name = ? AND r.responsibility_key = 'start/' || a.id"
-            " AND r.status IN (3, 4)", (name,))
+            " AND r.status IN (3, 4)", (name,), process=process)
         deployment.resume_clock()
         stdout, stderr = process.communicate(
             timeout=max(0, deadline - time.monotonic()))
