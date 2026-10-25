@@ -77,8 +77,10 @@ def abort_unstarted_baseline_read(owner, *, capture, owned, wall_us):
 
 
 @owned_tool_call
-async def _read_and_freeze(owner,directory,wall_us):
-    actual=await directory.read_directory(owner.intent.directory_request(),stop=_DirectoryStop())
+async def _read_and_freeze(owner,directory,wall_us,baseline=None):
+    request=owner.intent.directory_request()
+    actual=(await directory.read_directory(request,stop=_DirectoryStop()) if baseline is None
+            else await baseline.read_directory(request,directory=directory,stop=_DirectoryStop()))
     owner.actual_return=actual
     if not isinstance(actual,DirectoryRead):
         raise ConsistencyError('目录调用没有交回真实页或实际错误')
@@ -89,7 +91,7 @@ async def _read_and_freeze(owner,directory,wall_us):
     owner.actual_return=None
 
 
-async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read):
+async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read,baseline=None):
     """原实际Task收场、返回冻结和保存交接后才传播等待者取消。"""
     result=resume_baseline_read_save(owner,capture=capture,owned=owned)
     if result is not None:
@@ -113,7 +115,7 @@ async def advance_baseline_read(owner,*,directory,capture,owned,wall_us,can_read
         return owner.result
     if not owner.locally_created:
         return None
-    owner.task=asyncio.create_task(_read_and_freeze(owner,directory,wall_us))
+    owner.task=asyncio.create_task(_read_and_freeze(owner,directory,wall_us,baseline))
     interrupted=None
     call_error=None
     while True:

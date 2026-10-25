@@ -226,6 +226,23 @@ def _action6_contract_driver(transport, *, clock=lambda: 0):
         transport, terminate_grace_s=Decimal("1"), monotonic_ns=clock)
 
 
+def test_baseline_directory_factory_retains_original_request_and_filesystem(mocker):
+    from camctl.devices.directory import DirectoryRequest
+    from camctl.devices.drivers.adb_cameras.filesystem import AdbFilesystem
+
+    driver = _action6_contract_driver(Transport())
+    filesystem = mocker.create_autospec(AdbFilesystem, instance=True, spec_set=True)
+    original = DirectoryRequest(DeviceBinding("cam-1", "dji-action6"),
+                                ("/DCIM",), None, 128, Decimal("3"))
+    factory = mocker.patch.object(driver, "_filesystem", autospec=True, return_value=filesystem)
+
+    assert driver.directory_scan(original) is filesystem.directory_scan.return_value
+
+    factory.assert_called_once_with(original.binding)
+    filesystem.directory_scan.assert_called_once_with(original)
+    filesystem.read_directory.assert_not_awaited()
+
+
 def _attached_call(result, command):
     return next(call for call in result.outcome.settlement.evidence.data["calls"]
                 if call["command"] == list(command))

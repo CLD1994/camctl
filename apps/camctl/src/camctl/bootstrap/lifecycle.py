@@ -1213,6 +1213,20 @@ async def execute_command(
                 await stop_worker(worker)
             except BaseException as error:
                 remember_cleanup_error("报告监督收场异常", error)
+        if deps.capture_baselines:
+            try:
+                if any(owner.required_settlements() for owner in deps.background_flows):
+                    raise RuntimeError("实际后台责任尚未交付，基准读取缓存仍由原拥有者保留")
+            except BaseException as error:
+                remember_cleanup_error("基准读取缓存关闭前提失效", error)
+            else:
+                for pending in tuple(deps.capture_baselines.values()):
+                    try:
+                        if pending.in_call:
+                            raise RuntimeError("基准目录调用尚未结束，不能关闭读取缓存")
+                        pending.close()
+                    except BaseException as error:
+                        remember_cleanup_error("基准读取缓存关闭异常", error)
         if deps.capture_result_scans:
             try:
                 if any(owner.required_settlements() for owner in deps.background_flows):

@@ -905,17 +905,19 @@ class CaptureRuntime(_FileObservationSaves):
 
     async def prepare_baseline(self, action_id):
         """通过共同准备边界取得原基准，完成后仍由授予事务核验。"""
-        if (
-            self.action(action_id)["execution_spec_json"].get("result_policy")
-            is not None
-        ):
-            from camctl.capture.segment_baseline import prepare_segment_baseline
+        from camctl.logging_runtime.performance import measure_performance
 
-            return await prepare_segment_baseline(
-                action_id, _activity_id_of(self, action_id), self
-            )
-        from camctl.capture.baseline import prepare_baseline
-        return await prepare_baseline(action_id, _activity_id_of(self, action_id), runtime=self)
+        action = self.action(action_id)
+        with measure_performance("baseline_preparation", action_id=action_id,
+                                 device_id=action["device_id"]):
+            if action["execution_spec_json"].get("result_policy") is not None:
+                from camctl.capture.segment_baseline import prepare_segment_baseline
+
+                return await prepare_segment_baseline(
+                    action_id, _activity_id_of(self, action_id), self
+                )
+            from camctl.capture.baseline import prepare_baseline
+            return await prepare_baseline(action_id, _activity_id_of(self, action_id), runtime=self)
 
     def resume_baselines(self, action_id):
         from camctl.capture.baseline import PreparationPhase, resume_baseline_settlement
@@ -1883,7 +1885,7 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
                     baseline_error=result.error,
                 )
             )
-        runtime.pending_baselines.pop(action["id"], None)
+        runtime.resume_baselines(action["id"])
         return HandlerOutcome("call_failed", "baseline_read_failed")
     now = runtime.wall_us()
     if window_phase(runtime.window_of(current), now) is WindowPhase.AFTER_WINDOW:

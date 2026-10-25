@@ -277,6 +277,9 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
     async def read_directory(self, request, *, stop):
         return await self._filesystem(request.binding).read_directory(request, stop=stop)
 
+    def directory_scan(self, request):
+        return self._filesystem(request.binding).directory_scan(request)
+
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         identity = FileIdentity.from_source(source.file_id, source.locator)
         return await self._filesystem(identity.binding).open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)

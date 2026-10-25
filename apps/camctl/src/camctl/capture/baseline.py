@@ -10,7 +10,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.devices.bindings import DeviceBinding
-from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest
+from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest, DirectoryScan
 from camctl.operations.models import ErrorValue
 from camctl.operations.owned_calls import check_call_interruption
 from camctl.persistence.models import DbOutcomeKind
@@ -39,7 +39,7 @@ class BaselinePreparation:
 
 @dataclass
 class PendingBaseline:
-    """原页保存前保留下一游标；每次最多持有一页，不保留完整目录。"""
+    """原活动独占清单缓存；内存只保留当前页及原保存申请。"""
     activity_id: int
     binding: DeviceBinding
     directories: tuple[str, ...]
@@ -55,6 +55,41 @@ class PendingBaseline:
     read_owner: object | None = None
     read_no: int = 0
     aborted: bool = False
+    directory_scan: DirectoryScan | None = None
+    completed: bool = False
+    closed: bool = False
+
+    async def read_directory(self, request, *, directory, stop):
+        if self.closed or self.completed:
+            raise ConsistencyError("已结束的基准拥有者不能重新读取目录")
+        if (request.binding != self.binding
+                or request.directories != DirectoryRequest(
+                    self.binding, self.directories, request.cursor,
+                    request.batch, request.timeout_s).directories):
+            raise ConsistencyError("基准目录读取不能更换原绑定及完整范围")
+        factory = getattr(directory, "directory_scan", None)
+        if self.directory_scan is None and callable(factory):
+            self.directory_scan = factory(request)
+        reader = directory if self.directory_scan is None else self.directory_scan
+        return await reader.read_directory(request, stop=stop)
+
+    def close(self):
+        """真实调用结束后释放清单；失败时保留原清单供再次关闭。"""
+        if self.in_call or (self.read_owner is not None
+                and self.read_owner.task is not None and not self.read_owner.task.done()):
+            raise ConsistencyError("基准目录调用尚未结束，不能关闭读取缓存")
+        if self.directory_scan is not None:
+            self.directory_scan.close()
+            self.directory_scan = None
+        self.closed = True
+
+
+def close_baseline(action_id, *, runtime):
+    """可靠收场后删除拥有者；关闭失败仍保留其清理责任。"""
+    pending = runtime.pending_baselines.get(action_id)
+    if pending is not None:
+        pending.close()
+        del runtime.pending_baselines[action_id]
 
 
 def recover_terminal_baselines(*, runtime, limit=None):
@@ -109,6 +144,9 @@ def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
+    if pending.completed:
+        close_baseline(action_id, runtime=runtime)
+        return BaselinePreparation(PreparationPhase.READY)
     if pending.in_call:
         # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
         return BaselinePreparation(PreparationPhase.WAITING)
@@ -129,7 +167,8 @@ def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
             return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
         if receipt.value.outcome is ReleaseOutcome.REJECTED:
             raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
-        del runtime.pending_baselines[action_id]
+        pending.completed = True
+        close_baseline(action_id, runtime=runtime)
         return BaselinePreparation(PreparationPhase.READY)
     if pending.saves.pending is None:
         return None
@@ -139,7 +178,8 @@ def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
         return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
     pending.saves.take()
     if isinstance(original, BaselineFixSave):
-        del runtime.pending_baselines[action_id]
+        pending.completed = True
+        close_baseline(action_id, runtime=runtime)
         return BaselinePreparation(PreparationPhase.READY)
     pending.chunks = original.chunk_no
     pending.entries += len(original.entries)
@@ -179,7 +219,7 @@ def resume_baseline_settlement(action_id, *, runtime):
     if (facts.not_started and facts.activity is not None and facts.activity["ownership_mode"] == 2
             and facts.activity["occupancy_state"] == 1):
         return release_preparation(action_id, runtime=runtime)
-    runtime.pending_baselines.pop(action_id, None)
+    close_baseline(action_id, runtime=runtime)
     return result
 
 
@@ -196,7 +236,7 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
         return BaselinePreparation(PreparationPhase.READY)
     ref = runtime.capture.baseline_ref(activity_id, runtime.owned)
     if ref.state is BaselineState.FIXED:
-        runtime.pending_baselines.pop(action_id, None)
+        close_baseline(action_id, runtime=runtime)
         return BaselinePreparation(PreparationPhase.READY)
     dispatch = enum_for("device_activities.dispatch_state")
     if activity["dispatch_state"] != int(dispatch.NOT_DISPATCHED):
@@ -234,7 +274,8 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
                                        runtime.baseline_timeout_s)
             pending.in_call = True
             try:
-                result = await runtime.baseline_directory.read_directory(request, stop=_DirectoryStop())
+                result = await pending.read_directory(
+                    request, directory=runtime.baseline_directory, stop=_DirectoryStop())
             finally:
                 pending.in_call = False
             if not isinstance(result, DirectoryRead):

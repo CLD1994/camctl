@@ -83,6 +83,18 @@ class DirectoryReader(Protocol):
         ...
 
 
+class DirectoryScan(DirectoryReader, Protocol):
+    """原活动独占的连续清单；实际读取结束后由拥有者关闭。"""
+    def close(self) -> None:
+        ...
+
+
+class DirectoryScanFactory(Protocol):
+    """可选能力；没有该能力的目录端口继续逐页读取。"""
+    def directory_scan(self, request: DirectoryRequest) -> DirectoryScan:
+        ...
+
+
 def _roots(binding, directories):
     if not isinstance(binding, DeviceBinding):
         raise ValueError("目录请求必须保留原设备绑定")

@@ -178,7 +178,8 @@ class BaselineReadReturn:
                 raise ValueError('基准返回必须是至多128份实际稳定文件身份')
             page = Page(tuple(page.items), page.next_cursor)
         object.__setattr__(self, 'error', error)
-        object.__setattr__(self, 'returned', DirectoryRead(None, error, page))
+        object.__setattr__(self, 'returned', DirectoryRead(None, error, page,
+            call_performed=self.returned.call_performed, elapsed_ns=self.returned.elapsed_ns))
 
 
 @dataclass(frozen=True)

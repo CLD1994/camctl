@@ -12,7 +12,7 @@ from camctl.capture.baseline_reads import (
     BaselineReadRecoveryContext,
     resume_baseline_read_save,
 )
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.models import ErrorValue
 
 
@@ -107,6 +107,8 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                     reader=runtime.owned,
                     wall_us=runtime.wall_us,
                 )
+    if pending.activity_id != activity_id:
+        raise ConsistencyError("基准准备拥有者不得更换原活动")
     resumed = resume_baseline_save(action_id, runtime=runtime)
     if resumed is not None:
         owner = pending.read_owner
@@ -172,6 +174,7 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                 owned=runtime.owned,
                 wall_us=runtime.wall_us,
                 can_read=can_read,
+                baseline=pending,
             )
         finally:
             pending.in_call = owner.task is not None and not owner.task.done()
