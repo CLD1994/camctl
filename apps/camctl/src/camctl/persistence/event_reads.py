@@ -370,7 +370,7 @@ class SqlEventReads:
             raw=parse_exact_json(header)
             state['accepted']=_ValidatedSegmentFinish(scope,transaction,event.event_id,header,qualification)
             request=_header_request(raw)
-            candidates,scopes=_finish_event_inputs(request,self,raw['batch_size'],set_id=facts.setrow['id'])
+            candidates,scopes=_finish_event_inputs(request,self,raw['batch_size'])
             created=lambda file_id,kind: self.segment_created_output(transaction,request.ref.action_id,file_id,kind)
             state['progress']=iter(_canonical_events(request,transaction,raw,facts,qualification,candidates,scopes,created))
         proof=state.get('accepted')
@@ -387,15 +387,101 @@ class SqlEventReads:
             if next(progress,None) is not None:raise ConsistencyError('实际L之前规范阶段尚未耗尽')
             state.pop('progress',None)
 
+    def _segment_finish_prefix(self,transaction):
+        if (self._segment_guard_transaction!=transaction or not self.connection.in_transaction
+                or getattr(self,'_kernel_transaction',None)!=transaction):
+            raise ConsistencyError('完成事实缺少内核实际绑定的同组前序')
+        return self._kernel_accepted
+
+    def segment_finish_values(self,table,row,transaction):
+        """普通完成读取实际当前行；有限入口叠加内核已验证前序。"""
+        if (self._segment_guard_transaction!=transaction or not self.connection.in_transaction
+                or table not in ('actions','operation_runs','plans','segment_scope_members')):
+            raise ConsistencyError('完成当前行不属于原内核事务范围')
+        if row is None:return None
+        prefix=self._segment_finish_prefix(transaction)
+        if prefix is None:return row
+        values=dict(row)
+        for accepted in prefix:
+            for changed in accepted.envelope.rows:
+                if changed.table==table and changed.row_id==row['id']:
+                    if not changed.after.exists:return None
+                    values.update(changed.after.values)
+        return values
+
+    def segment_finish_event(self,event_id,transaction):
+        """只取实际已验证前序，完整提案本身不授予先前事件资格。"""
+        if self._segment_guard_transaction!=transaction or not self.connection.in_transaction:
+            raise ConsistencyError('完成前序不属于原内核事务范围')
+        prefix=self._segment_finish_prefix(transaction)
+        if prefix is None:
+            from camctl.history.decoding import decode_event_row
+            with closing(self.connection.execute('SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(event_id,))) as query:
+                row=query.fetchone()
+            event=None if row is None else decode_event_row(row)
+        else:
+            event=None
+            for accepted in prefix:
+                if accepted.envelope.event_id!=event_id:continue
+                if event is not None:raise ConsistencyError('完成位置没有唯一实际已验证前序')
+                event=accepted.envelope
+        if event is None or event.transaction_id!=transaction.txn_id or not transaction.first_event_id<=event.event_id<transaction.last_event_id:
+            raise ConsistencyError('完成前序不属于原同组范围')
+        return event
+
+    def segment_finish_outputs(self,transaction,action_id):
+        """逐批核实际产物反向覆盖；有限入口只用实际已验证创建前序。"""
+        if self._segment_guard_transaction!=transaction or not self.connection.in_transaction:
+            raise ConsistencyError('完成产物不属于原内核事务范围')
+        prefix=self._segment_finish_prefix(transaction)
+        if prefix is not None:
+            from camctl.history.events import load_event_registry
+            output_type=load_event_registry()['events']['OUTPUT_REGISTERED']['id']
+            for accepted in prefix:
+                event=accepted.envelope
+                if (event.transaction_id!=transaction.txn_id or event.event_type!=output_type
+                        or not transaction.first_event_id<event.event_id<transaction.last_event_id):continue
+                for row in event.rows:
+                    if row.table=='outputs' and not row.before.exists and row.after.values.get('source_action_id')==action_id:
+                        yield row.row_id,row.after.values['device_file_id'],row.after.values['kind']
+            return
+        after=0
+        while True:
+            with closing(self.connection.execute('SELECT id,device_file_id,kind FROM outputs WHERE source_action_id=? AND id>? ORDER BY id LIMIT 128',(action_id,after))) as query:
+                rows=query.fetchmany(128)
+            if not rows:return
+            yield from rows
+            after=rows[-1][0]
+
+    def segment_finish_origin(self,transaction,output_id):
+        """预览只能关联同组实际已验证的真实原片。"""
+        if self._segment_guard_transaction!=transaction or not self.connection.in_transaction:
+            raise ConsistencyError('完成origin不属于原内核事务范围')
+        prefix=self._segment_finish_prefix(transaction)
+        if prefix is None:
+            with closing(self.connection.execute('SELECT COUNT(*),MIN(original_output_id),MAX(original_output_id) FROM output_origins WHERE output_id=?',(output_id,))) as query:
+                return query.fetchone()
+        count=0;smallest=largest=None
+        for accepted in prefix:
+            if (accepted.envelope.transaction_id!=transaction.txn_id
+                    or not transaction.first_event_id<accepted.envelope.event_id<transaction.last_event_id):continue
+            for row in accepted.envelope.rows:
+                if row.table=='output_origins' and not row.before.exists and row.after.values.get('output_id')==output_id:
+                    original=row.after.values['original_output_id'];count+=1
+                    smallest=original if smallest is None else min(smallest,original)
+                    largest=original if largest is None else max(largest,original)
+        return count,smallest,largest
+
     def segment_created_output(self,transaction,action_id,file_id,kind):
         """有限入口借用实际已验证前序；有界入口只读已写入原连接。"""
-        if self.proposal_event is not None:
+        prefix=self._segment_finish_prefix(transaction)
+        if prefix is None:
             from camctl.persistence.repositories.segment_transactions import _created_output
             return _created_output(self.connection,transaction,action_id,file_id,kind)
         from camctl.history.events import load_event_registry
         output_type=load_event_registry()['events']['OUTPUT_REGISTERED']['id']
         found=None
-        for accepted in self._validated:
+        for accepted in prefix:
             event=accepted.envelope
             if (event.transaction_id!=transaction.txn_id or event.event_type!=output_type
                     or not transaction.first_event_id<event.event_id<transaction.last_event_id):continue

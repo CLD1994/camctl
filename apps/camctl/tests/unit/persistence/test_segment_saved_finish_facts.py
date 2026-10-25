@@ -94,7 +94,7 @@ def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     port(monkeypatch, finish.storage, "segment_activation_rows", return_value=(
         update_change("segment_sets", 2, {"published_event_id": None}, {"published_event_id": 11}),))
     proof = port(monkeypatch, finish, "verify_completion_proof", side_effect=AssertionError("重演旧来源"))
-    classification = port(monkeypatch, finish, "_verify_assessment", side_effect=AssertionError("重算旧判断"))
+    classification = port(monkeypatch, finish.storage, "_verify_assessment", side_effect=AssertionError("重算旧判断"))
     actual = finish._FinishCommand(request, new_operation_key(), 128).plan(scope)
     assert actual.result.action_status == 3
     assert actual.result.output_count == 0
@@ -246,7 +246,7 @@ def test_original_key_verification_consumes_whole_exact_event_group(monkeypatch,
     port(monkeypatch, finish, "_read_failure_sources", return_value=finish._FailureSources())
     port(monkeypatch, finish, "_finish_event_inputs", return_value=(lambda: iter(()), lambda: iter(())))
     port(monkeypatch, finish, "verify_completion_proof", side_effect=AssertionError("重演旧来源"))
-    port(monkeypatch, finish, "_verify_assessment", side_effect=AssertionError("重算旧判断"))
+    port(monkeypatch, finish.storage, "_verify_assessment", side_effect=AssertionError("重算旧判断"))
     tail = () if defect == "missing_last" else (marker,)
     if defect == "extra_event":
         tail += (marker,)
@@ -352,3 +352,69 @@ def test_explicit_failure_rule_consumes_only_supplied_error_facts(monkeypatch, d
     else:
         with pytest.raises(ConsistencyError):
             finish._failure(request, assessment, 0, {"facts_json": {}}, sources, before_event_id=10)
+
+
+@pytest.mark.parametrize("activity_id", [None, 3])
+def test_result_identity_keeps_no_activity_and_no_results_partition(monkeypatch, activity_id):
+    from camctl.persistence.repositories import segment_dispositions
+
+    db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    request = FinishSegmentRecording(SegmentResultRef(1, 2, 1), activity_id, None, 5)
+    identity = finish.storage.SegmentIdentity(
+        {"id": 2, "activity_id": None, "run_id": None}, {"id": 1}, None, None, None)
+    port(monkeypatch, finish.storage, "read_segment_identity", return_value=identity)
+    port(monkeypatch, conclusions, "read_fixed_result_check_conclusion", return_value={})
+    disposition = port(monkeypatch, segment_dispositions, "saved_result_disposition",
+                       return_value=segment_dispositions.RetainedResultDisposition())
+    port(monkeypatch, finish, "_one", return_value=(0,))
+    if activity_id is None:
+        assert finish._identity(request, db)[:3] == (identity.action, None, identity.setrow)
+        disposition.assert_called_once()
+    else:
+        with pytest.raises(ConsistencyError, match="活动或RESULTS身份"):
+            finish._identity(request, db)
+        disposition.assert_not_called()
+    db.execute.assert_not_called()
+
+
+def test_event_inputs_keep_empty_pages_and_use_batch_facts_without_member_point_reads(monkeypatch):
+    from camctl.capture.segment_models import SegmentSetRef
+    from camctl.capture.segment_storage import SegmentOutputCandidate
+    from camctl.contracts.pages import Page
+    from camctl.outputs.catalog import OutputKind
+
+    db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    reader=SimpleNamespace(connection=db)
+    request=FinishSegmentRecording(SegmentSetRef(1,8,9,1),3,4,5)
+    port(monkeypatch,finish.storage,"_set",return_value={"publication_kind":int(enum_for("segment_sets.publication_kind").RESULT)})
+    rows=port(monkeypatch,finish,"row_facts",return_value={})
+    file={"original_name":"video.osv","media_type":"video/x-osv"}
+    item=finish.storage.SavedSegmentCandidate(SegmentOutputCandidate(1,11,OutputKind.ORIGINAL),file)
+    def pages(ref,cursor,batch,owned):
+        assert ref==request.ref and batch==128 and owned is reader
+        return Page((),"next") if cursor is None else Page((item,),None)
+    candidates=port(monkeypatch,finish.storage,"read_segment_finish_candidates",side_effect=pages)
+    scope=port(monkeypatch,finish.storage,"read_segment_finish_scope",side_effect=[Page((),"next"),Page((({"id":1,"member_id":1},11),),None)])
+    get_candidates,get_scopes=finish._finish_event_inputs(request,reader,128)
+    assert tuple(get_candidates())==((item.candidate,file),)
+    assert tuple(get_scopes())==((),(({"id":1,"member_id":1},11),))
+    assert candidates.call_count==scope.call_count==2
+    rows.assert_not_called()
+    db.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("native",[False,True])
+def test_event_inputs_keep_canceled_video_candidate_partition(monkeypatch,native):
+    from camctl.devices.tasks import CaptureResultPolicy
+    from camctl.contracts.pages import Page
+
+    db=create_autospec(sqlite3.Connection,instance=True,spec_set=True)
+    request=FinishSegmentRecording(SegmentResultRef(1,2,1),3,4,5)
+    port(monkeypatch,finish.storage,"_set",return_value={"publication_kind":int(enum_for("segment_sets.publication_kind").CANCELED)})
+    port(monkeypatch,finish,"row_facts",return_value={"type":int(enum_for("actions.type").CAMERA_TIMELAPSE),
+         "execution_spec_json":{"result_policy":CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value if native
+         else CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value}})
+    candidates=port(monkeypatch,finish.storage,"read_segment_finish_candidates",return_value=Page((),None))
+    get_candidates,get_scopes=finish._finish_event_inputs(request,SimpleNamespace(connection=db),128)
+    assert tuple(get_candidates())==tuple(get_scopes())==()
+    assert candidates.call_count==int(native)
