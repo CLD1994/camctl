@@ -229,23 +229,29 @@ async def test_direct_live_write_value_is_scrubbed_without_changing_receipt(port
     assert outcome.kind is kind and outcome.value is None
 
 
-@pytest.mark.parametrize('value_kind', ['connection', 'cursor', 'iterator', 'awaitable'])
+@pytest.mark.parametrize('value_kind', ['connection', 'cursor', 'iterator', 'async_iterator', 'awaitable'])
 async def test_read_rejects_direct_live_values_in_worker(inline_port, ports, value_kind):
     from camctl.persistence.models import DbExecutorError
     owned = ports[1]
     async def delayed():
         return 1
+    async def streamed():
+        yield 1
     value = {'connection': owned.connection,
              'cursor': create_autospec(sqlite3.Cursor, instance=True),
-             'iterator': iter([1]), 'awaitable': None}[value_kind]
+             'iterator': iter([1]), 'async_iterator': None, 'awaitable': None}[value_kind]
     if value_kind == 'awaitable':
         value = delayed()
+    elif value_kind == 'async_iterator':
+        value = streamed()
     try:
         with pytest.raises(DbExecutorError):
             await inline_port.read(lambda owned: value)
     finally:
         if value_kind == 'awaitable':
             value.close()
+        elif value_kind == 'async_iterator':
+            await value.aclose()
 
 
 async def test_cancelled_close_waits_for_shared_actual_close(ports):

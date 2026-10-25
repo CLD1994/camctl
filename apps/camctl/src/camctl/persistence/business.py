@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import replace
 import inspect
 import sqlite3
@@ -58,7 +58,7 @@ async def settle_required(awaitable: Awaitable[T]) -> T:
 
 def _check_value(value):
     # callback自身负责既定有限值类型；端口不反射遍历业务对象图。
-    if isinstance(value, (OwnedConnection, sqlite3.Connection, sqlite3.Cursor, Iterator)) or inspect.isawaitable(value):
+    if isinstance(value, (OwnedConnection, sqlite3.Connection, sqlite3.Cursor, Iterator, AsyncIterator)) or inspect.isawaitable(value):
         raise DbExecutorError('数据库callback只能返回有限值，不能交付连接、游标或延迟执行对象')
 
 
