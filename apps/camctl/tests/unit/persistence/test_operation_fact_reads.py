@@ -310,3 +310,35 @@ def test_operation_key_lookup_does_not_preserve_absence_or_admit_future_group(da
         state['operation'] = (2,)
         with pytest.raises(ConsistencyError, match='C0'):
             facts.read_operation_transaction(connection, 'key')
+
+
+@pytest.mark.parametrize('bounded', [False, True])
+def test_kernel_accepted_current_page_prefix_remains_separate_from_committed_c0(database, facts, monkeypatch, bounded):
+    from camctl.history import decoding
+    from camctl.history.reads import ResultPageWriteScope
+    from camctl.history.validators import ValidatedEvent
+    from camctl.persistence.event_reads import SqlEventReads
+
+    connection, state = database
+    current = TransactionRange(2, 4, 5)
+    append = EventEnvelope(4, 2, 1, 1, 0, 1, None, 1, {}, ())
+    state['event'] = (4, 2, 1, 1, 0, 1, None, '{}')
+    monkeypatch.setattr(decoding, 'decode_event_row', create_autospec(decoding.decode_event_row, return_value=append))
+    scope = ResultPageWriteScope(1, 2, 3, 4, 1)
+    accepted = ValidatedEvent(append, 'RESULT_PAGE', 'APPEND', (), {})
+    guard = {'connection': connection, 'scope': scope, 'transaction': current,
+             'phase': 'PAGE_ACCEPTED', 'append': append}
+    reads = SqlEventReads(connection, scope, () if bounded else (accepted,),
+        result_page_guard_state=guard, result_page_bounded=bounded)
+    reads.bind_result_page_write_state(guard, current, connection)
+    with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
+        with pytest.raises(ConsistencyError, match='C0'):
+            facts.read_event(connection, 4)
+        assert reads.accepted_result_page_event(4, current) == append
+        assert facts.operation_fact_boundary(connection) == HistoryBoundary(1, 3)
+        with pytest.raises(ConsistencyError, match='C0'):
+            facts.read_event(connection, 4)
+        guard['phase'] = 'PREFIX'
+        with pytest.raises(ConsistencyError, match='已通过的真实前序'):
+            reads.accepted_result_page_event(4, current)
+    assert state['events'] == (1 if bounded else 0)
