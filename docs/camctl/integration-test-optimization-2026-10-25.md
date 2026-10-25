@@ -2,7 +2,29 @@
 
 本记录保存[优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)实施期间取得的证据。[优化前逐项报告](integration-test-timing-2026-10-25.md)维护原始全量统计；这里仅记录实际改动、覆盖映射与改造后的结果。完整验收仍包含容量测试和完整参数组合。
 
-## 完整运行与当前成果
+## 第二轮：客户端与完成来源复用
+
+本阶段保持 Hasselblad 原 29 项与清理原 11 项的身份和业务分区。每个拍摄世界复用真实客户端服务，六类参数保留完整网页预设往返；清理消费者从同一路径的完整只读基线恢复独立副本。生产代码、公共协议及运行脚本相对第二轮基线 `b82d96e0` 保持一致，最终测试源码冻结于 `8164851c`。
+
+### 清理 11 项的四路完整对照
+
+前后均为 11 passed、退出 0，四个任务及九个 OSMO 来源消费者的分配保持。相同解释器、锁定依赖及隔离入口依次独占运行；下表是单次对照的实际结果。
+
+| 口径 | 修改前 | 修改后 |
+| --- | ---: | ---: |
+| 入口单调墙钟 | 335.100 秒 | 274.862 秒 |
+| 任务累计墙钟 | 996.106 秒 | 696.006 秒 |
+| pytest 三阶段累计 | 948.740 秒 | 632.076 秒 |
+| 真实完成来源数 | 9 | 3 |
+| STOP 后实际等待累计 | 271.602 秒 | 90.669 秒 |
+
+入口本次少 60.239 秒，约 18.0%；累计任务少 300.100 秒。这两个差值属于不同口径。来源共享准备移入模块 fixture 后，setup 从 125.615 秒变为 234.407 秒，call 从 823.095 秒变为 397.594 秒；实际收益按完整三阶段与入口计算。三次来源仍各自生成真实双流媒体，完成原拍摄、探测和修复断言，再等待至少 30 秒；完整备份和只读基线保存耗时合计 0.449 秒。九个消费者分别恢复两库、远端与工作文件、客户端数据、时钟和环境，保留独立错误门及进程收场。
+
+原始逐项结果、WAL 模式、摘要与来源计数由[修改前回执](verification-data/2026-10-25-integration-optimization-round2/cleanup-before-4/manifest.json)和[修改后回执](verification-data/2026-10-25-integration-optimization-round2/cleanup-after-4/manifest.json)维护。最终最长实例仍为逐份精确清理的 `test_exact_outputs_and_non_cascade`，三阶段合计 238.593 秒。该链继续实际执行 Hasselblad 来源与五份独立取回、导入及清理，是此文件当前的主要剩余成本。
+
+Hasselblad 的最终 29 项四路、六路和八路完整对照正在运行；会话异常与实际 Application 导出的功能证据已分别保存在[客户端回执](verification-data/2026-10-25-integration-optimization-round2/client-session.json)和[导出微见证](verification-data/2026-10-25-integration-optimization-round2/s6-application-micro.json)。最近一次全范围墙钟仍由下节的冻结完整运行维护，本节专项时间单独记录。
+
+## 首轮完整运行与回归状态
 
 `48d2ee64` 冻结完整范围已经四路并行执行完毕，入口单调墙钟为 **2,820.160 秒，即 47 分 0.160 秒**。10,339 个主实例全部具有完整且唯一的记录：10,290 passed、44 failed、5 skipped；342 个嵌套子检查全部通过。84 项任务为 56 passed、28 failed，入口退出 1；全部容量门槛与 Hasselblad 十二组正常链都已实际执行，没有首轮观察器中断造成的漏测。逐项、逐文件和原始口径见[最终运行回执](verification-data/2026-10-25-integration-optimization/final-run.json)、[主实例 CSV](verification-data/2026-10-25-integration-optimization/final-run-cases.csv)、[文件聚合 CSV](verification-data/2026-10-25-integration-optimization/final-run-files.csv)及[独立审计](verification-data/2026-10-25-integration-optimization/final-audit.json)。
 
