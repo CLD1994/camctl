@@ -70,15 +70,15 @@ class _ReportReads:
             entity, identity, boundary, event_batch_size=self.event_batch_size)
 
     def restore_entity(self, entity, identity, boundary):
-        return self.repository.restore_entity(
+        return self.repository.restore_report_entity(
             entity, identity, boundary, event_batch_size=self.event_batch_size)
 
     def related_primary_rows_at_h(self, entity, column, value, boundary):
         return self.repository.related_primary_rows_at_h(
             entity, column, value, boundary, event_batch_size=self.event_batch_size)
 
-    def open_segment_history(self, identity, boundary):
-        return self.repository.open_segment_history(
+    def open_report_action(self, identity, boundary):
+        return self.repository.open_report_action(
             identity, boundary, event_batch_size=self.event_batch_size)
 
     def open_report_selection(self, request):
@@ -237,7 +237,7 @@ class _SegmentExpansion:
             self.handle = self.source_handle
         else:
             self.handle = self.stack.enter_context(
-                self.repo.open_segment_history(self.header.source_action_id, self.boundary)
+                self.repo.open_report_action(self.header.source_action_id, self.boundary)
             )
         self.ref = self.handle.active_result_ref()
         source = self.handle.primary()
@@ -707,7 +707,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
     from camctl.reporting.generation import _merge_output, _merge_delivery
 
     with ExitStack() as stack:
-        handle = stack.enter_context(repo.open_segment_history(identity, boundary))
+        handle = stack.enter_context(repo.open_report_action(identity, boundary))
         finite = _project("action", identity, _action_facts(repo, handle, boundary))
         expansion = _SegmentExpansion(
             repo, boundary, binding, finite.get("error"), stack, source_handle=handle

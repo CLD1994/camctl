@@ -58,12 +58,13 @@ def test_report_reader_forwards_the_event_batch_without_limiting_rows(batch):
     reader.restore_primary_at_h("action", 4, H)
     reader.restore_entity("output", 9, H)
     reader.related_primary_rows_at_h("delivery", "action_id", 4, H)
-    reader.open_segment_history(4, H)
+    reader.open_report_action(4, H)
     repo.restore_primary_at_h.assert_called_once_with("action", 4, H, event_batch_size=batch)
-    repo.restore_entity.assert_called_once_with("output", 9, H, event_batch_size=batch)
+    repo.restore_report_entity.assert_called_once_with("output", 9, H, event_batch_size=batch)
+    repo.restore_entity.assert_not_called()
     repo.related_primary_rows_at_h.assert_called_once_with(
         "delivery", "action_id", 4, H, event_batch_size=batch)
-    repo.open_segment_history.assert_called_once_with(4, H, event_batch_size=batch)
+    repo.open_report_action.assert_called_once_with(4, H, event_batch_size=batch)
 
 
 class MemoryFailures:
@@ -223,7 +224,7 @@ def _writer(monkeypatch, *, kind):
     handle = create_autospec(SegmentHistoryHandle, instance=True)
     handle.action_id = 8
     handle.__enter__.return_value = handle
-    repo.open_segment_history.return_value = handle
+    repo.open_report_action.return_value = handle
     plan = create_autospec(NodeValidationPlan, instance=True)
     gate = create_autospec(NodeGate, instance=True)
     plan.begin.return_value = gate
@@ -287,7 +288,7 @@ def test_segment_expansion_reuses_only_its_source_at_the_same_h(
     current.__enter__.return_value = current
     other = create_autospec(SegmentHistoryHandle, instance=True)
     other.__enter__.return_value = other
-    repo.open_segment_history.return_value = other
+    repo.open_report_action.return_value = other
     for handle in (current, other):
         handle.primary.return_value = {"type": 2, "execution_started": True, "status": 3}
         handle.active_result_ref.return_value = object()
@@ -306,10 +307,10 @@ def test_segment_expansion_reuses_only_its_source_at_the_same_h(
     validate.assert_called_once_with(error["code"], error["details"])
     current.__exit__.assert_called_once()
     if reused:
-        repo.open_segment_history.assert_not_called()
+        repo.open_report_action.assert_not_called()
         other.__exit__.assert_not_called()
     else:
-        repo.open_segment_history.assert_called_once_with(source_id, H)
+        repo.open_report_action.assert_called_once_with(source_id, H)
         other.__exit__.assert_called_once()
 
 
@@ -326,7 +327,7 @@ def test_action_writer_reuses_the_open_source_for_segment_error(monkeypatch):
 
     list(generation._write_action(repo, object(), stream, plan, object(), 8, H))
 
-    repo.open_segment_history.assert_called_once_with(8, H)
+    repo.open_report_action.assert_called_once_with(8, H)
     handle.__enter__.assert_called_once()
     handle.__exit__.assert_called_once()
 
@@ -348,4 +349,4 @@ def test_reused_segment_source_keeps_source_type_and_published_set_checks(
             "code": "default_segment_scope_empty", "details": {}}, stack,
             source_handle=handle)
 
-    repo.open_segment_history.assert_not_called()
+    repo.open_report_action.assert_not_called()
