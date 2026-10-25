@@ -1,0 +1,803 @@
+{
+  "purpose": "仅对显式启用的测试部署控制业务UTC与单调钟，保留真实CLI、C模块、客户端、SQLite提交、原启动窗口与业务断言。",
+  "base_commit": "c4f1ae10f5ccd59608fe7a5c7350aa57da29f1eb",
+  "core_commit": "b01e00400aaadc1f44e8fa7a364ae32a5c426ae0",
+  "workspace": "/tmp/camctl-itopt-controlled-clock",
+  "branch": "work/itopt-controlled-clock",
+  "api": {
+    "enabled": "Deployment(root, controlled_clock=True)，默认false保持原入口，不创建时钟文件。",
+    "schedule": "按本世界read_clock当前UTC加秒并输出原格式。",
+    "freeze_at": "只允许向前，将UTC与业务单调钟增加相同差量后冻结。",
+    "pause_clock": "调用方已停止执行或确认进程已进入实际门闩后，读取当前一对读数并冻结。",
+    "resume_clock": "在冻结的一对读数上切running，之后仅按真实单调经过时间推进。",
+    "environment": [
+      "CAMCTL_TEST_CLOCK_FILE",
+      "CAMCTL_TEST_CLOCK_LOG"
+    ],
+    "paths": [
+      "business-clock.json",
+      "business-clock.jsonl"
+    ],
+    "scope": "仅本世界CLI环境副本和C launcher显式导出；父进程、C进程管理、门闩与工具超时继续使用真实时间。",
+    "gate_witness": "仅显式启用业务钟时，真实port进入原gate前写<gate>.entered，JSON含port与本CLI PID；默认门不新增I/O。"
+  },
+  "run": {
+    "root": "/tmp/camctl-itopt-controlled-clock-v2-20261025",
+    "runner_exit_code": 0,
+    "runner_wall_seconds": 83.38012424099725,
+    "versions": {
+      "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+      "version": [
+        3,
+        11
+      ],
+      "sqlite": "3.53.1",
+      "pytest": "9.1.1",
+      "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+      "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+      "node": "v24.22.1",
+      "git": "git version 2.43.0"
+    },
+    "source": {
+      "root": "/tmp/camctl-itopt-controlled-clock",
+      "head": "b01e00400aaadc1f44e8fa7a364ae32a5c426ae0",
+      "status": "M tests/integration/test_camctl_c_module_roundtrip.py\n M tests/integration/test_video_size_estimate.py",
+      "snapshot_sha256": "1301b6b2f1f19ff6fb6420590d5ec986e7fa173705e1369d8e8aabf270db4a4a"
+    },
+    "node_modules": "/workspaces/camctl/apps/client/node_modules",
+    "dependency_boundary": "本次三个窄节点没有浏览器步骤；主组合采用已按锁文件准备的/tmp/camctl-itopt-runner-npm-client/node_modules。本次依赖来源不证明Playwright版本一致。",
+    "tasks": [
+      {
+        "id": "root/test_video_size_estimate",
+        "targets": [
+          "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+          "tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution"
+        ],
+        "command": [
+          "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/source/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+          "tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution",
+          "-q",
+          "--durations=0",
+          "-p",
+          "integration_progress",
+          "--basetemp",
+          "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/tmp/pytest"
+        ],
+        "environment": {
+          "PYTHONPATH": "/tmp/camctl-itopt-controlled-clock-v2-20261025/control:/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/source/apps/camctl/src",
+          "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/python-cache",
+          "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/project-env",
+          "UV_CACHE_DIR": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/uv-cache",
+          "UV_OFFLINE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/tmp"
+        },
+        "exit_code": 0,
+        "wall_seconds": 53.26849340699846
+      },
+      {
+        "id": "root/test_camctl_c_module_roundtrip",
+        "targets": [
+          "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module"
+        ],
+        "command": [
+          "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/002-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+          "-q",
+          "--durations=0",
+          "-p",
+          "integration_progress",
+          "--basetemp",
+          "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/002-root-test_camctl_c_module_roundtrip/tmp/pytest"
+        ],
+        "environment": {
+          "PYTHONPATH": "/tmp/camctl-itopt-controlled-clock-v2-20261025/control:/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/002-root-test_camctl_c_module_roundtrip/source/apps/camctl/src",
+          "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/python-cache",
+          "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/project-env",
+          "UV_CACHE_DIR": "/tmp/camctl-itopt-controlled-clock-v2-20261025/workers/0/uv-cache",
+          "UV_OFFLINE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/002-root-test_camctl_c_module_roundtrip/tmp"
+        },
+        "exit_code": 0,
+        "wall_seconds": 29.020726794995426
+      }
+    ]
+  },
+  "preparation_failure": {
+    "root": "/tmp/camctl-itopt-controlled-clock-20261025",
+    "runner_exit_code": 1,
+    "task_exit_code": 2,
+    "tests_executed": false,
+    "cause": "首个runner传入不存在的主工作区node_modules目录，准备阶段明确拒绝；随后修正为实际存在的外部依赖目录。"
+  },
+  "cases": [
+    {
+      "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+      "outcome": "passed",
+      "call_seconds": 17.22354420600459,
+      "tmp_root": "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/tmp/pytest/test_record_estimate_stays_out0",
+      "request_id": "4000539213071628563",
+      "request_sha256": "29a6b796b4115a480100000ec34e952d9dcd73e7d2600c109972630a885bc06d",
+      "scheduled_at": "2026-10-25 00:28:44",
+      "actions": [
+        {
+          "id": 1,
+          "name": "估算交接",
+          "scheduled_at": 1792888124000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888124000000,
+          "expiration_reason": null,
+          "effective_params_json": "{\"type\":\"video\"}",
+          "execution_spec_json": "{\"target_duration_ms\":1000,\"video_result_mode\":\"single_file\"}"
+        }
+      ],
+      "operations": [
+        {
+          "responsibility_key": "start/1",
+          "intent_event_id": 12,
+          "result_event_id": 13,
+          "intent_at": 1792888124000000,
+          "result_at": 1792888124000000,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "3",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "operation_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "start_confirmed",
+                "version": 1,
+                "data": {
+                  "activity_id": "1"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "responsibility_key": "stop/1",
+          "intent_event_id": 20,
+          "result_event_id": 21,
+          "intent_at": 1792888125033431,
+          "result_at": 1792888125042736,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "3",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "stop_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "stop_confirmed",
+                "version": 1,
+                "data": {
+                  "activity_id": "1"
+                }
+              }
+            ]
+          },
+          "intent_clock_read_utc_us": 1792888125033431,
+          "real_seconds_since_resume": 1.033431625
+        },
+        {
+          "responsibility_key": "results/1",
+          "intent_event_id": 27,
+          "result_event_id": 34,
+          "intent_at": 1792888125089101,
+          "result_at": 1792888125096803,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "0",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "results_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "record-1",
+                      "locator": {
+                        "path": "/DCIM/record-1"
+                      },
+                      "size_bytes": 8192,
+                      "complete": true,
+                      "kind": "video",
+                      "original_name": "record-1.mp4",
+                      "media_type": "video/mp4"
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": true,
+                  "completion_evidence": null
+                }
+              }
+            ]
+          },
+          "intent_clock_read_utc_us": 1792888125089101,
+          "real_seconds_since_resume": 1.089101045
+        }
+      ],
+      "clock": {
+        "epochs": {
+          "1": {
+            "mode": "frozen",
+            "first_utc_us": 1792888121000000,
+            "first_monotonic_ns": 39413606444441,
+            "read_count": 1
+          },
+          "2": {
+            "mode": "frozen",
+            "first_utc_us": 1792888124000000,
+            "first_monotonic_ns": 39416606444441,
+            "read_count": 22
+          },
+          "3": {
+            "mode": "running",
+            "first_utc_us": 1792888124002058,
+            "first_monotonic_ns": 39416608503387,
+            "read_count": 78
+          }
+        },
+        "final_state": {
+          "mode": "running",
+          "epoch": 3,
+          "utc_anchor_us": 1792888124000000,
+          "monotonic_anchor_ns": 39416606444441,
+          "real_monotonic_anchor_ns": 39427977070526
+        },
+        "reader_pids": [
+          526066,
+          526111
+        ],
+        "log_sha256": "a1b4536e7fdd6254e8515a78d8bf0357b1a8d29175f31f178e60dce82b3b7295",
+        "running_utc_equals_monotonic_delta_floor_us": true,
+        "frozen_to_running_utc_continuous": true,
+        "frozen_to_running_monotonic_continuous": true
+      },
+      "reported_outputs": [
+        {
+          "availability": "available",
+          "checksum": {
+            "status": "not_obtained"
+          },
+          "cleanup": {
+            "status": "not_requested"
+          },
+          "kind": "original",
+          "media": {
+            "check_status": "not_performed",
+            "duration": {
+              "status": "unknown"
+            }
+          },
+          "media_type": "video/mp4",
+          "original_name": "record-1.mp4",
+          "output_id": "1",
+          "size": 8192,
+          "source_action_instance_id": "1"
+        }
+      ],
+      "original_csv": {
+        "status": "passed",
+        "call_seconds": 9.183722442001454,
+        "source": "cross-component-cases.csv"
+      },
+      "report_has_no_video_size_estimate": true,
+      "final_frozen_comparison": {
+        "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/artifacts",
+        "outcome": "failed",
+        "call_seconds": 17.43569949099765,
+        "action": {
+          "scheduled_at": 1792886669000000,
+          "max_delay_ms": 5000,
+          "status": 5,
+          "execution_started": 0,
+          "first_window_observed_at": null,
+          "expiration_reason": 1
+        },
+        "attempt_count": 0
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution",
+      "outcome": "passed",
+      "call_seconds": 15.526470692995645,
+      "tmp_root": "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/001-root-test_video_size_estimate/tmp/pytest/test_timelapse_estimate_uses_s0",
+      "request_id": "1952097236709649987",
+      "request_sha256": "e67f460207f18547b789ac5473dfca993d4a081a6a1907fe0b01b6f489d39e3c",
+      "scheduled_at": "2026-10-25 00:29:01",
+      "actions": [
+        {
+          "id": 1,
+          "name": "估算交接",
+          "scheduled_at": 1792888141000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888141000000,
+          "expiration_reason": null,
+          "effective_params_json": "{\"type\":\"timelapse\",\"capture_duration_s\":3,\"interval_s\":1}",
+          "execution_spec_json": "{\"duration_based\":true,\"wait_after_send\":true,\"end_control\":1,\"stop_supported\":false,\"start_return_meaning\":1,\"completion_mode\":2,\"video_result_mode\":\"single_file\",\"target_duration_ms\":3000,\"result_wait_margin_ms\":0}"
+        }
+      ],
+      "operations": [
+        {
+          "responsibility_key": "start/1",
+          "intent_event_id": 12,
+          "result_event_id": 13,
+          "intent_at": 1792888141000000,
+          "result_at": 1792888141000000,
+          "max_attempts_used": 1,
+          "timeout_s_json": "30",
+          "retry_interval_s_json": null,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "operation_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "timelapse_sent",
+                "version": 1,
+                "data": {
+                  "activity_id": "1"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "responsibility_key": "results/1",
+          "intent_event_id": 22,
+          "result_event_id": 29,
+          "intent_at": 1792888144407312,
+          "result_at": 1792888144426944,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "0",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "results_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "timelapse-1",
+                      "locator": {
+                        "path": "/DCIM/timelapse-1"
+                      },
+                      "size_bytes": 8192,
+                      "complete": true,
+                      "kind": "video",
+                      "original_name": "timelapse-1.mp4",
+                      "media_type": "video/mp4"
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": true,
+                  "completion_evidence": null
+                }
+              }
+            ]
+          },
+          "intent_clock_read_utc_us": 1792888144407312,
+          "real_seconds_since_resume": 3.407312022
+        }
+      ],
+      "clock": {
+        "epochs": {
+          "1": {
+            "mode": "frozen",
+            "first_utc_us": 1792888138000000,
+            "first_monotonic_ns": 39430828526663,
+            "read_count": 1
+          },
+          "2": {
+            "mode": "frozen",
+            "first_utc_us": 1792888141000000,
+            "first_monotonic_ns": 39433828526663,
+            "read_count": 19
+          },
+          "3": {
+            "mode": "running",
+            "first_utc_us": 1792888141001376,
+            "first_monotonic_ns": 39433829903414,
+            "read_count": 103
+          }
+        },
+        "final_state": {
+          "mode": "running",
+          "epoch": 3,
+          "utc_anchor_us": 1792888141000000,
+          "monotonic_anchor_ns": 39433828526663,
+          "real_monotonic_anchor_ns": 39440685097597
+        },
+        "reader_pids": [
+          526362,
+          526387
+        ],
+        "log_sha256": "cce4d2b86430ce00506c094c17d555e1743e40ba86d4fc7b6251be05f08f4e4e",
+        "running_utc_equals_monotonic_delta_floor_us": true,
+        "frozen_to_running_utc_continuous": true,
+        "frozen_to_running_monotonic_continuous": true
+      },
+      "reported_outputs": [
+        {
+          "availability": "available",
+          "checksum": {
+            "status": "not_obtained"
+          },
+          "cleanup": {
+            "status": "not_requested"
+          },
+          "kind": "original",
+          "media": {
+            "check_status": "not_performed",
+            "duration": {
+              "status": "unknown"
+            }
+          },
+          "media_type": "video/mp4",
+          "original_name": "timelapse-1.mp4",
+          "output_id": "1",
+          "size": 8192,
+          "source_action_instance_id": "1"
+        }
+      ],
+      "original_csv": {
+        "status": "passed",
+        "call_seconds": 11.411829749999015,
+        "source": "cross-component-cases.csv"
+      },
+      "report_has_no_video_size_estimate": true,
+      "final_frozen_comparison": {
+        "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/artifacts",
+        "outcome": "passed",
+        "call_seconds": 19.443981349999376,
+        "action": {
+          "scheduled_at": 1792886687000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792886691692807,
+          "expiration_reason": null
+        },
+        "attempt_count": 2
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+      "outcome": "passed",
+      "call_seconds": 13.751464845998271,
+      "tmp_root": "/tmp/camctl-itopt-controlled-clock-v2-20261025/tasks/002-root-test_camctl_c_module_roundtrip/tmp/pytest/test_auto_preview_roundtrip_vi0",
+      "request_id": "1388894278063088344",
+      "request_sha256": "813e12ebfd9d9798427c6ba47c1ae2d28e6a6e02a06aff4aeaae87aa99595115",
+      "scheduled_at": "2026-10-25 00:29:30",
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "scheduled_at": 1792888170000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888170000000,
+          "expiration_reason": null,
+          "effective_params_json": "{\"type\":\"single_shot\"}",
+          "execution_spec_json": "{}"
+        },
+        {
+          "id": 2,
+          "name": "auto-preview",
+          "scheduled_at": 1792888170000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "effective_params_json": null,
+          "execution_spec_json": "{\"selection_mode\":2}"
+        }
+      ],
+      "operations": [
+        {
+          "responsibility_key": "start/1",
+          "intent_event_id": 14,
+          "result_event_id": 15,
+          "intent_at": 1792888170000000,
+          "result_at": 1792888170000000,
+          "max_attempts_used": 1,
+          "timeout_s_json": "30",
+          "retry_interval_s_json": null,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "operation_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "photo_taken",
+                "version": 1,
+                "data": {
+                  "activity_id": "1"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "responsibility_key": "results/1",
+          "intent_event_id": 20,
+          "result_event_id": 31,
+          "intent_at": 1792888170043589,
+          "result_at": 1792888170054781,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "0",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "results_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "ap-shot",
+                      "locator": {
+                        "path": "/DCIM/ap-shot"
+                      },
+                      "size_bytes": 4096,
+                      "complete": true,
+                      "kind": "photo",
+                      "original_name": "ap-shot.jpg",
+                      "media_type": "image/jpeg"
+                    },
+                    {
+                      "identity": "ap-preview",
+                      "locator": {
+                        "path": "/DCIM/ap-preview"
+                      },
+                      "size_bytes": 2048,
+                      "complete": true,
+                      "kind": "photo",
+                      "original_name": "ap-preview.jpg",
+                      "media_type": "image/jpeg",
+                      "paired_identity": "ap-shot"
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": true,
+                  "completion_evidence": null
+                }
+              }
+            ]
+          },
+          "intent_clock_read_utc_us": 1792888170043589,
+          "real_seconds_since_resume": 0.043589052
+        },
+        {
+          "responsibility_key": "read/1",
+          "intent_event_id": 49,
+          "result_event_id": 56,
+          "intent_at": 1792888170861978,
+          "result_at": 1792888170992398,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "3",
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "read_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": []
+          },
+          "intent_clock_read_utc_us": 1792888170861978,
+          "real_seconds_since_resume": 0.861978575
+        }
+      ],
+      "clock": {
+        "epochs": {
+          "1": {
+            "mode": "frozen",
+            "first_utc_us": 1792888169000000,
+            "first_monotonic_ns": 39461640235334,
+            "read_count": 3
+          },
+          "2": {
+            "mode": "frozen",
+            "first_utc_us": 1792888170000000,
+            "first_monotonic_ns": 39462640235334,
+            "read_count": 17
+          },
+          "3": {
+            "mode": "running",
+            "first_utc_us": 1792888170001419,
+            "first_monotonic_ns": 39462641654408,
+            "read_count": 52
+          }
+        },
+        "final_state": {
+          "mode": "running",
+          "epoch": 3,
+          "utc_anchor_us": 1792888170000000,
+          "monotonic_anchor_ns": 39462640235334,
+          "real_monotonic_anchor_ns": 39470583455785
+        },
+        "reader_pids": [
+          527307,
+          527308,
+          527459
+        ],
+        "log_sha256": "25dcae426b448143982cd19f167110e705cacc33bdccf6e9bb5b0142e9dd30e4",
+        "running_utc_equals_monotonic_delta_floor_us": true,
+        "frozen_to_running_utc_continuous": true,
+        "frozen_to_running_monotonic_continuous": true
+      },
+      "reported_outputs": [
+        {
+          "availability": "available",
+          "checksum": {
+            "status": "not_obtained"
+          },
+          "cleanup": {
+            "status": "not_requested"
+          },
+          "kind": "original",
+          "media": {
+            "check_status": "not_performed",
+            "duration": {
+              "status": "unknown"
+            }
+          },
+          "media_type": "image/jpeg",
+          "original_name": "ap-shot.jpg",
+          "output_id": "1",
+          "size": 4096,
+          "source_action_instance_id": "1"
+        },
+        {
+          "availability": "available",
+          "checksum": {
+            "status": "not_obtained"
+          },
+          "cleanup": {
+            "status": "not_requested"
+          },
+          "kind": "preview",
+          "media": {
+            "check_status": "not_performed",
+            "duration": {
+              "status": "unknown"
+            }
+          },
+          "media_type": "image/jpeg",
+          "original_name": "ap-preview.jpg",
+          "output_id": "2",
+          "preview_of_output_id": "1",
+          "size": 2048,
+          "source_action_instance_id": "1"
+        }
+      ],
+      "original_csv": {
+        "status": "passed",
+        "call_seconds": 8.776215297999443,
+        "source": "cross-component-cases.csv"
+      },
+      "report_has_no_video_size_estimate": true,
+      "final_frozen_comparison": {
+        "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/artifacts",
+        "outcome": "failed",
+        "call_seconds": 10.41573690399673,
+        "action": {
+          "scheduled_at": 1792886897000000,
+          "max_delay_ms": 5000,
+          "status": 5,
+          "execution_started": 0,
+          "first_window_observed_at": null,
+          "expiration_reason": 1
+        },
+        "attempt_count": 0
+      }
+    }
+  ],
+  "source_sha256": {
+    "tests/integration/camctl_fixtures.py": "f010fa79de1fcf787544ef26e31b934726b53faba7df7bebe6acbee2ab796531",
+    "tests/integration/_camctl_stub_entry.py": "569a5ea74536bce62f226eed971c56b7993293fae80c89ca4185de0486dea508",
+    "tests/integration/_wsl_host_demo.py": "7b94da2aa2110c9942021b6937f931f5cb994ea357b7a84457f7500eb6ee8ac1",
+    "tests/integration/test_video_size_estimate.py": "8591e27823d9cdc374490baa7d89b428d7054cebf3f611395fb699de864040e3",
+    "tests/integration/test_camctl_c_module_roundtrip.py": "e4af1cbb4a272570ad75ec93b9ddd0d06844a280bceee3c5bb4b9ed3ce71e38d",
+    "tests/integration/_osmo_builtin_clock.py": "54dbb81ecca21de7c45f1141bf3e94c9a653c5be99fa7fbef743aef18c982264"
+  },
+  "contract_checks": {
+    "future_schedule_ast_unchanged": true,
+    "max_delay_ms": 5000,
+    "success_wait_budget_seconds": 180,
+    "production_and_protocol_changed": false,
+    "three_requested_nodeids_only": true,
+    "no_database_fact_injection": true,
+    "real_durations": "record STOP意图距resume真实1.033431625秒；timelapse结果核实意图距resume真实3.407312022秒，目标仍为1000/3000毫秒。",
+    "boundary": "窄三例证明真实协作和本世界业务钟接线，不外推完整联合验收、目标设备计时或整轮提速。",
+    "success_wait_budget_scope": "START同步与其后执行共用同一真实180秒deadline；C后续报告/ACK等待保持原各自预算。"
+  },
+  "post_run_changes": [
+    "pause_clock文档明确调用方须停止执行或到实际门闩。",
+    "START同步和后续完成等待共用原180秒deadline，避免拆分同步步骤增加总成功预算；其余同步、业务断言和通过路径不变，主组合进一步覆盖。"
+  ]
+}

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import io
 import os
+import time
 from pathlib import Path
 
 from _wsl_host_demo import (
@@ -284,7 +285,7 @@ def test_auto_preview_roundtrip_via_c_module(
         tmp_path: Path, host_demo: str) -> None:
     """自动取回经 C 模块递交链：驱动按配对关联列举预览、预览登记为
     正式产物，客户端展开的自动取回选择预览产物交付并领取导入。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     spec = stub_driver_spec(
         {"1": [photo_file("ap-shot"),
                preview_file("ap-preview", "ap-shot")]},
@@ -294,7 +295,7 @@ def test_auto_preview_roundtrip_via_c_module(
     _init_with_capabilities(deployment, spec)
     state_db = deployment.state_db
 
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -331,10 +332,24 @@ def test_auto_preview_roundtrip_via_c_module(
     try:
         demo.start()
         demo.submit(plan_path)
+        deadline = time.monotonic() + 180
+        frozen = deployment.freeze_at(shoot_at)
+        wait_for(lambda: query_state(state_db,
+            "SELECT p.result_event_id FROM operation_attempts p"
+            " JOIN operation_runs r ON r.id=p.run_id"
+            " JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='shoot' AND p.result_event_id IS NOT NULL"
+            " AND EXISTS(SELECT 1 FROM json_each(p.result_json, '$.observations')"
+            " WHERE json_extract(value, '$.type')='photo_taken')") or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="照片 START 结果未保存", failure=failure)
+        running = deployment.resume_clock()
+        assert running["utc_anchor_us"] == frozen["utc_us"]
+        assert running["monotonic_anchor_ns"] == frozen["monotonic_ns"]
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,), (3,)] or None,
-            timeout_s=180, message="拍摄与自动取回未全部成功",
+            timeout_s=max(0, deadline - time.monotonic()), message="拍摄与自动取回未全部成功",
             failure=failure)
         assert query_state(state_db, "SELECT status FROM plans") == [(3,)]
         # 原片与预览分别登记；自动取回选择预览产物建立交付。

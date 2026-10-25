@@ -163,7 +163,7 @@ class Deployment:
                           monotonic_ns=reading["monotonic_ns"] + delta_us * 1000)
 
     def pause_clock(self) -> dict:
-        """在当前一对业务读数上暂停，不改变真实进程和工具计时。"""
+        """在执行已停止或已进入实际门闩时，按当前一对业务读数暂停。"""
         from _osmo_builtin_clock import read_clock, set_frozen
 
         if not self._controlled_clock:
