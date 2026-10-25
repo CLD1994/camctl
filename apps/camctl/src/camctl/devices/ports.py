@@ -112,7 +112,7 @@ class ControlRequest:
     #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
     prior_result_entries: Callable[[], AsyncIterator[Mapping[str, Any]]] | None = None
     #: 原活动固定基准的只读差集；保留输入次序，不进入机器参数。
-    result_candidates: Callable[[tuple[FileIdentity, ...]], tuple[FileIdentity, ...]] | None = None
+    result_candidates: Callable[[tuple[FileIdentity, ...]], Awaitable[tuple[FileIdentity, ...]]] | None = None
     #: 当前扫描拥有者提供的目录读取入口，不保存在驱动全局状态。
     result_directory_reader: ResultDirectoryReader | None = None
     #: 当前会话同一活动已完成设置的原准备尝试；仅用于实际 START。

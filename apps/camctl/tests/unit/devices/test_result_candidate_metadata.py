@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
@@ -44,7 +44,7 @@ async def test_136_paths_only_query_ten_new_sizes_and_preserve_all_old_entries(r
         request = ControlRequest("result", BINDING,
             {"activity_id": "7", "output_scope": {"directories": [ROOT]},
                 "completion_context": _natural(), "video_result_mode": "segmented", "cursor": cursor},
-            TICKET, Decimal("40"), result_candidates=lambda identities: tuple(identity for identity in identities if identity in new),
+            TICKET, Decimal("40"), result_candidates=AsyncMock(side_effect=lambda identities: tuple(identity for identity in identities if identity in new)),
             result_directory_reader=directory_reader)
         result = await read_results(driver, request, 32)
         assert result.error is None
@@ -74,7 +74,7 @@ async def test_old_or_empty_page_skips_metadata_and_can_finalize(empty):
     driver = SimpleNamespace(_filesystem=lambda binding: filesystem, monotonic_ns=lambda: 0)
     request = ControlRequest("result", BINDING, {"activity_id": "7", "output_scope": {"directories": [ROOT]},
         "completion_context": _natural(), "video_result_mode": "segmented"}, TICKET, Decimal("40"),
-        result_candidates=lambda identities: ())
+        result_candidates=AsyncMock(return_value=()))
 
     result = await list_osmo360ii_results(driver, request, 32)
 
@@ -93,7 +93,7 @@ async def test_metadata_failure_retains_successful_new_file_and_unknown_old_and_
         FileMetadataItem(good, 11, None), FileMetadataItem(failed, None, error)), error)
     request = ControlRequest("result", BINDING, {"activity_id": "7", "output_scope": {"directories": [ROOT]},
         "completion_context": _natural(), "video_result_mode": "segmented"}, TICKET, Decimal("40"),
-        result_candidates=lambda identities: identities[1:])
+        result_candidates=AsyncMock(side_effect=lambda identities: identities[1:]))
     driver = SimpleNamespace(_filesystem=lambda binding: filesystem, monotonic_ns=lambda: 0)
 
     result = await list_osmo360ii_results(driver, request, 32)
