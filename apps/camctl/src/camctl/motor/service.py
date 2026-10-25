@@ -66,17 +66,18 @@ def _trusted_now(runtime: MotorRuntime, clock_input) -> int:
     return checked.reading_micros
 
 
-async def _read_facts(runtime: MotorRuntime, action_id: int):
-    return await runtime.database.read(
-        lambda owned: runtime.repository.read_facts(action_id, owned),
-        description="电机动作事实读取")
-
-
 async def _read_send_basis(runtime: MotorRuntime, action_id: int):
+    owns_permit = action_id in runtime.permits
+
+    def read(owned):
+        facts = runtime.repository.read_facts(action_id, owned)
+        if (facts.action["status"] in (3, 4, 5, 6)
+                or (facts.notification is not None and not owns_permit)):
+            return facts, None
+        return facts, runtime.clock_policy(owned.connection)
+
     return await runtime.database.read(
-        lambda owned: (runtime.repository.read_facts(action_id, owned),
-                       runtime.clock_policy(owned.connection)),
-        description="电机发送资格读取")
+        read, description="电机发送资格读取")
 
 
 def _grant_permit(runtime: MotorRuntime, action_id: int, prepared) -> None:
@@ -113,7 +114,7 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
     原操作；意图核实不产生许可，结果核实不再次执行 write。无法
     可靠核实则停止会话，后续依据持久化终态或未知意图恢复。
     """
-    facts = await _read_facts(runtime, action_id)
+    facts, clock_input = await _read_send_basis(runtime, action_id)
     if facts.action["status"] in (3, 4, 5, 6):
         runtime.permits.pop(action_id, None)
         return MotorDecision.KEEP_TERMINAL
@@ -127,9 +128,6 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
     if isinstance(fields, str):
         fields = parse_exact_json(fields)
     message = encode_motor_notification(ObjectId(action_id), fields["params"]["position"])
-    clock_input = await runtime.database.read(
-        lambda owned: runtime.clock_policy(owned.connection),
-        description="电机墙钟策略读取")
     now = _trusted_now(runtime, clock_input)
     decision = _decision(facts, runtime, now)
     if decision in (MotorDecision.PREPARE, MotorDecision.CHANNEL_UNAVAILABLE):
@@ -143,6 +141,9 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
             # 新事实由下一轮读取；ALREADY 永远不转换为本次发送许可。
             return MotorDecision.WAIT
         facts, clock_input = await _read_send_basis(runtime, action_id)
+        if facts.action["status"] in (3, 4, 5, 6):
+            runtime.permits.pop(action_id, None)
+            return MotorDecision.KEEP_TERMINAL
         now = _trusted_now(runtime, clock_input)
         decision = _decision(facts, runtime, now)
 

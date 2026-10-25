@@ -273,3 +273,32 @@ async def test_database_callbacks_do_not_update_permits_or_send(monkeypatch):
     writer.send.side_effect = send
     assert await advance_motor(1, runtime) is MotorDecision.SEND
     assert runtime.permits == {}
+
+
+async def test_existing_permit_rechecks_terminal_during_qualification_wait(monkeypatch):
+    runtime, repo, writer, row = make_runtime(monkeypatch)
+    runtime.permits[1] = PERMIT
+    current = MotorActionFacts(
+        {**row, "status": 2, "execution_started": 1}, PENDING)
+    repo.read_facts.side_effect = lambda *_: current
+    started, release = asyncio.Event(), asyncio.Event()
+    original_read = runtime.database.read
+
+    async def paused_read(callback, *, description):
+        if description in ("电机墙钟策略读取", "电机发送资格读取"):
+            started.set()
+            await release.wait()
+        return await original_read(callback, description=description)
+
+    runtime.database.read = paused_read
+    task = asyncio.create_task(advance_motor(1, runtime))
+    await asyncio.wait_for(started.wait(), 1)
+    current = MotorActionFacts(
+        {**row, "status": 6, "execution_started": 1, "cancel_requested": 1},
+        SendFacts(2, 1, 1000, KEY, SendOutcome.NOT_SENT, None, None, 1001))
+    release.set()
+
+    assert await task is MotorDecision.KEEP_TERMINAL
+    writer.send.assert_not_called()
+    repo.finish_send.assert_not_called()
+    assert runtime.permits == {}
