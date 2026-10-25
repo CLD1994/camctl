@@ -370,3 +370,120 @@ async def test_old_result_forget_cannot_remove_new_owner_or_continuation(world):
     forget_read_result(world.runtime, original)
     assert world.runtime.pending_read_results[(5, 1)] is replacement
     assert world.runtime.continuing_read_tickets[2].ticket == replacement.finish.ticket
+
+
+@pytest.mark.parametrize('failed_stage', ['check', 'repair_decision', 'repair_result', 'slot'])
+@pytest.mark.parametrize('control_kind', ['none', 'error', 'cancel'])
+async def test_exhausted_internal_read_recovers_original_business_stages(world, monkeypatch, failed_stage, control_kind):
+    from camctl.capture import processing
+    from camctl.operations.models import ErrorValue
+
+    ticket = AttemptTicket(1, 'read', '2', 'read/2', 5)
+    outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
+        error=ErrorValue('device_error', 'read', {'reason': 'device read failed'}),
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('read_returned', 1, {})))
+    pending = hold_read_result(world.runtime, AttemptFinish(ticket,
+        validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE), 123,
+        run_finish=RunFinish(RunOutcome.FAILED, ErrorValue('read_attempts_exhausted', 'source_read'))))
+    world.runtime.occurred_at = lambda: 123
+    status = SimpleNamespace(check_decision=3, check_state=1,
+        repair_state=1 if failed_stage == 'repair_decision' else 3 if failed_stage == 'repair_result' else 2,
+        target_duration_ms=1000)
+    world.database.read.return_value = status
+    slot_held = [failed_stage == 'slot']
+    async def read_one(database, sql, parameters):
+        if sql.startswith('SELECT processing_id,inspection_id'):
+            return (10, None)
+        if sql.startswith('SELECT c.processing_id,r.attempts_used'):
+            return (10, 1, 1, 4)
+        if sql.startswith('SELECT 1 FROM operation_attempts'):
+            return None
+        if sql.startswith('SELECT error_json'):
+            return ('{"code":"read_attempts_exhausted","stage":"source_read","details":{}}',)
+        if sql.startswith('SELECT slot_device_id'):
+            return ('cam-1' if slot_held[0] else None,)
+        raise AssertionError(sql)
+    monkeypatch.setattr(media_flow, '_read_one', read_one)
+    calls = []
+    failed = [False]
+    control = (None if control_kind == 'none' else RuntimeError('committed check')
+               if control_kind == 'error' else asyncio.CancelledError('committed check'))
+    def save(stage, request, key):
+        calls.append((stage, request, key))
+        if stage == failed_stage and not failed[0]:
+            failed[0] = True
+            return DbOutcome(DbOutcomeKind.UNKNOWN)
+        if stage == 'check':
+            status.check_state = 3
+            if control is not None:
+                _attach_db_outcome(control, DbOutcome(DbOutcomeKind.COMPLETED))
+                raise control
+        elif stage.startswith('repair'):
+            status.repair_state = 5
+        elif stage == 'slot':
+            slot_held[0] = False
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+    def save_check_result(request, key, owned):
+        assert isinstance(request, processing.CheckResultSave)
+        return save('check', request, key)
+    def save_repair_decision(request, key, owned):
+        return save('repair_decision', request, key)
+    def save_repair_result(request, key, owned):
+        return save('repair_result', request, key)
+    def release_read_slot(request, key, owned):
+        return save('slot', request, key)
+    monkeypatch.setattr(media_flow, 'CaptureRepository', lambda: SimpleNamespace(
+        save_check_result=save_check_result, save_repair_decision=save_repair_decision,
+        save_repair_result=save_repair_result))
+    world.outputs.release_read_slot.side_effect = release_read_slot
+    world.release.set()
+    with pytest.raises(ConsistencyError):
+        await media_flow._save_internal_read_and_settle(world.runtime, pending)
+    original = next(item for item in calls if item[0] == failed_stage)
+    async def recover():
+        await media_flow.resume_prepared_internal_reads(world.database,
+            pending_read_results=world.runtime.pending_read_results,
+            pending_read_business=world.runtime.pending_read_business,
+            pending_read_ends=world.runtime.pending_read_ends,
+            continuing_read_tickets=world.runtime.continuing_read_tickets)
+    if control is None:
+        await recover()
+    else:
+        with pytest.raises(type(control)) as raised:
+            await recover()
+        assert raised.value is control
+    await recover()
+    retried = [item for item in calls if item[0] == failed_stage]
+    assert len(retried) == 2 and retried[0][1] is retried[1][1] and retried[1][2] == original[2]
+    assert [stage for stage, _, _ in calls].count('check') == (2 if failed_stage == 'check' else 1)
+    assert not world.runtime.pending_read_business and not world.runtime.pending_read_results
+    world.operations.finish_attempt.assert_called_once()
+
+
+async def test_public_obtain_recovery_reuses_completed_release_before_result_settlement(world):
+    from camctl.outputs import obtain_flow
+    from camctl.operations.attempts import RetryWaitGate
+
+    class RoundReached(Exception):
+        pass
+    async def begin_round(database, now):
+        raise RoundReached
+    world.runtime.outputs = world.outputs
+    world.runtime.occurred_at = lambda: 123
+    world.runtime.retry_gate = RetryWaitGate()
+    world.runtime.discovery = SimpleNamespace(begin_round=begin_round)
+    facts = {'id': 2, 'delivery_status': 1, 'source_device_file_id': 7}
+    world.database.read.return_value = facts
+    world.outputs.release_read_slot.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN), DbOutcome(DbOutcomeKind.COMPLETED)]
+    pending = _pending_result(world)
+    world.release.set()
+    with pytest.raises(ConsistencyError):
+        await obtain_flow._save_read_result_and_settle(world.runtime, pending, facts)
+    original = world.runtime.pending_read_business[(2, 'release_read_slot')]
+    with pytest.raises(RoundReached):
+        await obtain_flow.advance_obtain(world.runtime)
+    assert world.outputs.release_read_slot.call_count == 2
+    assert all(call.args[:2] == (original.request, original.key)
+        for call in world.outputs.release_read_slot.call_args_list)
+    assert not world.runtime.pending_read_results and not world.runtime.pending_read_business
+    world.operations.finish_attempt.assert_called_once()

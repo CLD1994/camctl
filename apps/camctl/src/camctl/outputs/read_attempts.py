@@ -168,6 +168,8 @@ class PendingReadResult:
     business: "PendingReadBusiness | None" = None
     result_save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     settlement: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    business_saves: dict[tuple[int, str], "PendingReadBusiness"] = field(
+        default_factory=dict, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -309,18 +311,25 @@ async def retry_read_business(runtime):
         await _save_pending_read_business(runtime, identity, pending, retry=True)
 
 
-async def save_read_business(runtime, copy_id, operation, request, save, *, on_completed=None, retry=False):
+async def save_read_business(runtime, copy_id, operation, request, save, *, on_completed=None, retry=False,
+                             business_saves=None):
     """共同等待原申请的保存与应用；明确恢复时才重新核实失败结果。"""
     identity = (copy_id, operation)
-    pending = runtime.pending_read_business.get(identity)
+    # 原结果仍持有后续各申请；全局恢复完成并删除活动责任后也能交付原回执。
+    pending = (business_saves.get(identity) if business_saves is not None else None)
+    if pending is None:
+        pending = runtime.pending_read_business.get(identity)
     if pending is None:
         pending = PendingReadBusiness(save, request, new_operation_key(), on_completed)
         runtime.pending_read_business[identity] = pending
+    if business_saves is not None:
+        business_saves[identity] = pending
     return await _save_pending_read_business(runtime, identity, pending, retry=retry)
 
 
 async def _save_pending_read_business(runtime, identity, pending, *, retry=False):
-    if retry:
+    # 已完成的控制错误也属于原回执；只有仍未收场的业务责任可以重新核实。
+    if retry and runtime.pending_read_business.get(identity) is pending:
         pending.shared.retry_failed()
 
     def apply_completed(receipt):

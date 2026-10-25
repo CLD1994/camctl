@@ -1051,7 +1051,7 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
 
             released = await save_read_business(runtime, facts["id"], "release_read_slot",
                 SlotRequest(copy_id=facts["id"], occurred_at=runtime.occurred_at()),
-                runtime.outputs.release_read_slot, retry=retry)
+                runtime.outputs.release_read_slot, retry=retry, business_saves=pending.business_saves)
             if released.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
         runtime.retry_gate.cleared(f"read/{facts['id']}")

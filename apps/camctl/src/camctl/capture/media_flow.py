@@ -846,10 +846,10 @@ async def _save_internal_read_and_settle(flow: MediaFlow, pending, *, retry=Fals
     if retry:
         pending.settlement.retry_failed()
         pending.result_save.retry_failed()
-    await pending.settlement.run(lambda: _save_internal_read_result(flow, pending))
+    await pending.settlement.run(lambda: _save_internal_read_result(flow, pending, retry=retry))
 
 
-async def _save_internal_read_result(flow, pending):
+async def _save_internal_read_result(flow, pending, *, retry=False):
     pending = await save_read_result(flow, pending)
     if pending is None:
         return
@@ -866,9 +866,17 @@ async def _save_internal_read_result(flow, pending):
     row = await _read_one(flow.database, "SELECT processing_id,inspection_id FROM file_copies WHERE id=?", (int(ticket.target_id),))
     if row is None:
         raise ConsistencyError("已结束读取尝试缺少对应拷贝")
+    notification_error = None
     if exhausted:
         if row[0] is not None:
-            await _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
+            try:
+                await _fail_internal_read_input(flow, copy_id=int(ticket.target_id),
+                    business_saves=pending.business_saves, retry=retry)
+            except BaseException as error:
+                actual = db_outcome_for(error)
+                if actual is None or actual.kind is not _DbOutcomeKind.COMPLETED:
+                    raise
+                notification_error = error
     if row[1] is not None:
         run_status = await _read_one(flow.database, "SELECT status FROM operation_runs WHERE copy_id=?", (int(ticket.target_id),))
         if run_status is None:
@@ -898,9 +906,12 @@ async def _save_internal_read_result(flow, pending):
             SlotRequest(int(ticket.target_id), pending.finish.occurred_at), OutputsRepository().release_read_slot)
         return
     forget_read_result(flow, pending)
+    if notification_error is not None:
+        raise notification_error
 
 
-async def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
+async def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int,
+                                    business_saves=None, retry=False) -> None:
     """原读取可靠耗尽后结束所需检查或修复，再释放原读取机会。"""
     from camctl.capture.processing import (
         CheckPhase, CheckResultSave, MediaObservation, ProcessingError, RepairBasis,
@@ -944,8 +955,30 @@ async def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
             processing_id, RepairOutcome.FAILED, flow.occurred_at(), error=failure)))
     from camctl.outputs.read_attempts import save_read_business
 
+    held = [] if business_saves is None else [
+        pending for (identity, operation), pending in business_saves.items()
+        if identity == copy_id and operation != "release_read_slot"]
+    held_operations = {pending.save.__name__ for pending in held}
+    requests = [(pending.save, pending.request) for pending in held] + [
+        (save, request) for save, request in requests if save.__name__ not in held_operations]
+    notification_error = None
+    async def save_stage(operation, request, save):
+        nonlocal notification_error
+        try:
+            await save_read_business(flow, copy_id, operation, request, save,
+                business_saves=business_saves, retry=retry)
+        except BaseException as error:
+            actual = db_outcome_for(error)
+            if actual is None or actual.kind is not _DbOutcomeKind.COMPLETED:
+                raise
+            if notification_error is None:
+                notification_error = error
+
     for save, request in requests:
-        await save_read_business(flow, copy_id, save.__name__, request, save)
-    if (await _read_one(flow.database, "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_id,)))[0] is not None:
-        await save_read_business(flow, copy_id, "release_read_slot", SlotRequest(copy_id, flow.occurred_at()),
-                           OutputsRepository().release_read_slot)
+        await save_stage(save.__name__, request, save)
+    if ((business_saves is not None and (copy_id, "release_read_slot") in business_saves)
+            or (await _read_one(flow.database, "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_id,)))[0] is not None):
+        await save_stage("release_read_slot", SlotRequest(copy_id, flow.occurred_at()),
+                         OutputsRepository().release_read_slot)
+    if notification_error is not None:
+        raise notification_error
