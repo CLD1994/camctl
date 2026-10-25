@@ -42,6 +42,16 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 录像结果事务成本计量的验证与安装（2026-10-25）
+
+本轮为录像结果完整事务增加阶段独占计时、线程 CPU 时间、SQL API 调用及行数聚合，并记录历史解码和校验的包含子调用明细。保存动作、方法和原操作键贯穿分段原保存及保存恢复；字段解释与新计划测量步骤见[人工验证指南](../hardware/result-reading-performance-validation.md#事务成本分解)。事务、批次、调度、重试和设备调用沿用原行为。
+
+验证源码为 `188c307d1f8d000da33cdc0183bdea40b54e8aea`，环境为 Linux 开发容器、CPython 3.11.17、SQLite 3.53.1。命令为 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，UTC 2026-10-25 03:25:50 至 03:27:37，结果为 **7796 项通过、1 项跳过、2 条既有 asyncio 标记警告，102.46 秒，退出 0**。命令、环境、源码及全部输出保存在 `.local/verification/transaction-cost-measurement-20261025/unit.json` 和同目录 `unit.log`。独立只读审查通过；移除计时包裹后的事务业务语法树与原实现一致，核对收据为同目录 `ast-equivalence.json`。本轮未运行集成测试或真实相机命令。
+
+人工环境 `/home/cld/.camctl/manual-validation-20261025` 已安装对应 wheel，SHA-256 为 `63e0ba5eb88db52633c1025cebdf521b6a38a2064380d8097102203752206711`。314 个生产 Python 文件及 27 项权威资源与源码、安装包逐项一致，依赖检查和原配置下的静态能力导出退出 0；能力与主机、客户端现有文件一致。安装前确认没有待执行动作、拍摄占用、在途尝试及基准读取，随后停止空闲的旧 CLI 进程。安装前后配置字节、41 张业务表、元信息和实例身份均相同，数据库继续使用 V5。安装核对与原进程退出记录由 `.local/deployments/20261025-transaction-cost-measurement/delivery-manifest.json` 汇总。
+
+该版本提供计量能力；原日志只有约 79 秒的总耗时，不能事后还原内部占比。实际阶段数据仍待用户以新的计划时间和 `request_id` 运行同配置录像后，从 `camctl.log` 中读取。
+
 ## 软件恢复启用配置与诊断修复的合并验证（2026-10-25）
 
 软件恢复配置使用 `devices.<id>.software_recovery.enabled`，默认关闭；驱动维护已验证的精确固件及原拍摄范围。当前记录覆盖 OSMO 360 II 构建 38390 的普通分段录像，真实固件仍在原恢复检查中读取并精确核对。原冻结责任继续使用原指纹、期限和预算。准备占用的报告事实修复同时包含在该版本中，实际行为由[配置简化设计](../superpowers/specs/2026-10-25-software-recovery-enablement-design.md)及下节诊断记录说明。
