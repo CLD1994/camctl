@@ -2335,7 +2335,7 @@ def _active_cleanup_call(runtime,item_id):
         and _pending_query_for_item(runtime,item_id) is None
         and (original.database_id,original.ticket.run_id,original.ticket.attempt_id) in runtime.active_calls)
 
-async def advance_cleanup(runtime: CleanupRuntime) -> None:
+async def advance_cleanup(runtime: CleanupRuntime) -> bool:
     """推进一个轮次的清理执行链；各步按已保存事实幂等。
 
     到时的待执行动作先开始，执行中的动作按目标集合状态推进：集
@@ -2344,12 +2344,13 @@ async def advance_cleanup(runtime: CleanupRuntime) -> None:
     """
     current_round = replace(runtime, round_token=object())
     try:
-        await _advance_cleanup_round(current_round)
+        return await _advance_cleanup_round(current_round)
     finally:
         runtime.last_recovery_diagnostic = current_round.last_recovery_diagnostic
 
 
-async def _advance_cleanup_round(runtime: CleanupRuntime) -> None:
+async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
+    wakeup_required = False
     for item_id in tuple(runtime.consumed_queries):
         row = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT status FROM cleanup_items WHERE id=?', (item_id,)).fetchone())
         if row is None or row[0] in _MEMBER_TERMINAL:
@@ -2364,6 +2365,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> None:
             from camctl.persistence.models import DbOutcomeKind
             if saved.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原清理动作申请续接未完成: {method} {saved.error}")
+            wakeup_required = True
     recovered = {pending.item_id for pending in runtime.pending_queries.values()}
     recovered.update(runtime.pending_companions)
     recovered.update(runtime.pending_intents)
@@ -2376,6 +2378,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> None:
             if _active_cleanup_call(runtime,item_id):
                 continue
             step = await delete_source_file(local, item_id)
+            wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
                 raise ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
@@ -2385,43 +2388,50 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> None:
                 if item_id in recovered or _active_cleanup_call(runtime,item_id):
                     continue
                 step = await delete_source_file(local, item_id)
+                wakeup_required = True
                 if step is not None and step.phase in _MEMBER_ERROR_PHASES:
                     raise ConsistencyError(
                         f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     finally:
         runtime.last_recovery_diagnostic = local.last_recovery_diagnostic
     now = runtime.occurred_at()
-    await _start_due(runtime, now)
+    wakeup_required |= await _start_due(runtime, now)
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)
+        wakeup_required = True
     from camctl.outputs.cleanup_discovery import cleanup_item_batches
     async for batch in cleanup_item_batches(runtime.database, batch_size=runtime.discovery_batch_size):
         for item_id in batch:
             if handed_off_this_round(runtime, item_id) or _active_cleanup_call(runtime,item_id):
                 continue
             step = await delete_source_file(runtime, item_id)
+            wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
                 raise ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)
+        wakeup_required = True
+    return wakeup_required
 
 
-async def _start_due(runtime: CleanupRuntime, now: int) -> None:
+async def _start_due(runtime: CleanupRuntime, now: int) -> bool:
     """开始到时的待执行清理动作；未到时与已取消动作不进入。"""
     from camctl.persistence.models import DbOutcomeKind
 
     after = (0, -1, 0)
+    wakeup_required = False
     while True:
         rows = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT plan_id,input_index,id FROM actions WHERE status=1 AND cancel_requested=0 AND type=5 AND scheduled_at<=? AND (plan_id,input_index,id)>(?,?,?) ORDER BY plan_id,input_index,id LIMIT ?', (now, *after, runtime.discovery_batch_size)).fetchall())
         if not rows:
-            return
+            return wakeup_required
         after = rows[-1]
         for _plan, _index, action_id in rows:
             outcome = await save_cleanup_request(runtime, 'start_cleanup_action', StartCleanupAction(action_id=action_id, occurred_at=now), action=True)
             if outcome.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(
                     f"清理开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+            wakeup_required |= outcome.value.disposition is CleanupStartDisposition.SAVED
 
 
 async def _running_cleanup_actions(runtime: CleanupRuntime):

@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping
 
-from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork, FlowWakeup
 from camctl.bootstrap.capture_assembly import (
     _DEFAULT_RETRY_INTERVAL_S,
     _device_seconds,
@@ -626,13 +626,15 @@ class _CleanupRound:
 
     async def __call__(self, context):
         if self._stopping or self._active:
-            return
+            return FlowWakeup.IDLE
         self._active = True
         self._settled = asyncio.Event()
         try:
             runtime = await self._factory(context.database)
             if runtime is not None:
-                await advance_cleanup(runtime)
+                required = await advance_cleanup(runtime)
+                return FlowWakeup.IDLE if required is False else FlowWakeup.RECHECK
+            return FlowWakeup.IDLE
         except (sqlite3.Error, ConsistencyError, DbReadError) as error:
             if not self._state_db_errors:
                 raise
@@ -671,7 +673,8 @@ class CleanupFlow:
                             and actual is self._background.unconsumed_task
                             and actual.done() and not self._notified):
                         self._notified = True
-                        if wake is not None:
+                        if (wake is not None
+                                and self._background.completion_requires_wakeup(actual)):
                             wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
 
                 task.add_done_callback(completed)

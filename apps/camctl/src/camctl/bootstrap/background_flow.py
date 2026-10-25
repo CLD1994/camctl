@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
+
+
+class FlowWakeup(Enum):
+    """后台流程明确交付中央调度是否需要立即重新检查。"""
+
+    RECHECK = "recheck"
+    IDLE = "idle"
 
 
 @dataclass(frozen=True)
 class _FlowResult:
     error: BaseException | None = None
+    wakeup_required: bool = True
 
 
 class BackgroundFlow:
@@ -24,6 +33,14 @@ class BackgroundFlow:
     def unconsumed_task(self):
         """只观察现有未交付任务；不改变任务或结果的所有权。"""
         return self._task
+
+    @staticmethod
+    def completion_requires_wakeup(task):
+        """只观察完成提示；原错误和结果仍由拥有者消费。"""
+        if task.cancelled() or task.exception() is not None:
+            return True
+        result = task.result()
+        return result.error is not None or result.wakeup_required
 
     def _consume(self):
         task, self._task = self._task, None
@@ -43,8 +60,8 @@ class BackgroundFlow:
 
     async def _run(self, context):
         try:
-            await self._flow(context)
-            return _FlowResult()
+            result = await self._flow(context)
+            return _FlowResult(wakeup_required=result is not FlowWakeup.IDLE)
         except BaseException as error:
             # shield 不传递内部取消异常；把原异常作为结果保存到消费时。
             return _FlowResult(error)
