@@ -1,5 +1,6 @@
 """报告公开分支才申请增长恢复，错误头在补齐前保留证据。"""
 from contextlib import ExitStack
+import json
 from unittest.mock import create_autospec
 
 import pytest
@@ -34,9 +35,11 @@ def error_request(monkeypatch, header):
     from camctl.contracts import report_reads
     request = ReportExpansionRequest('segment_error', header.source_action_id, header)
     monkeypatch.setattr(report_reads, 'registered_error', create_autospec(
-        report_reads.registered_error, return_value={'details_schema': {'$ref': '#/$defs/segment_error_header'}}))
+        report_reads.registered_error, return_value={'details_schema': {
+            '$ref': 'workflow-codes.json#/$defs/segment_error_header'}}))
     monkeypatch.setattr(report_reads, '_dependencies', create_autospec(
-        report_reads._dependencies, return_value={'read_expansions': {'segment_error': {
+        report_reads._dependencies, return_value={'error_registry': '../../../protocol/errors/workflow-codes.json',
+            'read_expansions': {'segment_error': {
             'trigger': {'kind': 'registered_error', 'details_schema': '#/$defs/segment_error_header'}}}}))
     monkeypatch.setattr(report_reads, 'validate_segment_error_header', create_autospec(
         report_reads.validate_segment_error_header, return_value=header))
@@ -119,6 +122,49 @@ def test_proved_absent_formal_set_never_opens_unread_growth(monkeypatch, retaine
         else:
             expansion = expand()
             assert list(expansion.members(generation._SEGMENT_PATHS[1])) == []
+    source.open_expansion.assert_not_called()
+
+
+def test_qualified_error_header_without_formal_set_still_encodes_three_empty_arrays(monkeypatch):
+    from camctl.contracts.public_projection import ProjectionStructure
+    from camctl.reporting import encoding
+    from camctl.reporting.encoding import ReportDocument, ReportStream
+    from camctl.reporting.stream_validation import NodeGate
+    source, _ = handles()
+    source.primary.return_value.update(execution_started=False, status=1)
+    source.active_result_ref.return_value = None
+    error_request(monkeypatch, SegmentErrorHeader(21, None, DefaultScopeState.UNKNOWN, None, 0))
+    error = {'code': 'default_segment_scope_unconfirmed', 'details': {
+        'source_action_instance_id': '21', 'gap_count': None, 'retained_original_count': 0,
+        'default_scope': {'state': 'unknown', 'member_count': None}}}
+    structures = {'report': ProjectionStructure(None, (('plans', 'plan'),)),
+        'plan': ProjectionStructure('plan_instance_id', (('actions', 'action'),)),
+        'action': ProjectionStructure('action_instance_id', ())}
+    monkeypatch.setattr(encoding, 'projection_structure', create_autospec(
+        encoding.projection_structure, side_effect=structures.__getitem__))
+    with ExitStack() as stack:
+        expansion = generation._SegmentExpansion(None, H, object(), error, stack, source_handle=source)
+        stream = ReportStream(ReportDocument('43', 224, 243))
+        gate = create_autospec(NodeGate, instance=True)
+        gate.binding = object()
+        arrays = generation._expansion_arrays(expansion, stream, gate)
+        tokens = list(stream.open())
+        tokens.extend(stream.open_array('plans'))
+        tokens.extend(stream.open_object(identity=1))
+        tokens.extend(stream.field('plan_instance_id', '1'))
+        tokens.extend(stream.open_array('actions'))
+        tokens.extend(stream.open_object(identity=21))
+        tokens.extend(stream.field('action_instance_id', '21'))
+        tokens.extend(generation._write_fields(stream, gate, {'error': error}, arrays=arrays))
+        tokens.extend(stream.close_object())
+        tokens.extend(stream.close_array())
+        tokens.extend(stream.close_object())
+        tokens.extend(stream.close_array())
+        tokens.extend(stream.finish())
+    details = json.loads(b''.join(tokens))['plans'][0]['actions'][0]['error']['details']
+    assert details == {'source_action_instance_id': '21', 'gap_count': None,
+        'retained_original_count': 0, 'gaps': [], 'retained_output_ids': [],
+        'default_scope': {'state': 'unknown', 'member_count': None, 'output_ids': []}}
     source.open_expansion.assert_not_called()
 
 
