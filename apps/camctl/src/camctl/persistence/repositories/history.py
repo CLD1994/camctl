@@ -12,8 +12,9 @@ import sqlite3
 import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from collections.abc import Iterator, Mapping, Sequence
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,7 +68,10 @@ from camctl.persistence.models import (
     DbPriority,
     DbExecutorError,
 )
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import (
+    DatabaseMetadata, DbConfig, DbOpenMode, OwnedConnection, open_existing,
+    verify_directory_binding,
+)
 from camctl.persistence.row_validation import ProjectionRowValidator
 from camctl.persistence.transaction import read_transaction_range as _transaction_range
 
@@ -81,7 +85,6 @@ class _FrozenRegistration:
     from_wm: int
     to_wm: int
     boundary: HistoryBoundary
-    format_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -109,27 +112,105 @@ class _ObjectSeed:
     snapshot: _SnapshotChoice | None
 
 
+def read_frozen_registration(connection, report_id: int) -> "_FrozenRegistration":
+    """在调用方所属的连接读取有限冻结登记值。"""
+    ObjectId(report_id)
+    with closing(connection.execute(
+            "SELECT from_wm, to_wm, frozen_event_id, format_version"
+            " FROM reports WHERE id = ?", (report_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError(f"报告 {report_id} 未登记")
+    if int(row[3]) != 1:
+        raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
+    frozen_event_id = int(row[2])
+    with closing(connection.execute(
+            "SELECT transaction_id FROM history_events WHERE id = ?",
+            (frozen_event_id,))) as cursor:
+        event_row = cursor.fetchone()
+    if event_row is None:
+        raise ConsistencyError(
+            f"报告 {report_id} 的冻结事件不在已提交历史中")
+    transaction = _transaction_range(connection, int(event_row[0]))
+    if transaction.last_event_id != frozen_event_id:
+        raise ConsistencyError(
+            f"报告 {report_id} 的冻结位置不是完整已提交边界")
+    return _FrozenRegistration(
+        from_wm=int(row[0]), to_wm=int(row[1]),
+        boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
+
+
 class HistoryRepository:
     """真实 SQLite 的历史读取仓储（报告进程使用只读连接）。"""
 
-    def __init__(self, path: Path, *, config: DbConfig | None = None) -> None:
+    def __init__(self, path: Path, *, config: DbConfig | None = None,
+                 expected_instance_id: str | None = None,
+                 expected_directories: tuple[str | Path, str | Path, str | Path] | None = None) -> None:
         self.path = Path(path)
         self._config = config if config is not None else DbConfig()
-        self._instance_id: str | None = None
+        self._instance_id = expected_instance_id
+        self._expected_directories = expected_directories
+        self._report_connection: sqlite3.Connection | None = None
+        self._report_resources: ExitStack | None = None
+        self._report_validator: ProjectionRowValidator | None = None
         # 不可变历史允许复用已核验的组；只保留固定 H 和上一页末组。
         self._validated_ranges: dict[int, TransactionRange] = {}
+        self._status_history_range: TransactionRange | None = None
         self._current_range: TransactionRange | None = None
 
     def _connect(self) -> sqlite3.Connection:
+        return self._open_read_connection().connection
+
+    def _open_read_connection(self) -> OwnedConnection:
         owned = open_existing(self.path, DbOpenMode.EXISTING_RO, self._config)
         try:
+            if self._instance_id is not None and owned.metadata.instance_id != self._instance_id:
+                raise ConsistencyError("历史读取的数据库实例身份发生变化")
+            if self._expected_directories is not None:
+                verify_directory_binding(owned.metadata, *self._expected_directories)
             owned.connection.execute("PRAGMA cache_size=-2048").close()
             owned.connection.execute("PRAGMA temp_store=FILE").close()
             owned.connection.execute("PRAGMA temp.cache_size=-2048").close()
-            return owned.connection
+            return owned
         except BaseException:
             owned.connection.close()
             raise
+
+    @contextmanager
+    def report_read_scope(self) -> Iterator[DatabaseMetadata]:
+        """单份报告持有读取资源；各页仍独立开始和结束事务。"""
+        if self._report_resources is not None:
+            raise ConsistencyError("报告读取资源不能跨报告嵌套使用")
+        try:
+            with ExitStack() as resources:
+                owned = self._open_read_connection()
+                resources.callback(owned.connection.close)
+                self._instance_id = owned.metadata.instance_id
+                self._report_connection = owned.connection
+                self._report_resources = resources
+                yield owned.metadata
+        finally:
+            self._report_connection = None
+            self._report_resources = None
+            self._status_history_range = None
+            self._report_validator = None
+            self._validated_ranges.clear()
+            self._current_range = None
+
+    @contextmanager
+    def projection_validator(self, storage_path=None) -> Iterator[ProjectionRowValidator]:
+        """对象独立核对唯一键；同份报告复用空结构与有限元数据。"""
+        resources = self._report_resources
+        if resources is None:
+            with ProjectionRowValidator(storage_path=storage_path) as validator:
+                yield validator
+            return
+        if self._report_validator is None:
+            directory = resources.enter_context(TemporaryDirectory(prefix="camctl-report-validation-"))
+            self._report_validator = resources.enter_context(ProjectionRowValidator(
+                storage_path=Path(directory) / "validation.db"))
+        with self._report_validator.object_scope() as validator:
+            yield validator
 
     def current_boundary(self) -> HistoryBoundary:
         with self._read_connection() as connection:
@@ -137,8 +218,9 @@ class HistoryRepository:
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
+        shared = self._report_connection is not None
         try:
-            connection = self._connect()
+            connection = self._report_connection if shared else self._connect()
         except BaseException:
             self._validated_ranges.clear()
             self._current_range = None
@@ -150,12 +232,20 @@ class HistoryRepository:
             yield connection
             with closing(connection.execute("COMMIT")):
                 pass
-        except BaseException:
+        except BaseException as error:
             self._validated_ranges.clear()
             self._current_range = None
+            if shared and connection.in_transaction:
+                try:
+                    with closing(connection.execute("ROLLBACK")):
+                        pass
+                except BaseException as rollback_error:
+                    error.add_note(f"报告短读事务回滚失败: {rollback_error}")
+                    raise error from rollback_error
             raise
         finally:
-            connection.close()
+            if not shared:
+                connection.close()
 
     def _bind_instance(self, connection, *, from_repository=False):
         instance_id = _one(connection, "SELECT instance_id FROM database_metadata")[0]
@@ -289,40 +379,10 @@ class HistoryRepository:
             connection.close()
 
     def frozen_registration(self, report_id: int) -> "_FrozenRegistration":
-        """读取一份报告的冻结依据并核实其冻结边界完整。
-
-        frozen_event_id 必须是其所在历史事务的末事件；否则该位置
-        不是完整已提交边界，按状态库一致性错误处理。
-        """
+        """读取并核实冻结的完整事务边界。"""
         ObjectId(report_id)
-        connection = self._connect()
-        try:
-            with closing(connection.execute(
-                    "SELECT from_wm, to_wm, frozen_event_id, format_version"
-                    " FROM reports WHERE id = ?", (report_id,))) as cursor:
-                row = cursor.fetchone()
-            if row is None:
-                raise ConsistencyError(f"报告 {report_id} 未登记")
-            from camctl.reporting.models import REPORT_FORMAT_VERSIONS
-            if row[3] not in REPORT_FORMAT_VERSIONS:
-                raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
-            frozen_event_id = int(row[2])
-            with closing(connection.execute(
-                    "SELECT transaction_id FROM history_events WHERE id = ?",
-                    (frozen_event_id,))) as cursor:
-                event_row = cursor.fetchone()
-            if event_row is None:
-                raise ConsistencyError(
-                    f"报告 {report_id} 的冻结事件不在已提交历史中")
-            transaction = _transaction_range(connection, int(event_row[0]))
-            if transaction.last_event_id != frozen_event_id:
-                raise ConsistencyError(
-                    f"报告 {report_id} 的冻结位置不是完整已提交边界")
-            return _FrozenRegistration(
-                from_wm=int(row[0]), to_wm=int(row[1]),
-                boundary=HistoryBoundary(transaction.txn_id, frozen_event_id), format_version=int(row[3]))
-        finally:
-            connection.close()
+        with self._read_connection() as connection:
+            return read_frozen_registration(connection, report_id)
 
     def open_report_selection(self, request: ReportScopeRequest) -> ReportEntitySelection:
         """打开固定 H/窗口的有界逐层实体选择会话。"""
@@ -405,25 +465,26 @@ class HistoryRepository:
 
     def open_segment_history(
             self, action_id: int, boundary: HistoryBoundary, *,
-            strategy: str = "auto", batch_size: int = 128,
+            strategy: str = "auto", batch_size: int = 128, event_batch_size: int = 256,
     ) -> SegmentHistoryHandle:
         """完整恢复后返回有界动作句柄；调用者必须关闭句柄。"""
-        from camctl.history.bounded import SegmentHistoryHandle, _limit
+        from camctl.history.bounded import SegmentHistoryHandle, _limit, _event_limit
         _limit(batch_size)
+        _event_limit(event_batch_size)
         if strategy not in ("auto","initial","current","snapshot"):
             raise ValueError("未知历史恢复路径")
         with self._read_connection() as connection:
             seed = self._object_seed(connection, "action", action_id, boundary,
-                                     event_batch_size=batch_size, primary_only=True,
+                                     event_batch_size=event_batch_size, primary_only=True,
                                      include_snapshot=strategy != "initial",
-                                     allow_current_snapshot=strategy == "snapshot")
+                                     allow_current_snapshot=strategy == "snapshot", metadata_only=True)
         if strategy == "auto":
             choice = seed.snapshot
             strategy = ("snapshot" if choice is not None and
                         (choice.boundary == boundary or
                          seed.floor[1]-choice.position[1] < seed.head[1]-seed.floor[1])
                         else "current")
-        handle = SegmentHistoryHandle(self, seed, batch_size)
+        handle = SegmentHistoryHandle(self, seed, batch_size, event_batch_size=event_batch_size)
         try:
             return handle.restore(strategy)
         except (ReplayError,EventValidationError,ValueError,TypeError,KeyError) as error:
@@ -435,75 +496,40 @@ class HistoryRepository:
             handle.close()
             raise
 
-    def status_history(self, entity, identity, boundary, current_status, *, event_batch_size=128):
-        """沿对象目录分页读创建至 H；页间释放连接，只保留有限状态转换。"""
+    def status_history(self, entity, identity, boundary, current_status):
+        """通过稀疏状态目录读取创建至 H 的转换，不读取其他事件正文。"""
+        from camctl.contracts.enums import decode_member, EnumRegistryError
         from camctl.history.queries import status_transitions
         if entity not in ("plan", "action"):
             raise ConsistencyError("状态时间只适用于计划和动作")
+        ObjectId(identity)
+        spec = load_enum_registry()["history_objects"][entity]
         with self._read_connection() as connection:
-            seed = self._object_seed(connection, entity, identity, boundary,
-                event_batch_size=event_batch_size, include_snapshot=False, primary_only=True)
-        placeholders = set()
-        def events():
-            count, previous = 1, 0
-            while count <= seed.floor[1]:
-                page = self._object_event_page(seed.ref, INITIAL_BOUNDARY, boundary, previous, count,
-                    forward=True, batch_size=event_batch_size, remaining=seed.floor[1]-count+1)
-                for event in page:
-                    if event.occurred_at == 0:
-                        placeholders.update(self._local_report_placeholder_events(event))
-                    yield event
-                count += len(page)
-                previous = page[-1].event_id
-        return status_transitions(events(), seed.primary_table, identity, current_status,
-                                  placeholder_events=placeholders)
-
-    def _local_report_placeholder_events(self, candidate):
-        """只识别旧本地报告完成事务的精确形状，其他零值保留为真实 epoch。"""
-        registry = load_event_registry()["events"]
-        finish, complete, local = (registry[name] for name in
-                                  ("ACTION_FINISHED", "PLAN_STATUS_CHANGED", "SYNC_CHANGED"))
-        if (candidate.event_type, candidate.reason) not in (
-            (finish["id"], finish["branches"]["SUCCEED"]["reason"]),
-            (complete["id"], complete["branches"]["COMPLETE"]["reason"])):
-            return ()
-        with self._read_connection() as connection:
-            transaction = _transaction_range(connection, candidate.transaction_id)
-            if transaction.last_event_id - transaction.first_event_id not in (1, 2):
-                return ()
+            checked = self._status_history_range if self._report_resources is not None else None
+            transaction = _transaction_range(connection, boundary.txn_id,
+                checked if checked is not None and checked.txn_id == boundary.txn_id
+                else self._validated_ranges.get(boundary.txn_id))
+            if transaction.last_event_id != boundary.last_event_id:
+                raise ConsistencyError("状态历史 H 不是完整已提交边界")
+            if self._report_resources is not None:
+                self._status_history_range = transaction
             with closing(connection.execute(
-                "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
-                " FROM history_events WHERE transaction_id=? ORDER BY id", (candidate.transaction_id,))) as cursor:
-                events = tuple(decode_event_row(row) for row in cursor.fetchall())
-            if len(events) not in (2, 3) or any(event.occurred_at != 0 or len(event.rows) != 1 for event in events):
-                return ()
-            if [(event.event_type, event.reason) for event in events] != [
-                (local["id"], local["branches"]["LOCAL"]["reason"]),
-                (finish["id"], finish["branches"]["SUCCEED"]["reason"]),
-                *([(complete["id"], complete["branches"]["COMPLETE"]["reason"])] if len(events) == 3 else [])]:
-                return ()
-            sync, action = (event.rows[0] for event in events[:2])
-            if (sync.table != "state_syncs" or action.table != "actions"
-                    or not all(row.before.exists and row.after.exists for row in (sync, action))
-                    or dict(sync.before.values) != {"local_report_id": None}
-                    or set(sync.after.values) != {"local_report_id"}
-                    or sync.after.values["local_report_id"] is None
-                    or dict(action.before.values) != {"status": 2}
-                    or dict(action.after.values) != {"status": 3}):
-                return ()
-            stored_sync = _table_row(connection, "state_syncs", sync.row_id)
-            stored_action = _table_row(connection, "actions", action.row_id)
-            if (stored_sync["action_id"] != action.row_id
-                    or stored_action["type"] != int(enum_for("actions.type").REPORT_STATUS)):
-                return ()
-            if len(events) == 3:
-                plan = events[2].rows[0]
-                if (plan.table != "plans" or plan.row_id != stored_action["plan_id"]
-                        or not plan.before.exists or not plan.after.exists
-                        or dict(plan.before.values) not in ({"status": 1}, {"status": 2})
-                        or dict(plan.after.values) != {"status": 3}):
-                    return ()
-            return tuple(event.event_id for event in events[1:])
+                    "SELECT l.event_id,l.before_status,l.after_status,e.occurred_at,e.clock_status"
+                    " FROM entity_event_links AS l JOIN history_events AS e ON e.id=l.event_id"
+                    " WHERE l.entity_type=? AND l.entity_id=? AND l.after_status IS NOT NULL"
+                    " AND l.event_id<=? ORDER BY l.event_id",
+                    (spec["id"], identity, boundary.last_event_id))) as cursor:
+                # 当前状态模型无回环；数量只随真实状态转换增长。
+                rows = cursor.fetchall()
+        try:
+            for _, before, after, _, clock in rows:
+                for status in (before, after):
+                    if status is not None:
+                        decode_member(spec["table"] + ".status", status)
+                decode_member("history_events.clock_status", clock)
+        except EnumRegistryError as error:
+            raise ConsistencyError("状态目录编号与所属实体或时钟定义不符") from error
+        return status_transitions(rows, current_status)
 
     def restore_primary_at_h(self, entity, entity_id, boundary, *, event_batch_size=128):
         """仅恢复对象主行；子表增长不会进入有限主行消费者。"""
@@ -511,8 +537,23 @@ class HistoryRepository:
         table = load_enum_registry()["history_objects"][entity]["table"]
         return rows.get((table,entity_id))
 
+    def open_report_action(self, action_id, boundary, *, event_batch_size=256, row_batch_size=128):
+        """按报告依赖恢复动作，保留有限事实与增长关系的分页端口。"""
+        from camctl.history.report_action import open_report_history
+        return open_report_history(self, 'action', action_id, boundary,
+            event_batch_size=event_batch_size, row_batch_size=row_batch_size)
+
+    def restore_report_entity(self, entity, entity_id, boundary, *, event_batch_size=256):
+        """报告普通对象的有限自身映像；动作增长关系由专用句柄交付。"""
+        from camctl.history.report_action import open_report_history
+        if entity == 'action':
+            raise ConsistencyError('报告动作须使用有界报告句柄')
+        with open_report_history(self, entity, entity_id, boundary,
+                event_batch_size=event_batch_size) as handle:
+            return {(row.table, row.row_id): dict(row.values) for row in handle.iter_rows()}
+
     def related_primary_rows_at_h(
-        self, entity, column, value, boundary, *, batch_size=128
+        self, entity, column, value, boundary, *, batch_size=128, event_batch_size=128
     ):
         """按不可变关系读取 H 处独立实体，每页释放业务库连接。"""
         definition = load_enum_registry()["history_objects"][entity]
@@ -521,6 +562,8 @@ class HistoryRepository:
             raise ConsistencyError("历史关联读取只接受登记的不可变列")
         if type(batch_size) is not int or not 1 <= batch_size <= 128:
             raise ValueError("历史关联批次必须为1至128")
+        if type(event_batch_size) is not int or event_batch_size < 1:
+            raise ValueError("事件批量必须是正整数")
         after = 0
         while True:
             with self._read_connection() as connection:
@@ -542,7 +585,8 @@ class HistoryRepository:
             if not identities:
                 return
             for identity in identities:
-                row = self.restore_primary_at_h(entity, identity, boundary)
+                row = self.restore_primary_at_h(
+                    entity, identity, boundary, event_batch_size=event_batch_size)
                 if row is None:
                     raise ConsistencyError("H 处关联实体缺少主行")
                 yield identity, row
@@ -608,19 +652,21 @@ class HistoryRepository:
     ) -> dict[tuple[str, int], dict]:
         """按固定 C、H 和可用 S 的相关次数恢复对象自身行。
 
-        先在同一短读视图取得投影副本和路径依据。选中快照只读取
-        其固定 ID；随后每页结束游标和读事务，再应用本页事件。
+        先在同一短读视图取得路径依据；当前路径才复制投影。选中
+        快照只读取其固定 ID，随后逐页应用 (S,H] 的事件。
         """
         with self._read_connection() as connection:
-            seed = self._object_seed(
-                connection, entity, entity_id, boundary,
-                event_batch_size=event_batch_size)
+            seed = self._object_seed(connection, entity, entity_id, boundary,
+                event_batch_size=event_batch_size, metadata_only=True)
+            snapshot = seed.snapshot
+            forward = (snapshot is not None and seed.head[1] != seed.floor[1] and
+                       (snapshot.boundary == boundary or
+                        seed.floor[1]-snapshot.position[1] < seed.head[1]-seed.floor[1]))
+            if not forward:
+                spec = load_enum_registry()['history_objects'][entity]
+                seed = replace(seed, rows=self._seed_entity_rows(connection, spec, entity_id))
         if seed.head[1] == seed.floor[1]:
             return self._finish_rows(seed, dict(seed.rows))
-        snapshot = seed.snapshot
-        forward = (snapshot is not None and
-                   (snapshot.boundary == boundary or
-                    seed.floor[1] - snapshot.position[1] < seed.head[1] - seed.floor[1]))
         if forward:
             rows = self._snapshot_rows(seed)
             lower, upper = snapshot.boundary, boundary
@@ -670,7 +716,7 @@ class HistoryRepository:
             self, connection: sqlite3.Connection, entity: str,
             entity_id: int, boundary: HistoryBoundary, *, event_batch_size: int,
             include_snapshot: bool = True, primary_only: bool = False,
-            allow_current_snapshot: bool = False,
+            allow_current_snapshot: bool = False, metadata_only: bool = False,
     ) -> _ObjectSeed:
         from camctl.persistence.row_history import _anchor
 
@@ -693,8 +739,13 @@ class HistoryRepository:
         if (not primary_only and entity == "action" and _one(connection,
                 "SELECT 1 FROM segment_sets WHERE action_id=? LIMIT 1",(entity_id,))):
             raise ConsistencyError("分段动作须使用有界历史句柄或有限主行入口")
-        seeded = ({(spec["table"], entity_id): _table_row(connection, spec["table"], entity_id)}
-                  if primary_only else self._seed_entity_rows(connection, spec, entity_id))
+        if metadata_only:
+            names = load_event_registry()['tables'][spec['table']]['derived']
+            stored = _one(connection, f"SELECT {','.join(names)} FROM {spec['table']} WHERE id=?", (entity_id,))
+            seeded = {} if stored is None else {(spec['table'], entity_id): dict(zip(names, stored))}
+        else:
+            seeded = ({(spec["table"], entity_id): _table_row(connection, spec["table"], entity_id)}
+                      if primary_only else self._seed_entity_rows(connection, spec, entity_id))
         primary_key = (spec["table"], entity_id)
         if primary_key not in seeded:
             raise ConsistencyError(
@@ -1034,6 +1085,17 @@ class HistoryRepository:
         finally:
             connection.close()
 
+    def _owns_row_identity(self, entity, identity, table, row_id):
+        """仅沿不可变归属关系定位身份，不以当前业务值重算历史状态。"""
+        from camctl.history.bounded import _ownership_branches
+        branches = _ownership_branches(table, entity)
+        if not branches:
+            return False
+        query = ' UNION '.join(branch.query() for branch in branches)
+        with self._read_connection() as connection:
+            return _one(connection, f'SELECT 1 FROM ({query}) WHERE id=? LIMIT 1',
+                        (identity,)*len(branches)+(row_id,)) is not None
+
     def _snapshot_rows(self, seed: _ObjectSeed) -> dict[tuple[str, int], dict]:
         """读取固定快照正文，释放事务后核对格式、主行及归属链。"""
         choice = seed.snapshot
@@ -1054,24 +1116,15 @@ class HistoryRepository:
                 raise SnapshotMaintenanceError("快照正文头与固定元数据不一致")
             rows = {}
             registry = load_event_registry()["tables"]
-            with ProjectionRowValidator() as validator:
+            with self.projection_validator() as validator:
                 for record in decoded:
                     ObjectId(record.values.get("id"))
                     key = (record.table, record.row_id)
-                    current = seed.rows.get(key)
                     if key in rows:
                         raise SnapshotMaintenanceError(f"快照重复保存自身行: {key}")
-                    if current is None or record.table not in registry:
-                        raise SnapshotMaintenanceError(f"快照包含对象自身范围以外的行: {key}")
+                    if record.table not in registry:
+                        raise SnapshotMaintenanceError(f"快照包含未知业务表: {key}")
                     values = dict(record.values)
-                    if values.keys() != current.keys():
-                        raise SnapshotMaintenanceError(f"快照行缺少必要列或包含未知列: {key}")
-                    # 不可变身份和创建位置必须保持；业务可变值使用 S 的
-                    # 原值，不能用新 C 的值覆盖已冻结快照。
-                    fixed = registry[record.table]["immutable"]
-                    for column in (*fixed, "id", "created_event_id"):
-                        if column in current and not json_equal(values[column], current[column]):
-                            raise SnapshotMaintenanceError(f"快照行的固定事实与当前对象矛盾: {key}.{column}")
                     if ("created_event_id" in values
                             and values["created_event_id"] > choice.boundary.last_event_id):
                         raise SnapshotMaintenanceError(f"快照包含 S 之后创建的行: {key}")
@@ -1142,17 +1195,20 @@ class HistoryRepository:
             self._validated_ranges = {recent.txn_id: recent}
             return tuple(events)
 
-    @staticmethod
     def _apply_object_event(
-            seed: _ObjectSeed, rows: dict[tuple[str, int], dict],
+            self, seed: _ObjectSeed, rows: dict[tuple[str, int], dict],
             event: EventEnvelope, *, forward: bool,
     ) -> None:
         """在读事务外应用自身行；固定归属不随可变状态改变。"""
         touched = False
         for change in event.rows:
             key = (change.table, change.row_id)
-            current = seed.rows.get(key)
-            if current is None:
+            current = seed.rows.get(key) if not forward else None
+            if forward:
+                if key not in rows and not self._owns_row_identity(
+                        _snapshot_entity_name(seed.ref[0]), seed.ref[1], *key):
+                    continue
+            elif current is None:
                 continue
             touched = True
             columns = business_columns(change.table)
@@ -1164,8 +1220,9 @@ class HistoryRepository:
                     if not change.before.exists:
                         if target is not None or set(change.after.values) != columns:
                             raise ReplayError(f"行 {key} 的创建事实不完整或已存在")
-                        created = {name: value for name, value in current.items() if name not in columns}
-                        created.update(change.after.values)
+                        from camctl.history.forward import created_values
+                        created = created_values(event, change, seed.ref,
+                            seed.floor[1])
                         rows[key] = created
                     else:
                         if target is None:
@@ -1400,6 +1457,45 @@ class SqliteSnapshotStore:
         self._path = Path(path)
         self._executor = executor
         self._config = config
+
+    async def discover_objects(
+        self, after_plan_id: int | None, threshold: int,
+    ) -> tuple[int, bool]:
+        """启动只记上界；后续只检查新计划及所属动作的快照资格。"""
+        if (isinstance(threshold, bool) or not isinstance(threshold, int)
+                or threshold < 1):
+            raise SnapshotMaintenanceError("发现阈值必须为正整数")
+        if after_plan_id is not None and (
+                isinstance(after_plan_id, bool) or not isinstance(after_plan_id, int)
+                or after_plan_id < 0):
+            raise SnapshotMaintenanceError("发现起点必须为非负整数或 None")
+        objects = load_enum_registry()["history_objects"]
+
+        def execute(owned):
+            with closing(owned.connection.execute("SELECT MAX(id) FROM plans")) as cursor:
+                value = cursor.fetchone()[0]
+            upper = 0 if value is None else int(value)
+            if after_plan_id is None or upper == after_plan_id:
+                return upper, False
+            with closing(owned.connection.execute(
+                "WITH new_objects(entity_type, entity_id) AS ("
+                f" SELECT {objects['plan']['id']}, id FROM plans WHERE id > ? AND id <= ?"
+                " UNION ALL"
+                f" SELECT {objects['action']['id']}, id FROM actions WHERE plan_id > ? AND plan_id <= ?"
+                ") SELECT MAX(CASE WHEN p.id IS NULL OR p.current_change_count < 1"
+                " OR p.snapshot_change_count < 0 OR p.current_change_count < p.snapshot_change_count"
+                " THEN 1 ELSE 0 END),"
+                " MAX(CASE WHEN p.pending_changes >= ? THEN 1 ELSE 0 END)"
+                " FROM new_objects AS n LEFT JOIN entity_snapshot_progress AS p"
+                " ON p.entity_type = n.entity_type AND p.entity_id = n.entity_id",
+                (after_plan_id, upper, after_plan_id, upper, threshold),
+            )) as cursor:
+                invalid, eligible = cursor.fetchone()
+            if invalid:
+                raise SnapshotMaintenanceError("新发现对象缺少有效快照维护进度")
+            return upper, bool(eligible)
+
+        return await self._run(DbJobKind.READ, execute, "新计划快照资格发现")
 
     async def snapshot_candidates(
             self, threshold: int, limit: int) -> tuple[SnapshotRef, ...]:

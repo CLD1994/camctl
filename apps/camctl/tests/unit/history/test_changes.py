@@ -530,3 +530,24 @@ class TestProgressScope:
         assert changes.links == (EntityEventLink(5, 9, 105, 1),)
         assert changes.report_changes == (ReportEntityChange(5, 9, 105, 3),)
         assert changes.progress_updates == ()
+
+
+@pytest.mark.parametrize("table,owner,before,after,expected", [
+    ("plans", PLAN, None, {"status": 3}, (None, 3)),
+    ("actions", ACTION, None, {"status": 4}, (None, 4)),
+    ("plans", PLAN, {"status": 1}, {"status": 2}, (1, 2)),
+    ("actions", ACTION, {"status": 2}, {"status": 6}, (2, 6)),
+    ("actions", ACTION, {"status": 2}, {"status": 2}, (None, None)),
+    ("actions", ACTION, {"cancel_requested": 0}, {"cancel_requested": 1}, (None, None)),
+])
+def test_status_columns_derive_only_primary_creation_and_real_transitions(monkeypatch, table, owner, before, after, expected):
+    from camctl.history import changes
+    # 报告路由为独立职责，此处隔离后只核对已验证事件的目录派生。
+    monkeypatch.setattr(changes, "event_report_targets", lambda *args: ())
+    row = RowChange(table, 7, RowImage(before is not None, before or {}), RowImage(True, after))
+    event = _validated(_envelope(101, 1, 1, (row,)), "test", "test", {(table, 7): (owner, 7)})
+    initial = {table: {7: before}} if before is not None else {table: {}}
+    derived = derive_changes((event,), StateSlice(initial), StateSlice({table: {7: after}}))
+    link, = derived.links
+    assert (link.before_status, link.after_status) == expected
+    assert link.change_count == 1

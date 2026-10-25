@@ -175,27 +175,52 @@
     "segment_set_members": {
       "from": "segment_sets.id",
       "to": "segment_members.set_id",
-      "cardinality": "many"
+      "cardinality": "many",
+      "read_phase": [
+        "segment_error"
+      ]
     },
     "segment_set_gaps": {
       "from": "segment_sets.id",
       "to": "segment_gaps.set_id",
-      "cardinality": "many"
+      "cardinality": "many",
+      "read_phase": [
+        "segment_error"
+      ]
     },
     "segment_set_scope": {
       "from": "segment_sets.id",
       "to": "segment_scope_members.set_id",
-      "cardinality": "many"
+      "cardinality": "many",
+      "read_phase": [
+        "segment_error",
+        "video_coverage"
+      ]
     },
     "segment_scope_output": {
       "from": "segment_scope_members.output_id",
       "to": "outputs.id",
-      "cardinality": "optional_one"
+      "cardinality": "optional_one",
+      "read_phase": [
+        "segment_error",
+        "video_coverage"
+      ]
     },
     "segment_member_file": {
       "from": "segment_members.file_id",
       "to": "device_files.id",
-      "cardinality": "one"
+      "cardinality": "one",
+      "read_phase": [
+        "segment_error"
+      ]
+    },
+    "segment_scope_member": {
+      "from": "segment_scope_members.member_id",
+      "to": "segment_members.id",
+      "cardinality": "one",
+      "read_phase": [
+        "video_coverage"
+      ]
     }
   },
   "projections": {
@@ -356,7 +381,6 @@
           }
         },
         "status_history": {
-          "minimum_format": 2,
           "when": {
             "op": "literal",
             "value": true
@@ -379,7 +403,8 @@
         "segment_set_gaps",
         "segment_set_scope",
         "segment_scope_output",
-        "segment_member_file"
+        "segment_member_file",
+        "segment_scope_member"
       ],
       "when": {
         "op": "literal",
@@ -847,7 +872,6 @@
           }
         },
         "status_history": {
-          "minimum_format": 2,
           "when": {
             "op": "literal",
             "value": true
@@ -2778,7 +2802,10 @@
         "outputs.device_file_id",
         "device_files.size_bytes"
       ],
-      "contract": "segments.md#错误头与完整公开详情"
+      "contract": "segments.md#错误头与完整公开详情",
+      "read_phase": [
+        "segment_error"
+      ]
     },
     "video_coverage_expansion_at_same_h": {
       "columns": [
@@ -2801,7 +2828,10 @@
         "outputs.kind",
         "outputs.device_file_id"
       ],
-      "contract": "segments.md#有限核实决定"
+      "contract": "segments.md#有限核实决定",
+      "read_phase": [
+        "video_coverage"
+      ]
     }
   },
   "routes": {
@@ -3019,5 +3049,43 @@
     "direct_derivatives": "产物可用性和清理汇总读取 outputs 已共同保存的派生列。文件观察错误、内部维护和停止尝试不直接替换这些字段。",
     "routes": "路由仅产生需比较字段的候选；读取变化涉及的值与条件后比较公开值及存在性。交付导致取回失败列表改变时只登记交付，随父对象补齐重建取回完整自身字段。",
     "source_catalog": "SQL 尚未同步的目标字段只在 sql_pending 显式登记。其他列由实际 SQL 核验；同步后须删除对应待办，不允许通配豁免。"
+  },
+  "read_expansions": {
+    "segment_error": {
+      "trigger": {
+        "kind": "registered_error",
+        "details_schema": "#/$defs/segment_error_header"
+      },
+      "relations": [
+        "action_segment_sets",
+        "segment_set_members",
+        "segment_set_gaps",
+        "segment_set_scope",
+        "segment_scope_output",
+        "segment_member_file"
+      ],
+      "assertion": "segment_error_expansion_at_same_h",
+      "members": {
+        "relation": "segment_set_members",
+        "selection": "all"
+      }
+    },
+    "video_coverage": {
+      "trigger": {
+        "kind": "projection",
+        "projection": "video_coverage"
+      },
+      "relations": [
+        "action_segment_sets",
+        "segment_set_scope",
+        "segment_scope_member",
+        "segment_scope_output"
+      ],
+      "assertion": "video_coverage_expansion_at_same_h",
+      "members": {
+        "relation": "segment_scope_member",
+        "selection": "referenced"
+      }
+    }
   }
 }

@@ -799,7 +799,7 @@ async def test_completion_proof_uses_original_scan_bound_and_actual_stop(tmp_pat
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
-async def test_confirmed_control_flag_without_original_stop_is_rejected(tmp_path,monkeypatch):
+async def test_original_control_proof_rejects_missing_stop_after_assessment_was_saved(tmp_path,monkeypatch):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     original=transactions._one
     def one(db,sql,params=()):
@@ -807,9 +807,12 @@ async def test_confirmed_control_flag_without_original_stop_is_rejected(tmp_path
         return original(db,sql,params)
     monkeypatch.setattr(transactions,'_one',one)
     try:
+        from camctl.contracts.values import ConsistencyError
+        with pytest.raises(ConsistencyError, match='实际STOP证明'):
+            transactions.verify_completion_proof(request,owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
-        assert saved.kind=='rolled_back'
-        assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()==(0,)
+        assert saved.kind=='completed',saved.error
+        assert saved.result.action_status==3
     finally:owned.connection.close()
 
 async def _pending_stop_world(tmp_path):
@@ -886,7 +889,7 @@ async def test_later_stronger_control_fact_does_not_upgrade_frozen_unknown(tmp_p
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
-async def test_control_saved_after_original_scan_cannot_strengthen_frozen_request(tmp_path,monkeypatch):
+async def test_original_control_proof_rejects_late_control_after_assessment_was_saved(tmp_path,monkeypatch):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     original=transactions._one
     def one(db,sql,params=()):
@@ -894,8 +897,12 @@ async def test_control_saved_after_original_scan_cannot_strengthen_frozen_reques
         return original(db,sql,params)
     monkeypatch.setattr(transactions,'_one',one)
     try:
+        from camctl.contracts.values import ConsistencyError
+        with pytest.raises(ConsistencyError, match='scan之前'):
+            transactions.verify_completion_proof(request,owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
-        assert saved.kind=='rolled_back' and 'scan之前' in str(saved.error)
+        assert saved.kind=='completed',saved.error
+        assert saved.result.action_status==3
     finally:owned.connection.close()
 
 @pytest.mark.asyncio

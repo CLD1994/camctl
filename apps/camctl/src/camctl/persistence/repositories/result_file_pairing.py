@@ -12,16 +12,24 @@ from camctl.history.events import load_event_registry
 from camctl.history.reads import CaptureResultReadScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.event_reads import SqlEventReads
+from camctl.persistence.fact_reads import (
+    opened_operation_fact_scope, read_event, read_operation_transaction, read_transaction,
+)
 from camctl.persistence.transaction import (
     CommandPlan, TransactionError, event_envelope, next_row_id, read_transaction_range,
     row_change, row_facts, update_change,
 )
 from . import result_pages as pages
 from .result_file_ownership import (
-    _guard_boundary, _proof, _request_from_event as ownership_request,
-    _saved_range, request_document as ownership_document,
+    ownership_guard_boundary, ownership_request_from_event as ownership_request,
+    request_document as ownership_document,
 )
-from .result_file_proofs import _file_at, _one, load_completion_input
+from .result_file_proofs import read_file_at_boundary, read_fixed_file, read_result_file_input
+
+
+def _one(connection, sql, parameters=()):
+    with closing(connection.execute(sql, parameters)) as cursor:
+        return cursor.fetchone()
 
 _EVENT = load_event_registry()['events']['DEVICE_FILE_OBSERVED']
 _REASON = _EVENT['branches']['PAIR_FROM_RESULT_SCAN']['reason']
@@ -61,25 +69,25 @@ def _request(event):
     return result
 
 
-def _validate_page(connection, saved, raw, event, transaction, current_boundary):
-    action, _, attempt, _ = pages.committed_page_proof(connection, saved, raw, event, transaction)
-    return action, attempt
-
-
 def _scan(connection, request, current_boundary):
     boundary = request.source_boundary
-    transaction = read_transaction_range(connection, boundary.txn_id)
+    transaction = read_transaction(connection, boundary.txn_id)
     if transaction.last_event_id != boundary.last_event_id:
         raise ConsistencyError('配对文件来源不是完整边界')
-    saved, raw, event, transaction = pages._at_record(connection, request.scan.event_id)
-    if saved.ref != request.scan or transaction.last_event_id > boundary.last_event_id:
+    saved, raw = pages.read_saved_page(connection, request.scan.event_id)
+    record = read_event(connection, request.scan.event_id)
+    if saved.ref != request.scan or record.transaction.last_event_id > boundary.last_event_id:
         raise ConsistencyError('扫描配对改变原末页引用或引用未来原页')
-    action, attempt = _validate_page(connection, saved, raw, event, transaction, current_boundary)
+    run = row_facts(connection, 'operation_runs', request.scan.ticket.run_id)
+    selected = _one(connection, 'SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
+                    (request.scan.ticket.run_id, request.scan.ticket.attempt_id))
+    attempt = None if selected is None else row_facts(connection, 'operation_attempts', selected[0])
+    action = None if run is None else row_facts(connection, 'actions', run['action_id'])
+    if action is None or attempt is None or raw['run_id'] != run['id']:
+        raise ConsistencyError('扫描配对没有同一实际流程及尝试')
     if (not saved.page.scan_complete or not saved.page.set_finalized
             or saved.page.outcome.error is not None or saved.ref.next_cursor is not None):
         return None
-    # A1 两入口必经的逐页 guard/seal 已归纳保存连续前缀。本次独立重放
-    # 末页 F 前资格及紧邻页，再核其原首点，避免每个 LRF 重扫全目录链。
     return action, attempt
 
 
@@ -102,7 +110,7 @@ def _classify(connection, request, *, current_boundary=None):
     if scan is None:
         return None
     action, attempt = scan
-    preview = _file_at(connection, request.preview_file_id, request.source_boundary)
+    preview = read_file_at_boundary(connection, request.preview_file_id, request.source_boundary)
     relation = _one(connection,
         'SELECT family_directory,family_stem,family_role FROM result_page_files'
         ' WHERE run_id=? AND file_id=? AND attempt_id=? AND page_event_id<=?'
@@ -132,19 +140,19 @@ def _classify(connection, request, *, current_boundary=None):
         current_page = None
         for file_id, page_id, identity, family_role in cursor:
             if current_page is None or current_page.ref.event_id != page_id:
-                current_page, _ = pages._at(connection, page_id)
+                current_page, _ = pages.read_saved_page(connection, page_id)
             entries = [entry for entry in current_page.page.entries if entry.identity == identity]
             if len(entries) != 1 or (identity, file_id) not in current_page.file_ids:
                 raise ConsistencyError('族关系不属于实际原页差集')
             entry = entries[0]
-            if pages._family_fields(
+            if pages.result_file_family(
                 entry.identity,
                 result_policy=action["execution_spec_json"].get("result_policy"),
             ) != (directory, stem, family_role):
                 raise ConsistencyError('族字段与原观察身份不符')
-            member = load_completion_input(connection, current_page.ref, file_id,
-                request.source_boundary, current_boundary=current_boundary)
-            file = _file_at(connection, file_id, request.source_boundary)
+            member = read_result_file_input(connection, current_page.ref, file_id,
+                request.source_boundary)
+            file = read_file_at_boundary(connection, file_id, request.source_boundary)
             if (member.ownership is not OwnershipState.OWNED
                     or member.completion is not FileCompletionState.COMPLETE
                     or not entry.complete or entry.size_bytes is None):
@@ -212,7 +220,7 @@ def _pairing_guard(event, context):
         raise EventValidationError('扫描配对缺少实际 SQL 读取端口')
     try:
         request = _request(event)
-        boundary = _guard_boundary(reads.connection, event, context.transaction)
+        boundary = ownership_guard_boundary(reads.connection, event, context.transaction)
         before = pages._page_before_boundary(reads.connection, context.transaction)
         if request.source_boundary != before:
             raise ConsistencyError('配对申请的原文件边界不是本次保存前完整边界')
@@ -242,7 +250,7 @@ class PairResultFilesCommand:
 
     def plan(self, scope):
         connection, request = scope.connection, self.request
-        if _saved_range(connection, self.key) is not None:
+        if read_operation_transaction(connection, self.key) is not None:
             return CommandPlan((), {}, {}, result=_verify(request, self.key, connection), read_only=True)
         if pages._latest_history_boundary(connection) != request.source_boundary:
             raise ConsistencyError('新配对申请不能更换原保存前文件边界')
@@ -269,14 +277,12 @@ class PairResultFilesCommand:
 
 
 def _verify(request, key, connection, *, current_boundary=None):
-    transaction = _saved_range(connection, key)
+    transaction = read_operation_transaction(connection, key)
     if transaction is None:
         return None
     if transaction.first_event_id != transaction.last_event_id:
         raise TransactionError('原键不属于独立配对事务')
-    stored = _one(connection, f'SELECT {pages._COLUMNS} FROM history_events WHERE id=?',
-                  (transaction.first_event_id,))
-    event = pages.decode_event_row(stored)
+    event = read_event(connection, transaction.first_event_id).event
     validate_event_structure(event)
     if (event.event_type, event.reason, event.transaction_id) != (_EVENT['id'], _REASON, transaction.txn_id):
         raise TransactionError('原键属于其他完整事务')
@@ -304,27 +310,85 @@ def verify_result_file_pairing(request, key, reader, *, execution_finished=True)
     if opened:
         connection.execute('BEGIN')
     try:
-        return _verify(request, key, connection)
+        with opened_operation_fact_scope(connection, opened):
+            return _verify(request, key, connection)
     finally:
         if opened:
             connection.execute('ROLLBACK')
 
 
-def verify_pairing_fact(connection, fact_id, preview_file_id, boundary, *, current_boundary=None):
-    """只核已有原事实及原操作键，绝不执行新的配对保存。"""
+def read_pairing_fact(connection, fact_id, preview_file_id, boundary):
+    opened = not connection.in_transaction
+    if opened: connection.execute('BEGIN')
+    try:
+        return _read_pairing_fact(connection, fact_id, preview_file_id, boundary)
+    finally:
+        if opened: connection.execute('ROLLBACK')
+
+
+def _read_pairing_fact(connection, fact_id, preview_file_id, boundary):
+    """读取已有配对及直接端点，不执行原键核实或重新分类族。"""
+    from camctl.contracts.values import ObjectId
+    from camctl.history.events import business_columns
+    from camctl.contracts.json_values import parse_exact_json
+    ObjectId(fact_id); ObjectId(preview_file_id)
+    if not isinstance(boundary, HistoryBoundary):
+        raise TypeError('配对读取必须使用完整历史边界')
+    complete = read_transaction(connection, boundary.txn_id)
+    if complete.last_event_id != boundary.last_event_id:
+        raise ConsistencyError('配对读取不是完整边界')
     fact = row_facts(connection, 'device_file_pairing_facts', fact_id)
     if (fact is None or fact['preview_file_id'] != preview_file_id
             or fact['created_event_id'] > boundary.last_event_id
             or fact['source_event_id'] >= fact['created_event_id']):
         raise ConsistencyError('配对事实不存在、属于其他预览或越过固定边界')
-    anchor = _one(connection, 'SELECT t.operation_key,t.last_event_id FROM history_events e'
-        ' JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?',
-        (fact['created_event_id'],))
-    if anchor is None or anchor[1] > boundary.last_event_id:
-        raise ConsistencyError('配对事实没有边界内完整创建事务')
-    stored = _one(connection, f'SELECT {pages._COLUMNS} FROM history_events WHERE id=?',
-                  (fact['created_event_id'],))
-    request = _request(pages.decode_event_row(stored))
-    if _verify(request, anchor[0], connection, current_boundary=current_boundary) != fact_id:
-        raise ConsistencyError('实际配对事实不是原完整事务的唯一事实')
+    source = read_transaction(connection, fact['source_txn_id'])
+    record = read_event(connection, fact['created_event_id'])
+    event, transaction = record.event, record.transaction
+    if (source.last_event_id != fact['source_event_id']
+            or transaction.first_event_id != transaction.last_event_id
+            or transaction.last_event_id > boundary.last_event_id
+            or (event.event_type, event.reason) != (_EVENT['id'], _REASON)):
+        raise ConsistencyError('配对事实没有边界内完整创建事务及原来源边界')
+    created = [row for row in event.rows if row.table == 'device_file_pairing_facts'
+               and row.row_id == fact_id and not row.before.exists]
+    if (len(created) != 1 or not json_equal(dict(created[0].after.values),
+            {name: fact[name] for name in business_columns('device_file_pairing_facts')})):
+        raise ConsistencyError('配对事实与实际创建事件不同')
+    attempt = row_facts(connection, 'operation_attempts', fact['attempt_id'])
+    run = None if attempt is None else row_facts(connection, 'operation_runs', attempt['run_id'])
+    if run is None or fact['final_page_event_id'] > source.last_event_id:
+        raise ConsistencyError('配对事实没有边界内实际尝试及末页')
+    def endpoint(file_id, page_id, file_event_id, wanted_role):
+        if (page_id > source.last_event_id or file_event_id > source.last_event_id):
+            raise ConsistencyError('配对端点越过原固定边界')
+        file = read_fixed_file(connection, file_id, file_event_id)
+        identity = parse_exact_json(file['identity_key'])[2]
+        relation = _one(connection, 'SELECT identity,attempt_id,action_id,run_id FROM result_page_files'
+            ' WHERE page_event_id=? AND file_id=?', (page_id, file_id))
+        if (relation is None or tuple(relation) != (identity, attempt['id'], run['action_id'], run['id'])
+                or file['source_action_id'] != run['action_id']
+                or file['role'] != int(enum_for('device_files.role')[wanted_role])):
+            raise ConsistencyError('配对端点的身份、来源或用途不同')
+        return file
+    preview = endpoint(preview_file_id, fact['preview_page_event_id'], fact['preview_file_event_id'], 'PREVIEW')
+    if fact['original_file_id'] is not None:
+        original = endpoint(fact['original_file_id'], fact['original_page_event_id'],
+                            fact['original_file_event_id'], 'ORIGINAL')
+        if fact['state'] == int(_STATE.PAIRED):
+            action = row_facts(connection, 'actions', run['action_id'])
+            policy = action['execution_spec_json'].get('result_policy')
+            left = pages.result_file_family(parse_exact_json(preview['identity_key'])[2], result_policy=policy)
+            right = pages.result_file_family(parse_exact_json(original['identity_key'])[2], result_policy=policy)
+            if (left[0] is None or left[:2] != right[:2]
+                    or left[2] != int(_ROLE.PREVIEW) or right[2] != int(_ROLE.ORIGINAL)):
+                raise ConsistencyError('配对端点没有同一目录和完整主干')
+        if fact['state'] == int(_STATE.PAIRED) and (
+                original['size_bytes'] is None or original['size_bytes'] <= 0
+                or preview['size_bytes'] is None or preview['size_bytes'] <= 0
+                or original['completion_state'] != int(enum_for('device_files.completion_state').COMPLETE)
+                or preview['completion_state'] != int(enum_for('device_files.completion_state').COMPLETE)):
+            raise ConsistencyError('已配对事实没有两端固定完整非零文件')
+    elif fact['state'] == int(_STATE.PAIRED):
+        raise ConsistencyError('已配对事实缺少实际原片端点')
     return fact

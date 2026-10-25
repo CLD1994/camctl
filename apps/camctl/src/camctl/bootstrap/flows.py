@@ -1007,7 +1007,6 @@ def report_flow(
             from_wm=registration.from_wm,
             to_wm=registration.to_wm,
             frozen_event_id=registration.boundary.last_event_id,
-            format_version=registration.format_version,
             instance_id=owned.metadata.instance_id,
             db_path=str(state_db),
             staging_path=str(_temporary_staging_path(report_id, job_id)),

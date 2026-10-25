@@ -60,6 +60,23 @@ class DbOutcome(Generic[T]):
     error: BaseException | None = None
     boundary: HistoryBoundary | None = None
     stage: str | None = None
+    control: BaseException | None = None
+    observer_error: BaseException | None = None
+    handoff_error: BaseException | None = None
+    secondary_errors: tuple[BaseException, ...] = ()
+
+
+_DB_OUTCOME_ATTRIBUTE = '_camctl_db_outcome'
+
+
+def db_outcome_for(error: BaseException) -> DbOutcome | None:
+    """取消或提交后通知失败仍携带原数据库实际结果。"""
+    value = getattr(error, _DB_OUTCOME_ATTRIBUTE, None)
+    return value if isinstance(value, DbOutcome) else None
+
+
+def _attach_db_outcome(error: BaseException, outcome: DbOutcome) -> None:
+    setattr(error, _DB_OUTCOME_ATTRIBUTE, outcome)
 
 
 @dataclass(frozen=True)
@@ -67,7 +84,7 @@ class ReadReceipt(Generic[T]):
     """一次读操作的结果；读取错误与数据分别表达。"""
 
     value: T | None = None
-    error: DbReadError | None = None
+    error: BaseException | None = None
     boundary: HistoryBoundary | None = None
 
 

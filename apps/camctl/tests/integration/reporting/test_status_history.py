@@ -1,4 +1,4 @@
-"""真实受理、冻结和报告生成共同保留状态时间及旧字节。"""
+"""真实受理、冻结和报告生成共同保留状态时间及冻结字节。"""
 import json
 
 import pytest
@@ -44,36 +44,16 @@ async def test_new_report_has_complete_terminal_creation_times(environment):
     owned, path = environment
     admit(owned)
     report = freeze(owned)
-    assert report.format_version == 2
-    payload = generate(path, report, format_version=2)
+    payload = generate(path, report)
     plan = json.loads(payload)["plans"][0]
     assert plan["status_history"] == [{"status": "completed", "changed_at": "1970-01-01 00:00:02", "clock_status": "unchecked"}]
     assert plan["actions"][0]["status_history"] == [{"status": "failed", "changed_at": "1970-01-01 00:00:02", "clock_status": "unchecked"}]
     admit(owned, "2", occurred_at=9_000_000)
-    assert generate(path, report, format_version=2, event_batch_size=1, entity_batch_size=1) == payload
+    assert generate(path, report, event_batch_size=1, entity_batch_size=1) == payload
 
 
 @pytest.mark.asyncio
-async def test_format_one_golden_bytes_remain_unchanged(environment):
-    owned, path = environment
-    admit(owned)
-    report = freeze(owned)
-    # 保存格式1的受控旧库夹具：原登记和投影共同声明原生成格式。
-    registration, = owned.connection.execute("SELECT created_event_id FROM reports WHERE id=?", (report.report_id,)).fetchone()
-    body, = owned.connection.execute("SELECT body_json FROM history_events WHERE id=?", (registration,)).fetchone()
-    body = json.loads(body)
-    body["rows"][0]["after"]["values"]["format_version"] = 1
-    owned.connection.execute("UPDATE history_events SET body_json=? WHERE id=?", (json.dumps(body), registration))
-    owned.connection.execute("UPDATE reports SET format_version=1 WHERE id=?", (report.report_id,))
-    payload = generate(path, report)
-    assert b'"status_history"' not in payload
-    expected = ('{"from_wm":0,"report_id":"1","to_wm":2,"plans":[{"created_at":"2026-01-15 08:00:00","name":"时间","plan_instance_id":"1","request_id":"1","status":"completed","actions":[{"action_instance_id":"1","error":{"code":"action_validation_failed","details":{"issues":[{"field":"actions[0].scheduled_at","reason":"range","value":"bad"}]},"stage":"admission"},"input_params":{"scope":"full"},"name":"错误动作","scheduled_at":"bad","status":"failed","type":"report_status"}]}]}\n').encode("utf-8")
-    assert payload == expected
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("legacy_zero", [False, True])
-async def test_full_history_survives_incremental_window_and_local_completion(environment, legacy_zero):
+async def test_full_history_survives_incremental_window_and_local_completion(environment):
     from camctl.reporting import policy
     from camctl.reporting.models import ReportBytes, SyncMode
     from camctl.reporting.publication import DbPublicationSession
@@ -88,41 +68,38 @@ async def test_full_history_survives_incremental_window_and_local_completion(env
         new_operation_key(), owned))
     completed(policy.start_sync(new_operation_key(), owned, action_id=1, mode=SyncMode.FULL, occurred_at=1_100_000))
     first = freeze(owned)
-    old_payload = generate(path, first, format_version=2)
+    old_payload = generate(path, first)
     completed(policy.record_report_bytes(new_operation_key(), owned, first.report_id, ReportBytes(len(old_payload), __import__("hashlib").sha256(old_payload).hexdigest()), occurred_at=4_000_000))
     completed(policy.record_report_publish_intent(new_operation_key(), owned, first.report_id, occurred_at=5_000_000))
     completed(policy.publish_report(new_operation_key(), owned, first.report_id,
         PublishResult(PublishStage.MOVED, DirectorySyncStage.SYNCED, True, None), occurred_at=6_000_000))
     completed(AcceptanceRepository().process_input(
         ProcessInput(ParsedInput("ack.json", {"request_id":"1", "last_report_id":str(first.report_id)}), Catalog(), CommandMode.RUN, 7_000_000), new_operation_key(), owned))
-    if legacy_zero:
-        completed(policy.record_local_report(new_operation_key(), owned, action_id=1, local_report_id=first.report_id, occurred_at=0))
-    else:
-        completed(DbPublicationSession(owned, occurred_at=lambda: 9_500_000).settle_local(1, first.report_id))
+    completed(DbPublicationSession(owned, occurred_at=lambda: 9_500_000).settle_local(1, first.report_id))
     final = freeze(owned)
     assert final.from_wm == first.to_wm and final.from_wm > 0
-    payload = generate(path, final, format_version=2, event_batch_size=1)
+    payload = generate(path, final, event_batch_size=1)
     plan = json.loads(payload)["plans"][0]
-    expected_end = None if legacy_zero else "1970-01-01 00:00:09"
+    expected_end = "1970-01-01 00:00:09"
     assert [item["status"] for item in plan["status_history"]] == ["pending", "running", "completed"]
     assert [item["status"] for item in plan["actions"][0]["status_history"]] == ["pending", "running", "succeeded"]
     for timeline in (plan["status_history"], plan["actions"][0]["status_history"]):
         assert [item["changed_at"] for item in timeline] == ["1970-01-01 00:00:02", "1970-01-01 00:00:01", expected_end]
-    assert generate(path, first, format_version=2) == old_payload
+    assert generate(path, first) == old_payload
 
 
 @pytest.mark.asyncio
-async def test_actual_epoch_creation_is_not_a_legacy_placeholder(environment):
+async def test_actual_epoch_creation_keeps_zero_time(environment):
     owned, path = environment
     admit(owned, occurred_at=0)
     report = freeze(owned)
-    plan = json.loads(generate(path, report, format_version=2))["plans"][0]
+    plan = json.loads(generate(path, report))["plans"][0]
     assert plan["status_history"][0]["changed_at"] == "1970-01-01 00:00:00"
     assert plan["actions"][0]["status_history"][0]["changed_at"] == "1970-01-01 00:00:00"
 
 
 @pytest.mark.asyncio
-async def test_reader_port_keeps_format_two_and_historical_clock_judgment(environment):
+async def test_reader_port_keeps_historical_clock_judgment(environment):
     from camctl.persistence.repositories.history import HistoryRepository
     owned, path = environment
     admit(owned, occurred_at=-1)
@@ -138,8 +115,46 @@ async def test_reader_port_keeps_format_two_and_historical_clock_judgment(enviro
         status_history = actual.status_history
     reader = Reader()
     spec = GenerationSpec(path / "state.db", report.report_id, report.from_wm, report.to_wm,
-        report.boundary.last_event_id, path / "port.json", format_version=2)
+        report.boundary.last_event_id, path / "port.json")
     generated = generate_report_file(spec, repository=reader)
     plan = json.loads(generated.path.read_bytes())["plans"][0]
     assert plan["status_history"] == [{"status":"completed", "changed_at":"1969-12-31 23:59:59", "clock_status":"invalid"}]
     assert plan["actions"][0]["status_history"] == [{"status":"failed", "changed_at":"1969-12-31 23:59:59", "clock_status":"invalid"}]
+
+
+@pytest.mark.asyncio
+async def test_status_query_uses_sparse_index_without_event_body_reads(environment, monkeypatch):
+    from camctl.persistence.repositories import history
+    owned, path = environment
+    admit(owned)
+    report = freeze(owned)
+    repo = history.HistoryRepository(path / "state.db")
+    with repo.report_read_scope():
+        queries = []
+        repo._report_connection.set_trace_callback(queries.append)
+        monkeypatch.setattr(history, "decode_event_row", lambda *args: pytest.fail("状态查询不能解析事件正文"))
+        assert repo.status_history("action", 1, report.boundary, 4) == [
+            {"status": 4, "changed_at": 2_900_000, "clock_status": 1}]
+        repo.status_history("plan", 1, report.boundary, 3)
+        members = [sql for sql in queries if "COUNT(*), MIN(id), MAX(id) FROM history_events" in sql]
+        assert len(members) == 1, members
+        statement = next(sql for sql in queries if "SELECT l.event_id" in sql)
+        plan = owned.connection.execute("EXPLAIN QUERY PLAN " + statement).fetchall()
+        assert any("entity_links_status" in row[-1] for row in plan), plan
+        assert all("body_json" not in sql for sql in queries)
+
+
+@pytest.mark.asyncio
+async def test_status_history_rejects_wrong_entity_enum_and_broken_chain(environment):
+    from camctl.contracts.values import ConsistencyError
+    from camctl.persistence.repositories.history import HistoryRepository
+    owned, path = environment
+    admit(owned)
+    report = freeze(owned)
+    repo = HistoryRepository(path / "state.db")
+    owned.connection.execute("UPDATE entity_event_links SET after_status=6 WHERE entity_type=4")
+    with pytest.raises(ConsistencyError):
+        repo.status_history("plan", 1, report.boundary, 3)
+    owned.connection.execute("UPDATE entity_event_links SET after_status=3,before_status=1 WHERE entity_type=4")
+    with pytest.raises(ConsistencyError):
+        repo.status_history("plan", 1, report.boundary, 3)

@@ -85,6 +85,7 @@ from camctl.acceptance.definitions import read_action_spec
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import completed_file_wait_source, is_completed_file_wait
 from camctl.history.decoding import decode_event_row
+from camctl.persistence.fact_reads import read_event
 from camctl.history.reads import ReadCoverage, PlanReadScope, SoftwareRecoveryReadScope
 from camctl.history.events import business_columns
 from camctl.history.validators import EventValidationError, register_guard
@@ -2394,10 +2395,10 @@ class CaptureRepository:
         from .result_pages import read_source_inputs
         return read_source_inputs(ticket, cursor, batch, owned)
 
-    def read_strict_result_file_input(self, page, file_id, boundary, owned: OwnedConnection,
+    def read_saved_result_file_input(self, page, file_id, boundary, owned: OwnedConnection,
                                       *, pairing_fact_id=None):
-        from .result_file_proofs import read_strict_result_file_input
-        return read_strict_result_file_input(page, file_id, boundary, owned,
+        from .result_file_proofs import read_result_file_input_from_reader
+        return read_result_file_input_from_reader(page, file_id, boundary, owned,
                                              pairing_fact_id=pairing_fact_id)
 
     def read_result_completion(self, action_id: int, owned: OwnedConnection):
@@ -4268,13 +4269,10 @@ class _CompletedStartReturnCommand:
         """仅沿实际结果事件读取原票据及固定契约，不访问新驱动。"""
         if not is_json_integer(result_event_id) or result_event_id <= 0:
             raise ConsistencyError("完成返回必须引用实际结果事件")
-        with closing(connection.execute(
-            "SELECT event_type,occurred_at,body_json FROM history_events WHERE id=?",
-            (result_event_id,),
-        )) as cursor:
-            event = cursor.fetchone()
-        if event is None or event[0] != _ATTEMPT_RESULT_EVENT:
+        record = read_event(connection, result_event_id)
+        if record.event.event_type != _ATTEMPT_RESULT_EVENT:
             raise ConsistencyError("完成返回引用的事件不是原尝试结果")
+        event = record.event.event_type, record.event.occurred_at, record.raw[7]
         rows = parse_exact_json(event[2])["rows"]
         originals = [value for value in rows if value["table"] == "operation_attempts"]
         if len(originals) != 1:
@@ -6041,16 +6039,7 @@ _HISTORY_SOURCE_COLUMNS = ("id", "transaction_id", "event_type", "event_version"
 
 def _history_source_row(connection, event_id):
     """只复制引用的一条不可变原历史输入，不读取完整历史。"""
-    with closing(connection.execute(
-        "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
-        " FROM history_events WHERE id=?", (event_id,))) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError("文件完成引用的原历史事实不存在")
-    boundary = read_transaction_range(connection, row[1])
-    if not boundary.first_event_id <= row[0] <= boundary.last_event_id:
-        raise ConsistencyError("文件完成原历史不属于完整事务范围")
-    return dict(zip(_HISTORY_SOURCE_COLUMNS, row))
+    return dict(zip(_HISTORY_SOURCE_COLUMNS, read_event(connection, event_id).raw))
 
 
 def _history_source_event(state, event_id):

@@ -14,12 +14,11 @@ from camctl.history.events import load_event_registry
 from camctl.history.events import business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.page_read_cache import opened_read_page_scope
 from camctl.persistence.transaction import (
     CommandPlan,event_envelope,next_row_id,read_transaction_range,row_change,row_facts,
     saved_transaction_events)
 
-from .result_pages import _at,read_pages
+from .result_pages import read_saved_page as _at,read_pages
 
 _EVENT=load_event_registry()['events']['SEGMENT_FACTS']
 
@@ -145,8 +144,7 @@ def _read_transaction(owned):
     opened=not db.in_transaction
     if opened:db.execute('BEGIN')
     try:
-        with opened_read_page_scope(db, opened):
-            yield db
+        yield db
     finally:
         if opened:db.execute('ROLLBACK')
 
@@ -173,53 +171,59 @@ def read_result_member_inputs(ref,cursor,limit,owned):
 
 
 def _run_files(db,run_id,boundary):
-    """逐file_id消费既有索引，保持一个文件的有限来源引用。"""
+    """按file_id分批续读；不为每个文件重新启动一个SQL游标。"""
     previous=0
     while True:
-        row=_one(db,'SELECT file_id,MAX(page_event_id) FROM result_page_files'
-            ' WHERE run_id=? AND file_id>? AND created_event_id<=?'
-            ' GROUP BY file_id ORDER BY file_id LIMIT 1',(run_id,previous,boundary.last_event_id))
-        if row is None:return
-        yield row
-        previous=row[0]
+        with closing(db.execute('SELECT file_id,MAX(page_event_id) FROM result_page_files'
+                ' WHERE run_id=? AND file_id>? AND created_event_id<=?'
+                ' GROUP BY file_id ORDER BY file_id LIMIT 128',
+                (run_id,previous,boundary.last_event_id))) as query:
+            selected = query.fetchmany(128)
+        if not selected:return
+        yield from selected
+        previous=selected[-1][0]
 
 
-def _retained_input(db,file_id,page_event_id,boundary):
-    from .result_file_proofs import _file_at,load_strict_result_file_input
+def _retained_input(db, file_id, page_event_id, boundary):
+    from .result_file_proofs import read_result_file_input, read_file_at_boundary
+    from camctl.capture.segment_models import SegmentMemberRole
     saved,_=_at(db,page_event_id)
-    file=_file_at(db,file_id,boundary)
+    result = read_result_file_input(db,saved.ref,file_id,boundary)
+    if result.role is not SegmentMemberRole.PREVIEW:
+        return result
+    file=read_file_at_boundary(db,file_id,boundary)
     if file['original_device_file_id'] is not None:
-        return load_strict_result_file_input(db,saved.ref,file_id,boundary)
+        return result
     fact=_one(db,'SELECT f.id FROM device_file_pairing_facts f JOIN operation_attempts a ON a.id=f.attempt_id'
         ' WHERE f.preview_file_id=? AND a.run_id=? AND f.created_event_id<=?'
         ' ORDER BY f.created_event_id DESC LIMIT 1',(file_id,saved.ref.ticket.run_id,boundary.last_event_id))
-    return load_strict_result_file_input(db,saved.ref,file_id,boundary,
-        pairing_fact_id=None if fact is None else fact[0])
+    return result if fact is None else read_result_file_input(db,saved.ref,file_id,boundary,
+        pairing_fact_id=fact[0])
 
 
 def _check_fixed_qualifications(db,run_id,boundary):
-    from .result_file_proofs import _file_at
+    from .result_file_proofs import read_file_at_boundary
     columns=('source_action_id','role','ownership_evidence_json','size_bytes',
         'completion_state','completion_evidence_json','original_device_file_id','pairing_evidence_json')
     if _one(db,'SELECT f.id FROM device_file_pairing_facts f JOIN operation_attempts a ON a.id=f.attempt_id'
             ' WHERE a.run_id=? AND f.created_event_id>? LIMIT 1',(run_id,boundary.last_event_id)) is not None:
         raise ConsistencyError('原H0之后已有本run的新配对资格')
     for file_id,_ in _run_files(db,run_id,boundary):
-        fixed=_file_at(db,file_id,boundary)
+        fixed=read_file_at_boundary(db,file_id,boundary)
         current=row_facts(db,'device_files',file_id)
         if any(not json_equal(fixed[name],current[name]) for name in columns):
             raise ConsistencyError('原H0之后已有本run文件的资格变化')
 
 
 def _current_input(db,page,file_id,attempt,current,boundary):
-    from .result_file_proofs import load_completion_input,load_strict_result_file_input
-    result=load_completion_input(db,page,file_id,boundary)
+    from .result_file_proofs import read_result_file_input
+    result=read_result_file_input(db,page,file_id,boundary)
     from camctl.capture.segment_models import SegmentMemberRole
     if result.role is not SegmentMemberRole.PREVIEW:return result
     fact=_one(db,'SELECT id FROM device_file_pairing_facts WHERE preview_file_id=?'
         ' AND attempt_id=? AND final_page_event_id=? AND created_event_id<=?',
         (file_id,attempt['id'],current.event_id,boundary.last_event_id))
-    return result if fact is None else load_strict_result_file_input(db,page,file_id,boundary,pairing_fact_id=fact[0])
+    return result if fact is None else read_result_file_input(db,page,file_id,boundary,pairing_fact_id=fact[0])
 
 
 def _current_scan(db,run,attempt,boundary):
@@ -249,7 +253,7 @@ def _current_scan(db,run,attempt,boundary):
 
 def _same_current_files(db,run,attempt,current,boundary):
     """R按文件去重，C只使用最后轮次原页；旧完成证明不能替换当前观察。"""
-    from .segments import _fixed_file
+    from .result_file_proofs import read_fixed_file
     from camctl.capture.segment_models import OwnershipState,FileCompletionState
     for file_id,last_page in _run_files(db,run['id'],boundary):
         actual=_one(db,'SELECT MAX(page_event_id) FROM result_page_files'
@@ -259,7 +263,7 @@ def _same_current_files(db,run,attempt,current,boundary):
         retained=_retained_input(db,file_id,last_page,boundary)
         if retained.ownership is not OwnershipState.OWNED or retained.completion is not FileCompletionState.COMPLETE:
             return False
-        file=_fixed_file(db,file_id,retained.file_event_id)
+        file=read_fixed_file(db,file_id,retained.file_event_id)
         saved,_=_at(db,actual)
         current_input=_current_input(db,saved.ref,file_id,attempt,current,boundary)
         identity=next(identity for identity,identity_id in saved.file_ids if identity_id==file_id)

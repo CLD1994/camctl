@@ -18,10 +18,11 @@ from camctl.operations.recovery import (
     RecoveryFacts,
     recover_attempt,
 )
+from camctl.outputs.cleanup_flow import _read_cleanup
 from camctl.outputs.cleanup_results import running_cleanup_attempt
 
 
-def recover_cleanup_call(runtime, item_id):
+async def recover_cleanup_call(runtime, item_id):
     """恢复只形成原尝试的 UNKNOWN 结果，保存和消费沿原统一路径。"""
     if (
         item_id in runtime.pending_intents
@@ -29,7 +30,7 @@ def recover_cleanup_call(runtime, item_id):
         or any(value.item_id == item_id for value in runtime.pending_queries.values())
     ):
         return
-    running = running_cleanup_attempt(runtime.owned.connection, item_id)
+    running = await _read_cleanup(runtime, lambda connection: running_cleanup_attempt(connection, item_id))
     if running is None:
         return
     ticket, intent_event = running
@@ -47,9 +48,7 @@ def recover_cleanup_call(runtime, item_id):
         reason = RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP
     evidence = None
     if reason is None:
-        evidence = runtime.recovery_evidence_for(
-            runtime.binding_of(item_id), ticket.operation
-        )
+        evidence = runtime.recovery_evidence_for(await runtime.binding_of(item_id), ticket.operation)
         if evidence is None:
             reason = RecoveryBlockedReason.EVIDENCE_UNAVAILABLE
     if reason is not None:
@@ -63,7 +62,7 @@ def recover_cleanup_call(runtime, item_id):
         raise ConsistencyError("原清理恢复判定不能结束原调用")
     kind = (
         "local_file_recovery"
-        if runtime.binding_of(item_id) is None
+        if await runtime.binding_of(item_id) is None
         else "adb_foreground_recovery"
     )
     actual = DeviceCallResult.from_outcome(
@@ -82,7 +81,7 @@ def recover_cleanup_call(runtime, item_id):
 
     if ticket.operation == "delete":
         pending = PendingCleanupDelete(
-            runtime.owned.metadata.instance_id,
+            runtime.database.metadata.instance_id,
             item_id,
             ticket,
             actual,
@@ -100,21 +99,18 @@ def recover_cleanup_call(runtime, item_id):
             _latest_possible_delete,
         )
 
-        connection = runtime.owned.connection
-        if _cancel_requested(connection, _item_action(connection, item_id)):
+        if await _read_cleanup(runtime, lambda connection: _cancel_requested(connection, _item_action(connection, item_id))):
             consumer = CleanupQueryConsumer.CANCEL
         else:
-            output_id = connection.execute(
-                "SELECT output_id FROM cleanup_items WHERE id=?", (item_id,)
-            ).fetchone()[0]
+            output_id = (await _read_cleanup(runtime, lambda connection: connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()))[0]
             consumer = (
                 CleanupQueryConsumer.AFTER_DELETE
-                if _latest_possible_delete(connection, output_id)
+                if await _read_cleanup(runtime, lambda connection: _latest_possible_delete(connection, output_id))
                 else CleanupQueryConsumer.BEFORE_DELETE
             )
         runtime.pending_queries[(ticket.run_id, ticket.attempt_id)] = (
             PendingCleanupQuery(
-                runtime.owned.metadata.instance_id,
+                runtime.database.metadata.instance_id,
                 item_id,
                 consumer,
                 ticket,

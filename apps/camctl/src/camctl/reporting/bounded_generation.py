@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import islice, chain
 
-from camctl.contracts.segment_errors import public_gap, validate_segment_error_header
+from camctl.contracts.segment_errors import public_gap
+from camctl.contracts.report_reads import report_expansion_request
 from camctl.contracts.segment_values import (
     SegmentGap,
     SegmentGapKind,
@@ -21,6 +22,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import _public_json_registry
 from camctl.contracts.segment_values import SegmentKey, decode_text_enum
 from camctl.history.queries import ReportScopeRequest
+from camctl.reporting.failure_index import FailureDeliveryIndex
 from camctl.reporting.stream_validation import (
     CompletionRequirement,
     DeferredField,
@@ -55,6 +57,36 @@ _DEFERRED = {
     "cancel_result": frozenset({"items"}),
     "cancel_item": frozenset({"withdrawals"}),
 }
+
+
+@dataclass(frozen=True)
+class _ReportReads:
+    """一次生成的恢复端口，统一向所有消费者传递生效事件批次。"""
+
+    repository: object
+    event_batch_size: int
+
+    def restore_primary_at_h(self, entity, identity, boundary):
+        return self.repository.restore_primary_at_h(
+            entity, identity, boundary, event_batch_size=self.event_batch_size)
+
+    def restore_entity(self, entity, identity, boundary):
+        return self.repository.restore_report_entity(
+            entity, identity, boundary, event_batch_size=self.event_batch_size)
+
+    def related_primary_rows_at_h(self, entity, column, value, boundary):
+        return self.repository.related_primary_rows_at_h(
+            entity, column, value, boundary, event_batch_size=self.event_batch_size)
+
+    def status_history(self, entity, identity, boundary, current_status):
+        return self.repository.status_history(entity, identity, boundary, current_status)
+
+    def open_report_action(self, identity, boundary):
+        return self.repository.open_report_action(
+            identity, boundary, event_batch_size=self.event_batch_size)
+
+    def open_report_selection(self, request):
+        return self.repository.open_report_selection(request)
 
 
 def _segment_fields():
@@ -175,14 +207,10 @@ def _action_facts(repo, handle, boundary):
     return facts
 
 
-def _project(entity, identity, facts, *, repo=None, boundary=None, spec=None):
-    histories = {}
-    if spec is not None and spec.format_version >= 2 and entity in ("plan", "action"):
-        table = "plans" if entity == "plan" else "actions"
-        histories[(entity, identity)] = repo.status_history(entity, identity, boundary, facts[table][identity]["status"], event_batch_size=spec.event_batch_size)
+def _project(entity, identity, facts, *, status_histories=None):
     return project_public(
         ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED,
-                        format_version=1 if spec is None else spec.format_version, status_histories=histories)
+                        status_histories=status_histories or {})
     )
 
 
@@ -193,25 +221,26 @@ class _SegmentExpansion:
     binding: object
     error: dict | None
     stack: object
+    source_handle: object | None = None
     consumed: bool = False
 
     def __post_init__(self):
         self.ends = {}
         self.handle = self.ref = self.header = None
-        if self.error is None or self.error["code"] not in (
-            "capture_segment_gap",
-            "default_segment_scope_empty",
-            "default_segment_scope_unconfirmed",
-        ):
+        request = report_expansion_request('error', self.error)
+        if request is None:
             return
-        self.header = validate_segment_error_header(
-            self.error["code"], self.error["details"]
-        )
-        self.handle = self.stack.enter_context(
-            self.repo.open_segment_history(self.header.source_action_id, self.boundary)
-        )
-        self.ref = self.handle.active_result_ref()
-        source = self.handle.primary()
+        self.header = request.header
+        if (self.source_handle is not None
+                and self.source_handle.action_id == self.header.source_action_id
+                and self.source_handle.boundary == self.boundary):
+            finite = self.source_handle
+        else:
+            finite = self.stack.enter_context(
+                self.repo.open_report_action(self.header.source_action_id, self.boundary)
+            )
+        self.ref = finite.active_result_ref()
+        source = finite.primary()
         if source["type"] not in (2, 3):
             raise ConsistencyError("分段公开详情必须属于普通录像或原生延时")
         if (
@@ -221,13 +250,20 @@ class _SegmentExpansion:
             and self.ref is None
         ):
             raise ConsistencyError("已执行分段来源缺少正式发布集合")
-        if self.ref is not None:
-            self.handle.read_result(self.ref)
+        if self.ref is None:
+            if (self.header.first_gap is not None or self.header.gap_count not in (None, 0)
+                    or self.header.retained_original_count != 0 or self.header.scope_count not in (None, 0)):
+                raise ConsistencyError('同 H 没有正式集合却声明非空分段详情')
+            # 空关系的依据是有限阶段已证明没有正式集合，未读取的表不参与判断。
+            return
+        self.handle = self.stack.enter_context(finite.open_expansion(request))
+        self.handle.read_result(self.ref)
         if self.header.first_gap is not None:
             first = next(_rows(self.handle, "segment_gaps", self.ref), None)
             if first is None:
                 raise ConsistencyError("首缺口没有同 H 的实际关系")
-            self.error["details"]["first_gap"] = self._gap(first.values)
+            self.error["details"]["first_gap"] = self._gap(
+                first.values, expected=self.header.first_gap)
 
     def _output(self, identity, file_id=None):
         output = self.repo.restore_primary_at_h("output", identity, self.boundary)
@@ -241,7 +277,7 @@ class _SegmentExpansion:
             raise ConsistencyError("分段详情引用不属于同 H 的实际原片")
         return output
 
-    def _gap(self, values):
+    def _gap(self, values, *, expected=None):
         def member(name):
             identity = values[name]
             return (
@@ -264,6 +300,8 @@ class _SegmentExpansion:
             decode_text_enum(SegmentGapNeighborState, values["neighbors_json"]["right"], column="segment_gaps.neighbors_json.state"),
             None if empty is None else empty["identity"],
         )
+        if expected is not None and gap != expected:
+            raise ConsistencyError('原有限头首缺口与同 H 完整缺口第一项不同')
         result = public_gap(gap)
         for side, neighbor in (("left", left), ("right", right)):
             if neighbor is None:
@@ -374,6 +412,7 @@ class _CoverageExpansion:
     boundary: object
     binding: object
     public: dict | None
+    stack: object = None
     ends: dict = None
     consumed: bool = False
 
@@ -394,6 +433,11 @@ class _CoverageExpansion:
         if not isinstance(self.decision, SegmentDecision):
             raise ConsistencyError("公开覆盖没有 Action6 公共分段判断")
         self._validate_projection()
+        if self.stack is None:
+            raise ConsistencyError('公开覆盖增长恢复缺少报告资源作用域')
+        request = report_expansion_request('video_coverage', self.public,
+            source_action_id=self.handle.action_id)
+        self.handle = self.stack.enter_context(self.handle.open_expansion(request))
 
     def _validate_projection(self):
         from camctl.contracts.segment_values import DefaultScopeState
@@ -578,8 +622,43 @@ def _expansion_arrays(expansion, stream, gate):
     return arrays
 
 
-def _failure_rows(repo, handle, boundary):
+def _prepare_failure_index(repo, handle, boundary, index):
+    """每个 H 处交付只恢复一次；全部关系通过后才交付失败数组。"""
+    for item in handle.related_rows("obtain_items"):
+        selection = handle.row("obtain_source_selections", item.values["selection_id"])
+        if selection is None:
+            raise ConsistencyError("取回项缺少同 H 的来源选择")
+        dependency_id = selection["dependency_id"]
+        dependency = handle.row("action_dependencies", dependency_id)
+        if dependency is None or dependency["action_id"] != handle.action_id:
+            raise ConsistencyError("取回项的来源依赖不属于同 H 动作")
+        delivery_id = item.values["delivery_id"]
+        if delivery_id is not None:
+            output_id = item.values["output_id"]
+            if output_id is None:
+                raise ConsistencyError("已关联交付的取回项缺少产物")
+            index.add_reference(delivery_id, dependency_id, output_id,
+                                dependency["depends_on_action_id"])
+    for identity, delivery in repo.related_primary_rows_at_h(
+        "delivery", "action_id", handle.action_id, boundary
+    ):
+        if delivery["action_id"] != handle.action_id:
+            raise ConsistencyError("交付不属于同 H 的取回动作")
+        dependency_id, source_id = index.bind_delivery(identity, delivery["output_id"])
+        output_id = delivery["output_id"]
+        output = repo.restore_primary_at_h("output", output_id, boundary)
+        if output is None or output["source_action_id"] != source_id:
+            raise ConsistencyError("交付产物不属于同 H 的来源依赖")
+        fragment = _project("delivery_failure", identity, {
+            "deliveries": {identity: delivery}, "outputs": {output_id: output}})
+        if fragment is not OMIT:
+            index.add_failure(dependency_id, identity, fragment)
+    index.finish()
+
+
+def _failure_rows(repo, handle, boundary, index):
     """按依赖、分支、真实身份续读，匹配权威 failure_union 顺序。"""
+    _prepare_failure_index(repo, handle, boundary, index)
     for dependency in handle.related_rows("action_dependencies"):
         selections = tuple(
             islice(
@@ -606,27 +685,16 @@ def _failure_rows(repo, handle, boundary):
             fragment = _project("item_failure", item.row_id, facts)
             if fragment is not OMIT:
                 yield f"{dependency.row_id}:1:{item.row_id}", fragment
-        # delivery 身份按主键续读，不采用 item 返回顺序推断。
-        for identity, delivery in repo.related_primary_rows_at_h(
-            "delivery", "action_id", handle.action_id, boundary
-        ):
-            items = tuple(
-                islice(handle.related_rows("obtain_items", "delivery_id", identity), 2)
-            )
-            if not items or items[0].values["selection_id"] != selection.row_id:
-                continue
-            if len(items) != 1:
-                raise ConsistencyError("取回交付的条目身份不唯一")
-            facts = {"deliveries": {identity: delivery}}
-            _merge(
-                facts,
-                "outputs",
-                delivery["output_id"],
-                repo.restore_primary_at_h("output", delivery["output_id"], boundary),
-            )
-            fragment = _project("delivery_failure", identity, facts)
-            if fragment is not OMIT:
-                yield f"{dependency.row_id}:2:{identity}", fragment
+        # delivery 身份按磁盘索引续读，不采用 item 返回顺序推断。
+        for identity, fragment in index.failures(dependency.row_id):
+            yield f"{dependency.row_id}:2:{identity}", fragment
+
+
+@dataclass(frozen=True)
+class _ResultRow:
+    row: object
+    fragment: object
+    target: dict | None = None
 
 
 def _result_rows(repo, handle, boundary, kind):
@@ -637,25 +705,30 @@ def _result_rows(repo, handle, boundary, kind):
     )
     for row in handle.related_rows(table):
         facts = {table: {row.row_id: row.values}}
+        target_values = None
         if kind == "cancel_task":
             target = row.values["target_action_id"]
+            target_values = repo.restore_primary_at_h("action", target, boundary)
             _merge(
                 facts,
                 "actions",
                 target,
-                repo.restore_primary_at_h("action", target, boundary),
+                target_values,
             )
-        yield row.row_id, (row, _project(projection, row.row_id, facts))
+        yield row.row_id, _ResultRow(row, _project(projection, row.row_id, facts), target_values)
 
 
-def _write_action(repo, selection, stream, plan, binding, identity, boundary, spec):
+def _write_action(repo, selection, stream, plan, binding, identity, boundary):
     from camctl.reporting.generation import _merge_output, _merge_delivery
 
     with ExitStack() as stack:
-        handle = stack.enter_context(repo.open_segment_history(identity, boundary))
-        finite = _project("action", identity, _action_facts(repo, handle, boundary), repo=repo, boundary=boundary, spec=spec)
+        handle = stack.enter_context(repo.open_report_action(identity, boundary))
+        facts = _action_facts(repo, handle, boundary)
+        histories = {("action", identity): repo.status_history(
+            "action", identity, boundary, facts["actions"][identity]["status"])}
+        finite = _project("action", identity, facts, status_histories=histories)
         expansion = _SegmentExpansion(
-            repo, boundary, binding, finite.get("error"), stack
+            repo, boundary, binding, finite.get("error"), stack, source_handle=handle
         )
         coverage = _CoverageExpansion(
             repo,
@@ -663,6 +736,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary, sp
             boundary,
             binding,
             finite.get("result", {}).get("coverage"),
+            stack=stack,
         )
         gate = plan.begin(binding, finite)
         arrays = _expansion_arrays(expansion, stream, gate)
@@ -685,6 +759,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary, sp
                             gate.child_binding(path, position),
                             value.get("error"),
                             nested,
+                            source_handle=handle,
                         )
                         sub = child.begin(expansion.binding, value)
                         yield from stream.open_object()
@@ -698,14 +773,15 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary, sp
                         return sub.close_node()
 
                 arrays[path] = (
-                    _failure_rows(repo, handle, boundary),
+                    _failure_rows(repo, handle, boundary,
+                                  stack.enter_context(FailureDeliveryIndex())),
                     emit_failure,
                     None,
                 )
             elif finite["type"] in ("delete_action_outputs", "cancel_task"):
 
                 def emit_result(position, value, path=path):
-                    row, fragment = value
+                    row, fragment = value.row, value.fragment
                     pointer = (
                         "/cancel_item"
                         if finite["type"] == "cancel_task"
@@ -718,9 +794,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary, sp
                     nested = {}
                     if pointer == "/cancel_item":
                         withdrawals = ("withdrawals",)
-                        target = repo.restore_primary_at_h(
-                            "action", row.values["target_action_id"], boundary
-                        )
+                        target = value.target
                         if target["type"] == 3:
 
                             def members():
@@ -790,6 +864,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary, sp
 
 def report_tokens(repo, spec, boundary, stream):
     """完整供给 root/plan/action 的同 H 节点及全部结束证明。"""
+    repo = _ReportReads(repo, spec.event_batch_size)
     plan = _report_plan()
     with repo.open_report_selection(
         ReportScopeRequest(
@@ -828,9 +903,12 @@ def report_tokens(repo, spec, boundary, stream):
             yield from stream.open_array(name)
             count, last = 0, None
             for identity in chain((first,), identities):
-                finite = _project(
-                    entity, identity, _primary_facts(repo, entity, identity, boundary), repo=repo, boundary=boundary, spec=spec
-                )
+                facts = _primary_facts(repo, entity, identity, boundary)
+                histories = {}
+                if entity == "plan":
+                    histories[(entity, identity)] = repo.status_history(
+                        entity, identity, boundary, facts["plans"][identity]["status"])
+                finite = _project(entity, identity, facts, status_histories=histories)
                 if entity == "plan":
                     node = gate.item_plan(path).begin(
                         gate.child_binding(path, identity), finite
@@ -859,7 +937,6 @@ def report_tokens(repo, spec, boundary, stream):
                                 node.child_binding(action_path, action_id),
                                 action_id,
                                 boundary,
-                                spec,
                             )
                             node.accept_item(action_path, receipt, position=action_id)
                             n, position = n + 1, action_id

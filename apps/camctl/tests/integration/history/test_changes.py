@@ -268,3 +268,35 @@ class TestReplayMatchesStoredProjection:
             # 仅由事件正文驱动。
         finally:
             connection.close()
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("rollback", [False, True])
+def test_status_directory_is_atomic_in_both_transaction_paths(tmp_path, plan_guards, bounded, rollback):
+    from camctl.persistence.transaction import BoundedCommandPlan
+    from camctl.history.validators import EventContext
+    from ..persistence.test_transactions import FailingConnection
+    _create_valid_database(tmp_path / "state.db")
+    owned = _open(tmp_path)
+    connection = owned.connection
+
+    class Create:
+        def plan(self, scope):
+            plan = PlanCreateCommand((1,)).plan(scope)
+            if bounded:
+                return BoundedCommandPlan(plan.events,
+                    lambda event, transaction: EventContext(transaction, plan.owners, plan.state_rows),
+                    plan.result, lambda connection: None)
+            return plan
+
+    try:
+        writer = OwnedConnection(FailingConnection(connection, "INSERT INTO plans"), owned.metadata) if rollback else owned
+        outcome = commit_operation(Create(), new_operation_key(), writer)
+        assert outcome.kind == ("rolled_back" if rollback else "completed"), outcome.error
+        rows = connection.execute("SELECT before_status,after_status FROM entity_event_links").fetchall()
+        assert rows == ([] if rollback else [(None, 1)])
+        assert connection.execute("SELECT COUNT(*) FROM history_events").fetchone() == (0 if rollback else 1,)
+        assert connection.execute("SELECT COUNT(*) FROM plans").fetchone() == (0 if rollback else 1,)
+        assert not connection.in_transaction
+    finally:
+        connection.close()

@@ -28,6 +28,7 @@ __all__ = [
     "PublicProjectionError",
     "ProjectionStructure",
     "projection_structure",
+    "projection_read_tables",
     "project_public",
     "public_changed",
 ]
@@ -53,8 +54,7 @@ class ProjectionInput:
     tables: Mapping[str, Mapping[int, Mapping[str, Any]]]
     selected_entities: Mapping[str, Mapping[int, Mapping[str, Any]]] = field(default_factory=dict)
     deferred_fields: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    format_version: int = 1
-    status_histories: Mapping[tuple[str, int], Sequence[Mapping[str, Any]]] = field(default_factory=dict)
+    status_histories: Mapping[tuple[str, int], Sequence[Mapping[str, Any]]] | None = None
 
 
 PublicFragment = dict[str, Any]
@@ -117,6 +117,77 @@ def projection_structure(entity: str) -> ProjectionStructure:
         raise PublicProjectionError(f"投影 {entity} 的子集合编码顺序必须唯一且连续")
     return ProjectionStructure(identities[0] if identities else None,
                                tuple((name, child) for _, name, child in children))
+
+
+def projection_read_tables(entity: str, *, phase=None, _registry=None) -> frozenset[str]:
+    """从投影、关系及前置校验派生保守表闭包，保留独立实体边界。"""
+    registry = _dependencies() if _registry is None else _registry
+    tables: set[str] = set()
+    visited: set[str] = set()
+
+    if phase not in (None, 'finite') and phase not in registry.get('read_expansions', {}):
+        raise PublicProjectionError(f'未登记的报告读取阶段: {phase}')
+
+    def included(spec):
+        return phase is None or 'read_phase' not in spec or phase in spec['read_phase']
+
+    def column(value):
+        if isinstance(value, str) and "." in value:
+            tables.add(value.partition(".")[0])
+
+    def relation(name):
+        spec = registry["relations"].get(name)
+        if spec is None:
+            raise PublicProjectionError(f"报告读取引用未登记的关联: {name}")
+        if not included(spec):
+            return
+        column(spec["from"])
+        column(spec["to"])
+
+    def walk(node):
+        if isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, Mapping):
+            if node.get("op") == "entities":
+                return
+            if "projection" in node:
+                projection(node["projection"])
+            for name in node.get("relations", ()):
+                relation(name)
+            if isinstance(node.get("table"), str):
+                tables.add(node["table"])
+            for key, value in node.items():
+                if key == "column" or key.endswith("_column") or key == "identity":
+                    column(value)
+                elif key in ("columns", "order_by"):
+                    for item in value if isinstance(value, list) else (value,):
+                        column(item)
+                walk(value)
+
+    def projection(name):
+        if name in visited:
+            return
+        spec = registry["projections"].get(name)
+        if spec is None:
+            raise PublicProjectionError(f"未登记的公开实体投影: {name}")
+        visited.add(name)
+        tables.add(spec["root_table"])
+        walk(spec)
+        for assertion in spec.get("assertions", ()):
+            requirement = registry.get("assertions", {}).get(assertion)
+            if requirement is None:
+                raise PublicProjectionError(f"报告读取引用未登记的前置校验: {assertion}")
+            if included(requirement):
+                walk(requirement)
+
+    projection(entity)
+    if phase not in (None, 'finite'):
+        expansion = registry['read_expansions'][phase]
+        for name in expansion['relations']:
+            relation(name)
+        walk(registry['assertions'][expansion['assertion']])
+    return frozenset(tables)
 
 
 def _enum_member(column: str, value: int) -> str:
@@ -273,8 +344,6 @@ def project_public(facts: ProjectionInput) -> PublicFragment:
         return OMIT  # 类型检查器友好的省略标记
     fragment: PublicFragment = {}
     for field_name, spec in projection["fields"].items():
-        if facts.format_version < spec.get("minimum_format", 1):
-            continue
         if field_name in facts.deferred_fields.get(facts.entity, ()):
             continue
         when = spec.get("when", {"op": "literal", "value": True})
@@ -471,7 +540,6 @@ def _project(projection_name: str, context: _Context) -> Any:
             tables=context.input.tables,
             selected_entities=context.input.selected_entities,
             deferred_fields=context.input.deferred_fields,
-            format_version=context.input.format_version,
             status_histories=context.input.status_histories,
         )
     )
@@ -498,7 +566,6 @@ def _entities(node: Mapping[str, Any], context: _Context) -> Any:
                     tables=context.input.tables,
                     selected_entities=subtree,
                     deferred_fields=context.input.deferred_fields,
-                    format_version=context.input.format_version,
                     status_histories=context.input.status_histories,
                 )
             )
@@ -518,7 +585,6 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
                 tables=context.input.tables,
                 selected_entities=context.input.selected_entities,
                 deferred_fields=context.input.deferred_fields,
-                format_version=context.input.format_version,
                 status_histories=context.input.status_histories,
             )
         )
@@ -731,11 +797,14 @@ def _failure_union(node: Mapping[str, Any], context: _Context) -> Any:
 
 def _status_history(node: Mapping[str, Any], context: _Context) -> Any:
     """时间历史复用所属实体的公开状态映射，时钟枚举来自全局登记。"""
+    if context.input.status_histories is None:
+        # 通用纯投影允许调用方不请求时间；报告装配始终显式提供此输入。
+        return OMIT
     transitions = context.input.status_histories.get((context.input.entity, context.row_id))
     if not transitions:
         raise PublicProjectionError("缺少从创建至 H 的状态历史")
     mapping = _dependencies()["projections"][context.input.entity]["fields"]["status"]["value"]["map"]
     return [{"status": mapping[_enum_member(node["column"], item["status"])],
-             "changed_at": None if item["changed_at"] is None else format_utc_micros((item["changed_at"] // 1_000_000) * 1_000_000),
+             "changed_at": format_utc_micros((item["changed_at"] // 1_000_000) * 1_000_000),
              "clock_status": _enum_member("history_events.clock_status", item["clock_status"]).lower()}
             for item in transitions]

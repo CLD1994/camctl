@@ -28,7 +28,6 @@ from camctl.history.changes import (
     derive_changes,
     event_report_targets,
 )
-from camctl.history.decoding import decode_event_row
 from camctl.history.events import (
     SCHEMA_RESOURCES,
     EventEnvelope,
@@ -58,9 +57,9 @@ from camctl.history.validators import (
     validate_event,
 )
 from camctl.persistence.runtime import OwnedConnection
-from camctl.persistence.page_read_cache import clear_page_records, discard_page_records, page_read_scope
-from camctl.persistence.read_reuse import (
-    clear_read_reuse, read_reuse_scope, reuse_read, typed_read_key,
+from camctl.persistence.fact_reads import (
+    discard_operation_facts, operation_fact_scope, operation_fact_boundary,
+    read_transaction, iter_transaction_events,
 )
 from camctl.logging_runtime.transaction_timing import (
     TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
@@ -330,8 +329,6 @@ def _write_bounded_plan(plan, scope, operation_key):
         db_count("row_changes", len(proposed.rows))
         with db_phase(TransactionPhase.CONTEXT):
             context = plan.context(proposed, transaction)
-            clear_page_records(connection)
-            clear_read_reuse(connection)
             context, reads = _bind_event_reads(
                 context, proposed, transaction, segment_guard_state,
                 source_guard_state, connection, operation_key,
@@ -369,8 +366,8 @@ def _write_bounded_plan(plan, scope, operation_key):
                 "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
                 (event.event_id,event.transaction_id,event.event_type,event.event_version,event.occurred_at,event.clock_status,event.change_seq,_encode_body(event)))
             for link in changes.links:
-                connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
-                    (link.entity_type,link.entity_id,link.event_id,link.change_count))
+                connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count,before_status,after_status) VALUES(?,?,?,?,?,?)",
+                    (link.entity_type,link.entity_id,link.event_id,link.change_count,link.before_status,link.after_status))
             for link in changes.report_changes:
                 connection.execute("INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)",
                     (link.entity_type,link.entity_id,link.event_id,link.change_seq))
@@ -405,7 +402,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         _finish_result_check_group(result_check_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
     try:
-        discard_page_records(connection)
+        discard_operation_facts(connection)
         with db_phase(TransactionPhase.COMMIT):
             connection.execute("COMMIT")
     except Exception as error:
@@ -691,15 +688,14 @@ def commit_operation(
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
     connection: sqlite3.Connection = timed_connection(owned.connection)
-    with read_reuse_scope(connection):
-        return _commit_operation(command, operation_key, connection)
+    return _commit_operation(command, operation_key, connection)
 
 
 def _commit_operation(command, operation_key, connection) -> WriteReceipt:
     begun = False
     committing = False
     rollback_attempted = False
-    page_reads = ExitStack()
+    fact_reads = ExitStack()
 
     def rollback_error(error: BaseException) -> WriteReceipt:
         nonlocal rollback_attempted
@@ -723,12 +719,11 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                 _scalar(connection, "SELECT MAX(id) FROM history_transactions"),
                 _scalar(connection, "SELECT MAX(id) FROM history_events"),
             )
-        page_reads.enter_context(page_read_scope(connection, scope.max_event_id))
+        fact_reads.enter_context(operation_fact_scope(
+            connection, HistoryBoundary(scope.max_txn_id, scope.max_event_id)))
         try:
             with db_phase(TransactionPhase.PLAN):
                 plan = command.plan(scope)
-                clear_page_records(connection)
-                clear_read_reuse(connection)
         except SchemaRuleError:
             raise
         except Exception as error:
@@ -769,7 +764,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                 return rollback_error(error)
             try:
                 rollback_attempted = True
-                discard_page_records(connection)
+                discard_operation_facts(connection)
                 with db_phase(TransactionPhase.ROLLBACK):
                     connection.execute("ROLLBACK")
             except Exception as rollback_error:
@@ -850,8 +845,6 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                     current_reads=(None if read_scope is None else
                                    SqlEventReads(connection, read_scope, validated, sequenced)),
                 )
-                clear_page_records(connection)
-                clear_read_reuse(connection)
                 context, reads = _bind_event_reads(
                     context, event, transaction_range, segment_guard_state,
                     source_guard_state, connection, operation_key,
@@ -932,9 +925,9 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                 )
             for link in change_set.links:
                 connection.execute(
-                    "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count)"
-                    " VALUES (?, ?, ?, ?)",
-                    (link.entity_type, link.entity_id, link.event_id, link.change_count),
+                    "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count, before_status, after_status)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (link.entity_type, link.entity_id, link.event_id, link.change_count, link.before_status, link.after_status),
                 )
             for report_change in change_set.report_changes:
                 connection.execute(
@@ -976,7 +969,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
             _finish_baseline_read_group(baseline_read_group)
             _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction_range,connection)
         committing = True
-        discard_page_records(connection)
+        discard_operation_facts(connection)
         with db_phase(TransactionPhase.COMMIT):
             connection.execute("COMMIT")
         return WriteReceipt(
@@ -1011,7 +1004,7 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
             rollback_control(control)
         raise
     finally:
-        page_reads.close()
+        fact_reads.close()
 
 
 def _rollback_control_or_unknown(
@@ -1020,7 +1013,7 @@ def _rollback_control_or_unknown(
 ) -> None:
     """回滚一次并在原控制对象上附加实际事务结果。"""
     try:
-        discard_page_records(connection)
+        discard_operation_facts(connection)
         with db_phase(TransactionPhase.ROLLBACK):
             connection.execute("ROLLBACK")
     except BaseException as rollback_error:
@@ -1036,7 +1029,7 @@ def _rollback_or_unknown(
     if not begun:
         return WriteReceipt(kind="rolled_back", error=error)
     try:
-        discard_page_records(connection)
+        discard_operation_facts(connection)
         with db_phase(TransactionPhase.ROLLBACK):
             connection.execute("ROLLBACK")
     except BaseException as rollback_error:
@@ -1125,8 +1118,9 @@ def event_envelope(
 
 def row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
     """读取完整行事实，按权威 SQL 的 JSON 列分类恢复精确结构化值。"""
-    key = (__name__, "row_facts", typed_read_key(table), typed_read_key(row_id))
-    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+    from camctl.persistence.fact_reads import _reuse_current_row
+    return _reuse_current_row(connection, table, row_id,
+                              lambda: _load_row_facts(connection, table, row_id))
 
 
 def _load_row_facts(connection: sqlite3.Connection, table: str, row_id: int) -> dict | None:
@@ -1153,10 +1147,12 @@ def read_transaction_range(
     validated: TransactionRange | None = None,
 ) -> TransactionRange:
     """核实完整事务范围、前一边界及成员；复用范围只限已核验的不可变历史。"""
-    key = (__name__, "transaction_range", typed_read_key(transaction_id),
-           typed_read_key(validated))
-    return reuse_read(connection, key, lambda: _load_transaction_range(
-        connection, transaction_id, validated))
+    if validated is not None and operation_fact_boundary(connection) is None:
+        return _load_transaction_range(connection, transaction_id, validated)
+    actual = read_transaction(connection, transaction_id)
+    if validated is not None and actual != validated:
+        raise ConsistencyError(f"已核验历史事务 {transaction_id} 的范围发生变化")
+    return actual
 
 
 def _load_transaction_range(
@@ -1240,14 +1236,9 @@ def read_saved_transaction_page(connection, operation_key, transaction, cursor=N
             raise ConsistencyError("原组游标不属于固定实例、操作键和完整范围")
         after = cursor.after_event_id
     size = min(limit,transaction.last_event_id-after)
-    with closing(connection.execute(
-        "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json "
-        "FROM history_events WHERE transaction_id=? AND id>? AND id<=? ORDER BY id LIMIT ?",
-        (transaction.txn_id,after,transaction.last_event_id,size))) as reader:
-        rows = reader.fetchmany(size)
-    events = tuple(decode_event_row(row) for row in rows)
-    if len(events) != size or any(event.event_id != after+i+1 or event.transaction_id != transaction.txn_id for i,event in enumerate(events)):
-        raise ConsistencyError("原组分页事件缺失或顺序不同")
+    from itertools import islice
+    events = tuple(record.event for record in islice(iter_transaction_events(
+        connection, transaction, after_event_id=after, batch_size=size), size))
     following = after+size
     return Page(events,None if following==transaction.last_event_id else
         SavedTransactionCursor(instance,str(operation_key),transaction,following))
@@ -1270,24 +1261,11 @@ def saved_transaction_events(
         return None
     transaction = read_transaction_range(connection, row[0])
     events: list[SavedEvent] = []
-    next_event_id = transaction.first_event_id
-    with closing(connection.execute(
-        "SELECT id, transaction_id, event_type, event_version, occurred_at,"
-        " clock_status, change_seq, body_json FROM history_events"
-        " WHERE transaction_id = ? ORDER BY id",
-        (transaction.txn_id,),
-    )) as cursor:
-        for stored in cursor:
-            event = decode_event_row(stored)
-            if (event.transaction_id != transaction.txn_id or event.event_id != next_event_id
-                    or event.event_id > transaction.last_event_id):
-                raise ConsistencyError(f"历史事务 {transaction.txn_id} 的事件身份、范围或顺序不一致")
-            events.append(SavedEvent(
-                event_id=event.event_id, occurred_at=event.occurred_at,
-                transaction=transaction, type=event.event_type,
-                reason=event.reason, body=_body_document(event),
-            ))
-            next_event_id += 1
-    if next_event_id != transaction.last_event_id + 1:
-        raise ConsistencyError(f"历史事务 {transaction.txn_id} 的事件成员缺失")
+    for record in iter_transaction_events(connection, transaction):
+        event = record.event
+        events.append(SavedEvent(
+            event_id=event.event_id, occurred_at=event.occurred_at,
+            transaction=transaction, type=event.event_type,
+            reason=event.reason, body=_body_document(event),
+        ))
     return events

@@ -28,7 +28,7 @@ from camctl.persistence.transaction import (
     row_facts,
 )
 from camctl.reporting.models import (
-    REPORT_FORMAT_VERSIONS, FrozenReport, ReportDecision, ReportDecisionKind, ReportOpportunity, ReportSelection,
+    FrozenReport, ReportDecision, ReportDecisionKind, ReportOpportunity, ReportSelection,
     ReportBytes, ReportPublication, ReportStatus, validate_frozen_report, validate_report_management,
     SyncDisposition, SyncMode, SyncSaved,
 )
@@ -135,10 +135,6 @@ class _FreezeCommand:
                       if decision.kind is ReportDecisionKind.REUSE else None)
             return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
                                result=ReportSelection(decision.kind, report, opportunity.latest_change_wm))
-        from camctl.reporting.models import CURRENT_REPORT_FORMAT
-        from camctl.persistence.runtime import report_format_versions, DatabaseUnsupportedFormatError
-        if CURRENT_REPORT_FORMAT not in report_format_versions(connection):
-            raise DatabaseUnsupportedFormatError("状态库尚未支持报告格式 2；请先执行 init --upgrade-report-format")
         boundary = opportunity.boundary
         last_event = boundary.last_event_id
         from_wm, to_wm = decision.from_wm, decision.to_wm
@@ -158,7 +154,7 @@ class _FreezeCommand:
                     "frozen_event_id": last_event,
                     "from_wm": from_wm,
                     "to_wm": to_wm,
-                    "format_version": CURRENT_REPORT_FORMAT,
+                    "format_version": 1,
                     "status": 1,
                     "size_bytes": None,
                     "sha256": None,
@@ -188,7 +184,7 @@ class _FreezeCommand:
             boundary=boundary,
             from_wm=from_wm,
             to_wm=to_wm,
-            format_version=CURRENT_REPORT_FORMAT,
+            format_version=1,
             scope=(),
         )
         validate_frozen_report(report)
@@ -219,7 +215,7 @@ class _FreezeCommand:
         if current is None:
             raise ConsistencyError("原冻结报告缺失")
         fixed = {"frozen_event_id": current.frozen_event_id, "from_wm": current.from_wm,
-                 "to_wm": current.to_wm, "format_version": read_frozen_report(connection, current).format_version}
+                 "to_wm": current.to_wm, "format_version": 1}
         with closing(connection.execute(
             "SELECT created_event_id FROM reports WHERE id = ?", (row["id"],),
         )) as cursor:
@@ -313,7 +309,7 @@ def _report_guard(event, context) -> None:
         except ValueError as error:
             raise EventValidationError(str(error)) from error
         version = after.get("format_version")
-        if isinstance(version, bool) or not isinstance(version, int) or version not in REPORT_FORMAT_VERSIONS:
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
             raise EventValidationError("报告格式版本不受支持")
         if after["frozen_event_id"] >= context.transaction.first_event_id:
             raise EventValidationError("冻结依据必须早于本次登记事务")

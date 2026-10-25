@@ -5,6 +5,7 @@ from typing import Any
 
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.business import settle_required
 
 
 @dataclass
@@ -37,37 +38,47 @@ def verify_cleanup_transaction(owned, key):
         connection.execute("ROLLBACK")
 
 
-def _no_longer_applicable(runtime, pending):
+async def _no_longer_applicable(runtime, pending):
     if pending.method != "fail_cleanup_binding" or pending.last_kind is None:
         return False
-    connection = runtime.owned.connection
-    row = connection.execute(
-        "SELECT a.cancel_requested,c.status FROM cleanup_items c"
-        " JOIN actions a ON a.id=c.action_id WHERE c.id=?", (pending.request.item_id,)).fetchone()
+    row, in_transaction = await runtime.database.read(lambda owned: (
+        owned.connection.execute(
+            "SELECT a.cancel_requested,c.status FROM cleanup_items c"
+            " JOIN actions a ON a.id=c.action_id WHERE c.id=?", (pending.request.item_id,)).fetchone(),
+        owned.connection.in_transaction), description="核实清理申请当前适用性")
     if row is None or row[1] in (4, 5, 6) or bool(row[0]) == pending.request.canceled:
         return False
-    if connection.in_transaction:
+    if in_transaction:
         raise ConsistencyError("原清理成员申请仍有未决事务，不能处置为未生效")
-    return verify_cleanup_transaction(runtime.owned, pending.key) is None
+    return await runtime.database.read(
+        lambda owned: verify_cleanup_transaction(owned, pending.key),
+        description="核实原清理申请未生效") is None
 
 
-def save_cleanup_request(runtime, method: str, request, *, action=False):
+async def save_cleanup_request(runtime, method: str, request, *, action=False):
+    """数据库回执与原申请的事件循环应用共同结束后才交付取消。"""
+    return await settle_required(_save_cleanup_request(runtime, method, request, action=action))
+
+
+async def _save_cleanup_request(runtime, method: str, request, *, action=False):
     """每个阶段持有一个原申请，可靠完成前不替换 key 或发生时刻。"""
     target_id = request.action_id if action else request.item_id
     identity = (method, target_id)
     pending = runtime.pending_saves.get(identity)
-    database_id = runtime.owned.metadata.instance_id
+    database_id = runtime.database.metadata.instance_id
     if pending is None:
         pending = PendingCleanupSave(database_id, method, request, new_operation_key())
         runtime.pending_saves[identity] = pending
     elif pending.database_id != database_id or pending.method != method:
         raise ConsistencyError("原清理保存申请不属于本次数据库或保存阶段")
-    if _no_longer_applicable(runtime, pending):
+    if await _no_longer_applicable(runtime, pending):
         del runtime.pending_saves[identity]
         return DbOutcome(DbOutcomeKind.COMPLETED,
                          CleanupSaveNotApplicable(pending.request, pending.key))
     try:
-        result = getattr(runtime.outputs, method)(pending.request, pending.key, runtime.owned)
+        result = await runtime.database.write(
+            lambda owned: getattr(runtime.outputs, method)(pending.request, pending.key, owned),
+            key=pending.key, description=f"清理保存:{method}")
     except BaseException:
         # 普通抛错不是已确认完成或回滚的回执，不据此替换申请。
         pending.last_kind = None

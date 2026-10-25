@@ -32,10 +32,17 @@ CREATE TABLE entity_event_links (
     entity_id INTEGER NOT NULL CHECK (entity_id > 0),
     event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     change_count INTEGER NOT NULL CHECK (change_count > 0),
+    before_status INTEGER CHECK (before_status IS NULL OR before_status IN (1,2,3,4,5,6)),
+    after_status INTEGER CHECK (after_status IS NULL OR after_status IN (1,2,3,4,5,6)),
+    CHECK (after_status IS NOT NULL OR before_status IS NULL),
+    CHECK (before_status IS NULL OR before_status <> after_status),
+    CHECK (after_status IS NULL OR entity_type IN (1,4)),
     UNIQUE (entity_type, entity_id, event_id),
     UNIQUE (entity_type, entity_id, change_count)
 ) STRICT;
 CREATE INDEX entity_links_event ON entity_event_links(event_id, entity_type, entity_id);
+CREATE INDEX entity_links_status ON entity_event_links(entity_type, entity_id, event_id)
+    WHERE after_status IS NOT NULL;
 
 CREATE TABLE report_entity_changes (
     id INTEGER PRIMARY KEY CHECK (id > 0),

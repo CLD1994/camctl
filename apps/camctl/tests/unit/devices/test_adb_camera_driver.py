@@ -1,5 +1,7 @@
 """相机启动组合按一个原尝试执行，设置事实与拍摄事实分别解释。"""
 
+from unittest.mock import AsyncMock
+
 from dataclasses import replace
 from decimal import Decimal
 import shlex
@@ -162,7 +164,7 @@ def _params(model):
 
 def _request(model=CameraModel.ACTION6, *, check=lambda: None, device_id="cam-1"):
     return ControlRequest("start_recording", DeviceBinding(device_id, model), _params(model),
-        AttemptTicket(1, "control", "7", "start/3", 9), Decimal("20"), dispatch_check=check)
+        AttemptTicket(1, "control", "7", "start/3", 9), Decimal("20"), dispatch_check=AsyncMock(side_effect=check))
 
 
 def _timelapse_request(*, check=lambda: None):
@@ -455,7 +457,7 @@ async def test_action6_dispatch_gate_preserves_last_settlement_and_attaches_comp
     transport = Action6ContractTransport(aperture_payload=payload,
         overrides={} if raw is None else {aperture: raw})
     request = replace(_request(),
-        dispatch_check=lambda: "window_closed" if transport.aperture_seen else None)
+        dispatch_check=AsyncMock(side_effect=lambda: "window_closed" if transport.aperture_seen else None))
 
     result = await _action6_contract_driver(transport).control(request)
 
@@ -528,7 +530,7 @@ async def test_action6_tool_start_error_keeps_not_started_evidence_when_gate_blo
     if gate == "cancel":
         monkeypatch.setattr(driver_module, "current_call_scope", lambda: scope)
     request = replace(_request(),
-        dispatch_check=lambda: "window_closed" if gate == "window" and transport.aperture_seen else None)
+        dispatch_check=AsyncMock(side_effect=lambda: "window_closed" if gate == "window" and transport.aperture_seen else None))
 
     result = await _action6_contract_driver(transport, clock=lambda: now[0]).control(request)
 
@@ -552,7 +554,7 @@ async def test_action6_tool_start_error_keeps_not_started_evidence_when_gate_blo
 @pytest.mark.asyncio
 async def test_action6_dispatch_prevention_before_any_call_keeps_v1_not_dispatched_evidence():
     transport = Action6ContractTransport()
-    request = replace(_request(), dispatch_check=lambda: "window_closed")
+    request = replace(_request(), dispatch_check=AsyncMock(side_effect=lambda: "window_closed"))
 
     result = await _action6_contract_driver(transport).control(request)
 
@@ -624,7 +626,7 @@ async def test_action6_cancel_after_a_settled_setting_returns_its_call_history(m
 @pytest.mark.asyncio
 async def test_action6_aperture_result_survives_dispatch_loss_before_next_command():
     transport = Action6ContractTransport(aperture_payload="00")
-    request = replace(_request(), dispatch_check=lambda: "window_closed" if transport.aperture_seen else None)
+    request = replace(_request(), dispatch_check=AsyncMock(side_effect=lambda: "window_closed" if transport.aperture_seen else None))
 
     result = await _action6_contract_driver(transport).control(request)
 

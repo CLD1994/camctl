@@ -23,8 +23,6 @@ __all__ = [
 ]
 
 ReportStatus = enum_for("reports.status")
-REPORT_FORMAT_VERSIONS = frozenset(int(member) for member in enum_for("reports.format_version"))
-CURRENT_REPORT_FORMAT = max(REPORT_FORMAT_VERSIONS)
 
 
 @dataclass(frozen=True)
@@ -175,7 +173,7 @@ def validate_frozen_report(report: FrozenReport) -> None:
     合法初始边界（无任何报告目标）允许空范围；其他边界缺少范围
     或对象身份非法均拒绝。
     """
-    if type(report.format_version) is not int or report.format_version not in REPORT_FORMAT_VERSIONS:
+    if report.format_version != 1:
         raise ValueError(f"报告格式版本不受支持: {report.format_version}")
     if report.report_id is None or report.report_id < 1:
         raise ValueError("报告身份必须是正整数")

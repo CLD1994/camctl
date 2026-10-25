@@ -9,15 +9,12 @@ from camctl.devices.segment_profiles import SegmentFileKind
 from .segment_profiles import profile_for_action
 from camctl.history.events import load_event_registry
 
-from .result_file_proofs import _file_at
-from .result_file_ownership import _proof
-from .result_pages import _at
+from .result_file_proofs import read_file_at_boundary
 from .segment_result_sets import _one, _read_transaction
 
 
 def segment_start_from_set(connection, setrow):
     """逐文件读取原 H0，不用合格产物过滤起点，也不借旧扫描补当前扫描。"""
-    from camctl.capture.files import OwnershipFromResultPageSave
     from camctl.persistence.transaction import row_facts
 
     unknown = SegmentStart()
@@ -58,36 +55,34 @@ def segment_start_from_set(connection, setrow):
     earliest = None
     order_unknown = False
     while True:
-        source = _one(
-            connection,
-            "SELECT file_id,MIN(page_event_id) FROM result_page_files"
-            " WHERE run_id=? AND file_id>? AND created_event_id<=?"
-            " GROUP BY file_id ORDER BY file_id LIMIT 1",
-            (setrow["run_id"], previous, boundary.last_event_id),
-        )
-        if source is None:
+        from contextlib import closing
+        with closing(connection.execute(
+                "SELECT file_id,MIN(page_event_id) FROM result_page_files"
+                " WHERE run_id=? AND file_id>? AND created_event_id<=?"
+                " GROUP BY file_id ORDER BY file_id LIMIT 128",
+                (setrow['run_id'], previous, boundary.last_event_id))) as query:
+            selected = query.fetchmany(128)
+        if not selected:
             break
-        file_id, page_id = source
-        previous = file_id
-        saved, _ = _at(connection, page_id)
-        action_id, role, _ = _proof(
-            connection, OwnershipFromResultPageSave(saved.ref, file_id, 0)
-        )
-        if action_id != setrow["action_id"] or page_id <= fixed[0]:
-            raise ConsistencyError("起点观察没有沿用同一原基准和动作")
-        file = _file_at(connection, file_id, boundary)
-        identity = parse_exact_json(file["identity_key"])[2]
-        parsed = profile_for_action(connection, setrow["action_id"]).classify_file(identity)
-        if parsed.kind is SegmentFileKind.PHOTO:
-            continue
-        if file["source_action_id"] != action_id or file["role"] != role:
-            order_unknown = True
-        if parsed.key is None:
-            order_unknown = True
-            continue
-        position = (parsed.key, page_id, file_id)
-        if earliest is None or position < earliest:
-            earliest = position
+        for file_id, page_id in selected:
+            if page_id <= fixed[0]:
+                raise ConsistencyError('起点观察没有沿用同一原基准')
+            file = read_file_at_boundary(connection, file_id, boundary)
+            identity = parse_exact_json(file['identity_key'])[2]
+            parsed = profile_for_action(connection, setrow['action_id']).classify_file(identity)
+            if parsed.kind is SegmentFileKind.PHOTO:
+                continue
+            role = int(enum_for('device_files.role').PREVIEW if parsed.kind is SegmentFileKind.PREVIEW
+                       else enum_for('device_files.role').ORIGINAL)
+            if file['source_action_id'] != setrow['action_id'] or file['role'] != role:
+                order_unknown = True
+            if parsed.key is None:
+                order_unknown = True
+                continue
+            position = (parsed.key, page_id, file_id)
+            if earliest is None or position < earliest:
+                earliest = position
+        previous = selected[-1][0]
     if earliest is None or order_unknown:
         return unknown
     key, page_id, file_id = earliest

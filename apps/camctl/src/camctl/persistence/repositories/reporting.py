@@ -12,7 +12,7 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.persistence.transaction import row_facts, saved_transaction_events
 from camctl.history.events import load_event_registry
 from camctl.reporting.ack import AckFacts, AckReport, SyncResponsibility
-from camctl.reporting.models import REPORT_FORMAT_VERSIONS, FrozenReport, ReportBytes, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management
+from camctl.reporting.models import FrozenReport, ReportBytes, ReportOpportunity, ReportPublication, ReportStatus, validate_report_management
 
 
 def _read_one(connection, sql, parameters=()):
@@ -83,7 +83,7 @@ def read_ack_report(connection, report_id: int) -> AckReport | None:
     if row is None:
         return None
     report = AckReport(report_id, row[0], row[1], row[2])
-    if row[3] not in REPORT_FORMAT_VERSIONS or report.frozen_event_id >= row[4]:
+    if row[3] != 1 or report.frozen_event_id >= row[4]:
         raise ConsistencyError("ACK 报告的固定生成依据无效")
     if report.frozen_event_id != 0 and _read_one(connection,
         "SELECT id FROM history_transactions WHERE last_event_id = ?",
@@ -192,8 +192,7 @@ def read_frozen_report(connection, report: AckReport) -> FrozenReport:
         if row is None:
             raise ConsistencyError("已选报告的完整冻结事务缺失")
         boundary = HistoryBoundary(row[0], row[1])
-    version = _read_one(connection, "SELECT format_version FROM reports WHERE id = ?", (report.report_id,))[0]
-    return FrozenReport(report.report_id, boundary, report.from_wm, report.to_wm, version)
+    return FrozenReport(report.report_id, boundary, report.from_wm, report.to_wm, 1)
 
 
 def read_report_management(connection, report_id: int) -> dict:

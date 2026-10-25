@@ -94,7 +94,6 @@ def _spec(tmp_path, report, name="staging/report-1.json", **overrides):
         from_wm=report.from_wm,
         to_wm=report.to_wm,
         frozen_event_id=report.boundary.last_event_id,
-        format_version=report.format_version,
         staging_path=tmp_path / name,
     )
     values.update(overrides)

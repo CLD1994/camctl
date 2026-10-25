@@ -31,6 +31,12 @@ def _limit(value):
     return value
 
 
+def _event_limit(value):
+    if type(value) is not int or value < 1:
+        raise ValueError('事件批量必须是正整数')
+    return value
+
+
 @dataclass(frozen=True)
 class _OwnerBranch:
     tables: tuple
@@ -112,7 +118,9 @@ class RowCursor:
 
 class SegmentHistoryHandle:
     """恢复全部通过后才返回的查询句柄；close释放可重建磁盘文件。"""
-    def __init__(self, repository, seed, batch_size):
+    def __init__(self, repository, seed, batch_size, *, event_batch_size=256):
+        self.batch_size = _limit(batch_size)
+        self.event_batch_size = _event_limit(event_batch_size)
         self.repository = repository
         self.boundary = seed.target
         self.action_id = seed.ref[1]
@@ -134,7 +142,6 @@ class SegmentHistoryHandle:
             self.close()
             raise
         self.seed = seed
-        self.batch_size = _limit(batch_size)
         self.ready = False
         self.stats = {'projection_rows': 0, 'events': 0, 'candidate_pages': 0}
 
@@ -408,14 +415,14 @@ class SegmentHistoryHandle:
         with self.repository._read_connection() as connection:
             maximum=self.repository._boundary(connection)
             head=self.repository._object_seed(connection,'action',self.action_id,maximum,
-                event_batch_size=self.batch_size,include_snapshot=False,primary_only=True)
+                event_batch_size=self.event_batch_size,include_snapshot=False,primary_only=True)
         return maximum,head.head
 
     def _events(self, lower, upper, first, end, forward):
         previous = lower.last_event_id if forward else upper.last_event_id+1
         count = first
         while (count <= end if forward else count >= end):
-            events = self.repository._object_event_page(self.seed.ref,lower,upper,previous,count,forward=forward,batch_size=self.batch_size,remaining=abs(end-count)+1)
+            events = self.repository._object_event_page(self.seed.ref,lower,upper,previous,count,forward=forward,batch_size=self.event_batch_size,remaining=abs(end-count)+1)
             for event in events:
                 self.stats['events'] += 1
                 yield event
@@ -425,15 +432,18 @@ class SegmentHistoryHandle:
     def _apply(self,event,forward):
         changes = event.rows if forward else reversed(event.rows)
         for change in changes:
-            self._apply_change(event.event_id,change,forward)
+            self._apply_change(event,change,forward)
 
-    def _apply_change(self,event_id,change,forward):
+    def _apply_change(self,event,change,forward):
         key = (change.table,change.row_id)
-        candidate = self._one('SELECT body,upper_event FROM candidates WHERE tab=? AND id=?',key)
-        if candidate is None or (not forward and event_id > candidate[1]):
-            return
-        current = parse_exact_json(candidate[0])
         target = self._get(*key)
+        if forward:
+            if target is None and not self._forward_candidate(*key):
+                return
+        else:
+            candidate = self._one('SELECT body,upper_event FROM candidates WHERE tab=? AND id=?', key)
+            if candidate is None or event.event_id > candidate[1]:
+                return
         columns = business_columns(change.table)
         if not change.after.exists:
             raise ConsistencyError('永久自身行不能被历史事件删除')
@@ -441,7 +451,8 @@ class SegmentHistoryHandle:
             if not change.before.exists:
                 if target is not None or set(change.after.values) != columns:
                     raise ConsistencyError('历史创建行不完整或重复')
-                target = {k:v for k,v in current.items() if k not in columns}
+                from camctl.history.forward import created_values
+                target = created_values(event, change, self.seed.ref, self._forward_count)
             elif target is None:
                 raise ConsistencyError('历史更新行不存在')
             else:
@@ -459,133 +470,54 @@ class SegmentHistoryHandle:
                 raise ConsistencyError('逆向更新行不存在')
             self._put(*key,reverse_row_values(target,change,frozenset(target)))
 
+    def _prepare_forward(self):
+        pass
+
+    def _forward_candidate(self, table, identity):
+        return self.repository._owns_row_identity(self._row_owner()[0], self.seed.ref[1], table, identity)
+
     def restore(self,strategy):
-        upper,head = self._copy_candidates()
-        self._upper,self._head=upper,head
+        self._forward = strategy in ('snapshot', 'initial')
         if strategy == 'current':
+            upper, head = self._copy_candidates()
+            self._upper, self._head = upper, head
             self._db.execute('INSERT INTO rows SELECT tab,id,body FROM candidates').close()
-            for event in self._events(self.boundary,upper,head[1],self.seed.floor[1]+1,False):
-                self._apply(event,False)
-        elif strategy == 'initial':
-            self._prove_fixed_values(self.boundary,self.seed.floor[1])
-            for event in self._events(INITIAL_BOUNDARY,self.boundary,1,self.seed.floor[1],True):
-                self._apply(event,True)
-        elif strategy == 'snapshot':
-            choice = self.seed.snapshot
-            if choice is None:
-                raise ConsistencyError('请求的快照恢复路径没有可靠S')
-            self._prove_fixed_values(choice.boundary,choice.position[1])
-            self._load_snapshot()
-            self._replay_proved_changes()
+            for event in self._events(self.boundary, upper, head[1], self.seed.floor[1]+1, False):
+                self._apply(event, False)
+        elif self._forward:
+            self._prepare_forward()
+            if strategy == 'snapshot':
+                choice = self.seed.snapshot
+                if choice is None:
+                    raise ConsistencyError('请求的快照恢复路径没有可靠S')
+                self._load_snapshot()
+                lower, count = choice.boundary, choice.position[1]
+                if count < self.seed.floor[1]:
+                    self._validate(build_indexes=False)
+            else:
+                lower, count = INITIAL_BOUNDARY, 0
+            self._forward_count = count
+            for event in self._events(lower, self.boundary, count+1, self.seed.floor[1], True):
+                self._forward_count += 1
+                self._apply(event, True)
         else:
             raise ValueError('未知历史恢复路径')
-        if strategy != 'current':
-            self._verify_complete_keys()
-            self._verify_fixed_values()
-        primary = self._get('actions',self.action_id)
+        primary = self._get(self.seed.primary_table,self.seed.ref[1])
         if self.seed.floor[1]:
             if primary is None:
                 raise ConsistencyError('H处对象缺少主行')
-            primary.update(last_event_id=self.seed.floor[0],change_count=self.seed.floor[1])
-            self._put('actions',self.action_id,primary)
+            derived = load_event_registry()['tables'][self.seed.primary_table]['derived']
+            if 'last_event_id' in derived:
+                primary['last_event_id'] = self.seed.floor[0]
+            if 'change_count' in derived:
+                primary['change_count'] = self.seed.floor[1]
+            self._put(self.seed.primary_table,self.seed.ref[1],primary)
         elif self._one('SELECT 1 FROM rows LIMIT 1'):
             raise ConsistencyError('H处对象尚未创建但仍有自身行')
         self._validate()
         self._validate_sets()
         self.ready = True
         return self
-
-    def _prove_fixed_values(self, lower, lower_count):
-        """沿每行Ci逆向一次，分别取得S/H的原write_once事实。
-
-        (S,H]的已验证变化落盘后供快照正向复用；源事件只读取一次。
-        fixed表也记录存在性，完整身份校验复用同一份创建事实。
-        """
-        self._db.execute('CREATE TABLE fixed_work (tab TEXT,id INTEGER,body TEXT,PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
-        self._db.execute('CREATE TABLE proved_changes (event INTEGER,ordinal INTEGER,tab TEXT,id INTEGER,before_exists INTEGER,before_body TEXT,after_body TEXT,PRIMARY KEY(event,ordinal)) WITHOUT ROWID').close()
-        registry=load_event_registry()['tables']
-        previous=('',0)
-        while True:
-            with closing(self._db.execute('SELECT tab,id,body FROM candidates WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as query:
-                selected=query.fetchall()
-            if not selected:
-                break
-            for table,identity,body in selected:
-                values=parse_exact_json(body)
-                fixed={column:values[column] for column in registry[table]['write_once']}
-                self._db.execute('INSERT INTO fixed_work VALUES (?,?,?)',
-                    (table,identity,encode_json_value(fixed))).close()
-            previous=selected[-1][:2]
-        copied_h=False
-        for event in self._events(lower,self._upper,self._head[1],lower_count+1,False):
-            if not copied_h and event.event_id <= self.boundary.last_event_id:
-                self._copy_fixed('fixed_h')
-                copied_h=True
-            for ordinal,change in reversed(tuple(enumerate(event.rows))):
-                key=(change.table,change.row_id)
-                candidate=self._one('SELECT upper_event FROM candidates WHERE tab=? AND id=?',key)
-                if candidate is None or event.event_id > candidate[0]:
-                    continue
-                if not change.after.exists:
-                    raise ConsistencyError('永久自身行不能被历史删除')
-                found=self._one('SELECT body FROM fixed_work WHERE tab=? AND id=?',key)
-                if found is None:
-                    raise ConsistencyError('一次固定证据缺少原行')
-                fixed=parse_exact_json(found[0])
-                for column in registry[change.table]['write_once']:
-                    if column in change.after.values:
-                        if not json_equal(fixed[column],change.after.values[column]):
-                            raise ConsistencyError('一次固定事实与Ci后值不连续')
-                        if change.before.exists:
-                            fixed[column]=change.before.values[column]
-                if not change.before.exists:
-                    self._db.execute('DELETE FROM fixed_work WHERE tab=? AND id=?',key).close()
-                else:
-                    self._db.execute('UPDATE fixed_work SET body=? WHERE tab=? AND id=?',
-                        (encode_json_value(fixed),*key)).close()
-                if event.event_id <= self.boundary.last_event_id:
-                    self._db.execute('INSERT INTO proved_changes VALUES (?,?,?,?,?,?,?)',
-                        (event.event_id,ordinal,*key,int(change.before.exists),
-                         encode_json_value(dict(change.before.values)),encode_json_value(dict(change.after.values)))).close()
-        if not copied_h:
-            self._copy_fixed('fixed_h')
-        self._copy_fixed('fixed_s')
-        self._db.execute('DROP TABLE fixed_work').close()
-
-    def _copy_fixed(self,name):
-        self._db.execute(f'CREATE TABLE {name} (tab TEXT,id INTEGER,body TEXT,PRIMARY KEY(tab,id)) WITHOUT ROWID').close()
-        self._db.execute(f'INSERT INTO {name} SELECT tab,id,body FROM fixed_work').close()
-
-    def _replay_proved_changes(self):
-        from camctl.history.events import RowChange,RowImage
-        previous=(0,-1)
-        while True:
-            with closing(self._db.execute('SELECT event,ordinal,tab,id,before_exists,before_body,after_body FROM proved_changes WHERE (event,ordinal)>(?,?) ORDER BY event,ordinal LIMIT ?',(*previous,self.batch_size))) as query:
-                selected=query.fetchall()
-            if not selected:
-                return
-            for event,ordinal,table,identity,exists,before,after in selected:
-                change=RowChange(table,identity,RowImage(bool(exists),parse_exact_json(before)),RowImage(True,parse_exact_json(after)))
-                self._apply_change(event,change,True)
-            previous=selected[-1][:2]
-
-    def _fixed_values(self,table,identity,at='fixed_s'):
-        found=self._one(f'SELECT body FROM {at} WHERE tab=? AND id=?',(table,identity))
-        if found is None:
-            raise ConsistencyError('快照包含原边界尚未创建的行')
-        return parse_exact_json(found[0])
-
-    def _verify_complete_keys(self):
-        missing=self._one('SELECT tab,id FROM fixed_h EXCEPT SELECT tab,id FROM rows LIMIT 1')
-        extra=self._one('SELECT tab,id FROM rows EXCEPT SELECT tab,id FROM fixed_h LIMIT 1')
-        if missing or extra:
-            raise ConsistencyError('H处恢复自身成员不完整或包含后创建行')
-
-    def _verify_fixed_values(self):
-        for record in self._iter_rows():
-            expected=self._fixed_values(record.table,record.row_id,'fixed_h')
-            if any(not json_equal(record.values[column],value) for column,value in expected.items()):
-                raise ConsistencyError('恢复结果的一次固定事实不属于H')
 
     def _iter_rows(self):
         previous=('',0)
@@ -598,13 +530,13 @@ class SegmentHistoryHandle:
                 yield SnapshotRow(table,identity,parse_exact_json(body))
             previous=selected[-1][:2]
 
-    def _validate(self):
+    def _validate(self, *, build_indexes=True):
         from camctl.history.validators import EventContext,_resolve_owner_spec
-        from camctl.persistence.row_validation import ProjectionRowValidator
         from camctl.acceptance.definitions import read_action_spec
         registry = load_event_registry()['tables']
         context = EventContext(self.seed.snapshot.transaction if self.seed.snapshot else self._transaction(),{},_DiskState(self))
-        with ProjectionRowValidator(storage_path=Path(self._temporary.name)/'validation.db') as validator:
+        filename = 'validation.db' if build_indexes else 'snapshot-validation.db'
+        with self.repository.projection_validator(storage_path=Path(self._temporary.name)/filename) as validator:
             previous = ('',0)
             while True:
                 with closing(self._db.execute('SELECT tab,id,body FROM rows WHERE (tab,id)>(?,?) ORDER BY tab,id LIMIT ?',(*previous,self.batch_size))) as cursor:
@@ -614,8 +546,11 @@ class SegmentHistoryHandle:
                 for table,identity,body in selected:
                     values = parse_exact_json(body)
                     validator.validate(table,values)
-                    if _resolve_owner_spec(registry[table]['owner'],table,values,context,{}) != ('action',self.action_id):
+                    if _resolve_owner_spec(registry[table]['owner'],table,values,context,{}) != self._row_owner():
                         raise ConsistencyError('恢复行归属不属于同H动作')
+                    if not build_indexes:
+                        self.stats['snapshot_rows_validated'] = self.stats.get('snapshot_rows_validated', 0)+1
+                        continue
                     if table == 'actions':
                         read_action_spec(values)
                     if table == 'segment_sets' and values['current_attempt_id'] is not None:
@@ -635,72 +570,84 @@ class SegmentHistoryHandle:
                             (table,values['set_id'],*position)).close()
                 previous = selected[-1][:2]
 
-    def _validate_sets(self):
-        from camctl.capture.segment_models import (
-            DefaultScopeState, SegmentDecision, SegmentSetRef,
-        )
+    def _row_owner(self):
+        return 'action',self.action_id
+
+    def _set_validation_scope(self):
+        return 'complete'
+
+    def _validate_set_header(self, values):
+        """有限头只核自身决定，不把尚未读取的集合解释为零行。"""
+        from camctl.capture.segment_models import DefaultScopeState, SegmentDecision, SegmentSetRef
         from camctl.capture.segment_storage import assessment_from_document, facts_from_document
-        previous=0
+        if values['facts_json'] is not None:
+            facts_from_document(values['facts_json'])
+        if values['assessment_json'] is None:
+            return None
+        assessment = assessment_from_document(values['assessment_json'])
+        ref = SegmentSetRef(self.action_id, values['current_attempt_id'],
+                            values['current_final_page_event_id'], values['version'])
+        if isinstance(assessment, SegmentDecision):
+            if assessment.set_ref != ref or assessment.default_scope.set_ref != ref:
+                raise ConsistencyError('H处公共判断改变原集合')
+            scope = assessment.default_scope
+            expected = (0 if scope.state in (DefaultScopeState.UNKNOWN, DefaultScopeState.EMPTY)
+                        else scope.member_count)
+            if type(expected) is not int or expected < 0:
+                raise ConsistencyError('H处公共判断的默认范围数量无效')
+            if assessment.checked_count > expected:
+                raise ConsistencyError('H处检查前缀超过公共判断')
+            if scope.state is DefaultScopeState.UNKNOWN and assessment.checked_count:
+                raise ConsistencyError('H处未知公共范围不能包含已检查前缀')
+        elif assessment.set_ref != ref or assessment.target_duration_ms != values['target_duration_ms']:
+            raise ConsistencyError('H处判断改变原集合或目标')
+        return assessment
+
+    def _validate_sets(self):
+        from camctl.capture.segment_models import DefaultScopeState, SegmentDecision
+        validation = self._set_validation_scope()
+        previous = 0
         while True:
             with closing(self._db.execute("SELECT id,body FROM rows WHERE tab='segment_sets' AND id>? ORDER BY id LIMIT ?",
-                    (previous,self.batch_size))) as cursor:
-                selected=cursor.fetchall()
+                    (previous, self.batch_size))) as cursor:
+                selected = cursor.fetchall()
             if not selected:
                 return
-            for identity,body in selected:
-                values=parse_exact_json(body)
+            for identity, body in selected:
+                values = parse_exact_json(body)
+                assessment = self._validate_set_header(values)
+                if validation == 'finite':
+                    continue
                 def count(table):
-                    return self._one('SELECT COUNT(*),MIN(k1),MAX(k1) FROM row_order WHERE tab=? AND set_id=?',(table,identity))
-                members=count('segment_members')[0]
-                if values['member_count'] is not None and members != values['member_count']:
-                    raise ConsistencyError('H处完整成员数量与固定集合计数不同')
-                gaps=count('segment_gaps')
-                scope=count('segment_scope_members')
-                for summary in (gaps,scope):
-                    if summary[0] and summary[1:] != (1,summary[0]):
-                        raise ConsistencyError('H处缺口或范围保存序号不完整')
-                if values['facts_json'] is not None:
-                    facts_from_document(values['facts_json'])
-                if values['assessment_json'] is not None:
-                    assessment=assessment_from_document(values['assessment_json'])
-                    ref=SegmentSetRef(self.action_id,values['current_attempt_id'],values['current_final_page_event_id'],values['version'])
-                    if isinstance(assessment, SegmentDecision):
-                        if assessment.set_ref != ref or assessment.default_scope.set_ref != ref:
-                            raise ConsistencyError('H处公共判断改变原集合')
-                        selected_scope = assessment.default_scope
-                        expected = (
-                            0 if selected_scope.state in (
-                                DefaultScopeState.UNKNOWN, DefaultScopeState.EMPTY
-                            ) else selected_scope.member_count
-                        )
-                        if type(expected) is not int or expected < 0:
-                            raise ConsistencyError('H处公共判断的默认范围数量无效')
-                        if assessment.checked_count > expected or scope[0] > expected:
-                            raise ConsistencyError('H处检查前缀或范围超过公共判断')
-                        if selected_scope.state is DefaultScopeState.UNKNOWN and assessment.checked_count:
-                            raise ConsistencyError('H处未知公共范围不能包含已检查前缀')
-                        if values['published_event_id'] is not None:
-                            if scope[0] != expected:
-                                raise ConsistencyError('H处正式公共范围缺少成员')
-                            missing=self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1",(identity,))
-                            if missing:
-                                raise ConsistencyError('H处正式公共范围尚未关联真实产物')
-                        continue
-                    if assessment.set_ref != ref or assessment.target_duration_ms != values['target_duration_ms']:
-                        raise ConsistencyError('H处判断改变原集合或目标')
-                    if gaps[0] != (0 if assessment.gap_count is None else assessment.gap_count):
-                        raise ConsistencyError('H处完整缺口与nullable摘要计数不同')
-                    expected=(0 if assessment.default_scope.state is DefaultScopeState.UNKNOWN
-                              else assessment.default_scope.member_count)
+                    return self._one('SELECT COUNT(*),MIN(k1),MAX(k1) FROM row_order WHERE tab=? AND set_id=?', (table, identity))
+                if validation == 'complete':
+                    members = count('segment_members')[0]
+                    if values['member_count'] is not None and members != values['member_count']:
+                        raise ConsistencyError('H处完整成员数量与固定集合计数不同')
+                    gaps = count('segment_gaps')
+                    if gaps[0] and gaps[1:] != (1, gaps[0]):
+                        raise ConsistencyError('H处缺口保存序号不完整')
+                scope = count('segment_scope_members')
+                if scope[0] and scope[1:] != (1, scope[0]):
+                    raise ConsistencyError('H处范围保存序号不完整')
+                if assessment is None:
+                    continue
+                expected = (0 if assessment.default_scope.state is DefaultScopeState.UNKNOWN
+                            else assessment.default_scope.member_count)
+                if isinstance(assessment, SegmentDecision):
                     if scope[0] > expected:
-                        raise ConsistencyError('H处范围包含原判断以外的成员')
-                    if values['published_event_id'] is not None:
-                        if scope[0] != expected:
-                            raise ConsistencyError('H处正式范围缺少成员')
-                        missing=self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1",(identity,))
-                        if missing:
-                            raise ConsistencyError('H处正式范围尚未关联真实产物')
-            previous=selected[-1][0]
+                        raise ConsistencyError('H处范围超过公共判断')
+                elif validation == 'complete' and gaps[0] != (0 if assessment.gap_count is None else assessment.gap_count):
+                    raise ConsistencyError('H处完整缺口与nullable摘要计数不同')
+                if scope[0] > expected:
+                    raise ConsistencyError('H处范围包含原判断以外的成员')
+                if values['published_event_id'] is not None:
+                    if scope[0] != expected:
+                        raise ConsistencyError('H处正式范围缺少成员')
+                    missing = self._one("SELECT 1 FROM row_order o JOIN rows r ON r.tab=o.tab AND r.id=o.id WHERE o.tab='segment_scope_members' AND o.set_id=? AND json_extract(r.body,'$.output_id') IS NULL LIMIT 1", (identity,))
+                    if missing:
+                        raise ConsistencyError('H处正式范围尚未关联真实产物')
+            previous = selected[-1][0]
 
     def _transaction(self):
         from camctl.persistence.repositories.history import _transaction_range

@@ -300,21 +300,10 @@ def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] 
     return frozenset(values)
 
 
-def report_format_versions(connection: sqlite3.Connection) -> frozenset[int]:
-    """识别独立报告格式资格；普通打开只接受旧约束或当前完整约束。"""
-    registered = frozenset(int(member) for member in enum_for("reports.format_version"))
-    row = connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='reports'").fetchone()
-    values = None if row is None else _known_integer_check_values(row[0], "format_version")
-    if values not in (frozenset({int(enum_for("reports.format_version").V1)}), registered):
-        raise DatabaseInvalidError("reports.format_version 的 CHECK 不属于受支持的报告格式")
-    return values
-
-
 def _verify_format_constraints(
     connection: sqlite3.Connection, format_version: int
 ) -> None:
-    """核对整体格式及独立报告格式的已知 CHECK 约束。"""
-    report_format_versions(connection)
+    """核对仅涉及整体格式声明的两个已知 CHECK 约束。"""
     metadata_row = connection.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'database_metadata'"
     ).fetchone()

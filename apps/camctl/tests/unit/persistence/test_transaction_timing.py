@@ -386,22 +386,27 @@ def test_disabled_timing_keeps_connection_and_original_sql_sequence(transaction_
 
 
 @pytest.mark.parametrize("timing_enabled", [False, True])
-def test_complete_transaction_reuses_reads_and_releases_scope(transaction_ports, timing_enabled):
-    from camctl.persistence.read_reuse import reuse_read
+def test_complete_transaction_owns_c0_and_discards_before_rollback(transaction_ports, timing_enabled):
+    from camctl.persistence.fact_reads import operation_fact_boundary
+    from camctl.contracts.history_values import INITIAL_BOUNDARY
 
     owned, _, _, _ = transaction_ports
     owned.connection.in_transaction = True
-    owned.connection.total_changes = 0
     command = create_autospec(tx.AtomicCommand, instance=True, spec_set=True)
-    loaded = []
+    planned = []
+    execute = owned.connection.execute.side_effect
 
-    def load():
-        loaded.append(len(loaded) + 1)
-        return {"fact": loaded[-1]}
+    def observe(sql, parameters=()):
+        if sql == "ROLLBACK":
+            assert operation_fact_boundary(planned[-1]) is None
+        return execute(sql, parameters)
+
+    owned.connection.execute.side_effect = observe
 
     def plan(scope):
-        values = [reuse_read(scope.connection, ("proof", 1), load) for _ in range(2)]
-        return tx.CommandPlan((), {}, {}, values, read_only=True)
+        planned.append(scope.connection)
+        assert operation_fact_boundary(scope.connection) == INITIAL_BOUNDARY
+        return tx.CommandPlan((), {}, {}, "saved", read_only=True)
 
     command.plan.side_effect = plan
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
@@ -409,6 +414,48 @@ def test_complete_transaction_reuses_reads_and_releases_scope(transaction_ports,
         first = tx.commit_operation(command, new_operation_key(), owned)
         second = tx.commit_operation(command, new_operation_key(), owned)
     assert first.kind == second.kind == "completed"
-    assert first.result == [{"fact": 1}, {"fact": 1}]
-    assert second.result == [{"fact": 2}, {"fact": 2}]
-    assert loaded == [1, 2]
+    assert first.result == second.result == "saved"
+    assert all(operation_fact_boundary(connection) is None for connection in planned)
+
+
+@pytest.mark.parametrize('bounded', [False, True])
+@pytest.mark.parametrize('outcome', ['commit', 'commit_unknown', 'rollback', 'rollback_unknown', 'cancel'])
+def test_fact_scope_is_inactive_before_each_real_transaction_exit(transaction_ports, bounded, outcome):
+    from camctl.persistence.fact_reads import operation_fact_boundary
+    from camctl.contracts.history_values import INITIAL_BOUNDARY
+
+    owned, active, _, _ = transaction_ports
+    owned.connection.in_transaction = True
+    command = _one_event_command(active=active, bounded=bounded)
+    original_plan = command.plan.side_effect
+    execute = owned.connection.execute.side_effect
+    planned = []
+    failure = RuntimeError('计划失败')
+
+    def plan(scope):
+        planned.append(scope.connection)
+        assert operation_fact_boundary(scope.connection) == INITIAL_BOUNDARY
+        if outcome in {'rollback', 'rollback_unknown'}:
+            raise failure
+        if outcome == 'cancel':
+            raise KeyboardInterrupt
+        return original_plan(scope)
+
+    def observe(sql, parameters=()):
+        if sql in {'COMMIT', 'ROLLBACK'}:
+            assert operation_fact_boundary(planned[-1]) is None
+            if (sql == 'COMMIT' and outcome == 'commit_unknown'
+                    or sql == 'ROLLBACK' and outcome == 'rollback_unknown'):
+                raise sqlite3.OperationalError('实际退出结果未知')
+        return execute(sql, parameters)
+
+    command.plan.side_effect = plan
+    owned.connection.execute.side_effect = observe
+    if outcome == 'cancel':
+        with pytest.raises(KeyboardInterrupt):
+            tx.commit_operation(command, new_operation_key(), owned)
+    else:
+        result = tx.commit_operation(command, new_operation_key(), owned)
+        expected = 'completed' if outcome == 'commit' else 'rolled_back' if outcome == 'rollback' else 'unknown'
+        assert result.kind == expected
+    assert planned and all(operation_fact_boundary(connection) is None for connection in planned)

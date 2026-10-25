@@ -145,7 +145,7 @@ def _chunks(handle,choice):
         yield chunk
 
 
-def load_snapshot(handle):
+def load_snapshot(handle, *, include_row=None):
     choice = handle.seed.snapshot
     if choice is None:
         raise ConsistencyError('请求的快照恢复路径没有可靠S')
@@ -153,7 +153,7 @@ def load_snapshot(handle):
         with closing(_records(_chunks(handle,choice))) as records:
             header = next(records,None)
             expected = {'format_version':FORMAT_VERSION,'entity_type':handle.seed.ref[0],
-                        'entity_id':handle.action_id,'boundary_event_id':choice.boundary.last_event_id,
+                        'entity_id':handle.seed.ref[1],'boundary_event_id':choice.boundary.last_event_id,
                         'change_count':choice.position[1]}
             if not json_equal(header,expected):
                 raise SnapshotMaintenanceError('快照头不符合固定S及目录计数')
@@ -169,23 +169,22 @@ def load_snapshot(handle):
                 key = (table,values['id'])
                 if key <= previous:
                     raise SnapshotMaintenanceError('快照行排序不连续或包含重复身份')
-                current = handle._get(*key,source='candidates')
-                if current is None or values.keys() != current.keys():
-                    raise SnapshotMaintenanceError('快照行超出自身范围或列不完整')
-                for column in (*registry[table]['immutable'],'id','created_event_id'):
-                    if column in current and not json_equal(values[column],current[column]):
-                        raise SnapshotMaintenanceError('快照不可变身份不符合永久投影')
-                fixed=handle._fixed_values(*key)
-                for column in registry[table]['write_once']:
-                    if not json_equal(values[column],fixed[column]):
-                        raise SnapshotMaintenanceError('快照一次固定事实不属于原S')
+                previous = key
+                if include_row is not None and not include_row(table, values):
+                    continue
+                columns = set().union(*(registry[table].get(name, ()) for name in
+                    ('immutable', 'mutable', 'write_once', 'derived')))
+                if values.keys() != columns:
+                    raise SnapshotMaintenanceError('快照行列不完整或包含未知列')
                 if ('created_event_id' in values and values['created_event_id'] > choice.boundary.last_event_id):
                     raise SnapshotMaintenanceError('快照包含S之后创建的行')
                 handle._put(*key,values)
-                previous = key
-                del record,values,current,fixed
-            primary = handle._get('actions',handle.action_id)
-            if primary is None or (primary['last_event_id'],primary['change_count']) != choice.position:
+                del record,values
+            primary = handle._get(handle.seed.primary_table,handle.seed.ref[1])
+            derived = registry[handle.seed.primary_table]['derived']
+            if (primary is None
+                    or 'last_event_id' in derived and primary['last_event_id'] != choice.position[0]
+                    or 'change_count' in derived and primary['change_count'] != choice.position[1]):
                 raise SnapshotMaintenanceError('快照主行缺失或目录计数不符')
     except (SnapshotMaintenanceError,ValueError,TypeError,KeyError) as error:
         raise ConsistencyError('已选快照损坏，无法可靠恢复') from error

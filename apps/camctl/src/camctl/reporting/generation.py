@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Mapping, Protocol
@@ -48,12 +48,8 @@ class GenerationSpec:
     staging_path: Path
     entity_batch_size: int = 32
     event_batch_size: int = 256
-    format_version: int = 1
 
     def __post_init__(self) -> None:
-        from camctl.reporting.models import REPORT_FORMAT_VERSIONS
-        if type(self.format_version) is not int or self.format_version not in REPORT_FORMAT_VERSIONS:
-            raise ValueError("报告格式版本不受支持")
         if not isinstance(self.report_id, int) or isinstance(self.report_id, bool) \
                 or self.report_id < 1:
             raise ValueError(f"报告身份必须是正整数: {self.report_id!r}")
@@ -82,9 +78,11 @@ class _ReportReader(Protocol):
 
     def restore_entity(self, entity: str, entity_id: int, boundary) -> dict: ...
 
+    def restore_primary_at_h(self, entity: str, entity_id: int, boundary) -> dict | None: ...
+
     def related_entity_ids(self, table: str, column: str, value: int) -> list[int]: ...
 
-    def status_history(self, entity: str, identity: int, boundary, current_status: int, *, event_batch_size: int) -> list[dict]: ...
+    def status_history(self, entity: str, identity: int, boundary, current_status: int) -> list[dict]: ...
 
 
 def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSpec) -> "HistoryBoundary":
@@ -98,8 +96,6 @@ def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSp
             f"报告 {spec.report_id} 的冻结依据与生成输入不符:"
             f" 库内 from={registered.from_wm} to={registered.to_wm}"
             f" frozen={registered.boundary.last_event_id}")
-    if registered.format_version != spec.format_version:
-        raise ConsistencyError("报告格式版本与冻结登记不一致")
     return registered.boundary
 
 
@@ -117,6 +113,13 @@ def generate_report_file(
     不进入发布流程。
     """
     repo = repository if repository is not None else HistoryRepository(spec.db_path)
+    scope = repo.report_read_scope() if isinstance(repo, HistoryRepository) else nullcontext()
+    with scope:
+        return _generate_report_file(spec, repo, buffer_size)
+
+
+def _generate_report_file(spec, repo, buffer_size) -> GeneratedFile:
+    """在调用者拥有的读取范围内写文件，并显式结束所有流式读取。"""
     boundary = verify_frozen_registration(repo, spec)
     document = ReportDocument(
         report_id=str(spec.report_id), from_wm=spec.from_wm, to_wm=spec.to_wm)
@@ -144,16 +147,16 @@ def generate_report_file(
             for subtree in scope.plans:
                 facts = _plan_facts(repo, subtree, boundary)
                 histories = {}
-                if spec.format_version >= 2:
-                    objects = [("plan", "plans", subtree.plan_id),
-                               *(("action", "actions", identity) for identity in scope.action_ids_of(subtree.plan_id))]
-                    for entity, table, identity in objects:
-                        histories[(entity, identity)] = repo.status_history(
-                            entity, identity, boundary, facts[table][identity]["status"],
-                            event_batch_size=spec.event_batch_size)
+                objects = [
+                    ("plan", "plans", subtree.plan_id),
+                    *(("action", "actions", identity) for identity in scope.action_ids_of(subtree.plan_id)),
+                ]
+                for entity, table, identity in objects:
+                    histories[(entity, identity)] = repo.status_history(
+                        entity, identity, boundary, facts[table][identity]["status"])
                 fragment = project_public(ProjectionInput(
                     "plan", subtree.plan_id, facts, dict(subtree.selection),
-                    format_version=spec.format_version, status_histories=histories))
+                    status_histories=histories))
                 yield from stream.section("plans", fragment)
             for diagnostic_id in scope.diagnostics:
                 facts = _diagnostic_facts(repo, diagnostic_id, boundary)
@@ -162,10 +165,12 @@ def generate_report_file(
                 yield from stream.section("plan_file_diagnostics", fragment)
             yield from stream.finish()
 
-        for chunk in chunk_bytes(tokens(), buffer_size=buffer_size):
-            handle.write(chunk)
-            digest.update(chunk)
-            size += len(chunk)
+        with closing(tokens()) as source:
+            with closing(chunk_bytes(source, buffer_size=buffer_size)) as chunks:
+                for chunk in chunks:
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
         handle.flush()
         os.fsync(handle.fileno())
     except BaseException:
@@ -245,7 +250,11 @@ def _merge_delivery(repo, facts: dict, delivery_id: int, boundary) -> None:
         raise ConsistencyError(f"交付 {delivery_id} 在 H 不存在")
     output_id = delivery.get("output_id")
     if output_id is not None:
-        _merge_output(repo, facts, int(output_id), boundary)
+        # 交付展示需要来源身份；源文件的完整展示由产物节点负责。
+        output = repo.restore_primary_at_h("output", int(output_id), boundary)
+        if output is None:
+            raise ConsistencyError(f"产物 {output_id} 在 H 不存在")
+        _merge(facts, {("outputs", int(output_id)): output})
     target_ids = sorted({
         int(copy["target_file_id"])
         for (table, _), copy in rows.items()

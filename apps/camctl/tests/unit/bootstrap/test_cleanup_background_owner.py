@@ -1,9 +1,9 @@
-"""清理后台任务、连接与原保存集合的完整拥有边界。"""
+"""清理后台任务、共享数据库端口与原保存集合的完整拥有边界。"""
 
 import asyncio
 import sqlite3
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 
@@ -13,19 +13,21 @@ from camctl.bootstrap.lifecycle import _local_work
 from camctl.contracts.values import ConsistencyError
 from camctl.scheduling.notifications import WorkNotifier, WakeReason
 from camctl.session.service import StateDbFailure
+from camctl.persistence.business import BusinessDatabase
+from camctl.persistence.models import DbReadError
 
 pytestmark = pytest.mark.asyncio
 
 
 def _context(wake=None):
-    owned = SimpleNamespace(connection=SimpleNamespace(close=Mock()))
-    return SimpleNamespace(open_connection=Mock(return_value=owned), wake=wake), owned
+    database = create_autospec(BusinessDatabase, instance=True)
+    return SimpleNamespace(database=database, wake=wake), database
 
 
-async def test_one_round_keeps_connection_until_delivery_and_never_reenters(monkeypatch):
+async def test_one_round_uses_shared_database_and_never_reenters(monkeypatch):
     release = asyncio.Event()
     runtime = object()
-    factory = Mock(return_value=runtime)
+    factory = AsyncMock(return_value=runtime)
     factory.pending_collections = ()
     calls = []
 
@@ -40,11 +42,12 @@ async def test_one_round_keeps_connection_until_delivery_and_never_reenters(monk
     for _ in range(3):
         await flow(context)
     assert calls == [runtime] and factory.call_count == 1
-    owned.connection.close.assert_not_called()
+    factory.assert_awaited_once_with(context.database)
+    owned.close.assert_not_called()
     assert flow.required_settlements() > 0
     release.set()
     await asyncio.sleep(0)
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert flow.required_settlements() > 0  # 已完成但尚未交付。
     await flow(context)
     assert factory.call_count == 1 and flow.required_settlements() == 0
@@ -55,7 +58,7 @@ async def test_one_round_keeps_connection_until_delivery_and_never_reenters(monk
 
 async def test_stop_before_background_body_starts_does_not_open_connection():
     context, _owned = _context()
-    factory = Mock(return_value=None)
+    factory = AsyncMock(return_value=None)
     factory.pending_collections = ()
     flow = cleanup_flow(factory)
     schedule = asyncio.create_task(flow(context))
@@ -66,7 +69,7 @@ async def test_stop_before_background_body_starts_does_not_open_connection():
     await schedule
     await flow.settle()
     await flow(context)
-    context.open_connection.assert_not_called()
+    _owned.close.assert_not_called()
     factory.assert_not_called()
     assert flow.required_settlements() == 0
 
@@ -77,23 +80,23 @@ async def test_original_pending_is_checked_after_task_and_survives_stopped_owner
     original = object()
     pending[phase]['original'] = original
     context, owned = _context()
-    flow = cleanup_flow(lambda _: None, pending_collections=pending)
+    flow = cleanup_flow(AsyncMock(return_value=None), pending_collections=pending)
     await flow(context)
     with pytest.raises(StateDbFailure):
         await flow.settle()
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert flow.required_settlements() == 1
     flow.stop_new_work()
     await flow(context)
     assert pending[phase]['original'] is original
-    assert context.open_connection.call_count == 1
+    owned.close.assert_not_called()
 
     async def resume(collections):
         assert collections is pending and collections[phase]['original'] is original
         collections[phase].clear()
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', resume)
-    replacement = cleanup_flow(lambda _: pending, pending_collections=pending)
+    replacement = cleanup_flow(AsyncMock(return_value=pending), pending_collections=pending)
     await replacement(context)
     await replacement.settle()
     assert flow.required_settlements() == replacement.required_settlements() == 0
@@ -112,7 +115,7 @@ async def test_original_failure_is_delivered_before_pending_and_keeps_identity(m
         raise failure
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
-    flow = cleanup_flow(lambda _: object(), pending_collections=pending)
+    flow = cleanup_flow(AsyncMock(return_value=object()), pending_collections=pending)
     await flow(context)
     release.set()
     await asyncio.sleep(0)
@@ -128,11 +131,11 @@ async def test_original_failure_is_delivered_before_pending_and_keeps_identity(m
         assert caught.value is failure
         assert 'StateDbFailure' in str(caught.value.__notes__)
     assert pending[0]['original'] is failure
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert flow.required_settlements() == 1
 
 
-@pytest.mark.parametrize('failure_type', [ConsistencyError, sqlite3.OperationalError])
+@pytest.mark.parametrize('failure_type', [ConsistencyError, sqlite3.OperationalError, DbReadError])
 async def test_state_db_classification_preserves_original_cause(monkeypatch, failure_type):
     failure = failure_type('original state fault')
 
@@ -141,13 +144,29 @@ async def test_state_db_classification_preserves_original_cause(monkeypatch, fai
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
     context, owned = _context()
-    flow = cleanup_flow(lambda _: object(), state_db_errors=True)
+    flow = cleanup_flow(AsyncMock(return_value=object()), state_db_errors=True)
     with pytest.raises(StateDbFailure) as caught:
         await flow(context)
         await flow.settle()
     assert caught.value.__cause__ is failure
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert flow.required_settlements() == 0
+
+
+async def test_factory_directory_binding_error_keeps_original_classification():
+    from camctl.persistence.runtime import DirectoryBindingError
+
+    context, database = _context()
+    original = DirectoryBindingError("原目录绑定不对应")
+    factory = AsyncMock(side_effect=original)
+    factory.pending_collections = ()
+    flow = cleanup_flow(factory, state_db_errors=True)
+    with pytest.raises(DirectoryBindingError) as caught:
+        await flow(context)
+        await flow.settle()
+    assert caught.value is original
+    factory.assert_awaited_once_with(database)
+    database.close.assert_not_awaited()
 
 
 async def test_repeated_settle_observer_cancel_keeps_actual_task_and_connection(monkeypatch):
@@ -160,7 +179,7 @@ async def test_repeated_settle_observer_cancel_keeps_actual_task_and_connection(
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
     context, owned = _context()
-    flow = cleanup_flow(lambda _: object())
+    flow = cleanup_flow(AsyncMock(return_value=object()))
     await flow(context)
     original_task = flow._notification_task
     observer = asyncio.create_task(flow.settle())
@@ -171,14 +190,14 @@ async def test_repeated_settle_observer_cancel_keeps_actual_task_and_connection(
     await asyncio.sleep(0)
     assert not observer.done() and flow.required_settlements() > 0
     assert flow._notification_task is original_task
-    owned.connection.close.assert_not_called()
+    owned.close.assert_not_called()
     release.set()
     with pytest.raises(asyncio.CancelledError) as caught:
         await observer
     assert str(caught.value) == 'first observer'
     assert saved == ['actual'] and flow.required_settlements() == 0
     assert flow._notification_task is None and not flow._notified
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
 
 
 @pytest.mark.parametrize('entry', ['call', 'check', 'settle'])
@@ -194,7 +213,7 @@ async def test_each_consumption_releases_notification_task_even_on_original_erro
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
     context, _owned = _context(WorkNotifier())
-    flow = cleanup_flow(lambda _: object())
+    flow = cleanup_flow(AsyncMock(return_value=object()))
     await flow(context)
     task = flow._notification_task
     assert task is flow._background.unconsumed_task
@@ -234,7 +253,7 @@ async def test_completion_notification_keeps_unconsumed_result_across_wait_inter
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
     observed = wake.snapshot()
-    flow = cleanup_flow(lambda _: object())
+    flow = cleanup_flow(AsyncMock(return_value=object()))
     await flow(context)
     if point == 'during_discovery':
         observed = wake.snapshot()
@@ -249,7 +268,7 @@ async def test_completion_notification_keeps_unconsumed_result_across_wait_inter
     changed = await asyncio.wait_for(waiter or wake.wait_changed(observed), 1)
     assert changed.version > observed.version
     assert WakeReason.ACTIVITY_FINISHED in changed.reasons
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert flow.required_settlements() == 1
     flow.check_completed()
     assert flow.required_settlements() == 0
@@ -263,7 +282,7 @@ async def test_external_local_work_registers_complete_cleanup_owner_once(monkeyp
         await release.wait()
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
-    flow = cleanup_flow(lambda _: object())
+    flow = cleanup_flow(AsyncMock(return_value=object()))
     outer = _local_work(SimpleNamespace(background_flows=[flow], work_files=None),
                         {'cleanup': flow, 'duplicate': flow})
     await flow(context)
@@ -271,7 +290,7 @@ async def test_external_local_work_registers_complete_cleanup_owner_once(monkeyp
     release.set()
     await outer.settle()
     assert outer.required_settlements() == 0
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
 
 
 @pytest.mark.parametrize('already_done', [False, True])
@@ -288,7 +307,7 @@ async def test_scheduling_waiter_cancel_arms_actual_task_even_when_already_done(
             raise failure
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
-    owner = cleanup_flow(lambda _: object())
+    owner = cleanup_flow(AsyncMock(return_value=object()))
     schedule = asyncio.create_task(owner(context))
     asyncio.get_running_loop().call_soon(schedule.cancel, 'schedule observer')
     with pytest.raises(asyncio.CancelledError) as caught:
@@ -308,7 +327,7 @@ async def test_scheduling_waiter_cancel_arms_actual_task_even_when_already_done(
         with pytest.raises(type(failure)) as actual:
             await owner.settle()
         assert actual.value is failure
-    owned.connection.close.assert_called_once()
+    owned.close.assert_not_called()
     assert owner.required_settlements() == 0
     assert owner._notification_task is None and not owner._notified
 
@@ -316,7 +335,7 @@ async def test_scheduling_waiter_cancel_arms_actual_task_even_when_already_done(
 async def test_queued_stop_after_scheduling_cancel_notifies_without_entering_round():
     wake = WorkNotifier()
     context, _owned = _context(wake)
-    owner = cleanup_flow(lambda _: None)
+    owner = cleanup_flow(AsyncMock(return_value=None))
     schedule = asyncio.create_task(owner(context))
     await asyncio.sleep(0)
     schedule.cancel('queued schedule observer')
@@ -326,7 +345,7 @@ async def test_queued_stop_after_scheduling_cancel_notifies_without_entering_rou
     for _ in range(2):
         await asyncio.sleep(0)
     assert wake.snapshot().version == 1
-    context.open_connection.assert_not_called()
+    _owned.close.assert_not_called()
     assert owner.required_settlements() == 1
     await owner.settle()
     assert owner.required_settlements() == 0
@@ -348,7 +367,7 @@ async def test_consuming_before_callback_invalidates_old_notification_and_next_r
             raise failure
 
     monkeypatch.setattr(cleanup_assembly, 'advance_cleanup', advance)
-    owner = cleanup_flow(lambda _: object())
+    owner = cleanup_flow(AsyncMock(return_value=object()))
     await owner(context)
     for _ in range(3):
         await owner(context)
@@ -375,7 +394,7 @@ async def test_consuming_before_callback_invalidates_old_notification_and_next_r
 
 async def test_cleanup_stop_attempts_background_after_round_failure_and_keeps_both(monkeypatch):
     context, _owned = _context()
-    owner = cleanup_flow(lambda _: None)
+    owner = cleanup_flow(AsyncMock(return_value=None))
     calls = []
     first, second = ValueError('round stop failure'), LookupError('background stop failure')
 

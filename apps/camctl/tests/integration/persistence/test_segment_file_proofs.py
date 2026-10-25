@@ -101,11 +101,11 @@ async def test_unpaired_preview_completion_requires_saved_page_and_original_wait
         else:
             _ok(runtime.capture.save_file_completion(command, key, owned))
         after = _boundary(owned)
-        current = runtime.capture.read_strict_result_file_input(saved.ref, file_id, after, owned)
+        current = runtime.capture.read_saved_result_file_input(saved.ref, file_id, after, owned)
         assert current.completion is FileCompletionState.COMPLETE
         assert current.pairing_state is PreviewPairingState.UNKNOWN
         assert current.file_event_id == after.last_event_id
-        old = runtime.capture.read_strict_result_file_input(saved.ref, file_id, before, owned)
+        old = runtime.capture.read_saved_result_file_input(saved.ref, file_id, before, owned)
         assert old.completion is FileCompletionState.UNKNOWN
         assert old.file_event_id == before.last_event_id
         assert owned.connection.execute(
@@ -135,7 +135,7 @@ async def test_strict_file_input_does_not_consume_legacy_result_search(tmp_path,
         for name in ("_legacy_source_entry", "_complete_source_entry", "read_source_inputs"):
             monkeypatch.setattr(result_pages, name, forbidden)
         monkeypatch.setattr(type(runtime.capture), "read_result_sources", forbidden)
-        result = runtime.capture.read_strict_result_file_input(
+        result = runtime.capture.read_saved_result_file_input(
             saved.ref, file_id, _boundary(owned), owned)
         assert result.completion is FileCompletionState.UNKNOWN
     finally:
@@ -169,7 +169,7 @@ async def test_declared_completion_proof_damage_is_an_error(tmp_path, damage):
                 "UPDATE device_files SET completion_evidence_json=? WHERE id=?",
                 (json.dumps(raw), file_id))
         with pytest.raises(ConsistencyError):
-            runtime.capture.read_strict_result_file_input(saved.ref, file_id, boundary, owned)
+            runtime.capture.read_saved_result_file_input(saved.ref, file_id, boundary, owned)
     finally:
         owned.connection.close()
 
@@ -190,7 +190,7 @@ async def test_strict_file_input_rejects_middle_future_and_foreign_references(tm
         )
         for page, identity, boundary in invalid:
             with pytest.raises(ConsistencyError):
-                runtime.capture.read_strict_result_file_input(page, identity, boundary, owned)
+                runtime.capture.read_saved_result_file_input(page, identity, boundary, owned)
         assert not owned.connection.in_transaction
     finally:
         owned.connection.close()
@@ -222,7 +222,7 @@ async def test_unpaired_preview_can_use_its_original_natural_wait(tmp_path):
             activity_id=int(ticket.target_id), wait_completed_event_id=wait_id,
             result_page_event_id=page.event_id, start_result_event_id=start_id),
             new_operation_key(), owned))
-        result = runtime.capture.read_strict_result_file_input(
+        result = runtime.capture.read_saved_result_file_input(
             page, file_id, _boundary(owned), owned)
         assert result.completion is FileCompletionState.COMPLETE
         assert result.pairing_state is PreviewPairingState.UNKNOWN
@@ -255,7 +255,7 @@ async def test_strict_file_proof_queries_its_owner_history_not_all_events(tmp_pa
                     assert any("entity_type=? AND entity_id=?" in row[-1] for row in plan), plan
                 return self.connection.execute(sql, params)
 
-        result = runtime.capture.read_strict_result_file_input(
+        result = runtime.capture.read_saved_result_file_input(
             saved.ref, file_id, _boundary(owned),
             replace(owned, connection=MeasuredConnection(owned.connection)))
         assert result.completion is FileCompletionState.COMPLETE
@@ -277,7 +277,7 @@ async def test_strict_file_input_preserves_database_read_failure(tmp_path):
                 return owned.connection.execute(sql, params)
 
         with pytest.raises(sqlite3.DatabaseError):
-            runtime.capture.read_strict_result_file_input(
+            runtime.capture.read_saved_result_file_input(
                 saved.ref, file_id, _boundary(owned),
                 replace(owned, connection=BrokenConnection()))
         assert not owned.connection.in_transaction

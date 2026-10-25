@@ -162,13 +162,16 @@ def test_saved_preparation_failure_cannot_drop_the_business_error(preparation_so
 def test_preparation_failure_publishes_the_original_business_error(preparation_source, monkeypatch):
     from camctl.capture.media import RecordingFailure
     from camctl.persistence.repositories import segment_dispositions
-    monkeypatch.setattr(segment_dispositions, "retained_disposition", lambda ref, db: None)
-    monkeypatch.setattr(storage, "read_verified_conclusion", lambda db, row: {
+    from unittest.mock import create_autospec
+    monkeypatch.setattr(segment_dispositions, "saved_result_disposition", create_autospec(
+        segment_dispositions.saved_result_disposition, return_value=None))
+    monkeypatch.setattr(storage, "read_fixed_result_check_conclusion", create_autospec(
+        storage.read_fixed_result_check_conclusion, return_value={
         "reason": encode_enum(ResultCheckEndReason.NO_RESULT_WORK), "anchor_event_id": 20,
         "current_failure_json": {"code": "capture_failed",
-            "details": {"activity_id": "8", "reason": "device_failed"}}})
+            "details": {"activity_id": "8", "reason": "device_failed"}}}))
     request = SimpleNamespace(ref=_request().ref, failure_event_id=None,
         failure=RecordingFailure("capture_failed", {"activity_id": "8", "reason": "device_failed"}))
-    result = segment_dispositions.retained_failure(request, preparation_source.setrow, None)
+    result = segment_dispositions.saved_result_failure(request, preparation_source.setrow, storage.read_fixed_result_check_conclusion(None, preparation_source.setrow))
     assert result[0] == 4
     assert result[2] == {"activity_id": "8", "reason": "device_failed"}

@@ -373,8 +373,9 @@ async def test_later_preview_propagates_history_call_error_unchanged(error_type)
     error = error_type("history read failed")
     preview = ROOT + "/folder/Clip.lrf"
     cursor = DirectoryCursor(BINDING, (ROOT,), 0, MP4).as_json()
-    def history():
+    async def history():
         raise error
+        yield  # 保持异步条目流契约；读取在首条交付前失败。
 
     with pytest.raises(error_type) as raised:
         await _list(Filesystem([preview, ROOT + "/folder/Z.JPG"]),
@@ -389,7 +390,7 @@ async def test_later_preview_propagates_history_iteration_error_after_matching_e
     preview = ROOT + "/folder/Clip.lrf"
     cursor = DirectoryCursor(BINDING, (ROOT,), 0, MP4).as_json()
 
-    def history():
+    async def history():
         yield {"identity": MP4, "format_id": "mp4"}
         raise error
 
@@ -406,7 +407,7 @@ async def test_later_preview_checks_complete_history_before_returning_conflict()
     cursor = DirectoryCursor(BINDING, (ROOT,), 0, MP4).as_json()
     history_finished = []
 
-    def history():
+    async def history():
         yield {"identity": MP4, "format_id": "mp4"}
         history_finished.append(True)
         yield {"identity": ROOT + "/folder/other.MP4", "format_id": "mp4"}
@@ -429,7 +430,8 @@ async def test_later_preview_checks_complete_history_before_returning_conflict()
 async def test_later_preview_propagates_malformed_history_entry():
     preview = ROOT + "/folder/Clip.lrf"
     cursor = DirectoryCursor(BINDING, (ROOT,), 0, MP4).as_json()
-    history = lambda: iter([{"identity": MP4, "format_id": ""}])
+    async def history():
+        yield {"identity": MP4, "format_id": ""}
 
     with pytest.raises(ValueError, match="稳定身份或格式分类"):
         await _list(Filesystem([preview, ROOT + "/folder/Z.JPG"]),

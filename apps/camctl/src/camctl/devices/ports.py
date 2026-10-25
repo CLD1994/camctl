@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.start_entry import StartEntryPermit
@@ -103,14 +103,14 @@ class ControlRequest:
     params: Mapping[str, Any]
     ticket: AttemptTicket | None = None
     timeout_s: Decimal | None = None
-    #: 多步启动在新设备派发前调用；None 返回值表示仍有原业务资格。
-    dispatch_check: Callable[[], str | None] | None = None
+    #: 多步启动在每次设备派发前等待实际资格查询；None 表示仍有原业务资格。
+    dispatch_check: Callable[[], Awaitable[str | None]] | None = None
     #: 原 START 的同步入口许可；不进入 JSON 或历史。
     start_entry: StartEntryPermit | None = None
     #: 普通录像原受理定义中的返回含义；省略保持旧 STARTED 合同。
     start_return_meaning: int | None = None
     #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
-    prior_result_entries: Callable[[], Iterator[Mapping[str, Any]]] | None = None
+    prior_result_entries: Callable[[], AsyncIterator[Mapping[str, Any]]] | None = None
     #: 原活动固定基准的只读差集；保留输入次序，不进入机器参数。
     result_candidates: Callable[[tuple[FileIdentity, ...]], tuple[FileIdentity, ...]] | None = None
     #: 当前扫描拥有者提供的目录读取入口，不保存在驱动全局状态。

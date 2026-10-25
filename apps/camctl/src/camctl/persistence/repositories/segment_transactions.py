@@ -1,10 +1,10 @@
 """分段完整收场：有限引用、原连接逐事件提交及原键逐页核实。"""
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from itertools import zip_longest
 
-from camctl.capture.segment_models import SegmentSetRef, SegmentAssessmentStatus, DefaultScopeState
+from camctl.capture.segment_models import SegmentAssessmentStatus, DefaultScopeState
 from camctl.capture.segment_finish import FinishSegmentRecording, SegmentFinishResult, validate_finish_header, request_document
 from camctl.capture.segment_finish import (
     SavedSegmentCompletionProof,
@@ -26,8 +26,7 @@ from camctl.history.events import load_event_registry, foreign_key_targets
 from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
-from camctl.persistence.page_read_cache import opened_read_page_scope
-from camctl.persistence.read_reuse import read_reuse_scope
+from camctl.persistence.fact_reads import opened_operation_fact_scope
 from camctl.persistence.transaction import (
     BoundedCommandPlan, CommandPlan, TransactionError, commit_operation, row_facts,
     row_change, update_change, event_envelope, next_row_id, read_transaction_range,
@@ -43,23 +42,31 @@ def _one(db,sql,params=()):
         return cursor.fetchone()
 
 
-def _candidates(request,reader,batch=128):
-    setrow = storage._set(reader.connection, request.ref)
-    if setrow["publication_kind"] == int(
-        enum_for("segment_sets.publication_kind").CANCELED
-    ):
-        action = row_facts(reader.connection, "actions", request.ref.action_id)
-        from camctl.devices.tasks import CaptureResultPolicy
-        if (action["execution_spec_json"].get("result_policy")
-                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
-                or action["type"] != int(enum_for("actions.type").CAMERA_TIMELAPSE)):
-            return
+def _publishes_candidates(action, setrow):
+    if setrow["publication_kind"] != int(enum_for("segment_sets.publication_kind").CANCELED):
+        return True
+    from camctl.devices.tasks import CaptureResultPolicy
+    return (action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+            and action["type"] == int(enum_for("actions.type").CAMERA_TIMELAPSE))
+
+
+def _candidate_facts(request,reader,batch=128):
+    setrow=storage._set(reader.connection,request.ref)
+    canceled=setrow["publication_kind"]==int(enum_for("segment_sets.publication_kind").CANCELED)
+    action=row_facts(reader.connection,"actions",request.ref.action_id) if canceled else None
+    if not _publishes_candidates(action,setrow):
+        return
     cursor=None
     while True:
-        page=storage.read_segment_output_candidates(request.ref,cursor,batch,reader)
+        page=storage.read_segment_finish_candidates(request.ref,cursor,batch,reader)
         yield from page.items
         if page.next_cursor is None:return
         cursor=page.next_cursor
+
+
+def _candidates(request,reader,batch=128):
+    yield from (saved.candidate for saved in _candidate_facts(request,reader,batch))
 
 
 def _scopes(request,reader,batch=128):
@@ -97,11 +104,55 @@ def _verify_scope_members(request,assessment,reader):
     if count!=(selected.member_count or 0):raise ConsistencyError('冻结选段计数与实际成员不同')
 
 
-def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
-    if isinstance(request.ref, SegmentResultRef):
-        from .segment_dispositions import retained_failure
+@dataclass(frozen=True)
+class _FailureSources:
+    canceled: bool = False
+    conclusion: dict | None = None
+    anchor_owned: bool = False
+    error_rows: tuple = ()
 
-        return retained_failure(request, setrow, db)
+
+def _read_failure_sources(request, assessment, setrow, db, conclusion):
+    """取得本次终态判断直接依赖的有限记录，不执行旧决定算法。"""
+    from camctl.capture.segment_models import SegmentAssessmentReason, SegmentDecision, SegmentDecisionStatus
+    if isinstance(request.ref, SegmentResultRef):
+        return _FailureSources(conclusion=conclusion)
+    if isinstance(assessment, SegmentDecision):
+        return _FailureSources(canceled=(assessment.status is SegmentDecisionStatus.CANCELED
+            and _canceled_result(db,request.ref)))
+    if assessment.reason is not SegmentAssessmentReason.EXPLICIT_ERROR or request.failure_event_id is None:
+        return _FailureSources()
+    from camctl.contracts.enums import load_registry
+    from camctl.persistence.fact_reads import read_event
+    owner=load_registry()['history_objects']['action']['id']
+    anchor=request.failure_event_id
+    owned=_one(db,'SELECT 1 FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',
+        (owner,request.ref.action_id,anchor)) is not None
+    if not owned:
+        return _FailureSources()
+    event=read_event(db,anchor).event
+    registry=load_event_registry()['events']
+    rows=[]
+    for changed in event.rows:
+        source_attempt=None
+        if changed.table=='operation_runs' and event.event_type==registry['OPERATION_CONFIGURED']['id'] and event.reason==3:
+            source_run=row_facts(db,'operation_runs',changed.row_id)
+        elif changed.table=='operation_attempts' and event.event_type==registry['ATTEMPT_RESULT']['id']:
+            source_attempt=row_facts(db,'operation_attempts',changed.row_id)
+            if source_attempt is None or source_attempt['result_event_id']!=anchor:
+                continue
+            source_run=row_facts(db,'operation_runs',source_attempt['run_id'])
+        else:
+            continue
+        rows.append((changed,source_run,source_attempt))
+    return _FailureSources(anchor_owned=True,error_rows=tuple(rows))
+
+
+def _failure(request,assessment,original_count,setrow,sources,*,before_event_id):
+    if isinstance(request.ref, SegmentResultRef):
+        from .segment_dispositions import saved_result_failure
+
+        return saved_result_failure(request, setrow, sources.conclusion)
     from camctl.capture.segment_models import SegmentAssessmentReason, SegmentDecision, SegmentDecisionStatus
     if isinstance(assessment, SegmentDecision):
         if assessment.status is SegmentDecisionStatus.SUCCEEDED:
@@ -109,7 +160,7 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
                 raise ConsistencyError("Action6 成功判断不能携带失败申请")
             return 3, None, None
         if assessment.status is SegmentDecisionStatus.CANCELED:
-            if request.failure is not None or not _canceled_result(db, request.ref):
+            if request.failure is not None or not sources.canceled:
                 raise ConsistencyError("Action6 取消判断必须引用实际取消结果且不带失败")
             return 6, None, None
         if request.failure is None:
@@ -146,25 +197,11 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
         anchor=request.failure_event_id
         if anchor is None or anchor>=before_event_id:
             raise ConsistencyError('明确错误必须引用完成组之前已保存的实际错误事件')
-        from camctl.contracts.enums import load_registry
-        owner=load_registry()['history_objects']['action']['id']
-        if _one(db,'SELECT 1 FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',(owner,request.ref.action_id,anchor)) is None:
+        if not sources.anchor_owned:
             raise ConsistencyError('原错误事件不属于来源动作')
-        raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(anchor,))
-        from camctl.history.decoding import decode_event_row
-        event=decode_event_row(raw)
         # 只接受操作责任/实际尝试的明确错误列，不搜索任意嵌套正文。
-        registry=load_event_registry()['events']
         matched=False
-        for changed in event.rows:
-            source_attempt=None
-            if changed.table=='operation_runs' and event.event_type==registry['OPERATION_CONFIGURED']['id'] and event.reason==3:
-                source_run=row_facts(db,'operation_runs',changed.row_id)
-            elif changed.table=='operation_attempts' and event.event_type==registry['ATTEMPT_RESULT']['id']:
-                source_attempt=row_facts(db,'operation_attempts',changed.row_id)
-                source_run=None if source_attempt is None else row_facts(db,'operation_runs',source_attempt['run_id'])
-                if source_attempt is None or source_attempt['result_event_id']!=anchor:continue
-            else:continue
+        for changed,source_run,source_attempt in sources.error_rows:
             error=changed.after.values.get('error_json')
             if (source_run is not None and source_run['action_id']==request.ref.action_id
                     and source_run['activity_id']==request.activity_id and isinstance(error,dict)
@@ -203,51 +240,59 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
 
 
 def _identity(request,db):
+    """取得固定集合的直接身份和已保存决定，不重演事实形成。"""
+    identity = storage.read_segment_identity(db, request.ref, fixed=True)
+    action, activity, run, setrow = identity.action, identity.activity, identity.run, identity.setrow
+    if ((None if activity is None else activity["id"]) != request.activity_id or setrow["activity_id"] != request.activity_id
+            or setrow["run_id"] != request.run_id or (None if run is None else run["id"]) != request.run_id):
+        raise ConsistencyError("完成申请改变原活动或RESULTS身份")
     if isinstance(request.ref, SegmentResultRef):
-        from .segment_dispositions import retained_disposition
+        from .segment_dispositions import saved_result_disposition
+        from .segment_check_conclusions import read_fixed_result_check_conclusion
+        conclusion = read_fixed_result_check_conclusion(db, setrow)
+        assessment = saved_result_disposition(setrow, conclusion)
+        _verify_saved_gap_count(db, setrow, assessment)
+        return action, run, setrow, assessment, conclusion
+    storage._check_write_kind(db, setrow, "ACTIVATE")
+    if setrow["assessment_json"] is None:
+        raise ConsistencyError("完成申请缺少已保存分段判断")
+    from camctl.persistence.fact_reads import read_event
+    created = read_event(db, setrow["created_event_id"]).event
+    conclusion = None
+    if created.reason == storage._EVENT["branches"]["CREATE_RESULT"]["reason"]:
+        from .segment_check_conclusions import read_fixed_result_check_conclusion
+        conclusion = read_fixed_result_check_conclusion(db, setrow)
+    assessment = assessment_from_document(setrow["assessment_json"])
+    _verify_saved_gap_count(db, setrow, assessment)
+    return action, run, setrow, assessment, conclusion
 
-        setrow = storage._set(db, request.ref, fixed=True)
-        if (request.activity_id, request.run_id) != (
-            setrow["activity_id"],
-            setrow["run_id"],
-        ):
-            raise ConsistencyError("结果发布改变原活动或 RESULTS 身份")
-        return (
-            row_facts(db, "actions", request.ref.action_id),
-            row_facts(db, "operation_runs", request.run_id),
-            setrow,
-            retained_disposition(request.ref, db),
-        )
-    action,activity,run,attempt,_=storage._source(db,request.ref)
-    setrow=storage._set(db,request.ref,fixed=True)
-    storage._check_write_kind(db,setrow,'ACTIVATE')
-    if activity['id']!=request.activity_id or run['id']!=request.run_id or setrow['activity_id']!=request.activity_id or setrow['run_id']!=request.run_id:
-        raise ConsistencyError('完成申请改变原活动或RESULTS流程身份')
-    if setrow['assessment_json'] is None:
-        raise ConsistencyError('完成申请缺少原完整分段判断')
-    reason = _one(
-        db,
-        "SELECT json_extract(body_json,'$.reason') FROM history_events WHERE id=?",
-        (setrow["created_event_id"],),
-    )[0]
-    if (
-        reason
-        == load_event_registry()["events"]["SEGMENT_FACTS"]["branches"][
-            "CREATE_RESULT"
-        ]["reason"]
-    ):
+
+def _verify_saved_gap_count(db, setrow, assessment):
+    """固定决定消费时核实际缺口数量，不重算已保存的缺口分类。"""
+    from camctl.capture.segment_models import SegmentDecision
+    count = _one(db, "SELECT COUNT(*) FROM segment_gaps WHERE set_id=?", (setrow["id"],))[0]
+    expected = 0 if isinstance(assessment, SegmentDecision) else (assessment.gap_count or 0)
+    if count != expected:
+        raise ConsistencyError("固定集合缺口数量与已保存决定不同")
+
+
+def verify_assessment_sources(setrow, facts, reader):
+    """形成判断时核源；无当前扫描时核已保存结论，不读取待保存判断。"""
+    ref = storage._ref(setrow)
+    if isinstance(ref, SegmentResultRef):
         from .segment_check_conclusions import read_verified_conclusion
+        read_verified_conclusion(reader.connection, setrow)
+        return
+    verify_completion_proof(FinishSegmentRecording(
+        ref, setrow["activity_id"], setrow["run_id"], 0), reader, facts=facts)
 
-        read_verified_conclusion(db, setrow)
-    return action,run,setrow,assessment_from_document(setrow['assessment_json'])
 
-
-def verify_completion_proof(request,reader):
+def verify_completion_proof(request,reader,*,facts=None):
     """只采用原scan意图之前的实际控制和原页等待，不升级未知标志。"""
     if isinstance(request.ref, SegmentResultRef):
-        from .segment_dispositions import retained_disposition
+        from .segment_dispositions import verify_retained_disposition_sources
 
-        retained_disposition(request.ref, reader.connection)
+        verify_retained_disposition_sources(request.ref, reader.connection)
         return SavedSegmentCompletionProof(
             storage._set(reader.connection, request.ref)["source_event_id"]
         )
@@ -337,7 +382,7 @@ def verify_completion_proof(request,reader):
     db=reader.connection
     action,activity,run,scan,last=storage._source(db,request.ref)
     setrow=storage._set(db,request.ref,fixed=True)
-    facts=facts_from_document(setrow['facts_json'])
+    facts=facts_from_document(setrow['facts_json']) if facts is None else facts
     upper=scan['intent_event_id']
     stop_id=wait_id=control_id=elapsed=None
     stop_required=(facts.stop is EvidenceState.CONFIRMED
@@ -432,18 +477,7 @@ def _has_freezable_scan(db,action_id):
         after=latest[1]
 
 
-def _verify_assessment(request, db, setrow, assessment):
-    if isinstance(request.ref, SegmentResultRef):
-        from .segment_dispositions import retained_disposition
-
-        retained_disposition(request.ref, db)
-    else:
-        storage._verify_assessment(
-            db, setrow, facts_from_document(setrow["facts_json"]), assessment
-        )
-
-
-def _completion_qualification(db,request,*,before_event_id=None,transaction=None):
+def _completion_qualification(db,request,setrow,conclusion,*,before_event_id=None,transaction=None):
     """只恢复原组前的有限主行字段；兄弟以实际原status查存在性。"""
     action=row_facts(db,'actions',request.ref.action_id)
     run=row_facts(db,'operation_runs',request.run_id)
@@ -514,18 +548,14 @@ def _completion_qualification(db,request,*,before_event_id=None,transaction=None
         "finish_run": original_run["status"] in (1, 2),
         "complete_plan": complete,
         "plan_result_status": 3 if complete else original_plan["status"],
-        "preparation_events": _preparation_events(db, request),
+        "preparation_events": _preparation_events(db, request, setrow, conclusion),
     }
 
 
-def _preparation_events(db, request):
+def _preparation_events(db, request, setrow, conclusion):
     """从冻结来源复用未启动依据，保留实际基准错误并释放原占用。"""
     if not isinstance(request.ref, SegmentResultRef):
         return ()
-    setrow = storage._set(db, request.ref)
-    from .segment_check_conclusions import read_verified_conclusion
-
-    conclusion = read_verified_conclusion(db, setrow)
     reasons = enum_for("segment_check_conclusions.reason")
     if conclusion["reason"] not in (
         int(reasons.NO_RESULT_WORK),
@@ -645,7 +675,7 @@ def verify_finish_request_event(db,event,context,action_id):
     if (request.ref.action_id!=action_id or request.occurred_at!=event.occurred_at
             or event.event_id!=context.transaction.first_event_id or len(event.rows)!=1):
         raise ConsistencyError('原有限分段申请改变来源身份、实际时刻或首事件位置')
-    action,run,setrow,assessment=_identity(request,db)
+    action,run,setrow,assessment,conclusion=_identity(request,db)
     canceled = _canceled_result(db, request.ref)
     if (
         action["status"] != 2
@@ -658,8 +688,6 @@ def verify_finish_request_event(db,event,context,action_id):
     if _one(db,'SELECT 1 FROM operation_attempts WHERE run_id=? AND status=1 LIMIT 1',(request.run_id,)) is not None:
         raise ConsistencyError('原RESULTS实际尝试尚未完成')
     reader=SimpleNamespace(connection=db)
-    verify_completion_proof(request,reader)
-    _verify_assessment(request, db, setrow, assessment)
     _verify_scope_members(request,assessment,reader)
     originals=previews=0
     for candidate in _candidates(request,reader,header['batch_size']):
@@ -668,14 +696,14 @@ def verify_finish_request_event(db,event,context,action_id):
     scope_count=sum(len(page) for page in _scopes(request,reader,header['batch_size']))
     if (header['original_count'],header['preview_count'],header['scope_count'])!=(originals,previews,scope_count):
         raise ConsistencyError('原有限头没有完整覆盖冻结候选和范围')
-    expected_status,error,details=_failure(request,assessment,originals,setrow,db,before_event_id=event.event_id)
+    expected_status,error,details=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=event.event_id)
     before={'status':2};after={'status':expected_status}
     if expected_status==4:
         before.update(error_code=action['error_code'],error_details_json=action['error_details_json'])
         after.update(error_code=error,error_details_json=details)
     if changed!=update_change('actions',action_id,before,after) or header['action_status']!=expected_status:
         raise ConsistencyError('来源终态与原冻结判断或实际有限失败不同')
-    qualification=_completion_qualification(db,request)
+    qualification=_completion_qualification(db,request,setrow,conclusion)
     _verify_qualification_header(header,qualification)
     complete_plan=qualification['complete_plan']
     output_count=originals+previews
@@ -696,19 +724,21 @@ def verify_finish_request_event(db,event,context,action_id):
     final=context.transaction_rows['segment_sets'][setrow['id']]
     if final['published_event_id']!=context.transaction.last_event_id:
         raise ConsistencyError('原正式ACTIVATE不是完整完成组的最后事件')
-    context.current_reads.prepare_segment_finish(event,context.transaction,header,qualification)
+    facts=_FinishFacts(action,run,setrow,assessment,(expected_status,error,details))
+    context.current_reads.prepare_segment_finish(event,context.transaction,header,qualification,facts)
 
 
 def _created_output(db,transaction,action_id,file_id,kind):
     # LIMIT 2 保留跨批重复检测；实际查找使用既有device_file_id唯一索引。
     with closing(db.execute(
-        'SELECT id,created_event_id FROM outputs WHERE source_action_id=? AND device_file_id=? AND kind=? ORDER BY id LIMIT 2',
+        'SELECT o.id,o.created_event_id,e.event_type,e.transaction_id FROM outputs o '
+        'LEFT JOIN history_events e ON e.id=o.created_event_id '
+        'WHERE o.source_action_id=? AND o.device_file_id=? AND o.kind=? ORDER BY o.id LIMIT 2',
         (action_id,file_id,kind))) as cursor:
         rows=cursor.fetchmany(2)
     if len(rows)!=1 or not transaction.first_event_id<=rows[0][1]<=transaction.last_event_id:
         raise ConsistencyError('成员没有同完成组的唯一实际产物')
-    event=_one(db,'SELECT event_type,transaction_id FROM history_events WHERE id=?',(rows[0][1],))
-    if event!=(load_event_registry()['events']['OUTPUT_REGISTERED']['id'],transaction.txn_id):
+    if rows[0][2:]!=(load_event_registry()['events']['OUTPUT_REGISTERED']['id'],transaction.txn_id):
         raise ConsistencyError('产物创建没有本完成组已验证登记事件')
     return rows[0][0]
 
@@ -727,15 +757,12 @@ def _verify_run_finish_event(event,request,responsibility_key,qualification):
         raise ConsistencyError('原RESULTS共同收场的完整事件或前后行不同')
 
 
-def _verify_group_closure(db,request,header,transaction,marker_id,qualification):
+def _verify_group_closure(db,request,header,transaction,marker_id,qualification,reads):
     """最后具名守卫核实际先前收场，独立于命令complete回调。"""
     if marker_id!=transaction.last_event_id:raise ConsistencyError('正式ACTIVATE必须是完整组最后事件')
     _verify_qualification_header(header,qualification)
-    from camctl.history.decoding import decode_event_row
     def saved(identity):
-        raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(identity,))
-        if raw is None or raw[1]!=transaction.txn_id:raise ConsistencyError('原收场位置没有同组实际已验证事件')
-        return decode_event_row(raw)
+        return reads.segment_finish_event(identity,transaction)
 
     identity = transaction.first_event_id + 1
     for template in qualification["preparation_events"]:
@@ -749,14 +776,15 @@ def _verify_group_closure(db,request,header,transaction,marker_id,qualification)
         header["output_count"]
         + (header["scope_count"] + header["batch_size"] - 1) // header["batch_size"]
     )
-    run=row_facts(db,'operation_runs',request.run_id)
+    run=reads.segment_finish_values('operation_runs',row_facts(db,'operation_runs',request.run_id),transaction)
     if header['finish_run']:
         _verify_run_finish_event(saved(identity),request,run['responsibility_key'],qualification);identity+=1
         if (run['status'],run['retry_wait_required'],run['error_json'])!=(3,0,None):
             raise ConsistencyError('最后守卫没有原RESULTS实际共同收场')
     elif run is not None and run["status"] not in (3, 4, 5, 6, 7):
         raise ConsistencyError("最后守卫仍有未结束原RESULTS责任")
-    action=row_facts(db,'actions',request.ref.action_id);plan=row_facts(db,'plans',action['plan_id'])
+    action=reads.segment_finish_values('actions',row_facts(db,'actions',request.ref.action_id),transaction)
+    plan=reads.segment_finish_values('plans',row_facts(db,'plans',action['plan_id']),transaction)
     if header['complete_plan']:
         event=saved(identity);identity+=1
         if (event.event_type!=load_event_registry()['events']['PLAN_STATUS_CHANGED']['id'] or event.reason!=2
@@ -769,26 +797,24 @@ def _verify_group_closure(db,request,header,transaction,marker_id,qualification)
 
 
 def verify_publication(db,ref,event,context):
-    """独立核对已验证且已写投影；提案只用于查证唯一marker结构。"""
+    """独立核对实际已验证前序及当前值；提案只用于查证唯一marker结构。"""
     setrow=storage._set(db,ref,fixed=True)
     storage._verify_final_activation(ref,setrow,event,context)
     if setrow['published_event_id'] is not None or _one(db,'SELECT 1 FROM segment_sets WHERE action_id=? AND published_event_id IS NOT NULL',(ref.action_id,)):
         raise ConsistencyError('动作已经存在正式分段集合')
     tx=context.transaction
-    action=row_facts(db,'actions',ref.action_id)
-    terminal=_one(db,'SELECT id FROM history_events WHERE transaction_id=? AND event_type=? ORDER BY id LIMIT 1',
-        (tx.txn_id,load_event_registry()['events']['ACTION_FINISHED']['id']))
-    if terminal is None or action['status'] not in (3,4,5,6):
+    reads=context.current_reads
+    action=reads.segment_finish_values('actions',row_facts(db,'actions',ref.action_id),tx)
+    accepted=reads.segment_finish_event(tx.first_event_id,tx)
+    if accepted.event_type!=load_event_registry()['events']['ACTION_FINISHED']['id'] or action['status'] not in (3,4,5,6):
         raise ConsistencyError('分段发布必须引用本完成组已验证来源终态')
-    # 终态事件的实际身份必须准确对应本action，不能使用其它动作的终态。
-    from camctl.history.decoding import decode_event_row
-    raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(terminal[0],))
-    accepted=decode_event_row(raw)
+    def created(file_id,kind):
+        return reads.segment_created_output(tx,ref.action_id,file_id,kind)
     if not any(row.table=='actions' and row.row_id==ref.action_id and row.after.values.get('status')==action['status'] for row in accepted.rows):
         raise ConsistencyError('来源终态不属于原完成组')
     header = accepted.evidence.get("segment_finish_request")
     request = _header_request(header)
-    _, _, _, assessment = _identity(request, db)
+    _, _, _, assessment, conclusion = _identity(request, db)
     from camctl.capture.segment_models import SegmentDecision, SegmentDecisionStatus
     if isinstance(assessment, SegmentDecision):
         if action['status'] == 3 and assessment.status is not SegmentDecisionStatus.SUCCEEDED:
@@ -805,56 +831,50 @@ def verify_publication(db,ref,event,context):
             scope=row_facts(db,'segment_scope_members',changed.row_id)
             member=row_facts(db,'segment_members',scope['member_id'])
             if (scope['set_id']!=setrow['id'] or scope['output_id'] is not None
-                    or _created_output(db,tx,ref.action_id,member['file_id'],int(enum_for('outputs.kind').ORIGINAL))!=changed.after.values['output_id']):
+                    or created(member['file_id'],int(enum_for('outputs.kind').ORIGINAL))!=changed.after.values['output_id']):
                 raise ConsistencyError('范围关联没有同组已验证实际原片')
     if event.reason!=storage._EVENT['branches']['ACTIVATE']['reason']:return
-    # 末组重新执行两遍生产分类和完整gap核对，不能只信任处理器摘要。
-    _verify_assessment(request, db, setrow, assessment)
+    # 末组核对固定候选和实际产物的双向完整覆盖。
     reader=SimpleNamespace(connection=db)
     count=originals=0
     header=accepted.evidence.get('segment_finish_request')
     request=_header_request(header)
     if request.ref!=ref or request.activity_id!=setrow['activity_id'] or request.run_id!=setrow['run_id'] or request.occurred_at!=event.occurred_at:
         raise ConsistencyError('最后守卫改变原完整分段申请')
-    verify_completion_proof(request,reader)
     _verify_scope_members(request,assessment,reader)
     for candidate in _candidates(request,reader):
         kind=int(enum_for('outputs.kind')[candidate.kind.name])
-        output_id=_created_output(db,tx,ref.action_id,candidate.file_id,kind)
+        output_id=created(candidate.file_id,kind)
         count+=1
         if candidate.kind is OutputKind.ORIGINAL:originals+=1
         else:
-            original=_created_output(db,tx,ref.action_id,candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
-            links=_one(db,'SELECT COUNT(*),MIN(original_output_id),MAX(original_output_id) FROM output_origins WHERE output_id=?',(output_id,))
+            original=created(candidate.original_file_id,int(enum_for('outputs.kind').ORIGINAL))
+            links=reads.segment_finish_origin(tx,output_id)
             if links!=(1,original,original):raise ConsistencyError('预览未准确关联本组真实原片')
     # 双向覆盖：同数量的外来/重复/缺项产物不能通过。
-    total=_one(db,'SELECT COUNT(*) FROM outputs WHERE source_action_id=?',(ref.action_id,))[0]
+    total=0
+    for identity,file_id,kind in reads.segment_finish_outputs(tx,ref.action_id):
+        total+=1
+        found=_one(db,'SELECT id FROM segment_members WHERE set_id=? AND file_id=?',(setrow['id'],file_id))
+        candidate=None if found is None else storage.segment_output_candidate(ref,found[0],reader)
+        if candidate is None or kind!=int(enum_for('outputs.kind')[candidate.kind.name]) or created(file_id,kind)!=identity:
+            raise ConsistencyError('登记产物不是原冻结合格候选')
     if total!=count:raise ConsistencyError('完成组存在额外或重复产物')
-    after=0
-    while True:
-        with closing(db.execute('SELECT id,device_file_id,kind FROM outputs WHERE source_action_id=? AND id>? ORDER BY id LIMIT 128',(ref.action_id,after))) as cursor:
-            rows=cursor.fetchmany(128)
-        if not rows:break
-        for identity,file_id,kind in rows:
-            found=_one(db,'SELECT id FROM segment_members WHERE set_id=? AND file_id=?',(setrow['id'],file_id))
-            candidate=None if found is None else storage.segment_output_candidate(ref,found[0],reader)
-            if candidate is None or kind!=int(enum_for('outputs.kind')[candidate.kind.name]) or _created_output(db,tx,ref.action_id,file_id,kind)!=identity:
-                raise ConsistencyError('登记产物不是原冻结合格候选')
-        after=rows[-1][0]
     expected=assessment.default_scope.member_count or 0
     actual=0
     for page in _scopes(request,reader):
         for scope in page:
+            scope=reads.segment_finish_values('segment_scope_members',scope,tx)
             actual+=1
             member=row_facts(db,'segment_members',scope['member_id'])
-            if scope['output_id']!=_created_output(db,tx,ref.action_id,member['file_id'],int(enum_for('outputs.kind').ORIGINAL)):
+            if scope['output_id']!=created(member['file_id'],int(enum_for('outputs.kind').ORIGINAL)):
                 raise ConsistencyError('正式默认范围缺少完整实际关联')
     if actual!=expected:raise ConsistencyError('默认范围数量与冻结判断不同')
-    status,error,details=_failure(request,assessment,originals,setrow,db,before_event_id=tx.first_event_id)
+    status,error,details=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=tx.first_event_id)
     if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):
         raise ConsistencyError('实际来源终态与冻结判断或有限错误头不同')
     qualification=context.current_reads.validated_segment_finish(tx,header)
-    _verify_group_closure(db,request,header,tx,event.event_id,qualification)
+    _verify_group_closure(db,request,header,tx,event.event_id,qualification,reads)
 
 
 def _event_state(db,event,ref,proposal):
@@ -904,16 +924,39 @@ def _event_state(db,event,ref,proposal):
     return state,owners,ReadCoverage(coverage)
 
 
-def _canonical_events(request,transaction,header,reader,qualification):
-    """原冻结事实的唯一事件协议；每阶段只驻留当前候选/范围页。
+@dataclass(frozen=True)
+class _FinishFacts:
+    action: dict
+    run: dict | None
+    setrow: dict
+    assessment: object
+    outcome: tuple
 
-    reader 的前序产物端口只承认实际已验证事件；恢复时使用原完整组。
-    此生成器同时约束生产、必经 seal 和原键核实，不从实际待验证行生成预期。
-    """
-    db=reader.connection
-    action,run,setrow,assessment=_identity(request,db)
+
+def _finish_event_inputs(request, reader, batch):
+    """显式取得每批候选的固定文件及范围文件身份，不逐项重复反查。"""
+    def candidates():
+        for saved in _candidate_facts(request,reader,batch):
+            yield saved.candidate,saved.file
+
+    def scopes():
+        if isinstance(request.ref, SegmentResultRef):
+            return
+        cursor=None
+        while True:
+            page=storage.read_segment_finish_scope(request.ref,cursor,batch,reader)
+            yield page.items
+            if page.next_cursor is None:return
+            cursor=page.next_cursor
+
+    return candidates, scopes
+
+
+def _canonical_events(request,transaction,header,facts,qualification,candidates,scopes,created):
+    """从显式固定事实生成规范事件；前序产物映射由调用方独立取得。"""
+    action, run, setrow = facts.action, facts.run, facts.setrow
     _verify_qualification_header(header,qualification)
-    status,error,details=_failure(request,assessment,header['original_count'],setrow,db,before_event_id=transaction.first_event_id)
+    status,error,details=facts.outcome
     if status!=header['action_status']:raise ConsistencyError('规范终态与原冻结判断不同')
     types=load_event_registry()['events']
     identity=transaction.first_event_id
@@ -937,17 +980,11 @@ def _canonical_events(request,transaction,header,reader,qualification):
         yield replace(template, event_id=identity, transaction_id=transaction.txn_id)
         identity += 1
 
-    def created(file_id,kind):
-        resolver=getattr(reader,'segment_created_output',None)
-        if resolver is not None:return resolver(transaction,request.ref.action_id,file_id,kind)
-        return _created_output(db,transaction,request.ref.action_id,file_id,kind)
     output_id=header['first_output_id'];origin_id=header['first_origin_id']
     originals=previews=0
     for wanted in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
-        for candidate in _candidates(request,reader,header['batch_size']):
+        for candidate, file in candidates():
             if candidate.kind is not wanted:continue
-            member=row_facts(db,'segment_members',candidate.member_id)
-            file=storage._fixed_file(db,candidate.file_id,member['file_event_id'])
             from .capture import _unchecked_media
             values=dict(source_action_id=request.ref.action_id,kind=int(enum_for('outputs.kind')[wanted.name]),device_file_id=candidate.file_id,intermediate_file_id=None,
                 original_name=file['original_name'],media_type=file['media_type'],availability=1,cleanup_status=1,cleanup_error_json=None,media_json=_unchecked_media(),error_json=None)
@@ -960,12 +997,11 @@ def _canonical_events(request,transaction,header,reader,qualification):
             yield envelope('OUTPUT_REGISTERED',values['kind'],rows)
             identity+=1;output_id+=1
     count=0
-    for page in _scopes(request,reader,header['batch_size']):
+    for page in scopes():
         if not page:continue
         bindings=[];rows=[]
-        for row in page:
-            member=row_facts(db,'segment_members',row['member_id'])
-            output=created(member['file_id'],int(enum_for('outputs.kind').ORIGINAL))
+        for row, file_id in page:
+            output=created(file_id,int(enum_for('outputs.kind').ORIGINAL))
             bindings.append((row['id'],output))
             rows.append(update_change('segment_scope_members',row['id'],{'output_id':None},{'output_id':output}))
             count+=1
@@ -996,8 +1032,7 @@ class _FinishCommand:
         if saved is not None:
             result=verify_segment_finish(request,self.key,scope,execution_finished=True)
             return CommandPlan((),{}, {},result=result,read_only=True)
-        action,run,setrow,assessment=_identity(request,db)
-        verify_completion_proof(request,scope)
+        action,run,setrow,assessment,conclusion=_identity(request,db)
         canceled = _canceled_result(db, request.ref)
         if (
             action["status"] != 2
@@ -1009,7 +1044,6 @@ class _FinishCommand:
             raise ConsistencyError('未完成来源已经存在正式产物')
         if _one(db,'SELECT 1 FROM operation_attempts WHERE run_id=? AND status=1 LIMIT 1',(request.run_id,)):
             raise ConsistencyError('RESULTS实际尝试仍在执行')
-        _verify_assessment(request, db, setrow, assessment)
         originals=previews=0
         for candidate in _candidates(request,scope,self.batch):
             if candidate.kind is OutputKind.ORIGINAL:originals+=1
@@ -1023,7 +1057,7 @@ class _FinishCommand:
         first_origin=next_row_id(db,'output_origins') if previews else 1
         storage._capacity(first_output,output_count);storage._capacity(first_origin,previews)
         plan=row_facts(db,'plans',action['plan_id'])
-        qualification=_completion_qualification(db,request)
+        qualification=_completion_qualification(db,request,setrow,conclusion)
         complete_plan=qualification['complete_plan'];finish_run=qualification['finish_run']
         event_count = (
             1
@@ -1035,7 +1069,9 @@ class _FinishCommand:
             + 1
         )
         allocation=scope.allocate(event_count)
-        status,error,details=_failure(request,assessment,originals,setrow,db,before_event_id=scope.max_event_id+1)
+        outcome=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=scope.max_event_id+1)
+        status,error,details=outcome
+        facts=_FinishFacts(action,run,setrow,assessment,outcome)
         result=SegmentFinishResult(request.ref,status,3 if complete_plan else plan['status'],HistoryBoundary(allocation.txn_id,allocation.last_event_id),output_count,originals,previews,scope_count)
         header={'request':request_document(request),'output_count':output_count,'original_count':originals,'preview_count':previews,'scope_count':scope_count,
             'first_output_id':first_output,'first_origin_id':first_origin,'action_status':status,'plan_status':result.plan_status,'batch_size':self.batch,
@@ -1051,7 +1087,10 @@ class _FinishCommand:
             reads=SqlEventReads(db,PlanReadScope(plan['id'],self.batch),proposal_event=proposal,segment_ref=request.ref)
             return EventContext(transaction,owners,state,final,coverage,current_reads=reads)
         def generate():
-            yield from _canonical_events(request,TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id),header,scope,qualification)
+            transaction=TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id)
+            candidates,scopes=_finish_event_inputs(request,scope,self.batch)
+            created=lambda file_id,kind: _created_output(db,transaction,request.ref.action_id,file_id,kind)
+            yield from _canonical_events(request,transaction,header,facts,qualification,candidates,scopes,created)
         def complete(db):
             from camctl.history.decoding import decode_event_row
             raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(marker.event_id,))
@@ -1085,7 +1124,7 @@ def verify_segment_finish(request,key,reader,*,execution_finished,batch_size=128
     opened=not db.in_transaction
     if opened:db.execute('BEGIN')
     try:
-        with opened_read_page_scope(db, opened), read_reuse_scope(db):
+        with opened_operation_fact_scope(db, opened):
             return _verify_segment_finish(request,key,reader,batch_size)
     finally:
         if opened:db.execute('ROLLBACK')
@@ -1112,11 +1151,9 @@ def _verify_events(request,key,tx,header,reader,batch_size,first_page):
     """按固定完整组和冻结输入双向比较，只有读到原L才返回原结果。"""
     validate_finish_header(header)
     db=reader.connection
-    action,run,setrow,assessment=_identity(request,db)
-    qualification=_completion_qualification(db,request,before_event_id=tx.first_event_id,transaction=tx)
+    action,run,setrow,assessment,conclusion=_identity(request,db)
+    qualification=_completion_qualification(db,request,setrow,conclusion,before_event_id=tx.first_event_id,transaction=tx)
     _verify_qualification_header(header,qualification)
-    verify_completion_proof(request,reader)
-    _verify_assessment(request, db, setrow, assessment)
     _verify_scope_members(request,assessment,reader)
     def stream():
         yield from first_page.items
@@ -1127,7 +1164,11 @@ def _verify_events(request,key,tx,header,reader,batch_size,first_page):
             yield from page.items
             if page.next_cursor is None:return
             position=page.next_cursor
-    for actual,expected in zip_longest(stream(),_canonical_events(request,tx,header,reader,qualification)):
+    outcome=_failure(request,assessment,header['original_count'],setrow,_read_failure_sources(request,assessment,setrow,db,conclusion),before_event_id=tx.first_event_id)
+    facts=_FinishFacts(action,run,setrow,assessment,outcome)
+    candidates,scopes=_finish_event_inputs(request,reader,header['batch_size'])
+    created=lambda file_id,kind: _created_output(db,tx,request.ref.action_id,file_id,kind)
+    for actual,expected in zip_longest(stream(),_canonical_events(request,tx,header,facts,qualification,candidates,scopes,created)):
         if actual is None or expected is None or replace(actual,change_seq=None)!=expected:
             raise ConsistencyError('原完成组完整事件与冻结完整申请不同')
         if expected.event_type==load_event_registry()['events']['OUTPUT_REGISTERED']['id']:

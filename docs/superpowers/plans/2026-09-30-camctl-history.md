@@ -137,6 +137,7 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 - [x] [全局事件分页基础](2026-10-02-camctl-history-read-review.md)：核实完整 H、事务分组、严格范围和连续事件位置；正反向分页在返回前释放读资源，共用版本、分支及行权限校验。
 - [x] 对象读取请求绑定数据库身份、对象、H、方向及恢复范围；当前投影与 C 联合读取，并组合正逆恢复。锚点表额外核对表内锚点与对象目录头一致，不声明锚点的对象以对象目录为唯一位置依据。
+- [ ] 有限主行和限定业务列恢复按同一对象计数选择已有快照或投影路径，并保持流式投影及必要事实核验。生产缺口与前置设计见[历史性能补全计划](2026-10-25-history-performance-closure.md)。
 - [x] 固定 H 的报告入选范围、关联候选优化、对象自身成员分批及父子补齐。select_report_scope 在固定 H 取报告入选实体，报告生成按根实体分页恢复并跨批补齐父子。
 - [x] 事件结构余项：必要字段真实变化、空更新、多状态转换与证据成员校验；详见上述审查计划。
 
@@ -162,6 +163,10 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 ### H6 快照维护与会话退出
 
+生产补全跟踪：[历史性能补全计划](2026-10-25-history-performance-closure.md)。下列原门禁交付维护模块与窄仓储；正常 `run` 的装配、提交与发现通知及退出接线按该计划继续落实。
+
+- [ ] 接通正常 `run` 的业务优先派发、启动及提交通知、外部对象发现、持久化积压观察与四阶段实际收场。维护模块的候选返回、依据返回及准备结束后三处停止检查已补齐；其余生产接线仍待完成。
+
 **预计文件：** `apps/camctl/src/camctl/history/snapshots.py`、`apps/camctl/src/camctl/persistence/repositories/history.py`；测试为 `apps/camctl/tests/unit/history/test_snapshots.py` 和 `apps/camctl/tests/integration/history/test_snapshots.py`。
 
 **接口与依赖：** 提供 `prepare_snapshot(seed: EntityImage) -> PreparedSnapshot`、异步 `maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult`；context 含本次阈值、批量、会话状态和窄仓储。前置交付：H4、P2/P3、S5。
@@ -184,6 +189,8 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 - 后置：会话装配（运行循环挂维护协程、提交后唤醒、收尾四阶段接线、`query_work_facts` 的 `snapshot_backlog`）归后续轮次，本任务交付可独立调用的维护入口与窄仓储；快照积压不延长会话、不产生 needs_run，与规格一致。
 
 ### H7 全部事件覆盖与查询规模
+
+- [x] 分段对象快照读取与所选恢复路径闭合：快照自身提供 S 状态，S＝H 直接使用，正向只读取 `(S,H]`；读取核验与构建完整性验收按[历史性能补全计划](2026-10-25-history-performance-closure.md)落实。
 
 **预计文件：** `apps/camctl/src/camctl/history/queries.py`、`apps/camctl/src/camctl/history/replay.py`；测试为 `apps/camctl/tests/integration/history/test_complete_history.py`。
 

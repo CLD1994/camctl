@@ -423,9 +423,9 @@ def finish_action6_retained_unconfirmed(runtime, action, ref):
         row = repository.read_result_set(ref, runtime.owned)
     if row["state"] != int(enum_for("segment_sets.state").ASSESSED):
         raise ConsistencyError("Action6 保留来源缺少可靠的有限未知结论")
-    from camctl.persistence.repositories.segment_check_conclusions import read_verified_conclusion
+    from camctl.persistence.repositories.segment_check_conclusions import read_fixed_result_check_conclusion
 
-    conclusion = read_verified_conclusion(runtime.owned.connection, row)
+    conclusion = read_fixed_result_check_conclusion(runtime.owned.connection, row)
     actual_failure = conclusion["current_failure_json"]
     failure = (None if actual_failure is None else RecordingFailure(**actual_failure)) or RecordingFailure(
         "capture_result_unconfirmed",

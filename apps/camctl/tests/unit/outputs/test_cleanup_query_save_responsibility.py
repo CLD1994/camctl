@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from decimal import Decimal
 import sqlite3
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
@@ -46,6 +46,7 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
 
 
 pytestmark = pytest.mark.asyncio
@@ -148,6 +149,7 @@ def _runtime(
         cursor.fetchone.return_value = (
             (5, "file-5", '{"path":"/DCIM/file.MP4"}')
             if "JOIN device_files f ON f.id = o.device_file_id" in statement
+            else (11, 3) if "SELECT action_id,status FROM cleanup_items" in statement
             else None
         )
         cursor.fetchall.return_value = []
@@ -169,19 +171,26 @@ def _runtime(
     operations.finish_attempt.return_value = saved
     driver = create_autospec(FileQueryDriver, instance=True)
     driver.query_file.return_value = actual
-    return CleanupRuntime(
-        owned=owned,
+    runtime = CleanupRuntime(
+        database=inline_business_database(owned),
         outputs=create_autospec(OutputsRepository, instance=True),
         operations=operations,
         driver=driver,
         evidence=_EVIDENCE,
-        binding_of=lambda item_id: DeviceBinding("cam-1", "camctl-adb"),
+        binding_of=AsyncMock(return_value=DeviceBinding("cam-1", "camctl-adb")),
         occurred_at=lambda: _RETURNED_AT,
         delete_config=AttemptConfig(3, Decimal(10), Decimal(1)),
         query_config=AttemptConfig(3, Decimal(10), Decimal(1)),
         monotonic_ns=lambda: 300,
         retry_gate=RetryWaitGate({"exists/91": 100, "delete/91": 200, "exists/92": 250}),
     )
+    runtime._test_owned = owned
+    return runtime
+
+
+def _set_database(runtime, owned):
+    runtime._test_owned = owned
+    runtime.database = inline_business_database(owned)
 
 
 @pytest.mark.parametrize("present", _OBSERVATIONS)
@@ -198,7 +207,7 @@ async def test_unreliable_result_save_does_not_deliver_observation(present, kind
     finish, _, owned = runtime.operations.finish_attempt.call_args.args
     assert finish.ticket is _TICKET
     assert finish.outcome.outcome is actual.outcome
-    assert owned is runtime.owned
+    assert owned is runtime._test_owned
 
 
 @pytest.mark.parametrize("present", _OBSERVATIONS)
@@ -225,6 +234,7 @@ async def test_already_ended_without_original_full_result_does_not_deliver_obser
         await _run_query(runtime, _TICKET, _ITEM_ID)
 
     assert runtime.retry_gate.anchors == anchors
+
 
 
 @pytest.mark.parametrize("value", [
@@ -280,7 +290,7 @@ async def test_complete_driver_result_is_saved_without_reinterpretation(present,
     assert finish.outcome.outcome.settlement is actual.outcome.settlement
     assert finish.outcome.outcome.call_info is actual.outcome.call_info
     assert finish.occurred_at == _RETURNED_AT
-    assert owned is runtime.owned
+    assert owned is runtime._test_owned
 
 
 @pytest.mark.parametrize("present", _OBSERVATIONS)
@@ -301,7 +311,7 @@ async def test_retry_saves_original_prepared_result_without_querying_again(prese
     changed = _runtime(_actual_result(None), _saved(AttemptStatus.SUCCEEDED))
     runtime.driver = changed.driver
     if fresh_connection:
-        runtime.owned = changed.owned
+        _set_database(runtime, changed._test_owned)
     runtime.evidence = EvidenceRegistry(())
     runtime.query_config = AttemptConfig(9, Decimal(20), Decimal(5))
     runtime.occurred_at = lambda: _RETURNED_AT + 9_000_000
@@ -314,7 +324,7 @@ async def test_retry_saves_original_prepared_result_without_querying_again(prese
     assert second_key == first_key
     assert second_finish.outcome.outcome is actual.outcome
     assert second_finish.occurred_at == _RETURNED_AT
-    assert owned is runtime.owned
+    assert owned is runtime._test_owned
     first_driver.query_file.assert_awaited_once()
     changed.driver.query_file.assert_not_awaited()
 
@@ -356,23 +366,23 @@ async def test_second_save_failure_keeps_original_result_for_later_redelivery(pr
 async def test_pending_result_is_not_saved_into_another_database_instance(present, kind):
     actual = _actual_result(present, status=AttemptStatus.FAILED)
     runtime = _runtime(actual, DbOutcome(kind, error=sqlite3.OperationalError("原结果尚未保存")))
-    original_owned = runtime.owned
+    original_owned = runtime._test_owned
     with pytest.raises(ConsistencyError):
         await _run_query(runtime, _TICKET, _ITEM_ID)
     first_finish, first_key, _ = runtime.operations.finish_attempt.call_args.args
     runtime.operations.finish_attempt.return_value = _saved(AttemptStatus.FAILED)
-    another_owned = _runtime(_actual_result(None), _saved(AttemptStatus.SUCCEEDED)).owned
-    runtime.owned = replace(
+    another_owned = _runtime(_actual_result(None), _saved(AttemptStatus.SUCCEEDED))._test_owned
+    _set_database(runtime, replace(
         another_owned,
         metadata=replace(another_owned.metadata, instance_id="abcdef1234567890abcdef1234567890"),
-    )
+    ))
 
     with pytest.raises(ConsistencyError):
         await _run_query(runtime, _TICKET, _ITEM_ID)
 
     assert runtime.operations.finish_attempt.call_count == 1
     runtime.driver.query_file.assert_awaited_once()
-    runtime.owned = original_owned
+    _set_database(runtime, original_owned)
     assert await _run_query(runtime, _TICKET, _ITEM_ID) is present
     restored_finish, restored_key, owned = runtime.operations.finish_attempt.call_args.args
     assert restored_finish is first_finish

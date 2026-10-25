@@ -23,40 +23,22 @@ from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.events import EventEnvelope
 
 
-def status_transitions(
-    events: Iterable[EventEnvelope], table: str, identity: int, current_status: int,
-    *, placeholder_events: frozenset[int] | set[int] = frozenset(),
-) -> list[dict[str, Any]]:
-    """从创建至 H 的完整对象事件中提取真实状态转换，保留事件顺序。"""
+def status_transitions(rows: Iterable[Sequence[int | None]], current_status: int) -> list[dict[str, Any]]:
+    """校验目录中的创建与真实转换，按事件顺序交付状态和时钟事实。"""
     result: list[dict[str, Any]] = []
     previous_event = 0
     status = None
-    for event in events:
-        if event.event_id <= previous_event:
+    for event_id, before_status, after_status, occurred_at, clock_status in rows:
+        if event_id <= previous_event:
             raise ConsistencyError("状态历史事件身份未严格递增")
-        previous_event = event.event_id
-        for row in event.rows:
-            if row.table != table or row.row_id != identity:
-                continue
-            before, after = row.before, row.after
-            if not after.exists:
-                raise ConsistencyError("状态历史主对象被删除")
-            if not before.exists:
-                if status is not None or "status" not in after.values:
-                    raise ConsistencyError("状态历史创建记录不完整或重复")
-            elif "status" not in after.values:
-                continue
-            elif status is None or before.values.get("status") != status:
-                raise ConsistencyError("状态历史转换前值不连续")
-            next_status = after.values["status"]
-            if next_status != status:
-                result.append({"status": next_status,
-                               "changed_at": None if event.event_id in placeholder_events else event.occurred_at,
-                               "clock_status": event.clock_status})
-            status = next_status
+        if before_status != status or after_status is None or after_status == before_status:
+            raise ConsistencyError("状态历史创建或转换前后值不连续")
+        result.append({"status": after_status, "changed_at": occurred_at, "clock_status": clock_status})
+        previous_event, status = event_id, after_status
     if not result or status != current_status:
         raise ConsistencyError("状态历史未从创建完整覆盖至 H 的当前状态")
     return result
+
 
 __all__ = [
     "status_transitions",

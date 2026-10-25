@@ -799,15 +799,6 @@
 | 7 | `ISOLATED` |
 | 8 | `ABANDONED` |
 
-### `reports.format_version`
-
-[行为说明](reports-runtime.md#报告字段)
-
-| 编号 | 成员 |
-| --- | --- |
-| 1 | `V1` |
-| 2 | `V2` |
-
 ## JSON 中的整数分类
 
 ### `device_files.ownership_evidence_json.method`

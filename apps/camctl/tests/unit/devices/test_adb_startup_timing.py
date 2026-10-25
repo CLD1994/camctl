@@ -1,5 +1,7 @@
 """区分相机参数设置与实际启动命令的耗时，不执行真实工具。"""
 
+from unittest.mock import AsyncMock
+
 from dataclasses import replace
 import json
 from unittest.mock import create_autospec
@@ -39,8 +41,8 @@ async def test_setting_and_start_command_have_separate_timings():
 async def test_window_ending_during_settings_does_not_log_a_start_command():
     transport = Transport()
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
-    request = replace(_request("record"), dispatch_check=lambda:
-                      "window_ended" if transport.commands else None)
+    request = replace(_request("record"), dispatch_check=AsyncMock(side_effect=lambda:
+                      "window_ended" if transport.commands else None))
     with performance_logging(channel):
         result = await _driver(transport).control(request)
     assert result.error["code"] == "window_ended"

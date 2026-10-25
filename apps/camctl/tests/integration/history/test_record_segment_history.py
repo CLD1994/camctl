@@ -403,7 +403,7 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('removed_table',['segment_members','segment_sets','device_activities'])
-async def test_snapshot_missing_self_rows_is_not_a_valid_complete_snapshot(tmp_path,removed_table):
+async def test_snapshot_rejects_missing_owner_or_required_set_members(tmp_path,removed_table):
     from camctl.history.snapshots import prepare_snapshot
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.transaction import encode_json_value
@@ -454,7 +454,7 @@ async def test_disk_failure_closes_partial_handle_and_does_not_change_business(t
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('damage',['member_count','gap_summary'])
-async def test_snapshot_cannot_change_write_once_summary(tmp_path,damage):
+async def test_snapshot_rejects_summary_inconsistent_with_required_members(tmp_path,damage):
     from camctl.history.snapshots import prepare_snapshot
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.transaction import encode_json_value
