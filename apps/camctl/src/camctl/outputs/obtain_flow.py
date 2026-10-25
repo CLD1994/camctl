@@ -556,7 +556,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
 
                 business = PendingReadBusiness(runtime.outputs.fail_read_binding,
-                    FailReadBinding(copy_id, source_id, result, now), new_operation_key())
+                    FailReadBinding(copy_id, source_id, result, now), new_operation_key(),
+                    lambda _, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}"))
                 pending = await held_binding_read_result(runtime, copy_id, result, business)
                 if pending is not None:
                     await _save_read_result_and_settle(runtime, pending)
@@ -702,7 +703,8 @@ async def _begin_read_attempt(
 
 async def _fail_read_delivery(
         runtime: ObtainRuntime, facts: Mapping, now: int, *,
-        checksum_mismatch=False, source_verification_failed=False) -> None:
+        checksum_mismatch=False, source_verification_failed=False,
+        on_completed=None, business_saves=None, retry=False) -> None:
     """交付读取终局失败后释放读取机会及原源文件保护。"""
     from camctl.outputs.read_attempts import save_read_business
 
@@ -710,7 +712,8 @@ async def _fail_read_delivery(
         FailReadDelivery(delivery_id=facts["delivery_id"], occurred_at=now,
                          checksum_mismatch=checksum_mismatch,
                          source_verification_failed=source_verification_failed),
-        runtime.outputs.fail_read_delivery)
+        runtime.outputs.fail_read_delivery, on_completed=on_completed,
+        business_saves=business_saves, retry=retry)
 
 
 async def _settle_failed_reads(runtime: ObtainRuntime) -> None:
@@ -1002,6 +1005,10 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
     pending = await save_read_result(runtime, pending, retry=retry)
     if pending is None:
         return
+    def complete_business(_):
+        runtime.retry_gate.cleared(f"read/{int(pending.finish.ticket.target_id)}")
+        forget_read_result(runtime, pending)
+
     if pending.business is not None:
         from camctl.outputs.read_attempts import save_prepared_read_business
 
@@ -1036,14 +1043,14 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
     if exhausted:
         code = finish.run_finish.error.code
         if code == "checksum_mismatch":
-            await _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True)
-            forget_read_result(runtime, pending)
+            await _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True,
+                on_completed=complete_business, business_saves=pending.business_saves, retry=retry)
             return
         if code == "source_file_unconfirmed":
             await _fail_read_delivery(
                 runtime, facts, runtime.occurred_at(),
-                source_verification_failed=True)
-            forget_read_result(runtime, pending)
+                source_verification_failed=True, on_completed=complete_business,
+                business_saves=pending.business_saves, retry=retry)
             return
     if succeeded:
         if facts["source_device_file_id"] is not None:
@@ -1051,15 +1058,16 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
 
             released = await save_read_business(runtime, facts["id"], "release_read_slot",
                 SlotRequest(copy_id=facts["id"], occurred_at=runtime.occurred_at()),
-                runtime.outputs.release_read_slot, retry=retry, business_saves=pending.business_saves)
+                runtime.outputs.release_read_slot, retry=retry, business_saves=pending.business_saves,
+                on_completed=complete_business)
             if released.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
-        runtime.retry_gate.cleared(f"read/{facts['id']}")
-        forget_read_result(runtime, pending)
+        else:
+            complete_business(None)
         return
     if exhausted:
-        await _fail_read_delivery(runtime, facts, runtime.occurred_at())
-        forget_read_result(runtime, pending)
+        await _fail_read_delivery(runtime, facts, runtime.occurred_at(), on_completed=complete_business,
+            business_saves=pending.business_saves, retry=retry)
         return
     runtime.retry_gate.established(
         f"read/{facts['id']}", runtime.monotonic_ns())

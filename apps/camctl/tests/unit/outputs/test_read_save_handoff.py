@@ -487,3 +487,104 @@ async def test_public_obtain_recovery_reuses_completed_release_before_result_set
         for call in world.outputs.release_read_slot.call_args_list)
     assert not world.runtime.pending_read_results and not world.runtime.pending_read_business
     world.operations.finish_attempt.assert_called_once()
+
+
+@pytest.mark.parametrize('stage', ['release', 'read_attempts_exhausted', 'checksum_mismatch', 'source_file_unconfirmed', 'binding'])
+@pytest.mark.parametrize('initial_kind', [DbOutcomeKind.COMPLETED, DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED])
+@pytest.mark.parametrize('control_kind', ['error', 'cancel'])
+async def test_obtain_complete_business_applies_tail_before_original_control(
+        world, stage, initial_kind, control_kind):
+    from camctl.outputs import obtain_flow
+    from camctl.operations.attempts import RetryWaitGate
+    from camctl.operations.models import ErrorValue
+    from camctl.contracts.values import new_operation_key
+    from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
+    from camctl.persistence.repositories.outputs import FailReadBinding
+
+    class RoundReached(Exception):
+        pass
+    async def begin_round(database, now):
+        raise RoundReached
+    world.runtime.outputs = world.outputs
+    world.runtime.occurred_at = lambda: 123
+    world.runtime.retry_gate = RetryWaitGate()
+    world.runtime.retry_gate.established('read/2', 1)
+    world.runtime.discovery = SimpleNamespace(begin_round=begin_round)
+    facts = {'id': 2, 'delivery_id': 3, 'delivery_status': 1, 'source_device_file_id': 7}
+    world.database.read.return_value = facts
+    control = RuntimeError('committed business') if control_kind == 'error' else asyncio.CancelledError('committed business')
+    actual = DbOutcome(DbOutcomeKind.COMPLETED)
+    _attach_db_outcome(control, actual)
+    method = (world.outputs.release_read_slot if stage == 'release' else
+              world.outputs.fail_read_binding if stage == 'binding' else world.outputs.fail_read_delivery)
+    method.side_effect = ([control] if initial_kind is DbOutcomeKind.COMPLETED
+                          else [DbOutcome(initial_kind), control])
+    ticket = AttemptTicket(1, 'read', '2', 'read/2', 5)
+    failed = stage not in ('release', 'binding')
+    outcome = CallOutcome(status=AttemptStatus.FAILED if failed else AttemptStatus.SUCCEEDED,
+        effect=EffectState.UNKNOWN,
+        error=ErrorValue('device_error', 'read', {'reason': 'device read failed'}) if failed else None,
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('read_returned', 1, {})))
+    finish = AttemptFinish(ticket, validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE), 123,
+        run_finish=RunFinish(RunOutcome.FAILED, ErrorValue(stage, 'source_read'))
+        if failed else RunFinish(RunOutcome.SUCCEEDED))
+    business = None
+    if stage == 'binding':
+        request = FailReadBinding(2, 7, BindingResult(BindingStatus.DEVICE_MISSING,
+            DeviceBinding('cam-1', 'camera-driver'), None), 123)
+        business = PendingReadBusiness(method, request, new_operation_key(),
+            lambda _: world.runtime.retry_gate.cleared('read/2'))
+    pending = hold_read_result(world.runtime, finish, business=business)
+    world.release.set()
+    if initial_kind is DbOutcomeKind.COMPLETED:
+        with pytest.raises(type(control)) as raised:
+            await obtain_flow._save_read_result_and_settle(world.runtime, pending, facts)
+    else:
+        with pytest.raises(ConsistencyError):
+            await obtain_flow._save_read_result_and_settle(world.runtime, pending, facts)
+        with pytest.raises(type(control)) as raised:
+            await obtain_flow.advance_obtain(world.runtime)
+    assert raised.value is control
+    assert not world.runtime.pending_read_business and not world.runtime.pending_read_results
+    assert 'read/2' not in world.runtime.retry_gate.anchors
+    with pytest.raises(RoundReached):
+        await obtain_flow.advance_obtain(world.runtime)
+    assert method.call_count == (1 if initial_kind is DbOutcomeKind.COMPLETED else 2)
+    if method.call_count == 2:
+        assert method.call_args_list[0].args[:2] == method.call_args_list[1].args[:2]
+    world.operations.finish_attempt.assert_called_once()
+
+
+async def test_obtain_binding_producer_keeps_gate_application_with_original_business(world, monkeypatch):
+    from camctl.outputs import obtain_flow, read_attempts
+    from camctl.outputs.read_discovery import ReadCandidate
+    from camctl.contracts.pages import Page
+    from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
+    from camctl.operations.attempts import RetryWaitGate
+
+    pending = _pending_result(world)
+    world.runtime.pending_read_results.clear()
+    world.runtime.outputs = world.outputs
+    world.runtime.retry_gate = RetryWaitGate()
+    world.runtime.retry_gate.established('read/2', 1)
+    world.runtime.binding_check = lambda binding: BindingResult(BindingStatus.DEVICE_MISSING, binding, None)
+    candidate = ReadCandidate(2, 3, 1, 4, 0, 'cam-1', 'camera-driver', 7, True)
+    async def reads(database, scope, now):
+        return Page((candidate,), None)
+    world.runtime.discovery = SimpleNamespace(reads=reads)
+    async def held_binding(runtime, copy_id, binding_result, business):
+        assert binding_result.binding == DeviceBinding(candidate.device_id, candidate.driver_id)
+        return hold_read_result(runtime, pending.finish, business=business)
+    monkeypatch.setattr(read_attempts, 'held_binding_read_result', held_binding)
+    control = RuntimeError('committed binding result')
+    _attach_db_outcome(control, DbOutcome(DbOutcomeKind.COMPLETED))
+    world.outputs.fail_read_binding.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN), control]
+    world.release.set()
+    with pytest.raises(ConsistencyError):
+        await obtain_flow._advance_reads(world.runtime, 123)
+    assert not world.runtime.pending_read_results and world.runtime.pending_read_business
+    with pytest.raises(RuntimeError) as raised:
+        await obtain_flow.advance_obtain(world.runtime)
+    assert raised.value is control
+    assert not world.runtime.pending_read_business
+    assert 'read/2' not in world.runtime.retry_gate.anchors
