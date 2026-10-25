@@ -93,12 +93,33 @@ def test_finite_set_validation_keeps_header_without_comparing_unread_members():
     handle.phase = 'finite'
     handle.action_id, handle.batch_size = 9, 128
     handle._db = create_autospec(sqlite3.Connection, instance=True)
-    cursor = handle._db.execute.return_value
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    handle._db.execute.return_value = cursor
     cursor.fetchall.side_effect = [[(4, encode_json_value({
         'id': 4, 'member_count': 500, 'facts_json': None, 'assessment_json': None}))], []]
     handle._one = create_autospec(handle._one, return_value=(0, None, None))
     handle._validate_sets()
     handle._one.assert_not_called()
+
+
+@pytest.mark.parametrize('profile,raises', [('complete', True), ('video_coverage', False)])
+def test_full_default_counts_every_member_while_coverage_only_counts_scope(profile, raises):
+    from camctl.history.bounded import SegmentHistoryHandle
+    cls = SegmentHistoryHandle if profile == 'complete' else report_action.ReportHistoryHandle
+    handle = cls.__new__(cls)
+    handle.phase, handle.action_id, handle.batch_size = profile, 9, 128
+    handle._db = create_autospec(sqlite3.Connection, instance=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True)
+    handle._db.execute.return_value = cursor
+    cursor.fetchall.side_effect = [[(4, encode_json_value({
+        'id': 4, 'member_count': 500, 'facts_json': None, 'assessment_json': None}))], []]
+    handle._one = create_autospec(handle._one, return_value=(2, 1, 2))
+    if raises:
+        with pytest.raises(ConsistencyError, match='完整成员数量'):
+            handle._validate_sets()
+    else:
+        handle._validate_sets()
+        assert [call.args[1][0] for call in handle._one.call_args_list] == ['segment_scope_members']
 
 
 def test_coverage_candidates_follow_scope_member_reference_not_all_set_members():
