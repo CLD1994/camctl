@@ -2,6 +2,12 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 自动预览名称与用户动作序号（2026-10-26）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，`automatic-previews`、`validation-presentation`、`preview-renaming`、`preview-current-state`、`preview-editor`、`preview-reload`、`web-editing` 七个单元文件的 273 项通过，`automatic-previews` 集成文件的 76 项通过。覆盖源动作改名后派生名称与引用同步、重名及 128 字符边界、能力不可用、无效名称保留，以及多个来源消除名称冲突后保存、重开、复制和直接导出。
+
+`browser-previews` 中两个重点场景通过，实际操作名称输入、新增、复制、删除及保存重开，核对技术详情中的派生名称、普通动作连续序号、动作总数及校验位置。测试使用独立临时数据库与 HTTP 服务。类型检查和生产构建退出 0，构建保留既有主包超过 500 kB 的提示；未执行完整客户端测试套件。
+
 ## 计划下载文件名与创建时间（2026-10-26）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，`creation-time`、`protocol`、`reports`、`request-id`、`http`、`requests` 六个测试文件的 572 项通过。创建时间用例先观察到原实现拒绝三位毫秒、导出正文丢失毫秒，再验证合法日期、零与非零毫秒、旧秒级记录及非法精度。HTTP 用例在导出后推进到另一日期，确认正文时间与文件名固定，旧秒级记录的名称补 `000` 且正文不改写。

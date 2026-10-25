@@ -15,6 +15,7 @@ import {
   copyDraftAction,
   createActionAllocation,
   initializePreviewMetadata,
+  isAutomaticPreviewAction,
   type CapabilityState,
 } from "../shared/automatic-previews";
 import {
@@ -55,6 +56,7 @@ import {
   type PresentedIssue,
 } from "./Validation";
 import { deviceOptions } from "./device-options";
+import { userActionOrdinals } from "./action-order";
 import { canSwitchActionType, switchActionType } from "./action-drafts";
 import {
   canSwitchParameterType,
@@ -192,6 +194,13 @@ export function Editor(props: Props) {
       return { plan: undefined, problem: (error as Error).message };
     }
   }, [content]);
+  const actionOrdinals = useMemo(
+    () => userActionOrdinals(plan?.actions ?? []),
+    [plan],
+  );
+  const actionCount = actionOrdinals.filter(
+    (ordinal) => ordinal !== undefined,
+  ).length;
   // 计划校验只消费报告身份及水位，轮询携带的其他报告字段不改变依据。
   const reportBasis = JSON.stringify(
     props.reports.map((r) => [r.report_id, r.to_wm]),
@@ -235,11 +244,16 @@ export function Editor(props: Props) {
   }, [content, capabilities, reportBasis, props.coverage]);
   const add = () => {
     if (plan) {
+      const names = new Set(
+        plan.actions.filter(isObject).map((action) => action.name),
+      );
+      let ordinal = actionCount + 1;
+      while (names.has(`动作 ${ordinal}`)) ordinal++;
       change(
         appendDraftAction(
           content,
           {
-            name: `动作 ${plan.actions.length + 1}`,
+            name: `动作 ${ordinal}`,
           },
           createActionAllocation(),
         ),
@@ -584,10 +598,10 @@ export function Editor(props: Props) {
               </label>
               <div className="section-head">
                 <h3>
-                  动作 <span className="muted">{plan.actions.length}</span>
+                  动作 <span className="muted">{actionCount}</span>
                 </h3>
                 <div className="button-row">
-                  {!!plan.actions.length && (
+                  {!!actionCount && (
                     <>
                       <button onClick={() => setCollapsed(new Set())}>
                         全部展开
@@ -612,10 +626,7 @@ export function Editor(props: Props) {
                 </p>
               )}
               {plan.actions.map((action, index) =>
-                isObject(action) &&
-                action.type === "obtain_action_outputs" &&
-                isObject(action.params) &&
-                action.params.purpose === "auto_preview" ? (
+                isAutomaticPreviewAction(action) ? (
                   <details
                     className="advanced"
                     key={identity(index)}
@@ -633,6 +644,7 @@ export function Editor(props: Props) {
                     {...props}
                     content={content}
                     index={index}
+                    ordinal={actionOrdinals[index]!}
                     action={action}
                     change={change}
                     collapsed={collapsed.has(identity(index))}
@@ -670,7 +682,8 @@ export function Editor(props: Props) {
                   />
                 ) : (
                   <div className="notice error" key={identity(index)}>
-                    动作 {index + 1} 不是对象，请在整份 JSON 中修正。
+                    动作 {actionOrdinals[index]} 不是对象，请在整份 JSON
+                    中修正。
                     <button onClick={() => remove(index)}>删除此动作</button>
                   </div>
                 ),
@@ -835,6 +848,7 @@ function ActionEditor(
   props: Props & {
     content: DraftContent;
     index: number;
+    ordinal: number;
     action: EditObject;
     change: (c: DraftContent) => void;
     collapsed: boolean;
@@ -943,7 +957,7 @@ function ActionEditor(
       <div className="section-head action-summary">
         <div>
           <h3>
-            <span className="step">{index + 1}</span>
+            <span className="step">{props.ordinal}</span>
             {typeof action.name === "string" ? action.name : "未命名动作"}
           </h3>
           <p className="muted">

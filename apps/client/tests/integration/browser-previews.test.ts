@@ -956,6 +956,7 @@ it("复制拍摄分配独立来源及自动取回身份，改名删项保持对�
   await browserExpect(
     page.locator('[data-testid="derived-preview"]'),
   ).toHaveCount(2);
+  await browserExpect(page.locator("article.action-card .step")).toHaveText(["1", "2"]);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -987,10 +988,36 @@ it("复制拍摄分配独立来源及自动取回身份，改名删项保持对�
   await browserExpect(
     page.locator('[data-testid="derived-preview"]'),
   ).toHaveCount(1);
+  await browserExpect(page.locator("article.action-card .step")).toHaveText(["1"]);
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   expect(
     application.draft(d.id).content.automaticPreviews!.actions.map((a) => a.id),
   ).toEqual(d.content.automaticPreviews!.actions.map((a) => a.id));
+}, 20000);
+it("自动预览跟随源名称，用户动作计数和新增序号连续，保存重开保持", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const draft = previewDraft(application);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const editor = page.getByTestId("draft-editor");
+  const cards = editor.locator("article.action-card");
+  await page.getByLabel("动作名称", { exact: true }).fill("室外录像");
+  const automatic = page.getByTestId("derived-preview");
+  await browserExpect(automatic.locator("summary")).toContainText("室外录像预览");
+  await automatic.locator("summary").click();
+  expect(JSON.parse(await automatic.locator("pre").innerText()).name).toBe("室外录像预览");
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await browserExpect(cards.locator(".step")).toHaveText(["1", "2"]);
+  await browserExpect(page.getByLabel("动作名称", { exact: true }).last()).toHaveValue("动作 2");
+  await browserExpect(editor.locator(".section-head > h3").first()).toHaveText("动作 2");
+  await browserExpect(editor.locator(".validation")).toContainText("动作 2");
+  await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
+  expect(JSON.parse(application.draft(draft.id).content.text).actions).toHaveLength(3);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await browserExpect(cards.locator(".step")).toHaveText(["1", "2"]);
+  await browserExpect(automatic.locator("summary")).toContainText("室外录像预览");
 }, 20000);
 it("能力重载等待所有开放会话的在途保存，旧轮询不能回退失败观察", async () => {
   const { page, application } = await setup();

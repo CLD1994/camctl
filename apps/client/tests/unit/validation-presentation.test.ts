@@ -61,6 +61,37 @@ const capabilities: Capabilities = {
   ],
 };
 
+it("校验位置按用户动作连续编号，技术路径保持真实数组位置", () => {
+  const withPreview = {
+    actions: [
+      plan.actions[0],
+      {
+        name: "录像 A预览",
+        type: "obtain_action_outputs",
+        params: { purpose: "auto_preview" },
+      },
+      plan.actions[1],
+    ],
+  };
+  const result = presentIssue(
+    {
+      path: "/actions/2/scheduled_at",
+      code: "schema_required",
+      message: "technical",
+    },
+    withPreview,
+  );
+  expect(result.location).toContain("动作 2");
+  expect(result.target).toBe("/actions/2/scheduled_at");
+  expect(result.actionIndex).toBe(2);
+  const automatic = presentIssue(
+    { path: "/actions/1/name", code: "schema_required", message: "technical" },
+    withPreview,
+  );
+  expect(automatic.location).toContain("自动预览");
+  expect(automatic.location).not.toContain("动作 2");
+});
+
 it.each([
   ["actions[1].scheduled_at", "/actions/1/scheduled_at", "取回 B", "执行时间"],
   [

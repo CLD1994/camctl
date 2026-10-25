@@ -64,7 +64,7 @@ it("删除其他拍摄消除重名后，共享协调恢复剩余来源", () => {
   const result = coordinatePreviews(removeAction(waiting(), 1), k());
   expect(
     JSON.parse(result.content.text).actions.map((a: any) => a.name),
-  ).toEqual(["B", "自动A", "手动"]);
+  ).toEqual(["B", "B预览", "手动"]);
   expect(
     JSON.parse(result.content.text).actions[1].params.source.action_name,
   ).toBe("B");
