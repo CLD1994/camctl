@@ -137,7 +137,7 @@ SQL 的历史、报告和快照类型范围由[生成工具](../../../scripts/sy
 | 5 `ACTION_STARTED` | 1 开始动作并初始化专属责任 |
 | 6 `RETRY_WAIT_CHANGED` | 1 建立本流程重试间隔；2 保存间隔已完成；3 结束本流程重试责任 |
 | 7 `WINDOW_OBSERVED` | 1 保存首次窗口内观察 |
-| 8 `ACTION_FINISHED` | 1 保存动作成功；2 保存执行失败；3 保存动作过期；4 保存取消收场完成 |
+| 8 `ACTION_FINISHED` | 1 保存动作成功；2 保存执行失败；3 保存动作过期；4 保存取消收场完成；5 保存拍摄准备失败 |
 | 9 `PLAN_STATUS_CHANGED` | 1 计划首次开始；2 计划全部动作结束 |
 | 10 `OPERATION_CONFIGURED` | 1 建立普通操作责任；2 实际采用本次操作配置；3 结束普通操作责任 |
 | 11 `ATTEMPT_STARTED` | 1 保存普通尝试意图及额度 |

@@ -35,6 +35,7 @@ _FORMAT_VERSIONS = enum_for("database_metadata.format_version")
 SUPPORTED_FORMAT_VERSIONS = frozenset(int(member) for member in _FORMAT_VERSIONS)
 CURRENT_FORMAT_VERSION = max(SUPPORTED_FORMAT_VERSIONS)
 HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
+CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
 
 _PRAGMA_LIMIT = 2_147_483_647
 _INSTANCE_ID = re.compile(r"\A[0-9a-f]{32}\Z")
@@ -248,6 +249,20 @@ def require_host_photo_format(format_version: int | None) -> None:
         )
 
 
+def require_capture_preparation_format(format_version: int | None) -> None:
+    """准备尝试及尚未开始的拍摄失败只写入支持该组合的整体格式。"""
+    if (
+        isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version not in SUPPORTED_FORMAT_VERSIONS
+        or format_version < CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION
+    ):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持拍摄提前准备；"
+            f"至少需要格式 {CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION}"
+        )
+
+
 def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] | None:
     """读取指定已知列声明中的简单整数等值或 IN 检查，不解析通用 SQL。"""
     if not isinstance(sql, str):
@@ -317,9 +332,8 @@ def _verify_format_constraints(
     if format_version == int(_FORMAT_VERSIONS.V1):
         allowed_purpose_checks = {legacy_purposes, mapped_purposes}
         allowed_metadata_checks = {
-            frozenset({int(_FORMAT_VERSIONS.V1)}),
-            SUPPORTED_FORMAT_VERSIONS,
-            frozenset({1, 2}),
+            frozenset(version for version in SUPPORTED_FORMAT_VERSIONS if version <= upper)
+            for upper in SUPPORTED_FORMAT_VERSIONS
         }
         if purpose_values not in allowed_purpose_checks or metadata_values not in allowed_metadata_checks:
             raise DatabaseInvalidError(
@@ -327,13 +341,13 @@ def _verify_format_constraints(
             )
         return
 
-    if format_version in (int(_FORMAT_VERSIONS.V2), CURRENT_FORMAT_VERSION):
+    if format_version in SUPPORTED_FORMAT_VERSIONS and format_version >= int(_FORMAT_VERSIONS.V2):
         if (
             purpose_values != mapped_purposes
             or not metadata_values.issubset(SUPPORTED_FORMAT_VERSIONS)
         ):
             raise DatabaseInvalidError(
-                "格式 V2 的已知 CHECK 未声明完整用途集合或格式版本"
+                "格式 V2 及以上的已知 CHECK 未声明完整用途集合或格式版本"
             )
         return
 

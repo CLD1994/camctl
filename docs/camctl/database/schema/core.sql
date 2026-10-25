@@ -51,9 +51,11 @@ CREATE TABLE actions (
     CHECK ((status = 4 AND error_code IS NOT NULL AND error_details_json IS NOT NULL)
         OR (status <> 4 AND error_code IS NULL AND error_details_json IS NULL)),
     CHECK (status <> 4 OR (execution_started = 0 AND error_code IN (1,2,3,4))
+        OR (execution_started = 0 AND type IN (2,3) AND error_code = 13
+            AND COALESCE(json_extract(error_details_json, '$.reason') IN ('device_failed','baseline_read_failed'), 0))
         OR (execution_started = 1 AND error_code IN (10,11,12,13,14,15,16,17,18,20,21,22,23,24,25,26,27,28,29,30))),
-    CHECK ((execution_spec_json IS NULL AND status = 4 AND execution_started = 0)
-        OR (execution_spec_json IS NOT NULL AND NOT (status = 4 AND execution_started = 0))),
+    CHECK ((execution_spec_json IS NULL AND status = 4 AND execution_started = 0 AND error_code IN (1,2,3,4))
+        OR (execution_spec_json IS NOT NULL AND NOT (status = 4 AND execution_started = 0 AND error_code IN (1,2,3,4)))),
     CHECK ((type IN (1,2,3) AND execution_spec_json IS NOT NULL AND effective_params_json IS NOT NULL
             AND driver_id IS NOT NULL AND device_id IS NOT NULL AND scheduled_at IS NOT NULL AND max_delay_ms IS NOT NULL)
         OR ((type NOT IN (1,2,3) OR execution_spec_json IS NULL) AND effective_params_json IS NULL AND driver_id IS NULL)),

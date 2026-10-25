@@ -1641,7 +1641,8 @@
           "from": 1,
           "to": 4,
           "by": [
-            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE"
+            "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
+            "ACTION_FINISHED.PREPARATION_FAILED"
           ],
           "id": "transition_8"
         }
@@ -4931,6 +4932,67 @@
             "preparation_resolved",
             "segment_finish_request"
           ]
+        },
+        "PREPARATION_FAILED": {
+          "reason": 5,
+          "title": "保存拍摄准备失败",
+          "rows": [
+            {
+              "table": "actions",
+              "op": "update",
+              "columns": [
+                "status",
+                "error_code",
+                "error_details_json"
+              ],
+              "before": {
+                "type": [
+                  2,
+                  3
+                ],
+                "status": [
+                  1
+                ],
+                "execution_started": [
+                  0
+                ],
+                "cancel_requested": [
+                  0
+                ]
+              },
+              "after": {
+                "status": [
+                  4
+                ],
+                "error_code": [
+                  13
+                ]
+              },
+              "required": [
+                "status",
+                "error_code",
+                "error_details_json"
+              ],
+              "transitions": {
+                "status": [
+                  "transition_8"
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "action_finish",
+            "plan_aggregate",
+            "output"
+          ],
+          "evidence": [
+            "preparation_resolved",
+            "preparation_failure_request"
+          ]
         }
       }
     },
@@ -5046,7 +5108,8 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  10
                 ],
                 "status": [
                   1
@@ -5091,7 +5154,8 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  10
                 ],
                 "status": [
                   1,
@@ -5135,7 +5199,8 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  10
                 ],
                 "status": [
                   1,
@@ -5239,7 +5304,8 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  10
                 ],
                 "status": [
                   1,
@@ -5305,7 +5371,8 @@
                   5,
                   6,
                   7,
-                  8
+                  8,
+                  10
                 ],
                 "status": [
                   2
@@ -5563,7 +5630,9 @@
             "activity",
             "release"
           ],
-          "evidence": []
+          "evidence": [
+            "preparation_request"
+          ]
         },
         "OBSERVE": {
           "reason": 2,

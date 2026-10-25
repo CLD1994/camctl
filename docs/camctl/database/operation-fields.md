@@ -21,7 +21,7 @@
 | `returned_at`、`result_event_id` | 可空UTC整数微秒实际返回时刻和结果事件外键。INTENDED时共同为空；RETURNED时共同有值；UNCONFIRMED只保存结果事件，不补造返回时刻。 |
 | `error_json`、`next_cursor_json`、`chunk_event_id` | 可空实际错误、成功页下一游标和原基准批次事件外键。INTENDED及UNCONFIRMED时均为空；错误返回不带下一游标或批次。成功非空页引用同组前序APPEND，成功空页不建批次，是否结束由下一游标判断。 |
 
-意图创建必须核对原动作RUNNING且execution_started为1、活动COLLECTING/NOT_DISPATCHED/HELD、完整绑定和目录、实际前缀及连续调用关系。首调用从空前缀和空游标开始；后续调用只沿前一成功RETURNED的非空下一游标继续，前一调用未结束、出错、返回未知或已到末页时不创建下一调用。
+意图创建必须核对原动作的准备资格：沿原执行路径时要求 `RUNNING + execution_started=1`；首次独立提前准备时要求 `PENDING + execution_started=0`；原动作已开始、但原 `START` 均有可靠无效果依据且仍可重试时，保留 `RUNNING + execution_started=1`。独立准备路径均须持有当前会话已经可靠保存的设置准备结果。两者均要求活动为 `COLLECTING/NOT_DISPATCHED/HELD`，绑定、目录、实际前缀及连续调用关系完整。首调用从空前缀和空游标开始；后续调用只沿前一成功RETURNED的非空下一游标继续，前一调用未结束、出错、返回未知或已到末页时不创建下一调用。
 
 INTEND独立提交。非空成功页的APPEND与RETURN按此顺序在同一事务保存；空页、实际错误或返回未知各只保存一个结果事件。结果列首次赋值后固定。意图不表示已经派发，调用结果不自行结束动作、固定基准或释放活动。实际返回未知的拥有者及后续收场规则见[核实结束与终态提交](../../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md#核实结束与终态提交)；接入进度由[分段实施计划](../../superpowers/plans/2026-10-21-osmo360ii-record-segmentation.md#p4把分段规则接入正常录像异常恢复和空尾分类)跟踪。
 
@@ -45,8 +45,11 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 | `CHECK_CAPTURE_RESULTS` | `results/<activity_id>` | `activity_id` |
 | `STOP_RESIDUAL` | `followup/<action_id>/<activity_id>` | 原历史 `activity_id`；动作是新的触发者 |
 | `EMERGENCY_STOP` | `emergency/<session_key>/<activity_id>` | `activity_id` 和 `session_key` |
+| `PREPARE_CAPTURE` | `prepare/<activity_id>/<session_key>` | 原动作的 `activity_id` 和当前 `session_key` |
 
-`activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，仅应急流程使用；它区分同一会话的唯一限额，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+`activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，应急和独立准备流程必须填写，其他流程必须为空；它区分同一会话的唯一责任，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+
+`PREPARE_CAPTURE` 要求整体格式 V4。取得准备资格时，原动作保持 `PENDING + execution_started=0`，通过 `DEVICE_OBSERVED.CREATE` 建立唯一活动及占用；到计划时间开始执行时复用该活动。原动作已经开始且原 `START` 均可靠无效果时，新会话设置准备复用原活动和固定基准，保留执行标记及累计 `START` 次数。每个会话对同一活动只允许一次设置组合，流程及尝试的 `max_attempts_used=1`，`timeout_s_json` 保存本次启动控制超时，`retry_interval_s_json` 为空，`retry_wait_required=0`。准备尝试按普通意图和结果事件可靠保存，允许流程因取消或窗口结束进入 `CANCELED` 或 `EXPIRED`；已开始的调用仍须独立收场。设置成功不消耗 `START` 次数，也不替代驱动当前会话凭据和固定完整基准。详细资格与恢复规则见[拍摄提前准备规格](../../superpowers/specs/2026-10-25-capture-preparation-design.md)。
 
 显式取回源检查的固定归属沿 `obtain_items.selection_id → obtain_source_selections.dependency_id → action_dependencies.action_id` 核对原获取动作；以 `requested_output_id` 定位产物，再以唯一 `device_file_id` 或 `intermediate_file_id` 载体确定设备或主机配置。未选择条目的 `output_id` 可以为空。这项身份核对不判定产物可用性、文件存在性或取回资格。主机 CHECK 的流程和每次尝试保存空 timeout/interval；开放原责任的后续票据还要求上一票已有完整结果与结果事件，沿用累计次数。设备 CHECK 保存正 timeout 和非负 interval，间隔为零仍要求已有重试等待责任。原键重送核对原 owner、采用配置和时刻，返回原票据及历史；终态或预算耗尽不建立新尝试。
 
@@ -56,7 +59,7 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 
 `retry_wait_required` 为 0 或 1，保存本流程的重试间隔责任。进入、清除、其他条件阻挡、取消、预算变化与恢复按[重试责任转换](waiting.md#重试责任的完整转换)处理。实际使用新配置时保存依据；只加载配置不写库。普通流程采用降低后的上限时，上限可以小于累计已用次数；应急限额在本会话内固定，实际次数不得超过该限额。
 
-`status` 为 `PENDING`、`ACTIVE`、`SUCCEEDED`、`FAILED`、`CANCELED`、`UNCONFIRMED`、`EXPIRED`。`EXPIRED` 用于启动责任随动作过期结束，以及尚未尝试的后续残留收场因触发动作过期结束；启动流程保留已有尝试和累计次数，后续残留收场仍要求尚未尝试。`SUCCEEDED`、`FAILED`、`CANCELED`、`EXPIRED` 表示该操作责任的最终结果；`UNCONFIRMED` 表示有限处理结束但其外部效果尚未确认，原普通责任不自动重开。后续可靠观察更新设备或文件事实，而非把原失败流程改判成功。`FAILED`、`UNCONFIRMED` 必须有 `error_json`；单次尝试失败但仍在重试时可为 `ACTIVE`，不直接结束动作。
+`status` 为 `PENDING`、`ACTIVE`、`SUCCEEDED`、`FAILED`、`CANCELED`、`UNCONFIRMED`、`EXPIRED`。`EXPIRED` 用于启动或独立准备责任随动作过期结束，以及尚未尝试的后续残留收场因触发动作过期结束；启动和准备流程保留已有尝试和累计次数，后续残留收场仍要求尚未尝试。`SUCCEEDED`、`FAILED`、`CANCELED`、`EXPIRED` 表示该操作责任的最终结果；`UNCONFIRMED` 表示有限处理结束但其外部效果尚未确认，原普通责任不自动重开。后续可靠观察更新设备或文件事实，而非把原失败流程改判成功。`FAILED`、`UNCONFIRMED` 必须有 `error_json`；单次尝试失败但仍在重试时可为 `ACTIVE`，不直接结束动作。
 
 录像 `START` 的合法字段组合、转换、结束条件及当前机会推导由[录像启动流程](recording-start.md)定义。首次尝试共同建立 `ACTIVE` 责任；结束状态不重新激活。流程的业务结果与尚未收场的尝试分别保存，恢复不能仅查询未结束流程。
 
