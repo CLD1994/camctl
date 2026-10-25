@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
+from dataclasses import replace
 from typing import Any, Callable
 
 from camctl.contracts.values import OperationKey
@@ -175,10 +176,12 @@ class DbExecutor:
         *,
         capacity: int = 64,
         enqueue_timeout_seconds: float = 9.0,
+        confirmed_write_observer: Callable[[OwnedConnection, DbOutcome, OperationKey], None] | None = None,
     ) -> None:
         if isinstance(enqueue_timeout_seconds, bool) or enqueue_timeout_seconds <= 0:
             raise DbExecutorError(f"入队时限必须是正数秒: {enqueue_timeout_seconds!r}")
         self._factory = connection_factory
+        self._confirmed_write_observer = confirmed_write_observer
         self._enqueue_timeout = enqueue_timeout_seconds
         self._core = QueueCore(capacity)
         self._lock = threading.Lock()
@@ -307,7 +310,7 @@ class DbExecutor:
             if owned is None:
                 try:
                     owned = self._factory()
-                except Exception as error:
+                except BaseException as error:
                     self._deliver_factory_failure(job, error)
                     with self._lock:
                         self._core.complete(job.key)
@@ -324,15 +327,23 @@ class DbExecutor:
         提交或回滚结果未知时在所属线程关闭连接并返回 None，下一
         项操作重新打开。
         """
+        from camctl.persistence.transaction import write_receipt_for
         if job.kind is DbJobKind.READ:
+            keep = owned
             try:
-                value = job.execute(owned)
-            except Exception as error:
-                payload: Any = ReadReceipt(error=DbReadError(f"读取 {job.description} 失败: {error}"))
-            else:
-                payload = ReadReceipt(value=value)
+                payload: Any = ReadReceipt(value=job.execute(owned))
+            except BaseException as error:
+                payload = self._read_failure(error, f"读取 {job.description} 失败")
+                receipt = write_receipt_for(error)
+                if (receipt is not None and receipt.kind == 'unknown'
+                        or receipt is None and not isinstance(error, Exception)):
+                    keep = None
+                    try:
+                        owned.connection.close()
+                    except BaseException as close_error:
+                        error.add_note(f"关闭失效读取连接失败: {close_error!r}")
             self._loop.call_soon_threadsafe(self._finish, job, payload)
-            return owned
+            return keep
         try:
             outcome = job.execute(owned)
             if not isinstance(outcome, DbOutcome):
@@ -340,24 +351,48 @@ class DbExecutor:
                     kind=DbOutcomeKind.UNKNOWN,
                     error=DbExecutorError(f"写任务 {job.description} 未返回分类结果"),
                 )
-        except Exception as error:
-            outcome = DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=error)
+        except BaseException as error:
+            receipt = write_receipt_for(error)
+            outcome = DbOutcome(
+                kind=DbOutcomeKind.UNKNOWN if receipt is None else DbOutcomeKind(receipt.kind),
+                value=None if receipt is None else receipt.result,
+                error=error if receipt is None else receipt.error or error,
+                boundary=None if receipt is None else receipt.boundary,
+                control=None if isinstance(error, Exception) else error,
+                secondary_errors=() if receipt is None else receipt.secondary_errors,
+            )
         keep: OwnedConnection | None = owned
         if outcome.kind is DbOutcomeKind.UNKNOWN:
-            # 提交或回滚结果未知：先在所属线程关闭失效连接，再通知结果。
-            owned.connection.close()
             keep = None
+            try:
+                owned.connection.close()
+            except BaseException as error:
+                outcome = replace(outcome, secondary_errors=(*outcome.secondary_errors, error))
+        if outcome.kind is DbOutcomeKind.COMPLETED and self._confirmed_write_observer is not None:
+            try:
+                self._confirmed_write_observer(owned, outcome, job.key)
+            except BaseException as error:
+                outcome = replace(outcome, observer_error=error)
         self._loop.call_soon_threadsafe(self._finish, job, outcome)
         return keep
+
+    @staticmethod
+    def _read_failure(error: BaseException, description: str) -> ReadReceipt:
+        if not isinstance(error, Exception):
+            return ReadReceipt(error=error)
+        failure = DbReadError(f"{description}: {error}")
+        failure.__cause__ = error
+        return ReadReceipt(error=failure)
 
     def _finish(self, job: DbJob, payload: Any) -> None:
         result = self._results.pop(job.key, None)
         if result is not None and not result.done():
             result.set_result(payload)
 
-    def _deliver_factory_failure(self, job: DbJob, error: Exception) -> None:
+    def _deliver_factory_failure(self, job: DbJob, error: BaseException) -> None:
         if job.kind is DbJobKind.READ:
-            payload: Any = ReadReceipt(error=DbReadError(f"打开数据库连接失败: {error}"))
+            payload: Any = self._read_failure(error, "打开数据库连接失败")
         else:
-            payload = DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=error)
+            payload = DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=error,
+                control=None if isinstance(error, Exception) else error)
         self._loop.call_soon_threadsafe(self._finish, job, payload)
