@@ -117,8 +117,13 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
         return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)
 
     async def can_read():
-        current = (await runtime.action(action_id))
-        activity = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))
+        def read(owned):
+            current = row_facts(owned.connection, "actions", action_id)
+            if current is None:
+                raise LookupError(f"动作不存在: {action_id}")
+            return current, row_facts(owned.connection, "device_activities", activity_id)
+        current, activity = await runtime.database.read(
+            read, description="读取分段基准派发资格")
         return (
             not current["cancel_requested"]
             and (current["status"], current["execution_started"]) in ((1, 0), (2, 1))

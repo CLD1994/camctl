@@ -171,17 +171,50 @@ async def resume_preparation_saves(database, cache, *, operations=None, scheduli
 
 async def preparation_dispatch_reason(runtime, action_id):
     """设置允许提前；每次真实设置前核取消、原占用和窗口上界。"""
-    action = (await runtime.action(action_id))
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+
+    def read(owned):
+        connection = owned.connection
+        action = row_facts(connection, "actions", action_id)
+        if action is None:
+            raise LookupError(f"动作不存在: {action_id}")
+        if action["status"] in (3, 4, 5, 6) or action["cancel_requested"]:
+            return action, None, False
+        with closing(connection.execute(
+                "SELECT id FROM device_activities WHERE action_id=?", (action_id,))) as cursor:
+            found = cursor.fetchone()
+        activity = None if found is None else row_facts(
+            connection, "device_activities", found[0])
+        if activity is None or activity["occupancy_state"] != 1:
+            return action, activity, False
+        with closing(connection.execute(
+                "SELECT a.status,a.effect_state,e.occurred_at FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id=r.id"
+                " JOIN history_events e ON e.id=a.intent_event_id"
+                " WHERE r.responsibility_key=? ORDER BY a.id DESC LIMIT 1",
+                (f"start/{action_id}",))) as cursor:
+            attempt = cursor.fetchone()
+        if attempt is None:
+            return action, activity, False
+        if action["type"] == int(enum_for("actions.type").CAMERA_TAKE_PHOTO):
+            return action, activity, True
+        facts = load_start_facts(connection, action)
+        start_precedes = (not facts.not_started
+            or facts.run is not None and facts.run["status"] not in (1, 2)
+            or facts.attempts_used >= runtime.start_config.max_attempts)
+        return action, activity, start_precedes
+
+    action, activity, start_precedes = await runtime.database.read(
+        read, description="读取设置准备派发资格")
     if action["status"] in (3, 4, 5, 6):
         return "terminal"
     if action["cancel_requested"]:
         return "canceled"
     if runtime.wall_us() > action["scheduled_at"] + action["max_delay_ms"] * 1000:
         return "window_ended"
-    activity = (await _activity(runtime, action_id))
     if activity is None or activity["occupancy_state"] != 1:
         return "occupancy_released"
-    if (await _start_precedes_preparation(runtime, action)):
+    if start_precedes:
         return "already_dispatched"
     return None
 
