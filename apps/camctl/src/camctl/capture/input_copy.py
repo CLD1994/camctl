@@ -238,6 +238,7 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
                          source_failed=settlement is ReadPreparationSettlement.SETTLED,
                          preparation_settlement=settlement)
     result = None
+    execution_error = None
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:
             await confirm_read_at_full_offset(session)
@@ -257,10 +258,13 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
     except (CopySegmentError, ConsistencyError) as error:
         result = InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id,
                            error=error, source_failed=isinstance(error, CopySegmentError) and error.source_failed)
+    except BaseException as error:
+        execution_error = error
+        raise
     finally:
-        session.request_stop()
-        end = await session.wait_stopped()
-        require_read_stopped(end)
+        original_error = (execution_error if execution_error is not None else
+                          result.error if result is not None else None)
+        end = await stop_read_session(session, original_error=original_error)
         if context.on_read_end is not None:
             context.on_read_end(end, session.position() == facts.source_size)
     if result is not None:
@@ -284,6 +288,28 @@ async def confirm_read_at_full_offset(session) -> None:
 def require_read_stopped(end: ReadEnd) -> None:
     if not isinstance(end, ReadEnd) or end.stopped is not True:
         raise ConsistencyError("原读取尚无可靠实际停止依据，保留原尝试及保护")
+
+
+async def stop_read_session(session: RecordingSource, *, original_error: BaseException | None = None) -> ReadEnd:
+    """核实实际停止；关闭失败与此前读取错误共同交付。"""
+    errors = []
+    try:
+        session.request_stop()
+    except BaseException as error:
+        errors.append(error)
+    try:
+        end = await session.wait_stopped()
+        require_read_stopped(end)
+    except BaseException as error:
+        if not any(error is previous for previous in errors):
+            errors.append(error)
+    if errors:
+        if original_error is not None and not any(original_error is error for error in errors):
+            errors.insert(0, original_error)
+        if len(errors) == 1:
+            raise errors[0]
+        raise BaseExceptionGroup("读取与会话关闭均失败", errors) from None
+    return end
 
 
 async def _complete_input(context: InputContext, copy_id: int,

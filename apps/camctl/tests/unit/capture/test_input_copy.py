@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -249,7 +250,7 @@ async def test_ready_copy_reentry_does_not_recopy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verify_without_end_confirms_session_at_saved_full_offset() -> None:
+async def test_verify_without_end_confirms_session_at_saved_full_offset(monkeypatch) -> None:
     """全部字节已保存而无结束事实：从原文件末尾打开并确认实际结束。"""
     copies = _Copies(state=_state(committed_bytes=_SOURCE_SIZE),
         prepare=_copy_step(ResumeOutcome.VERIFY, None), segments=[_committed_step()])
@@ -259,6 +260,9 @@ async def test_verify_without_end_confirms_session_at_saved_full_offset() -> Non
             return ReadChunk(data=None, eof=True)
 
     sessions = _Sessions(EndSession())
+    async def to_thread(function, *arguments):
+        return function(*arguments)
+    monkeypatch.setattr(asyncio, 'to_thread', to_thread)
 
     step = await obtain_recording_input(_context(copies, sessions))
 
@@ -373,6 +377,90 @@ async def test_segment_failure_stops_and_closes_session() -> None:
     assert isinstance(step.error, CopySegmentError)
     assert copies.calls == ["qualify", "state:9", "prepare", "transfer"]
     assert sessions.session.stop_requested and sessions.session.awaited
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('consumer', ['internal', 'delivery'])
+@pytest.mark.parametrize('read_cancelled', [False, True])
+@pytest.mark.parametrize('close_outcome', ['error', 'cancel', 'not_stopped'])
+async def test_read_and_close_failures_keep_both_original_errors(
+        monkeypatch, consumer, read_cancelled, close_outcome):
+    from types import SimpleNamespace
+    from camctl.outputs import obtain_flow
+
+    original = (asyncio.CancelledError('读取被取消') if read_cancelled else
+                CopySegmentError('transfer_failed', '原始段错误', source_failed=True))
+    cause = OSError(5, '源读取故障')
+    original.__cause__ = cause
+    close = asyncio.CancelledError('关闭被取消') if close_outcome == 'cancel' else RuntimeError('关闭失败')
+    copies, session = _Copies(), _Session()
+    async def transfer(*_arguments):
+        raise original
+    async def wait_stopped():
+        if close_outcome == 'not_stopped':
+            return ReadEnd(False, 0, None)
+        raise close
+    copies.transfer = transfer
+    session.wait_stopped = wait_stopped
+    ends = []
+    if consumer == 'internal':
+        from dataclasses import replace
+        call = obtain_recording_input(replace(_context(copies, _Sessions(session)),
+            on_read_end=lambda *values: ends.append(values)))
+    else:
+        monkeypatch.setattr(obtain_flow, 'RecordingInputCopies', lambda *_args, **_kwargs: copies)
+        runtime = SimpleNamespace(database=None, directories=SimpleNamespace(staging=_STAGING),
+            occurred_at=lambda: _NOW, file_executor=None, segment_size=4,
+            continuing_read_tickets={})
+        call = obtain_flow._copy_delivery(runtime, _Sessions(session),
+            {'id': 9, 'source_device_file_id': 11}, None,
+            on_read_end=lambda *values: ends.append(values))
+    with pytest.raises(BaseExceptionGroup) as caught:
+        await call
+    assert caught.value.exceptions[0] is original
+    if close_outcome == 'not_stopped':
+        assert isinstance(caught.value.exceptions[1], ConsistencyError)
+    else:
+        assert caught.value.exceptions[1] is close
+    assert caught.value.exceptions[0].__cause__ is cause
+    assert session.stop_requested and not ends
+    assert 'complete' not in copies.calls
+
+
+@pytest.mark.asyncio
+async def test_read_cancellation_keeps_original_error_after_confirmed_close():
+    copies, session = _Copies(), _Session()
+    original = asyncio.CancelledError('原读取取消')
+    cause = OSError(5, '已发生的读取错误')
+    original.__cause__ = cause
+    async def transfer(*_arguments):
+        raise original
+    copies.transfer = transfer
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await obtain_recording_input(_context(copies, _Sessions(session)))
+    assert caught.value is original and caught.value.__cause__ is cause
+    assert session.stop_requested and session.awaited
+    assert 'complete' not in copies.calls
+
+
+@pytest.mark.asyncio
+async def test_stop_signal_failure_still_collects_actual_close_error():
+    original = CopySegmentError('transfer_failed', '原读取失败', source_failed=True)
+    copies, session = _Copies(segments=[original]), _Session()
+    signal, close = RuntimeError('停止信号失败'), OSError(16, '实际关闭失败')
+    observed = []
+    def request_stop():
+        observed.append('stop')
+        raise signal
+    async def wait_stopped():
+        observed.append('close')
+        raise close
+    session.request_stop, session.wait_stopped = request_stop, wait_stopped
+    with pytest.raises(BaseExceptionGroup) as caught:
+        await obtain_recording_input(_context(copies, _Sessions(session)))
+    assert caught.value.exceptions == (original, signal, close)
+    assert observed == ['stop', 'close']
+    assert 'complete' not in copies.calls
 
 
 @pytest.mark.asyncio

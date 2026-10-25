@@ -14,10 +14,26 @@ from camctl.operations.models import (
     EvidenceValue, Settlement, SettlementBasis,
 )
 from camctl.operations.validation import validate_outcome
+from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.outputs.database_reads import read_one
 from camctl.devices.evidence import EvidenceError
+
+
+def read_failure_details(step) -> dict:
+    """原读取失败保留可读原因、完整异常及已取得的结束事实。"""
+    details = {"reason": str(step.error) if step.error is not None else None}
+    diagnostic = exception_diagnostic(step.error)
+    if diagnostic is not None:
+        details["exception"] = diagnostic
+    if step.read_end is not None:
+        details["read_end"] = {
+            "bytes_read": step.read_end.bytes_read,
+            "error": step.read_end.error,
+            "stopped": step.read_end.stopped,
+        }
+    return details
 
 
 @dataclass(frozen=True)

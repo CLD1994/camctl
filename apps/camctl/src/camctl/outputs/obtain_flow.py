@@ -56,7 +56,7 @@ from camctl.outputs.handoff import (
     DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery)
 from camctl.outputs.qualification import (
     FileCandidate, OperationConfig)
-from camctl.outputs.read_attempts import acquire_read_attempt, recover_unavailable_read
+from camctl.outputs.read_attempts import acquire_read_attempt, recover_unavailable_read, read_failure_details
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.sources import (
     ResolutionState, SelectionSnapshot, SourceResolution, SourceSpec,
@@ -840,6 +840,7 @@ async def _copy_delivery(
                          error=error, source_failed=settlement is ReadPreparationSettlement.SETTLED,
                          preparation_settlement=settlement)
     result = None
+    execution_error = None
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:
             from camctl.capture.input_copy import confirm_read_at_full_offset
@@ -861,12 +862,15 @@ async def _copy_delivery(
     except (CopySegmentError, ConsistencyError) as error:
         result = InputStep(InputPhase.SEGMENT_FAILED, copy_id=facts["id"],
                          error=error, source_failed=isinstance(error, CopySegmentError) and error.source_failed)
+    except BaseException as error:
+        execution_error = error
+        raise
     finally:
-        from camctl.capture.input_copy import require_read_stopped
+        from camctl.capture.input_copy import stop_read_session
 
-        session.request_stop()
-        end = await session.wait_stopped()
-        require_read_stopped(end)
+        original_error = (execution_error if execution_error is not None else
+                          result.error if result is not None else None)
+        end = await stop_read_session(session, original_error=original_error)
         if on_read_end is not None:
             on_read_end(end, session.position() == state.source_size)
     if result is not None:
@@ -955,7 +959,7 @@ async def _finish_read_attempt_phase(
         status=(AttemptStatus.SUCCEEDED if succeeded
                 else AttemptStatus.FAILED),
         error=None if succeeded else ErrorValue(
-            code="device_error", stage="read", details={"reason": str(step.error)}),
+            code="device_error", stage="read", details=read_failure_details(step)),
         effect=EffectState.UNKNOWN,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,
@@ -1362,8 +1366,7 @@ async def _finish_local_attempt_phase(
             details={
                 "phase": step.phase.value,
                 "source_failed": step.source_failed,
-                "reason": (
-                    str(step.error) if step.error is not None else None)}),
+                **read_failure_details(step)}),
         effect=EffectState.UNKNOWN,
         settlement=Settlement(
             basis=SettlementBasis.OBSERVED,

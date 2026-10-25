@@ -79,7 +79,7 @@ from camctl.operations.models import (
 from camctl.operations.validation import validate_outcome
 from camctl.outputs.read_attempts import (
     PendingReadResult, PendingStoppedRead, acquire_read_attempt, forget_read_result, hold_read_result,
-    retry_read_business, run_owned_read, save_read_result,
+    retry_read_business, run_owned_read, save_read_result, read_failure_details,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind, db_outcome_for
@@ -723,7 +723,7 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
     exhausted = ticket.attempt_id >= (max_attempts or flow.max_read_attempts)
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
-        error=None if succeeded else ErrorValue("device_error", "read", {"reason": str(step.error)}),
+        error=None if succeeded else ErrorValue("device_error", "read", read_failure_details(step)),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     if verification_failed:
         run_finish = verification_finish

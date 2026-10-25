@@ -42,6 +42,7 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.operations.owned_calls import current_call_scope
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -102,7 +103,7 @@ _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
 READ_PREPARATION_TIMEOUT_S = Decimal("180")
 
 
-class CameraReadError(ReadPreparationError):
+class CameraReadError(ReadPreparationError, DiagnosticError):
     """下载或身份核对失败；保留各次受管调用与实际收场细节。"""
 
     def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED):
@@ -113,6 +114,12 @@ class CameraReadError(ReadPreparationError):
                             else repr(cause) for cause in self.causes)
         super().__init__(f"相机文件读取失败: {reason}; steps={self.steps!r}; causes={diagnostics!r}",
                          settlement=settlement)
+        self.diagnostic_details = {
+            "reason": reason,
+            "steps": [deepcopy(step) for step in self.steps],
+            "causes": [exception_diagnostic(cause) for cause in self.causes],
+            "settlement": settlement.value,
+        }
 
 
 class _NeverStop:
