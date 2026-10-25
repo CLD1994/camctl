@@ -754,6 +754,15 @@ def _verify_action6_decision(db, setrow, decision):
 
 
 def _fixed_file(db,file_id,file_event_id):
+    """在本次事务内复用相同固定文件事实，写入后重新核实。"""
+    from camctl.persistence.read_reuse import reuse_read
+
+    return reuse_read(db, (__name__, "fixed_file", type(file_id), file_id,
+                          type(file_event_id), file_event_id),
+                      lambda: _load_fixed_file(db, file_id, file_event_id))
+
+
+def _load_fixed_file(db,file_id,file_event_id):
     """恢复独立文件到原固定事实事务；不读取整个动作。"""
     from camctl.contracts.enums import load_registry
     own_transaction=not db.in_transaction

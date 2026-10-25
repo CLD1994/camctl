@@ -51,10 +51,14 @@ def read_reuse_scope(connection: sqlite3.Connection) -> Iterator[None]:
         _active_scope.reset(token)
 
 
-def reuse_read(connection: sqlite3.Connection, key: Hashable, loader: Callable[[], _T]) -> _T:
+def reuse_read(connection: sqlite3.Connection, key: Any, loader: Callable[[], _T]) -> _T:
     """复用本事务同一写入代的已核验值；缺失时执行调用方的完整读取。"""
     state = _active_scope.get()
     if state is None or state.connection is not connection:
+        return loader()
+    try:
+        hash(key)
+    except TypeError:
         return loader()
     if not connection.in_transaction:
         state.reset(None)

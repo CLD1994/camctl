@@ -25,6 +25,7 @@ from camctl.persistence.transaction import (CommandPlan, TransactionError,
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.persistence.read_reuse import reuse_read
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -448,6 +449,11 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
 
 
 def _at_record(connection, event_id):
+    return reuse_read(connection, (__name__, "page", type(event_id), event_id),
+                      lambda: _load_at_record(connection, event_id))
+
+
+def _load_at_record(connection, event_id):
     with closing(connection.execute(f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (event_id,))) as cursor:
         row = cursor.fetchone()
     if row is None:

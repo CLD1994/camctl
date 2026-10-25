@@ -222,11 +222,23 @@ def test_exceptional_nested_scope_restores_parent(connection, failure):
         assert reuse_read(connection, "proof", lambda: "next") == "next"
 
 
-def test_unhashable_key_error_is_not_hidden(connection):
-    load = Mock(return_value="value")
-    with read_reuse_scope(connection), pytest.raises(TypeError):
-        reuse_read(connection, [], load)
-    load.assert_not_called()
+def test_unhashable_key_runs_original_loader_without_reuse(connection):
+    load = Mock(side_effect=["first", "second"])
+    with read_reuse_scope(connection):
+        assert reuse_read(connection, [], load) == "first"
+        assert reuse_read(connection, [], load) == "second"
+
+
+@pytest.mark.parametrize("key", [[], "proof"])
+def test_loader_type_error_is_preserved(connection, key):
+    failure = TypeError("原读取拒绝输入类型")
+
+    def load():
+        raise failure
+
+    with read_reuse_scope(connection), pytest.raises(TypeError) as caught:
+        reuse_read(connection, key, load)
+    assert caught.value is failure
 
 
 def test_entry_limit_evicts_least_recently_used(connection, monkeypatch):
@@ -350,3 +362,22 @@ def test_actual_read_value_types_support_isolated_reuse(connection, kind):
     assert type(copied) is type(value)
     assert copied == value
     assert copied is not value
+
+
+@pytest.mark.parametrize("key", [[], {}, ("proof", [])])
+def test_unhashable_key_keeps_original_loader_behavior(connection, key):
+    load = Mock(side_effect=["first", "second"])
+    with read_reuse_scope(connection):
+        assert reuse_read(connection, key, load) == "first"
+        assert reuse_read(connection, key, load) == "second"
+    assert load.call_count == 2
+
+
+def test_unhashable_key_does_not_swallow_loader_type_error(connection):
+    error = TypeError("原读取拒绝该输入")
+    load = Mock(side_effect=error)
+    with read_reuse_scope(connection):
+        with pytest.raises(TypeError) as caught:
+            reuse_read(connection, [], load)
+    assert caught.value is error
+    load.assert_called_once_with()

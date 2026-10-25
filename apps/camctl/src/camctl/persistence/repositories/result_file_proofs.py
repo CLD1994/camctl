@@ -1,6 +1,6 @@
 """按固定历史边界读取原页文件证明，不搜索其他结果补齐完成依据。"""
 from contextlib import closing
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from types import SimpleNamespace
 
 from camctl.capture.files import OwnershipFromResultPageSave
@@ -14,6 +14,7 @@ from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.persistence.transaction import read_transaction_range, row_facts
+from camctl.persistence.read_reuse import reuse_read
 
 from . import capture, result_pages
 from .result_file_ownership import _proof
@@ -25,7 +26,22 @@ def _one(connection, sql, parameters):
         return cursor.fetchone()
 
 
+def _read_key(value):
+    """保留完整引用的实际类型，避免布尔值与整数共享读取资格。"""
+    if is_dataclass(value) and not isinstance(value, type):
+        return type(value), tuple((member.name, _read_key(getattr(value, member.name)))
+                                  for member in fields(value))
+    if isinstance(value, tuple):
+        return type(value), tuple(_read_key(item) for item in value)
+    return type(value), value
+
+
 def _file_at(connection, file_id, boundary):
+    return reuse_read(connection, (__name__, "file_at", _read_key(file_id), _read_key(boundary)),
+                      lambda: _load_file_at(connection, file_id, boundary))
+
+
+def _load_file_at(connection, file_id, boundary):
     transaction = read_transaction_range(connection, boundary.txn_id)
     if transaction.last_event_id != boundary.last_event_id:
         raise ConsistencyError("严格文件读取必须使用完整历史边界")
@@ -76,6 +92,13 @@ def _completion_page(connection, page, file, boundary):
 
 def load_completion_input(connection, page, file_id, boundary, *, current_boundary=None):
     """返回一个固定文件的引用及资格；不返回增长目录或候选数组。"""
+    key = (__name__, "completion", _read_key(page), _read_key(file_id),
+           _read_key(boundary), _read_key(current_boundary))
+    return reuse_read(connection, key, lambda: _load_completion_input(
+        connection, page, file_id, boundary, current_boundary=current_boundary))
+
+
+def _load_completion_input(connection, page, file_id, boundary, *, current_boundary=None):
     if not isinstance(page, ResultPageRef) or not isinstance(boundary, HistoryBoundary):
         raise TypeError("严格文件读取要求原页引用和完整历史边界")
     ObjectId(file_id)
@@ -108,6 +131,15 @@ def load_completion_input(connection, page, file_id, boundary, *, current_bounda
 
 def load_strict_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None,
                                   current_boundary=None):
+    key = (__name__, "strict", _read_key(page), _read_key(file_id), _read_key(boundary),
+           _read_key(pairing_fact_id), _read_key(current_boundary))
+    return reuse_read(connection, key, lambda: _load_strict_result_file_input(
+        connection, page, file_id, boundary, pairing_fact_id=pairing_fact_id,
+        current_boundary=current_boundary))
+
+
+def _load_strict_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None,
+                                   current_boundary=None):
     result = load_completion_input(connection, page, file_id, boundary,
                                    current_boundary=current_boundary)
     file = _file_at(connection, file_id, boundary)
