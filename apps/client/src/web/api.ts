@@ -158,7 +158,7 @@ export async function readDraftObservation(
     };
   }
 }
-export async function download(path: string, name: string) {
+export async function download(path: string, name?: string) {
   const response = await fetch("/api" + path, { cache: "no-store" });
   if (!response.ok) {
     const value = await response.json();
@@ -169,11 +169,17 @@ export async function download(path: string, name: string) {
       response.status,
     );
   }
+  const fileName =
+    name ??
+    response.headers
+      .get("Content-Disposition")
+      ?.match(/(?:^|;)\s*filename="([^"]+)"/i)?.[1];
+  if (!fileName) throw new Error("下载响应未提供文件名");
   const blob = await response.blob(),
     url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = name;
+  link.download = fileName;
   document.body.append(link);
   link.click();
   link.remove();

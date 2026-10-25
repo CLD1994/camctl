@@ -664,13 +664,21 @@ it("网页导出与再次下载保持同一请求，复制后产生新请求", a
   );
   const firstEvent = page.waitForEvent("download");
   await page.getByTestId("export-button").click();
+  const firstDownload = await firstEvent;
+  expect(firstDownload.suggestedFilename()).toMatch(
+    /^plan-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.json$/,
+  );
   const first = JSON.parse(
-    readFileSync((await (await firstEvent).path())!, "utf8"),
+    readFileSync((await firstDownload.path())!, "utf8"),
   );
   const nextEvent = page.waitForEvent("download");
   await page.getByTestId("download-request-button").click();
+  const nextDownload = await nextEvent;
+  expect(nextDownload.suggestedFilename()).toMatch(
+    /^plan-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.json$/,
+  );
   const next = JSON.parse(
-    readFileSync((await (await nextEvent).path())!, "utf8"),
+    readFileSync((await nextDownload.path())!, "utf8"),
   );
   expect(next.request_id).toBe(first.request_id);
   await page.getByTestId("copy-request-button").click();

@@ -478,10 +478,7 @@ export function App() {
           : old,
       );
       finishExportNavigation(current, record.id, generation);
-      await download(
-        `/requests/${record.id}/download`,
-        `plan-${record.id}.json`,
-      );
+      await download(`/requests/${record.id}/download`);
       await refresh();
     });
   const handoff = (id: string, marked: boolean) =>

@@ -118,12 +118,7 @@ export function RecordDetail({
               data-testid="download-request-button"
               disabled={busy}
               onClick={() =>
-                run(() =>
-                  download(
-                    `/requests/${record.id}/download`,
-                    `plan-${record.id}.json`,
-                  ),
-                )
+                run(() => download(`/requests/${record.id}/download`))
               }
             >
               再次下载原请求

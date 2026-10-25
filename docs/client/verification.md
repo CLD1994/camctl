@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 计划下载文件名与创建时间（2026-10-26）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，`http` 集成测试的 12 项、`requests` 集成测试的 10 项及 `browser-workflow` 中的导出与再次下载场景均通过。HTTP 用例控制下载时钟，核对本地日期、时分秒及非零三位毫秒；浏览器用例核对首次导出和再次下载的实际建议文件名，并保留请求身份与复制后新身份的断言。原文件名用例先失败，再在统一使用后端附件名称后通过。类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。
+
+`requests` 既有用例确认正文 `created_at` 为公共协议要求的 UTC 秒级字符串。代码核对显示 camctl 在新计划校验时检查该字段，受理时转换为整数微秒并写入计划记录；既有格式已与客户端一致。本项未修改 camctl、公共协议或已有原请求，未运行 Python 测试。
+
+本地服务使用原 `data` 目录重启并提供新版构建。日志位于 `tmp/plan-filename-red.log`、`tmp/plan-filename-http.log`、`tmp/plan-filename-browser.log`、`tmp/plan-created-at.log`、`tmp/plan-filename-typecheck.log` 和 `tmp/plan-filename-build.log`。测试使用独立临时数据，未运行完整客户端测试套件。
+
 ## 草稿输入响应与保存布局（2026-10-25）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查和生产构建通过；构建保留既有主包超过 500 kB 的提示。`capability-observation`、`state-observations`、`preview-reload`、`web-session`、`draft-session-conflicts`、`validation-presentation`、`current-validation`、`preview-editor` 和 `video-estimate-state` 九个单元文件的 661 项通过。同版本能力复用用例先在原入口失败，覆盖版本切换、版本缺失、不可用变化与本次错误保留。

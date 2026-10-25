@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   mkdtempSync,
   rmSync,
@@ -142,9 +142,19 @@ it("HTTP 显式初始化后保存并导出计划", async () => {
   });
   expect(exported.status).toBe(200);
   const r = await exported.json();
-  const downloaded = await (
-    await fetch(`${base}/api/requests/${r.id}/download`)
-  ).json();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(
+    new Date(2026, 9, 26, 15, 8, 23, 47).getTime(),
+  );
+  let response: Response;
+  try {
+    response = await fetch(`${base}/api/requests/${r.id}/download`);
+  } finally {
+    clock.mockRestore();
+  }
+  expect(response.headers.get("Content-Disposition")).toBe(
+    'attachment; filename="plan-2026-10-26_15-08-23-047.json"',
+  );
+  const downloaded = await response.json();
   expect(downloaded.request_id).toBe(r.id);
 });
 it("跨来源写入被拒绝且数据库未初始化", async () => {

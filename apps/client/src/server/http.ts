@@ -187,16 +187,23 @@ export function createHttpApp(
     ),
   );
   app.get("/api/requests/:id/download", (req, res) => {
+    const body = application.downloadRequest(String(req.params.id));
+    const now = new Date(Date.now());
+    const localTime = new Date(
+      now.getTime() - now.getTimezoneOffset() * 60_000,
+    )
+      .toISOString()
+      .slice(0, -1)
+      .replace("T", "_")
+      .replaceAll(":", "-")
+      .replace(".", "-");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="plan-${req.params.id}.json"`,
+      `attachment; filename="plan-${localTime}.json"`,
     );
     res
       .type("application/json")
-      .send(
-        stringifyJson(application.downloadRequest(String(req.params.id)), 2) +
-          "\n",
-      );
+      .send(stringifyJson(body, 2) + "\n");
   });
   app.post("/api/requests/:id/copy", (req, res) =>
     res.status(201).json(application.copyRequest(String(req.params.id))),
