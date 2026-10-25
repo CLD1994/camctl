@@ -143,7 +143,9 @@ class _Sessions:
         self.opens: list[tuple[int, int]] = []
 
     async def open_session(self, source_device_file_id: int,
-                           offset: int) -> _Session:
+                           offset: int, *, on_start=None) -> _Session:
+        if on_start is not None:
+            on_start()
         self.opens.append((source_device_file_id, offset))
         self.session.offset = offset
         return self.session
@@ -168,14 +170,14 @@ class _Copies:
         self.candidates: list[FileCandidate] = []
         self.calls: list[str] = []
 
-    def qualify(self, candidate: FileCandidate) -> SaveReceipt:
+    async def qualify(self, candidate: FileCandidate) -> SaveReceipt:
         self.candidates.append(candidate)
         self.calls.append("qualify")
         if self.qualify_receipt is not None:
             return self.qualify_receipt
         return SaveReceipt(SaveDisposition.SAVED, value=self.qualification)
 
-    def copy_state(self, copy_id: int) -> CopyStateFacts:
+    async def copy_state(self, copy_id: int) -> CopyStateFacts:
         self.calls.append(f"state:{copy_id}")
         return self.state
 

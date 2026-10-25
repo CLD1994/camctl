@@ -2,7 +2,6 @@
 
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -15,6 +14,7 @@ from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverS
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration, ReadDriver
 from camctl.operations.attempts import RetryWaitGate
+from camctl.persistence.business import BusinessDatabase
 
 
 def _entry():
@@ -33,15 +33,15 @@ def test_current_device_copy_configuration_reaches_both_consumers(consumer, sett
     config = load_config({"devices": {"cam-1": {
         "kind": "camera", "driver": "camctl-adb", "copy": settings}}}, ConfigDefaults())
     entry = _entry()
-    owned = SimpleNamespace(connection=None)
+    database = create_autospec(BusinessDatabase, instance=True)
     if consumer == "obtain":
         runtime = session_obtain_assembly(
             devices=config.devices, drivers=DriverRegistry((entry,)), staging=Path("/staging"),
-            ready=Path("/ready"), processing=Path("/processing"))(owned)
+            ready=Path("/ready"), processing=Path("/processing"))(database)
         consumer_port = runtime.devices["cam-1"]
     else:
         consumer_port = _media_flow_with(
-            owned, entry, "cam-1", "camctl-adb", create_autospec(MediaTools, instance=True),
+            database, entry, "cam-1", "camctl-adb", create_autospec(MediaTools, instance=True),
             Path("/staging"), lambda: 1000, config.devices["cam-1"], RetryWaitGate(), lambda: 0)
 
     assert consumer_port is not None

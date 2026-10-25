@@ -44,7 +44,7 @@ class _Saves:
         self.script = script or {}
         self.calls: list[DiscardProgressSave] = []
 
-    def save_discard_progress(self, command) -> SaveReceipt:
+    async def save_discard_progress(self, command) -> SaveReceipt:
         self.calls.append(command)
         receipt = self.script.get("save_discard_progress", _saved())
         return receipt(command) if callable(receipt) else receipt
