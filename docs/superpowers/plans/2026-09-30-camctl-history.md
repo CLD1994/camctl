@@ -162,6 +162,8 @@ H1—H3 是受理事务的基础；H4 在首条报告链前完成。H5/H6 可在
 
 ### H6 快照维护与会话退出
 
+生产补全跟踪：[历史性能补全计划](2026-10-25-history-performance-closure.md)。下列原门禁交付维护模块与窄仓储；正常 `run` 的装配、提交与发现通知及退出接线按该计划继续落实。
+
 **预计文件：** `apps/camctl/src/camctl/history/snapshots.py`、`apps/camctl/src/camctl/persistence/repositories/history.py`；测试为 `apps/camctl/tests/unit/history/test_snapshots.py` 和 `apps/camctl/tests/integration/history/test_snapshots.py`。
 
 **接口与依赖：** 提供 `prepare_snapshot(seed: EntityImage) -> PreparedSnapshot`、异步 `maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult`；context 含本次阈值、批量、会话状态和窄仓储。前置交付：H4、P2/P3、S5。
