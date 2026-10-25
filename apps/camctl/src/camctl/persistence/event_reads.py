@@ -370,7 +370,7 @@ class SqlEventReads:
             raw=parse_exact_json(header)
             state['accepted']=_ValidatedSegmentFinish(scope,transaction,event.event_id,header,qualification)
             request=_header_request(raw)
-            candidates,scopes=_finish_event_inputs(request,self,raw['batch_size'])
+            candidates,scopes=_finish_event_inputs(request,self,raw['batch_size'],set_id=facts.setrow['id'])
             created=lambda file_id,kind: self.segment_created_output(transaction,request.ref.action_id,file_id,kind)
             state['progress']=iter(_canonical_events(request,transaction,raw,facts,qualification,candidates,scopes,created))
         proof=state.get('accepted')

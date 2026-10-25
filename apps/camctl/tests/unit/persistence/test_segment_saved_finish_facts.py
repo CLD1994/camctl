@@ -87,6 +87,7 @@ def test_finish_plan_does_not_reprove_saved_assessment(monkeypatch):
     port(monkeypatch, finish, "_verify_scope_members")
     port(monkeypatch, finish, "row_facts", return_value={"id": 6, "status": 2})
     port(monkeypatch, finish, "_failure", return_value=(3, None, None))
+    port(monkeypatch, finish, "_read_failure_sources", return_value=finish._FailureSources())
     qualification = {"action_status": 2, "finish_run": False, "complete_plan": False,
                      "plan_result_status": 2, "plan_status": 2, "preparation_events": ()}
     port(monkeypatch, finish, "_completion_qualification", return_value=qualification)
@@ -242,6 +243,7 @@ def test_original_key_verification_consumes_whole_exact_event_group(monkeypatch,
     port(monkeypatch, finish, "_completion_qualification", return_value=qualification)
     port(monkeypatch, finish, "_verify_scope_members")
     port(monkeypatch, finish, "_failure", return_value=facts.outcome)
+    port(monkeypatch, finish, "_read_failure_sources", return_value=finish._FailureSources())
     port(monkeypatch, finish, "_finish_event_inputs", return_value=(lambda: iter(()), lambda: iter(())))
     port(monkeypatch, finish, "verify_completion_proof", side_effect=AssertionError("重演旧来源"))
     port(monkeypatch, finish, "_verify_assessment", side_effect=AssertionError("重算旧判断"))
@@ -322,3 +324,31 @@ def test_assessment_formation_proves_actual_sources_without_saved_assessment(mon
         conclusion.assert_called_once_with(db, row)
         source.assert_not_called()
     db.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("defect", [None, "unlinked", "foreign_action", "foreign_activity", "wrong_error", "future_anchor"])
+def test_explicit_failure_rule_consumes_only_supplied_error_facts(monkeypatch, defect):
+    from camctl.capture.segment_models import SegmentSetRef, SegmentAssessmentReason
+    from camctl.contracts.workflow_errors import registered_error
+    from camctl.persistence.transaction import update_change
+
+    failure = RecordingFailure("capture_failed", {"activity_id": "3", "reason": "device_failed"})
+    request = FinishSegmentRecording(SegmentSetRef(1, 8, 9, 1), 3, 4, 5, failure,
+                                    11 if defect == "future_anchor" else 7)
+    assessment = SimpleNamespace(status=SegmentAssessmentStatus.FAILED, reason=SegmentAssessmentReason.EXPLICIT_ERROR)
+    port(monkeypatch, finish, "facts_from_document", return_value=SimpleNamespace(finite_check_complete=True))
+    actual_error = {"code": "device_error", "stage": "device", "details": {}}
+    if defect == "wrong_error":
+        actual_error = {"stage": "device", "details": {}}
+    change = update_change("operation_attempts", 8, {"error_json": None}, {"error_json": actual_error})
+    run = {"id": 4, "action_id": 99 if defect == "foreign_action" else 1,
+           "activity_id": 99 if defect == "foreign_activity" else 3,
+           "kind": int(enum_for("operation_runs.kind").STOP)}
+    attempt = {"status": int(enum_for("operation_attempts.status").FAILED)}
+    sources = finish._FailureSources(anchor_owned=defect != "unlinked", error_rows=((change, run, attempt),))
+    if defect is None:
+        assert finish._failure(request, assessment, 0, {"facts_json": {}}, sources, before_event_id=10) == (
+            4, registered_error(failure.code)["action_error_id"], failure.details)
+    else:
+        with pytest.raises(ConsistencyError):
+            finish._failure(request, assessment, 0, {"facts_json": {}}, sources, before_event_id=10)

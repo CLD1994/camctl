@@ -96,11 +96,56 @@ def _verify_scope_members(request,assessment,reader):
     if count!=(selected.member_count or 0):raise ConsistencyError('冻结选段计数与实际成员不同')
 
 
-def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
-    if isinstance(request.ref, SegmentResultRef):
-        from .segment_dispositions import retained_failure
+@dataclass(frozen=True)
+class _FailureSources:
+    canceled: bool = False
+    conclusion: dict | None = None
+    anchor_owned: bool = False
+    error_rows: tuple = ()
 
-        return retained_failure(request, setrow, db)
+
+def _read_failure_sources(request, assessment, setrow, db):
+    """取得本次终态判断直接依赖的有限记录，不执行旧决定算法。"""
+    from camctl.capture.segment_models import SegmentAssessmentReason, SegmentDecision, SegmentDecisionStatus
+    if isinstance(request.ref, SegmentResultRef):
+        from .segment_check_conclusions import read_fixed_result_check_conclusion
+        return _FailureSources(conclusion=read_fixed_result_check_conclusion(db,setrow))
+    if isinstance(assessment, SegmentDecision):
+        return _FailureSources(canceled=(assessment.status is SegmentDecisionStatus.CANCELED
+            and _canceled_result(db,request.ref)))
+    if assessment.reason is not SegmentAssessmentReason.EXPLICIT_ERROR or request.failure_event_id is None:
+        return _FailureSources()
+    from camctl.contracts.enums import load_registry
+    from camctl.persistence.fact_reads import read_event
+    owner=load_registry()['history_objects']['action']['id']
+    anchor=request.failure_event_id
+    owned=_one(db,'SELECT 1 FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',
+        (owner,request.ref.action_id,anchor)) is not None
+    if not owned:
+        return _FailureSources()
+    event=read_event(db,anchor).event
+    registry=load_event_registry()['events']
+    rows=[]
+    for changed in event.rows:
+        source_attempt=None
+        if changed.table=='operation_runs' and event.event_type==registry['OPERATION_CONFIGURED']['id'] and event.reason==3:
+            source_run=row_facts(db,'operation_runs',changed.row_id)
+        elif changed.table=='operation_attempts' and event.event_type==registry['ATTEMPT_RESULT']['id']:
+            source_attempt=row_facts(db,'operation_attempts',changed.row_id)
+            if source_attempt is None or source_attempt['result_event_id']!=anchor:
+                continue
+            source_run=row_facts(db,'operation_runs',source_attempt['run_id'])
+        else:
+            continue
+        rows.append((changed,source_run,source_attempt))
+    return _FailureSources(anchor_owned=True,error_rows=tuple(rows))
+
+
+def _failure(request,assessment,original_count,setrow,sources,*,before_event_id):
+    if isinstance(request.ref, SegmentResultRef):
+        from .segment_dispositions import saved_result_failure
+
+        return saved_result_failure(request, setrow, sources.conclusion)
     from camctl.capture.segment_models import SegmentAssessmentReason, SegmentDecision, SegmentDecisionStatus
     if isinstance(assessment, SegmentDecision):
         if assessment.status is SegmentDecisionStatus.SUCCEEDED:
@@ -108,7 +153,7 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
                 raise ConsistencyError("Action6 成功判断不能携带失败申请")
             return 3, None, None
         if assessment.status is SegmentDecisionStatus.CANCELED:
-            if request.failure is not None or not _canceled_result(db, request.ref):
+            if request.failure is not None or not sources.canceled:
                 raise ConsistencyError("Action6 取消判断必须引用实际取消结果且不带失败")
             return 6, None, None
         if request.failure is None:
@@ -145,25 +190,11 @@ def _failure(request,assessment,original_count,setrow,db,*,before_event_id):
         anchor=request.failure_event_id
         if anchor is None or anchor>=before_event_id:
             raise ConsistencyError('明确错误必须引用完成组之前已保存的实际错误事件')
-        from camctl.contracts.enums import load_registry
-        owner=load_registry()['history_objects']['action']['id']
-        if _one(db,'SELECT 1 FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id=?',(owner,request.ref.action_id,anchor)) is None:
+        if not sources.anchor_owned:
             raise ConsistencyError('原错误事件不属于来源动作')
-        raw=_one(db,'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(anchor,))
-        from camctl.history.decoding import decode_event_row
-        event=decode_event_row(raw)
         # 只接受操作责任/实际尝试的明确错误列，不搜索任意嵌套正文。
-        registry=load_event_registry()['events']
         matched=False
-        for changed in event.rows:
-            source_attempt=None
-            if changed.table=='operation_runs' and event.event_type==registry['OPERATION_CONFIGURED']['id'] and event.reason==3:
-                source_run=row_facts(db,'operation_runs',changed.row_id)
-            elif changed.table=='operation_attempts' and event.event_type==registry['ATTEMPT_RESULT']['id']:
-                source_attempt=row_facts(db,'operation_attempts',changed.row_id)
-                source_run=None if source_attempt is None else row_facts(db,'operation_runs',source_attempt['run_id'])
-                if source_attempt is None or source_attempt['result_event_id']!=anchor:continue
-            else:continue
+        for changed,source_run,source_attempt in sources.error_rows:
             error=changed.after.values.get('error_json')
             if (source_run is not None and source_run['action_id']==request.ref.action_id
                     and source_run['activity_id']==request.activity_id and isinstance(error,dict)
@@ -671,7 +702,7 @@ def verify_finish_request_event(db,event,context,action_id):
     scope_count=sum(len(page) for page in _scopes(request,reader,header['batch_size']))
     if (header['original_count'],header['preview_count'],header['scope_count'])!=(originals,previews,scope_count):
         raise ConsistencyError('原有限头没有完整覆盖冻结候选和范围')
-    expected_status,error,details=_failure(request,assessment,originals,setrow,db,before_event_id=event.event_id)
+    expected_status,error,details=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db),before_event_id=event.event_id)
     before={'status':2};after={'status':expected_status}
     if expected_status==4:
         before.update(error_code=action['error_code'],error_details_json=action['error_details_json'])
@@ -852,7 +883,7 @@ def verify_publication(db,ref,event,context):
             if scope['output_id']!=_created_output(db,tx,ref.action_id,member['file_id'],int(enum_for('outputs.kind').ORIGINAL)):
                 raise ConsistencyError('正式默认范围缺少完整实际关联')
     if actual!=expected:raise ConsistencyError('默认范围数量与冻结判断不同')
-    status,error,details=_failure(request,assessment,originals,setrow,db,before_event_id=tx.first_event_id)
+    status,error,details=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db),before_event_id=tx.first_event_id)
     if (action['status'],action['error_code'],action['error_details_json'])!=(status,error,details):
         raise ConsistencyError('实际来源终态与冻结判断或有限错误头不同')
     qualification=context.current_reads.validated_segment_finish(tx,header)
@@ -915,7 +946,7 @@ class _FinishFacts:
     outcome: tuple
 
 
-def _finish_event_inputs(request, reader, batch):
+def _finish_event_inputs(request, reader, batch, *, set_id):
     """为事件规则提供可重启的固定事实流，每批至多128项。"""
     db = reader.connection
     from .result_file_proofs import read_fixed_file
@@ -923,7 +954,7 @@ def _finish_event_inputs(request, reader, batch):
     def candidates():
         for candidate in _candidates(request, reader, batch):
             member = row_facts(db, "segment_members", candidate.member_id)
-            if member is None or member["set_id"] != request.ref.set_id or member["file_id"] != candidate.file_id:
+            if member is None or member["set_id"] != set_id or member["file_id"] != candidate.file_id:
                 raise ConsistencyError("候选与固定集合成员不同")
             yield candidate, read_fixed_file(db, candidate.file_id, member["file_event_id"])
 
@@ -932,7 +963,7 @@ def _finish_event_inputs(request, reader, batch):
             values = []
             for row in page:
                 member = row_facts(db, "segment_members", row["member_id"])
-                if member is None or member["set_id"] != request.ref.set_id:
+                if member is None or member["set_id"] != set_id:
                     raise ConsistencyError("默认范围成员不属于固定集合")
                 values.append((row, member["file_id"]))
             yield tuple(values)
@@ -1057,7 +1088,7 @@ class _FinishCommand:
             + 1
         )
         allocation=scope.allocate(event_count)
-        outcome=_failure(request,assessment,originals,setrow,db,before_event_id=scope.max_event_id+1)
+        outcome=_failure(request,assessment,originals,setrow,_read_failure_sources(request,assessment,setrow,db),before_event_id=scope.max_event_id+1)
         status,error,details=outcome
         facts=_FinishFacts(action,run,setrow,assessment,outcome)
         result=SegmentFinishResult(request.ref,status,3 if complete_plan else plan['status'],HistoryBoundary(allocation.txn_id,allocation.last_event_id),output_count,originals,previews,scope_count)
@@ -1076,7 +1107,7 @@ class _FinishCommand:
             return EventContext(transaction,owners,state,final,coverage,current_reads=reads)
         def generate():
             transaction=TransactionRange(allocation.txn_id,allocation.first_event_id,allocation.last_event_id)
-            candidates,scopes=_finish_event_inputs(request,scope,self.batch)
+            candidates,scopes=_finish_event_inputs(request,scope,self.batch,set_id=setrow["id"])
             created=lambda file_id,kind: _created_output(db,transaction,request.ref.action_id,file_id,kind)
             yield from _canonical_events(request,transaction,header,facts,qualification,candidates,scopes,created)
         def complete(db):
@@ -1152,9 +1183,9 @@ def _verify_events(request,key,tx,header,reader,batch_size,first_page):
             yield from page.items
             if page.next_cursor is None:return
             position=page.next_cursor
-    outcome=_failure(request,assessment,header['original_count'],setrow,db,before_event_id=tx.first_event_id)
+    outcome=_failure(request,assessment,header['original_count'],setrow,_read_failure_sources(request,assessment,setrow,db),before_event_id=tx.first_event_id)
     facts=_FinishFacts(action,run,setrow,assessment,outcome)
-    candidates,scopes=_finish_event_inputs(request,reader,header['batch_size'])
+    candidates,scopes=_finish_event_inputs(request,reader,header['batch_size'],set_id=setrow['id'])
     created=lambda file_id,kind: _created_output(db,tx,request.ref.action_id,file_id,kind)
     for actual,expected in zip_longest(stream(),_canonical_events(request,tx,header,facts,qualification,candidates,scopes,created)):
         if actual is None or expected is None or replace(actual,change_seq=None)!=expected:

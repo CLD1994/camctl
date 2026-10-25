@@ -113,9 +113,8 @@ def saved_result_disposition(setrow, conclusion):
     return RetainedResultDisposition()
 
 
-def retained_failure(request, setrow, db):
-    from .segment_check_conclusions import read_fixed_result_check_conclusion
-    conclusion = read_fixed_result_check_conclusion(db, setrow)
+def saved_result_failure(request, setrow, conclusion):
+    """从显式保存结论匹配本次终态申请。"""
     saved_result_disposition(setrow, conclusion)
     if setrow["publication_kind"] == int(
         enum_for("segment_sets.publication_kind").CANCELED
