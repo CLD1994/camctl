@@ -1,0 +1,9 @@
+..                                                                       [100%]
+============================== slowest durations ===============================
+228.94s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade
+60.71s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]
+31.31s setup    tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade
+0.01s teardown tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]
+
+(2 durations < 0.005s hidden.  Use -vv to show these durations.)
+2 passed in 321.20s (0:05:21)

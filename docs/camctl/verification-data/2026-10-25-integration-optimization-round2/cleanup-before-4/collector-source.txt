@@ -1,0 +1,84 @@
+import json, os, resource, subprocess, sys, time
+from datetime import datetime, timezone
+from pathlib import Path
+
+source, output, jobs = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+target = sys.argv[4] if len(sys.argv) > 4 else "tests/integration/test_hasselblad_photo_roundtrip.py"
+source_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
+source_status = subprocess.check_output(["git", "status", "--short"], cwd=source, text=True)
+if source_status:
+    raise SystemExit("benchmark source must be clean")
+python = "/workspaces/camctl/apps/camctl/.venv311/bin/python"
+command = [python, "-B", "scripts/run-integration.py", "--source", str(source), "--python", python, "--node-modules", "/tmp/camctl-itopt-runner-npm-client/node_modules", "--target", target, "--jobs", str(jobs), "--output", str(output)]
+if output.exists():
+    raise SystemExit("output must not exist")
+
+def usage(who):
+    r = resource.getrusage(who)
+    return {name: getattr(r, name) for name in ("ru_utime", "ru_stime", "ru_maxrss", "ru_inblock", "ru_oublock", "ru_minflt", "ru_majflt", "ru_nvcsw", "ru_nivcsw")}
+
+def save(suffix, value):
+    Path(str(output) + suffix).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+children_before = usage(resource.RUSAGE_CHILDREN)
+self_before = usage(resource.RUSAGE_SELF)
+started_utc = datetime.now(timezone.utc).isoformat()
+start = time.monotonic()
+observed = {}
+samples = 0
+scan_seconds = 0.0
+read_races = 0
+with Path(str(output) + "-driver.log").open("w") as driver:
+    runner = subprocess.Popen(command, cwd=source, stdout=driver, stderr=subprocess.STDOUT)
+    save("-resource-start.json", {"collector_pid": os.getpid(), "runner_pid": runner.pid, "command": command, "cwd": str(source), "source_head": source_head, "started_utc": started_utc, "children_before": children_before, "sampling_interval_seconds": 0.25})
+    print(json.dumps({"runner_pid": runner.pid, "collector_pid": os.getpid(), "output": str(output), "source": str(source)}, ensure_ascii=False), flush=True)
+    while runner.poll() is None:
+        scan_start = time.monotonic()
+        table = {}
+        for p in Path("/proc").iterdir():
+            if not p.name.isdigit():
+                continue
+            try:
+                stat = (p / "stat").read_text().rsplit(")", 1)[1].split()
+                table[int(p.name)] = (int(stat[1]), stat[19], p)
+            except (OSError, ValueError, IndexError):
+                read_races += 1
+        descendants = {runner.pid}
+        while True:
+            more = {pid for pid, (parent, _, _) in table.items() if parent in descendants}
+            if more <= descendants:
+                break
+            descendants.update(more)
+        now = time.monotonic() - start
+        for pid in descendants:
+            if pid not in table:
+                continue
+            parent, birth, p = table[pid]
+            try:
+                argv = [x.decode(errors="replace") for x in (p / "cmdline").read_bytes().split(b"\0") if x]
+            except OSError:
+                read_races += 1
+                continue
+            if not argv:
+                continue
+            executable = Path(argv[0]).name
+            if executable in ("chrome", "chromium", "headless_shell", "chrome-headless-shell") and not any(a.startswith("--type=") for a in argv[1:]):
+                key = f"{pid}:{birth}"
+                if key not in observed:
+                    observed[key] = {"pid": pid, "start_ticks": birth, "parent_pid": parent, "first_seen_seconds": now, "argv": argv}
+                observed[key]["last_seen_seconds"] = now
+        samples += 1
+        scan_seconds += time.monotonic() - scan_start
+        try:
+            runner.wait(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            pass
+    exit_code = runner.wait()
+wall = time.monotonic() - start
+children_after = usage(resource.RUSAGE_CHILDREN)
+self_after = usage(resource.RUSAGE_SELF)
+summary = json.loads((output / "summary.json").read_text()) if (output / "summary.json").is_file() else None
+result = {"command": command, "cwd": str(source), "runner_pid": runner.pid, "collector_pid": os.getpid(), "source_head": source_head, "started_utc": started_utc, "finished_utc": datetime.now(timezone.utc).isoformat(), "collector_monotonic_wall_seconds": wall, "runner_wall_seconds": summary.get("wall_seconds") if summary else None, "exit_code": exit_code, "children_before": children_before, "children_after": children_after, "children_delta": {k: children_after[k] - children_before[k] for k in children_before if k != "ru_maxrss"}, "children_peak_maxrss_kib": children_after["ru_maxrss"], "resource_scope": "Metadata git rev-parse/status children finish before children_before and start time. The measured interval has exactly one runner child; CPU/I/O deltas exclude prior metadata usage. RUSAGE_CHILDREN contains waited descendant usage propagated by child reaping. Raw ru_maxrss is the lifetime maximum single descendant process (including prior metadata git); children_before retains its prior value. It is not concurrent tree memory. inblock/oublock are raw kernel block-operation counts, not bytes. No complete per-process CPU/I/O sample or device-throughput claim.", "browser_observation": {"interval_seconds": 0.25, "samples": samples, "scan_wall_seconds": scan_seconds, "read_races": read_races, "observed_browser_roots_count": len(observed), "roots": list(observed.values()), "coverage": "Sampled runner-descendant Chromium root processes, excluding --type subprocesses. Count means sampled unique PID/start_ticks root process identities, not browser sessions or exact launch requests. The 0.25 second wait follows each scan, so actual intervals also include scan and scheduling time. Roots shorter than actual intervals, between scans, or reparented before observation can be missed."}, "collector_self_delta": {k: self_after[k] - self_before[k] for k in ("ru_utime", "ru_stime")}}
+save("-resource.json", result)
+print(json.dumps({"record": "finished", "exit_code": exit_code, "collector_monotonic_wall_seconds": wall, "runner_wall_seconds": result["runner_wall_seconds"], "children_delta": result["children_delta"], "children_peak_maxrss_kib": result["children_peak_maxrss_kib"], "browser_roots_observed": len(observed)}, ensure_ascii=False), flush=True)
+raise SystemExit(exit_code)

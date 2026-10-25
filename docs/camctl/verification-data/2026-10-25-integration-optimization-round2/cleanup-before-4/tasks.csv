@@ -1,0 +1,5 @@
+task,worker,status,wall_seconds,cases,passed,failed,pytest_elapsed_seconds
+root/test_device_file_cleanup_roundtrip/shard-1,0,passed,86.97803069500515,1,1,0,75.41829846300243
+root/test_device_file_cleanup_roundtrip/shard-4,1,passed,311.14269787300145,4,4,0,299.5732976500003
+root/test_device_file_cleanup_roundtrip/shard-2,2,passed,332.820306237998,2,2,0,321.2297829750023
+root/test_device_file_cleanup_roundtrip/shard-3,3,passed,265.164899868003,4,4,0,253.5900936429971

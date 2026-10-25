@@ -1,0 +1,78 @@
+{
+  "id": "root/test_device_file_cleanup_roundtrip/shard-2",
+  "scope": "root",
+  "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+  "targets": [
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]"
+  ],
+  "estimated_seconds": 8.800105462993088,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_device_file_cleanup_roundtrip",
+  "shard": 2,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-round2-cleanup-before-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+  "collected_nodes": 11,
+  "status": "passed",
+  "number": 3,
+  "worker": 2,
+  "artifacts": "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/artifacts",
+  "cwd": "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/source",
+  "started_utc": "2026-10-25T02:02:04.549690+00:00",
+  "command": [
+    "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-round2-cleanup-before-4/control:/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-round2-cleanup-before-4/workers/2/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-round2-cleanup-before-4/workers/2/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-round2-cleanup-before-4/workers/2/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-cleanup-before-4/tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/source",
+      "started_utc": "2026-10-25T02:02:14.759301+00:00",
+      "pid": 653438,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:02:14.848093+00:00",
+      "wall_seconds": 0.08877487100107828
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 653438,
+  "pid": 653446,
+  "execution_started_utc": "2026-10-25T02:02:14.849532+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 2,
+    "outcomes": {
+      "passed": 2
+    },
+    "subchecks": {},
+    "elapsed_seconds": 321.2297829750023,
+    "utc": "2026-10-25T02:07:38.692549+00:00",
+    "pid": 653446
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T02:07:38.819402+00:00",
+  "wall_seconds": 332.820306237998
+}

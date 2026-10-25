@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001793928000552114
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07463083200127585
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006214550012373365
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0770462150030653
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.649060498006293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 89.49042004000512
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008245980061474256
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 121.14030513601756
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002256371997646056
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 62.89412496199657
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004335789999458939
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 62.89681491299416
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008720549958525226
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 69.19041058799485
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0051918500030296855
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 69.19647449299373
+  }
+]
