@@ -14,7 +14,10 @@ import asyncio
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from camctl.outputs.read_attempts import ReadDispatchPrevented
 
 from camctl.capture.media import SaveDisposition, SaveReceipt
 from camctl.contracts.enums import enum_for
@@ -80,7 +83,7 @@ class ReadSessionOpener(Protocol):
     async def open_session(
         self, source_device_file_id: int, offset: int, *,
         on_start: Callable[[], None] | None = None,
-    ) -> RecordingSource: ...
+    ) -> RecordingSource | ReadDispatchPrevented: ...
 
 
 class RecordingCopies(Protocol):
@@ -103,6 +106,7 @@ class InputPhase(Enum):
     """输入取得编排的结果分区。"""
 
     WAITING = "waiting"
+    READ_NOT_STARTED = "read_not_started"
     REJECTED_FINAL = "rejected_final"
     INPUT_READY = "input_ready"
     QUALIFY_REJECTED = "qualify_rejected"
@@ -130,6 +134,7 @@ class InputStep:
     read_end: ReadEnd | None = None
     stop_requested: bool = False
     content_complete: bool = False
+    dispatch_prevented: ReadDispatchPrevented | None = None
     preparation_settlement: ReadPreparationSettlement = ReadPreparationSettlement.SETTLED
 
 
@@ -221,6 +226,10 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
         session = await context.sessions.open_session(
             context.source_device_file_id, facts.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
             else prepared.decision.offset, on_start=context.on_read_start)
+        from camctl.outputs.read_attempts import ReadDispatchPrevented
+        if isinstance(session, ReadDispatchPrevented):
+            return InputStep(InputPhase.READ_NOT_STARTED, copy_id=copy_id,
+                reason=session.reason, dispatch_prevented=session)
     except Exception as error:
         settlement = (error.settlement if isinstance(error, ReadPreparationError)
                       else ReadPreparationSettlement.SETTLED)

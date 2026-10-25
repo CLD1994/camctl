@@ -19,7 +19,10 @@ import re
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from camctl.outputs.read_attempts import ReadDispatchPrevented
 
 from camctl.capture.files import FileChecksumSave
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic
@@ -739,13 +742,13 @@ async def _run_read(
     """一次读取尝试：摘要能力固定、会话拷贝与完整性收尾。"""
     from camctl.outputs.read_attempts import run_owned_read
 
-    async def body():
-        await _run_read_and_save(runtime, assembly, facts, ticket, now)
+    async def body(control):
+        await _run_read_and_save(runtime, assembly, facts, ticket, now, control=control)
 
     await run_owned_read(runtime, facts["id"], body)
 
 
-async def _run_read_and_save(runtime, assembly, facts, ticket, now):
+async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=None):
     from camctl.outputs.read_attempts import hold_read_end
 
     device_file_id = facts["source_device_file_id"]
@@ -757,7 +760,7 @@ async def _run_read_and_save(runtime, assembly, facts, ticket, now):
     step = await _copy_delivery(
         runtime,
         DriverReadSessions(runtime.database, assembly.driver, ticket=ticket,
-                           idle_timeout_s=assembly.read_idle_timeout_s),
+                           idle_timeout_s=assembly.read_idle_timeout_s, control=control),
         facts, digest, max_recopies=assembly.max_recopies,
         read_end=(runtime.pending_read_ends[facts["id"]].end if facts["id"] in runtime.pending_read_ends else None),
         on_read_end=lambda end, complete: hold_read_end(runtime, ticket, end, complete,
@@ -776,7 +779,7 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
     if facts is None:
         raise ConsistencyError("原本地副本校验缺少所属交付")
 
-    async def complete_and_save():
+    async def complete_and_save(_control):
         copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
             runtime.occurred_at, max_recopies=assembly.max_recopies, file_executor=runtime.file_executor)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
@@ -809,11 +812,18 @@ async def _copy_delivery(
     def read_started():
         if on_read_start is not None:
             on_read_start()
-        runtime.continuing_read_tickets.pop(facts["id"], None)
+        from camctl.outputs.read_attempts import ReadContinuation
+        original = runtime.continuing_read_tickets.get(facts["id"])
+        if original is not None:
+            runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(original.ticket, False)
     try:
         session = await sessions.open_session(
             _source_file_id(facts), state.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
             else prepared.decision.offset, on_start=read_started)
+        from camctl.outputs.read_attempts import ReadDispatchPrevented
+        if isinstance(session, ReadDispatchPrevented):
+            return InputStep(InputPhase.READ_NOT_STARTED, copy_id=facts["id"],
+                reason=session.reason, dispatch_prevented=session)
     except Exception as error:
         from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
 
@@ -893,11 +903,19 @@ async def _finish_read_attempt_phase(
     """保存尝试结果；预算耗尽按流程失败终局交付并交还机会。"""
     from camctl.outputs.read_attempts import require_preparation_settled
 
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(runtime, ticket, step.dispatch_prevented, assembly.evidence)
+        if pending is not None:
+            await _save_read_result_and_settle(runtime, pending, facts)
+        return
+
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已经提交且文件任务已结束；读取尝试和原次数继续承担责任。
-        runtime.continuing_read_tickets[facts["id"]] = ticket
+        from camctl.outputs.read_attempts import ReadContinuation
+        runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=assembly.evidence)
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
     from camctl.outputs.read_attempts import stopped_read_result
@@ -1076,18 +1094,40 @@ class LocalReadSessions:
     根下的登记相对路径（derived/ 等），读取身份是登记事实。
     """
 
-    def __init__(self, database: Any, directories: DeliveryDirectories) -> None:
+    def __init__(self, database: Any, directories: DeliveryDirectories, *, ticket=None, control=None) -> None:
         self._database = database
         self._directories = directories
+        self._ticket = ticket
+        self._control = control
+
+    def for_attempt(self, ticket, *, control=None):
+        return LocalReadSessions(self._database, self._directories, ticket=ticket, control=control)
 
     async def open_session(self, source_intermediate_file_id: int,
-                           offset: int, *, on_start=None) -> "_LocalReadSession":
-        row = await read_one(self._database,
-            "SELECT relative_path FROM intermediate_files WHERE id = ?",
-            (source_intermediate_file_id,))
-        if row is None:
-            raise ConsistencyError(
-                f"中间文件缺失: {source_intermediate_file_id}")
+                           offset: int, *, on_start=None) -> "_LocalReadSession | ReadDispatchPrevented":
+        from camctl.outputs.read_attempts import read_dispatch_qualification, read_dispatch_gate
+
+        if self._ticket is None:
+            raise ConsistencyError("主机读取会话缺少已保存的尝试票据")
+        def read(owned):
+            with closing(owned.connection.execute(
+                "SELECT relative_path FROM intermediate_files WHERE id = ?",
+                (source_intermediate_file_id,))) as cursor:
+                row = cursor.fetchone()
+            qualification = read_dispatch_qualification(owned, self._ticket,
+                source_intermediate_file_id, device_source=False)
+            return row, qualification
+        try:
+            row, qualification = await self._database.read(read)
+            if row is None:
+                raise ConsistencyError(f"中间文件缺失: {source_intermediate_file_id}")
+        except Exception as error:
+            from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+            raise ReadPreparationError("主机读取源事实未取得，原尝试尚未调用",
+                settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+        prevented = read_dispatch_gate(qualification, self._control)
+        if prevented is not None:
+            return prevented
         path = self._directories.staging / str(row[0])
         if on_start is not None:
             on_start()
@@ -1150,14 +1190,14 @@ async def _advance_local_read(
     if await _read_wait_remaining(runtime, copy_id, config.retry_interval_s) is not None:
         return
 
-    async def body():
+    async def body(control):
         current = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id))
         if current is None:
             return
         ticket = await _begin_local_attempt(runtime, current, now, config)
         if ticket is None:
             return
-        step = await _copy_delivery(runtime, sessions, current, None)
+        step = await _copy_delivery(runtime, sessions.for_attempt(ticket, control=control), current, None)
         await _finish_local_attempt(runtime, current, ticket, step, config)
 
     from camctl.outputs.read_attempts import run_owned_read
@@ -1284,11 +1324,19 @@ async def _finish_local_attempt_phase(
     """先保存本地读取结果，再按同一 READ_FILE 预算续接或换源。"""
     from camctl.outputs.read_attempts import require_preparation_settled
 
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(runtime, ticket, step.dispatch_prevented, _LOCAL_READ_EVIDENCE)
+        if pending is not None:
+            await _save_read_result_and_settle(runtime, pending, facts)
+        return
+
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已登记且本地文件任务已收场；原 READ_FILE attempt 继续负责。
-        runtime.continuing_read_tickets[facts["id"]] = ticket
+        from camctl.outputs.read_attempts import ReadContinuation
+        runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=_LOCAL_READ_EVIDENCE)
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED

@@ -131,23 +131,35 @@ class DriverReadSessions:
     """
 
     def __init__(self, database: BusinessDatabase, driver: ReadDriver,
-                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S) -> None:
+                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S, control=None) -> None:
         self._database = database
         self._driver = driver
         self._ticket = ticket
+        self._control = control
         self.idle_timeout_s = idle_timeout_s
 
-    def for_attempt(self, ticket, *, idle_timeout_s: Decimal):
+    def for_attempt(self, ticket, *, idle_timeout_s: Decimal, control=None):
         """为已可靠保存的原尝试构造本次读取会话入口。"""
         return DriverReadSessions(self._database, self._driver, ticket,
-                                  idle_timeout_s=idle_timeout_s)
+                                  idle_timeout_s=idle_timeout_s, control=control)
 
     async def open_session(self, source_device_file_id: int, offset: int, *, on_start=None):
-        source = await self._database.read(
-            lambda owned: load_confirmed_source(owned, source_device_file_id),
-            description="媒体读取源事实")
+        from camctl.outputs.read_attempts import read_dispatch_qualification, read_dispatch_gate
+
         if self._ticket is None:
             raise ConsistencyError("设备读取会话缺少已保存的尝试票据")
+        def read(owned):
+            return (load_confirmed_source(owned, source_device_file_id),
+                read_dispatch_qualification(owned, self._ticket, source_device_file_id, device_source=True))
+        try:
+            source, qualification = await self._database.read(read, description="媒体读取源事实")
+        except Exception as error:
+            from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+            raise ReadPreparationError("设备读取源事实未取得，原尝试尚未调用",
+                settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+        prevented = read_dispatch_gate(qualification, self._control)
+        if prevented is not None:
+            return prevented
         if on_start is not None:
             on_start()
         return await self._driver.open_read(source, offset, self._ticket,
@@ -580,13 +592,15 @@ async def run_recording_media(
         on_read_start=lambda: _read_dispatched(flow, copy_id),
     )
 
-    async def read_and_save():
-        step = await obtain_recording_input(context)
+    async def read_and_save(control):
+        current = replace(context, sessions=(sessions if ticket is None else
+            sessions.for_attempt(ticket, idle_timeout_s=flow.read_idle_timeout_s, control=control)))
+        step = await obtain_recording_input(current)
         if ticket is not None:
             await _finish_internal_read(flow, ticket, step)
         return step
 
-    input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save()
+    input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
     if input_step.phase is InputPhase.SEGMENT_FAILED and input_step.source_failed:
         # 读取通信失败：登记锚点，间隔内不再次读取。
         flow.retry_gate.established(wait_key, flow.monotonic_ns())
@@ -643,7 +657,7 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     context = replace(original_context, copies=copies, digest=None, read_end=held.end)
     copy_id = int(held.ticket.target_id)
 
-    async def complete_and_save():
+    async def complete_and_save(_control):
         step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
         await _finish_internal_read(flow, held.ticket, step)
@@ -653,7 +667,10 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
 
 def _read_dispatched(flow, copy_id):
     flow.pending_read_ends.pop(copy_id, None)
-    flow.continuing_read_tickets.pop(copy_id, None)
+    from camctl.outputs.read_attempts import ReadContinuation
+    previous = flow.continuing_read_tickets.get(copy_id)
+    if previous is not None:
+        flow.continuing_read_tickets[copy_id] = ReadContinuation(previous.ticket, False)
 
 
 async def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
@@ -665,10 +682,18 @@ async def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
 async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
     from camctl.outputs.read_attempts import require_preparation_settled
 
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(flow, ticket, step.dispatch_prevented, flow.evidence)
+        if pending is not None:
+            await _save_internal_read_and_settle(flow, pending)
+        return
+
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
-        flow.continuing_read_tickets[step.copy_id] = ticket
+        from camctl.outputs.read_attempts import ReadContinuation
+        flow.continuing_read_tickets[step.copy_id] = ReadContinuation(ticket, False, step, flow.occurred_at(), evidence=flow.evidence)
         return
     from camctl.outputs.read_attempts import stopped_read_result
 

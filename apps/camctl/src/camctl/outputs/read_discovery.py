@@ -92,6 +92,20 @@ _ELIGIBLE = (
     " AND (fc.delivery_id IS NULL OR d.status IN (1,2))"
 )
 _READ_ORDER = "a.scheduled_at,a.plan_id,a.input_index,fc.id"
+_READ_COPY_ELIGIBLE = (
+    "fc.verification_state NOT IN (3,5)"
+    " AND (fc.delivery_id IS NULL OR d.status IN (1,2))"
+    f" AND (fc.inspection_id IS NULL OR si.state={_INSPECTION_PENDING})"
+)
+
+
+def read_copy_dispatch_eligible(connection, copy_id):
+    """实际开源前复核原副本仍属于有限发现允许推进的输入分区。"""
+    with closing(connection.execute(
+        "SELECT 1" + _READ_FROM + " WHERE fc.id=? AND " + _READ_COPY_ELIGIBLE + " LIMIT 1",
+        (copy_id,),
+    )) as cursor:
+        return cursor.fetchone() is not None
 
 
 def validate_read_basis(connection, device_id=None):
@@ -191,7 +205,7 @@ def read_candidates(connection, scope, cursor=None, *, limit):
     if scope.kind not in ("delivery", "reads", "internal", "all", "local"):
         raise ValueError("读取候选种类无效")
     validate_read_basis(connection, scope.device_id)
-    condition = "a.status=2 AND a.cancel_requested=0 AND fc.verification_state NOT IN (3,5)"
+    condition = "a.status=2 AND a.cancel_requested=0 AND " + _READ_COPY_ELIGIBLE
     parameters = []
     if scope.kind == "local":
         condition += " AND fc.source_device_file_id IS NULL AND d.status IN (1,2)"

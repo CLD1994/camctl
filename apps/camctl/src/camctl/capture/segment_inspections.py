@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
 from camctl.capture.media_facts import probe_document, read_probe
 from camctl.capture.media_flow import (
-    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support,
+    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support, _read_dispatched,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -390,16 +390,18 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
                 resume=lambda current, held: _resume_local_internal_end(
                     current, held, read_flow, context), evidence=read_flow.evidence)),
         on_read_start=(None if ticket is None else
-            lambda: read_flow.continuing_read_tickets.pop(copy_id, None)),
+            lambda: _read_dispatched(read_flow, copy_id)),
         inspection_id=inspection_id)
 
-    async def read_and_save():
-        step = await obtain_recording_input(context)
+    async def read_and_save(control):
+        current = replace(context, sessions=(sessions if ticket is None else
+            sessions.for_attempt(ticket, idle_timeout_s=config.timeout_s, control=control)))
+        step = await obtain_recording_input(current)
         if ticket is not None:
             (await _finish_internal_read(read_flow, ticket, step, max_attempts=config.max_attempts))
         return step
 
-    result = await run_owned_read(read_flow, copy_id, read_and_save) if ticket is not None else await read_and_save()
+    result = await run_owned_read(read_flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
     if result.phase is InputPhase.SEGMENT_FAILED and result.source_failed:
         read_flow.retry_gate.established(f"read/{copy_id}", read_flow.monotonic_ns())
     elif result.phase in (InputPhase.INPUT_READY, InputPhase.RECOPY_PENDING):
