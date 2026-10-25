@@ -8,6 +8,8 @@
 
 [40 项逐例耗时 CSV](verification-data/2026-10-25-integration-optimization-round2/case-times.csv)按实际 nodeid 保存前后结果及 setup／call／teardown；清理未运行六路和八路，对应列留空。单行 setup 会受到共享 fixture 首次归属的影响。所有输入摘要、相同通过集合及并发结论由[第二轮汇总](verification-data/2026-10-25-integration-optimization-round2/comparison.json)维护。
 
+[交付一致性检查](verification-data/2026-10-25-integration-optimization-round2/delivery-checks.json)保存协调者对 852 份原始文件、163 份派生输入和 40 行逐例数据的独立核验，以及冻结代码与主工作区的一致性。
+
 ### Hasselblad 29 项的覆盖与四路对照
 
 最终四路为 **29 passed，退出 0，入口墙钟 390.592 秒**。十二个正常拍摄组合、六个独立故障世界、三项定向预设及其余原实例保持；每个拍摄世界只有一次真实 capture，独立取回、原来源、固定 H、报告导入和网页累计 ACK 的断言继续执行。
