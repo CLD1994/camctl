@@ -393,6 +393,10 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.DISABLED,
                 saved=tuple(saved), batches=batches)
+        if context.state.closing:
+            return MaintenanceResult(
+                outcome=MaintenanceOutcome.CLOSING,
+                saved=tuple(saved), batches=batches)
         if not candidates:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.IDLE, saved=tuple(saved), batches=batches)
@@ -405,7 +409,15 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
                 saved=tuple(saved), batches=batches)
         prepared = []
         try:
+            if context.state.closing:
+                return MaintenanceResult(
+                    outcome=MaintenanceOutcome.CLOSING,
+                    saved=tuple(saved), batches=batches)
             prepared = await _prepare_images(images)
+            if context.state.closing:
+                return MaintenanceResult(
+                    outcome=MaintenanceOutcome.CLOSING,
+                    saved=tuple(saved), batches=batches)
             if prepared:
                 try:
                     batch_saved = await context.store.save_snapshots(tuple(prepared))
