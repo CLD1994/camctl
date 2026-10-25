@@ -20,7 +20,7 @@ CLI 是命令行接口：主程序通过启动 camctl 进程交给它工作。�
 ## 命令与用途
 
 ```text
-camctl init [--upgrade-software-recovery] [--config <path>]
+camctl init [--upgrade-software-recovery | --upgrade-capture-preparation] [--config <path>]
 camctl run [<plan-path>] [--config <path>] [--host-notification-fd FD]
 camctl submit <plan-path> [--config <path>]
 camctl describe [--config <path>]
@@ -32,6 +32,8 @@ camctl --version
 ### `init`
 
 首次部署由用户或部署人员显式建立运行目录和初始状态库。已有合法状态库保留身份与业务数据；配置要求更换交接目录时，只有原文件和相关责任全部处理完，才按[目录切换规则](configuration.md#文件目录的绑定与变更)共同更新绑定。无效或无法读取的库报错；目录、失败恢复和命令结果见[首次部署与初始化](initialization.md)。主程序不把该入口作为日常启动或数据库错误后的恢复动作。
+
+普通 `init` 只验证已有格式；`--upgrade-software-recovery` 显式请求 V2 到 V3，`--upgrade-capture-preparation` 显式请求 V3 到 V4。两个选项互斥，且不能与目录切换合并；目标不存在时创建当前格式。备份、内容保留、锁协调和失败核对见[初始化的格式升级规则](initialization.md#目录与状态库)。
 
 ### `run`
 
@@ -323,7 +325,3 @@ stdout 用于进程和会话控制。主程序读取这些消息，管理进程�
 首次 `run` 已经开始运行过后，后续启动不再附带首次计划路径。采用接入模块时，如果可以确认首次带计划的 `run` 从未成功启动，模块会保留该路径；后续提交要求启动 `run` 时，仍附带这份首次计划路径。完整规则见[首次启动时如何处理计划文件](../host-demo/design.md#首次启动时如何处理计划文件)。
 
 `run` 正常退出且没有 pending-start 时，主程序不应无条件再次启动 `run`。
-
-### 显式升级软件恢复格式
-
-`camctl init --upgrade-software-recovery --config <config.toml>` 请求在会话锁内把有效 V2 库升级到 V3，保留一致备份、实例身份及全部业务历史。普通 `init` 继续只验证已有库。目标不存在时创建当前格式；目录绑定改变时拒绝合并升级。完整规则见[数据库格式检查](../camctl/persistence-runtime.md#数据库整体格式检查与显式升级)。
