@@ -633,6 +633,7 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         directory_supported=False,
         local_read_recovery_supported=True,
         local_control_recovery_supported=True,
+        capture_preparation_supported=True,
     )
 
 

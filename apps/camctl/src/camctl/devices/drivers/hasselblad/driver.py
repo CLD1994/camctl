@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import replace
 from decimal import Decimal
 from typing import Callable
 
 from camctl.contracts.values import parse_object_id
 from camctl.devices.bindings import BindingStatus, DeviceConfigurationError, check_binding
+from camctl.devices.capture_preparation import (
+    CAPTURE_PREPARATION_COMPLETED, DEFAULT_PREPARE_LEAD_S, PreparedCaptureCache,
+)
 from camctl.devices.evidence import (
     DeviceObservation,
     EvidenceContract,
@@ -49,7 +54,7 @@ from camctl.operations.process import (
 from camctl.operations.tool_diagnostics import (
     ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState,
 )
-from .commands import PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
+from .commands import PhotoPhase, PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
 from .definitions import DRIVER_DECLARATION, DRIVER_ID
 from .parameters import PhotoSettings, parse_photo_settings
@@ -72,6 +77,10 @@ _PHOTO_TAKEN = EvidenceContract(
     frozenset({"activity_id", "original", "preview", "steps"}),
     identity_field="activity_id",
 )
+_PHOTO_PREPARATION_STEPS = EvidenceContract(
+    "photo_preparation_steps", 1, "control", frozenset({"activity_id", "steps"}),
+    identity_field="activity_id", max_diagnostic_calls=PHOTO_START_CALL_LIMIT,
+)
 _OPERATION_RETURNED = EvidenceContract(
     "operation_returned", 1, "control", frozenset({"terminate_grace_s"}),
     max_diagnostic_calls=PHOTO_START_CALL_LIMIT
@@ -82,6 +91,7 @@ _DISPATCH_PREVENTED = EvidenceContract(
 )
 EVIDENCE = EvidenceRegistry((
     _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
+    CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
@@ -120,10 +130,11 @@ class _ExecuteToolTransport:
 
 
 class HasselbladDriver:
-    """核对绑定机身后，在一次 START 内按完整参数执行有限命令。"""
+    """核对绑定机身并准备参数，在实际 START 中执行对焦及单张拍摄。"""
 
     driver_id = DRIVER_ID
     evidence = EVIDENCE
+    default_prepare_lead_s = DEFAULT_PREPARE_LEAD_S
 
     def __init__(
         self,
@@ -153,6 +164,19 @@ class HasselbladDriver:
         if not callable(getattr(self.transport, "run", None)):
             raise TypeError("transport 必须提供 run(ToolSpec, StopSignal)")
         self.declaration = DRIVER_DECLARATION
+        self._prepared_captures = PreparedCaptureCache()
+
+    def begin_session(self) -> None:
+        """新执行会话清空准备凭据，不向相机派发命令。"""
+        self._prepared_captures.clear()
+
+    def prepared_capture_matches(self, request: ControlRequest) -> bool:
+        """只检查本会话凭据及本地绑定，不读取或设置机身。"""
+        try:
+            config = self._binding_config(request.binding)
+        except (DeviceConfigurationError, ValueError):
+            return False
+        return self._prepared_captures.matches(request, (config.serial, config.product_id))
 
     def _binding_config(self, binding):
         if binding.driver_id != self.driver_id:
@@ -347,10 +371,27 @@ class HasselbladDriver:
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         if request.start_entry is not None:
             request.start_entry.enter(request.ticket)
+        return await self._capture_control(request, prepare_only=False)
+
+    async def prepare_capture(self, request: ControlRequest) -> DeviceCallResult:
+        """独立完成可重复设置，不进入 START、移动镜头或拍照。"""
+        return await self._capture_control(request, prepare_only=True)
+
+    async def _capture_control(self, request: ControlRequest, *, prepare_only: bool) -> DeviceCallResult:
+        if prepare_only:
+            request = replace(request, params=deepcopy(dict(request.params)))
         activity_id, config, settings = self._request_config(request)
-        entry = entered_observation(request.ticket)
+        prepared = not prepare_only and request.prepared_by is not None
+        if prepare_only and request.prepared_by is not None:
+            raise ValueError("独立设置准备不能携带已有准备凭据")
+        if prepared and not self._prepared_captures.matches(request, (config.serial, config.product_id)):
+            raise ValueError("实际启动缺少与原设备、活动、参数及准备尝试匹配的会话凭据")
+        if not prepared:
+            self._prepared_captures.clear(request.binding)
+        entries = () if prepare_only else (entered_observation(request.ticket),)
         roots = self.roots
-        commands = photo_start_commands(settings)
+        phase = PhotoPhase.PREPARATION if prepare_only else PhotoPhase.CAPTURE if prepared else None
+        commands = photo_start_commands(settings, phase=phase)
         began_ns = self.monotonic_ns()
         if type(began_ns) is not int:
             raise TypeError("monotonic_ns 必须返回整数纳秒")
@@ -358,7 +399,7 @@ class HasselbladDriver:
         calls: list[ToolCallOutput] = []
         last_raw: RawToolOutcome | None = None
 
-        def finish(status, effect, *, error=None, observation=None):
+        def finish(status, effect, *, error=None, observations=()):
             # 原关联由票据确定；这里只保留实际取得的双流和步骤对应关系。
             basis = SettlementBasis.OBSERVED if last_raw is not None else SettlementBasis.NOT_DISPATCHED
             data = {} if last_raw is None or last_raw.used_grace_s is None else {
@@ -367,7 +408,7 @@ class HasselbladDriver:
                 status=status, error=error, effect=effect,
                 settlement=Settlement(basis, EvidenceValue(
                     "operation_returned" if last_raw is not None else "dispatch_prevented", 1, data)),
-                observations=(entry,) if observation is None else (observation, entry),
+                observations=(*observations, *entries),
                 call_info=self._call_info(last_raw),
                 diagnostics=ToolDiagnostics(PHOTO_START_CALL_LIMIT, tuple(calls)),
             )
@@ -466,6 +507,21 @@ class HasselbladDriver:
                 if command.name in (PhotoStep.FOCUS, PhotoStep.AUTOFOCUS):
                     steps[-1]["lens_operation_returned"] = True
 
+        if prepare_only:
+            budget = remaining("preparation_completed")
+            if isinstance(budget, DeviceCallResult):
+                return budget
+            observation = DeviceObservation(
+                CAPTURE_PREPARATION_COMPLETED.type, CAPTURE_PREPARATION_COMPLETED.version,
+                {"activity_id": activity_id})
+            preparation_steps = DeviceObservation(
+                _PHOTO_PREPARATION_STEPS.type, _PHOTO_PREPARATION_STEPS.version,
+                {"activity_id": activity_id, "steps": deepcopy(steps)})
+            result = finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED,
+                            observations=(observation, preparation_steps))
+            self._prepared_captures.remember(request, (serial, config.product_id))
+            return result
+
         try:
             response: CaptureResponse = parse_capture(raw.output, raw.stderr, output_complete=complete,
                 capture_format=settings.capture_format, output_directory=str(workspace))
@@ -488,4 +544,4 @@ class HasselbladDriver:
         observation = DeviceObservation("photo_taken", 1, {
             "activity_id": activity_id, "original": artifacts[0].as_json(), "preview": artifacts[1].as_json(),
             "steps": [dict(fact) for fact in steps]})
-        return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observation=observation)
+        return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))

@@ -1,4 +1,4 @@
-"""同一有序命令槽派生参数 argv 和整次 START 的工具数量界限。"""
+"""同一有序命令槽派生设置准备、实际拍摄及旧 START 的工具调用。"""
 from dataclasses import dataclass
 from enum import StrEnum
 from decimal import Decimal
@@ -8,6 +8,11 @@ from .parameters import (
     EXPOSURE_MODE_DEFINITIONS, WHITE_BALANCE_MODE_DEFINITIONS,
     FOCUS_MODE_DEFINITIONS, PhotoSettings,
 )
+
+
+class PhotoPhase(StrEnum):
+    PREPARATION = "preparation"
+    CAPTURE = "capture"
 
 
 class PhotoStep(StrEnum):
@@ -26,6 +31,12 @@ class PhotoStep(StrEnum):
     AUTOFOCUS = "autofocus"
     CAPTURE = "capture"
 
+    @property
+    def phase(self) -> PhotoPhase:
+        if self in (PhotoStep.FOCUS, PhotoStep.AUTOFOCUS, PhotoStep.CAPTURE):
+            return PhotoPhase.CAPTURE
+        return PhotoPhase.PREPARATION
+
 
 PHOTO_START_CALL_LIMIT = len(PhotoStep)
 
@@ -40,12 +51,16 @@ def _number(value: int | Decimal) -> str:
     return format(value, "f") if isinstance(value, Decimal) else str(value)
 
 
-def photo_start_commands(settings: PhotoSettings) -> tuple[PhotoCommand, ...]:
+def photo_start_commands(
+    settings: PhotoSettings, *, phase: PhotoPhase | None = None,
+) -> tuple[PhotoCommand, ...]:
     """只展开已校验的保存值，不重新计算或舍入目录值。"""
     exposure, wb, focus = settings.exposure, settings.white_balance, settings.focus
     exposure_fields = EXPOSURE_MODE_DEFINITIONS[exposure.mode].fields
     commands = []
     for slot in PhotoStep:
+        if phase is not None and slot.phase is not phase:
+            continue
         match slot:
             case PhotoStep.LIST | PhotoStep.INFO:
                 argv = (slot.value,)

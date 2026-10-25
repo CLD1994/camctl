@@ -18,7 +18,14 @@ from .configuration import read_camera_config
 from .definitions import DRIVER_ID, driver_definition
 from .driver import EVIDENCE, HasselbladDriver
 
-__all__ = ["register_builtin_hasselblad_driver"]
+__all__ = ["register_builtin_hasselblad_driver", "begin_builtin_hasselblad_session"]
+
+
+def begin_builtin_hasselblad_session() -> None:
+    """取得执行会话资格后清除准备凭据，普通登记不改变原会话。"""
+    entry = current_registry().entry(DRIVER_ID)
+    if entry is not None and isinstance(entry.driver, HasselbladDriver):
+        entry.driver.begin_session()
 
 
 def _validate_serial_bindings(config) -> None:

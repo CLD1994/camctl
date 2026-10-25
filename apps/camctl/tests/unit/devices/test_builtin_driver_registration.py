@@ -286,3 +286,48 @@ def test_cli_describe_uses_unified_builtin_registration(monkeypatch):
     assert calls == [config]
     assert out.getvalue() == "{}"
     assert err.getvalue() == ""
+
+
+@pytest.mark.asyncio
+async def test_hasselblad_registration_retains_preparation_until_execution_session_begins():
+    from dataclasses import replace
+
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.drivers.hasselblad.registration import (
+        begin_builtin_hasselblad_session, register_builtin_hasselblad_driver,
+    )
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.devices.drivers.runtime import current_registry
+    from .test_hasselblad_capture_preparation import _prepare_request, _prepared_start
+    from .test_hasselblad_driver import FakeTransport, SERIAL
+
+    config = _config("/srv/staging", serial=SERIAL)
+    register_builtin_hasselblad_driver(config)
+    driver = current_registry().entry(DRIVER_ID).driver
+    transport = FakeTransport()
+    driver.transport = transport
+    preparation = replace(_prepare_request(), binding=DeviceBinding("hb0", DRIVER_ID))
+    start = replace(_prepared_start(preparation), binding=preparation.binding)
+    await driver.prepare_capture(preparation)
+    transport.calls.clear()
+
+    register_builtin_hasselblad_driver(config)
+
+    assert current_registry().entry(DRIVER_ID).driver is driver
+    assert driver.prepared_capture_matches(start)
+    assert transport.calls == []
+
+    begin_builtin_hasselblad_session()
+
+    assert not driver.prepared_capture_matches(start)
+    assert transport.calls == []
+
+
+def test_hasselblad_session_boundary_with_no_registered_driver_is_empty():
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.devices.drivers.hasselblad.registration import begin_builtin_hasselblad_session
+    from camctl.devices.drivers.runtime import current_registry
+
+    begin_builtin_hasselblad_session()
+
+    assert current_registry().entry(DRIVER_ID) is None

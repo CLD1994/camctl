@@ -14,7 +14,7 @@ from .test_hasselblad_driver import _photo_params
 @pytest.mark.parametrize("wb", ["auto","daylight","cloudy","shade","tungsten","fluorescent","flash","manual"])
 @pytest.mark.parametrize("focus", [{"mode":"MF"},{"mode":"MF","relative_move":-5},{"mode":"MF","relative_move":5},{"mode":"AF-S"}])
 def test_photo_setup_commands_follow_selected_branches(mode, fields, expected, wb, focus):
-    from camctl.devices.drivers.hasselblad.commands import photo_start_commands, PHOTO_START_CALL_LIMIT
+    from camctl.devices.drivers.hasselblad.commands import PhotoPhase, photo_start_commands, PHOTO_START_CALL_LIMIT
     params = _photo_params()
     params["exposure"] = {"mode":mode,"iso":100,**fields}
     params["white_balance"] = {"mode":wb, **({"temperature_k":6500} if wb=="manual" else {})}
@@ -27,6 +27,13 @@ def test_photo_setup_commands_follow_selected_branches(mode, fields, expected, w
     tail += ([("autofocus",)] if focus["mode"]=="AF-S" else [("focus",str(focus["relative_move"]))] if "relative_move" in focus else [])
     assert argv[5:] == expected + tail + [("capture",)]
     assert len(commands) <= PHOTO_START_CALL_LIMIT
+    preparation = photo_start_commands(parse_photo_settings(params), phase=PhotoPhase.PREPARATION)
+    capture = photo_start_commands(parse_photo_settings(params), phase=PhotoPhase.CAPTURE)
+    lens = ([("autofocus",)] if focus["mode"] == "AF-S" else
+            [("focus", str(focus["relative_move"]))] if "relative_move" in focus else [])
+    assert [item.argv for item in preparation] == argv[:5] + expected + tail[:len(tail) - len(lens)]
+    assert [item.argv for item in capture] == lens + [("capture",)]
+    assert preparation + capture == commands
 
 
 def test_capture_parser_consumes_two_complete_separate_streams():
