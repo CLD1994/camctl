@@ -79,8 +79,23 @@ def _world(mocker, *, recover=True):
     runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
     if recover:
         mocker.patch("camctl.capture.preparation._recover_old_preparation", autospec=True, return_value=True)
-    mocker.patch("camctl.capture.preparation._activity", autospec=True,
-                 return_value={"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    activity_reader = mocker.patch("camctl.capture.preparation._activity", autospec=True,
+        return_value={"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    mocker.patch("camctl.capture.preparation.row_facts", autospec=True,
+        side_effect=lambda connection, table, identity: action if table == "actions" else activity_reader.return_value)
+
+    def execute(sql, parameters=()):
+        if sql.startswith("SELECT id FROM device_activities WHERE action_id="):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = (7,)
+            return cursor
+        if sql.startswith("SELECT a.status,a.effect_state,e.occurred_at FROM operation_attempts"):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = runtime.last_attempt.return_value
+            return cursor
+        return runtime.owned.connection.execute.return_value
+
+    runtime.owned.connection.execute.side_effect = execute
     return runtime, action, ticket
 
 
