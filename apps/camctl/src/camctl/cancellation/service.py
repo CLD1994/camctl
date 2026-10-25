@@ -31,7 +31,8 @@ from camctl.cancellation.rules import (
     CancelEligibility,
     decide_cancel_eligibility,
     decide_origin_cancel,
-    load_eligibility_facts,
+    current_eligibility_facts,
+    load_eligibility_inputs,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.business import BusinessDatabase, settle_required
@@ -101,21 +102,22 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
         if status == 1:
             motor_permit = (None if runtime.motor_permits is None else
                             runtime.motor_permits.get(target_id))
+            loaded = await database.read(
+                lambda owned: load_eligibility_inputs(
+                    owned.connection, target_id, motor_permit=motor_permit),
+                description="读取取消资格事实",
+            )
             start_entry = (None if runtime.start_entries is None else
                            runtime.start_entries.get(
                                database.metadata.instance_id, target_id))
-            entry_phase = None if start_entry is None else start_entry.phase
-            eligibility_facts = await database.read(
-                lambda owned: load_eligibility_facts(
-                    owned.connection, target_id, motor_permit=motor_permit,
-                    entry_phase=entry_phase),
-                description="读取取消资格事实",
-            )
+            eligibility_facts = current_eligibility_facts(
+                loaded, None if start_entry is None else start_entry.phase)
             eligibility = decide_cancel_eligibility(eligibility_facts)
             if eligibility is CancelEligibility.REJECT_UNSUPPORTED:
                 await _save_target(runtime, target_id, RecordCancelResult(
                     item_id,occurred,code='task_cancel_unsupported',
-                    details={'action_instance_id':str(target_id)}))
+                    details={'action_instance_id':str(target_id)}),
+                    action_type=loaded.action["type"])
             elif eligibility is CancelEligibility.UNVERIFIED:
                 raise ConsistencyError(
                     f"目标取消事实不可靠，先核实再施加取消: {target_id}")
@@ -125,6 +127,7 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                     ApplyCancelTarget(
                         item_id,_MODE_BY_ELIGIBILITY[eligibility],occurred),
                     motor_permit=motor_permit,
+                    action_type=loaded.action["type"],
                 )
         row = await database.read(
             lambda owned: _fetchone(
@@ -178,16 +181,18 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
     return CancelProgress(items=tuple(progress))
 
 
-async def _save_target(runtime, target_id, request, *, motor_permit=None):
+async def _save_target(runtime, target_id, request, *, motor_permit=None, action_type=None):
     """保留本次原输入与原键；电机取消结果未知时核实后结束会话。"""
     database = runtime.database
-    action_type = await database.read(
-        lambda owned: _fetchone(
-            owned.connection, "SELECT type FROM actions WHERE id=?", (target_id,)),
-        description="读取取消目标类型",
-    )
     if action_type is None:
-        raise ConsistencyError(f"取消目标动作不存在: {target_id}")
+        row = await database.read(
+            lambda owned: _fetchone(
+                owned.connection, "SELECT type FROM actions WHERE id=?", (target_id,)),
+            description="读取取消目标类型",
+        )
+        if row is None:
+            raise ConsistencyError(f"取消目标动作不存在: {target_id}")
+        action_type = row[0]
     method = (
         "apply_cancel_target"
         if isinstance(request, ApplyCancelTarget)
@@ -210,7 +215,7 @@ async def _save_target(runtime, target_id, request, *, motor_permit=None):
                 key=key,
                 description="保存取消结果",
             )
-        if outcome.kind is DbOutcomeKind.UNKNOWN and action_type[0] == 8:
+        if outcome.kind is DbOutcomeKind.UNKNOWN and action_type == 8:
             try:
                 def verify(owned):
                     if owned.metadata.instance_id != database.metadata.instance_id:

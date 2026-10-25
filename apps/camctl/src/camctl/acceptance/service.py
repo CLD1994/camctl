@@ -103,7 +103,7 @@ async def accept_input(
     source: ParsedInput | InputDiagnostic,
     context: AcceptanceContext,
     key: OperationKey,
-    owned,
+    database,
 ) -> AcceptanceResult:
     """处理一次输入并返回完整提交结果。
 
@@ -118,7 +118,11 @@ async def accept_input(
         occurred_at=occurred_at,
         submit_handoff=context.submit_handoff,
     )
-    outcome = context.repository.process_input(command, key, owned)
+    outcome = await database.write(
+        lambda owned: context.repository.process_input(command, key, owned),
+        key=key,
+        description="输入处理",
+    )
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return outcome.value
     error = AcceptanceStateError(

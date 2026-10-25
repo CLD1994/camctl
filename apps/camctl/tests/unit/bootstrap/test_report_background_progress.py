@@ -4,7 +4,8 @@ import asyncio
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, create_autospec
+from unittest.mock import Mock, AsyncMock, create_autospec
+from support.business_database import inline_business_database
 
 import pytest
 
@@ -23,7 +24,7 @@ from camctl.devices.bindings import DeviceConfigurationError
 from camctl.history.events import HistoryEventError
 from camctl.history.replay import ReplayError
 from camctl.persistence.repositories.history import HistoryRepository, _FrozenRegistration
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, DbEnqueueTimeoutError
 from camctl.persistence.runtime import DatabaseMetadata, DirectoryBindingError, OwnedConnection
 from camctl.persistence.runtime import StateDatabaseError
 from camctl.contracts.values import ConsistencyError
@@ -85,9 +86,8 @@ class _ReportState:
         self.clock = create_autospec(ClockPort, instance=True, spec_set=True)
         self.clock.utc_micros.return_value = 1000
         self.supervisor = create_autospec(WorkerSupervisor, instance=True, spec_set=True)
-        history = create_autospec(HistoryRepository, instance=True, spec_set=True)
-        history.frozen_registration.return_value = _FrozenRegistration(0, 1, HistoryBoundary(1, 1))
-        mocker.patch("camctl.persistence.repositories.history.HistoryRepository", return_value=history)
+        mocker.patch("camctl.persistence.repositories.history.read_frozen_registration", autospec=True,
+            return_value=_FrozenRegistration(0, 1, HistoryBoundary(1, 1)))
         self.delivery = mocker.patch("camctl.reporting.publication.deliver_staged_report", autospec=True,
                                      side_effect=self._publish)
         self.failure_log = mocker.patch("camctl.session.service._trigger_failure_log", autospec=True)
@@ -104,7 +104,7 @@ class _ReportState:
         self.report = background_flow.ReportBackgroundFlow(self.flow)
         self.local = background_flow.CombinedLocalWork((self.report,))
         self.context = SimpleNamespace(
-            open_connection=Mock(return_value=self.owned), clock=self.clock,
+            database=inline_business_database(self.owned), clock=self.clock,
             flows={"report": self.report, "scheduling": scheduling}, local_work=self.local)
 
     def _execute(self, query, parameters=()):
@@ -112,13 +112,13 @@ class _ReportState:
         if query.startswith("SELECT status, to_wm FROM reports"):
             failed_ids = getattr(self, "failed_ids", ())
             cursor.fetchone.return_value = (5 if parameters[0] in failed_ids else 1, 1)
-            rows = []
+            rows = [cursor.fetchone.return_value]
         elif query == "SELECT MAX(change_seq) FROM history_events":
             cursor.fetchone.return_value = (self.latest_wm,)
             rows = []
         elif query.startswith("SELECT MIN("):
             cursor.fetchone.return_value = (getattr(self, "next_report_due", None),)
-            rows = []
+            rows = [cursor.fetchone.return_value]
         elif query.startswith("SELECT id FROM reports WHERE status IN"):
             pending_ids = getattr(self, "pending_ids", (self.report_id,) if self.pending else ())
             rows = [(report_id,) for report_id in pending_ids]
@@ -162,7 +162,7 @@ async def test_report_generation_wait_allows_following_scheduling_rounds(mocker)
         release.set()
         await state.local.settle()
         assert not state.pending
-        state.connection.close.assert_called_once()
+        state.connection.close.assert_not_called()
     finally:
         release.set()
         await state.local.settle()
@@ -218,7 +218,7 @@ async def test_report_failure_waits_new_changes_then_maintains_next_opportunity(
 async def test_unchanged_report_boundary_does_not_reopen_local_work(mocker):
     state = _ReportState(mocker)
     state.pending = False
-    state.context.report_change_wm = Mock(return_value=5)
+    state.context.report_change_wm = AsyncMock(return_value=5)
     repository = create_autospec(ReportingRepository, instance=True, spec_set=True)
     repository.freeze_report.return_value = DbOutcome(
         DbOutcomeKind.COMPLETED,
@@ -229,7 +229,7 @@ async def test_unchanged_report_boundary_does_not_reopen_local_work(mocker):
         assert await _drive_flows(state.context) is None
         await state.local.settle()
 
-    assert state.context.open_connection.call_count == 1
+    state.connection.close.assert_not_called()
     repository.freeze_report.assert_called_once()
     assert state.local.required_settlements() == 0
 
@@ -238,7 +238,7 @@ async def test_report_action_deadline_reopens_maintenance_without_new_commit(moc
     state = _ReportState(mocker)
     state.pending = False
     state.next_report_due = 2000
-    state.context.report_change_wm = Mock(return_value=5)
+    state.context.report_change_wm = AsyncMock(return_value=5)
     repository = create_autospec(ReportingRepository, instance=True, spec_set=True)
     repository.freeze_report.return_value = DbOutcome(
         DbOutcomeKind.COMPLETED,
@@ -249,14 +249,14 @@ async def test_report_action_deadline_reopens_maintenance_without_new_commit(moc
         assert await _drive_flows(state.context) is None
         await state.local.settle()
 
-    assert state.context.open_connection.call_count == 2
+    state.connection.close.assert_not_called()
     assert repository.freeze_report.call_count == 2
 
 
 async def test_change_committed_during_report_failure_remains_a_trigger(mocker):
     state = _ReportState(mocker)
     latest = 1
-    state.context.report_change_wm = lambda: latest
+    state.context.report_change_wm = AsyncMock(side_effect=lambda: latest)
 
     async def generate(job):
         nonlocal latest
@@ -283,7 +283,7 @@ async def test_change_committed_during_report_failure_remains_a_trigger(mocker):
     assert await _drive_flows(state.context) is None
     await state.local.settle()
 
-    assert state.context.open_connection.call_count == 2
+    state.connection.close.assert_not_called()
     repository.freeze_report.assert_called_once()
 
 
@@ -291,7 +291,7 @@ async def test_change_committed_during_report_failure_remains_a_trigger(mocker):
 async def test_ordinary_report_exception_is_saved_once_and_waits_new_change(mocker, failed_stage):
     state = _ReportState(mocker)
     latest = 1
-    state.context.report_change_wm = lambda: latest
+    state.context.report_change_wm = AsyncMock(side_effect=lambda: latest)
     original = RuntimeError(f"{failed_stage} failed")
     state.supervisor.generate.side_effect = state.generated
     failed_call = state.supervisor.generate if failed_stage == "generate" else state.delivery
@@ -340,7 +340,7 @@ async def test_ordinary_failure_keeps_other_unattempted_reports_runnable(
     state = _ReportState(mocker)
     state.pending_ids = [] if previously_failed else [1, 2]
     state.failed_ids = {1, 2} if previously_failed else set()
-    state.context.report_change_wm = Mock(return_value=1)
+    state.context.report_change_wm = AsyncMock(return_value=1)
     repository = create_autospec(ReportingRepository, instance=True, spec_set=True)
     repository.freeze_report.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
         SimpleNamespace(kind=ReportDecisionKind.REUSE, report=object(), checked_to_wm=1))
@@ -393,16 +393,19 @@ async def test_ordinary_failure_keeps_other_unattempted_reports_runnable(
 async def test_report_database_exception_remains_fatal_without_report_failure(
         mocker, failed_stage, failure):
     state = _ReportState(mocker)
-    state.context.report_change_wm = Mock(return_value=1)
+    state.context.report_change_wm = AsyncMock(return_value=1)
     state.supervisor.generate.side_effect = state.generated
     failed_call = state.supervisor.generate if failed_stage == "generate" else state.delivery
     failed_call.side_effect = failure
     record = mocker.patch("camctl.reporting.policy.record_report_failure", autospec=True,
                           return_value=DbOutcome(DbOutcomeKind.COMPLETED))
 
+    assert await _drive_flows(state.context) is None
+    await asyncio.wait_for(asyncio.shield(state.report.unconsumed_task), timeout=1)
+    scheduled_before_failure = state.device.call_count
     assert "状态库错误" in await _drive_flows(state.context)
     record.assert_not_called()
-    state.device.assert_not_called()
+    assert state.device.call_count == scheduled_before_failure
 
 
 @pytest.mark.parametrize("failed_stage", ["generate", "deliver"])
@@ -427,7 +430,7 @@ async def test_report_prerequisite_and_control_exceptions_keep_identity(
 
     assert caught.value is failure
     record.assert_not_called()
-    state.connection.close.assert_called_once()
+    state.connection.close.assert_not_called()
 
 
 @pytest.mark.parametrize("outcome", [DeliveryOutcome.UNKNOWN, DeliveryOutcome.STORE_FAILED])
@@ -442,7 +445,7 @@ async def test_unconfirmed_publication_stays_fatal_without_saving_report_failure
         await state.flow(state.context)
 
     record.assert_not_called()
-    state.connection.close.assert_called_once()
+    state.connection.close.assert_not_called()
 
 
 @pytest.mark.parametrize("failed_stage", ["generate", "deliver"])
@@ -463,29 +466,52 @@ async def test_unsaved_report_failure_stops_device_scheduling(
     else:
         record.return_value = record_result
 
+    assert await _drive_flows(state.context) is None
+    await asyncio.wait_for(asyncio.shield(state.report.unconsumed_task), timeout=1)
+    scheduled_before_failure = state.device.call_count
     result = await _drive_flows(state.context)
 
     assert result is not None
     assert "报告失败记录" in result
     record.assert_called_once()
-    state.device.assert_not_called()
+    assert state.device.call_count == scheduled_before_failure
     state.failure_log.assert_awaited_once()
 
 
 @pytest.mark.parametrize("failure", [sqlite3.OperationalError("read failed"),
+                                     DbEnqueueTimeoutError("queue full"),
                                      StateDbFailure("missing watermark")])
 async def test_report_probe_failure_keeps_fatal_report_boundary(mocker, failure):
     state = _ReportState(mocker)
-    state.context.report_change_wm = Mock(side_effect=failure)
+    state.context.report_change_wm = AsyncMock(side_effect=failure)
 
     assert await _drive_flows(state.context) == (
         "missing watermark" if isinstance(failure, StateDbFailure)
-        else "报告维护无法可靠观察业务水位: read failed")
-    state.context.open_connection.assert_not_called()
+        else f"报告维护无法可靠观察业务水位: {failure}")
+    state.connection.execute.assert_not_called()
     state.device.assert_not_called()
     state.failure_log.assert_awaited_once()
     await state.local.settle()
     assert state.local.required_settlements() == 0
+
+
+@pytest.mark.parametrize("method", ["read", "write"])
+async def test_report_database_queue_failure_stops_after_actual_failure(mocker, method):
+    state = _ReportState(mocker)
+    state.pending = False
+    error = DbEnqueueTimeoutError("business queue full")
+    mocker.patch.object(state.context.database, method, side_effect=error)
+
+    fatal = await _drive_flows(state.context)
+    if fatal is None:
+        await asyncio.wait_for(asyncio.shield(state.report.unconsumed_task), timeout=1)
+        scheduled = state.device.call_count
+        fatal = await _drive_flows(state.context)
+        assert state.device.call_count == scheduled
+    else:
+        state.device.assert_not_called()
+    assert fatal == "报告维护无法可靠读取或保存状态库事实: business queue full"
+    state.failure_log.assert_awaited_once()
 
 
 @pytest.mark.parametrize("new_at_close", [False, True])
@@ -535,7 +561,7 @@ async def test_completed_reports_close_session_and_final_check_keeps_new_changes
     session_repository.close_admission.side_effect = close
     context = SessionContext(
         mode=CommandMode.RUN, catalog=None, clock=state.clock,
-        open_connection=state.context.open_connection,
+        open_database=AsyncMock(return_value=state.context.database),
         acceptance_repository=Mock(), session_repository=session_repository,
         paths=SessionPaths("/session", "/admission"),
         clock_policy=lambda _: ClockCheckInput(1000, 0, 0, 1),
@@ -610,6 +636,9 @@ async def test_report_fatal_stops_scheduling_before_failure_log_wait_finishes(mo
     state.supervisor.generate.side_effect = failure
     waiter = None
     try:
+        assert await _drive_flows(state.context) is None
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        scheduled_before_failure = state.device.call_count
         if isinstance(failure, StateDbFailure):
             assert await _drive_flows(state.context) == str(failure)
         else:
@@ -617,7 +646,7 @@ async def test_report_fatal_stops_scheduling_before_failure_log_wait_finishes(mo
                 await _drive_flows(state.context)
             assert caught.value is failure
         await asyncio.wait_for(entered.wait(), timeout=1)
-        state.device.assert_not_called()
+        assert state.device.call_count == scheduled_before_failure
         assert state.local.required_settlements() == 1
         if stopped:
             state.local.stop_new_work()
@@ -637,7 +666,7 @@ async def test_report_fatal_stops_scheduling_before_failure_log_wait_finishes(mo
             await asyncio.gather(state.local.settle(), return_exceptions=True)
 
 
-async def test_normal_report_settlement_waits_for_generation_and_connection_close(mocker):
+async def test_normal_report_settlement_waits_for_generation_without_closing_shared_database(mocker):
     state = _ReportState(mocker)
     release = asyncio.Event()
 
@@ -655,14 +684,15 @@ async def test_normal_report_settlement_waits_for_generation_and_connection_clos
     release.set()
     await asyncio.wait_for(waiter, timeout=1)
     state.delivery.assert_awaited_once()
-    state.connection.close.assert_called_once()
+    state.connection.close.assert_not_called()
 
 
-async def test_report_stop_waits_for_supervisor_actual_cleanup_before_connection_close(mocker):
+async def test_report_stop_waits_for_supervisor_actual_cleanup_without_closing_shared_database(mocker):
     state = _ReportState(mocker)
-    cleaning, release = asyncio.Event(), asyncio.Event()
+    cleaning, release, started = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def generate(job):
+        started.set()
         try:
             await asyncio.Future()
         except asyncio.CancelledError:
@@ -672,6 +702,7 @@ async def test_report_stop_waits_for_supervisor_actual_cleanup_before_connection
 
     state.supervisor.generate.side_effect = generate
     await _drive_flows(state.context)
+    await asyncio.wait_for(started.wait(), timeout=1)
     state.local.stop_new_work()
     waiter = asyncio.create_task(state.local.settle())
     await asyncio.wait_for(cleaning.wait(), timeout=1)
@@ -679,7 +710,7 @@ async def test_report_stop_waits_for_supervisor_actual_cleanup_before_connection
     state.connection.close.assert_not_called()
     release.set()
     await asyncio.wait_for(waiter, timeout=1)
-    state.connection.close.assert_called_once()
+    state.connection.close.assert_not_called()
     state.delivery.assert_not_awaited()
     assert state.local.required_settlements() == 0
 
@@ -721,7 +752,7 @@ async def test_report_publication_allows_scheduling_and_stop_waits_actual_file_e
         assert moved.is_set()
         assert state.report.file_step_result.value.stage is PublishStage.MOVED
         assert any("moved" in note for note in state.report.interrupted_error.__notes__)
-        state.connection.close.assert_called_once()
+        state.connection.close.assert_not_called()
         session.save_publication.assert_not_called()
         assert state.local.required_settlements() == 0
     finally:

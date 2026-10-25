@@ -30,7 +30,8 @@ from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind
+from camctl.persistence.business import settle_required
 from camctl.persistence.repositories.scheduling import (
     ExpireActionRequest,
     ObserveWindowRequest,
@@ -46,30 +47,49 @@ __all__ = ["CaptureFlow", "capture_flow", "cancel_flow", "report_flow", "residua
            "winddown_flow"]
 
 
+async def _query_rows(database, sql, parameters=()):
+    def read(owned):
+        with closing(owned.connection.execute(sql, parameters)) as cursor:
+            return tuple(cursor.fetchall())
+    return await database.read(read)
+
+
+async def _save_command(database, method, command, *, key=None):
+    actual_key = new_operation_key() if key is None else key
+    return await database.write(
+        lambda owned: method(command, actual_key, owned), key=actual_key)
+
+
+async def _policy_write(database, method, *args, **kwargs):
+    key = new_operation_key()
+    return await database.write(
+        lambda owned: method(key, owned, *args, **kwargs), key=key)
+
+
 def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
                   resume_read_results=None, owns_device=None, read_discovery_batch_size=DEFAULT_BATCH_SIZE):
     """残留收场推进流程；实现见 camctl.capture.residual。"""
-    async def resume_actual_file_facts(owned):
+    async def resume_actual_file_facts(database):
         await _resume_actual_file_facts(
-            owned, resume_file_observations, resume_media_results, resume_read_results)
+            database, resume_file_observations, resume_media_results, resume_read_results)
 
     return _residual_flow_impl(
         capture_factory, resume_actual_file_facts=resume_actual_file_facts, owns_device=owns_device,
         read_discovery_batch_size=read_discovery_batch_size)
 
 
-async def _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
+async def _resume_actual_file_facts(database, resume_file_observations, resume_media_results,
                                    resume_read_results=None, resume_capture_completions=None):
     """已有文件与媒体事实先保存；失败保留各自责任并停止业务步骤。"""
     try:
         if resume_read_results is not None:
-            resume_read_results(owned)
+            await resume_read_results(database)
         if resume_capture_completions is not None:
-            resume_capture_completions(owned)
+            await resume_capture_completions(database)
         if resume_file_observations is not None:
-            resume_file_observations(owned)
+            await resume_file_observations(database)
         if resume_media_results is not None:
-            await resume_media_results(owned)
+            await resume_media_results(database)
     except (sqlite3.Error, ConsistencyError) as error:
         raise StateDbFailure(f"原文件事实未可靠保存: {error}") from error
 
@@ -124,7 +144,7 @@ def _ready_device_groups(
 
 
 class CaptureFlow:
-    """每设备持有一项跨轮任务，连接持续到原结果保存及交付完成。"""
+    """每设备持有一项跨轮任务，原结果沿会话数据库端口保存。"""
 
     def __init__(self, capture_factory, *, resume_media_results=None,
                  resume_file_observations=None, resume_read_results=None,
@@ -189,20 +209,21 @@ class CaptureFlow:
         self.check_completed()
         if self._stopping:
             return
-        owned = context.open_connection()
+        database = context.database
         try:
-            await _resume_actual_file_facts(owned, self._resume_files, self._resume_media, self._resume_reads)
+            await _resume_actual_file_facts(database, self._resume_files, self._resume_media, self._resume_reads)
             now = context.clock.utc_micros()
-            self._discovery.begin_round(owned.connection, now)
+            await self._discovery.begin_round(database, now)
             if self._preparation_leads:
                 from camctl.outputs.read_discovery import next_preparation_at
-                page = self._discovery.captures(owned.connection, now, self._preparation_leads)
-                at = next_preparation_at(owned.connection, now, self._preparation_leads)
+                page = await self._discovery.captures(database, now, self._preparation_leads)
+                at = await database.read(
+                    lambda owned: next_preparation_at(owned.connection, now, self._preparation_leads))
                 self._preparation_at = (None if at is None else
                     asyncio.get_running_loop().time() + max(0, at - now) / 1_000_000)
             else:
-                page = self._discovery.captures(owned.connection, now)
-            self._observe_windows(context, owned, tuple(item[0] for item in page.items))
+                page = await self._discovery.captures(database, now)
+            await self._observe_windows(context, database, tuple(item[0] for item in page.items))
             device_ids = {}
             for action_id, device_id, *_ in page.items:
                 device_ids.setdefault(device_id, []).append(action_id)
@@ -210,8 +231,7 @@ class CaptureFlow:
                 context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
         except (sqlite3.Error, ConsistencyError) as error:
             raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
-        finally:
-            owned.connection.close()
+
         for device_id, action_ids in device_ids.items():
             self._device_candidates[device_id] = tuple(action_ids)
             self.check_completed()
@@ -237,30 +257,31 @@ class CaptureFlow:
                             context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
                     task.add_done_callback(completed)
 
-    def _observe_windows(self, context, owned, action_ids):
+    async def _observe_windows(self, context, database, action_ids):
         """中央流程保存窗口事实，不等待同设备已有任务交付。"""
         scheduling = SchedulingRepository()
-        pending = _due_pending_actions(
-            owned.connection, context.clock.utc_micros(), action_ids=action_ids,
-            limit=self._discovery.batch_size)
+        now = context.clock.utc_micros()
+        pending = await database.read(lambda owned: _due_pending_actions(
+            owned.connection, now, action_ids=action_ids,
+            limit=self._discovery.batch_size))
         for action_id, _, scheduled_at, max_delay_ms in pending:
             current = context.clock.utc_micros()
             if current > scheduled_at + max_delay_ms * 1000:
-                outcome = scheduling.expire_action(
-                    ExpireActionRequest(action_id, current, current), new_operation_key(), owned)
+                outcome = await _save_command(database, scheduling.expire_action,
+                    ExpireActionRequest(action_id, current, current))
                 operation = "动作过期"
             else:
-                outcome = scheduling.observe_window(
-                    ObserveWindowRequest(action_id, current, current), new_operation_key(), owned)
+                outcome = await _save_command(database, scheduling.observe_window,
+                    ObserveWindowRequest(action_id, current, current))
                 operation = "窗口观察"
             if outcome.kind is not DbOutcomeKind.COMPLETED:
                 raise StateDbFailure(f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}")
 
     async def _advance_device(self, context, device_id, action_ids):
-        owned = context.open_connection()
+        database = context.database
         try:
             scheduling = SchedulingRepository()
-            runtime = self._factory(owned, device_id)
+            runtime = await self._factory(database, device_id)
             if runtime is not None:
                 def recording_deadline(action_id, target_ns):
                     if target_ns is None:
@@ -278,8 +299,8 @@ class CaptureFlow:
             if runtime is not None:
                 from camctl.capture.preparation import recover_preparation
                 for action_id in action_ids:
-                    if runtime.action(action_id)["status"] in (3, 4, 5, 6):
-                        recover_preparation(runtime, action_id)
+                    if (await runtime.action(action_id))["status"] in (3, 4, 5, 6):
+                        await recover_preparation(runtime, action_id)
             if runtime is not None and runtime.capture_preparation_supported is True:
                 from camctl.capture.preparation import advance_preparation
                 from camctl.capture.baseline import PreparationPhase
@@ -288,29 +309,30 @@ class CaptureFlow:
                     if self._stopping:
                         return
                     from camctl.capture.residual import _original_binding_failure
-                    if _original_binding_failure(runtime, runtime.action(action_id)) is not None:
+                    if await _original_binding_failure(runtime, await runtime.action(action_id)) is not None:
                         continue
                     prepared = await advance_preparation(runtime, action_id)
                     if prepared.phase is PreparationPhase.READY:
                         preparation_ready.add(action_id)
-            pending = _due_pending_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
-                action_ids=action_ids, limit=self._discovery.batch_size)
+            now = context.clock.utc_micros()
+            pending = await database.read(lambda owned: _due_pending_actions(owned.connection, now, device_id=device_id,
+                action_ids=action_ids, limit=self._discovery.batch_size))
             for action_id, _, scheduled_at, max_delay_ms in pending:
                 if self._stopping:
                     return
                 current = context.clock.utc_micros()
                 if current > scheduled_at + max_delay_ms * 1000:
-                    outcome = scheduling.expire_action(
-                        ExpireActionRequest(action_id, current, current), new_operation_key(), owned)
+                    outcome = await _save_command(database, scheduling.expire_action,
+                        ExpireActionRequest(action_id, current, current))
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
                         raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
                     continue
                 if runtime is not None:
                     from camctl.capture.residual import pass_residual_gate, _original_binding_failure
-                    if not await pass_residual_gate(runtime, runtime.action(action_id)):
+                    if not await pass_residual_gate(runtime, await runtime.action(action_id)):
                         continue
                     if (preparation_ready is not None and action_id not in preparation_ready
-                            and _original_binding_failure(runtime, runtime.action(action_id)) is None):
+                            and await _original_binding_failure(runtime, await runtime.action(action_id)) is None):
                         prepared = await advance_preparation(runtime, action_id)
                         if prepared.phase is not PreparationPhase.READY:
                             continue
@@ -318,21 +340,22 @@ class CaptureFlow:
                     return
                 # 执行前查询可能等待；建立准备活动时重新使用实际窗口时刻。
                 current = context.clock.utc_micros()
-                outcome = scheduling.start_action(
-                    StartActionRequest(action_id, current, current), new_operation_key(), owned)
+                outcome = await _save_command(database, scheduling.start_action,
+                    StartActionRequest(action_id, current, current))
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
             if runtime is None or self._stopping:
                 return
-            group = ready_capture_actions(owned.connection, context.clock.utc_micros(), device_id=device_id,
-                action_ids=action_ids, limit=self._discovery.batch_size)
+            now = context.clock.utc_micros()
+            group = await database.read(lambda owned: ready_capture_actions(owned.connection, now, device_id=device_id,
+                action_ids=action_ids, limit=self._discovery.batch_size))
             for action_id, outcome in await dispatch_ready(runtime, group):
                 if isinstance(outcome, BaseException):
                     raise outcome
             if runtime.capture_preparation_supported is True:
                 from camctl.capture.preparation import discard_terminal_preparation
                 for action_id in action_ids:
-                    discard_terminal_preparation(runtime, action_id)
+                    await discard_terminal_preparation(runtime, action_id)
         except Exception as error:
             self._stopping = True
             try:
@@ -343,8 +366,7 @@ class CaptureFlow:
             if isinstance(error, (sqlite3.Error, ConsistencyError)):
                 raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
             raise
-        finally:
-            owned.connection.close()
+
 
 
 def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
@@ -384,42 +406,34 @@ def winddown_flow(
     async def flow(context: Any) -> None:
         from camctl.capture.handlers import advance_winddown
 
-        owned = context.open_connection()
-        try:
-            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
-                                            resume_read_results)
-            from camctl.capture.preparation_discovery import preparation_responsibility_where
-            with closing(owned.connection.execute(
-                    "SELECT a.id,a.device_id FROM actions a JOIN device_activities d ON d.action_id=a.id"
-                    " WHERE " + preparation_responsibility_where(include_pending=True) + " ORDER BY a.id")) as cursor:
-                preparations = cursor.fetchall()
-            for action_id, device_id in preparations:
-                if owns_device is not None and owns_device(device_id):
-                    continue
-                runtime = capture_factory(owned, device_id)
-                if runtime is not None:
-                    from camctl.capture.preparation import recover_preparation
-                    recover_preparation(runtime, action_id)
-            with closing(owned.connection.execute(
-                    "SELECT id FROM actions"
-                    " WHERE type = 2 AND status = 2"
-                    " ORDER BY plan_id, input_index")) as cursor:
-                targets = [_WinddownTarget(int(row[0]))
-                           for row in cursor.fetchall()]
-            first_seen: dict[int, int] = {}
-            for device_id, group in _ready_device_groups(
-                    owned.connection, targets):
-                if owns_device is not None and owns_device(device_id):
-                    continue
-                runtime = capture_factory(owned, device_id)
-                if runtime is None:
-                    continue
-                for target in group:
-                    await advance_winddown(
-                        target.action_id, runtime, first_seen,
-                        wait_cap_s=wait_cap_s, sleep=sleep)
-        finally:
-            owned.connection.close()
+        database = context.database
+        await _resume_actual_file_facts(database, resume_file_observations, resume_media_results,
+                                        resume_read_results)
+        from camctl.capture.preparation_discovery import preparation_responsibility_where
+        preparations = await _query_rows(database,
+            "SELECT a.id,a.device_id FROM actions a JOIN device_activities d ON d.action_id=a.id"
+            " WHERE " + preparation_responsibility_where(include_pending=True) + " ORDER BY a.id")
+        for action_id, device_id in preparations:
+            if owns_device is not None and owns_device(device_id):
+                continue
+            runtime = await capture_factory(database, device_id)
+            if runtime is not None:
+                from camctl.capture.preparation import recover_preparation
+                await recover_preparation(runtime, action_id)
+        rows = await _query_rows(database,
+            "SELECT id FROM actions WHERE type = 2 AND status = 2 ORDER BY plan_id, input_index")
+        targets = [_WinddownTarget(int(row[0])) for row in rows]
+        groups = await database.read(lambda owned: _ready_device_groups(owned.connection, targets))
+        first_seen: dict[int, int] = {}
+        for device_id, group in groups:
+            if owns_device is not None and owns_device(device_id):
+                continue
+            runtime = await capture_factory(database, device_id)
+            if runtime is None:
+                continue
+            for target in group:
+                await advance_winddown(target.action_id, runtime, first_seen,
+                    wait_cap_s=wait_cap_s, sleep=sleep)
 
     return flow
 
@@ -488,21 +502,41 @@ def _fixed_cancel_items(owned: Any, action_id: int) -> tuple[int, ...] | None:
         return tuple(int(item[0]) for item in cursor.fetchall())
 
 
-def _withdrawal_position(owned: Any, ready: Path, processing: Path):
-    """按交付文件名观察当前交接位置；观察不到按未知处理。"""
-    def position(delivery_id: int) -> str:
-        with closing(owned.connection.execute(
-                "SELECT file_name FROM deliveries WHERE id = ?",
-                (delivery_id,))) as cursor:
-            row = cursor.fetchone()
-        if row is None or not isinstance(row[0], str) or not row[0]:
+def _withdrawal_position(database, ready: Path, processing: Path):
+    """数据库只交付名称；文件位置由主协程观察。"""
+    async def position(delivery_id: int) -> str:
+        rows = await _query_rows(database,
+            "SELECT file_name FROM deliveries WHERE id = ?", (delivery_id,))
+        if not rows or not isinstance(rows[0][0], str) or not rows[0][0]:
             return "unknown"
-        if (ready / row[0]).exists():
+        name = rows[0][0]
+        if (ready / name).exists():
             return "ready"
-        if (processing / row[0]).exists():
+        if (processing / name).exists():
             return "processing"
         return "unknown"
     return position
+
+
+async def _fix_cancel_request(database, repository, request, key, entries):
+    """入口许可在主协程封住，工作线程只消费固定的许可事实。"""
+    from camctl.devices.start_entry import EntryPhase
+    snapshots = []
+    for block in request.entry_blocks:
+        permit = None if entries is None else entries.get(block.database_id, block.action_id)
+        if permit is not None and permit.ticket == block.ticket:
+            snapshots.append((block, permit.phase))
+    async def save_and_apply():
+        outcome = await database.write(lambda owned: repository.fix_cancel_targets(
+            request, key, owned, reserved_entries=tuple(snapshots)), key=key)
+        if outcome.kind is DbOutcomeKind.COMPLETED and entries is not None:
+            for block in request.entry_blocks:
+                permit = entries.get(block.database_id, block.action_id)
+                if permit is not None and permit.ticket == block.ticket:
+                    permit.phase = EntryPhase.BLOCKED
+            entries.pending_cancels.pop(request.action_id, None)
+        return outcome
+    return await settle_required(save_and_apply())
 
 
 def cancel_flow(
@@ -516,16 +550,7 @@ def cancel_flow(
     cleanup_pending=None,
     preparation_pending=None,
 ) -> Callable[[Any], Any]:
-    """构造推进取消动作的会话流程。
-
-    逐动作推进完整取消链：开始（未开始时）→ 寻址 → 固定 → 生效
-    与逐目标收场 → 汇总终态。可靠不存在与自身包含按登记错误结束
-    取消动作；查询失败按状态库错误停止；收场未完成的成员保持处
-    理中，本次不等待设备工作。正常会话按可信墙钟包含到期的已排
-    期取消；受限会话以 unscheduled_only=True 构造，只推进未排
-    期动作，不依据不可信墙钟判断到时。
-    """
-
+    """推进原取消集合；设备及文件等待不占用数据库线程。"""
     from camctl.host_files.tasks import FileTaskExecutor
     from camctl.session.supervision import Supervisor
     from camctl.outputs.withdrawal import WithdrawalContext, resume_withdrawals, withdraw_delivery
@@ -535,209 +560,165 @@ def cancel_flow(
     pending_origin_settlements = {}
 
     async def flow(context: Any) -> None:
-        from camctl.cancellation.models import (
-            CancelStartDisposition,
-            FinishCancelAction,
-            StartCancelAction,
-        )
-        from camctl.cancellation.service import ApplyCancel
-        from camctl.cancellation.rules import (
-            CancellationStatus,
-            summarize_cancel,
-        )
-        from camctl.cancellation.service import (
-            CancellationRuntime,
-            apply_cancel,
-        )
+        from camctl.cancellation.models import CancelStartDisposition, FinishCancelAction, StartCancelAction
+        from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
+        from camctl.cancellation.rules import CancellationStatus, summarize_cancel
         from camctl.cancellation.settlement import TargetSettlement
-        from camctl.persistence.repositories.cancellation import (
-            CancellationRepository,
-        )
+        from camctl.persistence.repositories.cancellation import CancellationRepository
         from camctl.persistence.repositories.outputs import OutputsRepository
 
-        owned = context.open_connection()
-        try:
-            if any(identity[0] != owned.metadata.instance_id for identity in pending_origin_settlements):
-                raise StateDbFailure("原取消收场申请属于另一状态库")
-            await _resume_actual_file_facts(owned, resume_file_observations, resume_media_results,
-                                            resume_capture_completions=resume_capture_completions)
-            repository = CancellationRepository(motor_permits=motor_permits, start_entries=start_entries)
-            if start_entries is not None:
-                for request, key in tuple(start_entries.pending_cancels.values()):
-                    resumed = repository.fix_cancel_targets(request, key, owned)
-                    if resumed.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(f"原入口取消复合申请仍未完成: {resumed.error}")
-            occurred = context.clock.utc_micros
-            withdrawal_context = WithdrawalContext(owned, OutputsRepository(), ready,
-                processing, occurred, executor, pending_withdrawals)
-
-            async def execute_withdrawal(delivery_id):
-                try:
-                    return await withdraw_delivery(delivery_id, withdrawal_context)
-                except ConsistencyError as error:
-                    raise StateDbFailure(str(error)) from error
-
-            async def resume_withdrawal(action_id):
-                try:
-                    return await resume_withdrawals(action_id, withdrawal_context)
-                except ConsistencyError as error:
-                    raise StateDbFailure(str(error)) from error
-
-            settlement = TargetSettlement(
-                owned=owned, outputs=OutputsRepository(), cancellations=repository,
-                withdrawal_positions=_withdrawal_position(owned, ready, processing),
-                occurred_at=occurred, work_files=work_files,
-                withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
-                cleanup_pending=cleanup_pending,
-                preparation_pending=preparation_pending,
-                pending_origin_settlements=pending_origin_settlements)
-            cancellation_runtime = CancellationRuntime(
-                owned=owned, repository=repository, settlement=settlement,
-                occurred_at=occurred, motor_permits=motor_permits,
-                open_connection=context.open_connection,
-                pending_origin_settlements=pending_origin_settlements)
-            from camctl.cancellation.service import OriginSettle, settle_origin_cancel
-            for _, origin_id in tuple(pending_origin_settlements):
-                resumed = await settle_origin_cancel(OriginSettle(origin_id), cancellation_runtime)
+        database = context.database
+        if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):
+            raise StateDbFailure("原取消收场申请属于另一状态库")
+        await _resume_actual_file_facts(database, resume_file_observations, resume_media_results,
+                                        resume_capture_completions=resume_capture_completions)
+        repository = CancellationRepository()
+        if start_entries is not None:
+            for request, key in tuple(start_entries.pending_cancels.values()):
+                resumed = await _fix_cancel_request(database, repository, request, key, start_entries)
                 if resumed.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(f"原取消收场申请仍未完成: {resumed.error}")
-            now_us = None if unscheduled_only else occurred()
-            for action_id, status, spec_json in _due_cancel_actions(owned, now_us):
-                item_ids = _fixed_cancel_items(owned, action_id)
-                if item_ids is None:
-                    if status == 1:
-                        started = repository.start_cancel_action(
-                            StartCancelAction(
-                                action_id=action_id, occurred_at=occurred()),
-                            new_operation_key(), owned)
-                        if started.kind is not DbOutcomeKind.COMPLETED:
-                            raise StateDbFailure(
-                                "取消动作开始事务未完成"
-                                f"（{started.kind.value}）: {started.error}")
-                        if started.value.disposition \
-                                is CancelStartDisposition.REJECTED:
-                            continue
-                    item_ids = _resolve_and_fix(
-                        owned, repository, action_id, spec_json, occurred, motor_permits)
-                    if item_ids is None:
-                        continue
-                progress = await apply_cancel(
-                    ApplyCancel(origin_action_id=action_id, item_ids=item_ids), cancellation_runtime)
-                if summarize_cancel(progress).status is CancellationStatus.RUNNING:
-                    # 收场未完成：保持执行中，等待后续会话推进。
-                    continue
-                finished = repository.finish_cancel_action(
-                    FinishCancelAction(action_id, occurred()),
-                    new_operation_key(), owned)
-                if finished.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        "取消动作终态事务未完成"
-                        f"（{finished.kind.value}）: {finished.error}")
-        finally:
-            owned.connection.close()
+                    raise StateDbFailure(f"原入口取消复合申请仍未完成: {resumed.error}")
+        occurred = context.clock.utc_micros
+        withdrawal_context = WithdrawalContext(database, OutputsRepository(), ready,
+            processing, occurred, executor, pending_withdrawals)
 
+        async def execute_withdrawal(delivery_id):
+            try:
+                return await withdraw_delivery(delivery_id, withdrawal_context)
+            except ConsistencyError as error:
+                raise StateDbFailure(str(error)) from error
+
+        async def resume_withdrawal(action_id):
+            try:
+                return await resume_withdrawals(action_id, withdrawal_context)
+            except ConsistencyError as error:
+                raise StateDbFailure(str(error)) from error
+
+        settlement = TargetSettlement(
+            database=database, outputs=OutputsRepository(), cancellations=repository,
+            withdrawal_positions=_withdrawal_position(database, ready, processing),
+            occurred_at=occurred, work_files=work_files,
+            withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
+            cleanup_pending=cleanup_pending, preparation_pending=preparation_pending,
+            pending_origin_settlements=pending_origin_settlements)
+        cancellation_runtime = CancellationRuntime(
+            database=database, repository=repository, settlement=settlement,
+            occurred_at=occurred, motor_permits={} if motor_permits is None else motor_permits, start_entries=start_entries,
+            pending_origin_settlements=pending_origin_settlements)
+        from camctl.cancellation.service import OriginSettle, settle_origin_cancel
+        for _, origin_id in tuple(pending_origin_settlements):
+            resumed = await settle_origin_cancel(OriginSettle(origin_id), cancellation_runtime)
+            if resumed.kind is not DbOutcomeKind.COMPLETED:
+                raise StateDbFailure(f"原取消收场申请仍未完成: {resumed.error}")
+        now_us = None if unscheduled_only else occurred()
+        due = await database.read(lambda owned: _due_cancel_actions(owned, now_us))
+        for action_id, status, spec_json in due:
+            item_ids = await database.read(lambda owned: _fixed_cancel_items(owned, action_id))
+            if item_ids is None:
+                if status == 1:
+                    started = await _save_command(database, repository.start_cancel_action,
+                        StartCancelAction(action_id=action_id, occurred_at=occurred()))
+                    if started.kind is not DbOutcomeKind.COMPLETED:
+                        raise StateDbFailure(
+                            f"取消动作开始事务未完成（{started.kind.value}）: {started.error}")
+                    if started.value.disposition is CancelStartDisposition.REJECTED:
+                        continue
+                item_ids = await _resolve_and_fix(database, repository, action_id, spec_json,
+                    occurred, motor_permits, start_entries)
+                if item_ids is None:
+                    continue
+            progress = await apply_cancel(
+                ApplyCancel(origin_action_id=action_id, item_ids=item_ids), cancellation_runtime)
+            if summarize_cancel(progress).status is CancellationStatus.RUNNING:
+                continue
+            finished = await _save_command(database, repository.finish_cancel_action,
+                FinishCancelAction(action_id, occurred()))
+            if finished.kind is not DbOutcomeKind.COMPLETED:
+                raise StateDbFailure(
+                    f"取消动作终态事务未完成（{finished.kind.value}）: {finished.error}")
     return flow
 
 
-def _resolve_and_fix(
-        owned: Any, repository: Any, action_id: int, spec_json: str,
-        occurred: Callable[[], int], motor_permits: dict | None = None,
+async def _resolve_and_fix(
+        database: Any, repository: Any, action_id: int, spec_json: str,
+        occurred: Callable[[], int], motor_permits: dict | None = None, start_entries=None,
 ) -> tuple[int, ...] | None:
-    """解析并固定取消目标；可靠不存在或自身包含时按登记错误结束。
-
-    返回固定成员编号；取消动作已按解析失败终态时返回 None。
-    """
-    from camctl.cancellation.models import (
-        FailCancelTargets,
-        FixCancelTargets,
-        ResolvedTargets,
-        TargetFacts,
-    )
+    """只向数据库操作交付本次已经取得的有限许可事实。"""
+    from camctl.cancellation.models import FixCancelTargets, ResolvedTargets, TargetFacts, CancelTargetError
     from camctl.cancellation.rules import (
-        decide_cancel_eligibility,
-        load_eligibility_facts,
-        may_link_auto_preview,
+        current_eligibility_facts, decide_cancel_eligibility,
+        load_eligibility_inputs, may_link_auto_preview,
     )
-    from camctl.cancellation.targets import (
-        missing_target_error,
-        prepare_cancel_set,
-        resolve_cancel_target,
-    )
-    from camctl.persistence.repositories.cancellation import (
-        SqliteCancelLookup,
-        sqlite_auto_candidates,
-    )
-
-    target = _cancel_target_from_input(spec_json)
-    resolution = resolve_cancel_target(
-        target, SqliteCancelLookup(owned.connection))
-    if resolution.lookup_failed is not None:
-        raise StateDbFailure(
-            f"取消目标查询失败: {resolution.lookup_failed}")
-    if resolution.missing:
-        _fail_cancel_targets(
-            owned, repository, action_id,
-            missing_target_error(target), occurred)
-        return None
-    from camctl.persistence.transaction import row_facts
-    connection = owned.connection
-    with closing(connection.execute(
-            "SELECT id FROM actions WHERE status IN (3, 4, 5, 6)")) as cursor:
-        terminal = {int(row[0]) for row in cursor.fetchall()}
-    direct = tuple(
-        TargetFacts(
-            action_id=identity,
-            terminal=identity in terminal,
-            may_cancel=may_link_auto_preview(row_facts(connection, "actions", identity), decide_cancel_eligibility(
-                load_eligibility_facts(connection, identity, motor_permits=motor_permits,
-                    start_entries=getattr(repository, "start_entries", None),
-                    database_id=owned.metadata.instance_id))))
-        for identity in resolution.action_ids)
-    fixed = prepare_cancel_set(action_id, ResolvedTargets(
-        direct=direct,
-        auto_candidates=sqlite_auto_candidates(
-            connection, resolution.action_ids)))
-    from camctl.cancellation.models import CancelTargetError
-    if isinstance(fixed, CancelTargetError):
-        _fail_cancel_targets(owned, repository, action_id, fixed, occurred)
-        return None
+    from camctl.cancellation.targets import missing_target_error, prepare_cancel_set, resolve_cancel_target
+    from camctl.persistence.repositories.cancellation import SqliteCancelLookup, sqlite_auto_candidates
     from camctl.devices.start_entry import EntryBlock, is_hasselblad_photo
     from camctl.persistence.repositories.capture_facts import load_start_facts
-    entries = getattr(repository, "start_entries", None)
+
+    target = _cancel_target_from_input(spec_json)
+    resolution = await database.read(lambda owned: resolve_cancel_target(target, SqliteCancelLookup(owned.connection)))
+    if resolution.lookup_failed is not None:
+        raise StateDbFailure(f"取消目标查询失败: {resolution.lookup_failed}")
+    if resolution.missing:
+        await _fail_cancel_targets(database, repository, action_id, missing_target_error(target), occurred)
+        return None
+    permits = {identity: (motor_permits or {}).get(identity) for identity in resolution.action_ids}
+    def read(owned):
+        connection = owned.connection
+        inputs = []
+        candidates = []
+        for identity in resolution.action_ids:
+            loaded = load_eligibility_inputs(
+                connection, identity, motor_permit=permits[identity])
+            inputs.append((identity, loaded))
+            original = loaded.action
+            if (is_hasselblad_photo(original) and original["status"] not in (3,4,5,6)
+                    and not original["cancel_requested"]):
+                facts = load_start_facts(connection, original)
+                candidates.append((identity, facts.attempts_used == 0))
+        return (tuple(inputs),
+                sqlite_auto_candidates(connection, resolution.action_ids),
+                tuple(candidates))
+    inputs, auto_candidates, candidates = await database.read(read)
+    direct = []
+    for identity, loaded in inputs:
+        entry = None if start_entries is None else start_entries.get(
+            database.metadata.instance_id, identity)
+        facts = current_eligibility_facts(
+            loaded, None if entry is None else entry.phase)
+        direct.append(TargetFacts(
+            action_id=identity, terminal=facts.terminal,
+            may_cancel=may_link_auto_preview(
+                loaded.action, decide_cancel_eligibility(facts))))
+    fixed = prepare_cancel_set(action_id, ResolvedTargets(
+        direct=tuple(direct), auto_candidates=auto_candidates))
+    if isinstance(fixed, CancelTargetError):
+        await _fail_cancel_targets(database, repository, action_id, fixed, occurred)
+        return None
     blocks = []
-    if entries is not None:
-        for target in fixed.targets:
-            original = row_facts(connection, "actions", target.action_id)
-            if (not is_hasselblad_photo(original) or original["status"] in (3,4,5,6)
-                    or original["cancel_requested"]):
+    selected = {target.action_id for target in fixed.targets}
+    if start_entries is not None:
+        for identity, no_intent in candidates:
+            if identity not in selected:
                 continue
-            facts = load_start_facts(connection, original)
-            permit = entries.reserve(owned.metadata.instance_id, target.action_id,
-                                     no_intent=facts.attempts_used == 0)
+            permit = start_entries.reserve(database.metadata.instance_id, identity, no_intent=no_intent)
             if permit is not None:
                 blocks.append(EntryBlock(permit.database_id, permit.action_id, permit.ticket))
     request = FixCancelTargets(action_id, fixed, occurred(), tuple(blocks))
     key = new_operation_key()
     if blocks:
-        entries.pending_cancels[action_id] = (request, key)
-    saved = repository.fix_cancel_targets(request, key, owned)
+        start_entries.pending_cancels[action_id] = (request, key)
+    saved = await _fix_cancel_request(database, repository, request, key, start_entries)
     if saved.kind is not DbOutcomeKind.COMPLETED:
-        raise StateDbFailure(
-            f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}")
+        raise StateDbFailure(f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}")
     return saved.value.item_ids
 
 
-def _fail_cancel_targets(
-        owned: Any, repository: Any, action_id: int, error, occurred) -> None:
+async def _fail_cancel_targets(database, repository, action_id, error, occurred):
     from camctl.cancellation.models import FailCancelTargets
-
-    outcome = repository.fail_cancel_targets(
-        FailCancelTargets(action_id, error, occurred()),
-        new_operation_key(), owned)
+    outcome = await _save_command(database, repository.fail_cancel_targets,
+        FailCancelTargets(action_id, error, occurred()))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise StateDbFailure(
-            f"取消目标解析失败事务未完成（{outcome.kind.value}）"
-            f": {outcome.error}")
+        raise StateDbFailure(f"取消目标解析失败事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
 def _report_status_params(spec_json: str) -> dict:
@@ -751,17 +732,15 @@ def _report_status_params(spec_json: str) -> dict:
     return params
 
 
-def _start_due_report_actions(owned: Any, now_us: int) -> None:
+async def _start_due_report_actions(database: Any, now_us: int) -> None:
     """开始到期的报告动作并建立同步责任；起点在同事务内确定。"""
     from camctl.reporting.models import SyncMode
     from camctl.reporting.policy import start_sync
 
-    with closing(owned.connection.execute(
-            "SELECT id, input_fields_json FROM actions"
-            " WHERE status = 1 AND cancel_requested = 0 AND type = 7"
-            " AND (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY id",
-            (now_us,))) as cursor:
-        rows = cursor.fetchall()
+    rows = await _query_rows(database,
+        "SELECT id, input_fields_json FROM actions"
+        " WHERE status = 1 AND cancel_requested = 0 AND type = 7"
+        " AND (scheduled_at IS NULL OR scheduled_at <= ?) ORDER BY id", (now_us,))
     for action_id, spec_json in rows:
         params = _report_status_params(spec_json)
         scope = params.get("scope")
@@ -778,31 +757,28 @@ def _start_due_report_actions(owned: Any, now_us: int) -> None:
         else:
             raise StateDbFailure(
                 f"报告动作 {action_id} 的同步范围未知: {scope!r}")
-        outcome = start_sync(
-            new_operation_key(), owned, action_id=int(action_id),
+        outcome = await _policy_write(database, start_sync, action_id=int(action_id),
             mode=mode, after_report_id=after_report_id, occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise StateDbFailure(
                 f"同步开始事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
-def _settle_canceled_sync_actions(owned: Any, now_us: int) -> None:
+async def _settle_canceled_sync_actions(database: Any, now_us: int) -> None:
     """按目标自身标记完成取消收场，不依赖原取消发起者继续等待。"""
     from camctl.reporting.policy import finish_canceled_sync_action
 
-    with closing(owned.connection.execute(
-            "SELECT id FROM actions WHERE type = 7 AND status = 2"
-            " AND cancel_requested = 1 ORDER BY id")) as cursor:
-        action_ids = tuple(int(row[0]) for row in cursor.fetchall())
+    rows = await _query_rows(database, "SELECT id FROM actions WHERE type = 7 AND status = 2"
+        " AND cancel_requested = 1 ORDER BY id")
+    action_ids = tuple(int(row[0]) for row in rows)
     for action_id in action_ids:
-        outcome = finish_canceled_sync_action(
-            new_operation_key(), owned, action_id=action_id, occurred_at=now_us)
+        outcome = await _policy_write(database, finish_canceled_sync_action, action_id=action_id, occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise StateDbFailure(
                 f"报告取消收场事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
-def _settle_covered_local_syncs(owned: Any, now_us: int) -> None:
+async def _settle_covered_local_syncs(database: Any, now_us: int) -> None:
     """为已被已发布报告覆盖的同步动作补齐本地完成。
 
     覆盖条件：报告起点不晚于同步起点，且报告采用的记录已包含该
@@ -810,17 +786,15 @@ def _settle_covered_local_syncs(owned: Any, now_us: int) -> None:
     """
     from camctl.reporting.policy import record_local_report
 
-    with closing(owned.connection.execute(
-            "SELECT s.action_id, MAX(r.id) FROM state_syncs s"
-            " JOIN reports r ON r.status = 4 AND r.from_wm <= s.from_wm"
-            " AND r.frozen_event_id >= s.started_boundary_event_id"
-            " WHERE s.status IN (1, 2) AND s.local_report_id IS NULL AND s.action_id IN"
-            " (SELECT id FROM actions WHERE status = 2 AND cancel_requested = 0)"
-            " GROUP BY s.action_id ORDER BY s.action_id")) as cursor:
-        rows = cursor.fetchall()
+    rows = await _query_rows(database,
+        "SELECT s.action_id, MAX(r.id) FROM state_syncs s"
+        " JOIN reports r ON r.status = 4 AND r.from_wm <= s.from_wm"
+        " AND r.frozen_event_id >= s.started_boundary_event_id"
+        " WHERE s.status IN (1, 2) AND s.local_report_id IS NULL AND s.action_id IN"
+        " (SELECT id FROM actions WHERE status = 2 AND cancel_requested = 0)"
+        " GROUP BY s.action_id ORDER BY s.action_id")
     for action_id, report_id in rows:
-        outcome = record_local_report(
-            new_operation_key(), owned, action_id=int(action_id),
+        outcome = await _policy_write(database, record_local_report, action_id=int(action_id),
             local_report_id=int(report_id), occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise StateDbFailure(
@@ -854,7 +828,7 @@ def _failed_report_ids(owned: Any) -> tuple[int, ...]:
 @dataclass(frozen=True)
 class _ReportMaintenanceFlow:
     advance: Callable[[Any], Any]
-    should_advance: Callable[[Any], bool]
+    should_advance: Callable[[Any], Any]
 
     async def __call__(self, context: Any) -> None:
         await self.advance(context)
@@ -903,15 +877,14 @@ def report_flow(
 
         return staging / REPORTS_DIRECTORY / f"report-{report_id}-{job_id}.tmp"
 
-    def _record_failure(owned: Any, report_id: int, now_us: int, detail: str) -> None:
+    async def _record_failure(business: Any, report_id: int, now_us: int, detail: str) -> None:
         from camctl.devices.bindings import DeviceConfigurationError
         from camctl.persistence.runtime import DirectoryBindingError
         from camctl.reporting.policy import record_report_failure
         from camctl.session.clock import ClockBecameUntrusted
 
         try:
-            outcome = record_report_failure(
-                new_operation_key(), owned, report_id, {"error": detail},
+            outcome = await _policy_write(business, record_report_failure, report_id, {"error": detail},
                 occurred_at=now_us)
         except (StateDbFailure, DirectoryBindingError, DeviceConfigurationError,
                 ClockBecameUntrusted):
@@ -924,7 +897,7 @@ def report_flow(
                 f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
 
     async def _recover_or_generate(
-            report_id: int, owned: Any, now_us: int) -> str | None:
+            report_id: int, business: Any, now_us: int) -> str | None:
         """推进一份报告；失败时返回已确认的实际失败摘要。"""
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
@@ -960,9 +933,8 @@ def report_flow(
             JsonParseError, SchemaRuleError,
         )
 
-        with closing(owned.connection.execute(
-                "SELECT status, to_wm FROM reports WHERE id = ?", (report_id,))) as cursor:
-            status, attempted_wm = cursor.fetchone()
+        status, attempted_wm = (await _query_rows(business,
+            "SELECT status, to_wm FROM reports WHERE id = ?", (report_id,)))[0]
         from camctl.reporting.ack import validate_watermark
         validate_watermark(attempted_wm, "attempted_to_wm")
         progress.checked_to_wm = max(progress.checked_to_wm, attempted_wm)
@@ -978,28 +950,26 @@ def report_flow(
                 (identity for identity in locations.ready.files
                  if identity.report_id == report_id), None)
             if recovered is not None:
-                outcome = record_recovered_publication(
-                    new_operation_key(), owned, report_id,
+                outcome = await _policy_write(business, record_recovered_publication, report_id,
                     observed_sha256=recovered.sha256, occurred_at=now_us)
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise StateDbFailure(
                         f"发布恢复事务未完成（{outcome.kind.value}）:"
                         f" {outcome.error}")
-                _settle_covered_local_syncs(owned, now_us)
+                await _settle_covered_local_syncs(business, now_us)
                 return None
 
         try:
-            repository = HistoryRepository(
-                state_db,
-                config=DbConfig(busy_timeout_ms=database.busy_timeout_ms))
-            registration = repository.frozen_registration(report_id)
+            from camctl.persistence.repositories.history import read_frozen_registration
+            registration = await business.read(
+                lambda owned: read_frozen_registration(owned.connection, report_id))
         except (StateDatabaseError, ConsistencyError, PublicProjectionError,
                 BoundaryError, HistoryEventError, ReplayError,
                 JsonParseError) as error:
             raise StateDbFailure(
                 f"报告 {report_id} 的冻结依据不可靠: {error}") from error
-        local_actions = _covered_local_actions(
-            owned, registration.from_wm, registration.boundary.last_event_id)
+        local_actions = await business.read(lambda owned: _covered_local_actions(
+            owned, registration.from_wm, registration.boundary.last_event_id))
         job_id = new_job_id()
         job = JobMessage(
             job_id=job_id,
@@ -1007,7 +977,7 @@ def report_flow(
             from_wm=registration.from_wm,
             to_wm=registration.to_wm,
             frozen_event_id=registration.boundary.last_event_id,
-            instance_id=owned.metadata.instance_id,
+            instance_id=business.metadata.instance_id,
             db_path=str(state_db),
             staging_path=str(_temporary_staging_path(report_id, job_id)),
             staging_root=str(staging), ready_root=str(ready), processing_root=str(processing),
@@ -1024,7 +994,7 @@ def report_flow(
         except Exception as error:
             # 监督结果之外的普通生成错误也结束本次已冻结责任；
             # 保留原错误身份交给报告边界，不因下次轮询重新派发。
-            _record_failure(owned, report_id, now_us, f"报告生成失败: {error}")
+            await _record_failure(business, report_id, now_us, f"报告生成失败: {error}")
             raise
         if generation.kind is GenerationOutcomeKind.STATE_FAILURE:
             failure = generation.failure
@@ -1042,7 +1012,7 @@ def report_flow(
             detail = (f"{failure.error_code}: {failure.error_message}"
                       if failure is not None else generation.detail)
             failure_detail = f"报告生成失败: {detail}"
-            _record_failure(owned, report_id, now_us, failure_detail)
+            await _record_failure(business, report_id, now_us, failure_detail)
             return f"report_id={report_id}; {failure_detail}"
         success = generation.success
         identity = parse_report_file_name(Path(success.path).name)
@@ -1056,7 +1026,7 @@ def report_flow(
                 StagedReport(name=Path(success.path).name,
                              size_bytes=success.size_bytes, sha256=success.sha256),
                 HandoffDirectories(staging, ready),
-                DbPublicationSession(owned),
+                DbPublicationSession(business),
                 local_actions=local_actions,
             )
         except prerequisite_errors:
@@ -1064,10 +1034,10 @@ def report_flow(
         except state_errors as error:
             raise StateDbFailure(f"报告 {report_id} 文件交接遇到状态库错误: {error}") from error
         except Exception as error:
-            _record_failure(owned, report_id, now_us, f"报告文件交接失败: {error}")
+            await _record_failure(business, report_id, now_us, f"报告文件交接失败: {error}")
             raise
         if delivery.outcome is DeliveryOutcome.PUBLISHED:
-            _settle_covered_local_syncs(owned, now_us)
+            await _settle_covered_local_syncs(business, now_us)
             return None
         if delivery.outcome in (DeliveryOutcome.STORE_FAILED,
                                 DeliveryOutcome.UNKNOWN):
@@ -1080,20 +1050,20 @@ def report_flow(
                 f"{delivery.error or delivery.outcome.value}")
         failure_detail = (
             f"报告发布失败: {delivery.outcome.value}: {delivery.error}")
-        _record_failure(owned, report_id, now_us, failure_detail)
+        await _record_failure(business, report_id, now_us, failure_detail)
         return f"report_id={report_id}; {failure_detail}"
 
     progress = _ReportMaintenanceProgress()
 
-    def should_advance(context: Any) -> bool:
+    async def should_advance(context: Any) -> bool:
         observer = getattr(context, "report_change_wm", None)
         if not start_actions or observer is None:
             return True
         try:
-            latest = observer()
+            latest = await observer()
             from camctl.reporting.ack import validate_watermark
             validate_watermark(latest, "latest_change_wm")
-        except (sqlite3.Error, ConsistencyError) as error:
+        except (sqlite3.Error, ConsistencyError, DbEnqueueTimeoutError, DbExecutorError) as error:
             raise StateDbFailure(f"报告维护无法可靠观察业务水位: {error}") from error
         return (not progress.started or bool(progress.remaining_reports)
                 or latest > progress.checked_to_wm
@@ -1106,70 +1076,57 @@ def report_flow(
 
         first_round = not progress.started
         progress.started = True
-        try:
-            owned = context.open_connection()
-        except DirectoryBindingError:
-            raise
-        except (StateDatabaseError, sqlite3.Error) as error:
-            raise StateDbFailure(f"报告维护无法可靠打开状态库: {error}") from error
+        business = context.database
         try:
             now_us = context.clock.utc_micros()
-            _settle_canceled_sync_actions(owned, now_us)
+            await _settle_canceled_sync_actions(business, now_us)
             if start_actions:
-                _start_due_report_actions(owned, now_us)
-            _settle_covered_local_syncs(owned, now_us)
+                await _start_due_report_actions(business, now_us)
+            await _settle_covered_local_syncs(business, now_us)
             if start_actions and getattr(context, "report_change_wm", None) is not None:
-                with closing(owned.connection.execute(
-                        "SELECT MIN(COALESCE(scheduled_at, ?)) FROM actions"
-                        " WHERE status = 1 AND cancel_requested = 0 AND type = 7",
-                        (now_us,))) as cursor:
-                    progress.next_due_at = cursor.fetchone()[0]
-            pending = tuple(dict.fromkeys((
-                *_in_flight_report_ids(owned), *progress.remaining_reports)))
+                rows = await _query_rows(business,
+                    "SELECT MIN(COALESCE(scheduled_at, ?)) FROM actions"
+                    " WHERE status = 1 AND cancel_requested = 0 AND type = 7", (now_us,))
+                progress.next_due_at = rows[0][0]
+            in_flight = await business.read(_in_flight_report_ids)
+            pending = tuple(dict.fromkeys((*in_flight, *progress.remaining_reports)))
             if not pending:
-                outcome = ReportingRepository().freeze_report(
-                    new_operation_key(), owned, occurred_at=now_us)
-                if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
-                        f"报告冻结事务未完成（{outcome.kind.value}）:"
-                        f" {outcome.error}")
-                if getattr(context, "report_change_wm", None) is not None:
-                    progress.checked_to_wm = max(
-                        progress.checked_to_wm, outcome.value.checked_to_wm)
-                pending = _in_flight_report_ids(owned)
-            # 会话首轮重试此前失败的报告；同轮失败后不再重复，等待
-            # 新的会话触发。
+                async def freeze_and_apply():
+                    outcome = await _policy_write(business, ReportingRepository().freeze_report, occurred_at=now_us)
+                    if outcome.kind is not DbOutcomeKind.COMPLETED:
+                        raise StateDbFailure(
+                            f"报告冻结事务未完成（{outcome.kind.value}）: {outcome.error}")
+                    if getattr(context, "report_change_wm", None) is not None:
+                        progress.checked_to_wm = max(progress.checked_to_wm, outcome.value.checked_to_wm)
+                    return outcome
+                await settle_required(freeze_and_apply())
+                pending = await business.read(_in_flight_report_ids)
             if first_round and not pending:
-                pending = _failed_report_ids(owned)
+                pending = await business.read(_failed_report_ids)
             round_clean = True
             progress.remaining_reports = ()
             for index, report_id in enumerate(pending):
-                # 当前报告的普通异常交原日志边界，尚未尝试的同水位
-                # 报告仍须在后续调度中推进；本次失败项不因该标记重试。
                 progress.remaining_reports = pending[index + 1:]
-                failure_detail = await _recover_or_generate(
-                    report_id, owned, now_us)
+                failure_detail = await _recover_or_generate(report_id, business, now_us)
                 if failure_detail is not None:
                     round_clean = False
                     if on_failure is not None:
-                        # 可靠登记的报告错误立即尝试日志副本；不持有
-                        # 写事务，也不等待本轮其余报告后再复制。
                         try:
                             await on_failure(context, RuntimeError(failure_detail))
                         except Exception:
                             pass
-            if (on_recovered is not None and round_clean
-                    and not _in_flight_report_ids(owned)
-                    and not _failed_report_ids(owned)):
-                # 本轮报告处理全部可靠完成且无遗留失败责任：报告本
-                # 地处理已恢复，结束日志副本的故障轮。标记维护的失
-                # 败不阻止报告职责。
-                try:
-                    await on_recovered()
-                except Exception:
-                    pass
-        except (sqlite3.Error, ConsistencyError) as error:
+            if on_recovered is not None and round_clean:
+                remaining = await business.read(lambda owned: (
+                    _in_flight_report_ids(owned), _failed_report_ids(owned)))
+                if not any(remaining):
+                    try:
+                        await on_recovered()
+                    except Exception:
+                        pass
+        except DirectoryBindingError:
+            raise
+        except (StateDatabaseError, sqlite3.Error, ConsistencyError,
+                DbEnqueueTimeoutError, DbExecutorError) as error:
             raise StateDbFailure(f"报告维护无法可靠读取或保存状态库事实: {error}") from error
-        finally:
-            owned.connection.close()
+
     return _ReportMaintenanceFlow(flow, should_advance)

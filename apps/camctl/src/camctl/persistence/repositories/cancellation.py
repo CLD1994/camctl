@@ -527,11 +527,11 @@ class _ApplyCancelTargetCommand:
     保存成功；目标取消已生效时只保存本项效果，复用原责任。
     """
 
-    def __init__(self, command: ApplyCancelTarget, key: OperationKey, motor_permits=None,
+    def __init__(self, command: ApplyCancelTarget, key: OperationKey, motor_permit=None,
                  *, fixed_item=None, result_events=(), prior_pre_start_ids=frozenset()) -> None:
         if not isinstance(command, ApplyCancelTarget):
             raise TypeError("取消生效申请必须使用 ApplyCancelTarget")
-        self._motor_permits = motor_permits if motor_permits is not None else {}
+        self._motor_permit = motor_permit
         self._fixed_item, self._result_events = fixed_item, result_events
         self._prior_pre_start_ids = prior_pre_start_ids
         self._command = command
@@ -587,7 +587,7 @@ class _ApplyCancelTargetCommand:
                 from camctl.persistence.repositories.motor import read_motor_facts
                 facts = read_motor_facts(connection, target_id)
                 if facts.notification is not None:
-                    permit = self._motor_permits.get(target_id)
+                    permit = self._motor_permit
                     if not owns_send_permit(facts,permit):
                         raise ConsistencyError('电机未发送取消缺少本地原意图许可')
                     notice = row_facts(connection,'motor_notifications',facts.notification.notification_id)
@@ -1091,9 +1091,6 @@ def _verify_motor_cancel_rows(connection, saved, item):
 class CancellationRepository:
     """取消目标固定与解析失败事务的 SQLite 仓储。"""
 
-    def __init__(self, *, motor_permits=None, start_entries=None):
-        self.motor_permits = motor_permits if motor_permits is not None else {}
-        self.start_entries = start_entries
 
     def verify_motor_operation(self, command, key, owned):
         """使用新连接只读核实电机目标的原生效或原结果事务。"""
@@ -1124,7 +1121,7 @@ class CancellationRepository:
             else:
                 if isinstance(command, ApplyCancelTarget):
                     plan = _ApplyCancelTargetCommand(
-                        command, key, self.motor_permits
+                        command, key
                     )._reuse(connection, saved)
                 else:
                     plan = _RecordCancelResultCommand(command, key)._reuse(saved)
@@ -1186,18 +1183,11 @@ class CancellationRepository:
 
     def fix_cancel_targets(
         self, command: FixCancelTargets, key: OperationKey,
-        owned: OwnedConnection,
+        owned: OwnedConnection, *, reserved_entries=(),
     ) -> DbOutcome[CancelTargetsSaved]:
-        planner = (_FixPhotoEntriesCommand(command, key, self.start_entries, owned.metadata.instance_id)
+        planner = (_FixPhotoEntriesCommand(command, key, reserved_entries, owned.metadata.instance_id)
                    if command.entry_blocks else _FixCancelTargetsCommand(command, key))
         receipt = commit_operation(planner, key, owned)
-        if command.entry_blocks and receipt.kind == "completed" and self.start_entries is not None:
-            from camctl.devices.start_entry import EntryPhase
-            for block in command.entry_blocks:
-                permit = self.start_entries.get(block.database_id, block.action_id)
-                if permit is not None and permit.ticket == block.ticket:
-                    permit.phase = EntryPhase.BLOCKED
-            self.start_entries.pending_cancels.pop(command.action_id, None)
         return _outcome_of(receipt)
 
     def fail_cancel_targets(
@@ -1210,10 +1200,10 @@ class CancellationRepository:
 
     def apply_cancel_target(
         self, command: ApplyCancelTarget, key: OperationKey,
-        owned: OwnedConnection,
+        owned: OwnedConnection, *, motor_permit=None,
     ) -> DbOutcome[CancelTargetsSaved]:
         receipt = commit_operation(
-            _ApplyCancelTargetCommand(command, key, self.motor_permits), key, owned)
+            _ApplyCancelTargetCommand(command, key, motor_permit), key, owned)
         return _outcome_of(receipt)
 
     def record_cancel_result(
@@ -2124,9 +2114,9 @@ def include_photo_entry_rows(connection, action, state, owners):
 class _FixPhotoEntriesCommand:
     """只组合已封住入口的 Hasselblad 原结果、固定集合与源取消。"""
 
-    def __init__(self, command, key, coordinator, database_id):
+    def __init__(self, command, key, reserved_entries, database_id):
         self.command, self.key = command, key
-        self.coordinator, self.database_id = coordinator, database_id
+        self.reserved_entries, self.database_id = dict(reserved_entries), database_id
 
     def _request(self):
         from dataclasses import asdict
@@ -2153,10 +2143,9 @@ class _FixPhotoEntriesCommand:
         plans = []
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         for block in self.command.entry_blocks:
-            permit = None if self.coordinator is None else self.coordinator.get(block.database_id, block.action_id)
+            phase = self.reserved_entries.get(block)
             target = row_facts(scope.connection, 'actions', block.action_id)
-            if (block.database_id != self.database_id or permit is None
-                    or permit.phase is not EntryPhase.RESERVED or permit.ticket != block.ticket
+            if (block.database_id != self.database_id or phase is not EntryPhase.RESERVED
                     or not is_hasselblad_photo(target) or target['cancel_requested']
                     or target['status'] not in (1,2)):
                 raise ConsistencyError('取消原 START 缺少匹配且已封住的未进入许可')

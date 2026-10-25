@@ -2,7 +2,10 @@
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, create_autospec
+from unittest.mock import create_autospec
+import sqlite3
+from support.business_database import inline_business_database
+from camctl.persistence.runtime import OwnedConnection, DatabaseMetadata
 
 import pytest
 
@@ -14,9 +17,11 @@ from camctl.session.service import StateDbFailure
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("start_actions", [False, True])
-async def test_report_open_failure_is_state_database_failure(start_actions):
-    opener = Mock(side_effect=DatabaseInvalidError("database_metadata 不可读"))
-    context = SimpleNamespace(open_connection=opener)
+async def test_report_shared_database_read_failure_is_state_database_failure(start_actions):
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    connection.execute.side_effect = DatabaseInvalidError("database_metadata 不可读")
+    owned = OwnedConnection(connection, DatabaseMetadata("camctl", "a" * 32, 1, "/staging", "/ready", "/processing"))
+    context = SimpleNamespace(database=inline_business_database(owned), clock=SimpleNamespace(utc_micros=lambda: 1))
     flow = report_flow(
         state_db=Path("/state.db"), staging=Path("/staging"), ready=Path("/ready"),
         processing=Path("/processing"), history=None, database=None,

@@ -117,8 +117,12 @@ async def enter_execution(check: ClockCheck, context) -> ExecutionMode:
     if not check.trusted:
         return ExecutionMode.RESTRICTED
     if check.needs_bound_update:
-        outcome = context.repository.update_lower_bound(
-            check, context.operation_key, context.owned
+        outcome = await context.database.write(
+            lambda owned: context.repository.update_lower_bound(
+                check, context.operation_key, owned
+            ),
+            key=context.operation_key,
+            description="可信时间下界更新",
         )
         if outcome.kind.value != "completed":
             return ExecutionMode.FATAL

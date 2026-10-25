@@ -8,10 +8,14 @@
 from __future__ import annotations
 
 import pytest
+import sqlite3
+from unittest.mock import create_autospec
+from camctl.persistence.runtime import OwnedConnection, DatabaseMetadata
 
 from camctl.acceptance.rules import ActionManagement, PlanState, derive_plan_state
 from camctl.acceptance.service import AckDisposition, PlanDisposition
 from camctl.acceptance.notification import AcceptanceNotifier, notify_acceptance
+from support.business_database import inline_business_database
 
 
 class RecordingNotifier:
@@ -123,9 +127,11 @@ class TestNotifyAcceptance:
             clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
         )
         parsed = ParsedInput(path="p", document={"request_id": "1"})
+        key = new_operation_key()
+        database = inline_business_database(OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True), DatabaseMetadata("camctl", "a" * 32, 1, "/staging", "/ready", "/processing")))
 
         async def scenario() -> None:
-            await accept_input(parsed, context, new_operation_key(), None)
+            await accept_input(parsed, context, key, database)
 
         with pytest.raises(AcceptanceStateError):
             asyncio.run(scenario())

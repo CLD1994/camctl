@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -31,6 +32,9 @@ __all__ = [
     "EligibilityFacts",
     "decide_cancel_eligibility",
     "load_eligibility_facts",
+    "LoadedEligibility",
+    "load_eligibility_inputs",
+    "current_eligibility_facts",
     "may_apply_cancel",
     "may_link_auto_preview",
     "summarize_cancel",
@@ -187,8 +191,45 @@ _ACTION_TERMINAL = (3, 4, 5, 6)
 _TIME_LAPSE_TYPE = 3
 
 
-def load_eligibility_facts(connection, action_id: int, *, motor_permit=None,
-                           entry_phase=None) -> EligibilityFacts:
+@dataclass(frozen=True)
+class LoadedEligibility:
+    """一次数据库读取得到的资格输入；入口许可由事件循环随后应用。"""
+
+    action: dict[str, Any]
+    facts: EligibilityFacts
+    entered_dispatch: DispatchPhase | None = None
+
+
+def current_eligibility_facts(loaded: LoadedEligibility, entry_phase) -> EligibilityFacts:
+    """在数据库等待结束后，应用当前 START 入口阶段。"""
+    if (loaded.facts.terminal or loaded.facts.cancel_applied
+            or loaded.entered_dispatch is None or entry_phase is None):
+        return loaded.facts
+    from camctl.devices.start_entry import EntryPhase
+    if not isinstance(entry_phase, EntryPhase):
+        raise ConsistencyError("START 入口阶段类型不可解释")
+    if entry_phase in (EntryPhase.UNKNOWN, EntryPhase.RESERVED):
+        raise ConsistencyError("START 授予或取消事务尚未核实")
+    if entry_phase is EntryPhase.ENTERED:
+        dispatch = loaded.entered_dispatch
+    elif entry_phase is EntryPhase.READY:
+        dispatch = DispatchPhase.NOT_STARTED
+    else:
+        return loaded.facts
+    facts = loaded.facts
+    return EligibilityFacts(
+        terminal=facts.terminal, cancel_applied=facts.cancel_applied,
+        dispatch=dispatch, stop_supported=facts.stop_supported,
+        facts_reliable=facts.facts_reliable)
+
+
+def load_eligibility_facts(connection, action_id: int, *, motor_permit=None) -> EligibilityFacts:
+    """读取目标的持久取消资格事实，不读取会话入口许可。"""
+    return load_eligibility_inputs(
+        connection, action_id, motor_permit=motor_permit).facts
+
+
+def load_eligibility_inputs(connection, action_id: int, *, motor_permit=None) -> LoadedEligibility:
     """从已保存事实装配目标设备任务的取消资格输入。
 
     停止能力优先取首次建立活动时保存的 `device_activities.stop_
@@ -198,17 +239,20 @@ def load_eligibility_facts(connection, action_id: int, *, motor_permit=None,
     action = _action_row(connection, action_id)
     if action is None:
         raise ConsistencyError(f"取消目标动作不存在: {action_id}")
+    def loaded(facts, entered_dispatch=None):
+        return LoadedEligibility(action, facts, entered_dispatch)
+
     kind = action["type"]
     if kind == 8:
         from camctl.motor.rules import owns_send_permit
         from camctl.persistence.repositories.motor import read_motor_facts
         facts = read_motor_facts(connection, action_id)
         local = owns_send_permit(facts, motor_permit)
-        return EligibilityFacts(
+        return loaded(EligibilityFacts(
             terminal=action['status'] in _ACTION_TERMINAL,
             cancel_applied=bool(action['cancel_requested']),
             dispatch=DispatchPhase.NOT_STARTED if facts.notification is None or local else DispatchPhase.START_PENDING,
-            stop_supported=False)
+            stop_supported=False))
     if (kind not in _CAPTURE_TYPES and kind not in
             (_OBTAIN_TASK_TYPE, _CANCEL_TASK_TYPE, _CLEANUP_TASK_TYPE,
              _REPORT_TASK_TYPE)):
@@ -220,28 +264,23 @@ def load_eligibility_facts(connection, action_id: int, *, motor_permit=None,
         # 读取结束、解除限制或同步责任分类）：终态保持、取消已生效
         # 则复用原责任；未开始的目标没有在途工作，按未启动分区直接
         # 终态取消，已开始的允许标记后由各自流程收场。
-        return EligibilityFacts(
+        return loaded(EligibilityFacts(
             terminal=action["status"] in _ACTION_TERMINAL,
             cancel_applied=bool(action["cancel_requested"]),
             dispatch=(DispatchPhase.STARTED if action["execution_started"] == 1
                       else DispatchPhase.NOT_STARTED),
-            stop_supported=True)
+            stop_supported=True))
     activity = _activity_row(connection, action_id)
     not_started = None
+    entered_dispatch = None
     if action["status"] not in _ACTION_TERMINAL and not action["cancel_requested"]:
         start = load_start_facts(connection, action)
-        from camctl.devices.start_entry import is_hasselblad_photo, EntryPhase
+        from camctl.devices.start_entry import is_hasselblad_photo
         not_started = start.not_started
-        if is_hasselblad_photo(action) and entry_phase is not None:
-            if not isinstance(entry_phase, EntryPhase):
-                raise ConsistencyError("START 入口阶段类型不可解释")
-            if entry_phase in (EntryPhase.UNKNOWN, EntryPhase.RESERVED):
-                raise ConsistencyError("START 授予或取消事务尚未核实")
-            if entry_phase is EntryPhase.ENTERED:
-                not_started = False
-            elif entry_phase is EntryPhase.READY:
-                not_started = True
-    return capture_eligibility_facts(action, activity, not_started=not_started)
+        if is_hasselblad_photo(action):
+            entered_dispatch = _dispatch_phase(activity)
+    return loaded(capture_eligibility_facts(
+        action, activity, not_started=not_started), entered_dispatch)
 
 
 def capture_eligibility_facts(action, activity, *, not_started=None):

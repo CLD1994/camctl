@@ -63,6 +63,9 @@ class RuntimeDeps:
     admission_lock: Path
     catalog: Any
     notifier: Any = None
+    #: 只在会话锁内打开；全部业务及快照共用其执行器。
+    database: Any = None
+    snapshot_owner: Any = None
     #: 报告失败日志副本的文件通道；首次触发时创建，关闭时释放。
     failure_channel: Any = None
     #: stderr 诊断曾发生写入错误后停止再次尝试。
@@ -104,6 +107,7 @@ class RuntimeDeps:
     #: 原结果页保存申请由普通、残留和受限工厂共享。
     capture_result_scans: dict = field(default_factory=dict)
     capture_segment_writes: dict = field(default_factory=dict)
+    capture_segment_inspection_results: dict = field(default_factory=dict)
     #: 已确认录像的原单调锚点及停止目标；仅在本次会话内有效。
     capture_recording_anchors: dict[int, tuple[int, int]] = field(default_factory=dict)
     #: 已保存等待的原返回锚点；由流程行与剩余预算判定适用性。
@@ -126,21 +130,21 @@ class RuntimeDeps:
     cleanup_active_calls: set = field(default_factory=set)
 
 
-def _resume_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
     """候选读取前保存原 READ、有限耗尽及拍摄申请，不取得设备资格。"""
     from camctl.capture.media_flow import resume_prepared_internal_reads
 
-    resume_prepared_internal_reads(owned,
+    await resume_prepared_internal_reads(database,
         pending_read_results=deps.capture_read_results,
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads)
-    _resume_capture_requests(deps, owned)
+    await _resume_capture_requests(deps, database)
 
 
-def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+async def _resume_capture_requests(deps: RuntimeDeps, database) -> None:
     """核实原拍摄终态及附属收尾，取消入口不取得新的 READ 业务资格。"""
-    resume_preparation_saves(owned, deps.capture_preparations)
+    await resume_preparation_saves(database, deps.capture_preparations)
     from camctl.capture.handlers import (
         resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,
     )
@@ -153,43 +157,43 @@ def _resume_capture_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.capture import CaptureRepository
 
-    runtime = SimpleNamespace(owned=owned, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
+    runtime = SimpleNamespace(database=database, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,
                               preparation_cache=deps.capture_preparations,
                               session_key=deps.session_key,
                               wall_us=lambda: SystemClock().utc_micros())
-    recover_terminal_baselines(runtime=runtime)
+    await recover_terminal_baselines(runtime=runtime)
     for action_id in tuple(deps.capture_baselines):
-        result = resume_baseline_save(action_id, runtime=runtime)
+        result = await resume_baseline_save(action_id, runtime=runtime)
         if result is not None and result.phase is PreparationPhase.PENDING:
             raise ConsistencyError(f"原基准保存仍未可靠完成: {result.database_error}")
 
-    resume_result_page_saves(owned, pending_scans=deps.capture_result_scans, repository=runtime.capture)
+    await resume_result_page_saves(database, pending_scans=deps.capture_result_scans, repository=runtime.capture)
     from camctl.capture.segment_completion import resume_segment_writes
 
-    resume_segment_writes(owned, deps.capture_segment_writes)
+    await resume_segment_writes(database, deps.capture_segment_writes)
 
-    resume_result_check_closes(owned,
+    await resume_result_check_closes(database,
         pending_result_closes=deps.capture_result_closes,
         retry_gate=deps.capture_retry_gate)
-    resume_capture_completions(owned,
+    await resume_capture_completions(database,
         pending_capture_completions=deps.capture_completions,
         retry_gate=deps.capture_retry_gate)
-    resume_canceled_recording_results(owned,
+    await resume_canceled_recording_results(database,
         pending_capture_completions=deps.capture_completions,
         retry_gate=deps.capture_retry_gate)
     for action_id in tuple(deps.capture_baselines):
-        result = resume_baseline_settlement(action_id, runtime=runtime)
+        result = await resume_baseline_settlement(action_id, runtime=runtime)
         if result is not None and result.phase is PreparationPhase.PENDING:
             raise ConsistencyError(f"原准备收场仍未可靠保存: {result.database_error}")
 
 
-def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:
+async def _resume_normal_read_requests(deps: RuntimeDeps, database) -> None:
     """普通与残留入口先核原申请，再处理实际完成且必要摘要绑定失效的读取。"""
     from camctl.capture.media_flow import resume_binding_internal_read_ends
     from camctl.devices.bindings import check_binding
 
-    _resume_read_requests(deps, owned)
-    resume_binding_internal_read_ends(owned,
+    await _resume_read_requests(deps, database)
+    await resume_binding_internal_read_ends(database,
         pending_read_results=deps.capture_read_results,
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
@@ -611,30 +615,36 @@ def _open_runtime_connection(deps: RuntimeDeps) -> OwnedConnection:
     return owned
 
 
-def _initialize_recovery(deps: RuntimeDeps, owned: OwnedConnection) -> None:
-    """在会话锁内固定旧历史边界，业务事务不得提前发生。"""
+async def _initialize_recovery(deps: RuntimeDeps, database) -> None:
+    """固定数据库恢复输入，再在主协程更新驱动和文件责任。"""
     from contextlib import closing
     from camctl.devices.drivers.adb_cameras.registration import begin_builtin_camera_session
     from camctl.devices.drivers.hasselblad.registration import begin_builtin_hasselblad_session
 
     begin_builtin_camera_session()
     begin_builtin_hasselblad_session()
-    if owned.metadata.format_version >= 3:
-        from camctl.devices.drivers.runtime import current_registry
-        from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
-        with closing(owned.connection.execute("SELECT DISTINCT a.device_id,a.driver_id FROM software_recoveries r"
-                " JOIN device_activities d ON d.id=r.activity_id JOIN actions a ON a.id=r.action_id"
-                " WHERE d.occupancy_state=1")) as recoveries:
-            for device_id, driver_id in recoveries:
-                entry = current_registry().entry(driver_id)
-                if entry is not None and isinstance(entry.driver, AdbCameraDriver):
-                    entry.driver.hold_recovery(device_id)
-
-    with closing(owned.connection.execute(
-            "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
-        deps.recovery_max_event_id = int(cursor.fetchone()[0])
+    def read(owned):
+        recoveries = ()
+        if owned.metadata.format_version >= 3:
+            with closing(owned.connection.execute(
+                    "SELECT DISTINCT a.device_id,a.driver_id FROM software_recoveries r"
+                    " JOIN device_activities d ON d.id=r.activity_id JOIN actions a ON a.id=r.action_id"
+                    " WHERE d.occupancy_state=1")) as cursor:
+                recoveries = tuple(cursor.fetchall())
+        with closing(owned.connection.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
+            horizon = int(cursor.fetchone()[0])
+        return recoveries, horizon
+    recoveries, horizon = await database.read(read, description="会话恢复输入")
+    from camctl.devices.drivers.runtime import current_registry
+    from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
+    for device_id, driver_id in recoveries:
+        entry = current_registry().entry(driver_id)
+        if entry is not None and isinstance(entry.driver, AdbCameraDriver):
+            entry.driver.hold_recovery(device_id)
+    deps.recovery_max_event_id = horizon
     if deps.work_files is not None:
-        deps.work_files.initialize(owned)
+        await deps.work_files.initialize(database)
 
 
 def _clock_policy_factory(config: ConfigSnapshot) -> Callable[[Any], ClockCheckInput]:
@@ -815,6 +825,7 @@ def _report_assembly(
                 session_key=deps.session_key,
                 pending_result_scans=deps.capture_result_scans,
                 pending_segment_writes=deps.capture_segment_writes,
+                pending_segment_inspection_results=deps.capture_segment_inspection_results,
                 pending_file_observations=deps.capture_file_observations,
                 pending_media_results=deps.capture_media_results,
                 pending_read_results=deps.capture_read_results,
@@ -852,6 +863,7 @@ def _report_assembly(
                 session_key=deps.session_key,
                 pending_result_scans=deps.capture_result_scans,
                 pending_segment_writes=deps.capture_segment_writes,
+                pending_segment_inspection_results=deps.capture_segment_inspection_results,
                 pending_file_observations=deps.capture_file_observations,
                 pending_media_results=deps.capture_media_results,
                 pending_read_results=deps.capture_read_results,
@@ -1055,6 +1067,7 @@ async def execute_command(
                         session_key=deps.session_key,
                         pending_result_scans=deps.capture_result_scans,
                         pending_segment_writes=deps.capture_segment_writes,
+                        pending_segment_inspection_results=deps.capture_segment_inspection_results,
                         pending_file_observations=deps.capture_file_observations,
                         pending_media_results=deps.capture_media_results,
                         pending_read_results=deps.capture_read_results,
@@ -1109,11 +1122,33 @@ async def execute_command(
         # 生产 run 装配：非时钟致命错误收场时对会话内录像执行有
         # 限应急停止并补记；submit 不执行该流程。
         overrides["emergency_settlement"] = _emergency_settlement_of(deps)
+    async def open_database():
+        from camctl.persistence.business import BusinessDatabase
+        def observe(owned, outcome, key):
+            if deps.snapshot_owner is not None:
+                deps.snapshot_owner.observe_commit(owned, outcome, key)
+        database = await BusinessDatabase.open(lambda: _open_runtime_connection(deps),
+            capacity=deps.config.database.queue_capacity,
+            confirmed_write_observer=observe)
+        deps.database = database
+        return database
+
+    async def session_opened(database):
+        await _initialize_recovery(deps, database)
+        if assemble_production_run:
+            from camctl.persistence.snapshot_runtime import SnapshotMaintenanceOwner
+            owner = SnapshotMaintenanceOwner(database, deps.state_db,
+                threshold=deps.config.history.snapshot_change_threshold,
+                batch_size=deps.config.history.snapshot_batch_size,
+                config=DbConfig(busy_timeout_ms=deps.config.database.busy_timeout_ms,
+                    wal_autocheckpoint_pages=deps.config.database.wal_autocheckpoint_pages))
+            deps.snapshot_owner = context.snapshot_owner = owner
+
     context = SessionContext(
         mode=deps.mode,
         catalog=deps.catalog,
         clock=SystemClock(),
-        open_connection=lambda: _open_runtime_connection(deps),
+        open_database=open_database,
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(
@@ -1130,7 +1165,7 @@ async def execute_command(
         on_stderr_diagnostic=lambda message: _emit_log_diagnostic(
             deps, message, stderr_only=True),
         on_log_path_unsafe=lambda: _mark_log_path_unsafe(deps),
-        on_session_open=lambda owned: _initialize_recovery(deps, owned),
+        on_session_open=session_opened,
         on_session_locked=(None if logging_owner is None else
                            logging_owner.start_session),
         logging_owner=logging_owner,
@@ -1284,7 +1319,7 @@ def _recovery_callback(
     return on_recovered
 
 
-def _cleanup_pending_for_action(deps, connection, action_id):
+async def _cleanup_pending_for_action(deps, database, action_id):
     """取消等待同一会话的原保存责任，不能仅按成员终态完成。"""
     item_ids = set(deps.cleanup_intents) | set(deps.cleanup_deletes) | set(deps.cleanup_companions)
     item_ids.update(value.item_id for value in deps.cleanup_queries.values())
@@ -1293,8 +1328,18 @@ def _cleanup_pending_for_action(deps, connection, action_id):
             return True
         if hasattr(value.request, "item_id"):
             item_ids.add(value.request.item_id)
-    return any(connection.execute("SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?",
-        (item_id, action_id)).fetchone() is not None for item_id in item_ids)
+    identities = tuple(item_ids)
+    if not identities:
+        return False
+    def read(owned):
+        for item_id in identities:
+            with closing(owned.connection.execute(
+                "SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?",
+                (item_id, action_id))) as cursor:
+                if cursor.fetchone() is not None:
+                    return True
+        return False
+    return await database.read(read)
 
 
 def _local_work(deps, flows, logging_owner=None):
@@ -1330,15 +1375,17 @@ def _emergency_settlement_of(deps: RuntimeDeps):
                 declaration, "recording", "stop_retry_interval_s",
                 _DEFAULT_RETRY_INTERVAL_S),
         }
-    settlement = EmergencySettlement(
-        session_key=deps.session_key,
-        anchors=deps.capture_recording_anchors,
-        stop_config=stop_config,
-        registry=current_registry(),
-        open_owned=lambda: _open_runtime_connection(deps),
-        wall_us=lambda: SystemClock().utc_micros(),
-    )
-    return settlement.settle
+    async def settle():
+        settlement = EmergencySettlement(
+            session_key=deps.session_key,
+            anchors=deps.capture_recording_anchors,
+            stop_config=stop_config,
+            registry=current_registry(),
+            database=deps.database,
+            wall_us=lambda: SystemClock().utc_micros(),
+        )
+        return await settlement.settle()
+    return settle
 
 
 def _shutdown_state_outcome(

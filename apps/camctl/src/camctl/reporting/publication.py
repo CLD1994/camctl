@@ -33,7 +33,7 @@ from camctl.host_files.handoff import (
 )
 from camctl.host_files.io import DirectorySyncStage
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.business import BusinessDatabase
 from camctl.reporting import policy
 from camctl.reporting.ack import AckReport
 from camctl.reporting.models import FrozenReport, ReportBytes
@@ -250,50 +250,38 @@ class DeliveryResult:
 
 
 class PublicationSession(Protocol):
-    """发布编排所需的状态库管理端口。"""
-
-    def prepare(self, report_id: int, contents: ReportBytes) -> DbOutcome: ...
-
-    def record_intent(self, report_id: int) -> DbOutcome: ...
-
-    def save_publication(self, report_id: int,
-                         file_result: PublishResult) -> DbOutcome: ...
-
-    def record_failure(self, report_id: int, error: dict) -> DbOutcome: ...
-
-    def settle_local(self, action_id: int, report_id: int) -> DbOutcome: ...
+    """发布编排所需的异步业务数据库端口。"""
+    async def prepare(self, report_id: int, contents: ReportBytes) -> DbOutcome: ...
+    async def record_intent(self, report_id: int) -> DbOutcome: ...
+    async def save_publication(self, report_id: int, file_result: PublishResult) -> DbOutcome: ...
+    async def record_failure(self, report_id: int, error: dict) -> DbOutcome: ...
+    async def settle_local(self, action_id: int, report_id: int) -> DbOutcome: ...
 
 
 class DbPublicationSession:
-    """把发布端口适配到报告管理入口的真实会话。
+    """每项报告管理操作各自提交完整事务。"""
+    def __init__(self, database: BusinessDatabase) -> None:
+        self._database = database
 
-    每次管理事实都是独立事务：各步分别生成操作键，重放语义由
-    入口的幂等分支承担。
-    """
+    async def _write(self, method, *args, **kwargs):
+        key = new_operation_key()
+        return await self._database.write(
+            lambda owned: method(key, owned, *args, **kwargs), key=key)
 
-    def __init__(self, owned: OwnedConnection) -> None:
-        self._owned = owned
+    async def prepare(self, report_id, contents):
+        return await self._write(policy.record_report_bytes, report_id, contents)
 
-    def prepare(self, report_id: int, contents: ReportBytes) -> DbOutcome:
-        return policy.record_report_bytes(
-            new_operation_key(), self._owned, report_id, contents)
+    async def record_intent(self, report_id):
+        return await self._write(policy.record_report_publish_intent, report_id)
 
-    def record_intent(self, report_id: int) -> DbOutcome:
-        return policy.record_report_publish_intent(
-            new_operation_key(), self._owned, report_id)
+    async def save_publication(self, report_id, file_result):
+        return await self._write(policy.publish_report, report_id, file_result)
 
-    def save_publication(self, report_id: int,
-                         file_result: PublishResult) -> DbOutcome:
-        return policy.publish_report(
-            new_operation_key(), self._owned, report_id, file_result)
+    async def record_failure(self, report_id, error):
+        return await self._write(policy.record_report_failure, report_id, error)
 
-    def record_failure(self, report_id: int, error: dict) -> DbOutcome:
-        return policy.record_report_failure(
-            new_operation_key(), self._owned, report_id, error)
-
-    def settle_local(self, action_id: int, report_id: int) -> DbOutcome:
-        return policy.record_local_report(
-            new_operation_key(), self._owned, action_id=action_id,
+    async def settle_local(self, action_id, report_id):
+        return await self._write(policy.record_local_report, action_id=action_id,
             local_report_id=report_id, occurred_at=0)
 
 
@@ -481,11 +469,11 @@ async def deliver_staged_report(
     成的顺序和失败分类与 deliver_report 的相应阶段一致；staged
     必须位于报告专属 staging 子目录且文件名携带本次字节摘要。
     """
-    prepare = session.prepare(
+    prepare = await session.prepare(
         report_id, ReportBytes(staged.size_bytes, staged.sha256))
     if prepare.kind is not DbOutcomeKind.COMPLETED:
         return _store_failure(prepare)
-    intent = session.record_intent(report_id)
+    intent = await session.record_intent(report_id)
     if intent.kind is not DbOutcomeKind.COMPLETED:
         return _store_failure(intent)
 
@@ -509,7 +497,7 @@ async def deliver_staged_report(
             DeliveryOutcome.UNKNOWN, error=file_result.error)
     if file_result.stage is not PublishStage.MOVED:
         reason = file_result.error or "not moved"
-        session.record_failure(report_id, {"error": reason})
+        await session.record_failure(report_id, {"error": reason})
         return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=reason)
     try:
         policy.validate_report_publication_result(file_result)
@@ -517,16 +505,16 @@ async def deliver_staged_report(
         # 移动已发生但交接不完整（同步失败、源未移除等）：保存实
         # 际文件处理错误，不解释为成功。
         detail = file_result.error or str(failure)
-        session.record_failure(report_id, {"error": detail})
+        await session.record_failure(report_id, {"error": detail})
         return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=detail)
 
-    saved = session.save_publication(report_id, file_result)
+    saved = await session.save_publication(report_id, file_result)
     if saved.kind is not DbOutcomeKind.COMPLETED:
         return _store_failure(saved)
 
     settlement_error = None
     for action_id in local_actions:
-        settled = session.settle_local(action_id, report_id)
+        settled = await session.settle_local(action_id, report_id)
         if settled.kind is not DbOutcomeKind.COMPLETED:
             # 发布已确认成功；本地完成责任保留，由后续机会再保存。
             settlement_error = (

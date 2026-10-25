@@ -131,6 +131,11 @@ class _RequiredPhaseWaiter:
                     stop()
             except BaseException as error:
                 self._stop_error(error)
+            if self._context.snapshot_owner is not None:
+                try:
+                    self._context.snapshot_owner.stop_new_work()
+                except BaseException as error:
+                    self._stop_error(error)
         if self._restricted_logging_permit:
             self._restricted_logging_permit = False
             try:
@@ -215,6 +220,14 @@ class LocalWorkPort(Protocol):
     async def settle(self) -> None: ...
 
 
+class SnapshotOwnerPort(Protocol):
+    """派生维护的会话生命周期，不参与业务责任计数。"""
+    async def start(self) -> None: ...
+    async def discover(self) -> None: ...
+    def stop_new_work(self) -> None: ...
+    async def settle(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class SessionPaths:
     """会话锁与接纳锁文件路径。"""
@@ -238,7 +251,7 @@ class SessionContext:
     mode: CommandMode
     catalog: Any
     clock: ClockPort
-    open_connection: Callable[[], OwnedConnection]
+    open_database: Callable[[], Awaitable[Any]]
     acceptance_repository: AcceptanceRepositoryPort
     session_repository: SessionRepositoryPort
     paths: SessionPaths
@@ -276,13 +289,17 @@ class SessionContext:
     #: 内部截止提前检查余量；不允许实际业务操作提前执行。
     wakeup_margin_s: float = 0.05
     #: run 取得会话锁并可靠打开状态库后，业务事务前固定恢复输入。
-    on_session_open: Callable[[OwnedConnection], None] | None = None
+    on_session_open: Callable[[Any], Awaitable[None]] | None = None
     #: 实际文件调用、结果保存和独立连接关闭均完成后才结束的责任。
     local_work: LocalWorkPort | None = None
     #: 非时钟致命错误收场时的录像应急停止端口；返回诊断条目。
     emergency_settlement: Callable[[], Awaitable[list[dict]]] | None = None
     #: 正常 run 的报告轻量观察；只在会话连接存活期间绑定。
-    report_change_wm: Callable[[], int] | None = field(default=None, init=False, repr=False)
+    report_change_wm: Callable[[], Awaitable[int]] | None = field(default=None, init=False, repr=False)
+    #: 只在会话锁内可靠打开后发布，不交付线程所属连接。
+    database: Any = field(default=None, init=False, repr=False)
+    #: 正常运行的派生快照维护，不计入业务待处理责任。
+    snapshot_owner: SnapshotOwnerPort | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.poll_interval_s, (int, float)) or (
@@ -657,12 +674,13 @@ async def _submit_session(
 
     if source is None:
         return _outcome_error("input_missing", {"reason": "submit 需要计划输入文件"})
-    owned: OwnedConnection | None = None
+    database: Any = None
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
     try:
         try:
-            owned = context.open_connection()
+            database = await context.open_database()
+            context.database = database
         except (RuntimeLibraryError, DirectoryBindingError) as error:
             # 本进程运行库不满足部署要求：配置环境问题，不是状态库数据问题。
             outcome = _outcome_error(
@@ -674,13 +692,13 @@ async def _submit_session(
                 "state_db_error",
                 {"error": str(error)},
             )
-        if owned is not None:
+        if database is not None:
             try:
                 accepted = await accept_input(
                     source,
-                    _acceptance_context(context, owned),
+                    _acceptance_context(context),
                     new_operation_key(),
-                    owned,
+                    database,
                 )
             except AcceptanceStateError as error:
                 kind = getattr(error, "outcome_kind", None)
@@ -712,9 +730,9 @@ async def _submit_session(
         original = error
 
     cleanup_failures: list[tuple[BaseException, str, str]] = []
-    if owned is not None:
+    if database is not None:
         try:
-            owned.connection.close()
+            await database.close()
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     outcome, original = _merge_cleanup_errors(
@@ -733,14 +751,14 @@ async def _run_session(
     # 受理事务在时钟检查前结束。
     session_lease: SessionLease | None = None
     admission_lease: AdmissionLease | None = None
-    owned: OwnedConnection | None = None
+    database: Any = None
     local_errors: list[Exception] = []
     observed_errors: list[BaseException] = []
     waiter = _RequiredPhaseWaiter(context)
     previous_report_observer = context.report_change_wm
 
     async def drive() -> SessionOutcome:
-        nonlocal session_lease, admission_lease, owned
+        nonlocal session_lease, admission_lease, database
         try:
             session_lease = context.acquire_session()
         except Exception as error:
@@ -759,25 +777,28 @@ async def _run_session(
         if context.startup_outcome is not None:
             return context.startup_outcome
         try:
-            owned = context.open_connection()
+            database = await context.open_database()
+            context.database = database
         except (RuntimeLibraryError, DirectoryBindingError) as error:
             # 同 submit：运行库不满足部署要求归配置错误，先于业务库打开拒绝。
             return _outcome_error("configuration_error", {"error": str(error)})
         except Exception as error:
             return _outcome_error("state_db_error", {"error": str(error)})
-        context.report_change_wm = lambda: _read_report_change_wm(owned.connection)
+        context.report_change_wm = lambda: database.read(
+            lambda owned: _read_report_change_wm(owned.connection),
+            description="报告业务水位")
         if context.on_session_open is not None:
             try:
-                context.on_session_open(owned)
+                await context.on_session_open(database)
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error)})
         if source is not None:
             try:
                 await accept_input(
                     source,
-                    _acceptance_context(context, owned),
+                    _acceptance_context(context),
                     new_operation_key(),
-                    owned,
+                    database,
                 )
             except Exception as error:
                 from camctl.acceptance.service import AcceptanceStateError
@@ -796,12 +817,19 @@ async def _run_session(
                     )
                 return _outcome_error("state_db_error", {"error": str(error)})
 
-        policy = context.clock_policy(owned.connection)
+        try:
+            policy = await database.read(
+                lambda owned: context.clock_policy(owned.connection), description="启动时钟依据")
+        except Exception as error:
+            return _outcome_error("state_db_error", {"error": str(error)})
         check = check_clock(policy, context.clock)
-        mode = await enter_execution(
-            check,
-            _clock_context(context, owned),
-        )
+        try:
+            mode = await enter_execution(
+                check,
+                _clock_context(context, database),
+            )
+        except Exception as error:
+            return _outcome_error("state_db_error", {"error": str(error)})
         if mode is ExecutionMode.FATAL:
             return _outcome_error("state_db_error", {"error": "可信时间下界保存失败"})
         if mode is ExecutionMode.RESTRICTED:
@@ -813,16 +841,24 @@ async def _run_session(
 
         from camctl.persistence.repositories.session import AcquireAdmission
 
+        acquired: list[AdmissionLease] = []
+
         def acquire_and_register() -> None:
-            nonlocal admission_lease
-            admission_lease = context.acquire_admission()
+            acquired.append(context.acquire_admission())
 
         try:
-            admission_outcome = context.session_repository.acquire_admission(
-                AcquireAdmission(acquire_and_register),
-                new_operation_key(),
-                owned,
-            )
+            key = new_operation_key()
+            async def acquire_phase():
+                nonlocal admission_lease
+                try:
+                    return await database.write(
+                        lambda owned: context.session_repository.acquire_admission(
+                            AcquireAdmission(acquire_and_register), key, owned),
+                        key=key, description="取得接纳资格")
+                finally:
+                    if acquired:
+                        admission_lease = acquired[0]
+            admission_outcome = await waiter.run("acquire-admission", acquire_phase)
         except Exception as error:
             _remember_error(observed_errors, error)
             receipt = write_receipt_for(error)
@@ -854,9 +890,19 @@ async def _run_session(
                 stage="locking" if lock_failure else "handoff",
             )
 
+        if context.snapshot_owner is not None:
+            try:
+                await context.snapshot_owner.start()
+            except Exception as error:
+                return _outcome_error("state_db_error", {"error": str(error)})
         while True:
             observed_wake = None if context.wake is None else context.wake.snapshot()
             try:
+                if context.snapshot_owner is not None:
+                    try:
+                        await context.snapshot_owner.discover()
+                    except Exception as error:
+                        return _outcome_error("state_db_error", {"error": str(error)})
                 fatal = await _drive_flows(context)
             except ClockBecameUntrusted as clock_error:
                 async def transition_to_restricted() -> SessionOutcome:
@@ -915,7 +961,7 @@ async def _run_session(
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return _outcome_error("state_db_error", {"error": fatal})
             try:
-                decision = classify_work(_run_work_facts(context, owned.connection))
+                decision = classify_work(await _run_work_facts(context))
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error)})
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
@@ -940,13 +986,15 @@ async def _run_session(
                     return (_outcome_error("report_error")
                             if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
                             else SessionOutcome(succeeded=True))
-                outcome = await _try_close(
-                    context, owned, admission_lease, observed_errors,
-                )
+                outcome = await waiter.run("close-admission", lambda: _try_close(
+                    context, database, admission_lease, observed_errors))
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
-            await _wait_for_more_work(context, owned, observed=observed_wake)
+            try:
+                await _wait_for_more_work(context, database, observed=observed_wake)
+            except Exception as error:
+                return _outcome_error("state_db_error", {"error": str(error)})
 
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
@@ -1089,6 +1137,12 @@ async def _run_session(
         _remember_error(observed_errors, error)
 
     cleanup_failures: list[tuple[BaseException, str, str]] = []
+    if context.snapshot_owner is not None:
+        try:
+            context.snapshot_owner.stop_new_work()
+            await waiter.run("snapshot-settlement", context.snapshot_owner.settle)
+        except BaseException as error:
+            cleanup_failures.append((error, "shutdown", "state_db_error"))
     context.report_change_wm = previous_report_observer
     if admission_lease is not None:
         try:
@@ -1100,9 +1154,9 @@ async def _run_session(
             session_lease.close()
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "internal_error"))
-    if owned is not None:
+    if database is not None:
         try:
-            owned.connection.close()
+            await database.close()
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     outcome, original = _merge_cleanup_errors(
@@ -1146,15 +1200,23 @@ async def _merge_emergency_stops(
     return _replace(outcome, details=details)
 
 
-def _run_work_facts(context: SessionContext, connection: Any) -> WorkFacts:
-    """只为正常 run 补入本次已开始的实际收场，持久化未知保持。"""
-    facts = context.facts_query(connection)
-    if context.local_work is None or facts.required_settlements is None:
-        return facts
-    pending = context.local_work.required_settlements()
+def _work_facts_query(context: SessionContext):
+    """在主协程取得本地责任，再将不可变计数交给数据库操作。"""
+    pending = 0 if context.local_work is None else context.local_work.required_settlements()
     if isinstance(pending, bool) or not isinstance(pending, int) or pending < 0:
         raise StateDbFailure("本地实际责任数量不可可靠核实")
-    return replace(facts, required_settlements=facts.required_settlements + pending)
+    def query(connection):
+        facts = context.facts_query(connection)
+        if facts.required_settlements is None:
+            return facts
+        return replace(facts, required_settlements=facts.required_settlements + pending)
+    return query
+
+
+async def _run_work_facts(context: SessionContext) -> WorkFacts:
+    query = _work_facts_query(context)
+    return await context.database.read(
+        lambda owned: query(owned.connection), description="会话工作事实")
 
 
 async def _settle_local_work(
@@ -1625,7 +1687,7 @@ async def _deliver_log_diagnostic(
 
 
 async def _try_close(
-    context: SessionContext, owned: OwnedConnection,
+    context: SessionContext, database: Any,
     admission_lease: AdmissionLease,
     observed_errors: list[BaseException] | None = None,
 ) -> SessionOutcome | None:
@@ -1633,14 +1695,12 @@ async def _try_close(
     from camctl.persistence.repositories.session import CloseAdmission
 
     try:
-        outcome = context.session_repository.close_admission(
-            CloseAdmission(
-                facts_query=lambda connection: _run_work_facts(context, connection),
-                release_admission=admission_lease.close,
-            ),
-            new_operation_key(),
-            owned,
-        )
+        key = new_operation_key()
+        query = _work_facts_query(context)
+        outcome = await database.write(
+            lambda owned: context.session_repository.close_admission(
+                CloseAdmission(facts_query=query, release_admission=admission_lease.close),
+                key, owned), key=key, description="原子关闭接纳")
     except Exception as error:
         if observed_errors is not None:
             _remember_error(observed_errors, error)
@@ -1672,7 +1732,7 @@ async def _try_close(
 
 
 def _pending_deadline_seconds(
-    context: SessionContext, owned: OwnedConnection,
+    now: int, owned: OwnedConnection,
 ) -> float | None:
     """最近一个待执行动作的下一生命周期时刻距现在的秒数。
 
@@ -1689,7 +1749,6 @@ def _pending_deadline_seconds(
         return None
     if pending is None:
         return None
-    now = context.clock.utc_micros()
     try:
         with closing(owned.connection.execute(
                 "SELECT MIN(CASE WHEN scheduled_at>? THEN scheduled_at"
@@ -1706,7 +1765,7 @@ def _pending_deadline_seconds(
 
 
 async def _wait_for_more_work(
-    context: SessionContext, owned: OwnedConnection, *, observed=None,
+    context: SessionContext, database: Any, *, observed=None,
 ) -> None:
     """等待下一轮推进：最近待执行截止、进程内通知或轮询上限。
 
@@ -1714,7 +1773,9 @@ async def _wait_for_more_work(
     唤醒通知立即触发。等待期间保持接纳资格，取消按收尾路径释放。
     """
     wait_s = context.poll_interval_s
-    deadline = _pending_deadline_seconds(context, owned)
+    now_us = context.clock.utc_micros()
+    deadline = await database.read(
+        lambda owned: _pending_deadline_seconds(now_us, owned), description="下一业务截止")
     if deadline is not None:
         wait_s = min(wait_s, deadline)
     loop = asyncio.get_running_loop()
@@ -1791,7 +1852,7 @@ async def _restricted_once_report(context: SessionContext) -> SessionOutcome:
     return _outcome_error("clock_invalid")
 
 
-def _acceptance_context(context: SessionContext, owned: OwnedConnection):
+def _acceptance_context(context: SessionContext):
     from camctl.acceptance.service import AcceptanceContext
 
     return AcceptanceContext(
@@ -1806,13 +1867,13 @@ def _acceptance_context(context: SessionContext, owned: OwnedConnection):
     )
 
 
-def _clock_context(context: SessionContext, owned: OwnedConnection):
+def _clock_context(context: SessionContext, database: Any):
     return type(
         "ClockExecutionContext",
         (),
         {
             "repository": context.session_repository,
             "operation_key": new_operation_key(),
-            "owned": owned,
+            "database": database,
         },
     )()
