@@ -1,0 +1,1550 @@
+{
+  "scope": "七个普通成功及会话恢复场景的业务钟接线与实际结果；不是完整集成验收或性能对照",
+  "base": "c4f1ae10f5ccd59608fe7a5c7350aa57da29f1eb",
+  "core_sources": [
+    "b01e0040",
+    "33581dd1"
+  ],
+  "budgets": {
+    "launch_window_ms": 5000,
+    "synchronous_run_completion_seconds": 180,
+    "database_sync_seconds": 30
+  },
+  "clock_contract": "每个世界共享业务UTC与单调钟；软件导出和受理期间冻结，实际START责任保存后按真实经过时间推进。进程重启在START与首次五秒等待安排保存后中断；启动调用中断先核实原control门进入及PID。",
+  "validated_passed_cases": 7,
+  "validation_runs": [
+    {
+      "receipt": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "scripts/run-integration.py",
+          "--source",
+          "/tmp/camctl-itopt-success-clock",
+          "--python",
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "--node-modules",
+          "/tmp/camctl-itopt-runner-npm-client/node_modules",
+          "--jobs",
+          "4",
+          "--root-shards",
+          "4",
+          "--scope",
+          "root",
+          "--output",
+          "/tmp/camctl-itopt-success-recovery-clock-20261025",
+          "--target",
+          "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+          "--target",
+          "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+          "--target",
+          "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+          "--target",
+          "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+          "--target",
+          "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+          "--target",
+          "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+          "--target",
+          "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers"
+        ],
+        "cwd": "/tmp/camctl-itopt-success-clock",
+        "started_utc": "2026-10-25T00:31:01.752939+00:00",
+        "parent_pid": 529102,
+        "finished_utc": "2026-10-25T00:32:37.643790+00:00",
+        "wall_seconds": 95.50836253099988,
+        "exit_code": 1
+      },
+      "accepted_passed_cases": 6
+    },
+    {
+      "receipt": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "scripts/run-integration.py",
+          "--source",
+          "/tmp/camctl-itopt-success-clock",
+          "--python",
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "--node-modules",
+          "/tmp/camctl-itopt-runner-npm-client/node_modules",
+          "--jobs",
+          "1",
+          "--root-shards",
+          "1",
+          "--scope",
+          "root",
+          "--output",
+          "/tmp/camctl-itopt-success-recovery-clock-restart-20261025",
+          "--target",
+          "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work"
+        ],
+        "cwd": "/tmp/camctl-itopt-success-clock",
+        "started_utc": "2026-10-25T00:36:11.285530+00:00",
+        "finished_utc": "2026-10-25T00:36:43.120305+00:00",
+        "wall_seconds": 31.70085890700284,
+        "exit_code": 0
+      },
+      "accepted_passed_cases": 1
+    }
+  ],
+  "source_file_sha256": {
+    "tests/integration/test_camctl_output_roundtrip.py": "c4a27d34aa9234086de4e0d606301257ded91f93d96f4c108ec4a8c2dba507c6",
+    "tests/integration/test_camctl_session_recovery.py": "987beab8ba11de1a89f1f2c6dbeb29230779ed3bb336a85974b95dfe3597d5c6"
+  },
+  "original_assertion_mapping": {
+    "test_auto_preview_obtains_registered_preview": {
+      "original": 13,
+      "current": 13
+    },
+    "test_recording_delivery_survives_late_cancel": {
+      "original": 21,
+      "current": 21
+    },
+    "test_cross_plan_reference_and_multi_request": {
+      "original": 20,
+      "current": 20
+    },
+    "test_repeated_obtain_of_same_output_yields_independent_deliveries": {
+      "original": 11,
+      "current": 11
+    },
+    "test_process_restart_resumes_interrupted_work": {
+      "original": 10,
+      "current": 10
+    },
+    "test_start_call_interruption_settles_unconfirmed": {
+      "original": 15,
+      "current": 15
+    },
+    "test_report_failure_preserves_device_work_and_redelivers": {
+      "original": 8,
+      "current": 10
+    }
+  },
+  "cases": [
+    {
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+      "outcome": "passed",
+      "duration_seconds": 12.4621263500012,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/007-root-test_camctl_output_roundtrip-shard-4/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/007-root-test_camctl_output_roundtrip-shard-4/tmp/pytest/test_auto_preview_obtains_regi0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "type": 1,
+          "scheduled_at": 1792888345000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888345000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "auto-preview",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888345000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 14,
+          "result_event_id": 15,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 2,
+      "delivery_count": 1,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 762,
+          "sha256": "2374ebbaeab5398c49fbe7ce775160d7a80757eef79317b138affa4a8b0d7d6e",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 1454,
+          "sha256": "016d304a77e185a1fecfb509dd255e6910bd35a3ef6ec5977454c6730217a539",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 1726,
+          "sha256": "b167afd678b85b767478dbfb89683bc33909fa3e908ff176aa02791bbb648f0e",
+          "last_error_json": null
+        },
+        {
+          "id": 4,
+          "status": 4,
+          "size_bytes": 1731,
+          "sha256": "cf2fec79b1f5cee01299579f5f8f9823709cc133314658b437cf638b6520934b",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": null,
+          "acknowledged_wm": 0
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/007-root-test_camctl_output_roundtrip-shard-4/tmp/pytest/test_auto_preview_obtains_regi0/business-clock.jsonl",
+        "sha256": "719cae989da365bf225ee0ecbed31e66ac2b4103f1d046225e667ffe7fc74418",
+        "readers": [
+          {
+            "pid": 532097,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 532126,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 19
+          },
+          {
+            "pid": 532126,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 43
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "shoot",
+            "scheduled_at": 1792886757000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 10,
+            "admitted_at": 1792886759367990,
+            "expired_at": 1792886763589943
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 7.921781909000856
+      },
+      "delivered_files": [
+        {
+          "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/007-root-test_camctl_output_roundtrip-shard-4/tmp/pytest/test_auto_preview_obtains_regi0/deployment/ready/1.jpg",
+          "size_bytes": 2048,
+          "sha256": "4d0e6f7bb8a65f393790ee04bf1fcf4305e48ca4f2bb31af003ffe6135f517d4"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+      "outcome": "passed",
+      "duration_seconds": 53.92134608000197,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/001-root-test_camctl_output_roundtrip-shard-1/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/001-root-test_camctl_output_roundtrip-shard-1/tmp/pytest/test_cross_plan_reference_and_0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "首拍",
+          "type": 1,
+          "scheduled_at": 1792888290000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888290000000,
+          "expiration_reason": null,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "次拍",
+          "type": 1,
+          "scheduled_at": 1792888292000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888292000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "首拍",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "次拍",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 3,
+          "name": "取回首拍",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 4,
+          "name": "坏引用取回",
+          "status": 4,
+          "error_code": 20
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888290000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        },
+        {
+          "id": 2,
+          "action_id": 2,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888292000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        },
+        {
+          "id": 3,
+          "action_id": 2,
+          "responsibility_key": "start/2",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 12,
+          "result_event_id": 13,
+          "effect_state": 3
+        },
+        {
+          "run_id": 3,
+          "status": 2,
+          "intent_event_id": 46,
+          "result_event_id": 47,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 2,
+      "delivery_count": 1,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 459,
+          "sha256": "185c9b970f07c1ac10f3bb49c415ffd1e28182b46622aed1322ac96f6d75d9f1",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 790,
+          "sha256": "1ce4a1f6335cea9c141903b5c3a93774648e0eaa03fa49f035f723f8a086e198",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 1408,
+          "sha256": "5d020c0d832e71bd95869aa0d03696893547970bf16f44c4c9f9cf1d4b22b9b0",
+          "last_error_json": null
+        },
+        {
+          "id": 4,
+          "status": 4,
+          "size_bytes": 1953,
+          "sha256": "0196954ad47e8479fbe21433045950a9b693d93d47efb129a8a9a1230beb7e33",
+          "last_error_json": null
+        },
+        {
+          "id": 5,
+          "status": 4,
+          "size_bytes": 2030,
+          "sha256": "7d7c933310800c0084d7e3d2029b792d25ba768b391ab030262f6aa4b06e4f31",
+          "last_error_json": null
+        },
+        {
+          "id": 6,
+          "status": 4,
+          "size_bytes": 2035,
+          "sha256": "69196d283b03d86154df64b20a8339d0b5e64a8ad4348fca6e71518c07b9db3d",
+          "last_error_json": null
+        },
+        {
+          "id": 7,
+          "status": 4,
+          "size_bytes": 2404,
+          "sha256": "1754fa31fb25aefd5d54187829a5abe5fd8873cedbfc798a6ea351c9e140675a",
+          "last_error_json": null
+        },
+        {
+          "id": 8,
+          "status": 4,
+          "size_bytes": 2573,
+          "sha256": "bde25a177070a9408a86cd3bc104062fec428c7b1520ae0ca26aa3ccaf0efd95",
+          "last_error_json": null
+        },
+        {
+          "id": 9,
+          "status": 4,
+          "size_bytes": 385,
+          "sha256": "fc9a6a0f33429b1716e17cfac1001311c8017534889b2d45d2acf2cb7ecbe413",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": 8,
+          "acknowledged_wm": 40
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/001-root-test_camctl_output_roundtrip-shard-1/tmp/pytest/test_cross_plan_reference_and_0/business-clock.jsonl",
+        "sha256": "d48de2bc95ff63c63254b7d1cfb3a6674e974585cc273916b38a2c5110698913",
+        "readers": [
+          {
+            "pid": 530226,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530294,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 19
+          },
+          {
+            "pid": 530294,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 17
+          },
+          {
+            "pid": 530602,
+            "epoch": 4,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530681,
+            "epoch": 5,
+            "mode": "frozen",
+            "reads": 19
+          },
+          {
+            "pid": 530681,
+            "epoch": 6,
+            "mode": "running",
+            "reads": 43
+          },
+          {
+            "pid": 531164,
+            "epoch": 7,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 531216,
+            "epoch": 8,
+            "mode": "frozen",
+            "reads": 17
+          },
+          {
+            "pid": 531712,
+            "epoch": 8,
+            "mode": "frozen",
+            "reads": 10
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/033-root-test_camctl_output_roundtrip-shard-1/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "首拍",
+            "scheduled_at": 1792886682000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "admitted_at": 1792886685320588,
+            "expired_at": 1792886689983803
+          },
+          {
+            "id": 2,
+            "name": "次拍",
+            "scheduled_at": 1792886692000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 14,
+            "last_event_id": 22,
+            "admitted_at": 1792886694209545,
+            "expired_at": 1792886698298170
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 23.578891081997426
+      },
+      "delivered_files": [
+        {
+          "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/001-root-test_camctl_output_roundtrip-shard-1/tmp/pytest/test_cross_plan_reference_and_0/deployment/ready/1.jpg",
+          "size_bytes": 4096,
+          "sha256": "f6b99298a899253d2ad182d3bce921edc13fa0c77a1f5b3c3a7263d9bc149467"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+      "outcome": "passed",
+      "duration_seconds": 39.68846596399089,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/002-root-test_camctl_output_roundtrip-shard-2/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/002-root-test_camctl_output_roundtrip-shard-2/tmp/pytest/test_recording_delivery_surviv0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "拍录",
+          "type": 2,
+          "scheduled_at": 1792888290000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888290000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "拍录",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "取回",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 3,
+          "name": "取消",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888290000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 14,
+          "result_event_id": 15,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 1,
+      "delivery_count": 1,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 644,
+          "sha256": "aaaed7e14c49768094bbd130f4dd682688ab1754d99824861d9ffc31b426f425",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 644,
+          "sha256": "ab91a5cdc9d90daa54b0abe6c227f7a7a5298fc07bdc4b28768a65ef04229280",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 670,
+          "sha256": "9159e89ba4d4607a0632404c659ccd3df82715fb98971e6cb261b3c3d113fc74",
+          "last_error_json": null
+        },
+        {
+          "id": 4,
+          "status": 4,
+          "size_bytes": 992,
+          "sha256": "a33ed84cc8f87c094858451bd2bf4e955c8040ba086bec451e253d8d7fabeafc",
+          "last_error_json": null
+        },
+        {
+          "id": 5,
+          "status": 4,
+          "size_bytes": 1256,
+          "sha256": "1879b366f3f2fed483ba6bd3e8fd74aee25e4019f576eefe2e246fe7cdeaacbb",
+          "last_error_json": null
+        },
+        {
+          "id": 6,
+          "status": 4,
+          "size_bytes": 1261,
+          "sha256": "ddc20e06d18f3cbdb236302fac55adbfe893950009307acb145e852d5372c271",
+          "last_error_json": null
+        },
+        {
+          "id": 7,
+          "status": 4,
+          "size_bytes": 1591,
+          "sha256": "d01d3ff758d9f06fe66e1fd5a2a4c715dc141ba71369640c9f00abb0365f1bbb",
+          "last_error_json": null
+        },
+        {
+          "id": 8,
+          "status": 4,
+          "size_bytes": 1844,
+          "sha256": "ff87dcf79fd7e5146204db1c94a61e6006233cd5cc9431d3bd5600d0961367cd",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": 8,
+          "acknowledged_wm": 35
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/002-root-test_camctl_output_roundtrip-shard-2/tmp/pytest/test_recording_delivery_surviv0/business-clock.jsonl",
+        "sha256": "3d8943f82613bc4d997e43bcadcd85700db275b052eebdf92fb5cf864397f1f0",
+        "readers": [
+          {
+            "pid": 530234,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530307,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 22
+          },
+          {
+            "pid": 530307,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 99
+          },
+          {
+            "pid": 530805,
+            "epoch": 4,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530877,
+            "epoch": 5,
+            "mode": "frozen",
+            "reads": 27
+          },
+          {
+            "pid": 531213,
+            "epoch": 5,
+            "mode": "frozen",
+            "reads": 10
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/035-root-test_camctl_output_roundtrip-shard-2/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "拍录",
+            "scheduled_at": 1792886705000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 10,
+            "admitted_at": 1792886708132125,
+            "expired_at": 1792886712419311
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 16.137913916998514
+      },
+      "delivered_files": [
+        {
+          "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/002-root-test_camctl_output_roundtrip-shard-2/tmp/pytest/test_recording_delivery_surviv0/deployment/processing/1.mp4",
+          "size_bytes": 8192,
+          "sha256": "7ff6c5beb25ee5f62fb8643bc79006f9a16f66912c16be76d03157840212ba94"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+      "outcome": "passed",
+      "duration_seconds": 19.364252440995187,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/006-root-test_camctl_output_roundtrip-shard-3/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/006-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_repeated_obtain_of_same_o0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "拍录",
+          "type": 2,
+          "scheduled_at": 1792888332000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888332000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "拍录",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "第一次取回",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 3,
+          "name": "第二次取回",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888332000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 16,
+          "result_event_id": 17,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 1,
+      "delivery_count": 2,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 860,
+          "sha256": "7007f462b6bbaf8351c2d56cfae63ec5dcb178ba984f010c3b0c30ebf08eee5a",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 911,
+          "sha256": "d6acc3939e58372ed107a9ad614b59dc6b0591cbbaafa4e4b0ff9f933af18d72",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 911,
+          "sha256": "a4f682a5cb93762374e60da2f610be8430121e52221eeb4310e033d6764b7f8f",
+          "last_error_json": null
+        },
+        {
+          "id": 4,
+          "status": 4,
+          "size_bytes": 1618,
+          "sha256": "e3bfe398d6059cc4b850d538a68f4db7121f17dd6610419b5994a15508142a89",
+          "last_error_json": null
+        },
+        {
+          "id": 5,
+          "status": 4,
+          "size_bytes": 1780,
+          "sha256": "b7068fa005a0bc01bcd2a9ae7bfd31cda95fd8cd4623efcc4f1bfe56af09d45d",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": null,
+          "acknowledged_wm": 0
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/006-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_repeated_obtain_of_same_o0/business-clock.jsonl",
+        "sha256": "6a9a499a14ab94c46ae027e5023d8c21be80c087544491b06520432ee609a128",
+        "readers": [
+          {
+            "pid": 531765,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 531826,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 22
+          },
+          {
+            "pid": 531826,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 94
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/038-root-test_camctl_output_roundtrip-shard-4/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "拍录",
+            "scheduled_at": 1792886756000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 12,
+            "admitted_at": 1792886757668302,
+            "expired_at": 1792886761937946
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 8.454543808995368
+      },
+      "delivered_files": [
+        {
+          "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/006-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_repeated_obtain_of_same_o0/deployment/ready/1.mp4",
+          "size_bytes": 8192,
+          "sha256": "f9313677ed515127ed1f8a42de04226d94e2b4fe9d55016e24bd7cb1769ce404"
+        },
+        {
+          "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/006-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_repeated_obtain_of_same_o0/deployment/ready/2.mp4",
+          "size_bytes": 8192,
+          "sha256": "f9313677ed515127ed1f8a42de04226d94e2b4fe9d55016e24bd7cb1769ce404"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+      "outcome": "passed",
+      "duration_seconds": 21.268411081000522,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "c4b01f4f037ff2b6d99b09635dae2828ea141439",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "a979927308f153ef60b0a22647b6dd934ca8b44ccf2b5e471197997f5b24d33f"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-restart-20261025/tasks/001-root-test_camctl_session_recovery/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-restart-20261025/tasks/001-root-test_camctl_session_recovery/tmp/pytest/test_process_restart_resumes_i0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "timelapse",
+          "type": 3,
+          "scheduled_at": 1792888582000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888582000000,
+          "expiration_reason": null,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "shoot",
+          "type": 1,
+          "scheduled_at": 1792888588000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888588014601,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "timelapse",
+          "status": 3,
+          "error_code": null
+        },
+        {
+          "id": 2,
+          "name": "shoot",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888582000000,
+          "expected_check_at": 1792888587000000,
+          "wait_completed_event_id": 28
+        },
+        {
+          "id": 2,
+          "action_id": 2,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888588034421,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        },
+        {
+          "id": 3,
+          "action_id": 2,
+          "responsibility_key": "start/2",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 12,
+          "result_event_id": 13,
+          "effect_state": 3
+        },
+        {
+          "run_id": 3,
+          "status": 2,
+          "intent_event_id": 51,
+          "result_event_id": 52,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 2,
+      "delivery_count": 0,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 447,
+          "sha256": "d6481ee693b983331991118409269a2e3966032eb71ebb7a90b222d6884c5cf4",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 447,
+          "sha256": "ea988cf210ee25c0ad72a615f15e72acc3940aac9564c89bc4b10b438d8bceff",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 851,
+          "sha256": "fda1a55db0874e7e3a88d98a8a6e1777c172d7fffdf123ab2499088bdfbafd29",
+          "last_error_json": null
+        },
+        {
+          "id": 4,
+          "status": 4,
+          "size_bytes": 1175,
+          "sha256": "58a93afc0ec16fd53ecb636029e28fe2561034f6455ca33c42250361e43442cf",
+          "last_error_json": null
+        },
+        {
+          "id": 5,
+          "status": 4,
+          "size_bytes": 1500,
+          "sha256": "0b71888083c458d289dcf4468c943273bf253c07a2ec60a2bdd85f433c9ef214",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": null,
+          "acknowledged_wm": 0
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-restart-20261025/tasks/001-root-test_camctl_session_recovery/tmp/pytest/test_process_restart_resumes_i0/business-clock.jsonl",
+        "sha256": "979d7f302de83a669a2a3e0cdca3b3b63168a1cc26f299458fe8813863126008",
+        "readers": [
+          {
+            "pid": 536899,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 536933,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 91
+          },
+          {
+            "pid": 537032,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 537072,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 129
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/047-root-test_camctl_session_recovery-shard-1/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "timelapse",
+            "scheduled_at": 1792886835000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "admitted_at": 1792886842257862,
+            "expired_at": 1792886849390718
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 12.3775989450005
+      },
+      "delivered_files": []
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+      "outcome": "passed",
+      "duration_seconds": 24.41556617999595,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/005-root-test_camctl_session_recovery-shard-3/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/005-root-test_camctl_session_recovery-shard-3/tmp/pytest/test_report_failure_preserves_0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "type": 1,
+          "scheduled_at": 1792888321000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888321000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888321000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 2,
+          "intent_event_id": 12,
+          "result_event_id": 13,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 1,
+      "delivery_count": 0,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 470,
+          "sha256": "de0d82cc71d3d87c15688cca6e8a8365e570049884ed81ddfd4211e8420955d4",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 796,
+          "sha256": "04c6c670f66fc828b10d34c6cfa2f329d2e68d6ba8ee4af145884cb830310237",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": null,
+          "acknowledged_wm": 0
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/005-root-test_camctl_session_recovery-shard-3/tmp/pytest/test_report_failure_preserves_0/business-clock.jsonl",
+        "sha256": "4403c9d4300d598025957e6793a54a8999789174f8337e4069873dca086665b1",
+        "readers": [
+          {
+            "pid": 531217,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 531309,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 19
+          },
+          {
+            "pid": 531309,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 17
+          },
+          {
+            "pid": 531618,
+            "epoch": 3,
+            "mode": "running",
+            "reads": 9
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "shoot",
+            "scheduled_at": 1792886728000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "admitted_at": 1792886731795348,
+            "expired_at": 1792886735748295
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 10.048384792004072
+      },
+      "delivered_files": []
+    },
+    {
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+      "outcome": "passed",
+      "duration_seconds": 29.73147799599974,
+      "validation_source": {
+        "root": "/tmp/camctl-itopt-success-clock",
+        "head": "99f04a392fc4e17dbf61c1c9381bba238621173d",
+        "status": "M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4477d8e521ebdf19e984b20fc0b936aab445506fc1071031562c4b4c903ed1d9"
+      },
+      "task_artifacts": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/004-root-test_camctl_session_recovery-shard-2/artifacts",
+      "world": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/004-root-test_camctl_session_recovery-shard-2/tmp/pytest/test_start_call_interruption_s0",
+      "captures": [
+        {
+          "id": 1,
+          "name": "timelapse",
+          "type": 3,
+          "scheduled_at": 1792888290000000,
+          "max_delay_ms": 5000,
+          "status": 4,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888290000000,
+          "expiration_reason": null,
+          "error_code": 12
+        },
+        {
+          "id": 2,
+          "name": "shoot",
+          "type": 1,
+          "scheduled_at": 1792888292000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792888292000000,
+          "expiration_reason": null,
+          "error_code": null
+        }
+      ],
+      "actions": [
+        {
+          "id": 1,
+          "name": "timelapse",
+          "status": 4,
+          "error_code": 12
+        },
+        {
+          "id": 2,
+          "name": "shoot",
+          "status": 3,
+          "error_code": null
+        }
+      ],
+      "activities": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "dispatch_state": 2,
+          "occupancy_state": 1,
+          "sent_at": null,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        },
+        {
+          "id": 2,
+          "action_id": 2,
+          "dispatch_state": 3,
+          "occupancy_state": 2,
+          "sent_at": 1792888292000000,
+          "expected_check_at": null,
+          "wait_completed_event_id": null
+        }
+      ],
+      "start_runs": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "responsibility_key": "start/1",
+          "status": 6,
+          "attempts_used": 1
+        },
+        {
+          "id": 2,
+          "action_id": 2,
+          "responsibility_key": "start/2",
+          "status": 3,
+          "attempts_used": 1
+        }
+      ],
+      "start_attempts": [
+        {
+          "run_id": 1,
+          "status": 1,
+          "intent_event_id": 12,
+          "result_event_id": null,
+          "effect_state": 1
+        },
+        {
+          "run_id": 2,
+          "status": 2,
+          "intent_event_id": 27,
+          "result_event_id": 28,
+          "effect_state": 3
+        }
+      ],
+      "output_count": 1,
+      "delivery_count": 0,
+      "reports": [
+        {
+          "id": 1,
+          "status": 4,
+          "size_bytes": 447,
+          "sha256": "bb58c26472ba92f56de14fae5f91b54df73d2c4d0abc7a014f1eff91c5a1bb15",
+          "last_error_json": null
+        },
+        {
+          "id": 2,
+          "status": 4,
+          "size_bytes": 854,
+          "sha256": "ab4c8b8c5e61510c53eb2aba7754c28e1aeec603195592a3777729b30376eee0",
+          "last_error_json": null
+        },
+        {
+          "id": 3,
+          "status": 4,
+          "size_bytes": 1353,
+          "sha256": "377e93f4a47c4aeda09340f6ca97b55176d9c99857059b3a922f40bf1369a7f5",
+          "last_error_json": null
+        }
+      ],
+      "runtime_ack": [
+        {
+          "acknowledged_report_id": null,
+          "acknowledged_wm": 0
+        }
+      ],
+      "clock_log": {
+        "path": "/tmp/camctl-itopt-success-recovery-clock-20261025/tasks/004-root-test_camctl_session_recovery-shard-2/tmp/pytest/test_start_call_interruption_s0/business-clock.jsonl",
+        "sha256": "82f3891630d8664583ecc52c2e570af42e3e48610e323a0c8803d2d551710408",
+        "readers": [
+          {
+            "pid": 530213,
+            "epoch": 1,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530291,
+            "epoch": 2,
+            "mode": "frozen",
+            "reads": 17
+          },
+          {
+            "pid": 530517,
+            "epoch": 4,
+            "mode": "frozen",
+            "reads": 1
+          },
+          {
+            "pid": 530585,
+            "epoch": 5,
+            "mode": "frozen",
+            "reads": 21
+          },
+          {
+            "pid": 530585,
+            "epoch": 6,
+            "mode": "running",
+            "reads": 17
+          }
+        ]
+      },
+      "original_failure": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/artifacts",
+        "captures": [
+          {
+            "id": 1,
+            "name": "timelapse",
+            "scheduled_at": 1792886851000000,
+            "max_delay_ms": 5000,
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "created_event_id": 1,
+            "last_event_id": 8,
+            "admitted_at": 1792886855220915,
+            "expired_at": 1792886859703680
+          }
+        ],
+        "operation_runs": 0
+      },
+      "timing_baseline": {
+        "source": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+        "outcome": "passed",
+        "total_seconds": 11.527391854997404
+      },
+      "control_gate": {
+        "gate_entry_port_and_original_pid_assertion": "passed",
+        "original_control_clock_readers": [
+          530291
+        ],
+        "latest_port_marker": {
+          "port": "control",
+          "pid": 530585
+        }
+      },
+      "delivered_files": []
+    }
+  ],
+  "evidence_boundary": "六个通过身份来自首轮窄选，进程重启来自后续单项窄选；最终核心采样修正、剩余运行预算及门观察存档的主树组合验证由协调者保存。"
+}

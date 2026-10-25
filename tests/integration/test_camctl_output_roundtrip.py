@@ -26,11 +26,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from camctl_fixtures import (
+    CliResult,
     Deployment,
     future_schedule,
     photo_file,
     preview_file,
     stub_driver_spec,
+    terminate_process_tree,
     video_file,
 )
 
@@ -79,6 +81,30 @@ def _ready_report(deployment: Deployment) -> dict:
     return json.loads(content)
 
 
+def _run_capture_at_schedule(
+        deployment: Deployment, spec: dict, scheduled_at: str,
+        name: str) -> CliResult:
+    """冻结软件准备耗时，实际 START 责任收场后再推进业务钟。"""
+    deployment.freeze_at(scheduled_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
+        "run", "--config", str(deployment.config_path), driver=spec)
+    try:
+        _await_row(
+            deployment.state_db,
+            "SELECT r.id FROM operation_runs r"
+            " JOIN actions a ON a.id = r.action_id"
+            " WHERE a.name = ? AND r.responsibility_key = 'start/' || a.id"
+            " AND r.status IN (3, 4)", (name,))
+        deployment.resume_clock()
+        stdout, stderr = process.communicate(
+            timeout=max(0, deadline - time.monotonic()))
+        return CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
+
+
 def _delivered_files(directory: Path) -> list[Path]:
     """目录中的交付文件；报告文件不属于交付。"""
     return sorted(
@@ -89,7 +115,7 @@ def _delivered_files(directory: Path) -> list[Path]:
 def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
     """录像交付存活迟到取消：拷贝交付到 ready、领取进 processing、
     取消按不可撤回收场后原请求终态与交付字节保持。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -109,14 +135,14 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
                 "name": "拍录",
                 "type": "camera_record",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"type": "video"},
                 "policy": {"max_delay_ms": 5000},
             },
             {
                 "name": "取回",
                 "type": "obtain_action_outputs",
-                "scheduled_at": future_schedule(2),
+                "scheduled_at": deployment.schedule(2),
                 "params": {
                     "source": {"action_name": "拍录"},
                     "purpose": "manual",
@@ -133,8 +159,8 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
     assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
 
     # 一个 run 会话完成录像、产物核实、取回拷贝与交付发布。
-    run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    run = _run_capture_at_schedule(
+        deployment, spec, body["actions"][0]["scheduled_at"], "拍录")
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -150,6 +176,7 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
     shutil.move(str(delivered[0]), str(claimed))
 
     # 迟到取消按请求身份引用原计划；此时目标已全部成功终态。
+    deployment.pause_clock()
     cancel_body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -158,7 +185,7 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
             {
                 "name": "取消",
                 "type": "cancel_task",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"target": {"request_id": original_request}},
             },
         ],
@@ -168,6 +195,7 @@ def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
         "submit", str(cancel_path), "--config", str(deployment.config_path),
         driver=spec)
     assert cancel_submitted.exit_code == 0, cancel_submitted.stderr
+    deployment.freeze_at(cancel_body["actions"][0]["scheduled_at"])
     cancel_run = deployment.camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
     assert cancel_run.exit_code == 0, cancel_run.stderr
@@ -224,7 +252,7 @@ def _wait_until(moment: str) -> None:
 def test_auto_preview_obtains_registered_preview(tmp_path: Path) -> None:
     """自动预览链：驱动按配对关联列举预览文件，预览登记为正式产
     物并保留配对证据，客户端展开的自动取回选择预览产物交付。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -239,7 +267,7 @@ def test_auto_preview_obtains_registered_preview(tmp_path: Path) -> None:
 
     # 客户端真实导出：拍摄与自动取回同计划，取回三字段明确填写，
     # scheduled_at 与来源拍摄表达同一时刻。
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -272,8 +300,8 @@ def test_auto_preview_obtains_registered_preview(tmp_path: Path) -> None:
     assert submitted.exit_code == 0, submitted.stderr
 
     # 一个 run 会话完成拍摄、预览列举登记、取回拷贝与交付发布。
-    run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    run = _run_capture_at_schedule(
+        deployment, spec, shoot_at, "shoot")
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -614,7 +642,7 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
     """同一产物的重复取回：两个取回动作各自取得独立交付；源产物保
     持可用、设备原文件保留，两份 ready 副本字节与来源一致且文件名
     互不相同，源文件与副本生命周期分开。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -625,7 +653,7 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
         device_files={"repeat-clip": content})
     deployment.install_client_capabilities(spec)
 
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -664,8 +692,8 @@ def test_repeated_obtain_of_same_output_yields_independent_deliveries(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=spec)
     assert submitted.exit_code == 0, submitted.stderr
-    run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    run = _run_capture_at_schedule(
+        deployment, spec, shoot_at, "拍录")
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db
@@ -703,7 +731,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
     第二个请求的取回按稳定动作实例 ID 引用第一个请求的拍摄产物并
     交付；第三个请求引用不存在的实例在执行资格取得后按解析失败
     收场，不产生交付，已确定的跨计划交付不受影响。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -728,7 +756,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
                 "name": "首拍",
                 "type": "camera_take_photo",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"type": "single_shot"},
                 "policy": {"max_delay_ms": 5000},
             },
@@ -739,14 +767,15 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
         "submit", str(first_path), "--config", str(deployment.config_path),
         driver=spec)
     assert first_submit.exit_code == 0, first_submit.stderr
-    first_run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    first_run = _run_capture_at_schedule(
+        deployment, spec, first_body["actions"][0]["scheduled_at"], "首拍")
     assert first_run.exit_code == 0, first_run.stderr
     first_action = _query(
         state_db, "SELECT id FROM actions WHERE name = '首拍'")[0][0]
 
     # 第二个请求：自己再拍一张，取回按动作实例 ID 引用第一个请求
     # 的产物（跨计划引用；实例引用在执行资格取得后一次固定）。
+    deployment.pause_clock()
     second_body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -756,14 +785,14 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
                 "name": "次拍",
                 "type": "camera_take_photo",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"type": "single_shot"},
                 "policy": {"max_delay_ms": 5000},
             },
             {
                 "name": "取回首拍",
                 "type": "obtain_action_outputs",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {
                     "source": {"action_instance_id": str(first_action)},
                     "purpose": "manual",
@@ -776,8 +805,8 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
         "submit", str(second_path), "--config", str(deployment.config_path),
         driver=spec)
     assert second_submit.exit_code == 0, second_submit.stderr
-    second_run = deployment.camctl(
-        "run", "--config", str(deployment.config_path), driver=spec)
+    second_run = _run_capture_at_schedule(
+        deployment, spec, second_body["actions"][0]["scheduled_at"], "次拍")
     assert second_run.exit_code == 0, second_run.stderr
 
     # 三个动作全部成功；取回解析固定到第一个请求的真实来源计划。
@@ -803,6 +832,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
     # 第三个请求：引用不存在的动作实例。受理不解析实例引用（提交
     # 成功），执行资格取得后按解析失败收场：动作失败携带公共原因，
     # 不产生交付，此前确定的跨计划交付保持不变。
+    deployment.pause_clock()
     third_body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -811,7 +841,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
             {
                 "name": "坏引用取回",
                 "type": "obtain_action_outputs",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {
                     "source": {"action_instance_id": "999999"},
                     "purpose": "manual",
@@ -824,6 +854,7 @@ def test_cross_plan_reference_and_multi_request(tmp_path: Path) -> None:
         "submit", str(third_path), "--config", str(deployment.config_path),
         driver=spec)
     assert third_submit.exit_code == 0, third_submit.stderr
+    deployment.freeze_at(third_body["actions"][0]["scheduled_at"])
     third_run = deployment.camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
     assert third_run.exit_code == 0, third_run.stderr
