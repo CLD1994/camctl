@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Callable, Mapping
 
@@ -435,6 +436,38 @@ register_guard("ownership", _ownership_guard)
 register_guard("report_impact", _report_impact_guard)
 
 
+def parse_preparation_request(value: Any) -> dict[str, Any]:
+    """解析准备占用的完整原申请，保留秒数的精确表示。"""
+    if (not isinstance(value, Mapping)
+            or set(value) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at"}):
+        _fail("准备申请必须包含 action_id、trusted_wall_now、prepare_lead_s 和 occurred_at")
+    try:
+        ObjectId(value["action_id"])
+        UtcMicros(value["trusted_wall_now"])
+        UtcMicros(value["occurred_at"])
+    except ValueError as error:
+        raise EventValidationError(f"准备申请的身份或时间非法: {error}") from error
+    lead = value["prepare_lead_s"]
+    if (isinstance(lead, bool) or not isinstance(lead, (int, Decimal))
+            or (isinstance(lead, Decimal) and not lead.is_finite()) or lead < 0):
+        _fail("准备申请的 prepare_lead_s 必须是有限非负精确数字")
+    return dict(value)
+
+
+def parse_preparation_failure_request(value: Any) -> dict[str, Any]:
+    """解析准备失败的完整原申请；事件分支和业务资格由调用方核对。"""
+    if not isinstance(value, Mapping) or set(value) != {"action_id", "reason", "occurred_at"}:
+        _fail("准备失败申请必须包含 action_id、reason 和 occurred_at")
+    try:
+        ObjectId(value["action_id"])
+        UtcMicros(value["occurred_at"])
+    except ValueError as error:
+        raise EventValidationError(f"准备失败申请的身份或时间非法: {error}") from error
+    if value["reason"] not in ("device_failed", "baseline_read_failed"):
+        _fail("准备失败申请的 reason 必须是 device_failed 或 baseline_read_failed")
+    return dict(value)
+
+
 def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) -> None:
     """按格式 1 的公共与基准成员规则核对依据取值。
 
@@ -488,6 +521,10 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
     elif member == "entries":
         if not isinstance(value, list):
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
+    elif member == "preparation_request":
+        parse_preparation_request(value)
+    elif member == "preparation_failure_request":
+        parse_preparation_failure_request(value)
     elif member == "preparation_resolved":
         if value is not True:
             _fail(f"事件 {event_id} 的 evidence.preparation_resolved 只能为实际可靠的 true")

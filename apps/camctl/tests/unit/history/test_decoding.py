@@ -109,6 +109,86 @@ def test_undeclared_evidence_member_is_rejected_on_decode():
         decode_event_row(_row(body_json=text))
 
 
+def _preparation_request():
+    return {"action_id": 8, "trusted_wall_now": 0, "prepare_lead_s": 10, "occurred_at": 1}
+
+
+def _preparation_failure_request():
+    return {"action_id": 8, "reason": "device_failed", "occurred_at": 1}
+
+
+def _preparation_body(member, request):
+    # 此处只替换稳定的登记端口，两个真实结构入口仍调用生产成员校验。
+    events.load_event_registry()["events"]["PLAN_ACCEPTED"]["branches"]["CREATE"]["evidence"] = [member]
+    body = _body()
+    body["evidence"] = {member: request}
+    return body
+
+
+@pytest.mark.parametrize("member,payload", [
+    ("preparation_request", 7),
+    ("preparation_request", []),
+    ("preparation_request", {}),
+    ("preparation_request", {**_preparation_request(), "extra": 1}),
+    ("preparation_request", {key: value for key, value in _preparation_request().items() if key != "trusted_wall_now"}),
+    *[("preparation_request", {**_preparation_request(), "action_id": value})
+      for value in (True, 0, "8", 9223372036854775808)],
+    *[("preparation_request", {**_preparation_request(), "trusted_wall_now": value})
+      for value in (True, "0", 0.0)],
+    *[("preparation_request", {**_preparation_request(), "occurred_at": value})
+      for value in (True, "1", 1.0)],
+    *[("preparation_request", {**_preparation_request(), "prepare_lead_s": value})
+      for value in (True, -1, "10", None)],
+    ("preparation_failure_request", 7),
+    ("preparation_failure_request", []),
+    ("preparation_failure_request", {}),
+    ("preparation_failure_request", {**_preparation_failure_request(), "extra": 1}),
+    *[("preparation_failure_request", {**_preparation_failure_request(), "action_id": value})
+      for value in (True, 0, "8", 9223372036854775808)],
+    *[("preparation_failure_request", {**_preparation_failure_request(), "occurred_at": value})
+      for value in (True, "1", 1.0)],
+    *[("preparation_failure_request", {**_preparation_failure_request(), "reason": value})
+      for value in (True, None, [], "start_unknown")],
+])
+@pytest.mark.parametrize("entry", ["structure", "decode"])
+def test_preparation_evidence_shape_is_checked_without_business_guards(member, payload, entry):
+    body = _preparation_body(member, payload)
+    if entry == "decode":
+        with pytest.raises(ConsistencyError):
+            decode_event_row(_row(body))
+    else:
+        event = decode_event_row(_row())
+        object.__setattr__(event, "evidence", body["evidence"])
+        with pytest.raises(validators.EventValidationError):
+            validators.validate_event_structure(event)
+
+
+@pytest.mark.parametrize("lead", [True, -1, 0.0, Decimal("NaN"), Decimal("Infinity")])
+def test_preparation_lead_must_be_a_finite_nonnegative_exact_number(lead):
+    _preparation_body("preparation_request", {})
+    event = decode_event_row(_row())
+    object.__setattr__(event, "evidence", {
+        "preparation_request": {**_preparation_request(), "prepare_lead_s": lead},
+    })
+    with pytest.raises(validators.EventValidationError):
+        validators.validate_event_structure(event)
+
+
+@pytest.mark.parametrize("literal", ["0", "10", "0.00000000000000001"])
+def test_preparation_evidence_preserves_exact_lead(literal):
+    body = _preparation_body("preparation_request", _preparation_request())
+    text = json.dumps(body).replace('"prepare_lead_s": 10', '"prepare_lead_s": ' + literal)
+    event = decode_event_row(_row(body_json=text))
+    assert event.evidence["preparation_request"]["prepare_lead_s"] == Decimal(literal)
+
+
+@pytest.mark.parametrize("reason", ["device_failed", "baseline_read_failed"])
+def test_preparation_failure_evidence_accepts_exact_failure_reasons(reason):
+    request = {**_preparation_failure_request(), "reason": reason}
+    event = decode_event_row(_row(_preparation_body("preparation_failure_request", request)))
+    assert event.evidence["preparation_failure_request"] == request
+
+
 def test_boolean_is_not_a_numeric_column_enum():
     body = _body()
     body["rows"][0]["after"]["values"]["status"] = True
