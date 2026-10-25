@@ -1,0 +1,12 @@
+locator.click: Browser closed
+    at browserPhotoExport (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1089:10)
+    at async worldClientSession (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1216:11)
+    at async main (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1270:5) {
+  log: []
+}
+locator.click: Browser closed
+    at browserPhotoExport (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1089:10)
+    at async worldClientSession (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1216:11)
+    at async main (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1270:5) {
+  log: []
+}

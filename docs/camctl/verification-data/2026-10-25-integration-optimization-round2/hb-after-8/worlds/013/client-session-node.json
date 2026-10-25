@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "session_id": "54677909-5010-47db-8373-ffe3a470e14f",
+  "node_pid": 761923,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 2,
+    "files_starts": 2,
+    "http_server_starts": 2,
+    "browser_starts": 2
+  },
+  "browser_processes": [
+    {
+      "pid": 762637,
+      "pgid": 762637,
+      "starttime": "4782024",
+      "active": false
+    },
+    {
+      "pid": 774494,
+      "pgid": 774494,
+      "starttime": "4795839",
+      "active": false
+    }
+  ],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "browser-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-browser.json"
+      ],
+      "started_monotonic_ns": "47816930764861",
+      "outcome": "failed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "error": {
+        "message": "locator.click: Browser closed",
+        "stack": "locator.click: Browser closed\n    at browserPhotoExport (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1089:10)\n    at async worldClientSession (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1216:11)\n    at async main (/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts:1270:5)"
+      },
+      "finished_monotonic_ns": "47997068969433",
+      "elapsed_seconds": 180.138204572,
+      "node_cpu_microseconds": {
+        "user": 8122472,
+        "system": 926733
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 2,
+        "files_starts": 2,
+        "http_server_starts": 2,
+        "browser_starts": 2
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "failed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 3530755,
+    "system": 310623
+  },
+  "node_cpu_total_microseconds": {
+    "user": 11676122,
+    "system": 1237356
+  }
+}

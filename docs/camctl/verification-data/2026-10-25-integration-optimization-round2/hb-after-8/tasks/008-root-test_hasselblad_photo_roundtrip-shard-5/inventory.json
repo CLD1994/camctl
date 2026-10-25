@@ -1,0 +1,10 @@
+[
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]"
+]

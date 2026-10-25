@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "session_id": "244c874e-2ad9-430b-906d-0a5fe95612ad",
+  "node_pid": 760341,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 2,
+    "files_starts": 2,
+    "http_server_starts": 2,
+    "browser_starts": 2
+  },
+  "browser_processes": [
+    {
+      "pid": 761011,
+      "pgid": 761011,
+      "starttime": "4779986",
+      "active": false
+    },
+    {
+      "pid": 771358,
+      "pgid": 771358,
+      "starttime": "4792161",
+      "active": true
+    }
+  ],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "browser-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/photo-browser.json"
+      ],
+      "started_monotonic_ns": "47796629708595",
+      "outcome": "running",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "ready",
+  "node_cpu_at_ready_microseconds": {
+    "user": 3930957,
+    "system": 487480
+  }
+}

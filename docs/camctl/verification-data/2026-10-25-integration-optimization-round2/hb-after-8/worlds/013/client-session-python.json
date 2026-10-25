@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "session_id": "54677909-5010-47db-8373-ffe3a470e14f",
+  "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/client-candidate/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 180.0,
+  "startup": {
+    "started_monotonic_ns": 47811748433001,
+    "finished_monotonic_ns": 47816925925526,
+    "elapsed_seconds": 5.177492525,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "browser-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json"
+      ],
+      "receipt_path": "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/photo-browser.json",
+      "started_monotonic_ns": 47816927318406,
+      "finished_monotonic_ns": 47996930881103,
+      "elapsed_seconds": 180.003562697,
+      "outcome": "failed"
+    }
+  ],
+  "close": null,
+  "node_pid": 761923,
+  "failure": "TimeoutError: 客户端会话超过180秒预算；/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/client-session.stderr.log",
+  "cleanup": {
+    "survivors": [],
+    "notes": [],
+    "owned_processes": [
+      {
+        "pid": 761923,
+        "ppid": 755384,
+        "pgid": 761923,
+        "starttime": "4781174",
+        "state": "R"
+      },
+      {
+        "pid": 762439,
+        "ppid": 761923,
+        "pgid": 761923,
+        "starttime": "4781793",
+        "state": "Z"
+      },
+      {
+        "pid": 774494,
+        "ppid": 761923,
+        "pgid": 774494,
+        "starttime": "4795839",
+        "state": "Z"
+      },
+      {
+        "pid": 774496,
+        "ppid": 774494,
+        "pgid": 774494,
+        "starttime": "4795842",
+        "state": "Z"
+      },
+      {
+        "pid": 774497,
+        "ppid": 774494,
+        "pgid": 774494,
+        "starttime": "4795842",
+        "state": "Z"
+      },
+      {
+        "pid": 774517,
+        "ppid": 774494,
+        "pgid": 774494,
+        "starttime": "4795851",
+        "state": "S"
+      },
+      {
+        "pid": 774525,
+        "ppid": 1,
+        "pgid": 774494,
+        "starttime": "4795858",
+        "state": "R"
+      },
+      {
+        "pid": 774511,
+        "ppid": 1,
+        "pgid": 774494,
+        "starttime": "4795849",
+        "state": "Z"
+      }
+    ]
+  }
+}

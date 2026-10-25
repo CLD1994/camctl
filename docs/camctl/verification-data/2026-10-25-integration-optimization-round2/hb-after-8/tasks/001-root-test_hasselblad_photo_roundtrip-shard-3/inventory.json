@@ -1,0 +1,5 @@
+[
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+  "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes"
+]

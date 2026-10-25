@@ -1,0 +1,1 @@
+{"request_text":"{\n  \"name\": \"ack\",\n  \"actions\": [\n    {\n      \"name\": \"ack\",\n      \"type\": \"report_status\",\n      \"params\": {\n        \"scope\": \"full\"\n      }\n    }\n  ],\n  \"request_id\": \"7250520699733264840\",\n  \"created_at\": \"2026-10-25 02:54:54\",\n  \"last_report_id\": \"15\"\n}\n","request_id":"7250520699733264840","last_report_id":"15"}

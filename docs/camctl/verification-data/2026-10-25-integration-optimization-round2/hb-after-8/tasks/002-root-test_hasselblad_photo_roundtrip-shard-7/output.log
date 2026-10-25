@@ -1,0 +1,62 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+________ test_installed_hasselblad_photo_roundtrip[raw-device-0.000333] ________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f1a5116bcd0>
+host_demo = '/tmp/camctl-host-build-f1b494eace1f4b6883e17c172700ca50/host-demo'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f1a5113e710>
+case = PhotoCase(capture_format='raw', source='device', shutter='0.000333', focus_override=None)
+
+    @pytest.mark.parametrize("case", NORMAL_CASES, ids=lambda case: case.name)
+    def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+        world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+        monkeypatch.chdir(tmp_path)
+        world.start()
+        try:
+>           world.host.submit(world.export_photo(browser_prefix=case.name in FULL_UI_CASE_NAMES))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/test_hasselblad_photo_roundtrip.py:713: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/test_hasselblad_photo_roundtrip.py:440: in export_photo
+    receipt = self.client(f"{mode}-photo-export", str(input_path), str(plan),
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/test_hasselblad_photo_roundtrip.py:424: in client
+    return self.client_session.call(command, *arguments, output=output)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/_client_session.py:189: in call
+    reply = self._send(command_id, operation, [*record["arguments"], str(output)], deadline)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/_client_session.py:155: in _send
+    reply = self._read(deadline)
+            ^^^^^^^^^^^^^^^^^^^^
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/_client_session.py:133: in _read
+    self._wait_readable(self.connection, deadline)
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/_client_session.py:125: in _wait_readable
+    if select.select([stream], [], [], min(.1, self._remaining(deadline)))[0]:
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <_client_session.ClientSession object at 0x7f1a51258210>
+deadline = 47976.61429866
+
+    def _remaining(self, deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+>           raise TimeoutError(f"客户端会话超过{_TIMEOUT:g}秒预算；{self.stderr_path}")
+E           TimeoutError: 客户端会话超过180秒预算；/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/client-session.stderr.log
+E           stdout=/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/client-session.stdout.log; stderr=/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/client-session.stderr.log
+
+/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/source/tests/integration/_client_session.py:120: TimeoutError
+============================== slowest durations ===============================
+188.29s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]
+77.28s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]
+50.18s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]
+17.90s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays
+0.01s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]
+0.01s teardown tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]
+
+(3 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]
+1 failed, 2 passed in 334.65s (0:05:34)

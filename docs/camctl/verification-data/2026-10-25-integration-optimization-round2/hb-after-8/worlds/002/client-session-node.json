@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "session_id": "bb1ae057-3c1a-4c64-940b-6111b1c40156",
+  "node_pid": 760231,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 1,
+    "browser_starts": 1
+  },
+  "browser_processes": [
+    {
+      "pid": 760842,
+      "pgid": 760842,
+      "starttime": "4779777",
+      "active": false
+    }
+  ],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "application-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/photo-application.json"
+      ],
+      "started_monotonic_ns": "47795604753673",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "2303324396083828127",
+      "finished_monotonic_ns": "47799955116104",
+      "elapsed_seconds": 4.350362431,
+      "node_cpu_microseconds": {
+        "user": 2185994,
+        "system": 313397
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 2,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-body.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-1-original-browser.json"
+      ],
+      "started_monotonic_ns": "47817797989053",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "4043131081385081440",
+      "finished_monotonic_ns": "47822204092237",
+      "elapsed_seconds": 4.406103184,
+      "node_cpu_microseconds": {
+        "user": 1187663,
+        "system": 114611
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 3,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-body.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-2-preview-browser.json"
+      ],
+      "started_monotonic_ns": "47838267872290",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "1418272799413553168",
+      "finished_monotonic_ns": "47840946817916",
+      "elapsed_seconds": 2.678945626,
+      "node_cpu_microseconds": {
+        "user": 313044,
+        "system": 17516
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 4,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-body.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-3-original-browser.json"
+      ],
+      "started_monotonic_ns": "47853779140149",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "2734012571942760656",
+      "finished_monotonic_ns": "47856937622551",
+      "elapsed_seconds": 3.158482402,
+      "node_cpu_microseconds": {
+        "user": 330367,
+        "system": 18270
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 5,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-body.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/obtain-4-preview-browser.json"
+      ],
+      "started_monotonic_ns": "47873083674766",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "8066958481857697365",
+      "finished_monotonic_ns": "47876376080021",
+      "elapsed_seconds": 3.292405255,
+      "node_cpu_microseconds": {
+        "user": 345244,
+        "system": 16790
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 6,
+      "operation": "upload-files",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/reports-before-media-manifest.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/reports-before-media-receipt.json"
+      ],
+      "started_monotonic_ns": "47894455947309",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "finished_monotonic_ns": "47895416831210",
+      "elapsed_seconds": 0.960883901,
+      "node_cpu_microseconds": {
+        "user": 790843,
+        "system": 53632
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 7,
+      "operation": "upload-files",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/media-after-reports-manifest.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/media-after-reports-receipt.json"
+      ],
+      "started_monotonic_ns": "47895456971804",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "finished_monotonic_ns": "47896601582376",
+      "elapsed_seconds": 1.144610572,
+      "node_cpu_microseconds": {
+        "user": 875095,
+        "system": 58651
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 8,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/ack-body.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/ack-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/ack-browser.json"
+      ],
+      "started_monotonic_ns": "47896618337057",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "4011655363527111407",
+      "finished_monotonic_ns": "47899784971553",
+      "elapsed_seconds": 3.166634496,
+      "node_cpu_microseconds": {
+        "user": 570055,
+        "system": 62667
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 9,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "47906575189724",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "finished_monotonic_ns": "47906750781533",
+      "elapsed_seconds": 0.175591809,
+      "node_cpu_microseconds": {
+        "user": 68375,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 4072058,
+    "system": 563823
+  },
+  "node_cpu_total_microseconds": {
+    "user": 12995424,
+    "system": 1416691
+  }
+}
