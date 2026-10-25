@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
+import json
 from typing import Any
+
+from camctl.operations.error_diagnostics import exception_diagnostic
 
 
 class FlowWakeup(Enum):
@@ -268,15 +271,19 @@ class CombinedLocalWork:
     @staticmethod
     def _attach_failures(
             target: BaseException, failures: tuple[BaseException, ...]) -> None:
-        for failure in failures:
-            if failure is target:
-                continue
-            notes = tuple(getattr(failure, "__notes__", ()))
+        # 原异常图可能引用 target；先编码全部诊断，避免新附注进入后续快照。
+        snapshots = [
+            (failure, tuple(getattr(failure, "__notes__", ())),
+             json.dumps(exception_diagnostic(failure), ensure_ascii=False))
+            for failure in failures if failure is not target
+        ]
+        for failure, notes, diagnostic in snapshots:
             target.add_note(
                 "本地实际责任收场失败: "
                 f"{type(failure).__name__}: {failure}")
             for note in notes:
                 target.add_note(f"本地实际责任收场失败附注: {note}")
+            target.add_note(f"本地实际责任收场失败完整诊断: {diagnostic}")
 
     @staticmethod
     def _raise_failures(failures: tuple[BaseException, ...]) -> None:
