@@ -3790,10 +3790,10 @@ async def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | N
     return await runtime.database.read(read, description="读取拍摄当前责任")
 
 
-def _record_media_source(registered, entries, *, source_file_id=None):
+async def _record_media_source(registered, entries, *, source_file_id=None):
     """只保留一个完整原片及其原格式，拒绝由目录顺序选择修复输入。"""
     selected, count = None, 0
-    for (file, identity), entry in zip(registered, entries, strict=True):
+    async for (file, identity), entry in registered_observations(registered, entries):
         if file.file_id != entry.identity:
             raise ConsistencyError("录像来源与原结果条目顺序不一致")
         if (entry.complete and entry.kind is FileKind.VIDEO
@@ -4005,7 +4005,7 @@ async def _save_winddown_progress(
         == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
     ):
         return True
-    media_source = _record_media_source(registered, entries, source_file_id=row[6])
+    media_source = await _record_media_source(registered, entries, source_file_id=row[6])
     source_file_id = None if media_source is None else media_source[0]
     if source_file_id is None:
         # 尚无写完的完整原片可归属：不能用等待阶段代替文件证据。
@@ -4236,7 +4236,7 @@ async def _advance_recording_outcome(
         state = (await _recording_port(context).recording_state(action_id))
         control_complete = state.stop_confirmed and state.file_complete_guaranteed
     files = (await assess_registered_files(registered, _product_requirements(action, FileKind.VIDEO), set_finalized=_listing_finalized(listing)))
-    media_source = _record_media_source(registered, entries, source_file_id=row[6])
+    media_source = await _record_media_source(registered, entries, source_file_id=row[6])
     source_file_id = None if media_source is None else media_source[0]
     if cached is None and files.is_complete and context.listing_cache is not None and (
             row[6] is not None or source_file_id is not None):
@@ -5491,7 +5491,7 @@ async def _confirm_timelapse_results(
     """
     contract = _RESULT_CONTRACT
     if isinstance(entries, SavedResultEntries):
-        first = next((entries.pages())).ref
+        first = (await anext(entries.pages())).ref
         observation = {"first_page_event_id": first.event_id,
                        "last_page_event_id": entries.last_ref.event_id,
                        "file_count": assessment.file_count}
