@@ -172,20 +172,14 @@ def load_snapshot(handle, *, include_row=None):
                 previous = key
                 if include_row is not None and not include_row(table, values):
                     continue
-                current = handle._get(*key,source='candidates')
-                if current is None or values.keys() != current.keys():
-                    raise SnapshotMaintenanceError('快照行超出自身范围或列不完整')
-                for column in (*registry[table]['immutable'],'id','created_event_id'):
-                    if column in current and not json_equal(values[column],current[column]):
-                        raise SnapshotMaintenanceError('快照不可变身份不符合永久投影')
-                fixed=handle._fixed_values(*key)
-                for column in registry[table]['write_once']:
-                    if not json_equal(values[column],fixed[column]):
-                        raise SnapshotMaintenanceError('快照一次固定事实不属于原S')
+                columns = set().union(*(registry[table].get(name, ()) for name in
+                    ('immutable', 'mutable', 'write_once', 'derived')))
+                if values.keys() != columns:
+                    raise SnapshotMaintenanceError('快照行列不完整或包含未知列')
                 if ('created_event_id' in values and values['created_event_id'] > choice.boundary.last_event_id):
                     raise SnapshotMaintenanceError('快照包含S之后创建的行')
                 handle._put(*key,values)
-                del record,values,current,fixed
+                del record,values
             primary = handle._get(handle.seed.primary_table,handle.seed.ref[1])
             derived = registry[handle.seed.primary_table]['derived']
             if (primary is None

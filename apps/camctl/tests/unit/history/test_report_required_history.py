@@ -116,10 +116,9 @@ def _snapshot(monkeypatch, records):
         {'id': 9, 'last_event_id': 50, 'change_count': 5}
         if source == 'candidates' and table == 'actions' else saved.get((table, identity)))
     handle._put.side_effect = lambda table, identity, values: saved.__setitem__((table, identity), values)
-    handle._fixed_values.return_value = {}
     monkeypatch.setattr(snapshot_stream, 'load_event_registry', create_autospec(
         _REGISTRY_READER, return_value={'tables': {
-            'actions': {'immutable': [], 'write_once': [], 'derived': ['last_event_id', 'change_count']},
+            'actions': {'immutable': [], 'write_once': [], 'derived': ['id', 'last_event_id', 'change_count']},
             'operation_attempts': {'immutable': [], 'write_once': [], 'derived': ['id']}}}))
     header = {'format_version': 1, 'entity_type': 1, 'entity_id': 9,
               'boundary_event_id': 50, 'change_count': 5}
@@ -153,11 +152,15 @@ def test_projected_snapshot_rejects_bad_stream_structure_even_for_unneeded_rows(
         snapshot_stream.load_snapshot(handle, include_row=lambda table, values: False)
 
 
-def test_full_snapshot_still_rejects_rows_outside_complete_candidates(monkeypatch):
+def test_full_snapshot_rejects_incomplete_row_structure(monkeypatch):
     handle, _ = _snapshot(monkeypatch, [
         {'table': 'actions', 'row': {'id': 9, 'last_event_id': 50, 'change_count': 5}},
         {'table': 'operation_attempts', 'row': {'id': 11}},
     ])
+    monkeypatch.setattr(snapshot_stream, 'load_event_registry', create_autospec(
+        _REGISTRY_READER, return_value={'tables': {
+            'actions': {'immutable': [], 'derived': ['id', 'last_event_id', 'change_count']},
+            'operation_attempts': {'immutable': ['run_id'], 'derived': ['id']}}}))
     with pytest.raises(ConsistencyError):
         snapshot_stream.load_snapshot(handle)
 
@@ -176,23 +179,18 @@ def test_projected_snapshot_primary_metadata_follows_primary_table_derived_colum
     assert saved == {('device_files', 9): {'id': 9, 'last_event_id': 50}}
 
 
-@pytest.mark.parametrize('snapshot_value,valid', [(None, True), (7, False)])
-def test_projected_snapshot_uses_proved_original_write_once_values(monkeypatch, snapshot_value, valid):
+@pytest.mark.parametrize('snapshot_value', [None, 7])
+def test_projected_snapshot_uses_its_own_write_once_value_without_borrowing_c(monkeypatch, snapshot_value):
     values = {'id': 9, 'last_event_id': 50, 'change_count': 5, 'fixed': snapshot_value}
     handle, saved = _snapshot(monkeypatch, [{'table': 'actions', 'row': values}])
     handle._get.side_effect = lambda table, identity, source='rows': (
         {**values, 'fixed': 7} if source == 'candidates' else saved.get((table, identity)))
-    handle._fixed_values.return_value = {'fixed': None}
     monkeypatch.setattr(snapshot_stream, 'load_event_registry', create_autospec(
         _REGISTRY_READER, return_value={'tables': {
             'actions': {'immutable': [], 'write_once': ['fixed'],
-                        'derived': ['last_event_id', 'change_count']}}}))
-    if valid:
-        snapshot_stream.load_snapshot(handle, include_row=lambda table, values: True)
-        assert saved[('actions', 9)]['fixed'] is None
-    else:
-        with pytest.raises(ConsistencyError):
-            snapshot_stream.load_snapshot(handle, include_row=lambda table, values: True)
+                        'derived': ['id', 'last_event_id', 'change_count']}}}))
+    snapshot_stream.load_snapshot(handle, include_row=lambda table, values: True)
+    assert saved[('actions', 9)]['fixed'] == snapshot_value
 
 
 @pytest.mark.parametrize('H,expected', [(50, {('actions', 9)}),
@@ -294,6 +292,8 @@ def test_selected_row_replay_does_not_restore_unselected_internal_projection(mon
     handle = report_action.ReportHistoryHandle.__new__(report_action.ReportHistoryHandle)
     candidate = {'id': 9, 'status': 2 if not forward else 1, 'fixed': 7 if not forward else None}
     rows = {('actions', 9): dict(candidate)}
+    handle._forward_candidate = create_autospec(handle._forward_candidate,
+        side_effect=lambda table, identity: (table, identity) == ('actions', 9))
     handle._one = create_autospec(handle._one, side_effect=lambda sql, key: (
         (encode_json_value(candidate), 100) if key == ('actions', 9) else None))
     handle._get = create_autospec(handle._get, side_effect=lambda table, identity: rows.get((table, identity)))

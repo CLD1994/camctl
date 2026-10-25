@@ -125,6 +125,8 @@ def test_full_default_counts_every_member_while_coverage_only_counts_scope(profi
 def test_coverage_candidates_follow_scope_member_reference_not_all_set_members():
     handle = report_action.ReportHistoryHandle.__new__(report_action.ReportHistoryHandle)
     handle.phase, handle.action_id = 'video_coverage', 9
+    from camctl.contracts.history_values import HistoryBoundary
+    handle.boundary = HistoryBoundary(5, 50)
     handle._published_identity = 4
     handle._set_foreign_keys = {'segment_members': 'set_id', 'segment_scope_members': 'set_id'}
     handle.seed = SimpleNamespace(ref=(1, 9))
@@ -132,7 +134,7 @@ def test_coverage_candidates_follow_scope_member_reference_not_all_set_members()
         _OwnerBranch(('segment_members', 'segment_sets'), ('set_id',), (), 'action_id'),))
     assert 'segment_scope_members' in sql
     assert 'member_id' in sql
-    assert parameters[-1] == 4
+    assert parameters[-2:] == (4, 50)
 
 
 def test_coverage_snapshot_does_not_select_non_scope_members():

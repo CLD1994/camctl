@@ -473,7 +473,7 @@ class HistoryRepository:
             seed = self._object_seed(connection, "action", action_id, boundary,
                                      event_batch_size=event_batch_size, primary_only=True,
                                      include_snapshot=strategy != "initial",
-                                     allow_current_snapshot=strategy == "snapshot")
+                                     allow_current_snapshot=strategy == "snapshot", metadata_only=True)
         if strategy == "auto":
             choice = seed.snapshot
             strategy = ("snapshot" if choice is not None and
@@ -613,19 +613,21 @@ class HistoryRepository:
     ) -> dict[tuple[str, int], dict]:
         """按固定 C、H 和可用 S 的相关次数恢复对象自身行。
 
-        先在同一短读视图取得投影副本和路径依据。选中快照只读取
-        其固定 ID；随后每页结束游标和读事务，再应用本页事件。
+        先在同一短读视图取得路径依据；当前路径才复制投影。选中
+        快照只读取其固定 ID，随后逐页应用 (S,H] 的事件。
         """
         with self._read_connection() as connection:
-            seed = self._object_seed(
-                connection, entity, entity_id, boundary,
-                event_batch_size=event_batch_size)
+            seed = self._object_seed(connection, entity, entity_id, boundary,
+                event_batch_size=event_batch_size, metadata_only=True)
+            snapshot = seed.snapshot
+            forward = (snapshot is not None and seed.head[1] != seed.floor[1] and
+                       (snapshot.boundary == boundary or
+                        seed.floor[1]-snapshot.position[1] < seed.head[1]-seed.floor[1]))
+            if not forward:
+                spec = load_enum_registry()['history_objects'][entity]
+                seed = replace(seed, rows=self._seed_entity_rows(connection, spec, entity_id))
         if seed.head[1] == seed.floor[1]:
             return self._finish_rows(seed, dict(seed.rows))
-        snapshot = seed.snapshot
-        forward = (snapshot is not None and
-                   (snapshot.boundary == boundary or
-                    seed.floor[1] - snapshot.position[1] < seed.head[1] - seed.floor[1]))
         if forward:
             rows = self._snapshot_rows(seed)
             lower, upper = snapshot.boundary, boundary
@@ -675,7 +677,7 @@ class HistoryRepository:
             self, connection: sqlite3.Connection, entity: str,
             entity_id: int, boundary: HistoryBoundary, *, event_batch_size: int,
             include_snapshot: bool = True, primary_only: bool = False,
-            allow_current_snapshot: bool = False,
+            allow_current_snapshot: bool = False, metadata_only: bool = False,
     ) -> _ObjectSeed:
         from camctl.persistence.row_history import _anchor
 
@@ -698,8 +700,13 @@ class HistoryRepository:
         if (not primary_only and entity == "action" and _one(connection,
                 "SELECT 1 FROM segment_sets WHERE action_id=? LIMIT 1",(entity_id,))):
             raise ConsistencyError("分段动作须使用有界历史句柄或有限主行入口")
-        seeded = ({(spec["table"], entity_id): _table_row(connection, spec["table"], entity_id)}
-                  if primary_only else self._seed_entity_rows(connection, spec, entity_id))
+        if metadata_only:
+            names = load_event_registry()['tables'][spec['table']]['derived']
+            stored = _one(connection, f"SELECT {','.join(names)} FROM {spec['table']} WHERE id=?", (entity_id,))
+            seeded = {} if stored is None else {(spec['table'], entity_id): dict(zip(names, stored))}
+        else:
+            seeded = ({(spec["table"], entity_id): _table_row(connection, spec["table"], entity_id)}
+                      if primary_only else self._seed_entity_rows(connection, spec, entity_id))
         primary_key = (spec["table"], entity_id)
         if primary_key not in seeded:
             raise ConsistencyError(
@@ -1039,6 +1046,17 @@ class HistoryRepository:
         finally:
             connection.close()
 
+    def _owns_row_identity(self, entity, identity, table, row_id):
+        """仅沿不可变归属关系定位身份，不以当前业务值重算历史状态。"""
+        from camctl.history.bounded import _ownership_branches
+        branches = _ownership_branches(table, entity)
+        if not branches:
+            return False
+        query = ' UNION '.join(branch.query() for branch in branches)
+        with self._read_connection() as connection:
+            return _one(connection, f'SELECT 1 FROM ({query}) WHERE id=? LIMIT 1',
+                        (identity,)*len(branches)+(row_id,)) is not None
+
     def _snapshot_rows(self, seed: _ObjectSeed) -> dict[tuple[str, int], dict]:
         """读取固定快照正文，释放事务后核对格式、主行及归属链。"""
         choice = seed.snapshot
@@ -1063,20 +1081,11 @@ class HistoryRepository:
                 for record in decoded:
                     ObjectId(record.values.get("id"))
                     key = (record.table, record.row_id)
-                    current = seed.rows.get(key)
                     if key in rows:
                         raise SnapshotMaintenanceError(f"快照重复保存自身行: {key}")
-                    if current is None or record.table not in registry:
-                        raise SnapshotMaintenanceError(f"快照包含对象自身范围以外的行: {key}")
+                    if record.table not in registry:
+                        raise SnapshotMaintenanceError(f"快照包含未知业务表: {key}")
                     values = dict(record.values)
-                    if values.keys() != current.keys():
-                        raise SnapshotMaintenanceError(f"快照行缺少必要列或包含未知列: {key}")
-                    # 不可变身份和创建位置必须保持；业务可变值使用 S 的
-                    # 原值，不能用新 C 的值覆盖已冻结快照。
-                    fixed = registry[record.table]["immutable"]
-                    for column in (*fixed, "id", "created_event_id"):
-                        if column in current and not json_equal(values[column], current[column]):
-                            raise SnapshotMaintenanceError(f"快照行的固定事实与当前对象矛盾: {key}.{column}")
                     if ("created_event_id" in values
                             and values["created_event_id"] > choice.boundary.last_event_id):
                         raise SnapshotMaintenanceError(f"快照包含 S 之后创建的行: {key}")
@@ -1147,17 +1156,20 @@ class HistoryRepository:
             self._validated_ranges = {recent.txn_id: recent}
             return tuple(events)
 
-    @staticmethod
     def _apply_object_event(
-            seed: _ObjectSeed, rows: dict[tuple[str, int], dict],
+            self, seed: _ObjectSeed, rows: dict[tuple[str, int], dict],
             event: EventEnvelope, *, forward: bool,
     ) -> None:
         """在读事务外应用自身行；固定归属不随可变状态改变。"""
         touched = False
         for change in event.rows:
             key = (change.table, change.row_id)
-            current = seed.rows.get(key)
-            if current is None:
+            current = seed.rows.get(key) if not forward else None
+            if forward:
+                if key not in rows and not self._owns_row_identity(
+                        _snapshot_entity_name(seed.ref[0]), seed.ref[1], *key):
+                    continue
+            elif current is None:
                 continue
             touched = True
             columns = business_columns(change.table)
@@ -1169,8 +1181,9 @@ class HistoryRepository:
                     if not change.before.exists:
                         if target is not None or set(change.after.values) != columns:
                             raise ReplayError(f"行 {key} 的创建事实不完整或已存在")
-                        created = {name: value for name, value in current.items() if name not in columns}
-                        created.update(change.after.values)
+                        from camctl.history.forward import created_values
+                        created = created_values(event, change, seed.ref,
+                            seed.floor[1])
                         rows[key] = created
                     else:
                         if target is None:

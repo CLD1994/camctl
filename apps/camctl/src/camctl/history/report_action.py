@@ -58,7 +58,7 @@ def open_report_history(repository, entity, identity, boundary, *,
     phase = 'finite' if request is None else request.phase
     with repository._read_connection() as connection:
         seed = repository._object_seed(connection, entity, identity, boundary,
-            event_batch_size=event_batch_size, primary_only=True)
+            event_batch_size=event_batch_size, primary_only=True, metadata_only=True)
     handle = ReportHistoryHandle(repository, seed, entity=entity,
         tables=_required_tables(entity, seed.primary_table, phase=phase), phase=phase,
         event_batch_size=event_batch_size, row_batch_size=row_batch_size)
@@ -150,6 +150,8 @@ class ReportHistoryHandle(SegmentHistoryHandle):
             return values['id'] == self._published_identity
         reference = self._member_reference()
         if reference is not None and table == reference['to'].partition('.')[0]:
+            if getattr(self, '_forward', False):
+                return self._one('SELECT 1 FROM selected_members WHERE id=?', (values['id'],)) is not None
             return self._get(table, values['id'], 'candidates') is not None
         column = self._set_foreign_keys.get(table)
         return column is None or (
@@ -170,9 +172,55 @@ class ReportHistoryHandle(SegmentHistoryHandle):
             source, _, column = reference['from'].partition('.')
             set_column = self._set_foreign_keys[source]
             sql = (f'SELECT id FROM ({sql}) WHERE id IN '
-                   f'(SELECT {column} FROM {source} WHERE {set_column}=?)')
-            parameters += (self._published_identity,)
+                   f'(SELECT {column} FROM {source} WHERE {set_column}=? AND created_event_id<=?)')
+            parameters += (self._published_identity, self.boundary.last_event_id)
         return sql, parameters
+
+    def _select_published(self, connection):
+        if self.entity != 'action' or 'segment_sets' not in self.required_tables:
+            return
+        with closing(connection.execute(
+                'SELECT id FROM segment_sets WHERE action_id=?'
+                ' AND published_event_id IS NOT NULL AND published_event_id<=? LIMIT 2',
+                (self.action_id, self.boundary.last_event_id))) as cursor:
+            published = cursor.fetchall()
+        if len(published) > 1:
+            raise ConsistencyError('H处动作存在多个正式分段集合')
+        self._published_identity = None if not published else published[0][0]
+
+    def _prepare_forward(self):
+        with self.repository._read_connection() as connection:
+            self._select_published(connection)
+        reference = self._member_reference()
+        if reference is None:
+            return
+        self._db.execute('CREATE TABLE selected_members(id INTEGER PRIMARY KEY) WITHOUT ROWID').close()
+        source, _, column = reference['from'].partition('.')
+        previous = 0
+        while self._published_identity is not None:
+            with self.repository._read_connection() as connection:
+                with closing(connection.execute(
+                        f'SELECT id,{column} FROM {source} WHERE set_id=? AND created_event_id<=?'
+                        ' AND id>? ORDER BY id LIMIT ?',
+                        (self._published_identity, self.boundary.last_event_id, previous, self.batch_size))) as cursor:
+                    rows = cursor.fetchall()
+            if not rows:
+                return
+            for _, identity in rows:
+                self._db.execute('INSERT OR IGNORE INTO selected_members VALUES (?)', (identity,)).close()
+            previous = rows[-1][0]
+
+    def _forward_candidate(self, table, identity):
+        if table not in self.required_tables:
+            return False
+        branches = _ownership_branches(table, self.entity)
+        if not branches:
+            return False
+        sql, parameters = self._candidate_query(table, branches)
+        with self.repository._read_connection() as connection:
+            with closing(connection.execute(f'SELECT 1 FROM ({sql}) WHERE id=? LIMIT 1',
+                    (*parameters, identity))) as cursor:
+                return cursor.fetchone() is not None
 
     def _copy_candidates(self):
         from camctl.persistence.repositories.history import _table_row
@@ -182,15 +230,7 @@ class ReportHistoryHandle(SegmentHistoryHandle):
             with closing(connection.execute('SELECT format_version FROM database_metadata WHERE id=1')) as cursor:
                 database_format = cursor.fetchone()[0]
             available = business_tables_for_format(database_format)
-            if self.entity == 'action' and 'segment_sets' in self.required_tables:
-                with closing(connection.execute(
-                        'SELECT id FROM segment_sets WHERE action_id=?'
-                        ' AND published_event_id IS NOT NULL AND published_event_id<=? LIMIT 2',
-                        (self.action_id, self.boundary.last_event_id))) as cursor:
-                    published = cursor.fetchall()
-                if len(published) > 1:
-                    raise ConsistencyError('H处动作存在多个正式分段集合')
-                self._published_identity = None if not published else published[0][0]
+            self._select_published(connection)
             for table in sorted(self.required_tables & set(available)):
                 branches = _ownership_branches(table, self.entity)
                 if not branches:
