@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol, runtime_checkable
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.start_entry import StartEntryPermit
@@ -110,7 +110,7 @@ class ControlRequest:
     #: 普通录像原受理定义中的返回含义；省略保持旧 STARTED 合同。
     start_return_meaning: int | None = None
     #: 结果适配器核验后的同尝试前页历史；只读回调不进入 JSON params。
-    prior_result_entries: Callable[[], Iterator[Mapping[str, Any]]] | None = None
+    prior_result_entries: Callable[[], AsyncIterator[Mapping[str, Any]]] | None = None
     #: 原活动固定基准的只读差集；保留输入次序，不进入机器参数。
     result_candidates: Callable[[tuple[FileIdentity, ...]], tuple[FileIdentity, ...]] | None = None
     #: 当前扫描拥有者提供的目录读取入口，不保存在驱动全局状态。

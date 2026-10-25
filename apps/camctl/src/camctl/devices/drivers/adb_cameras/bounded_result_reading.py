@@ -203,7 +203,7 @@ class _BoundedRead:
                         {"reason": "history_unavailable"})
                     return None
                 matched_identity = None
-                for entry in history():
+                async for entry in history():
                     if not isinstance(entry, Mapping):
                         raise ValueError("前页结果历史必须是文件条目表")
                     identity = entry.get("identity")
