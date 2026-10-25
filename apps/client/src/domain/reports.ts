@@ -24,6 +24,7 @@ import {
   isName,
   isObject,
   isTimestamp,
+  isCreationTimestamp,
   isUint,
   schemaIssues,
 } from "../shared/validation";
@@ -797,7 +798,7 @@ function ownFacts(report: StatusReport, sameBoundary = true) {
   for (const plan of report.plans ?? []) {
     validateStatusHistory(plan, ["pending", "completed"]);
     requireFact(
-      isName(plan.name) && isTimestamp(plan.created_at),
+      isName(plan.name) && isCreationTimestamp(plan.created_at),
       "计划名称或真实日期不合法",
     );
     for (const action of plan.actions ?? []) {

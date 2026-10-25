@@ -8,7 +8,7 @@
       "$ref": "status-report.schema.json#/$defs/request_id"
     },
     "created_at": {
-      "$ref": "status-report.schema.json#/$defs/timestamp"
+      "$ref": "status-report.schema.json#/$defs/creation_timestamp"
     },
     "name": {
       "$ref": "status-report.schema.json#/$defs/name"
@@ -687,7 +687,7 @@
           "$ref": "status-report.schema.json#/$defs/request_id"
         },
         "created_at": {
-          "$ref": "status-report.schema.json#/$defs/timestamp"
+          "$ref": "status-report.schema.json#/$defs/creation_timestamp"
         },
         "name": {
           "$ref": "status-report.schema.json#/$defs/name"

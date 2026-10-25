@@ -21,6 +21,7 @@ _CANONICAL_ID = re.compile(r"\A[1-9][0-9]*\Z")
 
 #: 时间字面量固定格式 YYYY-MM-DD HH:mm:ss，只接受 ASCII 数字。
 _TIME_LITERAL = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\Z")
+_CREATION_TIME_LITERAL = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3})?\Z")
 
 _EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
 _MICROS_PER_DAY = 86_400_000_000
@@ -131,16 +132,18 @@ def format_object_id(value: ObjectId) -> str:
     return str(int(value))
 
 
-def to_utc_micros(raw: Any) -> UtcMicros:
+def to_utc_micros(raw: Any, *, allow_milliseconds: bool = False) -> UtcMicros:
     """把 ``YYYY-MM-DD HH:mm:ss`` 的 UTC 时间字面量转换为整数微秒。
 
     使用整数的日与秒运算，本地时区不参与转换；
-    小数秒、时区后缀、首尾空白及不真实的日期都按格式错误拒绝。
+    创建时间显式启用 allow_milliseconds 时接受三位毫秒。
+    其他小数秒、时区后缀、首尾空白及不真实的日期按格式错误拒绝。
     """
     if isinstance(raw, bool) or not isinstance(raw, str):
         raise ValueTypeError(f"时间字面量必须是字符串: {raw!r}")
-    if not _TIME_LITERAL.match(raw):
-        raise ValueFormatError(f"时间字面量不符合固定秒级格式: {raw!r}")
+    pattern = _CREATION_TIME_LITERAL if allow_milliseconds else _TIME_LITERAL
+    if not pattern.match(raw):
+        raise ValueFormatError(f"时间字面量不符合规定格式: {raw!r}")
     year, month, day = int(raw[0:4]), int(raw[5:7]), int(raw[8:10])
     hour, minute, second = int(raw[11:13]), int(raw[14:16]), int(raw[17:19])
     if hour > 23 or minute > 59 or second > 59:
@@ -151,16 +154,19 @@ def to_utc_micros(raw: Any) -> UtcMicros:
         raise ValueFormatError(f"日期不真实: {raw!r}") from error
     micros = (ordinal - _EPOCH_ORDINAL) * _MICROS_PER_DAY
     micros += (hour * 3600 + minute * 60 + second) * 1_000_000
+    if len(raw) == 23:
+        micros += int(raw[20:23]) * 1000
     return UtcMicros(micros)
 
 
-def format_utc_micros(value: UtcMicros) -> str:
+def format_utc_micros(value: UtcMicros, *, allow_milliseconds: bool = False) -> str:
     """从整数微秒还原唯一的时间字面量。"""
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueTypeError(f"UTC 微秒必须是整数: {value!r}")
     total_seconds, rem = divmod(int(value), 1_000_000)
-    if rem != 0:
-        raise ValueFormatError(f"微秒值不是整秒: {value}")
+    if rem != 0 and (not allow_milliseconds or rem % 1000 != 0):
+        raise ValueFormatError(f"微秒值不符合所需时间精度: {value}")
+    fraction = f".{rem // 1000:03d}" if rem else ""
     ordinal, day_seconds = divmod(total_seconds, 86400)
     try:
         moment = date.fromordinal(ordinal + _EPOCH_ORDINAL)
@@ -168,7 +174,7 @@ def format_utc_micros(value: UtcMicros) -> str:
         raise ValueRangeError(f"微秒值超出可表达日期范围: {value}") from error
     hour, rem = divmod(day_seconds, 3600)
     minute, second = divmod(rem, 60)
-    return f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+    return f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d} {hour:02d}:{minute:02d}:{second:02d}{fraction}"
 
 
 def seconds_to_duration_ms(seconds: Any) -> DurationMillis:

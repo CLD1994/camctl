@@ -9,7 +9,7 @@ import type {
 import { validateParams } from "./capabilities";
 import { validateBuiltinParams, isSyncBasis } from "./action-params";
 import { createProtocolValidator } from "./protocol-validation";
-import { isName, isObject, isTimestamp, schemaIssues } from "./validation";
+import { isName, isObject, isTimestamp, isCreationTimestamp, schemaIssues } from "./validation";
 
 const validate = createProtocolValidator().getSchema("plan.schema.json")!;
 
@@ -23,8 +23,8 @@ export function validatePlan(
     issues.push({ path, code, message });
   };
   if (!isObject(plan)) return issues;
-  if (!isTimestamp(plan.created_at))
-    issue("created_at", "invalid_value", "创建时间必须是真实的秒级 UTC 时间");
+  if (!isCreationTimestamp(plan.created_at))
+    issue("created_at", "invalid_value", "创建时间必须是真实的 UTC 时间，毫秒使用三位数字");
   if (!Array.isArray(plan.actions)) return issues;
   const actions = plan.actions;
   const names = new Map<string, Record<string, unknown>[]>();

@@ -154,6 +154,38 @@ class TestUtcMicros:
             UtcMicros(1_000_000_000_000_000.5)  # type: ignore[arg-type]
 
 
+class TestCreationTime:
+    @pytest.mark.parametrize("raw,expected,formatted", [
+        ("1970-01-01 00:00:00.001", 1000, "1970-01-01 00:00:00.001"),
+        ("1969-12-31 23:59:59.999", -1000, "1969-12-31 23:59:59.999"),
+        ("1970-01-01 00:00:00.000", 0, "1970-01-01 00:00:00"),
+        ("1970-01-01 00:00:00", 0, "1970-01-01 00:00:00"),
+        ("2025-01-15 00:00:00.047", 1_736_899_200_047_000, "2025-01-15 00:00:00.047"),
+    ])
+    def test_exact_creation_time(self, raw, expected, formatted):
+        assert to_utc_micros(raw, allow_milliseconds=True) == expected
+        assert format_utc_micros(UtcMicros(expected), allow_milliseconds=True) == formatted
+
+    @pytest.mark.parametrize("raw", [
+        "2026-01-01 00:00:00.1", "2026-01-01 00:00:00.12",
+        "2026-01-01 00:00:00.1234", "2026-01-01 00:00:00.123456",
+        "2026-02-29 00:00:00.047", "2026-01-01 00:00:00.047Z",
+    ])
+    def test_invalid_creation_time(self, raw):
+        with pytest.raises(ValueFormatError):
+            to_utc_micros(raw, allow_milliseconds=True)
+
+    def test_sub_millisecond_storage_is_rejected(self):
+        with pytest.raises(ValueFormatError):
+            format_utc_micros(UtcMicros(1001), allow_milliseconds=True)
+
+    def test_default_seconds_conversion_remains_strict(self):
+        with pytest.raises(ValueFormatError):
+            to_utc_micros("1970-01-01 00:00:00.001")
+        with pytest.raises(ValueFormatError):
+            format_utc_micros(UtcMicros(1000))
+
+
 class TestDurationMillis:
     @pytest.mark.parametrize("precision", [1, 3, 28, 80])
     def test_exact_milliseconds_do_not_depend_on_context(self, precision: int) -> None:

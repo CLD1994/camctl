@@ -14,7 +14,7 @@ const grammar = {
   $defs: {
     expression: { discriminator: { propertyName: 'op' }, oneOf: [
       operation('literal', { value: {} }), operation('omit'), operation('error', { code: { const: 'state_database_error' } }),
-      operation('read', { column, encoding: { enum: ['identity', 'id', 'utc_seconds', 'json'] }, schema: text }, ['column', 'encoding']),
+      operation('read', { column, encoding: { enum: ['identity', 'id', 'utc_seconds', 'utc_milliseconds', 'json'] }, schema: text }, ['column', 'encoding']),
       operation('status_history', { column, schema: text }),
       operation('enum', { column, map: { type: 'object', minProperties: 1, additionalProperties: text } }),
       operation('enum_is', { column, members: { ...strings, minItems: 1 } }),

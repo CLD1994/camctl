@@ -4,7 +4,7 @@ CREATE TABLE plans (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     request_id INTEGER NOT NULL UNIQUE CHECK (request_id > 0),
     name TEXT NOT NULL CHECK (length(name) > 0),
-    created_at INTEGER NOT NULL CHECK (created_at % 1000000 = 0),
+    created_at INTEGER NOT NULL CHECK (created_at % 1000 = 0),
     status INTEGER NOT NULL CHECK (status IN (1,2,3)),
     created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     last_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,

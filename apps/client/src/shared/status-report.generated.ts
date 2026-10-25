@@ -12,12 +12,12 @@ export type EntityId1 = string;
  */
 export type Uint = number;
 /**
- * 固定到秒的 UTC 时间字面量 YYYY-MM-DD HH:mm:ss；不接受小数秒，日期和时间的实际有效性另按语义校验。
+ * 计划创建时间为 UTC，新的客户端输出三位毫秒；兼容已有秒级时间。实际日期有效性另行校验。
  *
  * This interface was referenced by `Camctl`'s JSON-Schema
- * via the `definition` "timestamp".
+ * via the `definition` "creation_timestamp".
  */
-export type Timestamp = string;
+export type CreationTimestamp = string;
 /**
  * 首尾 Unicode 空白按输入契约另作语义校验，不依赖不同正则引擎对空白的不同解释。
  *
@@ -236,6 +236,13 @@ export type ActionStatusHistory = [
     clock_status: ClockStatus;
   }[]
 ];
+/**
+ * 固定到秒的 UTC 时间字面量 YYYY-MM-DD HH:mm:ss；不接受小数秒，日期和时间的实际有效性另按语义校验。
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "timestamp".
+ */
+export type Timestamp = string;
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "clock_status".
@@ -469,7 +476,7 @@ export interface Plan {
       }
   ) &
     string;
-  created_at: Timestamp;
+  created_at: CreationTimestamp;
   name: Name;
   status: PlanStatus;
   actions?: Action[];

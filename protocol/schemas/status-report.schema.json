@@ -143,6 +143,11 @@
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$(?![\\s\\S])",
       "description": "首尾 Unicode 空白按输入契约另作语义校验，不依赖不同正则引擎对空白的不同解释。"
     },
+    "creation_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?$(?![\\s\\S])",
+      "description": "计划创建时间为 UTC，新的客户端输出三位毫秒；兼容已有秒级时间。实际日期有效性另行校验。"
+    },
     "timestamp": {
       "type": "string",
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$(?![\\s\\S])",
@@ -2370,7 +2375,7 @@
           "$ref": "#/$defs/request_id"
         },
         "created_at": {
-          "$ref": "#/$defs/timestamp"
+          "$ref": "#/$defs/creation_timestamp"
         },
         "name": {
           "$ref": "#/$defs/name"

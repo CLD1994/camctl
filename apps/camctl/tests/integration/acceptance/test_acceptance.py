@@ -165,6 +165,24 @@ def _freeze_reports(environment, report_id: int) -> None:
 
 
 class TestFirstAcceptance:
+    async def test_creation_milliseconds_are_saved_and_projected(self, environment, tmp_path):
+        from camctl.contracts.public_projection import ProjectionInput, project_public
+
+        body = _plan_body()
+        body["created_at"] = "2025-01-15 00:00:00.047"
+        result = await _accept(environment, tmp_path, body)
+        assert result.plan_disposition is PlanDisposition.REGISTERED
+        connection, _ = environment
+        row = connection.execute(
+            "SELECT id,request_id,name,created_at,status FROM plans WHERE id=1"
+        ).fetchone()
+        assert row[3] == 1_736_899_200_047_000
+        facts = dict(zip(("id", "request_id", "name", "created_at", "status"), row))
+        fragment = project_public(ProjectionInput(
+            entity="plan", root_id=1, tables={"plans": {1: facts}}, selected_entities={},
+        ))
+        assert fragment["created_at"] == body["created_at"]
+
     async def test_register_plan_actions_links_and_catalogs(self, environment, tmp_path) -> None:
         connection, _ = environment
         body = _plan_body(

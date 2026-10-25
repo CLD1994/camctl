@@ -56,11 +56,9 @@ import {
 } from "../domain/reports";
 import { formatProtocolTime, type UtcText } from "../domain/protocol-time";
 
-function utc(): UtcText {
+function utc(date = new Date()): UtcText {
   // toISOString 恒为 UTC 且格式固定；截到秒符合公共协议时间字面量。
-  return formatProtocolTime(
-    new Date().toISOString().slice(0, 19).replace("T", " "),
-  );
+  return formatProtocolTime(date.toISOString().slice(0, 19).replace("T", " "));
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -543,7 +541,8 @@ export class Application {
           );
         }
       });
-      const now = utc();
+      const exportTime = new Date(Date.now());
+      const now = utc(exportTime);
       const {
         last_report_id: ack,
         request_id: oldId,
@@ -553,7 +552,11 @@ export class Application {
       const record: ExportedRequest = {
         id: requestId,
         draftId: id,
-        body: { ...intent, request_id: requestId, created_at: now },
+        body: {
+          ...intent,
+          request_id: requestId,
+          created_at: exportTime.toISOString().slice(0, -1).replace("T", " "),
+        },
         exportedAt: now,
         handedAt: null,
         copyContent: cloneClientJson(content),

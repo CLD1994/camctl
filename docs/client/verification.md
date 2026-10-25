@@ -4,11 +4,11 @@
 
 ## 计划下载文件名与创建时间（2026-10-26）
 
-Windows、Node.js 24.22.1 和系统 Chrome 中，`http` 集成测试的 12 项、`requests` 集成测试的 10 项及 `browser-workflow` 中的导出与再次下载场景均通过。HTTP 用例控制下载时钟，核对本地日期、时分秒及非零三位毫秒；浏览器用例核对首次导出和再次下载的实际建议文件名，并保留请求身份与复制后新身份的断言。原文件名用例先失败，再在统一使用后端附件名称后通过。类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。
+Windows、Node.js 24.22.1 和系统 Chrome 中，`creation-time`、`protocol`、`reports`、`request-id`、`http`、`requests` 六个测试文件的 572 项通过。创建时间用例先观察到原实现拒绝三位毫秒、导出正文丢失毫秒，再验证合法日期、零与非零毫秒、旧秒级记录及非法精度。HTTP 用例在导出后推进到另一日期，确认正文时间与文件名固定，旧秒级记录的名称补 `000` 且正文不改写。
 
-`requests` 既有用例确认正文 `created_at` 为公共协议要求的 UTC 秒级字符串。代码核对显示 camctl 在新计划校验时检查该字段，受理时转换为整数微秒并写入计划记录；既有格式已与客户端一致。本项未修改 camctl、公共协议或已有原请求，未运行 Python 测试。
+`requests` 用例确认首次导出 `created_at` 为 `2026-10-26 07:08:23.047`，关闭并重新打开真实数据库后原请求保持一致。浏览器导出与再次下载场景通过，核对实际建议名称、正文时间及复制后的新请求身份。类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。camctl 的相关验证单独记录在[软件验证记录](../camctl/verification.md#计划创建时间的毫秒精度2026-10-26)。
 
-本地服务使用原 `data` 目录重启并提供新版构建。日志位于 `tmp/plan-filename-red.log`、`tmp/plan-filename-http.log`、`tmp/plan-filename-browser.log`、`tmp/plan-created-at.log`、`tmp/plan-filename-typecheck.log` 和 `tmp/plan-filename-build.log`。测试使用独立临时数据，未运行完整客户端测试套件。
+日志位于 `tmp/created-at-ms-client-red.log`、`tmp/created-at-ms-client-green.log`、`tmp/created-at-ms-browser.log`、`tmp/created-at-ms-typecheck.log` 和 `tmp/created-at-ms-build.log`。测试使用独立临时数据，未运行完整客户端测试套件。
 
 ## 草稿输入响应与保存布局（2026-10-25）
 

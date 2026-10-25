@@ -10,6 +10,14 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 计划创建时间的毫秒精度（2026-10-26）
+
+Windows、CPython 3.11.12 中，时间值类型的 90 项单元测试通过，覆盖精确整数毫秒换算、起点两侧、零毫秒、旧秒级时间和非法精度。真实受理、数据库写入及公共投影的新增用例先因 `plans.created_at` 整秒约束失败；按契约放宽到整毫秒后，`integration/acceptance/test_acceptance.py` 的 52 项通过，数据库实际保存 `1736899200047000` 并投影为 `2025-01-15 00:00:00.047`。
+
+受理测试使用独立的 `created-at-python311-sqlite` 环境，链接 SQLite 3.54.1；原环境链接 3.47.1，不满足仓库运行条件，其受理结果不计作业务验证。`integration/contracts` 的 442 项通过，模块依赖检查另有一项失败；独立读取基线 `142b7925` 的源码导入图与当前源码，所得九条违规边完全相同。受理目录完整运行另有五项未通过，涉及事务替身的 `total_changes`、Windows 输出捕获与设备描述；本项只据已通过的受理文件和时间投影用例确认新增行为，没有将目录结果计作全绿。
+
+数据库结构检查通过 3925 项断言，公共协议、报告依赖登记与文档链接检查通过。日志位于 `tmp/created-at-ms-python-unit.log`、`tmp/created-at-ms-python-contracts.log`、`tmp/created-at-ms-python-acceptance-sqlite.log`、`tmp/created-at-ms-python-acceptance-focused.log`、`tmp/created-at-ms-database.log` 与 `tmp/created-at-ms-baseline-imports.log`。本项直接更新当前开发结构；未连接真实设备，未执行完整 Python 测试套件。
+
 ## 开发容器重建后的运行环境
 
 环境恢复、测试提速与统一交付由[接续计划](../superpowers/plans/2026-10-25-environment-test-speed-delivery.md)跟踪。恢复后的开发解释器位于 `.local/environments/dev-python311-20261025/`，`apps/camctl/.venv311` 指向该目录。旧失效环境保存在 `.local/archives/environment-20261025/venv311`。CPython 3.11.17 实际链接 SQLite 3.53.1；`uv sync --project apps/camctl --python 3.11 --group test --frozen` 使用显式的开发环境目录，依赖检查通过。运行库检查验证 STRICT、JSON、增量 BLOB 及临时文件库 WAL/FULL，退出 0。

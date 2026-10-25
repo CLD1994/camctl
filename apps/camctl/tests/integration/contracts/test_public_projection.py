@@ -37,6 +37,10 @@ def _plan_facts(plan_id: int = 1, **columns) -> ProjectionInput:
 
 
 class TestProjectPublicPlan:
+    def test_plan_creation_time_preserves_milliseconds(self):
+        fragment = project_public(_plan_facts(created_at=1_736_899_200_047_000))
+        assert fragment["created_at"] == "2025-01-15 00:00:00.047"
+
     def test_plan_fields_encoded_per_contract(self) -> None:
         fragment = project_public(_plan_facts())
         # 对象 ID 规范十进制字符串；时间秒级 UTC。

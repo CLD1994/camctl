@@ -1,10 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  mkdtempSync,
-  rmSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
@@ -12,6 +7,7 @@ import { Readable } from "node:stream";
 import { Application } from "../../src/server/application";
 import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
+import type { ExportedRequest } from "../../src/server/models";
 import { mappedReport, reportInput, deliveryFileName } from "./fixtures";
 const clean: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -84,9 +80,13 @@ it.each(["play", "download", "range"] as const)(
     expect(worker.videos()[0].status).toBe("unavailable");
   },
 );
-async function setup() {
+async function setup(request?: ExportedRequest) {
   const dir = mkdtempSync(join(tmpdir(), "camctl-http-"));
   const app = new Application(dir);
+  if (request) {
+    app.store.initialize();
+    app.store.set("requests", request.id, request);
+  }
   const files = new Files(app);
   const server = await new Promise<Server>((resolve) => {
     const s = createHttpApp(app, files).listen(0, "127.0.0.1", () =>
@@ -131,6 +131,10 @@ it("HTTP 显式初始化后保存并导出计划", async () => {
   expect(missingVersion.status).toBe(409);
   const observation = await (await fetch(base + "/api/state")).json();
   expect(observation.requests).toEqual([]);
+  const clock = vi
+    .spyOn(Date, "now")
+    .mockReturnValue(Date.parse("2026-10-26T07:08:23.047Z"));
+  clean.push(async () => clock.mockRestore());
   const exported = await fetch(`${base}/api/drafts/${d.id}/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -142,20 +146,41 @@ it("HTTP 显式初始化后保存并导出计划", async () => {
   });
   expect(exported.status).toBe(200);
   const r = await exported.json();
-  const clock = vi.spyOn(Date, "now").mockReturnValue(
-    new Date(2026, 9, 26, 15, 8, 23, 47).getTime(),
-  );
-  let response: Response;
-  try {
-    response = await fetch(`${base}/api/requests/${r.id}/download`);
-  } finally {
-    clock.mockRestore();
-  }
+  clock.mockReturnValue(Date.parse("2026-10-27T09:10:11.999Z"));
+  const response = await fetch(`${base}/api/requests/${r.id}/download`);
   expect(response.headers.get("Content-Disposition")).toBe(
-    'attachment; filename="plan-2026-10-26_15-08-23-047.json"',
+    'attachment; filename="plan-2026-10-26_07-08-23-047.json"',
   );
   const downloaded = await response.json();
   expect(downloaded.request_id).toBe(r.id);
+  expect(downloaded.created_at).toBe("2026-10-26 07:08:23.047");
+  clock.mockReturnValue(Date.parse("2026-10-28T10:11:12.123Z"));
+  const again = await fetch(`${base}/api/requests/${r.id}/download`);
+  expect(again.headers.get("Content-Disposition")).toBe(
+    response.headers.get("Content-Disposition"),
+  );
+  expect(await again.json()).toEqual(downloaded);
+});
+it("秒级旧请求的下载名称沿用创建时间并补齐毫秒位", async () => {
+  const base = await setup({
+    id: "42",
+    draftId: "legacy",
+    body: {
+      request_id: "42",
+      created_at: "2026-01-15 08:00:00",
+      name: "旧计划",
+      actions: [
+        { name: "同步", type: "report_status", params: { scope: "full" } },
+      ],
+    },
+    exportedAt: "2026-01-15 08:00:00",
+    handedAt: null,
+  });
+  const response = await fetch(`${base}/api/requests/42/download`);
+  expect(response.headers.get("Content-Disposition")).toBe(
+    'attachment; filename="plan-2026-01-15_08-00-00-000.json"',
+  );
+  expect((await response.json()).created_at).toBe("2026-01-15 08:00:00");
 });
 it("跨来源写入被拒绝且数据库未初始化", async () => {
   const base = await setup();
@@ -318,7 +343,7 @@ it("HTTP 状态与重载保留预览和估算声明的精确数字文本", async
     '"required":["type"],"additionalProperties":false},',
     '"video_size_estimate":{"bitrate_mbps":130.125,',
     '"duration":{"method":"direct","seconds":{"source":"constant","value":2.4e2}}}',
-    '}]}]}]}',
+    "}]}]}]}",
   ].join("");
   writeFileSync(file, text);
   const app = new Application(dir);

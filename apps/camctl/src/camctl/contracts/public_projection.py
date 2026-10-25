@@ -395,10 +395,10 @@ def _read(node: Mapping[str, Any], context: _Context) -> Any:
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise PublicProjectionError(f"{node['column']} 不是合法对象 ID: {value!r}")
         return str(value)
-    if encoding == "utc_seconds":
+    if encoding in ("utc_seconds", "utc_milliseconds"):
         if not isinstance(value, int) or isinstance(value, bool):
             raise PublicProjectionError(f"{node['column']} 不是整数微秒: {value!r}")
-        return format_utc_micros(value)
+        return format_utc_micros(value, allow_milliseconds=encoding == "utc_milliseconds")
     if encoding == "json":
         document = _json(node["column"], context)
         if "schema" in node:

@@ -312,7 +312,7 @@
           "value": {
             "op": "read",
             "column": "plans.created_at",
-            "encoding": "utc_seconds"
+            "encoding": "utc_milliseconds"
           }
         },
         "name": {
