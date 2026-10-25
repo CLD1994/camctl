@@ -49,7 +49,7 @@ def _world(mocker, *, scanning=True):
     repository.fix_baseline.side_effect = lambda request, *_: DbOutcome(
         DbOutcomeKind.COMPLETED, BaselineRef(1, BaselineState.FIXED, 11, 12, request.chunk_count, request.entry_count))
     action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
-              "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "cancel_requested": 0}
+              "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "execution_started": 1, "cancel_requested": 0}
     activity = {"id": 1, "action_id": 2, "ownership_mode": 2, "dispatch_state": 1,
                 "occupancy_state": 1, "output_scope_json": {"directories": list(ROOTS)}}
     mocker.patch("camctl.capture.baseline.row_facts", side_effect=lambda db, table, identity: action if table == "actions" else activity)
@@ -90,9 +90,9 @@ def _segmented_world(mocker, *, scanning=True):
     rows = mocker.patch("camctl.persistence.transaction.row_facts")
     # 两个生产入口从同一原动作及活动事实读取。
     action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
-              "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "cancel_requested": 0}
+              "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "execution_started": 1, "cancel_requested": 0}
     activity = {"id": 1, "action_id": 2, "ownership_mode": 2,
-                "output_scope_json": {"directories": list(ROOTS)}}
+                "dispatch_state": 1, "occupancy_state": 1, "output_scope_json": {"directories": list(ROOTS)}}
     rows.side_effect = lambda db, table, identity: action if table == "actions" else activity
     runtime.action = lambda _: action
     views = {}
@@ -140,6 +140,29 @@ async def test_segment_baseline_uses_same_scan_with_original_page_intents(mocker
     directory.directory_scan.assert_called_once()
     directory.read_directory.assert_not_awaited()
     scan.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_pending_segment_baseline_uses_real_preparation_route(mocker):
+    from camctl.capture.handlers import CaptureRuntime
+    from camctl.devices.tasks import CaptureResultPolicy
+    import sqlite3
+
+    runtime, directory, scan, state = _segmented_world(mocker)
+    action = runtime.action(2)
+    action.update(status=1, execution_started=0,
+        execution_spec_json={"result_policy": CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value})
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        cursor.fetchone.return_value = (1,) if "FROM device_activities WHERE action_id" in sql else None
+        return cursor
+    runtime.owned.connection.execute.side_effect = execute
+    result = await CaptureRuntime.prepare_baseline(runtime, 2)
+    assert result.phase is PreparationPhase.READY
+    assert (state.chunks, state.entries) == (2, 136)
+    assert runtime.capture.save_baseline_read_intent.call_count == 2
+    assert runtime.capture.save_baseline_read_return.call_count == 2
+    assert action["status"] == 1 and action["execution_started"] == 0
 
 
 @pytest.mark.asyncio
@@ -380,14 +403,15 @@ async def test_control_preparation_settles_cancel_or_expiry_after_actual_page(
     action = runtime.action(2) if segmented else None
     if not segmented:
         action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
-                  "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "cancel_requested": 0}
+                  "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "execution_started": 1, "cancel_requested": 0}
         activity = {"id": 1, "action_id": 2, "ownership_mode": 2, "dispatch_state": 1,
                     "occupancy_state": 1, "output_scope_json": {"directories": list(ROOTS)}}
         mocker.patch("camctl.capture.baseline.row_facts",
                      side_effect=lambda db, table, identity: action if table == "actions" else activity)
     action["execution_spec_json"] = ({"result_policy": CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value}
                                      if segmented else {})
-    action["execution_started"] = False
+    action["execution_started"] = 0
+    action["status"] = 1
     runtime.action = lambda _: action
     current_time = [NOW]
     runtime.wall_us = lambda: current_time[0]

@@ -512,6 +512,12 @@ def _motor_cancel_request(command):
     return _cancel_request(command)
 
 
+def _preparation_cancel_pending(facts):
+    """无START效果的取消只在原准备与占用都收场后结束。"""
+    return facts.not_started and (not facts.preparation_resolved or (
+        facts.activity is not None and facts.activity["occupancy_state"] == 1))
+
+
 class _ApplyCancelTargetCommand:
     """保存一个目标的取消生效（CANCEL_CHANGED.APPLY）。
 
@@ -597,8 +603,7 @@ class _ApplyCancelTargetCommand:
             if target["status"] == 1 or target["type"] == 8:
                 before["status"], after["status"] = target["status"], _ACTION_CANCELED
                 outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
-                if target["type"] in (1, 2, 3) and start.activity is not None and (
-                        start.activity["occupancy_state"] == 1 or not start.preparation_resolved):
+                if target["type"] in (1, 2, 3) and _preparation_cancel_pending(start):
                     # 目标先终态以阻止新业务；取消成员等待原准备调用及占用释放。
                     outcome_event = None
                 plan_row = self._pre_start_plan_row(connection, target)
@@ -625,6 +630,8 @@ class _ApplyCancelTargetCommand:
             else:
                 outcome_event = (_ITEM_SUCCEEDED,
                                  CancelOutcomeChoice.ALREADY_TERMINAL.value)
+                if target["type"] in (1, 2, 3) and _preparation_cancel_pending(load_start_facts(connection, target)):
+                    outcome_event = None
                 effect_after = CancellationEffect.NOT_REQUIRED.value
         elif mode is CancelApplyMode.ALREADY:
             if not target["cancel_requested"]:
@@ -960,9 +967,9 @@ class _RecordCancelResultCommand:
         if (target["type"] == 7 and command.outcome is not None
                 and target["status"] not in _ACTION_TERMINAL):
             raise ConsistencyError("报告取消成功结果要求目标已终态")
-        if target["type"] in (1, 2, 3) and target["execution_started"] == 0 and command.outcome is not None:
+        if target["type"] in (1, 2, 3) and command.outcome is not None:
             start = load_start_facts(connection, target)
-            if not start.preparation_resolved or (start.activity is not None and start.activity["occupancy_state"] == 1):
+            if _preparation_cancel_pending(start):
                 raise ConsistencyError("准备取消尚未完成原调用和占用释放")
         before = {"status": item["status"], "outcome": None,
                   "error_code": None, "error_details_json": None}
@@ -2041,6 +2048,10 @@ def _guard_cancel_result(event, context, items) -> None:
                 before_facts["target_action_id"])
             if target is None:
                 raise EventValidationError("取消成功结果缺少目标动作事实")
+            if target["type"] in (1, 2, 3) and context.preparation_reads is not None:
+                from .preparation import PreparationReads
+                if type(context.preparation_reads) is not PreparationReads or not context.preparation_reads.cancel_ready(target):
+                    raise EventValidationError("拍摄取消结果仍有准备调用或占用责任")
             if target["type"] == 7 and target["status"] not in _ACTION_TERMINAL:
                 raise EventValidationError("报告取消成功结果要求目标已终态")
             if values.get("outcome") not in (member.value for member in

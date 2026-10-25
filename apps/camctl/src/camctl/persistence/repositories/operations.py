@@ -566,8 +566,8 @@ class BeginAttemptCommand:
                                "retry_interval_s_json": intent.config.retry_interval_s}, self._state)
         if intent.kind is OperationKind.PREPARE_CAPTURE:
             activity = self._state["device_activities"][intent.target.activity_id]
-            from .preparation import preparation_action_eligible
-            if not preparation_action_eligible(connection, action, activity):
+            from .preparation import PreparationReads
+            if not PreparationReads(connection).can_prepare(action, activity, intent.occurred_at):
                 return self._rejected("not_pending")
             if (activity["occupancy_state"] != 1 or activity["dispatch_state"] not in (1, 4)
                     or activity["activity_state"] != 1):
@@ -1713,10 +1713,11 @@ def _attempt_intent_guard(event, context) -> None:
     if kind == int(_RUN_KIND.PREPARE_CAPTURE):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
         action = _guard_facts(context, "actions", run_after.get("action_id"))
-        pending = action.get("status") == 1 and action.get("execution_started") == 0
-        retry = (context.preparation_reads is not None
-                 and context.preparation_reads.can_prepare(action, activity))
-        if (not (pending or retry) or action.get("cancel_requested") != 0
+        from .preparation import PreparationReads
+        eligible = (type(context.preparation_reads) is PreparationReads
+                    and context.preparation_reads.can_prepare(action, activity, event.occurred_at)
+                    and context.preparation_reads.calls_resolved(activity["id"]))
+        if (not eligible or action.get("cancel_requested") != 0
                 or activity.get("occupancy_state") != 1 or activity.get("dispatch_state") not in (1, 4)
                 or activity.get("activity_state") != 1 or attempt_no != 1
                 or run_after.get("max_attempts_used") != 1

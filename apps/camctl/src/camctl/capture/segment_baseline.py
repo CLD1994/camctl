@@ -122,9 +122,12 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
 
     def can_read():
         current = runtime.action(action_id)
+        activity = row_facts(db, "device_activities", activity_id)
         return (
             not current["cancel_requested"]
-            and current["status"] == 2
+            and (current["status"], current["execution_started"]) in ((1, 0), (2, 1))
+            and activity is not None and activity["action_id"] == action_id
+            and activity["occupancy_state"] == 1 and activity["dispatch_state"] == 1
             and window_phase(
                 LaunchWindow(
                     current["scheduled_at"],

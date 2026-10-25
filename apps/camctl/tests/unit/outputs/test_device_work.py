@@ -98,3 +98,11 @@ class TestDecideDeviceWorkParallel:
             preparation_held=True))
         assert work.grant_reads == () and work.resume_reads == ()
         assert work.yield_reads == (40,)
+
+    def test_software_recovery_keeps_priority_over_preparation(self):
+        work = decide_device_work(DeviceFacts(
+            device_id="cam-1", due_captures=(12,), held_captures=(12,),
+            grantable_reads=(41,), held_reads=(), capture_read_parallel=True,
+            preparation_held=True, software_recovery=True))
+        assert work.dispatch_captures == () and work.grant_reads == ()
+        assert work.yield_reads == ()

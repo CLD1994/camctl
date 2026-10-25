@@ -728,7 +728,11 @@ def _action_finish_guard(event, context) -> None:
                     or row.after.values.get("error_code") != action_error_id("capture_failed")):
                 raise EventValidationError("准备失败要求尚未开始的合法拍摄动作")
             try:
+                from camctl.history.validators import parse_preparation_failure_request
+                request = parse_preparation_failure_request(event.evidence.get("preparation_failure_request"))
                 validate_error_details("capture_failed", details)
+                if request != {"action_id": row.row_id, "reason": details["reason"], "occurred_at": event.occurred_at}:
+                    raise EventValidationError("准备失败申请与实际动作、原因或时刻不符")
                 context.preparation_reads.verify_failure(action, details)
             except (ValueError, TypeError) as error:
                 raise EventValidationError(str(error)) from error
@@ -7236,6 +7240,12 @@ def _release_guard(event, context) -> None:
             .get(row.row_id, {})
         )
         facts.update(row.after.values)
+        action = context.state_rows.get("actions", {}).get(facts.get("action_id"), {})
+        known_preparation = action.get("execution_started") == 0 or any(
+            run.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and run.get("activity_id") == row.row_id
+            for run in context.state_rows.get("operation_runs", {}).values())
+        if known_preparation and context.preparation_reads is None:
+            raise EventValidationError("准备释放缺少内核绑定的原责任核对")
         if context.preparation_reads is not None:
             from .preparation import PreparationReads
             if type(context.preparation_reads) is not PreparationReads:

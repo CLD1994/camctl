@@ -7,8 +7,24 @@ class PreparationReads:
         self.connection = connection
         self.events = tuple(accepted.envelope for accepted in validated)
 
-    def can_prepare(self, action, activity):
-        return preparation_action_eligible(self.connection, action, activity)
+    def can_prepare(self, action, activity, occurred_at):
+        from contextlib import closing
+        from camctl.scheduling.resources import capture_scope_blocked
+        if (not preparation_action_eligible(self.connection, action, activity)
+                or occurred_at > action["scheduled_at"] + action["max_delay_ms"] * 1000
+                or capture_scope_blocked(self.connection, action["device_id"], action["id"],
+                                         activity["ownership_mode"], activity["output_scope_json"])):
+            return False
+        with closing(self.connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
+                                            (action["device_id"],))) as cursor:
+            if cursor.fetchone() is not None:
+                return False
+        with closing(self.connection.execute(
+                "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
+                " WHERE a.device_id=? AND d.action_id<>? AND d.occupancy_state=1"
+                " AND d.activity_state<>3 AND d.dispatch_state NOT IN (1,4) LIMIT 1",
+                (action["device_id"], action["id"]))) as cursor:
+            return cursor.fetchone() is None
 
     def verify_create(self, event, context, row):
         from contextlib import closing
@@ -18,9 +34,8 @@ class PreparationReads:
         from camctl.capture.models import activity_capabilities
         from .scheduling import ReservePreparationRequest, _CAMERA_TYPE_NAMES
         raw = event.evidence.get("preparation_request")
-        if not isinstance(raw, dict) or set(raw) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at"}:
-            raise ConsistencyError("pending活动创建缺少完整准备申请")
-        request = ReservePreparationRequest(**raw)
+        from camctl.history.validators import parse_preparation_request
+        request = ReservePreparationRequest(**parse_preparation_request(raw))
         action = context.state_rows.get("actions", {}).get(request.action_id)
         if (action is None or (action.get("status"), action.get("execution_started")) != (1, 0)
                 or action.get("cancel_requested") != 0 or action.get("type") not in (2, 3)
@@ -65,6 +80,11 @@ class PreparationReads:
             raise ConsistencyError("准备失败详情不属于原活动")
         verify_failure_source(self.connection, action, facts, details["reason"])
 
+    def cancel_ready(self, action):
+        from .capture_facts import load_start_facts
+        from .cancellation import _preparation_cancel_pending
+        return not _preparation_cancel_pending(load_start_facts(self.connection, action))
+
     def calls_resolved(self, activity_id):
         return preparation_calls_resolved(self.connection, activity_id, result_events=self.events)
 
@@ -79,7 +99,7 @@ def preparation_action_eligible(connection, action, activity):
     from .capture_facts import load_start_facts
     facts = load_start_facts(connection, action)
     return (facts.activity is not None and facts.activity["id"] == activity["id"]
-            and facts.attempts_used > 0 and facts.not_started)
+            and facts.not_started)
 
 
 def verify_failure_source(connection, action, facts, reason):
@@ -98,16 +118,22 @@ def verify_failure_source(connection, action, facts, reason):
                                     (action["id"],))) as cursor:
         if cursor.fetchone() is not None:
             raise ConsistencyError("未启动的准备失败不能已有正式产物")
+    from camctl.contracts.enums import enum_for
     if reason == "device_failed":
-        sql = ("SELECT 1 FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
-               " WHERE r.activity_id=? AND r.kind=? AND r.status IN (4,6)"
-               " AND t.status IN (3,4) AND t.error_json IS NOT NULL AND t.result_event_id IS NOT NULL LIMIT 1")
-        from camctl.contracts.enums import enum_for
-        parameters = (activity_id, int(enum_for("operation_runs.kind").PREPARE_CAPTURE))
+        with closing(connection.execute(
+                "SELECT r.status,t.status,t.error_json,t.result_event_id FROM operation_runs r"
+                " LEFT JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=1"
+                " WHERE r.activity_id=? AND r.kind=? ORDER BY r.id DESC LIMIT 1",
+                (activity_id, int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))) as cursor:
+            latest = cursor.fetchone()
+        if (latest is None or latest[0] not in (4, 6) or latest[1] not in (3, 4)
+                or latest[2] is None or latest[3] is None):
+            raise ConsistencyError("最近一次设置准备没有已保存的真实失败结果")
     else:
-        sql = ("SELECT 1 FROM baseline_read_calls WHERE activity_id=? AND state=2"
-               " AND error_json IS NOT NULL AND result_event_id IS NOT NULL LIMIT 1")
-        parameters = (activity_id,)
-    with closing(connection.execute(sql, parameters)) as cursor:
-        if cursor.fetchone() is None:
-            raise ConsistencyError("准备失败没有对应已保存的真实失败结果")
+        with closing(connection.execute(
+                "SELECT state,error_json,result_event_id FROM baseline_read_calls"
+                " WHERE activity_id=? ORDER BY read_no DESC LIMIT 1", (activity_id,))) as cursor:
+            latest = cursor.fetchone()
+        if (latest is None or latest[0] not in (2, 3) or latest[2] is None
+                or (latest[0] == 2 and latest[1] is None)):
+            raise ConsistencyError("最近一次目录基准没有已保存的失败或未知结果")

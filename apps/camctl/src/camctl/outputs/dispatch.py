@@ -69,11 +69,11 @@ def decide_device_work(facts: DeviceFacts) -> DeviceWork:
     先表达为派发顺序，不推迟读取）；一次一份拷贝的互斥不因并行
     声明改变，在途读取继续时不重复授予。
     """
+    if facts.software_recovery:
+        return DeviceWork(facts.device_id, (), (), facts.held_reads, ())
     if facts.preparation_held:
         return DeviceWork(facts.device_id, facts.due_captures if not facts.held_reads else (),
                           (), facts.held_reads, ())
-    if facts.software_recovery:
-        return DeviceWork(facts.device_id, (), (), facts.held_reads, ())
     if not facts.capture_read_parallel:
         if facts.held_reads and facts.due_captures:
             return DeviceWork(
