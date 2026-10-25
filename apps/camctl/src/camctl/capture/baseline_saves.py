@@ -1,11 +1,11 @@
 """基准原保存申请的拥有者。"""
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from camctl.capture.baseline_models import (BaselineChunkResult, BaselineChunkSave,
     BaselineFixSave, BaselineReadCallView, BaselineReadIntent, BaselineReadReturn,
     BaselineReadState, BaselineReadUnconfirmedSave, BaselineRef, BaselineState)
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, new_operation_key
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
 
 
@@ -14,6 +14,13 @@ class PendingBaselineSave:
     request: BaselineChunkSave | BaselineFixSave | BaselineReadIntent | BaselineReadReturn | BaselineReadUnconfirmedSave
     key: OperationKey
     response: BaselineChunkResult | BaselineRef | BaselineReadCallView | None = None
+    save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    application: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+
+
+class _IncompleteSave(Exception):
+    def __init__(self, receipt):
+        self.receipt = receipt
 
 
 class BaselineSaveOwner:
@@ -41,11 +48,14 @@ class BaselineSaveOwner:
         return self.pending
 
     async def save(self, repository, database) -> DbOutcome[BaselineChunkResult | BaselineRef | BaselineReadCallView]:
+        pending = self.pending
+        if pending is None:
+            raise ConsistencyError("没有待保存的原基准申请")
+        return await settle_required(self._save(repository, database, pending))
+
+    async def _save(self, repository, database, pending):
         async def save_and_apply():
             _delivery_error = None
-            pending = self.pending
-            if pending is None:
-                raise ConsistencyError("没有待保存的原基准申请")
             if pending.response is not None:
                 if _delivery_error is not None:
                     raise _delivery_error
@@ -93,8 +103,19 @@ class BaselineSaveOwner:
                 self.pending = replace(pending, response=response)
             if _delivery_error is not None:
                 raise _delivery_error
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise _IncompleteSave(receipt)
             return receipt
-        return await settle_required(save_and_apply())
+        try:
+            return await pending.save.run(save_and_apply)
+        except _IncompleteSave as incomplete:
+            return incomplete.receipt
+
+    async def resume_save(self, repository, database):
+        """明确恢复原申请；正在保存和已成功的原结果继续共同等待。"""
+        if self.pending is not None:
+            self.pending.save.retry_failed()
+        return await self.save(repository, database)
 
     @staticmethod
     def _check_call_response(request,response):

@@ -61,7 +61,7 @@ async def resume_result_page_saves(database, *, pending_scans, repository):
             continue
         with measure_performance("result_page_save", run_id=pending.ticket.run_id,
                 attempt_no=pending.ticket.attempt_id, page_no=pending.saves.pending.request.page_no):
-            receipt = (await pending.saves.save(repository, database))
+            receipt = (await pending.saves.resume_save(repository, database))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}")
 
@@ -117,12 +117,18 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
 
 
 async def _accept_saved_page(pending, runtime, page_qualified):
-    original = pending.saves.pending.request
+    held = pending.saves.pending
+    held.application.retry_failed()
+    return await held.application.run(lambda: _apply_saved_page(pending, runtime, page_qualified, held))
+
+
+async def _apply_saved_page(pending, runtime, page_qualified, held):
+    original = held.request
     delivery_error = None
     try:
         with measure_performance("result_page_save", run_id=pending.ticket.run_id,
                 attempt_no=pending.ticket.attempt_id, page_no=original.page_no):
-            receipt = await pending.saves.save(runtime.capture, runtime.database)
+            receipt = await pending.saves.resume_save(runtime.capture, runtime.database)
     except BaseException as error:
         receipt = db_outcome_for(error)
         if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:

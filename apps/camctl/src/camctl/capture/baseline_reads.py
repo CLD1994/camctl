@@ -40,17 +40,22 @@ class PendingBaselineRead:
 
 async def resume_baseline_read_save(owner,*,capture,database):
     """只保存原申请；没有目录端口和时钟，不重做实际调用。"""
+    return await settle_required(_resume_baseline_read_save(owner, capture=capture, database=database))
+
+
+async def _resume_baseline_read_save(owner, *, capture, database):
+    if owner.result is not None:
+        return owner.result
+    pending = owner.saves.pending
+    if pending is None:
+        return None
+    if (isinstance(pending.request, BaselineReadReturn)
+            and owner.task is not None and not owner.task.done()):
+        return None
     async def save_and_apply():
-        if owner.result is not None:
-            return owner.result
-        if owner.saves.pending is None:
-            return None
-        if (isinstance(owner.saves.pending.request,BaselineReadReturn)
-                and owner.task is not None and not owner.task.done()):
-            return None
         notification_error = None
         try:
-            receipt = await owner.saves.save(capture, database)
+            receipt = await owner.saves.resume_save(capture, database)
         except BaseException as error:
             receipt = db_outcome_for(error)
             if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
@@ -58,8 +63,8 @@ async def resume_baseline_read_save(owner,*,capture,database):
             notification_error = error
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             owner.diagnostic=receipt.error
-            return None
-        request=owner.saves.pending.request
+            raise _PendingReadSave()
+        request=pending.request
         response=owner.saves.take()
         if isinstance(request,BaselineReadIntent):
             owner.intent_view=response
@@ -70,7 +75,15 @@ async def resume_baseline_read_save(owner,*,capture,database):
         if notification_error is not None:
             raise notification_error
         return response
-    return await settle_required(save_and_apply())
+    pending.application.retry_failed()
+    try:
+        return await pending.application.run(save_and_apply)
+    except _PendingReadSave:
+        return None
+
+
+class _PendingReadSave(Exception):
+    pass
 
 
 async def abort_unstarted_baseline_read(owner, *, capture, database, wall_us):

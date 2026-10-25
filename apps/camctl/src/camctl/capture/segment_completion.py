@@ -1,6 +1,6 @@
 """按冻结任务策略推进分段结果，复用控制与分页，不进入单原片媒体链。"""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from camctl.capture.files import (
     FileCompletionSave,
@@ -31,7 +31,7 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import is_completed_file_wait
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.persistence.transaction import row_facts
@@ -45,6 +45,7 @@ class PendingSegmentWrite:
     method: str
     args: tuple
     key: str
+    save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 async def resume_segment_writes(database, pending_writes, action_id=None):
@@ -52,19 +53,15 @@ async def resume_segment_writes(database, pending_writes, action_id=None):
 
 
 async def _resume_segment_writes(database, pending_writes, action_id):
-    for identity in tuple(pending_writes):
+    for identity, pending in tuple(pending_writes.items()):
         if action_id is not None and identity != action_id:
             continue
-        pending = pending_writes[identity]
+        pending.save.retry_failed()
         with measure_performance("segment_save", action_id=identity,
                                  method=pending.method, resumed=True), db_operation_context(
                                      action_id=identity, method=pending.method, resumed=True):
-            receipt = await _write_segment_request(database, pending_writes, identity, pending)
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-                del pending_writes[identity]
-            raise ConsistencyError(f"原分段保存尚未可靠完成: {receipt.error}")
-        del pending_writes[identity]
+            await pending.save.run(lambda: _write_segment_request(
+                database, pending_writes, identity, pending))
 
 
 async def _save(runtime, action_id, repository, method, *args):
@@ -73,14 +70,22 @@ async def _save(runtime, action_id, repository, method, *args):
 
 async def _write_segment_request(database, pending_writes, action_id, pending):
     try:
-        return await database.write(
+        receipt = await database.write(
             lambda owned: getattr(pending.repository, pending.method)(*pending.args, pending.key, owned),
             key=pending.key, description=f'分段保存:{pending.method}')
     except BaseException as error:
         receipt = db_outcome_for(error)
         if receipt is not None and receipt.kind in (DbOutcomeKind.COMPLETED, DbOutcomeKind.ROLLED_BACK):
-            pending_writes.pop(action_id, None)
+            if pending_writes.get(action_id) is pending:
+                del pending_writes[action_id]
         raise
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        if receipt.kind is DbOutcomeKind.ROLLED_BACK and pending_writes.get(action_id) is pending:
+            del pending_writes[action_id]
+        raise ConsistencyError(f"原分段保存尚未可靠完成: {receipt.error}")
+    if pending_writes.get(action_id) is pending:
+        del pending_writes[action_id]
+    return receipt.value
 
 
 async def _save_segment_request(runtime, action_id, repository, method, args):
@@ -91,14 +96,8 @@ async def _save_segment_request(runtime, action_id, repository, method, args):
     with measure_performance("segment_save", action_id=action_id,
                              method=method, resumed=False), db_operation_context(
                                  action_id=action_id, method=method, resumed=False):
-        receipt = await _write_segment_request(
-            runtime.database, runtime.pending_segment_writes, action_id, pending)
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-            del runtime.pending_segment_writes[action_id]
-        raise ConsistencyError(f"分段保存尚未可靠完成: {receipt.error}")
-    del runtime.pending_segment_writes[action_id]
-    return receipt.value
+        return await pending.save.run(lambda: _write_segment_request(
+            runtime.database, runtime.pending_segment_writes, action_id, pending))
 
 
 async def release_segment_occupancy(runtime, action_id):

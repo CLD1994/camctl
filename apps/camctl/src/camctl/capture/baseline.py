@@ -13,8 +13,8 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest, DirectoryScan
 from camctl.operations.models import ErrorValue
 from camctl.operations.owned_calls import check_call_interruption
-from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.business import SharedSave, settle_required
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.transaction import row_facts
 
 
@@ -53,6 +53,7 @@ class PendingBaseline:
     error: ErrorValue | None = None
     saves: BaselineSaveOwner = field(default_factory=BaselineSaveOwner)
     release: tuple[ActivityReleaseSave, OperationKey] | None = None
+    release_save: SharedSave = field(default_factory=SharedSave, repr=False)
     read_owner: object | None = None
     read_no: int = 0
     aborted: bool = False
@@ -143,54 +144,89 @@ async def recover_terminal_baselines(*, runtime, limit=None):
 
 async def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     """恢复原完整申请，不依赖当前驱动、绑定或动作是否已有终态。"""
-    async def save_and_apply():
-        pending = runtime.pending_baselines.get(action_id)
-        if pending is None:
-            return None
-        if pending.completed:
-            close_baseline(action_id, runtime=runtime)
-            return BaselinePreparation(PreparationPhase.READY)
-        if pending.in_call:
-            # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
-            return BaselinePreparation(PreparationPhase.WAITING)
-        if pending.read_owner is not None:
-            from camctl.capture.segment_baseline import consume_read
+    return await settle_required(_resume_baseline_save(action_id, runtime=runtime))
 
-            if not (await consume_read(pending, runtime)):
-                if pending.read_owner.saves.pending is None:
-                    return BaselinePreparation(PreparationPhase.WAITING)
-                return BaselinePreparation(
-                    PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
-                )
+
+async def _resume_baseline_save(action_id, *, runtime):
+    pending = runtime.pending_baselines.get(action_id)
+    if pending is None:
+        return None
+    if pending.completed:
+        close_baseline(action_id, runtime=runtime)
+        return BaselinePreparation(PreparationPhase.READY)
+    if pending.in_call:
+        # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
+        return BaselinePreparation(PreparationPhase.WAITING)
+    if pending.read_owner is not None:
+        from camctl.capture.segment_baseline import consume_read
+
+        if not (await consume_read(pending, runtime)):
+            if pending.read_owner.saves.pending is None:
+                return BaselinePreparation(PreparationPhase.WAITING)
+            return BaselinePreparation(
+                PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
+            )
+    held = pending.saves.pending
+    if pending.release is None and held is None:
+        return None
+
+    async def save_and_apply():
+        notification_error = None
         if pending.release is not None:
             from camctl.persistence.repositories.capture import ReleaseOutcome
             request, key = pending.release
-            _save_inputs = (request, key)
-            _save_options = dict()
-            receipt = (await runtime.database.write(lambda owned: runtime.capture.release_occupancy(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
+            try:
+                receipt = await runtime.database.write(
+                    lambda owned: runtime.capture.release_occupancy(request, key, owned),
+                    key=key, description="保存拍摄业务事实")
+            except BaseException as error:
+                receipt = db_outcome_for(error)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                notification_error = error
             if receipt.kind is not DbOutcomeKind.COMPLETED:
-                return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
+                raise _PendingSave(receipt.error)
             if receipt.value.outcome is ReleaseOutcome.REJECTED:
                 raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
             pending.completed = True
             close_baseline(action_id, runtime=runtime)
+            if notification_error is not None:
+                raise notification_error
             return BaselinePreparation(PreparationPhase.READY)
-        if pending.saves.pending is None:
-            return None
-        original = pending.saves.pending.request
-        receipt = (await pending.saves.save(runtime.capture, runtime.database))
+        original = held.request
+        try:
+            receipt = await pending.saves.resume_save(runtime.capture, runtime.database)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            notification_error = error
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            return BaselinePreparation(PreparationPhase.PENDING, database_error=receipt.error)
+            raise _PendingSave(receipt.error)
         pending.saves.take()
         if isinstance(original, BaselineFixSave):
             pending.completed = True
             close_baseline(action_id, runtime=runtime)
+            if notification_error is not None:
+                raise notification_error
             return BaselinePreparation(PreparationPhase.READY)
         pending.chunks = original.chunk_no
         pending.entries += len(original.entries)
         pending.cursor = pending.next_cursor
+        if notification_error is not None:
+            raise notification_error
         return None
-    return await settle_required(save_and_apply())
+    shared = pending.release_save if pending.release is not None else held.application
+    shared.retry_failed()
+    try:
+        return await shared.run(save_and_apply)
+    except _PendingSave as incomplete:
+        return BaselinePreparation(PreparationPhase.PENDING, database_error=incomplete.error)
+
+
+class _PendingSave(Exception):
+    def __init__(self, error):
+        self.error = error
 
 
 async def release_preparation(action_id, *, runtime):

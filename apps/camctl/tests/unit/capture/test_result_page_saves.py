@@ -43,7 +43,7 @@ async def test_unknown_or_rolled_back_page_keeps_original_request_until_reliable
     with pytest.raises(ConsistencyError):
         owner.begin(_request(page_no=2))
     assert owner.pending == pending
-    assert (await owner.save(repository, capture_database())).value == response
+    assert (await owner.resume_save(repository, capture_database())).value == response
     assert owner.take() == response and owner.pending is None
     assert [call.args[:2] for call in repository.save_result_page.call_args_list] == [(request, pending.key)] * 2
 

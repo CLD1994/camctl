@@ -1,6 +1,6 @@
 """同一 RESULTS 尝试中逐页原保存请求与可靠历史引用。"""
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.contracts.enums import enum_for
@@ -9,7 +9,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.directory import DirectoryCursor
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.result_format import error_document, result_document
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
 
 
@@ -78,6 +78,13 @@ class PendingResultPageSave:
     request: ResultPageSave
     key: OperationKey
     response: ResultPageRef | None = None
+    save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    application: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+
+
+class _IncompleteSave(Exception):
+    def __init__(self, receipt):
+        self.receipt = receipt
 
 
 class ResultPageSaveOwner:
@@ -100,11 +107,14 @@ class ResultPageSaveOwner:
         return self.pending
 
     async def save(self, repository, database) -> DbOutcome[ResultPageRef]:
+        pending = self.pending
+        if pending is None:
+            raise ConsistencyError("没有原结果页保存责任")
+        return await settle_required(self._save(repository, database, pending))
+
+    async def _save(self, repository, database, pending):
         async def save_and_apply():
             _delivery_error = None
-            pending = self.pending
-            if pending is None:
-                raise ConsistencyError("没有原结果页保存责任")
             if pending.response is not None:
                 if _delivery_error is not None:
                     raise _delivery_error
@@ -131,8 +141,19 @@ class ResultPageSaveOwner:
                 self.pending = replace(pending, response=response)
             if _delivery_error is not None:
                 raise _delivery_error
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise _IncompleteSave(receipt)
             return receipt
-        return await settle_required(save_and_apply())
+        try:
+            return await pending.save.run(save_and_apply)
+        except _IncompleteSave as incomplete:
+            return incomplete.receipt
+
+    async def resume_save(self, repository, database) -> DbOutcome[ResultPageRef]:
+        """恢复入口显式核实原键，不替换完整页输入。"""
+        if self.pending is not None:
+            self.pending.save.retry_failed()
+        return await self.save(repository, database)
 
     def take(self) -> ResultPageRef:
         if self.pending is None or self.pending.response is None:
