@@ -42,6 +42,16 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 拍摄提前准备与基准单次扫描（2026-10-25）
+
+按照[提前准备规格](../superpowers/specs/2026-10-25-capture-preparation-design.md)，Action6 与 OSMO 的默认提前量为 10 秒。设置准备独立保存，完整基准复用单次扫描；准备期间保持 pending，到计划时间才复用原活动授予真正 START。原取消、过期、冷恢复、结果保存未确认及分段失败结论均沿同一可靠责任处理。
+
+最终合并生产源码为 `c6dd84cd37ebf84157be779a23783a70a2a5a3f5`。Python 3.11.17、SQLite 3.53.1 的完整 camctl 单元测试为 **7591 passed、1 skipped**，83.90 秒，退出 0；两条警告来自既有同步测试的 asyncio 标记。原命令、源码身份、日志和退出码位于 `.local/verification/capture-preparation-20261025/unit.{json,log}`。独立静态审查核对了准备凭据、真实 SQL 字段、持久收场责任、重复取消和分段历史锚点。按用户要求没有运行集成测试。
+
+安装交付位于 `.local/deployments/20261025-capture-preparation/`。wheel SHA-256 为 `87d58120d2216566fef811c94dad0a3945d63dbbe2276cf65c36cf20875e0e64`；312 份生产 Python 文件和 27 份权威资源与源码、wheel、独立安装逐字节一致。依赖检查、能力说明导出及安装版默认提前量核对均通过。原人工验证入口已经更新，配置保持原值。
+
+已在没有未完成拍摄、设备调用和旧 CLI 会话时，通过安装版 `init --upgrade-capture-preparation` 将人工状态库从 V3 升级为 V4。SQLite 一致备份保留；升级前后 41 张业务表的行数及完整内容摘要一致，仅元信息格式编号变化，实例、目录绑定、历史、水位和产物登记保留。外键与完整性核对通过。备份位置、逐表核对、构建及安装记录由 `delivery-manifest.json` 统一引用。这是实际安装升级核对，没有执行拍摄命令；真实准备耗时与启动结果仍由用户按[人工验证指南](../hardware/result-reading-performance-validation.md)核对。
+
 ## 结果读取与调度性能优化（2026-10-25）
 
 [结果读取性能计划](../superpowers/plans/2026-10-25-result-reading-performance.md)已完成软件实施及人工环境更新。分段结果现在对每个固定目录执行一次完整枚举，以临时文件缓冲并连续分页；主机按原活动固定基准筛选新增文件，仅对这些候选查询大小，结果仓储继续独立核对差集。元数据私有帧保留逐文件错误，读取兼容原格式。前页历史沿同一拥有者增量核对，暂停或保存未知时保留原工作责任。
