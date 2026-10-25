@@ -1,0 +1,87 @@
+{
+  "kind": "S6静态覆盖核对",
+  "base_commit": "f8121feb5bfcb2c38839cb5f240b7a4de32fca66",
+  "runtime_tests": 0,
+  "builds": 0,
+  "commands": [
+    {
+      "argv": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "--version"
+      ],
+      "workdir": "/tmp/camctl-itopt-s6-coverage",
+      "started_utc": "2026-10-25T01:56:06.303550+00:00",
+      "elapsed_seconds": 0.005116767999425065,
+      "exit_code": 0,
+      "stdout": "Python 3.11.17\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-B",
+        ".local/verification/itopt/s6-coverage/derive.py"
+      ],
+      "workdir": "/tmp/camctl-itopt-s6-coverage",
+      "started_utc": "2026-10-25T01:56:06.308691+00:00",
+      "elapsed_seconds": 3.262797397997929,
+      "exit_code": 0,
+      "stdout": "{\"output\": \"/tmp/camctl-itopt-s6-coverage/docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.json\", \"sha256\": \"e8648f364ea52961b1e8bfdb6bff9b0fab44874f020edc01852fce5d258d519d\", \"bytes\": 148977, \"classes\": 6, \"normal\": 12, \"fault\": 6, \"ui_assertion_rows\": 17, \"original_assertion_nodes\": 249, \"actual_capability_worlds\": 12, \"runtime_tests\": 0}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-B",
+        ".local/verification/itopt/s6-coverage/verify.py"
+      ],
+      "workdir": "/tmp/camctl-itopt-s6-coverage",
+      "started_utc": "2026-10-25T01:56:09.571516+00:00",
+      "elapsed_seconds": 3.28847025000141,
+      "exit_code": 0,
+      "stdout": "{\n  \"kind\": \"static_audit\",\n  \"python\": \"3.11.17\",\n  \"workdir\": \"/tmp/camctl-itopt-s6-coverage\",\n  \"input_hashes_checked\": 41,\n  \"nodeids\": 29,\n  \"unique_worlds\": 18,\n  \"input_partitions\": 6,\n  \"original_assertions_exact\": 249,\n  \"ui_handoff_rows\": 17,\n  \"local_document_links\": 3,\n  \"runtime_tests\": 0,\n  \"builds\": 0,\n  \"artifacts\": [\n    {\n      \"path\": \"docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.json\",\n      \"sha256\": \"e8648f364ea52961b1e8bfdb6bff9b0fab44874f020edc01852fce5d258d519d\",\n      \"size_bytes\": 148977\n    },\n    {\n      \"path\": \"docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.md\",\n      \"sha256\": \"5d380b240521aa3482d88a146d30d753d0c257f9760cb7db339e7fdfbbe6ca6c\",\n      \"size_bytes\": 9289\n    }\n  ],\n  \"result\": \"passed\",\n  \"exit_code\": 0\n}\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "workdir": "/tmp/camctl-itopt-s6-coverage",
+      "started_utc": "2026-10-25T01:56:12.860024+00:00",
+      "elapsed_seconds": 0.00594469100178685,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "checks": {
+    "kind": "static_audit",
+    "python": "3.11.17",
+    "workdir": "/tmp/camctl-itopt-s6-coverage",
+    "input_hashes_checked": 41,
+    "nodeids": 29,
+    "unique_worlds": 18,
+    "input_partitions": 6,
+    "original_assertions_exact": 249,
+    "ui_handoff_rows": 17,
+    "local_document_links": 3,
+    "runtime_tests": 0,
+    "builds": 0,
+    "artifacts": [
+      {
+        "path": "docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.json",
+        "sha256": "e8648f364ea52961b1e8bfdb6bff9b0fab44874f020edc01852fce5d258d519d",
+        "size_bytes": 148977
+      },
+      {
+        "path": "docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.md",
+        "sha256": "5d380b240521aa3482d88a146d30d753d0c257f9760cb7db339e7fdfbbe6ca6c",
+        "size_bytes": 9289
+      }
+    ],
+    "result": "passed",
+    "exit_code": 0
+  }
+}

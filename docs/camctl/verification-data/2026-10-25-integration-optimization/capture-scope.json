@@ -1,0 +1,334 @@
+{
+  "base_commit": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+  "scope": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py",
+  "coverage": {
+    "target_worlds_before": 4,
+    "target_worlds_after": 3,
+    "merged_success_worlds_before": 2,
+    "merged_success_worlds_after": 1,
+    "all_rollover_paths_preserved": true,
+    "remaining_matrix_cases_identical": true,
+    "remaining_matrix_body_identical": true,
+    "originals": [
+      "CAM_001/CAM_20261022100000_0998_D.OSV",
+      "CAM_001/CAM_20261022100000_0999_D.OSV",
+      "CAM_002/CAM_20261022110000_0001_D.OSV",
+      "CAM_002/CAM_20261022110000_0002_D.OSV"
+    ],
+    "previews": [
+      "CAM_001/CAM_20261022100000_0999_D.LRF",
+      "CAM_002/CAM_20261022110000_0001_D.LRF"
+    ],
+    "ordered_page_1": [
+      "CAM_001/CAM_20261022100000_0998_D.OSV",
+      "CAM_001/CAM_20261022100000_0999_D.LRF",
+      "CAM_001/CAM_20261022100000_0999_D.OSV"
+    ],
+    "ordered_page_2": [
+      "CAM_002/CAM_20261022110000_0001_D.LRF",
+      "CAM_002/CAM_20261022110000_0001_D.OSV",
+      "CAM_002/CAM_20261022110000_0002_D.OSV"
+    ],
+    "originals_count_preserved_from_cross_page_case": 4,
+    "previews_count_cross_page_before": 1,
+    "previews_count_cross_page_after": 2,
+    "unique_output_device_files_cross_page_before": 5,
+    "unique_output_device_files_cross_page_after": 6,
+    "default_scope_count_preserved_from_cross_page_case": 3,
+    "exact_two_original_scope_case_preserved_elsewhere": "test_segmented_completion_and_default_scope_remain_independent[(7, 8),(10, 10),True,3,2,2]",
+    "scope_count_mapping": "原rollover的两原片全部入范围与原跨页的四原片取前3合为同一非空范围见证；保留4原片才能继续证伪12秒目标下的默认前3限制。两原片全部入范围的独立分区仍由未修改的completion矩阵覆盖。",
+    "assertion_mapping": [
+      "动作成功、占用释放、集合已发布",
+      "4份原片+两目录边界段各1份预览，6个唯一设备文件",
+      "output_origins与device_files的预览指向实际同主干原片，类型精确为3→1",
+      "两页分别持久化前两份/后两份原片，页事件递增",
+      "NONEMPTY范围，ordinal 1..3精确指向前三原片，第四原片仍保留",
+      "file_copies=0且intermediate_files=0",
+      "STOP恰好一次，RESULTS恰好两页，重入不新增历史和扫描",
+      "preview-only起点为空范围、unknown-order为未知范围，各自独立世界保留"
+    ]
+  },
+  "before_source_sha256": "025b7986dc33522c50f4047bfb0dcaeb97162a85c79271c35ee76fb78f0cf1e1",
+  "after_source_sha256": "972dfc02decd6720cf12b499124fb5d413396319c5528c2e4eb32be38378ade3",
+  "patch_sha256": "f4a4dbb1465049008e4cdc57482a08c9b666f4b86e4e9fdc7337315659f49e8e",
+  "source_head": "d6fd0f4790b071367b7a09f30d4c60ab68dbbc02",
+  "implementation_commit": "d6fd0f4790b071367b7a09f30d4c60ab68dbbc02",
+  "review": "独立只读审计 capture_merge_audit 未发现确认问题；未执行pytest或写入文件。",
+  "runs": {
+    "before-target": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope/before-target",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/capture-scope/before-target.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:37:24.720314+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope"
+        },
+        "pid": 217080,
+        "exit_code": 0,
+        "elapsed_seconds": 40.012504925998655,
+        "end_utc": "2026-10-24T21:38:07.070711+00:00"
+      },
+      "exec_session_id": 86324,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "4",
+          "time": "39.484",
+          "timestamp": "2026-10-25T05:37:24.967417+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media": {
+          "nodes": 1,
+          "seconds": 11.79
+        },
+        "test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order": {
+          "nodes": 3,
+          "seconds": 24.708
+        }
+      }
+    },
+    "after-target": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_preserves_preview_only_start_and_unknown_order",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope/after-target",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/capture-scope/after-target.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:40:13.829717+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope"
+        },
+        "pid": 222937,
+        "exit_code": 1,
+        "elapsed_seconds": 31.540276769999764,
+        "end_utc": "2026-10-24T21:40:46.496083+00:00"
+      },
+      "exec_session_id": 41140,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "1",
+          "skipped": "0",
+          "tests": "3",
+          "time": "31.085",
+          "timestamp": "2026-10-25T05:40:14.027984+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media": {
+          "nodes": 1,
+          "seconds": 16.708
+        },
+        "test_handler_preserves_preview_only_start_and_unknown_order": {
+          "nodes": 2,
+          "seconds": 11.841999999999999
+        }
+      }
+    },
+    "after-target-final": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_preserves_preview_only_start_and_unknown_order",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope/after-target-final",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/capture-scope/after-target-final.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:41:12.985792+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope"
+        },
+        "pid": 224975,
+        "exit_code": 0,
+        "elapsed_seconds": 32.74669523199918,
+        "end_utc": "2026-10-24T21:41:46.914025+00:00"
+      },
+      "exec_session_id": 20928,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "3",
+          "time": "32.273",
+          "timestamp": "2026-10-25T05:41:13.172959+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media": {
+          "nodes": 1,
+          "seconds": 17.702
+        },
+        "test_handler_preserves_preview_only_start_and_unknown_order": {
+          "nodes": 2,
+          "seconds": 12.27
+        }
+      }
+    },
+    "after-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope/after-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-cancellation/.local/verification/itopt/capture-scope/after-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-cancellation",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T21:42:40.850610+00:00",
+        "head": "2ae58e645d70aaa993a2d2b897af569b8d3c3560",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-cancellation/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-cancellation/.local/tmp/itopt-capture-scope"
+        },
+        "pid": 227006,
+        "exit_code": 0,
+        "elapsed_seconds": 81.65027374999772,
+        "end_utc": "2026-10-24T21:44:05.994242+00:00"
+      },
+      "exec_session_id": 38799,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "24",
+          "time": "81.174",
+          "timestamp": "2026-10-25T05:42:41.037192+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "groups": {
+        "test_segmented_baseline_failure_publishes_no_results_and_releases_occupancy": {
+          "nodes": 1,
+          "seconds": 0.518
+        },
+        "test_segmented_external_failure_publishes_explicit_no_results_source": {
+          "nodes": 2,
+          "seconds": 0.432
+        },
+        "test_segmented_cancel_publishes_zero_outputs_and_preserves_original_stop": {
+          "nodes": 3,
+          "seconds": 2.49
+        },
+        "test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media": {
+          "nodes": 1,
+          "seconds": 17.004
+        },
+        "test_handler_preserves_preview_only_start_and_unknown_order": {
+          "nodes": 2,
+          "seconds": 12.14
+        },
+        "test_segmented_completion_and_default_scope_remain_independent": {
+          "nodes": 6,
+          "seconds": 25.147999999999996
+        },
+        "test_segment_finish_lost_receipt_recovers_original_request_without_duplicate_outputs": {
+          "nodes": 1,
+          "seconds": 1.682
+        },
+        "test_segment_release_lost_receipt_keeps_original_request_before_publication": {
+          "nodes": 1,
+          "seconds": 1.339
+        },
+        "test_last_scan_keeps_qualified_prior_files_and_its_own_failure": {
+          "nodes": 3,
+          "seconds": 11.115
+        },
+        "test_incomplete_segment_scan_keeps_qualified_files_without_complete_default_scope": {
+          "nodes": 1,
+          "seconds": 0.997
+        },
+        "test_repeated_unknown_order_scan_reuses_pairing_by_attempt_row_identity": {
+          "nodes": 1,
+          "seconds": 4.849
+        },
+        "test_single_original_frozen_task_keeps_its_existing_handler": {
+          "nodes": 1,
+          "seconds": 0.256
+        },
+        "test_segment_scan_resume_reuses_original_baseline_and_saved_pages": {
+          "nodes": 1,
+          "seconds": 1.016
+        }
+      }
+    }
+  },
+  "limitations": [
+    "前后均为一次开发容器采样，同期负载不同，不将差值外推到全目录或目标主机。",
+    "各集成进程在本工作区顺序运行，使用本工作区src、同步包资源和临时根；复用现有Python 3.11.17环境而未修改共享依赖。"
+  ],
+  "design_gaps": [],
+  "diagnostics": [
+    {
+      "run": "after-target",
+      "cause": "新增配对路径断言选择了包含绑定的identity_key，预期却为路径；按字段合同改为locator_json.path。数据库中的实际配对、页归属和scope结果正确，修正后的after-target-final复测通过。",
+      "production_change": false
+    }
+  ]
+}

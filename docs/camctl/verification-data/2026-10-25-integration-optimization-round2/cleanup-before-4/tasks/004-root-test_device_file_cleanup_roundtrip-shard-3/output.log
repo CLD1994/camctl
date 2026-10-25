@@ -1,0 +1,11 @@
+....                                                                     [100%]
+============================== slowest durations ===============================
+89.49s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output
+69.19s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover
+62.89s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]
+31.65s setup    tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output
+0.07s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting
+0.01s teardown tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover
+
+(6 durations < 0.005s hidden.  Use -vv to show these durations.)
+4 passed in 253.57s (0:04:13)

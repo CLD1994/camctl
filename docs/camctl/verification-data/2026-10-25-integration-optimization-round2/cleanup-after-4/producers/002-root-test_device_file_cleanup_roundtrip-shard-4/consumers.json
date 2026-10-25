@@ -1,0 +1,94 @@
+[
+  {
+    "case": "test_cleanup_interrupted_delet0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.07748790599725908,
+    "body_seconds": 22.18360295399907,
+    "consumer_seconds": 22.366458219999913,
+    "final_inventory_digest": "d69c23fdf43fd1b3ed64a3e9753accc23239c840b1febc6a69738bbc270ec0ab"
+  },
+  {
+    "case": "test_cleanup_query_present_or_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.049816117993032094,
+    "body_seconds": 22.130564822997258,
+    "consumer_seconds": 22.281936298997607,
+    "final_inventory_digest": "58cc23e692a879d33b443b42594911a55bc2a739683c48c98533e094c76afaa9"
+  },
+  {
+    "case": "test_cleanup_query_present_or_1",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.037597752998408396,
+    "body_seconds": 21.116337897001358,
+    "consumer_seconds": 21.267439014998672,
+    "final_inventory_digest": "6c17da50d331f42a2102a724cbb1207480d5c91b0b3e8c005392a187114689ab"
+  },
+  {
+    "case": "test_cleanup_query_present_or_2",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.045540899998741224,
+    "body_seconds": 21.208669304003706,
+    "consumer_seconds": 21.341783581003256,
+    "final_inventory_digest": "f474d12bc7b1084d111608159d9cdeff7b18b9334ba231523437c06b1b0f14b8"
+  }
+]

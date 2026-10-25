@@ -1,0 +1,86 @@
+{
+  "commit": "62fb78889c48b529850da9a42d0404c79ca3fff8",
+  "nodeid": "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope",
+  "scope": "test only; no production changes",
+  "construction": "3 actual result pages × 2 files, real save_ownership_from_result_page using enum RESULT_PAGE_DIFFERENCE, actual strict inputs then SegmentRepository create/append/fix and repeated read_members of final page",
+  "proof": "Each persisted ownership evidence matches original page and enum; _uses_strict_proof is true for actual inputs; only actual _verify_page_relations is wrapped for scoped counts.",
+  "facts": "Original/owned members 5 and 6, actual identity/key/page/file, unknown completion and size until completion evidence exists, no preview pairing; repeated results identical.",
+  "single": {
+    "result": "1 passed",
+    "call_seconds": 0.7,
+    "pytest_seconds": 1.39,
+    "exit_code": 0,
+    "historical_execution": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/strict-three-page-witness-v2-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "4bdf77959dde6db08a8a79c84a2505634ac53475",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T23:16:35.576978+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 1.797164083000098,
+      "finished_utc": "2026-10-24T23:16:37.374172+00:00"
+    },
+    "execution_log": {
+      "historical_filename": "strict-three-page-witness-v2.log",
+      "sha256": "360ff714809060a48ca1b184ffc63bf4c656a6ffb6a619ef97bf1f4956bf6ad5",
+      "text": ".\n============================== slowest durations ===============================\n0.70s call     tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope\n\n(2 durations < 0.005s hidden.  Use -vv to show these durations.)\n1 passed in 1.39s\n"
+    }
+  },
+  "sensitivity_control": {
+    "result": "expected failed with each of the three pages fully proved four times",
+    "exit_code": 1,
+    "isolation": "Only this independent test process gets window2; original verification executes unchanged, production files and other processes are untouched.",
+    "injection": "仅在独立测试进程把 _PAGE_LIMIT 临时设为 2；原完整页核验和生产文件保持。",
+    "expected_proofs_per_page": 4,
+    "actual_proofs_per_page": 4,
+    "historical_log_sha256": "4049a2fc9389b2792243c9e01f8a939c114b68803d6d057751e871e9a58ebb12"
+  },
+  "neighbors": {
+    "result": "22 passed",
+    "pytest_seconds": 3.76,
+    "new_case_call_seconds": 0.38,
+    "exit_code": 0,
+    "historical_execution": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+        "apps/camctl/tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/strict-three-page-neighbors-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "4bdf77959dde6db08a8a79c84a2505634ac53475",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T23:18:01.695082+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 4.115434382998501,
+      "finished_utc": "2026-10-24T23:18:06.065450+00:00"
+    },
+    "execution_log": {
+      "historical_filename": "strict-three-page-neighbors.log",
+      "sha256": "3a0d89c20f9bb10ca7773d694bb1455fbbf18afdc65579cd99f67b2024a99f1c",
+      "text": "......................\n============================== slowest durations ===============================\n0.41s call     tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction\n0.38s call     tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope\n0.27s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[format-True]\n0.15s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[reference]\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_page_record_from_another_connection_cannot_hide_changed_relations\n0.12s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[baseline-False]\n0.11s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[attempt_range]\n0.11s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[physical_attempt-False]\n0.11s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[activity-True]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[physical_attempt-True]\n0.10s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[rollback]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[missing_index-False]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[format-False]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[binding-False]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[baseline-True]\n0.10s call     tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[binding-True]\n0.10s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[unknown_commit]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[missing_index-True]\n0.10s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[activity-False]\n0.09s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[cancel]\n0.09s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[commit]\n\n(44 durations < 0.005s hidden.  Use -vv to show these durations.)\n22 passed in 3.76s\n"
+    }
+  },
+  "archive": {
+    "source_artifact": "strict-three-page-summary.json",
+    "source_sha256": "80573b0de2f5169b189b244333d9f014740f61e45b22a6313a502d1988059dac",
+    "note": "只保存最终真实见证、敏感性对照及相邻范围；原执行命令的临时路径仅为历史元数据。"
+  },
+  "expected_proofs_per_page_in_one_scope": 1
+}

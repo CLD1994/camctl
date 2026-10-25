@@ -1,0 +1,75 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-baseline",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "--jobs",
+    "4",
+    "--output",
+    "/tmp/camctl-itopt-round2-cleanup-before-4"
+  ],
+  "cwd": "/tmp/camctl-itopt-round2-baseline",
+  "runner_pid": 653119,
+  "collector_pid": 653112,
+  "source_head": "b82d96e0b5607b7d0e5f79a4dc9385f06f6a400e",
+  "started_utc": "2026-10-25T02:02:02.213041+00:00",
+  "finished_utc": "2026-10-25T02:07:38.906871+00:00",
+  "collector_monotonic_wall_seconds": 335.2430912359996,
+  "runner_wall_seconds": 335.1003527840003,
+  "exit_code": 0,
+  "children_before": {
+    "ru_utime": 0.0024189999999999997,
+    "ru_stime": 0.009936,
+    "ru_maxrss": 16956,
+    "ru_inblock": 0,
+    "ru_oublock": 0,
+    "ru_minflt": 784,
+    "ru_majflt": 0,
+    "ru_nvcsw": 5,
+    "ru_nivcsw": 0
+  },
+  "children_after": {
+    "ru_utime": 504.924741,
+    "ru_stime": 78.704299,
+    "ru_maxrss": 280836,
+    "ru_inblock": 140840,
+    "ru_oublock": 4863256,
+    "ru_minflt": 6450217,
+    "ru_majflt": 4726,
+    "ru_nvcsw": 482571,
+    "ru_nivcsw": 32057
+  },
+  "children_delta": {
+    "ru_utime": 504.922322,
+    "ru_stime": 78.69436300000001,
+    "ru_inblock": 140840,
+    "ru_oublock": 4863256,
+    "ru_minflt": 6449433,
+    "ru_majflt": 4726,
+    "ru_nvcsw": 482566,
+    "ru_nivcsw": 32057
+  },
+  "children_peak_maxrss_kib": 280836,
+  "resource_scope": "Metadata git rev-parse/status children finish before children_before and start time. The measured interval has exactly one runner child; CPU/I/O deltas exclude prior metadata usage. RUSAGE_CHILDREN contains waited descendant usage propagated by child reaping. Raw ru_maxrss is the lifetime maximum single descendant process (including prior metadata git); children_before retains its prior value. It is not concurrent tree memory. inblock/oublock are raw kernel block-operation counts, not bytes. No complete per-process CPU/I/O sample or device-throughput claim.",
+  "browser_observation": {
+    "interval_seconds": 0.25,
+    "samples": 1322,
+    "scan_wall_seconds": 4.379983315055142,
+    "read_races": 59,
+    "observed_browser_roots_count": 0,
+    "roots": [],
+    "coverage": "Sampled runner-descendant Chromium root processes, excluding --type subprocesses. Count means sampled unique PID/start_ticks root process identities, not browser sessions or exact launch requests. The 0.25 second wait follows each scan, so actual intervals also include scan and scheduling time. Roots shorter than actual intervals, between scans, or reparented before observation can be missed."
+  },
+  "collector_self_delta": {
+    "ru_utime": 3.548296,
+    "ru_stime": 1.734914
+  }
+}

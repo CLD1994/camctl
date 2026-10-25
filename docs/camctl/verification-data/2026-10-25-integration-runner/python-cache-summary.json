@@ -1,0 +1,118 @@
+{
+  "scope": "仅验证私有字节码环境和OSMO安装版describe，不执行拍摄或完整验收。",
+  "contract": "清除继承的PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX；任务各阶段使用槽私有且位于source外的缓存，collection使用自己的私有前缀。外部解释器版本检查移除这两个变量并使用-B；venv创建明确传入所属私有环境。",
+  "runner_sha256": "f191077b1f784222cb7251037555a55d954a4c36b00534a10eb465b9c85dc0e4",
+  "contract_tests": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-v"
+    ],
+    "cwd": "/tmp/camctl-itopt-runner",
+    "exit_code": 0,
+    "log": "test_function_selector_already_contains_parameter_instances (test_run_integration.IntegrationRunnerTest.test_function_selector_already_contains_parameter_instances) ... ok\ntest_hasselblad_uses_built_external_candidate_from_current_source (test_run_integration.IntegrationRunnerTest.test_hasselblad_uses_built_external_candidate_from_current_source) ... ok\ntest_isolated_concurrency_progress_exact_assignment_and_failure (test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure) ... ok\ntest_nested_unittest_checks_do_not_inflate_primary_results (test_run_integration.IntegrationRunnerTest.test_nested_unittest_checks_do_not_inflate_primary_results) ... ok\ntest_observer_keeps_artifacts_when_product_file_operations_fail (test_run_integration.IntegrationRunnerTest.test_observer_keeps_artifacts_when_product_file_operations_fail) ... ok\ntest_parent_path_cannot_escape_source (test_run_integration.IntegrationRunnerTest.test_parent_path_cannot_escape_source) ... ok\ntest_prepare_interrupt_reaps_owned_process_and_saves_actual_state (test_run_integration.IntegrationRunnerTest.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state) ... ok\ntest_python_cache_is_private_and_external_dependency_is_unchanged (test_run_integration.IntegrationRunnerTest.test_python_cache_is_private_and_external_dependency_is_unchanged) ... ok\ntest_root_shards_use_current_collection_including_unmeasured_nodes (test_run_integration.IntegrationRunnerTest.test_root_shards_use_current_collection_including_unmeasured_nodes) ... ok\ntest_snapshot_reports_unsupported_symbolic_link (test_run_integration.IntegrationRunnerTest.test_snapshot_reports_unsupported_symbolic_link) ... ok\ntest_unknown_target_is_rejected_before_execution (test_run_integration.IntegrationRunnerTest.test_unknown_target_is_rejected_before_execution) ... ok\n\n----------------------------------------------------------------------\nRan 11 tests in 16.799s\n\nOK\n",
+    "cache_case": "用户预设两个变量后，真实pytest验证sys.dont_write_bytecode为False，jsonschema.__cached__实际位于私有prefix，原共享jsonschema包的pyc数量、mtime和size保持，原用户prefix未创建。"
+  },
+  "osmo_describe": {
+    "source": {
+      "root": "/tmp/camctl-itopt-runner",
+      "head": "04f32c6ecdc8d24305191ca971a6403378b8c721",
+      "status": "M scripts/run-integration.py\n M scripts/tests/test_run_integration.py",
+      "snapshot_sha256": "87f8e0c41b9aecf2a54de517f97134ba2e305c73204aa6f9e67af6c9f2f354db"
+    },
+    "versions": {
+      "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+      "version": [
+        3,
+        11
+      ],
+      "sqlite": "3.53.1",
+      "pytest": "9.1.1",
+      "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+      "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+      "node": "v24.22.1",
+      "git": "git version 2.43.0"
+    },
+    "task": {
+      "id": "root/test_osmo_builtin_timelapse_roundtrip",
+      "scope": "root",
+      "path": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py",
+      "targets": [
+        "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types"
+      ],
+      "estimated_seconds": 2.7896172779983317,
+      "status": "passed",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/artifacts",
+      "cwd": "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source",
+      "started_utc": "2026-10-24T22:58:13.593570+00:00",
+      "command": [
+        "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-itopt-runner-pyc-osmo-final/control:/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-runner-pyc-osmo-final/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-runner-pyc-osmo-final/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-itopt-runner-pyc-osmo-final/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-pyc-osmo-final/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source",
+          "started_utc": "2026-10-24T22:58:23.276314+00:00",
+          "pid": 358692,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T22:58:23.347350+00:00",
+          "wall_seconds": 0.07103267600177787
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 358692,
+      "pid": 358694,
+      "execution_started_utc": "2026-10-24T22:58:23.348341+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 1,
+        "outcomes": {
+          "passed": 1
+        },
+        "subchecks": {},
+        "elapsed_seconds": 3.878777097001148,
+        "utc": "2026-10-24T22:58:28.190823+00:00",
+        "pid": 358694
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-24T22:58:28.271713+00:00",
+      "wall_seconds": 14.346628213002987
+    },
+    "assertions": "原用例实际核对安装模块位于安装环境、源与安装describe/资源相同，且安装运行环境所有值不包含source根。",
+    "cache_prefix": "/tmp/camctl-itopt-runner-pyc-osmo-final/workers/0/python-cache",
+    "cache_pyc_count": 765,
+    "summary": "/tmp/camctl-itopt-runner-pyc-osmo-final/summary.json",
+    "console_log": "/tmp/camctl-itopt-runner-pyc-osmo-final.log"
+  }
+}

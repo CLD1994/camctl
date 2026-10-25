@@ -1,0 +1,69 @@
+[
+  {
+    "id": "root/test_device_file_cleanup_roundtrip/shard-1",
+    "scope": "root",
+    "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "targets": [
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_device_delete_unsupported_with_host_files"
+    ],
+    "estimated_seconds": 31.890992549000657,
+    "historical_failure_observed": true,
+    "parent_id": "root/test_device_file_cleanup_roundtrip",
+    "shard": 1,
+    "shards": 4,
+    "collection": "/tmp/camctl-itopt-round2-cleanup-after-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+    "collected_nodes": 11
+  },
+  {
+    "id": "root/test_device_file_cleanup_roundtrip/shard-4",
+    "scope": "root",
+    "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "targets": [
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]"
+    ],
+    "estimated_seconds": 11.285482661998685,
+    "historical_failure_observed": true,
+    "parent_id": "root/test_device_file_cleanup_roundtrip",
+    "shard": 4,
+    "shards": 4,
+    "collection": "/tmp/camctl-itopt-round2-cleanup-after-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+    "collected_nodes": 11
+  },
+  {
+    "id": "root/test_device_file_cleanup_roundtrip/shard-2",
+    "scope": "root",
+    "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "targets": [
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]"
+    ],
+    "estimated_seconds": 8.800105462993088,
+    "historical_failure_observed": true,
+    "parent_id": "root/test_device_file_cleanup_roundtrip",
+    "shard": 2,
+    "shards": 4,
+    "collection": "/tmp/camctl-itopt-round2-cleanup-after-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+    "collected_nodes": 11
+  },
+  {
+    "id": "root/test_device_file_cleanup_roundtrip/shard-3",
+    "scope": "root",
+    "path": "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "targets": [
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+      "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover"
+    ],
+    "estimated_seconds": 8.733671916994354,
+    "historical_failure_observed": true,
+    "parent_id": "root/test_device_file_cleanup_roundtrip",
+    "shard": 3,
+    "shards": 4,
+    "collection": "/tmp/camctl-itopt-round2-cleanup-after-4/collection/root-test_device_file_cleanup_roundtrip/artifacts",
+    "collected_nodes": 11
+  }
+]

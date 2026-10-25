@@ -67,6 +67,10 @@ def test_cleanup_unknown_preserves_original_request_result(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
+    deployment.install_client_capabilities(
+        stub_driver_spec(
+            {"1": [photo_file("shot-1")]},
+            device_files={"shot-1": _PHOTO_CONTENT}))
     # 客户端真实导出：拍摄与范围清理同计划，清理按名称引用来源。
     body = {
         "request_id": "0",
@@ -89,10 +93,6 @@ def test_cleanup_unknown_preserves_original_request_result(
             },
         ],
     }
-    deployment.install_client_capabilities(
-        stub_driver_spec(
-            {"1": [photo_file("shot-1")]},
-            device_files={"shot-1": _PHOTO_CONTENT}))
     plan_path, receipt = deployment.export_plan_with_client(body)
     # 删除调用持续失败且文件确实还在：删除效果未知，预算耗尽。
     failing = stub_driver_spec(

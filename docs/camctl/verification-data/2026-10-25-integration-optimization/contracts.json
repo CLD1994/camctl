@@ -1,0 +1,69 @@
+{
+  "scope": "apps/camctl/tests/integration/contracts",
+  "environment": {
+    "python": "3.11.17",
+    "sqlite": "3.53.1",
+    "platform": "Linux x86_64"
+  },
+  "method": "one run per revision; independent worktrees running concurrently; monotonic process wall time",
+  "source_baseline": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "coverage": "All 442 original testcase identifiers preserved. Each real module is parsed once and every checker derives its own findings; the AST is released after each module. Synthetic violations are still parsed independently.",
+  "runs": {
+    "before": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/contracts",
+        "-q",
+        "--durations=15",
+        "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/contracts/before.xml"
+      ],
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "pid": 208104,
+      "exit_code": 0,
+      "wall_seconds": 14.465775087999646,
+      "commit": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "passed": 442,
+      "pytest_seconds": 14.158,
+      "log": ".local/verification/itopt/contracts/before.log",
+      "test_instances": 442,
+      "pytest_timestamp": "2026-10-25T05:32:47.550788+08:00"
+    },
+    "after": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/contracts",
+        "-q",
+        "--durations=15",
+        "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/itopt/contracts/final.xml"
+      ],
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "pid": 225731,
+      "exit_code": 0,
+      "wall_seconds": 9.824535400999594,
+      "commit": "012938090718365d3b6836bf497ab55cf8c794f0",
+      "passed": 442,
+      "pytest_seconds": 9.407,
+      "test_instances": 442,
+      "log": ".local/verification/itopt/contracts/final.log",
+      "same_test_instance_identifiers_as_before": true,
+      "pytest_timestamp": "2026-10-25T05:41:42.951401+08:00"
+    }
+  },
+  "memory_diagnostic": {
+    "method": "separate ordinary Python 3.11 process, full source inspection fixture called directly; not a complete pytest peak comparison",
+    "modules": 306,
+    "max_rss_before_kib": 28668,
+    "max_rss_after_kib": 79616,
+    "scan_seconds": 5.808300167998823,
+    "ast_lifetime": "released after deriving all rule findings for each module"
+  },
+  "implementation_files_sha256": {
+    "apps/camctl/tests/integration/contracts/test_dependencies.py": "f2225d903b344538d6e7e4c59420483d8cd538876da67af0feacda6614121b45",
+    "apps/camctl/tests/integration/contracts/conftest.py": "5a68c06d5bcd1e59ec3675e528634f5898016780482125004554d9a350e2d145",
+    "apps/camctl/tests/integration/contracts/test_external_boundaries.py": "9bf71eba0836c22384ecbcc553f815369605d616c8dd715140dd2e9400e8fdb5"
+  }
+}

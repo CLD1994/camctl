@@ -1,0 +1,364 @@
+{
+  "date_utc": "2026-10-25",
+  "purpose": "Hasselblad真实网页预设准备与实际执行排期分离的窄补测；保留冻结full原失败。",
+  "implementation": {
+    "base_commit": "df5b1d239df7f628ac445bb5aafd15ec54959240",
+    "files": [
+      {
+        "path": "tests/integration/client_driver.ts",
+        "sha256": "d0be65294a9a4877cfb57f02222d93d1d91346f693dd1131558d26128ee49aed"
+      },
+      {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "sha256": "a9706a27ddce136b0fd029aba0c934ddef6a07b84754e8d8c141b71ca7d7475f"
+      }
+    ],
+    "patch_sha256": "14f8b7d74858b0da997afcf858174f7ad632ca03c7cdc390a60ce8d0247b9fbd",
+    "contract": "仅PhotoWorld和显式启用refresh_scheduled_at的浏览器用例，在预设保存/关闭重开/应用与截图完成后、下载前，通过UTC浏览器中的执行时间表单选择新时间并等待实际保存；原policy60000ms、所有参数和原草稿/预设不变。"
+  },
+  "scope": {
+    "normal_matrix_source_cases": 12,
+    "browser_precision_source_cases": 3,
+    "test_function_names_and_parametrizations_unchanged": true,
+    "normal_matrix_executed_cases": 1,
+    "browser_precision_executed_cases": 1,
+    "not_executed": "其余11个正常组合、另两个不刷新未来排期的浏览器组合和五个恢复业务用例未在本次补测重跑。"
+  },
+  "original_csv": {
+    "source": "docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "status": "passed",
+    "call_seconds": 66.69535301999713,
+    "total_seconds": 66.69664263199593
+  },
+  "first_full_same_case": {
+    "source": {
+      "head": "507763857649d894ba9e6ec34c728ddfad9d9354",
+      "status": "",
+      "snapshot_sha256": "842142394d3bcaa6d907c1b542f30e409eaec058408ec038f2b1a4eb1063494e"
+    },
+    "case": {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0023903010005597025
+        },
+        "call": {
+          "outcome": "passed",
+          "duration_seconds": 116.89906520300065
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0007991040001797955
+        }
+      },
+      "outcome": "passed",
+      "duration_seconds": 116.90225460800139
+    },
+    "capture": {
+      "request_id": "7801330129635981464",
+      "request_created_at": "2026-10-24 22:26:26",
+      "input_scheduled_at": "2026-10-24 22:25:51",
+      "refresh": null,
+      "action": {
+        "status": 3,
+        "execution_started": 1,
+        "max_delay_ms": 60000,
+        "expiration_reason": null,
+        "first_window_observed_at": 1792880795225660
+      },
+      "timeline": {
+        "scheduled_at": "2026-10-24T22:25:51+00:00",
+        "deadline": "2026-10-24T22:26:51+00:00",
+        "request_file_mtime_utc": "2026-10-24T22:26:26.967228+00:00",
+        "admission_event": {
+          "id": 2,
+          "occurred_at": "2026-10-24T22:26:28.680718+00:00"
+        },
+        "start_decision_event": {
+          "id": 10,
+          "occurred_at": "2026-10-24T22:26:35.238542+00:00",
+          "remaining_window_seconds": 15.761458
+        },
+        "start_intent_event": {
+          "id": 14,
+          "occurred_at": "2026-10-24T22:26:35.265387+00:00"
+        },
+        "admission_seconds_after_deadline": -22.319282
+      },
+      "browser_command": {
+        "started_utc": "2026-10-24T22:25:51.187882+00:00",
+        "finished_utc": "2026-10-24T22:26:27.065493+00:00",
+        "exit_code": 0
+      },
+      "browser_seconds": 35.877611,
+      "start_attempts": 1,
+      "operation_runs_total": 5,
+      "hb_cli_argv_exists": true
+    }
+  },
+  "frozen_full_failure": {
+    "source": {
+      "head": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+      "status": "",
+      "snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818"
+    },
+    "raw_artifacts": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts",
+    "case": {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0014196789998095483
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 185.4546335510022
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0007983690011315048
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 185.45685159900313
+    },
+    "capture": {
+      "request_id": "9174740147331498308",
+      "request_created_at": "2026-10-24 23:52:08",
+      "input_scheduled_at": "2026-10-24 23:50:35",
+      "refresh": null,
+      "action": {
+        "status": 5,
+        "execution_started": 0,
+        "max_delay_ms": 60000,
+        "expiration_reason": 1,
+        "first_window_observed_at": null
+      },
+      "timeline": {
+        "scheduled_at": "2026-10-24T23:50:35+00:00",
+        "deadline": "2026-10-24T23:51:35+00:00",
+        "request_file_mtime_utc": "2026-10-24T23:52:08.367124+00:00",
+        "admission_event": {
+          "id": 2,
+          "occurred_at": "2026-10-24T23:52:09.273714+00:00"
+        },
+        "expired_event": {
+          "id": 9,
+          "occurred_at": "2026-10-24T23:52:14.744586+00:00"
+        },
+        "admission_seconds_after_deadline": 34.273714
+      },
+      "browser_command": {
+        "started_utc": "2026-10-24T23:50:35.365390+00:00",
+        "finished_utc": "2026-10-24T23:52:08.518466+00:00",
+        "exit_code": 0
+      },
+      "browser_seconds": 93.153076,
+      "start_attempts": 0,
+      "operation_runs_total": 0,
+      "hb_cli_argv_exists": false
+    },
+    "failure_point": "PhotoWorld.report(capture)只接受succeeded/failed报告，实际已发布expired/window_missed仍等满90s。请求在浏览器导出前已耗尽60s窗口；没有START/attempt/hb_cli调用。",
+    "result_preserved": true
+  },
+  "red_counterexample": {
+    "source": {
+      "head": "df5b1d239df7f628ac445bb5aafd15ec54959240",
+      "status": "M tests/integration/test_hasselblad_photo_roundtrip.py",
+      "snapshot_sha256": "6b6f9df1c7360450bafa31a06a6a94cfd9d32c4aaedadf44d8325681604af528"
+    },
+    "runner_output": "/tmp/camctl-itopt-hb-window-red-20261025",
+    "case": {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 2.496423787000822
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 41.50253377499757
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0010576460044831038
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 44.00001520800288
+    },
+    "failure": "导出时间仍等于输入的两分钟前时间；scheduled_at != scheduled_at断言失败，无sleep60s。"
+  },
+  "green_supplement": {
+    "source": {
+      "head": "df5b1d239df7f628ac445bb5aafd15ec54959240",
+      "status": "M tests/integration/client_driver.ts\n M tests/integration/test_hasselblad_photo_roundtrip.py",
+      "snapshot_sha256": "cf3535488df4903a6545f05f11320a5aa8a4526c62f99938b2006d25dac70b9d"
+    },
+    "runner_output": "/tmp/camctl-itopt-hb-window-green-20261025",
+    "runner_command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "scripts/run-integration.py",
+      "--python",
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "--node-modules",
+      "/tmp/camctl-itopt-runner-npm-client/node_modules",
+      "--jobs",
+      "1",
+      "--root-shards",
+      "1",
+      "--scope",
+      "root",
+      "--target",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "--target",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+      "--output",
+      "/tmp/camctl-itopt-hb-window-green-20261025"
+    ],
+    "exit_code": 0,
+    "cases": [
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 15.839868766001018
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 93.39163276900217
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006735560018569231
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 109.23217509100505
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.002475351997418329
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 65.3041503179993
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0008857400025590323
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 65.30751140999928
+      }
+    ],
+    "capture": {
+      "request_id": "5954545901024184037",
+      "request_created_at": "2026-10-25 00:09:54",
+      "input_scheduled_at": "2026-10-25 00:09:32",
+      "refresh": {
+        "previous_scheduled_at": "2026-10-25 00:09:32",
+        "scheduled_at": "2026-10-25 00:09:52",
+        "selected_utc": "2026-10-25T00:09:52.940Z"
+      },
+      "action": {
+        "status": 3,
+        "execution_started": 1,
+        "max_delay_ms": 60000,
+        "expiration_reason": null,
+        "first_window_observed_at": 1792887000105859
+      },
+      "timeline": {
+        "scheduled_at": "2026-10-25T00:09:52+00:00",
+        "deadline": "2026-10-25T00:10:52+00:00",
+        "request_file_mtime_utc": "2026-10-25T00:09:54.673237+00:00",
+        "admission_event": {
+          "id": 2,
+          "occurred_at": "2026-10-25T00:09:55.704039+00:00"
+        },
+        "start_decision_event": {
+          "id": 10,
+          "occurred_at": "2026-10-25T00:10:00.110883+00:00",
+          "remaining_window_seconds": 51.889117
+        },
+        "start_intent_event": {
+          "id": 14,
+          "occurred_at": "2026-10-25T00:10:00.133232+00:00"
+        },
+        "admission_seconds_after_deadline": -56.295961
+      },
+      "browser_command": {
+        "started_utc": "2026-10-25T00:09:32.231757+00:00",
+        "finished_utc": "2026-10-25T00:09:54.839163+00:00",
+        "exit_code": 0
+      },
+      "browser_seconds": 22.607406,
+      "start_attempts": 1,
+      "operation_runs_total": 5,
+      "hb_cli_argv_exists": true
+    },
+    "browser_counterexample": {
+      "input_scheduled_at": "2026-10-25 00:09:06",
+      "refresh": {
+        "previous_scheduled_at": "2026-10-25 00:09:06",
+        "scheduled_at": "2026-10-25 00:12:09",
+        "selected_utc": "2026-10-25T00:12:09.319Z"
+      },
+      "policy": {
+        "max_delay_ms": 60000
+      },
+      "precise_shutter_tokens": {
+        "source_draft_text": "0.000333",
+        "reopened_draft_text": "0.000333",
+        "applied_draft_text": "0.000333",
+        "request_text": "0.000333",
+        "preset_params_text": "0.000333",
+        "reopened_preset_params_text": "0.000333"
+      },
+      "source_reopened_unchanged": true,
+      "original_preset_reopened_unchanged": true,
+      "only_target_scheduled_at_changed": true,
+      "applied_receipt_matches_exported_action": true
+    },
+    "full_assertions": "两项保留原断言；正常链完成原图/预览四份交付、上传/报告/ACK、固定H和实际argv/精度核对。"
+  },
+  "report_scope_witness": {
+    "current_request_id": "9174740147331498308",
+    "current_action": "capture",
+    "actual_current_state": "EXPIRED/window_missed",
+    "foreign_report": "/tmp/camctl-itopt-full-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/claimed/status-report-12-f247ba3f9931ec1f0346f71a6aabb5e7be3a83503bde93a423a0a2c6b6c8f4c9.json",
+    "foreign_same_name_status": "succeeded",
+    "returned_foreign_report": false,
+    "diagnostic": "jpeg-device-0.000333/capture 请求 9174740147331498308 的 succeeded 报告; /tmp/camctl-hb-request-witness-fy4h5kpb: 请求 9174740147331498308 的动作已进入不相容终态：[(1, 'capture', 'EXPIRED', None, None)]\n本次 host 日志：\n",
+    "elapsed_seconds": 0.010026896001363639,
+    "success_budget_seconds": 90,
+    "source_database_read_only": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/evidence-state.db",
+    "registry_source": "隔离green源码副本中sync_resources生成的当前枚举资源"
+  },
+  "post_green_snapshot_change": {
+    "diff": "diff --git a/tmp/camctl-itopt-hb-window-green-20261025/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py b/tmp/camctl-itopt-hb-window/tests/integration/test_hasselblad_photo_roundtrip.py\nindex e30b31ca..7b7c4a55 100644\n--- a/tmp/camctl-itopt-hb-window-green-20261025/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py\n+++ b/tmp/camctl-itopt-hb-window/tests/integration/test_hasselblad_photo_roundtrip.py\n@@ -804,6 +804,10 @@ def _stop_fault_host(world, marker):\n \n def _restart_fault_host(world):\n     world.host = HostDemo(world.deployment, world.host._demo_path, str(world.launcher))\n+    _, expected, _ = world.report_checks['capture']\n+    failure = world.host.watch_failures(\n+        request_id=world.request_ids['capture'], expected_statuses=expected)\n+    world.report_checks['capture'] = (world.host, expected, failure)\n     world.start()\n     world.host.submit(world.photo_plan)\n \n",
+    "reason": "复审补齐替换host的观察器建立顺序；两项窄测不调用此恢复helper。",
+    "verification": {
+      "boundary": "替换host的start接缝在report调用前写入明确run result=error；未启动真实子进程",
+      "observed_error_before_report": true,
+      "database_opened": false,
+      "elapsed_seconds": 0.0005688410019502044,
+      "diagnostic": "jpeg-device-0.000333/capture 请求 123 的 succeeded 报告; /tmp/camctl-hb-restart-witness-losgd7_l: 本次 host 的 run 调用 1 已失败：\ncall=1 command=run pid=123 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0\n",
+      "scope": "仅验证重建watcher早于start/submit的局部顺序，不代表恢复业务链已重测"
+    },
+    "business_recovery_rerun": false,
+    "independent_review": "已只读核对全部PhotoWorld report调用者、FAILED预期和替换host路径，原观察顺序问题闭合。"
+  },
+  "boundaries": [
+    "该JSON保存必要输入、案例结果、窗口和精度事实；临时路径只定位原始执行，不是理解结论的前置。",
+    "history_events.occurred_at是业务事件时间，不等于实际COMMIT完成时间；mtime只作为文件生成区间辅助证据。",
+    "窄补测与冻结48d2ee64完整运行是不同源码和负载；不得用补测覆盖原full失败或据此宣称稳定提速。"
+  ]
+}

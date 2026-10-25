@@ -393,6 +393,10 @@ def test_unknown_management_commit_reuses_original_key_without_duplicate_fact(co
     key = new_operation_key()
 
     class LostCommitResponse:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:

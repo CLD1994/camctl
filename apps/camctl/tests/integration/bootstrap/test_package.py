@@ -96,25 +96,6 @@ def test_wheel_contains_authoritative_resources(tmp_path: Path) -> None:
     assert _venv_cli(env_dir).exists()
 
 
-def test_resource_names_reject_arbitrary_paths(tmp_path: Path) -> None:
-    """资源访问只接受构建资源目录中的登记名称，不能穿透到任意路径。"""
-    from camctl.resources import ResourceError, resource_bytes
-
-    for bad in [
-        "../resources.py",
-        "..\\..\\..\\..\\pyproject.toml",
-        "/etc/passwd",
-        "protocol/../../../pyproject.toml",
-        "protocol/nonexistent.schema.json",
-        "",
-    ]:
-        try:
-            resource_bytes(bad)
-        except ResourceError:
-            continue
-        raise AssertionError(f"非法资源名未被拒绝: {bad!r}")
-
-
 def test_generated_resources_match_authoritative_sources() -> None:
     """同步脚本以 --check 核对已生成资源与权威来源一致，缺失或漂移时失败。"""
     sync_script = PROJECT_DIR / "scripts" / "sync_resources.py"

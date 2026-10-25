@@ -1,0 +1,222 @@
+[
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_device_delete_unsupported_with_host_files",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.328032532997895
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 43.818564303997846
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00324988599459175
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 75.14984672299033
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.318759418005357
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 71.47038054100267
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007843269995646551
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 102.78992428600759
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001430973999958951
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 68.21135863400559
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000668383996526245
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 68.21345799200208
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001819974000682123
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 65.07540157599578
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003541230034898035
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 65.07757567299996
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001267427003767807
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 63.22436089900293
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009204269001202192
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 63.2348325950079
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.307147502004227
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 228.93707616499887
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013658750031027012
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 260.2455895420062
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025614419937483035
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 60.70778843000153
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0074520819980534725
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 60.71780195399333
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_hasselblad_tool_rejects_unrecognized_setting",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001793928000552114
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07463083200127585
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006214550012373365
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0770462150030653
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.649060498006293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 89.49042004000512
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008245980061474256
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 121.14030513601756
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002256371997646056
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 62.89412496199657
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004335789999458939
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 62.89681491299416
+  },
+  {
+    "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008720549958525226
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 69.19041058799485
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0051918500030296855
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 69.19647449299373
+  }
+]

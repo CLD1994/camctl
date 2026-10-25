@@ -1,0 +1,96 @@
+{
+  "id": "root/test_hasselblad_photo_roundtrip/shard-6",
+  "scope": "root",
+  "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+  "targets": [
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]"
+  ],
+  "estimated_seconds": 210.2160603869961,
+  "historical_failure_observed": false,
+  "parent_id": "root/test_hasselblad_photo_roundtrip",
+  "shard": 6,
+  "shards": 6,
+  "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+  "collected_nodes": 29,
+  "status": "passed",
+  "number": 5,
+  "worker": 4,
+  "artifacts": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/artifacts",
+  "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/source",
+  "started_utc": "2026-10-25T02:37:40.713119+00:00",
+  "command": [
+    "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-round2-hb-after-6/control:/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-round2-hb-after-6/workers/4/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-round2-hb-after-6/workers/4/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-round2-hb-after-6/workers/4/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/tmp",
+    "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/client-candidate"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/source",
+      "started_utc": "2026-10-25T02:37:56.945667+00:00",
+      "pid": 723359,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:37:57.020748+00:00",
+      "wall_seconds": 0.07507048399565974
+    },
+    {
+      "label": "hasselblad-client-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/client-candidate/apps/client",
+      "started_utc": "2026-10-25T02:38:04.015159+00:00",
+      "pid": 723514,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:38:28.776956+00:00",
+      "wall_seconds": 24.761783511996327
+    }
+  ],
+  "preparation": "hasselblad-client-build",
+  "preparation_pid": 723514,
+  "client_candidate": "/tmp/camctl-itopt-round2-hb-after-6/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/client-candidate",
+  "pid": 724292,
+  "execution_started_utc": "2026-10-25T02:38:28.779394+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 3,
+    "outcomes": {
+      "passed": 3
+    },
+    "subchecks": {},
+    "elapsed_seconds": 259.28789572700043,
+    "utc": "2026-10-25T02:42:51.756823+00:00",
+    "pid": 724292
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T02:42:52.381220+00:00",
+  "wall_seconds": 308.8441430039966
+}

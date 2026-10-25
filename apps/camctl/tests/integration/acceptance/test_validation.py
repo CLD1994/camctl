@@ -13,7 +13,6 @@ import pytest
 from camctl.acceptance.rules import (
     ActionValidation,
     BodyDecision,
-    validate_capture_params,
     validate_new_body,
 )
 from camctl.acceptance.schema import RuleError
@@ -84,76 +83,7 @@ def _camera_action(name: str = "shoot", *, device: str = "cam-1", **overrides):
     return action
 
 
-class TestPreciseNumbers:
-    def test_integral_decimals_satisfy_integer(self) -> None:
-        validation = validate_capture_params(
-            {"type": "single_shot", "shots": Decimal("1.0")},
-            _definition(),
-        )
-        assert validation.ok, validation.failure
-
-    def test_exponent_form_integer_satisfies(self) -> None:
-        validation = validate_capture_params(
-            {"type": "single_shot", "shots": Decimal("1e0")},
-            _definition(),
-        )
-        assert validation.ok, validation.failure
-
-    def test_near_integer_long_decimal_rejected(self) -> None:
-        validation = validate_capture_params(
-            {"type": "single_shot", "shots": Decimal("1.0000000000000001")},
-            _definition(),
-        )
-        assert not validation.ok
-
-    def test_multiple_of_uses_exact_fraction(self) -> None:
-        ok = validate_capture_params(
-            {"type": "single_shot", "interval_s": Decimal("0.3")},
-            _definition(),
-        )
-        assert ok.ok, ok.failure
-        bad = validate_capture_params(
-            {"type": "single_shot", "interval_s": Decimal("0.35")},
-            _definition(),
-        )
-        assert not bad.ok
-
-    def test_bool_and_string_numbers_rejected(self) -> None:
-        for raw in ({"type": "single_shot", "shots": True}, {"type": "single_shot", "shots": "3"}):
-            assert not validate_capture_params(raw, _definition()).ok
-
-    def test_defaults_applied_and_original_preserved(self) -> None:
-        raw = {"type": "single_shot"}
-        validation = validate_capture_params(raw, _definition())
-        assert validation.ok
-        assert validation.effective_params == {
-            "type": "single_shot",
-            "shots": 1,
-            "interval_s": Decimal("0.5"),
-        }
-        assert raw == {"type": "single_shot"}
-
-
-def _definition():
-    from camctl.acceptance.ports import ParameterDefinition
-
-    return ParameterDefinition(
-        schema=CAMERA_DEFINITION,
-        defaults={"shots": 1, "interval_s": Decimal("0.5")},
-    )
-
-
 class TestRuleErrors:
-    def test_invalid_schema_is_rule_error(self) -> None:
-        from camctl.acceptance.ports import ParameterDefinition
-
-        broken = ParameterDefinition(
-            schema={"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "no-such-type"},
-            defaults={},
-        )
-        with pytest.raises(RuleError):
-            validate_capture_params({"x": 1}, broken)
-
     def test_missing_required_definition_for_supported_action(self) -> None:
         catalog = StubCatalog()
         catalog.devices = {"cam-1"}

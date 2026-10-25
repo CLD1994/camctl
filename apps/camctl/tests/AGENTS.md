@@ -16,7 +16,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/integration/reporting -q
 ```
 
-集成测试目录清单：acceptance、bootstrap、cancellation、capture、contracts、devices、history、host_files、logging_runtime、motor、operations、outputs、persistence、reporting、scheduling、session。
+当前集成目录由 `python scripts/run-integration.py --scope camctl --list` 从实际源码发现，不另行维护目录清单。完整回归可以使用[隔离并行入口](../../../scripts/README.md#隔离并行集成测试)，默认覆盖全部目录与容量测试；`--target` 用于窄范围验证，不能替代完整回归。
 
 不要用系统 Python 直接跑：系统解释器缺少测试依赖（如 `referencing`），SQLite 版本也不满足运行条件。
 
@@ -24,22 +24,15 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 **1. 集成测试当前默认分目录运行。** 集成测试模块会在导入时调用 `register_*_guards()`，这些调用修改同一进程内的 `NAMED_GUARDS` 注册表；不同模块注册同名守卫时会覆盖先前值。合并多个目录可能因此改变用例执行时的全局状态，所以全量回归按目录分别启动 pytest。这个默认安排规避已知的进程内副作用，不代表已查明某次长时间停滞的根因。
 
-**2. 同一工作区的集成 pytest 顺序运行。** 每次集成测试启动时，`integration/conftest.py` 都会同步包资源到同一个 `src/camctl/_resources/` 目录。多个进程同时使用该工作区时，资源写入和另一进程读取可能重叠；在资源同步路径隔离前，同一工作区一次只运行一个集成 pytest 进程。不同工作区或独立资源发布物是否能并行，按共享文件、工具环境和其他实际边界判断；本指南没有宣称全量并行安全。单元测试不主动执行这条同步，但用例或其他进程若读取该目录，仍须与同步写入协调。
+**2. 同一工作区的集成 pytest 顺序运行。** 每次集成测试启动时，`integration/conftest.py` 都会同步包资源到同一个 `src/camctl/_resources/` 目录。多个进程同时使用该工作区时，资源写入和另一进程读取可能重叠；在资源同步路径隔离前，同一工作区一次只运行一个集成 pytest 进程。不同工作区或独立资源发布物是否能并行，按共享文件、工具环境和其他实际边界判断；仓库的隔离并行入口为每个任务冻结独立完整源码副本，隔离该资源目录、临时根与工具写入；其具体边界见[入口说明](../../../scripts/README.md#隔离并行集成测试)。直接启动的测试仍须自行核对这些边界。单元测试不主动执行这条同步，但用例或其他进程若读取该目录，仍须与同步写入协调。
 
-**3. 保留可追踪的执行记录。** 每次验证都记录命令、工作目录、Python 版本、执行会话、日志和退出码。前台运行便于查看和控制，但本身不构成隔离条件；后台运行时保留进程会话并将输出写入日志。`pytest … | tail` 中的 `tail` 默认等上游结束后才打印末尾行，因此运行期间可能看不到进度；需要持续观察时，将输出重定向到文件并用 `tail -f` 查看新增内容。
+**3. 保留可追踪的执行记录。** 每次验证都记录命令、工作目录、Python 版本、执行会话、日志和退出码。前台运行便于查看和控制，但本身不构成隔离条件；后台运行时保留进程会话并将输出写入日志。`pytest … | tail` 中的 `tail` 默认等上游结束后才打印末尾行，因此运行期间可能看不到进度；需要持续观察输出时，将输出重定向到文件并用 `tail -f` 查看新增内容。使用隔离并行入口时，直接查看 `summary.json` 与任务的 `progress.json` 可取得 PID、当前节点与阶段；这些状态由执行钩子写入，不依赖日志是否产生新行。
 
-## 历史时长参考
+## 计时与优化证据
 
-下表是此前记录的单目录粗略耗时；原记录未保留日期、环境、完整命令或计时口径，只供预留时间时参考，不能作为性能目标或挂起阈值。无输出或超过表中时间都不能单独证明测试已挂起，应查看本次执行日志、进程状态和退出结果。
+逐目录、逐文件和逐实例的实际结果见[集成测试计时报告](../../../docs/camctl/integration-test-timing-2026-10-25.md)，改造范围与复验见[集成测试优化记录](../../../docs/camctl/integration-test-optimization-2026-10-25.md)。两份记录保留日期、环境、范围及计时口径；历史测量只用于准备与排程，不能作为本次挂起阈值或性能对照。
 
-目录|历史粗估|说明
--|-|-
-unit|约 10 秒|历史参考
-outputs|2 分钟|文件 IO 量最大
-host_files|1 分钟|真实文件操作
-bootstrap|1.5—2 分钟|含真实进程会话
-acceptance|40 秒
-其余目录|数秒到半分钟
+无输出或超过历史测量时间都不能单独证明测试已挂起，应查看本次节点进度、进程状态和最终退出结果。
 
 ## Windows 开发机历史环境现象与诊断
 

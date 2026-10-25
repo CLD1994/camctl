@@ -1,0 +1,17 @@
+[
+  {
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow0",
+    "input": "one-shot-photo-inputs/001/browser-input.json",
+    "receipt_present": false
+  },
+  {
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0",
+    "input": "one-shot-photo-inputs/002/browser-input.json",
+    "receipt_present": false
+  },
+  {
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/tmp/pytest/test_installed_hasselblad_brow0",
+    "input": "one-shot-photo-inputs/003/browser-input.json",
+    "receipt_present": false
+  }
+]

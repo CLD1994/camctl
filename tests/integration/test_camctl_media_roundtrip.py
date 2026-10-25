@@ -122,8 +122,17 @@ def _delivered_files(directory: Path) -> list[Path]:
         and not path.name.startswith("status-report-"))
 
 
-def _submit_record_and_obtain(deployment: Deployment, spec: dict) -> None:
+def _submit_record_and_obtain(deployment: Deployment, spec: dict, *,
+                              scheduled_at: str | None = None) -> None:
     """受理录像与取回同计划：取回按名称引用来源，默认选择修复成品。"""
+    if scheduled_at is None:
+        record_at = future_schedule(1)
+        obtain_at = future_schedule(2)
+    else:
+        record_at = scheduled_at
+        obtain_at = (
+            datetime.fromisoformat(scheduled_at) + timedelta(seconds=1)
+        ).strftime("%Y-%m-%d %H:%M:%S")
     body = {
         "request_id": "3001",
         "created_at": "2026-01-15 08:00:00",
@@ -133,14 +142,14 @@ def _submit_record_and_obtain(deployment: Deployment, spec: dict) -> None:
                 "name": "拍录",
                 "type": "camera_record",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": record_at,
                 "params": {"type": "video"},
                 "policy": {"max_delay_ms": 5000},
             },
             {
                 "name": "取回",
                 "type": "obtain_action_outputs",
-                "scheduled_at": future_schedule(2),
+                "scheduled_at": obtain_at,
                 "params": {
                     "source": {"action_name": "拍录"},
                     "purpose": "manual",
@@ -157,7 +166,7 @@ def _submit_record_and_obtain(deployment: Deployment, spec: dict) -> None:
 
 
 def _start_recording_and_interrupt(deployment: Deployment,
-                                   spec: dict) -> int:
+                                   spec: dict, *, resume_clock: bool = False) -> int:
     """启动 run 会话执行录像，确认启动后终止会话树。
 
     返回启动确认的墙钟微秒；录像保持执行中、停止未尝试，供后续会
@@ -170,6 +179,8 @@ def _start_recording_and_interrupt(deployment: Deployment,
             deployment.state_db,
             "SELECT started_at FROM device_activities"
             " WHERE started_at IS NOT NULL")
+        if resume_clock:
+            deployment.resume_clock()
     finally:
         terminate_process_tree(process)
     _recover_wal(deployment.state_db)
@@ -222,7 +233,7 @@ def test_insufficient_timing_checks_repairs_and_delivers(tmp_path: Path) -> None
     """计时证据不足的检查链：受限会话保守停止保存等待阶段，正常会
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
     复成品登记提升并由默认取回交付。"""
-    deployment = Deployment(tmp_path, recording_margin_s="0.5")
+    deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -238,10 +249,13 @@ def test_insufficient_timing_checks_repairs_and_delivers(tmp_path: Path) -> None
         {"1": [video_file("clip-1", size_bytes=len(content))]},
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
-    _submit_record_and_obtain(deployment, spec)
+    scheduled_at = deployment.schedule(1)
+    _submit_record_and_obtain(deployment, spec, scheduled_at=scheduled_at)
+    # 受理完成后进入原启动窗口；CLI 准备不消耗业务窗口。
+    deployment.freeze_at(scheduled_at)
 
     # 第一个会话启动录像后中断：录像执行中、锚点随会话失效。
-    _start_recording_and_interrupt(deployment, spec)
+    _start_recording_and_interrupt(deployment, spec, resume_clock=True)
 
     # 时钟异常会话保守收场：放弃计时停止、列举原片、固定计时证据
     # 不足的检查决定并归属源文件，会话以 clock_invalid 结束。

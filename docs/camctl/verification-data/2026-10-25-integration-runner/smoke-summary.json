@@ -1,0 +1,631 @@
+{
+  "scope": "S3入口窄范围验证；不是完整集成验收或提速对照",
+  "source_baseline": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "timing": "UTC与单调时钟回执分别原样保存；目录日期沿正式计划命名，实际UTC见各次运行",
+  "coverage": "默认发现16个camctl目录、30个根pytest模块、4个Node文件；未筛掉容量或Hasselblad参数",
+  "contract_tests": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-v"
+    ],
+    "cwd": "/tmp/camctl-itopt-runner",
+    "exit_code": 0,
+    "log": "test_function_selector_already_contains_parameter_instances (test_run_integration.IntegrationRunnerTest.test_function_selector_already_contains_parameter_instances) ... ok\ntest_isolated_concurrency_progress_exact_assignment_and_failure (test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure) ... ok\ntest_nested_unittest_checks_do_not_inflate_primary_results (test_run_integration.IntegrationRunnerTest.test_nested_unittest_checks_do_not_inflate_primary_results) ... ok\ntest_unknown_target_is_rejected_before_execution (test_run_integration.IntegrationRunnerTest.test_unknown_target_is_rejected_before_execution) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 3.518s\n\nOK\n"
+  },
+  "runs": [
+    {
+      "name": "camctl",
+      "purpose": "两个真实组件目录隔离并发",
+      "started_utc": "2026-10-24T21:36:28.923164+00:00",
+      "finished_utc": "2026-10-24T21:36:36.239536+00:00",
+      "wall_seconds": 6.17883583299772,
+      "wall_scope": "入口调度与各任务准备；不含入口源码快照与版本检查",
+      "exit_code": 0,
+      "max_simultaneous_test_processes": 2,
+      "source_head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "snapshot_sha256": "d33478416fe5649b9d600ad3aad105d376f758f33b31ca151c7fb73d55f4148d",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "raw_summary": "/tmp/camctl-itopt-runner-smoke-camctl/summary.json",
+      "console_log": "/tmp/camctl-itopt-runner-smoke-camctl.log",
+      "tasks": [
+        {
+          "id": "camctl/logging_runtime",
+          "scope": "camctl",
+          "targets": [
+            "apps/camctl/tests/integration/logging_runtime"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-camctl/tasks/001-camctl-logging_runtime/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "apps/camctl/tests/integration/logging_runtime",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-camctl/tasks/001-camctl-logging_runtime/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-camctl/tasks/001-camctl-logging_runtime/source",
+          "pid": 214560,
+          "started_utc": "2026-10-24T21:36:28.931082+00:00",
+          "execution_started_utc": "2026-10-24T21:36:32.613964+00:00",
+          "finished_utc": "2026-10-24T21:36:35.900480+00:00",
+          "wall_seconds": 5.831356236001739,
+          "exit_code": 0,
+          "primary_cases": 112,
+          "outcomes": {
+            "passed": 112
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_copy_preserves_unlock_and_handler_close_errors[False]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_copy_preserves_unlock_and_handler_close_errors[True]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_rotation_failure_retains_real_copy_success",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_lock_failure_disables_channel_and_preserves_close_result[False]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_lock_failure_disables_channel_and_preserves_close_result[True]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_copy_format_failure_does_not_disable_file_channel",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_current_log_io_failure_disables_after_unlock[open]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_current_log_io_failure_disables_after_unlock[append]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_current_log_io_failure_disables_after_unlock[flush]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_ordinary_file_io_failure_is_typed_and_disables_without_retry[open]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_ordinary_file_io_failure_is_typed_and_disables_without_retry[append]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_ordinary_file_io_failure_is_typed_and_disables_without_retry[flush]",
+            "tests/integration/logging_runtime/test_clh_adapter.py::test_ordinary_format_failure_keeps_file_channel_available",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_copy_contains_all_current_bytes",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_copy_contains_trigger_before_rotation",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_records_stay_complete_during_copy",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_copy_close_exceptions_keep_ordered_primary_and_write_result[OSError-RuntimeError-group]",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_copy_close_exceptions_keep_ordered_primary_and_write_result[RuntimeError-CancelledError-target]",
+            "tests/integration/logging_runtime/test_copies.py::TestLockedCopy::test_copy_close_exceptions_keep_ordered_primary_and_write_result[OSError-CancelledError-source]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_full_delivery_publishes_copy",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_repeated_failure_is_suppressed",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_invalid_marker_content_still_suppresses",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_marker_create_failure_stops_before_copy",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_publish_failure_cleans_staging_copy",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copy_close_error_preserves_staging_and_marker[failed_closes0]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copy_close_error_preserves_staging_and_marker[failed_closes1]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copy_close_error_preserves_staging_and_marker[failed_closes2]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copy_operation_and_both_close_errors_are_preserved",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_confirmed_closed_snapshot_exception_cleans_own_staging_once[program]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_confirmed_closed_snapshot_exception_cleans_own_staging_once[worker_cancel]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_failed_delivery_is_not_retried",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_database_unavailable_does_not_block_delivery",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_real_progress_sync_failure_keeps_published_bytes[2-MarkerStage.COPIED]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_real_progress_sync_failure_keeps_published_bytes[3-MarkerStage.PUBLISHED]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copied_progress_exception_cleans_confirmed_staging[removed]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_copied_progress_exception_cleans_confirmed_staging[already_absent]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_failure_preserves_primary_and_receipt[cleanup_failure0]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_failure_preserves_primary_and_receipt[cleanup_failure1]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_failure_preserves_primary_and_receipt[cleanup_failure2]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_after_resultized_error_is_propagated[RuntimeError-copy_error]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_after_resultized_error_is_propagated[RuntimeError-not_moved]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_after_resultized_error_is_propagated[CancelledError-copy_error]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_after_resultized_error_is_propagated[CancelledError-not_moved]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_during_stopped_delivery_is_propagated[copy_write-RuntimeError]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_during_stopped_delivery_is_propagated[copy_write-CancelledError]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_during_stopped_delivery_is_propagated[copied_progress-RuntimeError]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_unexpected_exception_during_stopped_delivery_is_propagated[copied_progress-CancelledError]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copy_write-OSError-RuntimeError-group]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copied_progress-OSError-RuntimeError-group]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copy_write-OSError-CancelledError-control]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copied_progress-OSError-CancelledError-control]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copy_write-OSError-OSError-resultized]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copied_progress-OSError-OSError-primary]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copy_write-RuntimeError-RuntimeError-primary]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copied_progress-RuntimeError-RuntimeError-primary]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copy_write-CancelledError-RuntimeError-primary]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_cleanup_exception_priority_after_raw_primary[copied_progress-CancelledError-RuntimeError-primary]",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_published_progress_exception_preserves_moved_receipt",
+            "tests/integration/logging_runtime/test_copies.py::TestDelivery::test_started_publish_exception_preserves_unknown_location",
+            "tests/integration/logging_runtime/test_copies.py::TestRecovery::test_recovery_deletes_marker_and_allows_new_round",
+            "tests/integration/logging_runtime/test_copies.py::TestRecovery::test_recovery_waits_for_original_progress_before_new_round",
+            "tests/integration/logging_runtime/test_copies.py::TestRecovery::test_suspension_lifted_by_recovery",
+            "tests/integration/logging_runtime/test_copies.py::TestStartupSweep::test_sweep_cleans_old_copies_and_temps",
+            "tests/integration/logging_runtime/test_copies.py::TestStartupSweep::test_sweep_deletes_only_regular_files_without_following_links",
+            "tests/integration/logging_runtime/test_copies.py::TestStartupSweep::test_sweep_excludes_active_copy",
+            "tests/integration/logging_runtime/test_copies.py::TestStartupSweep::test_sweep_reports_directory_error",
+            "tests/integration/logging_runtime/test_copies.py::TestStartupSweep::test_sweep_treats_missing_directory_as_completed_absence",
+            "tests/integration/logging_runtime/test_handler.py::TestFileChannel::test_append_and_rotation_separated",
+            "tests/integration/logging_runtime/test_handler.py::TestFileChannel::test_rotation_failure_does_not_hide_append",
+            "tests/integration/logging_runtime/test_handler.py::TestFileChannel::test_retention_keeps_active_plus_backups",
+            "tests/integration/logging_runtime/test_handler.py::TestOrderedClose::test_close_summary_is_once",
+            "tests/integration/logging_runtime/test_handler.py::TestOrderedClose::test_zero_drops_no_summary",
+            "tests/integration/logging_runtime/test_handler.py::TestTwoProcesses::test_two_processes_share_file",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[stop-False-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[stop-False-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[stop-True-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[stop-True-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[file-False-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[file-False-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[file-True-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[file-True-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[wait-False-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[wait-False-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[wait-True-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_parent_cancel_waits_for_complete_log_close[wait-True-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_listener_stop_error_does_not_skip_queue_close[False-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_listener_stop_error_does_not_skip_queue_close[False-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_listener_stop_error_does_not_skip_queue_close[True-False]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_listener_stop_error_does_not_skip_queue_close[True-True]",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_unsafe_close_waits_for_active_listener_write",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_close_writes_summary_and_stops_listener",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestRealFileClose::test_disabled_file_channel_skips_summary",
+            "tests/integration/logging_runtime/test_lifecycle.py::TestTwoProcesses::test_two_processes_summarize_independently",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_real_partial_write_is_removed_after_handle_close",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_real_replace_failure_cleans_temp_and_preserves_marker",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_real_unconfirmed_temp_close_preserves_open_owned_temp",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_real_runtime_write_error_keeps_identity_when_close_oserror",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_real_directory_sync_failure_keeps_placed_formal_marker",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_directory_sync_error_survives_close_oserror",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_directory_sync_success_survives_close_oserror_for_save_and_delete",
+            "tests/integration/logging_runtime/test_marker_temp_cleanup.py::test_cancelled_wait_keeps_active_temp_until_save_owner_finishes",
+            "tests/integration/logging_runtime/test_queue.py::TestAtomicAdmission::test_concurrent_admission_is_atomic",
+            "tests/integration/logging_runtime/test_queue.py::TestAtomicAdmission::test_info_samples_once_per_record",
+            "tests/integration/logging_runtime/test_queue.py::TestAtomicAdmission::test_warning_and_error_survive_middle_zone",
+            "tests/integration/logging_runtime/test_queue.py::TestAtomicAdmission::test_accepted_fifo_order_preserved",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_unconfirmed_old_owner_files_wait_for_settled_sweep",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_sweep_preserves_formal_marker_and_other_log_scopes[valid]",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_sweep_preserves_formal_marker_and_other_log_scopes[invalid]",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_sweep_preserves_formal_marker_and_other_log_scopes[unreadable]",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_sweep_keeps_fifo_candidate_without_opening_it",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_sweep_reports_candidate_errors_and_retries_only_next_invocation",
+            "tests/integration/logging_runtime/test_startup_ownership.py::test_real_copy_and_closed_failed_marker_temp_share_run_ownership"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-camctl/tasks/001-camctl-logging_runtime/artifacts"
+        },
+        {
+          "id": "camctl/motor",
+          "scope": "camctl",
+          "targets": [
+            "apps/camctl/tests/integration/motor"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-camctl/tasks/002-camctl-motor/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "apps/camctl/tests/integration/motor",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-camctl/tasks/002-camctl-motor/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-camctl/tasks/002-camctl-motor/source",
+          "pid": 214558,
+          "started_utc": "2026-10-24T21:36:28.940440+00:00",
+          "execution_started_utc": "2026-10-24T21:36:32.592705+00:00",
+          "finished_utc": "2026-10-24T21:36:36.224895+00:00",
+          "wall_seconds": 6.146443379002449,
+          "exit_code": 0,
+          "primary_cases": 12,
+          "outcomes": {
+            "passed": 12
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/motor/test_history_reports.py::test_motor_history_all_restore_paths_have_same_public_result",
+            "tests/integration/motor/test_history_reports.py::test_group_source_resolution_excludes_motor",
+            "tests/integration/motor/test_history_reports.py::test_partial_write_is_persisted_and_disables_later_actions",
+            "tests/integration/motor/test_notification_pipe.py::test_real_pipe_normalized_lines_and_eof",
+            "tests/integration/motor/test_notification_pipe.py::test_full_pipe_returns_without_waiting_or_retry",
+            "tests/integration/motor/test_notification_pipe.py::test_closed_reader_is_explicit_write_failure",
+            "tests/integration/motor/test_notification_pipe.py::test_read_end_is_rejected_and_closed",
+            "tests/integration/motor/test_notification_pipe.py::test_regular_file_is_not_a_notification_channel",
+            "tests/integration/motor/test_notification_pipe.py::test_invalid_descriptor_keeps_explicit_unavailable_reason",
+            "tests/integration/motor/test_notification_pipe.py::test_cli_early_configuration_failure_closes_notification_fd",
+            "tests/integration/motor/test_notification_pipe.py::test_managed_tool_does_not_inherit_notification_writer",
+            "tests/integration/motor/test_notification_pipe.py::test_report_process_does_not_inherit_notification_writer"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-camctl/tasks/002-camctl-motor/artifacts"
+        }
+      ]
+    },
+    {
+      "name": "root",
+      "purpose": "根SQL模块与全部Node集成文件隔离并发",
+      "started_utc": "2026-10-24T21:37:16.872784+00:00",
+      "finished_utc": "2026-10-24T21:37:34.170075+00:00",
+      "wall_seconds": 16.140526307000982,
+      "wall_scope": "入口调度与各任务准备；不含入口源码快照与版本检查",
+      "exit_code": 0,
+      "max_simultaneous_test_processes": 2,
+      "source_head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "snapshot_sha256": "8b321714d4c0cfdb1bcf8fba2b2413bd8ac60502bc443da306caf5387fb587f0",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "raw_summary": "/tmp/camctl-itopt-runner-smoke-root/summary.json",
+      "console_log": "/tmp/camctl-itopt-runner-smoke-root.log",
+      "tasks": [
+        {
+          "id": "node/report-dependencies.test",
+          "scope": "node",
+          "targets": [
+            "tests/integration/report-dependencies.test.mjs"
+          ],
+          "command": [
+            "node",
+            "--disable-warning=ExperimentalWarning",
+            "--test",
+            "--test-reporter=tap",
+            "tests/integration/report-dependencies.test.mjs"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-root/tasks/001-node-report-dependencies.test/source",
+          "pid": 217229,
+          "started_utc": "2026-10-24T21:37:16.880210+00:00",
+          "execution_started_utc": "2026-10-24T21:37:27.579946+00:00",
+          "finished_utc": "2026-10-24T21:37:34.150876+00:00",
+          "wall_seconds": 16.11363014199742,
+          "exit_code": 0,
+          "primary_cases": 32,
+          "outcomes": {
+            "passed": 32,
+            "failed": 0,
+            "skipped": 0
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/report-dependencies.test.mjs"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/001-node-report-dependencies.test/artifacts"
+        },
+        {
+          "id": "node/event-transitions.test",
+          "scope": "node",
+          "targets": [
+            "tests/integration/event-transitions.test.mjs"
+          ],
+          "command": [
+            "node",
+            "--disable-warning=ExperimentalWarning",
+            "--test",
+            "--test-reporter=tap",
+            "tests/integration/event-transitions.test.mjs"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-root/tasks/002-node-event-transitions.test/source",
+          "pid": 217226,
+          "started_utc": "2026-10-24T21:37:16.887756+00:00",
+          "execution_started_utc": "2026-10-24T21:37:27.564171+00:00",
+          "finished_utc": "2026-10-24T21:37:29.338089+00:00",
+          "wall_seconds": 12.450339609000366,
+          "exit_code": 0,
+          "primary_cases": 58,
+          "outcomes": {
+            "passed": 58,
+            "failed": 0,
+            "skipped": 0
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/event-transitions.test.mjs"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/002-node-event-transitions.test/artifacts"
+        },
+        {
+          "id": "root/test_database_history_sql",
+          "scope": "root",
+          "targets": [
+            "tests/integration/test_database_history_sql.py"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-root/tasks/003-root-test_database_history_sql/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_database_history_sql.py",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-root/tasks/003-root-test_database_history_sql/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-root/tasks/003-root-test_database_history_sql/source",
+          "pid": 217328,
+          "started_utc": "2026-10-24T21:37:29.364811+00:00",
+          "execution_started_utc": "2026-10-24T21:37:29.952067+00:00",
+          "finished_utc": "2026-10-24T21:37:31.245128+00:00",
+          "wall_seconds": 1.880301375000272,
+          "exit_code": 0,
+          "primary_cases": 27,
+          "outcomes": {
+            "passed": 27
+          },
+          "subchecks": {
+            "passed": 342
+          },
+          "inventory": [
+            "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_missing_or_malformed_version_is_rejected",
+            "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_version_boundaries_use_numeric_comparison_and_exact_backports",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_canceled_cleanup_only_records_actual_delete_error",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_complete_state_matrix",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_final_result_requires_existing_event",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_success_accepts_registered_basis_values",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_unknown_target_keeps_request_without_file_reference",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_and_selection_identity",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_requires_real_source_at_commit",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_directory_binding_requires_three_distinct_absolute_paths",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_expiration_keeps_start_attempts_and_limits_residual_stop",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_candidate_indexes_keep_old_and_cleaned_records",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_and_affected_output_have_separate_directories",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_metadata_requires_valid_order_and_events",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_frozen_report_range_excludes_later_commits_and_keeps_large_ids",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_history_report_and_snapshot_type_scopes",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_missing_transaction_end_rejects_commit_and_rolls_back_group",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_multiple_final_results_may_share_event",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_obtain_source_dependency_requires_permanent_delivery",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_cleanup_holder_per_output",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_read_flow_per_copy_and_one_flow_per_cleanup_kind",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_output_cleanup_availability_and_error_matrix",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_probe_and_cursor_use_covering_indexes_with_or_without_statistics",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_target_rejects_event_sequence_mismatch_at_commit",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_targets_share_event_but_not_duplicate_object",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_snapshot_candidates_use_type_identifier_then_exact_integer_id",
+            "tests/integration/test_database_history_sql.py::DatabaseStructure::test_sync_can_reference_transaction_end_inserted_later"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/003-root-test_database_history_sql/artifacts"
+        },
+        {
+          "id": "node/video-coverage-protocol.test",
+          "scope": "node",
+          "targets": [
+            "tests/integration/video-coverage-protocol.test.mjs"
+          ],
+          "command": [
+            "node",
+            "--disable-warning=ExperimentalWarning",
+            "--test",
+            "--test-reporter=tap",
+            "tests/integration/video-coverage-protocol.test.mjs"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-root/tasks/004-node-video-coverage-protocol.test/source",
+          "pid": 217409,
+          "started_utc": "2026-10-24T21:37:31.255435+00:00",
+          "execution_started_utc": "2026-10-24T21:37:32.832032+00:00",
+          "finished_utc": "2026-10-24T21:37:33.284696+00:00",
+          "wall_seconds": 0.8721960250004486,
+          "exit_code": 0,
+          "primary_cases": 3,
+          "outcomes": {
+            "passed": 3,
+            "failed": 0,
+            "skipped": 0
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/video-coverage-protocol.test.mjs"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/004-node-video-coverage-protocol.test/artifacts"
+        },
+        {
+          "id": "node/report-dependency-conditions.test",
+          "scope": "node",
+          "targets": [
+            "tests/integration/report-dependency-conditions.test.mjs"
+          ],
+          "command": [
+            "node",
+            "--disable-warning=ExperimentalWarning",
+            "--test",
+            "--test-reporter=tap",
+            "tests/integration/report-dependency-conditions.test.mjs"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-root/tasks/005-node-report-dependency-conditions.test/source",
+          "pid": 217459,
+          "started_utc": "2026-10-24T21:37:33.293698+00:00",
+          "execution_started_utc": "2026-10-24T21:37:33.856532+00:00",
+          "finished_utc": "2026-10-24T21:37:34.021641+00:00",
+          "wall_seconds": 0.7279420980012219,
+          "exit_code": 0,
+          "primary_cases": 25,
+          "outcomes": {
+            "passed": 25,
+            "failed": 0,
+            "skipped": 0
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/report-dependency-conditions.test.mjs"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-root/tasks/005-node-report-dependency-conditions.test/artifacts"
+        }
+      ],
+      "counts_basis": "本次使用早期观测器；27主实例与342子检查由收集清单和pytest终态分离，非最终插件实测。最终插件真实回执见followup-summary.json。"
+    },
+    {
+      "name": "osmo",
+      "purpose": "安装版OSMO describe及外部运行环境断言",
+      "started_utc": "2026-10-24T21:41:00.237829+00:00",
+      "finished_utc": "2026-10-24T21:41:06.647263+00:00",
+      "wall_seconds": 6.409496773001592,
+      "wall_scope": "入口版本检查、源码快照、隔离准备与调度全过程",
+      "exit_code": 0,
+      "max_simultaneous_test_processes": 1,
+      "source_head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "snapshot_sha256": "a5c03fc3b13a4023f6cf2a0e6bd3a591eae764fc4689124c64da9501de0dbf33",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "raw_summary": "/tmp/camctl-itopt-runner-smoke-osmo/summary.json",
+      "console_log": "/tmp/camctl-itopt-runner-smoke-osmo.log",
+      "tasks": [
+        {
+          "id": "root/test_osmo_builtin_timelapse_roundtrip",
+          "scope": "root",
+          "targets": [
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-osmo/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-osmo/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-osmo/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/source",
+          "pid": 224662,
+          "started_utc": "2026-10-24T21:41:00.735467+00:00",
+          "execution_started_utc": "2026-10-24T21:41:03.423753+00:00",
+          "finished_utc": "2026-10-24T21:41:06.646275+00:00",
+          "wall_seconds": 5.910813051999867,
+          "exit_code": 0,
+          "primary_cases": 1,
+          "outcomes": {
+            "passed": 1
+          },
+          "subchecks": {},
+          "inventory": [
+            "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-osmo/tasks/001-root-test_osmo_builtin_timelapse_roundtrip/artifacts"
+        }
+      ]
+    },
+    {
+      "name": "failure",
+      "purpose": "两个受控runner世界验证失败传播、资源隔离和重叠目标仅分配一次",
+      "started_utc": "2026-10-24T21:42:29.944993+00:00",
+      "finished_utc": "2026-10-24T21:42:31.470533+00:00",
+      "wall_seconds": 1.5256583330010471,
+      "wall_scope": "入口版本检查、源码快照、隔离准备与调度全过程",
+      "exit_code": 1,
+      "max_simultaneous_test_processes": 2,
+      "source_head": "7ba3bef598ec4a800e1b1b8bcff822ea371f6fd1",
+      "snapshot_sha256": "46305f374dadb698e87ffb06cc65b3738b5e1a16be851890d6c283f36605c182",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "raw_summary": "/tmp/camctl-itopt-runner-smoke-failure/summary.json",
+      "console_log": "/tmp/camctl-itopt-runner-smoke-failure.log",
+      "tasks": [
+        {
+          "id": "camctl/one",
+          "scope": "camctl",
+          "targets": [
+            "apps/camctl/tests/integration/one/test_case.py"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-failure/tasks/001-camctl-one/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "apps/camctl/tests/integration/one/test_case.py",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-failure/tasks/001-camctl-one/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-failure/tasks/001-camctl-one/source",
+          "pid": 226813,
+          "started_utc": "2026-10-24T21:42:30.121791+00:00",
+          "execution_started_utc": "2026-10-24T21:42:30.179656+00:00",
+          "finished_utc": "2026-10-24T21:42:31.438137+00:00",
+          "wall_seconds": 1.316346858999168,
+          "exit_code": 0,
+          "primary_cases": 1,
+          "outcomes": {
+            "passed": 1
+          },
+          "subchecks": {},
+          "inventory": [
+            "apps/camctl/tests/integration/one/test_case.py::test_case"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-failure/tasks/001-camctl-one/artifacts"
+        },
+        {
+          "id": "camctl/two",
+          "scope": "camctl",
+          "targets": [
+            "apps/camctl/tests/integration/two"
+          ],
+          "command": [
+            "/tmp/camctl-itopt-runner-smoke-failure/tasks/002-camctl-two/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "apps/camctl/tests/integration/two",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-itopt-runner-smoke-failure/tasks/002-camctl-two/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-smoke-failure/tasks/002-camctl-two/source",
+          "pid": 226815,
+          "started_utc": "2026-10-24T21:42:30.124838+00:00",
+          "execution_started_utc": "2026-10-24T21:42:30.185287+00:00",
+          "finished_utc": "2026-10-24T21:42:31.468855+00:00",
+          "wall_seconds": 1.3440131759998621,
+          "exit_code": 1,
+          "primary_cases": 1,
+          "outcomes": {
+            "failed": 1
+          },
+          "subchecks": {},
+          "inventory": [
+            "apps/camctl/tests/integration/two/test_case.py::test_case"
+          ],
+          "artifacts": "/tmp/camctl-itopt-runner-smoke-failure/tasks/002-camctl-two/artifacts"
+        }
+      ]
+    }
+  ]
+}

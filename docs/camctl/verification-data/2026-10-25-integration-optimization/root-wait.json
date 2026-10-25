@@ -1,0 +1,244 @@
+{
+  "baseline": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "workspace": "/tmp/camctl-itopt-rootwait",
+  "branch": "work/itopt-rootwait",
+  "environment": {
+    "workspace": "/tmp/camctl-itopt-rootwait",
+    "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "sqlite": "3.53.1",
+    "node": "v24.22.1"
+  },
+  "scope": [
+    "OSMO单原片任务包装器透传真实result_mode参数",
+    "可选失败回调按操作前日志游标和request_id下指定动作识别不相容终态",
+    "C六动作成功等待与Action6检查副本回收等待保留原预算和原断言"
+  ],
+  "before_cases": [
+    {
+      "target": "C六动作",
+      "outcome": "failed: 六动作等待超时",
+      "pytest_call_s": 184.7,
+      "log": "baseline.log",
+      "note": "此节点已完整失败；随后另一个重复Action6运行被有意中断，因此该进程总退出码为2。"
+    },
+    {
+      "target": "Action6 reached-copy-progress",
+      "outcome": "failed: 检查副本等待180秒超时",
+      "pytest_call_s": 253.64,
+      "log": "action6-before.log",
+      "note": "另一个cleanup setup触发既有安装来源隔离断言，不能计作该cleanup基线。"
+    },
+    {
+      "target": "cleanup_new_request_for_cleaned_output",
+      "outcome": "failed: task() unexpected keyword result_mode",
+      "pytest_call_s": 3.52,
+      "log": "cleanup-before.log",
+      "exitcode": 1
+    }
+  ],
+  "first_after": {
+    "log": "after.log",
+    "junit": "after.xml",
+    "exitcode": 1,
+    "passed": 14,
+    "failed": 1,
+    "pytest_s": 306.85,
+    "wall_s": 318.884,
+    "cases": [
+      {
+        "target": "cleanup_new_request_for_cleaned_output",
+        "outcome": "passed",
+        "pytest_call_s": 74.84
+      },
+      {
+        "target": "cleanup_cancel_inflight_delete_recover",
+        "outcome": "passed",
+        "pytest_call_s": 64.17
+      },
+      {
+        "target": "Action6 reached-copy-progress",
+        "outcome": "passed",
+        "pytest_call_s": 73.29
+      },
+      {
+        "target": "Action6 reached-inspection-saved",
+        "outcome": "passed",
+        "pytest_call_s": 73.18
+      },
+      {
+        "target": "C六动作",
+        "outcome": "failed: 当前请求动作不相容终态",
+        "pytest_call_s": 6.96
+      }
+    ],
+    "note": "这次组合使用首版已导入观察器；最终游标API和真实重试分区由final.log独立验证。Action6前后结果不同，不能把180秒差计为已测性能收益。"
+  },
+  "contract_red": {
+    "log": "helper-red.log",
+    "exitcode": 1,
+    "failed": 10,
+    "pytest_s": 12.19
+  },
+  "direct_wait_callers_checked": 87,
+  "exclusions": [
+    "初次cleanup安装目录位于仓库路径或具有相同前缀，既有来源隔离断言拒绝；已以不相关的仓库外临时目录重跑。"
+  ],
+  "remaining": [
+    "完整10个清理分区及根层组合由协调者最终隔离并行运行",
+    "C六动作的原过期/来源失败保留：最终调用6.89秒，原调用184.70秒；生产行为未修改。",
+    "Action6原状态库错误在基线可见，本次成功不证明该生产缺陷已修复"
+  ],
+  "measurement_note": "各节点实际计时；与其他隔离工作区任务并发执行，不作为严格性能基准。",
+  "commands": [
+    {
+      "label": "helper_red",
+      "cwd": "/tmp/camctl-itopt-rootwait",
+      "env": {
+        "PYTHONPATH": "$PWD/apps/camctl/src"
+      },
+      "argv": [
+        "apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_host_wait_failures.py",
+        "-q",
+        "--basetemp=/tmp/itopt-rootwait-red-data"
+      ],
+      "note": "临时恢复HEAD版本_wsl_host_demo.py，进程完成后恢复候选文件。"
+    },
+    {
+      "label": "cleanup_before",
+      "cwd": "/tmp/camctl-itopt-rootwait",
+      "env": {
+        "PYTHONPATH": "$PWD/apps/camctl/src",
+        "UV_PYTHON": "$PWD/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "$PWD/apps/camctl/.venv311"
+      },
+      "argv": [
+        "apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+        "-q",
+        "--durations=5",
+        "--basetemp=/tmp/itopt-rootwait-cleanup-before-data"
+      ],
+      "note": "临时恢复HEAD版本_osmo_builtin_clock_entry.py，进程完成后恢复候选文件。"
+    },
+    {
+      "label": "final",
+      "cwd": "/tmp/camctl-itopt-rootwait",
+      "env": {
+        "PYTHONPATH": "$PWD/apps/camctl/src",
+        "UV_PYTHON": "$PWD/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "$PWD/apps/camctl/.venv311"
+      },
+      "argv": [
+        "apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_host_wait_failures.py",
+        "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+        "-q",
+        "--durations=10",
+        "--basetemp=/tmp/itopt-rootwait-final-data",
+        "--junitxml=.local/verification/itopt/final.xml"
+      ]
+    }
+  ],
+  "final": {
+    "log": "final.log",
+    "junit": "final.xml",
+    "exitcode": 1,
+    "passed": 13,
+    "failed": 1,
+    "pytest_s": 103.99,
+    "wall_s": 108.966,
+    "utc_start": "2026-10-24T21:45:10.055697+00:00",
+    "cases": [
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[error]",
+        "outcome": "passed",
+        "junit_total_s": 10.696
+      },
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[abnormal]",
+        "outcome": "passed",
+        "junit_total_s": 0.38
+      },
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[success]",
+        "outcome": "passed",
+        "junit_total_s": 0.08
+      },
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[not_started]",
+        "outcome": "passed",
+        "junit_total_s": 0.229
+      },
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[abnormal_once]",
+        "outcome": "passed",
+        "junit_total_s": 5.247
+      },
+      {
+        "target": "test_wait_observes_current_run_result_while_host_stays_alive[not_started_once]",
+        "outcome": "passed",
+        "junit_total_s": 5.09
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[PENDING]",
+        "outcome": "passed",
+        "junit_total_s": 0.018
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[RUNNING]",
+        "outcome": "passed",
+        "junit_total_s": 0.016
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[SUCCEEDED]",
+        "outcome": "passed",
+        "junit_total_s": 0.013
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[FAILED]",
+        "outcome": "passed",
+        "junit_total_s": 0.012
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[EXPIRED]",
+        "outcome": "passed",
+        "junit_total_s": 0.018
+      },
+      {
+        "target": "test_wait_limits_incompatible_terminal_to_requested_actions[CANCELED]",
+        "outcome": "passed",
+        "junit_total_s": 0.028
+      },
+      {
+        "target": "test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "outcome": "failed",
+        "junit_total_s": 6.891
+      },
+      {
+        "target": "test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+        "outcome": "passed",
+        "junit_total_s": 75.065
+      }
+    ],
+    "note": "最终12个观察器分区和Action6 reached-copy-progress通过；六动作原过期终态仍失败并被提前定位。",
+    "reported_start": "2026-10-25T05:45:10.055697+08:00",
+    "pytest_call_s": {
+      "C六动作": 6.89,
+      "Action6 reached-copy-progress": 73.69
+    }
+  },
+  "review": {
+    "kind": "独立只读审查",
+    "result": "已核验重试语义、按操作前游标隔离日志、50ms诊断限频及调用兼容；未运行pytest。"
+  },
+  "commit": "01c70955e5a653e07aada8b23192bff7348c7f6a"
+}

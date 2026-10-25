@@ -1,0 +1,100 @@
+{
+  "id": "root/test_hasselblad_photo_roundtrip/shard-3",
+  "scope": "root",
+  "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+  "targets": [
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]"
+  ],
+  "estimated_seconds": 342.3280528639989,
+  "historical_failure_observed": false,
+  "parent_id": "root/test_hasselblad_photo_roundtrip",
+  "shard": 3,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-round2-hb-after-4/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+  "collected_nodes": 29,
+  "status": "passed",
+  "number": 1,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/artifacts",
+  "cwd": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/source",
+  "started_utc": "2026-10-25T02:30:56.043457+00:00",
+  "command": [
+    "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-round2-hb-after-4/control:/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-round2-hb-after-4/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-round2-hb-after-4/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-round2-hb-after-4/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp",
+    "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/source",
+      "started_utc": "2026-10-25T02:31:09.310317+00:00",
+      "pid": 703954,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:31:09.411809+00:00",
+      "wall_seconds": 0.10144849099742714
+    },
+    {
+      "label": "hasselblad-client-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate/apps/client",
+      "started_utc": "2026-10-25T02:31:12.694586+00:00",
+      "pid": 704032,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:31:30.591971+00:00",
+      "wall_seconds": 17.754572375997668
+    }
+  ],
+  "preparation": "hasselblad-client-build",
+  "preparation_pid": 704032,
+  "client_candidate": "/tmp/camctl-itopt-round2-hb-after-4/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate",
+  "pid": 704628,
+  "execution_started_utc": "2026-10-25T02:31:30.598467+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 5,
+    "outcomes": {
+      "passed": 5
+    },
+    "subchecks": {},
+    "elapsed_seconds": 326.92787672099803,
+    "utc": "2026-10-25T02:37:00.776986+00:00",
+    "pid": 704628
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T02:37:00.943389+00:00",
+  "wall_seconds": 362.6917414779964
+}

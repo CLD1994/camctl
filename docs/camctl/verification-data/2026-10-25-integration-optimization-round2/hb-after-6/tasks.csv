@@ -1,0 +1,7 @@
+task,worker,status,wall_seconds,cases,passed,failed,pytest_elapsed_seconds
+root/test_hasselblad_photo_roundtrip/shard-2,0,passed,492.2060721809976,4,4,0,443.0344989399964
+root/test_hasselblad_photo_roundtrip/shard-1,1,failed,525.4085418329996,5,4,1,476.3688195289942
+root/test_hasselblad_photo_roundtrip/shard-4,2,passed,520.3783822959958,4,4,0,471.126720237
+root/test_hasselblad_photo_roundtrip/shard-5,3,passed,416.00640966100036,4,4,0,366.1062957019967
+root/test_hasselblad_photo_roundtrip/shard-6,4,passed,308.8441430039966,3,3,0,259.28789572700043
+root/test_hasselblad_photo_roundtrip/shard-3,5,passed,429.10746956500225,9,9,0,379.85681608100276

@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.307147502004227
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 228.93707616499887
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013658750031027012
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 260.2455895420062
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025614419937483035
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 60.70778843000153
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0074520819980534725
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 60.71780195399333
+  }
+]

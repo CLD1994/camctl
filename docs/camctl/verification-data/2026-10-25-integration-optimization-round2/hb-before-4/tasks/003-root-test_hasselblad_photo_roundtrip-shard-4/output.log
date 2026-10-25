@@ -1,0 +1,103 @@
+........F                                                                [100%]
+=================================== FAILURES ===================================
+_______ test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333] ________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f2d6681ba90>
+host_demo = '/tmp/camctl-host-build-2f74a8e788b44649a532eed40f83913e/host-demo'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f2d666eb6d0>
+case = PhotoCase(capture_format='jpeg', source='device', shutter='0.000333', focus_override=None)
+
+    @pytest.mark.parametrize("case", NORMAL_CASES, ids=lambda case: case.name)
+    def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+        world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+        monkeypatch.chdir(tmp_path)
+        world.start()
+        try:
+>           world.host.submit(world.export_photo())
+                              ^^^^^^^^^^^^^^^^^^^^
+
+/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/source/tests/integration/test_hasselblad_photo_roundtrip.py:636: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/source/tests/integration/test_hasselblad_photo_roundtrip.py:403: in export_photo
+    self.browser = _client(self.package, "browser-photo-export", str(self.store), str(input_path), str(plan),
+/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/source/tests/integration/test_hasselblad_photo_roundtrip.py:38: in _client
+    completed = package.run([
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f2d66bc0910>
+command = ['node', '--import', 'tsx', PosixPath('/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_round...4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/client-store', ...]
+cwd = PosixPath('/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/client-candidate/apps/client')
+timeout = 180
+
+    def run(self, command, *, cwd: Path | None = None, timeout: int = 180):
+        argv = [str(part) for part in command]
+        working_directory = cwd or self.root
+        started = datetime.now(timezone.utc).isoformat()
+        completed = subprocess.run(
+            argv,
+            cwd=working_directory,
+            env=self.environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        log_directory = self.root / "commands"
+        log_directory.mkdir(exist_ok=True)
+        log_path = log_directory / f"{len(list(log_directory.glob('*.json'))) + 1:03}.json"
+        log_path.write_text(json.dumps({
+            "argv": argv,
+            "cwd": str(working_directory),
+            "python": sys.version,
+            "node": subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip(),
+            "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip(),
+            "started_utc": started,
+            "finished_utc": datetime.now(timezone.utc).isoformat(),
+            "exit_code": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+>       assert completed.returncode == 0, (
+            f"安装版命令失败，详情见 {log_path}: {argv!r}\n"
+            f"{completed.stdout}\n{completed.stderr}"
+        )
+E       AssertionError: 安装版命令失败，详情见 /tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/commands/003.json: ['node', '--import', 'tsx', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/client-candidate/tests/integration/client_driver.ts', 'browser-photo-export', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/client-store', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/photo-input.json', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/photo-request.json', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/photo-browser.json']
+E         
+E         locator.fill: Error: Malformed value
+E         Call log:
+E         [2m  - waiting for getByLabel('执行时间', { exact: true })[22m
+E         [2m    - locator resolved to <input step="1" aria-label="执行时间" type="datetime-local" value="2026-10-25T01:55:30" data-validation-path="/actions/0/scheduled_at"/>[22m
+E         [2m    - fill("2026-10-25T01:56:00")[22m
+E         [2m  - attempting fill action[22m
+E         [2m    - waiting for element to be visible, enabled and editable[22m
+E         
+E             at browserPhotoExport (/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/client-candidate/tests/integration/client_driver.ts:919:10)
+E             at async main (/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/client-candidate/tests/integration/client_driver.ts:977:7) {
+E           log: [
+E             "  - waiting for getByLabel('执行时间', { exact: true })",
+E             '    - locator resolved to <input step="1" aria-label="执行时间" type="datetime-local" value="2026-10-25T01:55:30" data-validation-path="/actions/0/scheduled_at"/>',
+E             '    - fill("2026-10-25T01:56:00")',
+E             '  - attempting fill action',
+E             '    - waiting for element to be visible, enabled and editable'
+E           ]
+E         }
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['node', '--import', 'tsx', '/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad...n    \'  - attempting fill action\',\n    \'    - waiting for element to be visible, enabled and editable\'\n  ]\n}\n').returncode
+
+/tmp/camctl-itopt-round2-hb-before-4/tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/source/tests/integration/test_hasselblad_photo_parameters.py:149: AssertionError
+============================== slowest durations ===============================
+172.59s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]
+143.88s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]
+123.64s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]
+81.65s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+32.67s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+20.36s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]
+9.04s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[False]
+3.93s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+0.30s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]
+
+(18 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+1 failed, 8 passed in 588.84s (0:09:48)

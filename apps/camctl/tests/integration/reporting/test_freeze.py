@@ -307,6 +307,10 @@ async def test_concurrent_input_and_ack_are_read_at_one_complete_boundary(enviro
         connection = owned.connection
 
         class OrderedConnection:
+            @property
+            def in_transaction(self):
+                return connection.in_transaction
+
             def execute(self, statement, parameters=()):
                 if statement == "BEGIN IMMEDIATE":
                     if is_freeze == freeze_first:
@@ -428,6 +432,10 @@ async def test_unknown_freeze_commit_is_resolved_by_original_operation_key(envir
     key = new_operation_key()
 
     class LostCommitResponse:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:

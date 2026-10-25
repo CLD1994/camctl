@@ -1,0 +1,735 @@
+{
+  "date": "2026-10-25",
+  "status": "已分类交接，生产维护接缝未修改、未补测",
+  "analysis_base": "c4f1ae10f5ccd59608fe7a5c7350aa57da29f1eb",
+  "scope": "仅只读SQLite、已保存日志和源码；没有新增run或执行pytest。以下嵌入事实可独立阅读，run/task/world仅标识原始归档位置。",
+  "units": {
+    "business_times": "UTC微秒；受控业务钟，与CLI真实单调钟分别记录",
+    "cli_times": "真实单调钟纳秒"
+  },
+  "references": {
+    "original_csv": "../2026-10-25-integration-timing/cross-component-cases.csv",
+    "first_cases": "first-run-cases.csv",
+    "final_run": "final-run.json",
+    "existing_same_error": "root-wait.json",
+    "cleanup_contract": "../../../architecture/file-handoff.md#中间文件清理的运行预算",
+    "inspection_contract": "../../database/segments.md#逐段媒体检查责任"
+  },
+  "cases": {
+    "unknown_prefix": {
+      "original_csv": {
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+        "status": "passed",
+        "call_s": "59.37149073900218",
+        "total_s": "59.37331349099986"
+      },
+      "first_full": {
+        "run": "camctl-itopt-full-20261025",
+        "task": "018-root-test_action6_segmented_recovery_roundtrip-shard-4",
+        "world": "test_installed_action6_ordinar1/action6-record",
+        "db_sha256": "58e5321e398b53d2df0647537dd51649907286f209328fcab0278058b727de31",
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+        "outcome": "passed",
+        "call_seconds": 66.24151927299681,
+        "source_snapshot_sha256": "842142394d3bcaa6d907c1b542f30e409eaec058408ec038f2b1a4eb1063494e",
+        "actions": [
+          {
+            "id": 1,
+            "name": "capture",
+            "status": 3,
+            "scheduled_at": 1792881328000000,
+            "first_window_observed_at": 1792881328000000,
+            "expiration_reason": null,
+            "created_event_id": 1,
+            "last_event_id": 174,
+            "accepted_at": 1792881328000000,
+            "last_changed_at": 1792881415607413
+          },
+          {
+            "id": 2,
+            "name": "pre-default-a",
+            "status": 3,
+            "scheduled_at": 1792881328000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 27,
+            "last_event_id": 250,
+            "accepted_at": 1792881328000000,
+            "last_changed_at": 1792881421161125
+          },
+          {
+            "id": 3,
+            "name": "pre-default-b",
+            "status": 3,
+            "scheduled_at": 1792881328000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 41,
+            "last_event_id": 258,
+            "accepted_at": 1792881328000000,
+            "last_changed_at": 1792881421161125
+          }
+        ],
+        "coverage": {
+          "status": "succeeded",
+          "metric": "duration_s",
+          "target": 60,
+          "confirmed": 45.0,
+          "coverage_status": "unconfirmed",
+          "checked_count": 2,
+          "failure_code": null,
+          "reason": "probe_error",
+          "default_scope_count": 2
+        },
+        "start_attempts": [
+          {
+            "run_id": 1,
+            "intent_event_id": 15,
+            "result_event_id": 20,
+            "intent_at": 1792881328000000,
+            "result_at": 1792881328000000
+          }
+        ],
+        "inspection_copies": [
+          {
+            "id": 1,
+            "inspection_id": 1,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 1,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 267
+          },
+          {
+            "id": 2,
+            "inspection_id": 2,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 2,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 271
+          },
+          {
+            "id": 3,
+            "inspection_id": 3,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 3,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 275
+          }
+        ],
+        "release_clock_reads": [
+          {
+            "pid": 313248,
+            "epoch": 2,
+            "utc_us": 1792881424808432,
+            "monotonic_ns": 32787311686496,
+            "real_monotonic_ns": 32730416186238
+          }
+        ],
+        "delivery_copy_count": 5,
+        "host_run_results": [
+          "call=1 command=run pid=312213 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0",
+          "call=5 command=run pid=313248 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0",
+          "call=7 command=run pid=313707 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        ],
+        "source_submit_result": [
+          "call=2 command=submit pid=312214 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        ],
+        "cli_run_receipts": [
+          {
+            "pid": 312213,
+            "started_ns": 32694884655813,
+            "finished_ns": 32728173267378,
+            "exitcode": 0
+          },
+          {
+            "pid": 313248,
+            "started_ns": 32728636650538,
+            "finished_ns": 32731003849918,
+            "exitcode": 0
+          }
+        ],
+        "diagnostics": [],
+        "inspection_file_lifecycle": [
+          {
+            "file_id": 1,
+            "registered_event_id": 110,
+            "registered_at": 1792881412842628,
+            "release_event_id": 265,
+            "released_at": 1792881424808432,
+            "cleanup_completed_event_id": 267
+          },
+          {
+            "file_id": 2,
+            "registered_event_id": 126,
+            "registered_at": 1792881413312547,
+            "release_event_id": 269,
+            "released_at": 1792881424808432,
+            "cleanup_completed_event_id": 271
+          },
+          {
+            "file_id": 3,
+            "registered_event_id": 145,
+            "registered_at": 1792881413767901,
+            "release_event_id": 273,
+            "released_at": 1792881424808432,
+            "cleanup_completed_event_id": 275
+          }
+        ]
+      },
+      "final_full": {
+        "run": "camctl-itopt-final-20261025",
+        "task": "018-root-test_action6_segmented_recovery_roundtrip-shard-4",
+        "world": "test_installed_action6_ordinar1/action6-record",
+        "db_sha256": "925a5a2962da1f548fcb6d2b87dc57c0823b4a115efd82d3ea6ccbbaa097f994",
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+        "outcome": "failed",
+        "call_seconds": 237.86132819199702,
+        "source_snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "actions": [
+          {
+            "id": 1,
+            "name": "capture",
+            "status": 3,
+            "scheduled_at": 1792886326000000,
+            "first_window_observed_at": 1792886326000000,
+            "expiration_reason": null,
+            "created_event_id": 2,
+            "last_event_id": 174,
+            "accepted_at": 1792886326000000,
+            "last_changed_at": 1792886415663008
+          },
+          {
+            "id": 2,
+            "name": "pre-default-a",
+            "status": 3,
+            "scheduled_at": 1792886326000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 27,
+            "last_event_id": 250,
+            "accepted_at": 1792886326000000,
+            "last_changed_at": 1792886421639786
+          },
+          {
+            "id": 3,
+            "name": "pre-default-b",
+            "status": 3,
+            "scheduled_at": 1792886326000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 41,
+            "last_event_id": 258,
+            "accepted_at": 1792886326000000,
+            "last_changed_at": 1792886421639786
+          }
+        ],
+        "coverage": {
+          "status": "succeeded",
+          "metric": "duration_s",
+          "target": 60,
+          "confirmed": 45.0,
+          "coverage_status": "unconfirmed",
+          "checked_count": 2,
+          "failure_code": null,
+          "reason": "probe_error",
+          "default_scope_count": 2
+        },
+        "start_attempts": [
+          {
+            "run_id": 1,
+            "intent_event_id": 15,
+            "result_event_id": 20,
+            "intent_at": 1792886326000000,
+            "result_at": 1792886326000000
+          }
+        ],
+        "inspection_copies": [
+          {
+            "id": 1,
+            "inspection_id": 1,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 1,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 119
+          },
+          {
+            "id": 2,
+            "inspection_id": 2,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 2,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 138
+          },
+          {
+            "id": 3,
+            "inspection_id": 3,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 3,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 154
+          }
+        ],
+        "release_clock_reads": [],
+        "delivery_copy_count": 4,
+        "host_run_results": [
+          "call=1 command=run pid=465064 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        ],
+        "source_submit_result": [
+          "call=2 command=submit pid=465065 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        ],
+        "cli_run_receipts": [
+          {
+            "pid": 465064,
+            "started_ns": 37632862574507,
+            "finished_ns": 37672654746270,
+            "exitcode": 0
+          }
+        ],
+        "diagnostics": [],
+        "inspection_file_lifecycle": [
+          {
+            "file_id": 1,
+            "registered_event_id": 110,
+            "registered_at": 1792886411726234,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          },
+          {
+            "file_id": 2,
+            "registered_event_id": 129,
+            "registered_at": 1792886412254362,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          },
+          {
+            "file_id": 3,
+            "registered_event_id": 145,
+            "registered_at": 1792886412703187,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          }
+        ]
+      },
+      "classification": "来源检查副本在绑定等待者结束后未被本次首次清理发现；不是启动窗口或读取次数耗尽。",
+      "observed_completion": "来源成功、覆盖unconfirmed、两个等待者成功；4份独立交付的字节与摘要及客户端消费已通过，随后180秒清理等待超时；晚期明确产物取回和ACK尚未执行。",
+      "source_evidence": {
+        "discovery": "apps/camctl/src/camctl/bootstrap/work_file_assembly.py:184 的_discover仅按终态动作自身owner_action_id发现；:218的_add_owned_files仅加入owner_finished为真的文件。",
+        "eligibility": "apps/camctl/src/camctl/persistence/repositories/outputs.py:5070 的_load_work_file_facts对检查输入还要求发布H的全部绑定等待者终态。"
+      },
+      "causal_boundary": "最终来源终态事件163早于等待者终态250/258；来源终态发生时首次责任可被owner_finished过滤，后来等待者终态不沿依赖发现原来源副本。首轮source submit的needs_run=1使host额外执行第二个正常run，检查副本在该run才释放；最终needs_run=0仅有run1，文件一直REQUIRED/NOT_NEEDED。内存_discovery_after和_first_files未记录，具体扫描时刻仍需确定同步点反例核验。",
+      "contract": "本次运行中新形成清理责任，文件无用途且符合条件时由所属业务及时首次清理；检查输入在来源和H处绑定等待者收场后释放。",
+      "narrow_fix_recommendation": "在既有work_file_assembly维护发现边界，沿绑定等待者终态的既有依赖/H关系重新发现来源检查文件；保留原历史上界、额度及每文件每run一次处理。不要以额外run或延长180秒代替修复。",
+      "regression_recommendation": "确定门闩使来源终态先被维护器读取，再让最后绑定等待者终态；同一真实run无需新submit便应释放并清理检查输入，实际读取未停止时继续保留。"
+    },
+    "native_required_photo_failure": {
+      "original_csv": {
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+        "status": "passed",
+        "call_s": "48.05951783099954",
+        "total_s": "48.06039719199907"
+      },
+      "first_full": {
+        "run": "camctl-itopt-full-20261025",
+        "task": "019-root-test_action6_segmented_recovery_roundtrip-shard-3",
+        "world": "test_installed_action6_native_0/action6-native",
+        "db_sha256": "20a4ba98c043b72e329c70a2ba42a9ae3cf625e9caeab7507fd22a7404089703",
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+        "outcome": "passed",
+        "call_seconds": 58.68919114599703,
+        "source_snapshot_sha256": "842142394d3bcaa6d907c1b542f30e409eaec058408ec038f2b1a4eb1063494e",
+        "actions": [
+          {
+            "id": 1,
+            "name": "capture",
+            "status": 4,
+            "scheduled_at": 1792881516000000,
+            "first_window_observed_at": 1792881516000000,
+            "expiration_reason": null,
+            "created_event_id": 1,
+            "last_event_id": 163,
+            "accepted_at": 1792881516000000,
+            "last_changed_at": 1792881854219255
+          },
+          {
+            "id": 2,
+            "name": "native-prefix-a",
+            "status": 3,
+            "scheduled_at": 1792881516000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 28,
+            "last_event_id": 262,
+            "accepted_at": 1792881516000000,
+            "last_changed_at": 1792881859412267
+          },
+          {
+            "id": 3,
+            "name": "native-prefix-b",
+            "status": 3,
+            "scheduled_at": 1792881516000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 42,
+            "last_event_id": 273,
+            "accepted_at": 1792881516000000,
+            "last_changed_at": 1792881859412267
+          }
+        ],
+        "coverage": {
+          "status": "failed",
+          "metric": "frames",
+          "target": 151,
+          "confirmed": 165,
+          "coverage_status": "reached",
+          "checked_count": 3,
+          "failure_code": "capture_failed",
+          "reason": "invalid_outputs",
+          "default_scope_count": 3
+        },
+        "start_attempts": [
+          {
+            "run_id": 1,
+            "intent_event_id": 15,
+            "result_event_id": 20,
+            "intent_at": 1792881516000000,
+            "result_at": 1792881516000000
+          }
+        ],
+        "inspection_copies": [
+          {
+            "id": 1,
+            "inspection_id": 1,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 1,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 282
+          },
+          {
+            "id": 2,
+            "inspection_id": 2,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 2,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 286
+          },
+          {
+            "id": 3,
+            "inspection_id": 3,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 3,
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "last_event_id": 290
+          }
+        ],
+        "release_clock_reads": [
+          {
+            "pid": 320227,
+            "epoch": 2,
+            "utc_us": 1792881863322429,
+            "monotonic_ns": 33219788468880,
+            "real_monotonic_ns": 32910464313076
+          }
+        ],
+        "delivery_copy_count": 6,
+        "host_run_results": [
+          "call=1 command=run pid=319097 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0",
+          "call=5 command=run pid=320227 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        ],
+        "source_submit_result": [
+          "call=2 command=submit pid=319098 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        ],
+        "cli_run_receipts": [
+          {
+            "pid": 319097,
+            "started_ns": 32877492476482,
+            "finished_ns": 32907887283921,
+            "exitcode": 0
+          },
+          {
+            "pid": 320227,
+            "started_ns": 32908198983749,
+            "finished_ns": 32911089063994,
+            "exitcode": 0
+          }
+        ],
+        "diagnostics": [],
+        "inspection_file_lifecycle": [
+          {
+            "file_id": 1,
+            "registered_event_id": 103,
+            "registered_at": 1792881851286412,
+            "release_event_id": 280,
+            "released_at": 1792881863322429,
+            "cleanup_completed_event_id": 282
+          },
+          {
+            "file_id": 2,
+            "registered_event_id": 120,
+            "registered_at": 1792881851785600,
+            "release_event_id": 284,
+            "released_at": 1792881863322429,
+            "cleanup_completed_event_id": 286
+          },
+          {
+            "file_id": 3,
+            "registered_event_id": 135,
+            "registered_at": 1792881852324505,
+            "release_event_id": 288,
+            "released_at": 1792881863322429,
+            "cleanup_completed_event_id": 290
+          }
+        ]
+      },
+      "final_full": {
+        "run": "camctl-itopt-final-20261025",
+        "task": "019-root-test_action6_segmented_recovery_roundtrip-shard-3",
+        "world": "test_installed_action6_native_0/action6-native",
+        "db_sha256": "9b092af1d34c4cf97677532fed5bd028f192a9f1eff93d3a9bf1efd036e7c1a1",
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+        "outcome": "failed",
+        "call_seconds": 55.86891780699807,
+        "source_snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "actions": [
+          {
+            "id": 1,
+            "name": "capture",
+            "status": 4,
+            "scheduled_at": 1792886354000000,
+            "first_window_observed_at": 1792886354000000,
+            "expiration_reason": null,
+            "created_event_id": 1,
+            "last_event_id": 171,
+            "accepted_at": 1792886354000000,
+            "last_changed_at": 1792886698568990
+          },
+          {
+            "id": 2,
+            "name": "native-prefix-a",
+            "status": 3,
+            "scheduled_at": 1792886354000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 28,
+            "last_event_id": 271,
+            "accepted_at": 1792886354000000,
+            "last_changed_at": 1792886706119713
+          },
+          {
+            "id": 3,
+            "name": "native-prefix-b",
+            "status": 3,
+            "scheduled_at": 1792886354000000,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "created_event_id": 42,
+            "last_event_id": 282,
+            "accepted_at": 1792886354000000,
+            "last_changed_at": 1792886706119713
+          }
+        ],
+        "coverage": {
+          "status": "failed",
+          "metric": "frames",
+          "target": 151,
+          "confirmed": 165,
+          "coverage_status": "reached",
+          "checked_count": 3,
+          "failure_code": "capture_failed",
+          "reason": "invalid_outputs",
+          "default_scope_count": 3
+        },
+        "start_attempts": [
+          {
+            "run_id": 1,
+            "intent_event_id": 15,
+            "result_event_id": 20,
+            "intent_at": 1792886354000000,
+            "result_at": 1792886354000000
+          }
+        ],
+        "inspection_copies": [
+          {
+            "id": 1,
+            "inspection_id": 1,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 1,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 111
+          },
+          {
+            "id": 2,
+            "inspection_id": 2,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 2,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 129
+          },
+          {
+            "id": 3,
+            "inspection_id": 3,
+            "processing_id": null,
+            "delivery_id": null,
+            "target_file_id": 3,
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "last_event_id": 146
+          }
+        ],
+        "release_clock_reads": [],
+        "delivery_copy_count": 6,
+        "host_run_results": [
+          "call=1 command=run pid=466076 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0",
+          "call=5 command=run pid=467025 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        ],
+        "source_submit_result": [
+          "call=2 command=submit pid=466077 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        ],
+        "cli_run_receipts": [
+          {
+            "pid": 466076,
+            "started_ns": 37658370051452,
+            "finished_ns": 37679498128279,
+            "exitcode": 1
+          },
+          {
+            "pid": 467025,
+            "started_ns": 37679858009518,
+            "finished_ns": 37694881111288,
+            "exitcode": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "name": "camctl-host-diagnostic-466071-1-gH1iGw.log",
+            "sha256": "e0b6548a4629a18e09d3e5f5c60642e50223b556c5650c501c32c8387ac0667a",
+            "fields": {
+              "call_id": "1",
+              "command": "run",
+              "classification": "error",
+              "termination": "normal",
+              "exit_code": "1",
+              "child_pid": "466076"
+            },
+            "stdout": "{\"kind\" : \"error\", \"body\" : {\"reason\" : \"state_db_error\", \"details\" : {\"error\" : \"原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属\"}}}"
+          }
+        ],
+        "inspection_file_lifecycle": [
+          {
+            "file_id": 1,
+            "registered_event_id": 103,
+            "registered_at": 1792886690148010,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          },
+          {
+            "file_id": 2,
+            "registered_event_id": 121,
+            "registered_at": 1792886690746260,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          },
+          {
+            "file_id": 3,
+            "registered_event_id": 136,
+            "registered_at": 1792886691551955,
+            "release_event_id": null,
+            "released_at": null,
+            "cleanup_completed_event_id": null
+          }
+        ]
+      },
+      "classification": "合法inspection读取结束进入仅支持recording_processing的恢复查询，run1产生真实state_db_error；不是window_missed/window_exhausted或尝试耗尽。",
+      "observed_completion": "run1失败后排队的run5继续推进；来源因缺必需照片按预期FAILED，视频覆盖reached、confirmed165/target151，两个等待者成功，真实ffprobe及6份独立交付/客户端/摘要断言通过。最后清理等待立即捕获run1错误；ACK尚未执行。",
+      "source_evidence": {
+        "producer": "apps/camctl/src/camctl/capture/segment_inspections.py:390-409 通过hold_read_end把合法inspection读取的原End放入capture_read_ends。",
+        "consumer": "apps/camctl/src/camctl/capture/media_flow.py:702-735 的resume_binding_internal_read_ends遍历该集合，却INNER JOIN recording_processing ON c.processing_id；三个合法inspection copy均processing_id=NULL。",
+        "entry": "apps/camctl/src/camctl/bootstrap/lifecycle.py:181 的_resume_normal_read_requests调用此消费者。"
+      },
+      "contract": "检查输入沿file_copies.inspection_id关联其唯一读取责任，保存完整字节、摘要及原尝试后才探测；不应把合法inspection责任当作归属缺失。",
+      "narrow_fix_recommendation": "在resume_binding_internal_read_ends责任分类边界明确识别inspection与单文件processing，沿原ticket/action/source观察者核验并交回适用的结束/绑定续接；保留原错误传播与失败观察器。",
+      "regression_recommendation": "在真实inspection ReadEnd已持有、摘要/结果尚未完成时推进普通恢复入口，合法归属不报缺失；错误ticket/动作/源观察者继续拒绝，原结束保存后不重复设备READ。",
+      "uncertainty": "原诊断未记录触发copy_id；能确认合法inspection End生产者和不兼容查询，但不能指认三个copy中的具体一项。"
+    }
+  },
+  "unchanged_source": [
+    {
+      "path": "apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+      "baseline": "cd228b16",
+      "analysis_base": "c4f1ae10",
+      "identical": true,
+      "sha256": {
+        "cd228b16": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+        "c4f1ae10": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34"
+      }
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "baseline": "cd228b16",
+      "analysis_base": "c4f1ae10",
+      "identical": true,
+      "sha256": {
+        "cd228b16": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+        "c4f1ae10": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441"
+      }
+    },
+    {
+      "path": "apps/camctl/src/camctl/outputs/work_files.py",
+      "baseline": "cd228b16",
+      "analysis_base": "c4f1ae10",
+      "identical": true,
+      "sha256": {
+        "cd228b16": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+        "c4f1ae10": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1"
+      }
+    },
+    {
+      "path": "apps/camctl/src/camctl/persistence/repositories/outputs.py",
+      "baseline": "cd228b16",
+      "analysis_base": "c4f1ae10",
+      "identical": true,
+      "sha256": {
+        "cd228b16": "1ca5d5b13b14876884abcdc31754c3210c5b56cbaa271ee701400754eaa56884",
+        "c4f1ae10": "1ca5d5b13b14876884abcdc31754c3210c5b56cbaa271ee701400754eaa56884"
+      }
+    }
+  ],
+  "existing_failure_evidence": {
+    "source": "root-wait.json",
+    "baseline": "cd228b16",
+    "before_target": "Action6 reached-copy-progress",
+    "before_result": "检查副本等待180秒超时，call253.64秒；既有state_db_error在基线可见。",
+    "limit": "不是这两个身份各自的失败复现，原CSV及首轮这两个身份均通过；只证明同类维护错误此前已观察，不能把偶发通过当已修复。",
+    "baseline_module_log_sha256": "a96b6719e1eced3b58ecaae1b88ced707a2a3c1e3ea7726174ab82450ebb0935",
+    "baseline_error_lines": [
+      "call=1 command=run pid=216720 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0",
+      "call=1 stdout={\"kind\" : \"error\", \"body\" : {\"reason\" : \"state_db_error\", \"details\" : {\"error\" : \"原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属\"}}}"
+    ]
+  }
+}

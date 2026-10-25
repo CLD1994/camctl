@@ -388,6 +388,10 @@ def test_unknown_commit_preserves_atomic_sync_result(sync_environment, tmp_path,
     key = new_operation_key()
 
     class LostCommitResponse:
+        @property
+        def in_transaction(self):
+            return connection.in_transaction
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:

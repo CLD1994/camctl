@@ -1,0 +1,430 @@
+{
+  "base": "2acc661103638de99620ca558e66679e136810f1",
+  "workspace": "/tmp/camctl-itopt-client-ready",
+  "branch": "work/itopt-client-ready",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "node": "v24.22.1",
+  "runs": [
+    {
+      "name": "red",
+      "exit_code": 1,
+      "pytest_s": 13.68,
+      "case_call_s": 1.04,
+      "log": "red.log",
+      "purpose": "现有capabilities方法不返回初始化回执，空存储见证失败。"
+    },
+    {
+      "name": "after-one",
+      "target": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+      "exit_code": 0,
+      "pytest_s": 20.55,
+      "case_call_s": 10.89,
+      "log": "after-one.log",
+      "junit": "after-one.xml"
+    },
+    {
+      "name": "after-two",
+      "target": "tests/integration/test_camctl_c_module_roundtrip.py::test_late_cancel_roundtrip_via_c_module",
+      "exit_code": 0,
+      "pytest_s": 26.64,
+      "case_call_s": 16.93,
+      "log": "after-two.log",
+      "junit": "after-two.xml"
+    },
+    {
+      "name": "followup",
+      "exit_code": 1,
+      "pytest_s": 49.79,
+      "passed": 3,
+      "failed": 1,
+      "log": "followup.log",
+      "junit": "followup.xml",
+      "targets": [
+        "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+        "tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution",
+        "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+        "tests/integration/test_camctl_output_roundtrip.py::test_plan_cancel_before_start_settles_auto_preview"
+      ]
+    }
+  ],
+  "timeline": [
+    {
+      "case": "auto_preview",
+      "root": "/tmp/client-ready-after-one-data/test_auto_preview_roundtrip_vi0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "scheduled_at": 1792883041000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792883045633328,
+          "created_event_id": 1
+        },
+        {
+          "id": 2,
+          "name": "auto-preview",
+          "scheduled_at": 1792883041000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "created_event_id": 2
+        }
+      ],
+      "max_delay_ms": 5000,
+      "window_end_us": 1792883046000000,
+      "accepted_event_us": 1792883042963515,
+      "first_window_observed_us": 1792883045633328,
+      "start_intent_us": 1792883045654414,
+      "start_margin_s": 0.345586,
+      "file_timeline": {
+        "client-initialize.json": {
+          "mtime_ns": 1792883040553681911,
+          "mtime_utc": "2026-10-24T23:04:00.553682+00:00"
+        },
+        "plan-body.json": {
+          "mtime_ns": 1792883040593837581,
+          "mtime_utc": "2026-10-24T23:04:00.593837+00:00"
+        },
+        "client-plan-1.json": {
+          "mtime_ns": 1792883041766019555,
+          "mtime_utc": "2026-10-24T23:04:01.766020+00:00"
+        }
+      },
+      "body_to_export_interval_s": 1.172181974,
+      "initialization": {
+        "startup": {
+          "state": "ready",
+          "directory": "/tmp/client-ready-after-one-data/test_auto_preview_roundtrip_vi0/client-store"
+        },
+        "drafts": [],
+        "requests": [],
+        "imports": [],
+        "reports": [],
+        "coverage": 0
+      }
+    },
+    {
+      "case": "late_cancel",
+      "root": "/tmp/client-ready-after-two-data/test_late_cancel_roundtrip_via0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "拍录",
+          "scheduled_at": 1792883121000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792883125546351,
+          "created_event_id": 1
+        },
+        {
+          "id": 2,
+          "name": "取回",
+          "scheduled_at": 1792883122000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "created_event_id": 2
+        },
+        {
+          "id": 3,
+          "name": "取消",
+          "scheduled_at": 1792883130000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "created_event_id": 77
+        }
+      ],
+      "max_delay_ms": 5000,
+      "window_end_us": 1792883126000000,
+      "accepted_event_us": 1792883123086736,
+      "first_window_observed_us": 1792883125546351,
+      "start_intent_us": 1792883125557852,
+      "start_margin_s": 0.442148,
+      "file_timeline": {
+        "client-initialize.json": {
+          "mtime_ns": 1792883120730986583,
+          "mtime_utc": "2026-10-24T23:05:20.730987+00:00"
+        },
+        "plan-body.json": {
+          "mtime_ns": 1792883129486593948,
+          "mtime_utc": "2026-10-24T23:05:29.486594+00:00"
+        },
+        "client-plan-1.json": {
+          "mtime_ns": 1792883121916831112,
+          "mtime_utc": "2026-10-24T23:05:21.916831+00:00"
+        }
+      },
+      "body_to_export_interval_s": null,
+      "initialization": {
+        "startup": {
+          "state": "ready",
+          "directory": "/tmp/client-ready-after-two-data/test_late_cancel_roundtrip_via0/client-store"
+        },
+        "drafts": [],
+        "requests": [],
+        "imports": [],
+        "reports": [],
+        "coverage": 0
+      },
+      "body_timeline_note": "后续取消导出复用了plan-body.json，当前mtime已覆盖首个正文写入时刻；不据此计算首次导出区间。初始化回执早于首份计划，START窗口边界来自SQLite。"
+    },
+    {
+      "case": "test_record_estimate_stays_out0",
+      "root": "/tmp/client-ready-followup-data/test_record_estimate_stays_out0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "估算交接",
+          "scheduled_at": 1792883462000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792883466046486,
+          "expiration_reason": null,
+          "created_event_id": 1,
+          "last_event_id": 37
+        }
+      ],
+      "window_end_us": 1792883467000000,
+      "accepted_event_us": 1792883462144116,
+      "start_intent_us": 1792883466058608,
+      "start_margin_s": 0.941392,
+      "expired_after_window_s": null,
+      "note": "窗口约束只限制首次启动；启动后的完成可晚于窗口。occurred_at为保存的业务时钟读数，非独立COMMIT完成墙钟。",
+      "estimate_action": {
+        "name": "估算交接",
+        "type": "camera_record",
+        "device_id": "cam-1",
+        "scheduled_at": "2026-10-24 23:11:01",
+        "policy": {
+          "max_delay_ms": 5000
+        },
+        "params": {
+          "type": "video"
+        }
+      },
+      "execution_action": {
+        "name": "估算交接",
+        "type": "camera_record",
+        "device_id": "cam-1",
+        "scheduled_at": "2026-10-24 23:11:02",
+        "policy": {
+          "max_delay_ms": 5000
+        },
+        "params": {
+          "type": "video"
+        }
+      },
+      "params_equal": true,
+      "policy_equal": true
+    },
+    {
+      "case": "test_timelapse_estimate_uses_s0",
+      "root": "/tmp/client-ready-followup-data/test_timelapse_estimate_uses_s0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "估算交接",
+          "scheduled_at": 1792883475000000,
+          "max_delay_ms": 5000,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": 1792883478439562,
+          "expiration_reason": null,
+          "created_event_id": 1,
+          "last_event_id": 33
+        }
+      ],
+      "window_end_us": 1792883480000000,
+      "accepted_event_us": 1792883474766340,
+      "start_intent_us": 1792883478458293,
+      "start_margin_s": 1.541707,
+      "expired_after_window_s": null,
+      "note": "窗口约束只限制首次启动；启动后的完成可晚于窗口。occurred_at为保存的业务时钟读数，非独立COMMIT完成墙钟。",
+      "estimate_action": {
+        "name": "估算交接",
+        "type": "camera_timelapse",
+        "device_id": "cam-1",
+        "scheduled_at": "2026-10-24 23:11:13",
+        "policy": {
+          "max_delay_ms": 5000
+        },
+        "params": {
+          "type": "timelapse",
+          "capture_duration_s": 3,
+          "interval_s": 1
+        }
+      },
+      "execution_action": {
+        "name": "估算交接",
+        "type": "camera_timelapse",
+        "device_id": "cam-1",
+        "scheduled_at": "2026-10-24 23:11:15",
+        "policy": {
+          "max_delay_ms": 5000
+        },
+        "params": {
+          "type": "timelapse",
+          "capture_duration_s": 3,
+          "interval_s": 1
+        }
+      },
+      "params_equal": true,
+      "policy_equal": true
+    },
+    {
+      "case": "test_cleanup_unknown_preserves0",
+      "root": "/tmp/client-ready-followup-data/test_cleanup_unknown_preserves0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "scheduled_at": 1792883486000000,
+          "max_delay_ms": 5000,
+          "status": 5,
+          "execution_started": 0,
+          "first_window_observed_at": null,
+          "expiration_reason": 1,
+          "created_event_id": 1,
+          "last_event_id": 10
+        },
+        {
+          "id": 2,
+          "name": "purge",
+          "scheduled_at": 1792883487000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "created_event_id": 2,
+          "last_event_id": 14
+        }
+      ],
+      "window_end_us": 1792883491000000,
+      "accepted_event_us": 1792883488094189,
+      "start_intent_us": null,
+      "start_margin_s": null,
+      "expired_after_window_s": 1.336012,
+      "note": "窗口约束只限制首次启动；启动后的完成可晚于窗口。occurred_at为保存的业务时钟读数，非独立COMMIT完成墙钟。"
+    },
+    {
+      "case": "test_plan_cancel_before_start_0",
+      "root": "/tmp/client-ready-followup-data/test_plan_cancel_before_start_0",
+      "actions": [
+        {
+          "id": 1,
+          "name": "shoot",
+          "scheduled_at": 1792883526000000,
+          "max_delay_ms": 5000,
+          "status": 6,
+          "execution_started": 0,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "created_event_id": 1,
+          "last_event_id": 15
+        },
+        {
+          "id": 2,
+          "name": "auto-preview",
+          "scheduled_at": 1792883526000000,
+          "max_delay_ms": null,
+          "status": 6,
+          "execution_started": 0,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "created_event_id": 2,
+          "last_event_id": 17
+        },
+        {
+          "id": 3,
+          "name": "cancel",
+          "scheduled_at": 1792883497000000,
+          "max_delay_ms": null,
+          "status": 3,
+          "execution_started": 1,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "created_event_id": 5,
+          "last_event_id": 20
+        }
+      ],
+      "window_end_us": 1792883531000000,
+      "accepted_event_us": 1792883498727966,
+      "start_intent_us": null,
+      "start_margin_s": null,
+      "expired_after_window_s": null,
+      "note": "窗口约束只限制首次启动；启动后的完成可晚于窗口。occurred_at为保存的业务时钟读数，非独立COMMIT完成墙钟。"
+    }
+  ],
+  "test_node_delta": 0,
+  "notes": [
+    "保留构造器、原导出正文、max_delay_ms=5000和全部原成功/取消/交付断言。",
+    "空存储见证复用实际Application.state字段并核uploads没有文件，未新增完整Schema或测试清单。",
+    "原失败基线来自50776385首轮；本次基线2acc6611且同期负载不同，不把耗时差归于单项准备或宣称稳定通过。",
+    "两个窄验证均设置PYTHONDONTWRITEBYTECODE=1，TMPDIR和pytest临时根分别独立；未借PY cache收益作为业务越窗根因。"
+  ],
+  "remaining": [
+    "cleanup_unknown在准备前移后仍错过原窗口1.336012秒，无START；保留失败和全部原断言，不扩大产品预算。",
+    "C两代表分别只剩0.346/0.442秒启动余量，不能从串行窄测宣称最终并行稳定。"
+  ],
+  "estimate_contract": {
+    "spec": "docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#估算资格与状态分类",
+    "facts": "估算由当前能力与参数决定，执行时间未填仍可估算；estimateVideoAction只读type/device_id/params和能力。",
+    "change": "保留原estimate-action与HTTP动作相等；完成估算及init后在测试体显式选择新future_schedule(3)，实际生效和报告参数直接比较原估算参数。"
+  },
+  "node_delta": 0,
+  "review": "独立只读审查已核准备边界、能力加载/原始字节、调用兼容、原预算与估算时间独立性；未运行pytest。",
+  "commands": [
+    {
+      "name": "after-one",
+      "env": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/tmp/client-ready-after-one-tmp",
+        "PYTHONPATH": "$PWD/apps/camctl/src"
+      },
+      "argv": [
+        "apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+        "-q",
+        "--durations=5",
+        "--basetemp=/tmp/client-ready-after-one-data",
+        "--junitxml=.local/verification/client-ready/after-one.xml"
+      ]
+    },
+    {
+      "name": "after-two",
+      "env": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/tmp/client-ready-after-two-tmp",
+        "PYTHONPATH": "$PWD/apps/camctl/src"
+      },
+      "argv": [
+        "apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_c_module_roundtrip.py::test_late_cancel_roundtrip_via_c_module",
+        "-q",
+        "--durations=5",
+        "--basetemp=/tmp/client-ready-after-two-data",
+        "--junitxml=.local/verification/client-ready/after-two.xml"
+      ]
+    }
+  ],
+  "commit": "4ddf863b74c4f71e8b2ed5723c8c6ca142d00305",
+  "archive": {
+    "source_receipt": "/tmp/camctl-itopt-client-ready/.local/verification/client-ready/summary.json",
+    "source_sha256": "0e87c8f65941e922bb4db7cb2d92a113fb4be1a20f263d36c93325a9f27634fd",
+    "source_bytes": 14510,
+    "note": "临时路径只作原始执行定位；必要结论、命令和事实已随本回执纳入版本控制。"
+  }
+}

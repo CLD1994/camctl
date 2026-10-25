@@ -1,0 +1,548 @@
+{
+  "scope": "S3后续修正的真实窄验证与只收集计划；未执行完整集成验收。",
+  "contract_tests": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-v"
+    ],
+    "cwd": "/tmp/camctl-itopt-runner",
+    "exit_code": 0,
+    "log": "test_function_selector_already_contains_parameter_instances (test_run_integration.IntegrationRunnerTest.test_function_selector_already_contains_parameter_instances) ... ok\ntest_hasselblad_uses_built_external_candidate_from_current_source (test_run_integration.IntegrationRunnerTest.test_hasselblad_uses_built_external_candidate_from_current_source) ... ok\ntest_isolated_concurrency_progress_exact_assignment_and_failure (test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure) ... ok\ntest_nested_unittest_checks_do_not_inflate_primary_results (test_run_integration.IntegrationRunnerTest.test_nested_unittest_checks_do_not_inflate_primary_results) ... ok\ntest_parent_path_cannot_escape_source (test_run_integration.IntegrationRunnerTest.test_parent_path_cannot_escape_source) ... ok\ntest_prepare_interrupt_reaps_owned_process_and_saves_actual_state (test_run_integration.IntegrationRunnerTest.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state) ... ok\ntest_root_shards_use_current_collection_including_unmeasured_nodes (test_run_integration.IntegrationRunnerTest.test_root_shards_use_current_collection_including_unmeasured_nodes) ... ok\ntest_snapshot_reports_unsupported_symbolic_link (test_run_integration.IntegrationRunnerTest.test_snapshot_reports_unsupported_symbolic_link) ... ok\ntest_unknown_target_is_rejected_before_execution (test_run_integration.IntegrationRunnerTest.test_unknown_target_is_rejected_before_execution) ... ok\n\n----------------------------------------------------------------------\nRan 9 tests in 5.426s\n\nOK\n"
+  },
+  "client_preparation": {
+    "directory": "/tmp/camctl-itopt-runner-npm-client",
+    "command": [
+      "npm",
+      "ci",
+      "--offline",
+      "--no-audit",
+      "--no-fund"
+    ],
+    "lock_source": "apps/client/package-lock.json",
+    "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+    "playwright": "1.63.0",
+    "chromium_cache": "/home/cld/.cache/ms-playwright/chromium_headless_shell-1243",
+    "exit_code": 0,
+    "log": "/tmp/camctl-itopt-runner-npm-client-install.log",
+    "observation": "先前传入依赖为Playwright1.64.1，需要未准备的Chromium1248；该次在启动浏览器时失败，属于准备失败，未作为业务回归。"
+  },
+  "runs": [
+    {
+      "name": "sql_final_plugin",
+      "task": {
+        "id": "root/test_database_history_sql",
+        "scope": "root",
+        "path": "tests/integration/test_database_history_sql.py",
+        "targets": [
+          "tests/integration/test_database_history_sql.py"
+        ],
+        "estimated_seconds": 0.4258842019844451,
+        "status": "passed",
+        "number": 2,
+        "worker": 1,
+        "artifacts": "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/artifacts",
+        "cwd": "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/source",
+        "started_utc": "2026-10-24T21:52:26.314121+00:00",
+        "command": [
+          "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/source/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "tests/integration/test_database_history_sql.py",
+          "-q",
+          "--durations=0",
+          "-p",
+          "integration_progress",
+          "--basetemp",
+          "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/tmp/pytest"
+        ],
+        "environment": {
+          "PYTHONPATH": "/tmp/camctl-itopt-runner-hb-sql-final/control:/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/source/apps/camctl/src",
+          "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-runner-hb-sql-final/workers/1/project-env",
+          "UV_CACHE_DIR": "/tmp/camctl-itopt-runner-hb-sql-final/workers/1/uv-cache",
+          "UV_OFFLINE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/tmp"
+        },
+        "preparations": [
+          {
+            "label": "package-resources",
+            "command": [
+              "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+              "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/source/apps/camctl/scripts/sync_resources.py"
+            ],
+            "cwd": "/tmp/camctl-itopt-runner-hb-sql-final/tasks/002-root-test_database_history_sql/source",
+            "started_utc": "2026-10-24T21:52:32.258044+00:00",
+            "pid": 236098,
+            "exit_code": 0,
+            "finished_utc": "2026-10-24T21:52:32.312546+00:00",
+            "wall_seconds": 0.054482817999087274
+          }
+        ],
+        "preparation": "package-resources",
+        "preparation_pid": 236098,
+        "pid": 236100,
+        "execution_started_utc": "2026-10-24T21:52:32.314666+00:00",
+        "progress": {
+          "status": "finished",
+          "exit_code": 0,
+          "collected": 27,
+          "outcomes": {
+            "passed": 27
+          },
+          "subchecks": {
+            "passed": 342
+          },
+          "elapsed_seconds": 0.795858767000027,
+          "utc": "2026-10-24T21:52:33.371590+00:00",
+          "pid": 236100
+        },
+        "exit_code": 0,
+        "finished_utc": "2026-10-24T21:52:33.599642+00:00",
+        "wall_seconds": 7.285538702002668
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "source": {
+        "root": "/tmp/camctl-itopt-runner",
+        "head": "51a8f33567a0298145d5b50cbc93cea05a355b96",
+        "status": "M scripts/integration_progress.py\n M scripts/run-integration.py\n M scripts/tests/test_run_integration.py",
+        "snapshot_sha256": "2872dffdece606a14d03e58c111928d98dd66ffdabc86fb2dd1f546c2b495e41"
+      },
+      "inventory": [
+        "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_missing_or_malformed_version_is_rejected",
+        "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_version_boundaries_use_numeric_comparison_and_exact_backports",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_canceled_cleanup_only_records_actual_delete_error",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_complete_state_matrix",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_final_result_requires_existing_event",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_success_accepts_registered_basis_values",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_unknown_target_keeps_request_without_file_reference",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_and_selection_identity",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_requires_real_source_at_commit",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_directory_binding_requires_three_distinct_absolute_paths",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_expiration_keeps_start_attempts_and_limits_residual_stop",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_candidate_indexes_keep_old_and_cleaned_records",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_and_affected_output_have_separate_directories",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_metadata_requires_valid_order_and_events",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_frozen_report_range_excludes_later_commits_and_keeps_large_ids",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_history_report_and_snapshot_type_scopes",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_missing_transaction_end_rejects_commit_and_rolls_back_group",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_multiple_final_results_may_share_event",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_obtain_source_dependency_requires_permanent_delivery",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_cleanup_holder_per_output",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_read_flow_per_copy_and_one_flow_per_cleanup_kind",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_output_cleanup_availability_and_error_matrix",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_probe_and_cursor_use_covering_indexes_with_or_without_statistics",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_target_rejects_event_sequence_mismatch_at_commit",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_targets_share_event_but_not_duplicate_object",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_snapshot_candidates_use_type_identifier_then_exact_integer_id",
+        "tests/integration/test_database_history_sql.py::DatabaseStructure::test_sync_can_reference_transaction_end_inserted_later"
+      ],
+      "plugin_sha256": "2bb825aa22fa94d834f3d765a0056e81d277a0ea8e797ae465f92e121420c2f1",
+      "console_log": "/tmp/camctl-itopt-runner-hb-sql-final.log"
+    },
+    {
+      "name": "hasselblad_normal",
+      "task": {
+        "id": "root/test_hasselblad_photo_roundtrip",
+        "scope": "root",
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "targets": [
+          "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]"
+        ],
+        "estimated_seconds": 77.2626589749998,
+        "status": "passed",
+        "number": 1,
+        "worker": 0,
+        "artifacts": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts",
+        "cwd": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/source",
+        "started_utc": "2026-10-24T21:55:38.296630+00:00",
+        "command": [
+          "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+          "-q",
+          "--durations=0",
+          "-p",
+          "integration_progress",
+          "--basetemp",
+          "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+        ],
+        "environment": {
+          "PYTHONPATH": "/tmp/camctl-itopt-runner-hb-normal-final/control:/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/src",
+          "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-runner-hb-normal-final/workers/0/project-env",
+          "UV_CACHE_DIR": "/tmp/camctl-itopt-runner-hb-normal-final/workers/0/uv-cache",
+          "UV_OFFLINE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/tmp"
+        },
+        "preparations": [
+          {
+            "label": "package-resources",
+            "command": [
+              "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+              "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+            ],
+            "cwd": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/source",
+            "started_utc": "2026-10-24T21:55:40.577178+00:00",
+            "pid": 238993,
+            "exit_code": 0,
+            "finished_utc": "2026-10-24T21:55:40.629669+00:00",
+            "wall_seconds": 0.05247122999935527
+          },
+          {
+            "label": "hasselblad-client-build",
+            "command": [
+              "npm",
+              "run",
+              "build"
+            ],
+            "cwd": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/apps/client",
+            "started_utc": "2026-10-24T21:55:41.261268+00:00",
+            "pid": 239000,
+            "exit_code": 0,
+            "finished_utc": "2026-10-24T21:55:49.234441+00:00",
+            "wall_seconds": 6.808640433999244
+          }
+        ],
+        "preparation": "hasselblad-client-build",
+        "preparation_pid": 239000,
+        "client_candidate": "/tmp/camctl-itopt-runner-hb-normal-final/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate",
+        "pid": 239127,
+        "execution_started_utc": "2026-10-24T21:55:49.236375+00:00",
+        "progress": {
+          "status": "finished",
+          "exit_code": 0,
+          "collected": 1,
+          "outcomes": {
+            "passed": 1
+          },
+          "subchecks": {},
+          "elapsed_seconds": 98.96033834600166,
+          "utc": "2026-10-24T21:57:32.035107+00:00",
+          "pid": 239127
+        },
+        "exit_code": 0,
+        "finished_utc": "2026-10-24T21:57:32.091427+00:00",
+        "wall_seconds": 108.96648465100225
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "source": {
+        "root": "/tmp/camctl-itopt-runner",
+        "head": "51a8f33567a0298145d5b50cbc93cea05a355b96",
+        "status": "M scripts/integration_progress.py\n M scripts/run-integration.py\n M scripts/tests/test_run_integration.py",
+        "snapshot_sha256": "33247b5b37bcc372e35a7f16606393cecbe23c908b637568b54b5f7f20eb44b3"
+      },
+      "inventory": [
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]"
+      ],
+      "plugin_sha256": "2bb825aa22fa94d834f3d765a0056e81d277a0ea8e797ae465f92e121420c2f1",
+      "console_log": "/tmp/camctl-itopt-runner-hb-normal-final.log"
+    }
+  ],
+  "default_plan": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "scripts/run-integration.py",
+      "--python",
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "--node-modules",
+      "/tmp/camctl-itopt-runner-npm-client/node_modules",
+      "--jobs",
+      "4",
+      "--plan-only",
+      "--output",
+      "/tmp/camctl-itopt-runner-full-plan"
+    ],
+    "tasks": 59,
+    "by_scope": {
+      "camctl": 16,
+      "root": 39,
+      "node": 4
+    },
+    "source": {
+      "root": "/tmp/camctl-itopt-runner",
+      "head": "51a8f33567a0298145d5b50cbc93cea05a355b96",
+      "status": "M scripts/integration_progress.py\n M scripts/run-integration.py\n M scripts/tests/test_run_integration.py",
+      "snapshot_sha256": "86e24e2fe7cb5ff25aa2e359fafb987832515bee37f2e4e43ac8d143ee3e2299"
+    },
+    "wall_seconds": 3.73802295600035,
+    "raw_plan": "/tmp/camctl-itopt-runner-full-plan/plan.json",
+    "partitions": [
+      {
+        "module": "root/test_action6_segmented_recovery_roundtrip",
+        "current_collected_count": 8,
+        "assigned_once": true,
+        "normal_hasselblad_count": 0,
+        "collection_command": {
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+            "--collect-only",
+            "-q",
+            "-p",
+            "integration_progress"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-full-plan/collection/root-test_action6_segmented_recovery_roundtrip/source",
+          "started_utc": "2026-10-24T21:56:20.251850+00:00",
+          "source": "86e24e2fe7cb5ff25aa2e359fafb987832515bee37f2e4e43ac8d143ee3e2299",
+          "versions": {
+            "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+            "version": [
+              3,
+              11
+            ],
+            "sqlite": "3.53.1",
+            "pytest": "9.1.1",
+            "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+            "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+            "node": "v24.22.1",
+            "git": "git version 2.43.0"
+          },
+          "pid": 240017,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T21:56:21.219087+00:00",
+          "wall_seconds": 0.9672345779981697
+        },
+        "shards": [
+          {
+            "id": "root/test_action6_segmented_recovery_roundtrip/shard-1",
+            "targets": [
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]"
+            ],
+            "historical_estimated_seconds": 244.28222490799817
+          },
+          {
+            "id": "root/test_action6_segmented_recovery_roundtrip/shard-4",
+            "targets": [
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-inspection-saved]",
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]"
+            ],
+            "historical_estimated_seconds": 125.86221785000453
+          },
+          {
+            "id": "root/test_action6_segmented_recovery_roundtrip/shard-3",
+            "targets": [
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-local-read]",
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions"
+            ],
+            "historical_estimated_seconds": 121.32230833399444
+          },
+          {
+            "id": "root/test_action6_segmented_recovery_roundtrip/shard-2",
+            "targets": [
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt]",
+              "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[complete-short-sequence]"
+            ],
+            "historical_estimated_seconds": 119.32139747599649
+          }
+        ]
+      },
+      {
+        "module": "root/test_hasselblad_photo_roundtrip",
+        "current_collected_count": 29,
+        "assigned_once": true,
+        "normal_hasselblad_count": 12,
+        "collection_command": {
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "tests/integration/test_hasselblad_photo_roundtrip.py",
+            "--collect-only",
+            "-q",
+            "-p",
+            "integration_progress"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-full-plan/collection/root-test_hasselblad_photo_roundtrip/source",
+          "started_utc": "2026-10-24T21:56:18.510690+00:00",
+          "source": "86e24e2fe7cb5ff25aa2e359fafb987832515bee37f2e4e43ac8d143ee3e2299",
+          "versions": {
+            "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+            "version": [
+              3,
+              11
+            ],
+            "sqlite": "3.53.1",
+            "pytest": "9.1.1",
+            "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+            "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+            "node": "v24.22.1",
+            "git": "git version 2.43.0"
+          },
+          "pid": 239973,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T21:56:19.140521+00:00",
+          "wall_seconds": 0.6298274469991156
+        },
+        "shards": [
+          {
+            "id": "root/test_hasselblad_photo_roundtrip/shard-3",
+            "targets": [
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]"
+            ],
+            "historical_estimated_seconds": 342.3280528639989
+          },
+          {
+            "id": "root/test_hasselblad_photo_roundtrip/shard-2",
+            "targets": [
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes"
+            ],
+            "historical_estimated_seconds": 329.53250201301125
+          },
+          {
+            "id": "root/test_hasselblad_photo_roundtrip/shard-4",
+            "targets": [
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[False]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]"
+            ],
+            "historical_estimated_seconds": 313.64275926401
+          },
+          {
+            "id": "root/test_hasselblad_photo_roundtrip/shard-1",
+            "targets": [
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[True]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]",
+              "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays"
+            ],
+            "historical_estimated_seconds": 313.64233209399754
+          }
+        ]
+      },
+      {
+        "module": "root/test_osmo_builtin_record_segmentation_roundtrip",
+        "current_collected_count": 8,
+        "assigned_once": true,
+        "normal_hasselblad_count": 0,
+        "collection_command": {
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py",
+            "--collect-only",
+            "-q",
+            "-p",
+            "integration_progress"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-full-plan/collection/root-test_osmo_builtin_record_segmentation_roundtrip/source",
+          "started_utc": "2026-10-24T21:56:19.420831+00:00",
+          "source": "86e24e2fe7cb5ff25aa2e359fafb987832515bee37f2e4e43ac8d143ee3e2299",
+          "versions": {
+            "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+            "version": [
+              3,
+              11
+            ],
+            "sqlite": "3.53.1",
+            "pytest": "9.1.1",
+            "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+            "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+            "node": "v24.22.1",
+            "git": "git version 2.43.0"
+          },
+          "pid": 239992,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T21:56:19.964943+00:00",
+          "wall_seconds": 0.5441106329999457
+        },
+        "shards": [
+          {
+            "id": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-1",
+            "targets": [
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]"
+            ],
+            "historical_estimated_seconds": 220.34896152700458
+          },
+          {
+            "id": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-2",
+            "targets": [
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]"
+            ],
+            "historical_estimated_seconds": 203.4239329760021
+          },
+          {
+            "id": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-3",
+            "targets": [
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]"
+            ],
+            "historical_estimated_seconds": 200.76144527299766
+          },
+          {
+            "id": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-4",
+            "targets": [
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+              "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]"
+            ],
+            "historical_estimated_seconds": 186.38657038100064
+          }
+        ]
+      }
+    ],
+    "measurement_scope": "仅收集及计划，不含执行、安装、客户端构建或真实运行墙钟；历史权重不是本次测量。"
+  }
+}

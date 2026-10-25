@@ -1,0 +1,814 @@
+[
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_comp0",
+    "session_id": "58a3485d-9515-4826-861f-fda96baf7a2f",
+    "node_pid": 770430,
+    "archive": "worlds/001",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 4
+    },
+    "startup_seconds": 3.783593354,
+    "commands_seconds": 14.769065931,
+    "close_seconds": 0.218121147,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 8350283,
+      "system": 854248
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/001/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "7919956397703604961",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "bb1ae057-3c1a-4c64-940b-6111b1c40156",
+    "node_pid": 760231,
+    "archive": "worlds/002",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 5.701507587,
+    "commands_seconds": 23.265629238,
+    "close_seconds": 0.377819759,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 12995424,
+      "system": 1416691
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/002/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "2303324396083828127",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_repo0",
+    "session_id": "3e13e831-0a58-4b72-8dea-a8e4a70b4028",
+    "node_pid": 777261,
+    "archive": "worlds/003",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 4
+    },
+    "startup_seconds": 2.85999776,
+    "commands_seconds": 11.084588059,
+    "close_seconds": 0.145623324,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 6363405,
+      "system": 711844
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/003/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "1366894391098064474",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_miss0",
+    "session_id": "05db9d6d-3623-46fa-b157-7c6f4be557e6",
+    "node_pid": 780988,
+    "archive": "worlds/004",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1
+    },
+    "startup_seconds": 2.159712512,
+    "commands_seconds": 2.184972856,
+    "close_seconds": 0.140498302,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 4079805,
+      "system": 299530
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/004/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "3654367308848521605",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "244c874e-2ad9-430b-906d-0a5fe95612ad",
+    "node_pid": 760341,
+    "archive": "worlds/005",
+    "status": "ready",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1
+    },
+    "startup_seconds": 5.382651612,
+    "commands_seconds": 180.003003646,
+    "close_seconds": null,
+    "python_close_outcome": null,
+    "failure": "TimeoutError: 客户端会话超过180秒预算；/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot0/client-session.stderr.log",
+    "cleanup": {
+      "survivors": [],
+      "notes": [],
+      "owned_processes": [
+        {
+          "pid": 760341,
+          "ppid": 755366,
+          "pgid": 760341,
+          "starttime": "4779123",
+          "state": "Z"
+        },
+        {
+          "pid": 760394,
+          "ppid": 760341,
+          "pgid": 760341,
+          "starttime": "4779196",
+          "state": "S"
+        },
+        {
+          "pid": 771358,
+          "ppid": 760341,
+          "pgid": 771358,
+          "starttime": "4792161",
+          "state": "Z"
+        },
+        {
+          "pid": 771370,
+          "ppid": 771358,
+          "pgid": 771358,
+          "starttime": "4792173",
+          "state": "S"
+        },
+        {
+          "pid": 771371,
+          "ppid": 771358,
+          "pgid": 771358,
+          "starttime": "4792173",
+          "state": "S"
+        },
+        {
+          "pid": 771402,
+          "ppid": 771358,
+          "pgid": 771358,
+          "starttime": "4792181",
+          "state": "S"
+        },
+        {
+          "pid": 771415,
+          "ppid": 1,
+          "pgid": 771358,
+          "starttime": "4792196",
+          "state": "Z"
+        },
+        {
+          "pid": 771400,
+          "ppid": 771370,
+          "pgid": 771358,
+          "starttime": "4792180",
+          "state": "S"
+        }
+      ]
+    },
+    "browser_processes_inactive": false,
+    "node_only_cpu_microseconds": null,
+    "photo_exports": []
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/tmp/pytest/test_installed_hasselblad_phot1",
+    "session_id": "fb0035ef-53b5-43c7-9b1f-115401c7b203",
+    "node_pid": 776045,
+    "archive": "worlds/006",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 3.601704235,
+    "commands_seconds": 15.620387658,
+    "close_seconds": 0.194944154,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 8793158,
+      "system": 988579
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/006/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "8589112152913522185",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_comp0",
+    "session_id": "98398181-5f39-4105-9094-6caa077679d2",
+    "node_pid": 784829,
+    "archive": "worlds/007",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 4
+    },
+    "startup_seconds": 1.8468198,
+    "commands_seconds": 10.120354449,
+    "close_seconds": 0.120469865,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 6124556,
+      "system": 409669
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/007/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "1680464945157771492",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "ac9b4865-4ad5-454e-9781-ae8f26eb376b",
+    "node_pid": 771259,
+    "archive": "worlds/008",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 6.672749639,
+    "commands_seconds": 153.45873961299998,
+    "close_seconds": 0.394276867,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 14385002,
+      "system": 1740204
+    },
+    "photo_exports": [
+      {
+        "operation": "browser-photo-export",
+        "receipt": "worlds/008/receipts/001-photo-browser.json",
+        "export_mode": "browser",
+        "request_id": "7204571276352681938",
+        "has_preset_ui_fields": true
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "08edc984-14d3-4672-a5d0-54abef71bfc7",
+    "node_pid": 774790,
+    "archive": "worlds/009",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 3.520851858,
+    "commands_seconds": 127.765568853,
+    "close_seconds": 0.143538954,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 13460596,
+      "system": 1196964
+    },
+    "photo_exports": [
+      {
+        "operation": "browser-photo-export",
+        "receipt": "worlds/009/receipts/001-photo-browser.json",
+        "export_mode": "browser",
+        "request_id": "8017735729095725778",
+        "has_preset_ui_fields": true
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot1",
+    "session_id": "8f13016f-39e3-433f-a74c-3055e18ea149",
+    "node_pid": 785512,
+    "archive": "worlds/010",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 2.354309362,
+    "commands_seconds": 10.467879202000002,
+    "close_seconds": 0.237377081,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 6699839,
+      "system": 892955
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/010/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "2062310798170537886",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "a09febd9-1ea6-4f73-bb3f-8ede07a2f558",
+    "node_pid": 774836,
+    "archive": "worlds/011",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 4.015799454,
+    "commands_seconds": 17.550848003000002,
+    "close_seconds": 0.173400395,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 8562567,
+      "system": 1151099
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/011/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "6404200785046671478",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/tmp/pytest/test_installed_hasselblad_phot1",
+    "session_id": "4cb873ea-9c41-4604-88d7-77c922408b73",
+    "node_pid": 780370,
+    "archive": "worlds/012",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 2.518947929,
+    "commands_seconds": 54.83149401899999,
+    "close_seconds": 0.186430915,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 10548909,
+      "system": 890290
+    },
+    "photo_exports": [
+      {
+        "operation": "browser-photo-export",
+        "receipt": "worlds/012/receipts/001-photo-browser.json",
+        "export_mode": "browser",
+        "request_id": "2772081671778203036",
+        "has_preset_ui_fields": true
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "54677909-5010-47db-8373-ffe3a470e14f",
+    "node_pid": 761923,
+    "archive": "worlds/013",
+    "status": "failed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1
+    },
+    "startup_seconds": 5.177492525,
+    "commands_seconds": 180.003562697,
+    "close_seconds": null,
+    "python_close_outcome": null,
+    "failure": "TimeoutError: 客户端会话超过180秒预算；/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot0/client-session.stderr.log",
+    "cleanup": {
+      "survivors": [],
+      "notes": [],
+      "owned_processes": [
+        {
+          "pid": 761923,
+          "ppid": 755384,
+          "pgid": 761923,
+          "starttime": "4781174",
+          "state": "R"
+        },
+        {
+          "pid": 762439,
+          "ppid": 761923,
+          "pgid": 761923,
+          "starttime": "4781793",
+          "state": "Z"
+        },
+        {
+          "pid": 774494,
+          "ppid": 761923,
+          "pgid": 774494,
+          "starttime": "4795839",
+          "state": "Z"
+        },
+        {
+          "pid": 774496,
+          "ppid": 774494,
+          "pgid": 774494,
+          "starttime": "4795842",
+          "state": "Z"
+        },
+        {
+          "pid": 774497,
+          "ppid": 774494,
+          "pgid": 774494,
+          "starttime": "4795842",
+          "state": "Z"
+        },
+        {
+          "pid": 774517,
+          "ppid": 774494,
+          "pgid": 774494,
+          "starttime": "4795851",
+          "state": "S"
+        },
+        {
+          "pid": 774525,
+          "ppid": 1,
+          "pgid": 774494,
+          "starttime": "4795858",
+          "state": "R"
+        },
+        {
+          "pid": 774511,
+          "ppid": 1,
+          "pgid": 774494,
+          "starttime": "4795849",
+          "state": "Z"
+        }
+      ]
+    },
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 11676122,
+      "system": 1237356
+    },
+    "photo_exports": []
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/tmp/pytest/test_installed_hasselblad_phot1",
+    "session_id": "f69d9977-3262-4dc7-8f47-357b88d04f2d",
+    "node_pid": 777486,
+    "archive": "worlds/014",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 2,
+      "files_starts": 2,
+      "http_server_starts": 2,
+      "browser_starts": 2
+    },
+    "operations": {
+      "browser-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 3.137596809,
+    "commands_seconds": 91.69340558200001,
+    "close_seconds": 0.134527695,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 12456674,
+      "system": 997768
+    },
+    "photo_exports": [
+      {
+        "operation": "browser-photo-export",
+        "receipt": "worlds/014/receipts/001-photo-browser.json",
+        "export_mode": "browser",
+        "request_id": "7844919758952726260",
+        "has_preset_ui_fields": true
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "115379e2-ecc9-4ad7-a4ae-ead5a720e8ca",
+    "node_pid": 761855,
+    "archive": "worlds/015",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 5.304386291,
+    "commands_seconds": 20.515402646,
+    "close_seconds": 0.41416286,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 11974943,
+      "system": 1213046
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/015/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "4517934594583123511",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_save0",
+    "session_id": "4f466818-4a26-4f6f-baec-cc72b21feb0c",
+    "node_pid": 772528,
+    "archive": "worlds/016",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 4
+    },
+    "startup_seconds": 4.718503681,
+    "commands_seconds": 13.164063860999999,
+    "close_seconds": 0.165979932,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 7832595,
+      "system": 706233
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/016/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "6323826948293991895",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/tmp/pytest/test_installed_hasselblad_phot0",
+    "session_id": "2d8aa2c1-21ab-41c2-ab1e-bc393931b268",
+    "node_pid": 760251,
+    "archive": "worlds/017",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 5,
+      "upload-files": 2
+    },
+    "startup_seconds": 5.644657086,
+    "commands_seconds": 23.371023932999996,
+    "close_seconds": 0.362436996,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 12767669,
+      "system": 1269423
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/017/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "2775812371735083215",
+        "has_preset_ui_fields": false
+      }
+    ]
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+    "canonical_root": "/tmp/camctl-itopt-round2-hb-after-8/tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/tmp/pytest/test_installed_hasselblad_save0",
+    "session_id": "ad614763-772f-4393-93a6-d744196f5168",
+    "node_pid": 770419,
+    "archive": "worlds/018",
+    "status": "closed",
+    "counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 1,
+      "browser_starts": 1
+    },
+    "operations": {
+      "application-photo-export": 1,
+      "browser-plan-export": 4
+    },
+    "startup_seconds": 3.89964089,
+    "commands_seconds": 13.828616333,
+    "close_seconds": 0.230897025,
+    "python_close_outcome": "passed",
+    "failure": null,
+    "cleanup": null,
+    "browser_processes_inactive": true,
+    "node_only_cpu_microseconds": {
+      "user": 8282352,
+      "system": 975011
+    },
+    "photo_exports": [
+      {
+        "operation": "application-photo-export",
+        "receipt": "worlds/018/receipts/001-photo-application.json",
+        "export_mode": "application",
+        "request_id": "3550032029225444317",
+        "has_preset_ui_fields": false
+      }
+    ]
+  }
+]

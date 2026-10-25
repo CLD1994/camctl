@@ -267,8 +267,7 @@ def test_finishing_obtain_does_not_materialize_plan_siblings(prepared_env, tmp_p
         owned.connection.rollback()
 
 
-@pytest.mark.parametrize("total,batch_size", [(12, 1), (120, 1), (120, 3)])
-def test_candidate_capacity_tracks_batch_not_total(two_copies, total, batch_size):
+def test_candidate_capacity_tracks_batch_not_total(two_copies):
     import gc
     import json
     import weakref
@@ -276,37 +275,42 @@ def test_candidate_capacity_tracks_batch_not_total(two_copies, total, batch_size
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
 
     owned, _, _ = two_copies
-    repository = OutputsRepository(read_batch_size=batch_size)
-    for identity in range(1000, 1000 + total):
-        _seed_action(owned.connection, identity, 1, action_type=4)
-        _seed_selection_and_item(owned.connection, dependency_id=identity, selection_id=identity,
-            item_id=identity, owner_action_id=identity, source_action_id=11, output_id=701)
-        owned.connection.commit()
-        result = repository.grant_file(replace(_command(), action_id=identity, item_id=identity), new_operation_key(), owned)
-        assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
-    owner = ReadDiscoveryOwner(batch_size)
-    connection = _BoundedConnection(owned.connection, batch_size)
-    owner.begin_round(connection, _NOW)
-    returned = seen = largest = 0
-    while True:
-        page = owner.reads(connection, "reads", _NOW)
-        returned = len(page.items)
-        seen += returned
-        largest = max(largest, returned)
-        assert returned <= batch_size and owner.cursor_count <= 1
-        references = tuple(weakref.ref(candidate) for candidate in page.items)
-        exhausted = page.exhausted
-        del page
-        gc.collect()
-        assert all(reference() is None for reference in references)
-        if exhausted:
-            break
-    assert seen == total + 2
-    assert connection.query_plan and max(connection.returned) == batch_size
-    print(json.dumps({"candidates": seen, "batch_size": batch_size,
-                      "max_returned": largest, "retained_after_page": 0,
-                      "cursor_count_after_scan": owner.cursor_count,
-                      "query_plan": connection.query_plan}))
+    seeded = 0
+    for total, batch_size in ((12, 1), (120, 1), (120, 3)):
+        repository = OutputsRepository(read_batch_size=batch_size)
+        for identity in range(1000 + seeded, 1000 + total):
+            _seed_action(owned.connection, identity, 1, action_type=4)
+            _seed_selection_and_item(owned.connection, dependency_id=identity, selection_id=identity,
+                item_id=identity, owner_action_id=identity, source_action_id=11, output_id=701)
+            owned.connection.commit()
+            result = repository.grant_file(replace(_command(), action_id=identity, item_id=identity), new_operation_key(), owned)
+            assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
+        seeded = total
+        before = tuple(owned.connection.iterdump())
+        owner = ReadDiscoveryOwner(batch_size)
+        connection = _BoundedConnection(owned.connection, batch_size)
+        owner.begin_round(connection, _NOW)
+        returned = seen = largest = 0
+        while True:
+            page = owner.reads(connection, "reads", _NOW)
+            returned = len(page.items)
+            seen += returned
+            largest = max(largest, returned)
+            assert returned <= batch_size and owner.cursor_count <= 1
+            references = tuple(weakref.ref(candidate) for candidate in page.items)
+            exhausted = page.exhausted
+            del page
+            gc.collect()
+            assert all(reference() is None for reference in references)
+            if exhausted:
+                break
+        assert seen == total + 2
+        assert connection.query_plan and max(connection.returned) == batch_size
+        assert tuple(owned.connection.iterdump()) == before
+        print(json.dumps({"candidates": seen, "batch_size": batch_size,
+                          "max_returned": largest, "retained_after_page": 0,
+                          "cursor_count_after_scan": owner.cursor_count,
+                          "query_plan": connection.query_plan}))
 
 
 def test_query_failure_is_not_exhaustion(two_copies):

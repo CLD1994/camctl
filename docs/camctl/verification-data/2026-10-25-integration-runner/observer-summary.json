@@ -1,0 +1,121 @@
+{
+  "scope": "观察器与产品全局文件故障注入的边界复验，不替代完整bootstrap目录或全量验收。",
+  "initial_failure": "首轮bootstrap的产品测试按约定替换共享os.replace，早期观察器经Path.replace调用同一函数而出现INTERNALERROR。首轮快照与日志保留。",
+  "observer_contract": "插件导入时固定自身open、replace、JSON序列化、PID与计时函数。配置阶段固定输出文件路径；后续不动态调用Path文件操作。真实磁盘错误仍向外报告。",
+  "plugin_sha256": "1741af5391021c8d83fd90dc39a86186ebdbe219755d3ddaf702ae47bf5c85e4",
+  "regression": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/tests",
+      "-v"
+    ],
+    "cwd": "/tmp/camctl-itopt-runner",
+    "exit_code": 0,
+    "log": "test_function_selector_already_contains_parameter_instances (test_run_integration.IntegrationRunnerTest.test_function_selector_already_contains_parameter_instances) ... ok\ntest_hasselblad_uses_built_external_candidate_from_current_source (test_run_integration.IntegrationRunnerTest.test_hasselblad_uses_built_external_candidate_from_current_source) ... ok\ntest_isolated_concurrency_progress_exact_assignment_and_failure (test_run_integration.IntegrationRunnerTest.test_isolated_concurrency_progress_exact_assignment_and_failure) ... ok\ntest_nested_unittest_checks_do_not_inflate_primary_results (test_run_integration.IntegrationRunnerTest.test_nested_unittest_checks_do_not_inflate_primary_results) ... ok\ntest_observer_keeps_artifacts_when_product_file_operations_fail (test_run_integration.IntegrationRunnerTest.test_observer_keeps_artifacts_when_product_file_operations_fail) ... ok\ntest_parent_path_cannot_escape_source (test_run_integration.IntegrationRunnerTest.test_parent_path_cannot_escape_source) ... ok\ntest_prepare_interrupt_reaps_owned_process_and_saves_actual_state (test_run_integration.IntegrationRunnerTest.test_prepare_interrupt_reaps_owned_process_and_saves_actual_state) ... ok\ntest_root_shards_use_current_collection_including_unmeasured_nodes (test_run_integration.IntegrationRunnerTest.test_root_shards_use_current_collection_including_unmeasured_nodes) ... ok\ntest_snapshot_reports_unsupported_symbolic_link (test_run_integration.IntegrationRunnerTest.test_snapshot_reports_unsupported_symbolic_link) ... ok\ntest_unknown_target_is_rejected_before_execution (test_run_integration.IntegrationRunnerTest.test_unknown_target_is_rejected_before_execution) ... ok\n\n----------------------------------------------------------------------\nRan 10 tests in 10.633s\n\nOK\n",
+    "mini_pytest": "分别替换os.replace、Path.open、Path.write_text、builtins.open；四个产品操作均按PermissionError断言通过，四个主实例的setup/call/teardown和最终产物完整。"
+  },
+  "actual_file": {
+    "test_sha256": "ef8ff3abf40271c4b8cfe8fdbc5b29da56572d220e95a50c467e54b85fba626c",
+    "same_bytes_as_first_full": true,
+    "source": {
+      "root": "/tmp/camctl-itopt-runner",
+      "head": "6f1b82408ab91cac6be1d910a1ca9bb54059296a",
+      "status": "M scripts/integration_progress.py\n M scripts/tests/test_run_integration.py",
+      "snapshot_sha256": "d9600fbf98792d448920861525bf4ac71f009e4dfefcf145153b235538dce5d3"
+    },
+    "versions": {
+      "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+      "version": [
+        3,
+        11
+      ],
+      "sqlite": "3.53.1",
+      "pytest": "9.1.1",
+      "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+      "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+      "node": "v24.22.1",
+      "git": "git version 2.43.0"
+    },
+    "task": {
+      "id": "camctl/bootstrap",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/bootstrap",
+      "targets": [
+        "apps/camctl/tests/integration/bootstrap/test_download_cleanup.py"
+      ],
+      "estimated_seconds": 733.239981505747,
+      "status": "passed",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/artifacts",
+      "cwd": "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/source",
+      "started_utc": "2026-10-24T22:51:54.362409+00:00",
+      "command": [
+        "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_download_cleanup.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-itopt-runner-observer-bootstrap-final/control:/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/source/apps/camctl/src",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-runner-observer-bootstrap-final/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-itopt-runner-observer-bootstrap-final/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-itopt-runner-observer-bootstrap-final/tasks/001-camctl-bootstrap/source",
+          "started_utc": "2026-10-24T22:52:02.767525+00:00",
+          "pid": 349283,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T22:52:02.833421+00:00",
+          "wall_seconds": 0.06589264299691422
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 349283,
+      "pid": 349285,
+      "execution_started_utc": "2026-10-24T22:52:02.834241+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 22,
+        "outcomes": {
+          "passed": 22
+        },
+        "subchecks": {},
+        "elapsed_seconds": 3.4131873290025396,
+        "utc": "2026-10-24T22:52:06.548608+00:00",
+        "pid": 349285
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-24T22:52:06.830850+00:00",
+      "wall_seconds": 12.468449227002566
+    },
+    "cases": 22,
+    "phase_reports": 66,
+    "exit_code": 0,
+    "wall_seconds": 13.323287550003442,
+    "console_log": "/tmp/camctl-itopt-runner-observer-bootstrap-final.log",
+    "summary": "/tmp/camctl-itopt-runner-observer-bootstrap-final/summary.json"
+  }
+}

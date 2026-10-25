@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_device_delete_unsupported_with_host_files",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.328032532997895
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 43.818564303997846
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00324988599459175
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 75.14984672299033
+  }
+]

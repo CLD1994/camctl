@@ -10,7 +10,11 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.snapshots import prepare_snapshot
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.transaction import encode_json_value
-from .test_record_segment_history import _fixture, _save
+from .test_record_segment_history import (
+    _assert_same_s_snapshot_bytes,
+    _fixture,
+    _save,
+)
 
 
 def _change_snapshot(owned, prepared, transform):
@@ -187,7 +191,8 @@ async def test_growth_snapshot_restore_runs_in_managed_thread_and_event_loop_is_
 async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path,monkeypatch,phase):
     from camctl.history.snapshots import (MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots)
     from camctl.persistence.repositories import history as module
-    owned,_,_,ref,history=await _fixture(tmp_path,220 if phase=='middle' else 5)
+    owned,runtime,repo,ref,history=await _fixture(tmp_path,220 if phase=='middle' else 5)
+    boundary=history.current_boundary()
     store,executor=await _snapshot_store(history)
     selected=False
     async def candidates(*_):
@@ -211,7 +216,8 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
     monkeypatch.setattr(snapshots_module,'prepare_snapshot',prepare)
     if phase=='middle':
         from camctl.history.snapshot_stream import PreparedSnapshotSource
-        chunks=PreparedSnapshotSource.chunks.fget
+        original_chunks=PreparedSnapshotSource.chunks
+        chunks=original_chunks.fget
         def middle(self):
             assert self.length>65536
             for index,chunk in enumerate(chunks(self)):
@@ -256,6 +262,14 @@ async def test_cancel_started_save_keeps_source_until_actual_completion(tmp_path
         assert actual==(['OperationalError'] if phase=='rollback' else ['completed']*(2 if phase=='later_source' else 1))
         assert all(not path.exists() for path in paths)
         assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==(0 if phase=='rollback' else 2 if phase=='later_source' else 1)
+        assert history.current_boundary()==boundary, '取消后的实际保存不得推进业务历史'
+        if phase=='middle':
+            # 实际保存及来源清理完成后，从相同 H 的当前投影独立准备同 S 内容。
+            monkeypatch.setattr(module,'_save_one_snapshot',original)
+            monkeypatch.setattr(PreparedSnapshotSource,'chunks',original_chunks)
+            monkeypatch.setattr(snapshots_module,'prepare_snapshot',original_prepare)
+            await _assert_same_s_snapshot_bytes(
+                owned,runtime,repo,ref,history,boundary,paths)
     finally:
         release.set()
         if not task.done():

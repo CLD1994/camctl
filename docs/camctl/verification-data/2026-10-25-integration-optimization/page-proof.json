@@ -1,0 +1,413 @@
+{
+  "commit": "e32ab0b36377ae69e9fb968feb9d3a747c4edfbe",
+  "baseline": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+  "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python 3.11.17",
+  "worktree": "/tmp/camctl-itopt-verification",
+  "baseline_worktree": "/tmp/camctl-itopt-verification-baseline",
+  "scope": "S2：结果页完整关系证明的事务内有界复用；提案和每个事件守卫独立建立证明。",
+  "native_tail_false": {
+    "baseline_call_seconds": 54.84,
+    "final_call_seconds": 18.92,
+    "baseline": {
+      "exitstatus": 0,
+      "counts": {
+        "consumer_world": 1,
+        "camctl.persistence.repositories.result_pages.read_page": 1885,
+        "camctl.persistence.repositories.result_pages._at_record": 8909,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 8909,
+        "camctl.persistence.repositories.result_pages.committed_page_proof": 2351,
+        "camctl.persistence.repositories.result_pages.read_last_page": 2,
+        "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 1
+      },
+      "inclusive_seconds": {
+        "consumer_world": 0.41479656899900874,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 29.12793506606613,
+        "camctl.persistence.repositories.result_pages._at_record": 33.73470608716889,
+        "camctl.persistence.repositories.result_pages.read_page": 8.157087141953525,
+        "camctl.persistence.repositories.result_pages.committed_page_proof": 5.118257855949196,
+        "camctl.persistence.repositories.result_pages.read_last_page": 0.014744165000593057,
+        "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 41.85710753600142
+      },
+      "pages": {
+        "21": 8909
+      },
+      "callers": {
+        "_at_record/wrapped/_at/read_page/wrapped": 1885,
+        "_at_record/wrapped/read_pages/read_result_pages/pages": 8,
+        "_at_record/wrapped/_proof/plan/commit_operation": 6,
+        "_at_record/wrapped/_proof/_ownership_from_result_page_guard/validate_event": 6,
+        "_at_record/wrapped/_at/_load_natural_wait_file_sources/plan": 6,
+        "_at_record/wrapped/_scan/_classify/plan": 3,
+        "_at_record/wrapped/_at/_classify/plan": 3,
+        "_at_record/wrapped/_proof/load_completion_input/_classify": 928,
+        "_at_record/wrapped/_at/_completion_page/load_completion_input": 1875,
+        "_at_record/wrapped/_at/_load_natural_wait_file_sources/_completion_page": 1875,
+        "_at_record/wrapped/_scan/_classify/_check_event": 461,
+        "_at_record/wrapped/_at/_classify/_check_event": 461,
+        "_at_record/wrapped/_at/_current_scan/prepare_result_set": 2,
+        "_at_record/wrapped/read_pages/_current_scan/prepare_result_set": 2,
+        "_at_record/wrapped/_at/_retained_input/_same_current_files": 24,
+        "_at_record/wrapped/_proof/load_completion_input/load_strict_result_file_input": 917,
+        "_at_record/wrapped/_at/_same_current_files/prepare_result_set": 12,
+        "_at_record/wrapped/_proof/load_completion_input/_current_input": 30,
+        "_at_record/wrapped/_at/_input_member/ordered_listing_members": 6,
+        "_at_record/wrapped/_at/read_last_page/wrapped": 2,
+        "_at_record/wrapped/read_pages/result_pages/iter_result_file_facts": 2,
+        "_at_record/wrapped/_at/_current_scan/_source": 2,
+        "_at_record/wrapped/read_pages/_current_scan/_source": 2,
+        "_at_record/wrapped/_at/_same_current_files/_source": 12,
+        "_at_record/wrapped/_at/_retained_input/<genexpr>": 6,
+        "_at_record/wrapped/_at/_retained_input/_expected_input": 132,
+        "_at_record/wrapped/_at/_retained_input/_expected_inputs": 120,
+        "_at_record/wrapped/_at/_read_member/<genexpr>": 99,
+        "_at_record/wrapped/_at/plan/commit_operation": 1,
+        "_at_record/wrapped/read_pages/result_pages/_result_check_guard": 1,
+        "_at_record/wrapped/_at/_read_member/_output_candidate": 16,
+        "_at_record/wrapped/_at/_read_member/segment_output_candidate": 4
+      }
+    },
+    "final": {
+      "nodeid": "tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]",
+      "counts": {
+        "consumer_world": 1,
+        "camctl.persistence.repositories.result_pages.read_page": 1885,
+        "camctl.persistence.repositories.result_pages._at_record": 8909,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 189,
+        "camctl.persistence.repositories.result_pages.committed_page_proof": 2351,
+        "camctl.persistence.repositories.result_pages.read_last_page": 2,
+        "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 1
+      },
+      "inclusive_seconds": {
+        "consumer_world": 0.3001790459966287,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 0.4683527949891868,
+        "camctl.persistence.repositories.result_pages._at_record": 0.5779919239757874,
+        "camctl.persistence.repositories.result_pages.read_page": 0.5977687351223722,
+        "camctl.persistence.repositories.result_pages.committed_page_proof": 4.490990672082262,
+        "camctl.persistence.repositories.result_pages.read_last_page": 0.013133257001754828,
+        "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 14.150535066000884
+      },
+      "pages": {
+        "21": 189
+      }
+    }
+  },
+  "history_growth": {
+    "sizes": [
+      16,
+      64,
+      256
+    ],
+    "baseline_call_seconds": 136.93,
+    "final_call_seconds": 7.23,
+    "baseline_wall_seconds": 139.70187907700165,
+    "final_wall_seconds": 8.1647516669982,
+    "baseline": {
+      "exitstatus": 0,
+      "counts": {
+        "camctl.persistence.repositories.result_pages._at_record": 3103,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 3108,
+        "_fixture": 3
+      },
+      "inclusive_seconds": {
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 123.94751044395161,
+        "camctl.persistence.repositories.result_pages._at_record": 129.60789095412838,
+        "_fixture": 134.10746862499946
+      },
+      "pages": {
+        "34": 165,
+        "82": 597,
+        "146": 915,
+        "276": 1431
+      },
+      "callers": {
+        "_at_record/wrapped/read_pages/read_result_pages/_world": 5,
+        "_at_record/wrapped/_at/_source/plan": 20,
+        "_at_record/wrapped/_at/_source/_verify_set_identity": 9,
+        "_at_record/wrapped/_at/_input_member/_member_row": 672,
+        "_at_record/wrapped/_at/_source/_member_row": 672,
+        "_at_record/wrapped/_at/_member_row/<listcomp>": 336,
+        "_at_record/wrapped/_at/_read_member/verify_segment_event": 336,
+        "_at_record/wrapped/_at/_member_row/verify_segment_event": 336,
+        "_at_record/wrapped/read_pages/plan/commit_operation": 5,
+        "_at_record/wrapped/_at/_source/_source_member_count": 3,
+        "_at_record/wrapped/read_pages/_source_member_count/verify_segment_event": 5,
+        "_at_record/wrapped/_at/_read_member/<genexpr>": 27,
+        "_at_record/wrapped/_at/_read_member/_gap_row": 660,
+        "_at_record/wrapped/_at/_source/_verify_assessment": 6,
+        "_at_record/wrapped/_at/_read_member/_expected_scope_ids": 6,
+        "_at_record/wrapped/_at/_read_member/plan": 3,
+        "_at_record/wrapped/_at/plan/commit_operation": 1,
+        "_at_record/wrapped/_at/_verify_append_difference/_page_guard": 1,
+        "read_pages/read_result_pages/_world/_fixture/counted": 1,
+        "read_pages/plan/commit_operation/_save/fix_members": 2,
+        "read_pages/_source_member_count/verify_segment_event/verify_segment_event/guard": 2
+      }
+    },
+    "final": {
+      "tests": [
+        {
+          "nodeid": "tests/integration/history/test_record_segment_history.py::test_growth_has_bounded_python_peak_and_linear_projection_reads",
+          "counts": {
+            "camctl.persistence.repositories.result_pages._at_record": 3103,
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 72,
+            "_fixture": 3
+          },
+          "inclusive_seconds": {
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 1.9009978539834265,
+            "camctl.persistence.repositories.result_pages._at_record": 1.8174797329338617,
+            "_fixture": 4.920908985001006
+          },
+          "pages": {
+            "34": 16,
+            "82": 16,
+            "146": 18,
+            "276": 22
+          }
+        }
+      ],
+      "exitstatus": 0,
+      "counts": {
+        "camctl.persistence.repositories.result_pages._at_record": 3103,
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 72,
+        "_fixture": 3
+      },
+      "inclusive_seconds": {
+        "camctl.persistence.repositories.result_pages._verify_page_relations": 1.9009978539834265,
+        "camctl.persistence.repositories.result_pages._at_record": 1.8174797329338617,
+        "_fixture": 4.920908985001006
+      },
+      "pages": {
+        "34": 16,
+        "82": 16,
+        "146": 18,
+        "276": 22
+      },
+      "callers": {
+        "_at_record/wrapped/read_pages/read_result_pages/_world": 5,
+        "_at_record/wrapped/_at/_source/plan": 20,
+        "_at_record/wrapped/_at/_source/_verify_set_identity": 9,
+        "_at_record/wrapped/_at/_read_member/verify_segment_event": 4,
+        "_at_record/wrapped/_at/_read_member/<genexpr>": 13,
+        "_at_record/wrapped/_at/_read_member/_gap_row": 6,
+        "_at_record/wrapped/_at/_read_member/_expected_scope_ids": 4,
+        "_at_record/wrapped/_at/plan/commit_operation": 1,
+        "_at_record/wrapped/_at/_verify_append_difference/_page_guard": 1,
+        "read_pages/read_result_pages/_world/_fixture/counted": 1,
+        "_at_record/wrapped/_at/_input_member/_member_row": 1,
+        "_at_record/wrapped/_at/_source/_member_row": 1,
+        "_at_record/wrapped/read_pages/plan/commit_operation": 1,
+        "read_pages/plan/commit_operation/_save/fix_members": 2,
+        "_at_record/wrapped/read_pages/_source_member_count/verify_segment_event": 1,
+        "read_pages/_source_member_count/verify_segment_event/verify_segment_event/guard": 2
+      }
+    }
+  },
+  "passing": {
+    "full_unit": "7145 passed, 1 skipped, 2 warnings; 71.25s; exit0",
+    "native_file": "5 passed; 74.68s; exit0",
+    "independent_guard_and_cache": "21 passed; 2.67s; exit0",
+    "history_growth": "1 passed; 7.80s; exit0"
+  },
+  "limits": [
+    "计数器用f_back记录调用，计时数字为本容器相应会话实际结果；其他工作区同期也有测试负载，不是目标主机性能结论。",
+    "4项容量最终全范围和完整persistence/history由root在合并树验收；本子任务只完整运行其中history的16/64/256增长专项。",
+    "persistence-full最初539passed+4failed后按协调中止，退出2；四项独立守卫回归已由guard-proposal-green复核，不把该次部分运行记为完整目录通过。",
+    "baseline-persistence-capacity按协调中止，退出2，无完整用例结果；不计为容量证据。",
+    "unit/persistence独立子目录的既有枚举替身setup失败在干净基线首项复现；最终完整unit组合全部通过。"
+  ],
+  "source_identity": "unit-final/native-final/history-growth-final运行时包含提交后的独立守卫分界代码；命令记录的head为amend前0eccfa33，工作树变化由independent-guard-phase.patch保存，最终集成树为commit字段。",
+  "command_receipts": {
+    "unit-final-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/unit-final-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "0eccfa33e094d927e33640d7f7a485a7323240ee",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:48:33.350032+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 72.20413509699938,
+      "finished_utc": "2026-10-24T21:49:47.918072+00:00"
+    },
+    "native-full-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/capture/test_native_segment_completion.py",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/native-full-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:43:02.435720+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 80.03930055999808,
+      "finished_utc": "2026-10-24T21:44:26.013223+00:00"
+    },
+    "unit-persistence-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/persistence",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/unit-persistence-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:41:15.174724+00:00",
+      "exitstatus": 1,
+      "wall_seconds": 41.700414263999846,
+      "finished_utc": "2026-10-24T21:41:58.054481+00:00"
+    },
+    "guard-proposal-red-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/guard-proposal-red-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "0eccfa33e094d927e33640d7f7a485a7323240ee",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:47:10.939688+00:00",
+      "exitstatus": 1,
+      "wall_seconds": 3.18977381300283,
+      "finished_utc": "2026-10-24T21:47:14.129500+00:00"
+    },
+    "history-growth-final-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py::test_growth_has_bounded_python_peak_and_linear_projection_reads",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/history-growth-final-tmp",
+        "-p",
+        "proof_counts"
+      ],
+      "python": "Python 3.11.17",
+      "head": "0eccfa33e094d927e33640d7f7a485a7323240ee",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:50:02.493097+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 8.1647516669982,
+      "finished_utc": "2026-10-24T21:50:10.657870+00:00"
+    },
+    "native-final-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/capture/test_native_segment_completion.py",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/native-final-tmp",
+        "-p",
+        "proof_counts"
+      ],
+      "python": "Python 3.11.17",
+      "head": "0eccfa33e094d927e33640d7f7a485a7323240ee",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:48:32.224021+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 75.00824751699838,
+      "finished_utc": "2026-10-24T21:49:49.596223+00:00"
+    },
+    "guard-proposal-green-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/guard-proposal-green-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "0eccfa33e094d927e33640d7f7a485a7323240ee",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:48:09.794307+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 2.9931209569986095,
+      "finished_utc": "2026-10-24T21:48:12.787458+00:00"
+    },
+    "unit-full-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/unit-full-tmp"
+      ],
+      "python": "Python 3.11.17",
+      "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:43:57.496243+00:00",
+      "exitstatus": 0,
+      "wall_seconds": 76.83959216700168,
+      "finished_utc": "2026-10-24T21:45:16.712642+00:00"
+    },
+    "persistence-full-command.json": {
+      "cwd": "/tmp/camctl-itopt-verification",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence",
+        "-q",
+        "-s",
+        "--durations=0",
+        "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/persistence-full-tmp",
+        "-p",
+        "proof_counts"
+      ],
+      "python": "Python 3.11.17",
+      "head": "cd228b16c6d42c9ecb7331bf84f70e1d3915d293",
+      "branch": "work/itopt-verification",
+      "started_utc": "2026-10-24T21:45:01.251436+00:00",
+      "exitstatus": 2,
+      "wall_seconds": 73.43882794899764,
+      "finished_utc": "2026-10-24T21:46:17.053621+00:00"
+    }
+  },
+  "text_commands": {
+    "native-baseline-fastcount-command.txt": "工作区=/tmp/camctl-itopt-verification\n分支=work/itopt-verification\n基线=cd228b16c6d42c9ecb7331bf84f70e1d3915d293\nPython=/workspaces/camctl/apps/camctl/.venv311/bin/python 3.11.17\n命令=time -p env PYTHONPATH=\"$PWD/.local/verification/itopt:$PWD/apps/camctl/src\" PROOF_COUNT_OUTPUT=\"$PWD/.local/verification/itopt/native-baseline-fastcount-counts.json\" /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p proof_counts 'apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]' --basetemp=\"$PWD/.local/verification/itopt/native-baseline-fastcount-tmp\" -q --durations=0\n",
+    "native-baseline-command.txt": "工作区=/tmp/camctl-itopt-verification\n分支=work/itopt-verification\n基线=cd228b16c6d42c9ecb7331bf84f70e1d3915d293\nPython=/workspaces/camctl/apps/camctl/.venv311/bin/python 3.11.17\n命令=PYTHONPATH=\"$PWD/.local/verification/itopt:$PWD/apps/camctl/src\" PROOF_COUNT_OUTPUT=\"$PWD/.local/verification/itopt/native-baseline-counts.json\" time -p /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p proof_counts 'apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]' --basetemp=\"$PWD/.local/verification/itopt/native-baseline-tmp\" -q --durations=0\n",
+    "native-optimized-command.txt": "工作区=/tmp/camctl-itopt-verification\n分支=work/itopt-verification\n源码=工作树未提交（基于cd228b16）\nPython=/workspaces/camctl/apps/camctl/.venv311/bin/python 3.11.17\n命令=time -p env PYTHONPATH=\"$PWD/.local/verification/itopt:$PWD/apps/camctl/src\" PROOF_COUNT_OUTPUT=\"$PWD/.local/verification/itopt/native-optimized-counts.json\" /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p proof_counts 'apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]' --basetemp=\"$PWD/.local/verification/itopt/native-optimized-tmp\" -q --durations=0\n"
+  }
+}

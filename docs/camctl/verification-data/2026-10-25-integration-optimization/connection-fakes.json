@@ -1,0 +1,2239 @@
+{
+  "base_commit": "2acc661103638de99620ca558e66679e136810f1",
+  "implementation_commit": "2853d7b5df9570d8df778a49709533f798cd0e80",
+  "scope": "真实SQLite事务代理精确转发in_transaction",
+  "audit": {
+    "source_scope": {
+      "apps/camctl/tests": 762,
+      "tests": 51
+    },
+    "reviewer": "capture_merge_audit（独立只读复核，无pytest或文件改动）",
+    "approach": [
+      "AST直接execute/commit/rollback成员、属性与通用委托",
+      "继承、方法别名及动态接口关键字",
+      "嵌入源码和插值字符串，以及不能直接解析的生成片段逐项核对"
+    ],
+    "classification_counts": {
+      "fixed_transaction_proxy": 10,
+      "existing_exact_property": 12,
+      "existing_getattr_delegation": 37,
+      "inherited_correct_interface": 24,
+      "narrow_aggregate_query_probe": 1,
+      "non_sqlite_unit_double": 2
+    },
+    "classes": [
+      {
+        "path": "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+        "line": 124,
+        "class": "LostCommitResponse",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+        "line": 29,
+        "class": "TrackedConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "in_transaction",
+          "close"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self.connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_binding_transactions.py",
+        "line": 52,
+        "class": "_CommitFailure",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_capture_call_session_state.py",
+        "line": 104,
+        "class": "PendingCommit",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "ResultWriteFault"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+        "line": 21,
+        "class": "_FlowConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "in_transaction",
+          "close"
+        ],
+        "delegates_to": [
+          "self._connection",
+          "self._fault"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self._connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py",
+        "line": 40,
+        "class": "_CommitThenError",
+        "methods": [
+          "__init__",
+          "execute",
+          "close",
+          "in_transaction"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self.inner.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py",
+        "line": 250,
+        "class": "UnconfirmedTransaction",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [
+          "_CommitThenError"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py",
+        "line": 334,
+        "class": "_FailingCommit",
+        "methods": [
+          "__init__",
+          "execute",
+          "close",
+          "in_transaction"
+        ],
+        "delegates_to": [
+          "self._inner"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self._inner.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py",
+        "line": 425,
+        "class": "ResponsibilityReadError",
+        "methods": [
+          "__init__",
+          "execute",
+          "in_transaction",
+          "close"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self.inner.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_initialization.py",
+        "line": 79,
+        "class": "_PragmaReadbackConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self._connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_read_default_consumers.py",
+        "line": 57,
+        "class": "_WinddownQueryBoundary",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_read_default_consumers.py",
+        "line": 74,
+        "class": "_ReadCommitFailure",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "_CommitFailure"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding.py",
+        "line": 57,
+        "class": "_ResidualReadBoundary",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding_save_gate.py",
+        "line": 24,
+        "class": "_BindingRollbackConnection",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "_ReadGateConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_read_default_save_gate.py",
+        "line": 21,
+        "class": "_ReadGateConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_recording_results_cancellation.py",
+        "line": 65,
+        "class": "_CandidateBoundary",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_recording_results_saved_consumers.py",
+        "line": 26,
+        "class": "_UnavailableOriginalKey",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_result_exhaustion_default_recovery.py",
+        "line": 58,
+        "class": "_CandidateQuery",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+        "line": 315,
+        "class": "_FaultConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "in_transaction",
+          "close"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self.connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+        "line": 196,
+        "class": "_RecoveryReadFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_binding_failure_keeps_timelapse_files.py",
+        "line": 314,
+        "class": "_BindingTransactionFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_call_result_save.py",
+        "line": 88,
+        "class": "CallWriteFault",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "ResultWriteFault"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_call_result_save.py",
+        "line": 290,
+        "class": "ActionReadFault",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "ResultWriteFault"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_closed_result_local_boundaries.py",
+        "line": 30,
+        "class": "_ClosedInputFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_closed_result_local_boundaries.py",
+        "line": 56,
+        "class": "_TerminalProjectionFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_record_media_result_settlement.py",
+        "line": 159,
+        "class": "_TrackedCommitFailure",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "_CommitFailure"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py",
+        "line": 55,
+        "class": "ResultWriteFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py",
+        "line": 92,
+        "class": "PersistentFault",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "ResultWriteFault"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_result_error_guard_transaction.py",
+        "line": 414,
+        "class": "_RollbackFailure",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_result_file_fact_saves.py",
+        "line": 21,
+        "class": "FileFactFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_result_file_recovery.py",
+        "line": 102,
+        "class": "FileWriteFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_software_recovery.py",
+        "line": 324,
+        "class": "CommitUnknown",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_start_close_save_recovery.py",
+        "line": 75,
+        "class": "_ProjectionFailure",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/capture/test_stop_close_save_recovery.py",
+        "line": 72,
+        "class": "StopCloseFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/history/test_queries.py",
+        "line": 423,
+        "class": "_TrackedConnection",
+        "methods": [
+          "execute",
+          "close"
+        ],
+        "delegates_to": [
+          "cursor",
+          "self"
+        ],
+        "bases": [
+          "sqlite3.Connection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/history/test_record_segment_history.py",
+        "line": 616,
+        "class": "_MeasuredConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.inner, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/history/test_restore_paths.py",
+        "line": 119,
+        "class": "_Connection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.inner, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/history/test_snapshot_fix_round1.py",
+        "line": 488,
+        "class": "UnknownCommitConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "close",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.inner"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.inner, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/operations/test_obtain_check_identity.py",
+        "line": 257,
+        "class": "LostReceipt",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/operations/test_obtain_check_identity.py",
+        "line": 671,
+        "class": "ReadError",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/operations/test_result_reuse.py",
+        "line": 483,
+        "class": "LostReceipt",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/operations/test_result_reuse.py",
+        "line": 572,
+        "class": "ObservedConnection",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py",
+        "line": 124,
+        "class": "CatalogConnection",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_cleanup_delete_save_recovery.py",
+        "line": 346,
+        "class": "_UnreadableKeyConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self._connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_cleanup_delete_save_recovery.py",
+        "line": 529,
+        "class": "UnreadableResultHistory",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_UnreadableKeyConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_cleanup_query_commit_recovery.py",
+        "line": 38,
+        "class": "_CommitFaultConnection",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self._connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_cleanup_query_local_consumption.py",
+        "line": 47,
+        "class": "_CommitFault",
+        "methods": [
+          "__init__",
+          "execute",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_output_family.py",
+        "line": 164,
+        "class": "FamilyConnection",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_product_competition.py",
+        "line": 229,
+        "class": "_BatchReads",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "super()"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_read_discovery.py",
+        "line": 29,
+        "class": "_BoundedConnection",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_read_discovery.py",
+        "line": 358,
+        "class": "Connection",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "owned.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "narrow_aggregate_query_probe"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_read_recovery_queries.py",
+        "line": 19,
+        "class": "_RecoveryConnection",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_read_rejections.py",
+        "line": 182,
+        "class": "_RestrictionConnection",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self",
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_saved_output_references.py",
+        "line": 203,
+        "class": "MissingReference",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_saved_output_references.py",
+        "line": 224,
+        "class": "BatchedRead",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_selection_lookup.py",
+        "line": 26,
+        "class": "LookupConnection",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_selection_reuse.py",
+        "line": 141,
+        "class": "LostReceipt",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_selection_reuse_boundaries.py",
+        "line": 201,
+        "class": "_ReadProbe",
+        "methods": [
+          "__init__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [
+          "_FaultConnection"
+        ],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "inherited_correct_interface"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "line": 425,
+        "class": "LoseCommit",
+        "methods": [
+          "in_transaction",
+          "execute"
+        ],
+        "delegates_to": [
+          "db"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return db.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "line": 556,
+        "class": "LoseCommit",
+        "methods": [
+          "in_transaction",
+          "execute"
+        ],
+        "delegates_to": [
+          "db"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return db.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "line": 630,
+        "class": "Fault",
+        "methods": [
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "db"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(db, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "line": 681,
+        "class": "Measured",
+        "methods": [
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "db"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(db, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+        "line": 147,
+        "class": "Connection",
+        "methods": [
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "owned.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(owned.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_segment_file_proofs.py",
+        "line": 245,
+        "class": "MeasuredConnection",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_segment_file_proofs.py",
+        "line": 270,
+        "class": "BrokenConnection",
+        "methods": [
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "owned.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(owned.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_segment_scan_pairing.py",
+        "line": 211,
+        "class": "_PairCommitFault",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.real"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.real, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+        "line": 104,
+        "class": "ConnectionProbe",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.db"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.db, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+        "line": 470,
+        "class": "MeasuredConnection",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "self.db"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.db, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_software_recovery_upgrade.py",
+        "line": 100,
+        "class": "Connection",
+        "methods": [
+          "__init__",
+          "__getattr__",
+          "execute",
+          "commit"
+        ],
+        "delegates_to": [
+          "self.actual"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.actual, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_transactions.py",
+        "line": 245,
+        "class": "FailingConnection",
+        "methods": [
+          "__init__",
+          "in_transaction",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return self._connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_transactions.py",
+        "line": 262,
+        "class": "RecordingFailureConnection",
+        "methods": [
+          "__init__",
+          "in_transaction",
+          "execute"
+        ],
+        "delegates_to": [
+          "self._connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self) -> bool:\n    return self._connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_ack_sync.py",
+        "line": 390,
+        "class": "LostCommitResponse",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+        "line": 430,
+        "class": "LostCommitResponse",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+        "line": 309,
+        "class": "OrderedConnection",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+        "line": 206,
+        "class": "LostReceipt",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+        "line": 149,
+        "class": "FailingRead",
+        "methods": [
+          "execute",
+          "in_transaction"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+        "line": 175,
+        "class": "LostReceipt",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+        "line": 395,
+        "class": "LostCommitResponse",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/scheduling/test_resources.py",
+        "line": 398,
+        "class": "Connection",
+        "methods": [
+          "__getattr__",
+          "execute"
+        ],
+        "delegates_to": [
+          "connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/scheduling/test_window_expiration.py",
+        "line": 225,
+        "class": "FaultConnection",
+        "methods": [
+          "in_transaction",
+          "execute"
+        ],
+        "delegates_to": [
+          "owned.connection"
+        ],
+        "bases": [],
+        "in_transaction": "@property\ndef in_transaction(self):\n    return owned.connection.in_transaction",
+        "getattr": null,
+        "classification": "existing_exact_property"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_lock_error_classification.py",
+        "line": 87,
+        "class": "_ConnectionProxy",
+        "methods": [
+          "__init__",
+          "execute",
+          "close",
+          "__getattr__"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": "def __getattr__(self, name):\n    return getattr(self.connection, name)",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "line": 196,
+        "class": "BeginObserver",
+        "methods": [
+          "__init__",
+          "execute",
+          "close"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "line": 302,
+        "class": "LostCommitResponse",
+        "methods": [
+          "__init__",
+          "execute",
+          "close"
+        ],
+        "delegates_to": [
+          "self.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "line": 421,
+        "class": "EndTransactionFailure",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [
+          "owned.connection"
+        ],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "fixed_transaction_proxy"
+      },
+      {
+        "path": "apps/camctl/tests/unit/host_files/test_media.py",
+        "line": 43,
+        "class": "FakeMedia",
+        "methods": [
+          "__init__",
+          "execute",
+          "observe",
+          "hash_target",
+          "sync_target"
+        ],
+        "delegates_to": [],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "non_sqlite_unit_double"
+      },
+      {
+        "path": "apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py",
+        "line": 117,
+        "class": "Connection",
+        "methods": [
+          "execute"
+        ],
+        "delegates_to": [],
+        "bases": [],
+        "in_transaction": null,
+        "getattr": null,
+        "classification": "non_sqlite_unit_double"
+      }
+    ],
+    "additional_close_observers": [
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_emergency_session_exit.py",
+        "class": "ConnectionCloseSpy",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_session_lock_errors.py",
+        "class": "TrackedConnection",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_startup_log_sweep.py",
+        "class": "ConnectionCloseSpy",
+        "classification": "existing_getattr_delegation"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_local_work_settlement.py",
+        "class": "Connection",
+        "classification": "existing_getattr_delegation"
+      }
+    ],
+    "additional_base": {
+      "path": "apps/camctl/tests/integration/operations/test_result_reuse.py",
+      "class": "_FaultConnection",
+      "classification": "existing_exact_property"
+    },
+    "embedded_sql_probe": {
+      "path": "apps/camctl/tests/integration/bootstrap/test_directory_switch_history.py",
+      "string": "_INTERRUPTED_INIT",
+      "class": "InterruptedConnection",
+      "classification": "narrow_sql_process_exit_injection",
+      "actual_call_path": "initialize_state → _verify_existing → _attempt_directory_switch → directory_switch.switch_directory_binding；手工BEGIN/查询/UPDATE/COMMIT；COMMIT前或真实COMMIT后直接退出79，不进入commit_operation/page_read_scope。",
+      "baseline_evidence": "before-bootstrap-failures.json：2 passed，进程7.809秒，退出0。"
+    },
+    "narrow_aggregate_probe": {
+      "path": "apps/camctl/tests/integration/outputs/test_read_discovery.py",
+      "test": "test_idle_deadline_returns_only_nearest_pending_metadata",
+      "actual_call_path": "session.service._pending_deadline_seconds仅通过execute执行SELECT 1及SELECT MIN聚合，读取fetchone并close，不进入事务内核、页缓存或row_facts。"
+    },
+    "root_tests_connection_proxies": [],
+    "no_additional_regression_found": true
+  },
+  "diff_verification": {
+    "base_commit": "2acc661103638de99620ca558e66679e136810f1",
+    "changed_files": [
+      "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+      "apps/camctl/tests/integration/reporting/test_ack_sync.py",
+      "apps/camctl/tests/integration/reporting/test_freeze.py",
+      "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+      "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+      "apps/camctl/tests/integration/reporting/test_publish.py",
+      "apps/camctl/tests/integration/session/test_submit_boundary.py"
+    ],
+    "added_properties": [
+      {
+        "path": "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+        "class_scope": "test_unknown_commit_is_checked_by_original_key_before_retry.LostCommitResponse",
+        "line": 126,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_ack_sync.py",
+        "class_scope": "test_unknown_commit_preserves_atomic_sync_result.LostCommitResponse",
+        "line": 392,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+        "class_scope": "test_unknown_freeze_commit_is_resolved_by_original_operation_key.LostCommitResponse",
+        "line": 436,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+        "class_scope": "test_concurrent_input_and_ack_are_read_at_one_complete_boundary.execute.OrderedConnection",
+        "line": 311,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+        "class_scope": "test_unknown_commit_is_resolved_with_same_freeze_key.LostReceipt",
+        "line": 208,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+        "class_scope": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key.LostReceipt",
+        "line": 177,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+        "class_scope": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact.LostCommitResponse",
+        "line": 397,
+        "delegates_to": "connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "class_scope": "test_close_transaction_failure_keeps_released_admission_closed.EndTransactionFailure",
+        "line": 431,
+        "delegates_to": "owned.connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "class_scope": "test_submit_unknown_commit_does_not_return_handoff_success.LostCommitResponse",
+        "line": 311,
+        "delegates_to": "self.connection.in_transaction"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "class_scope": "BeginObserver",
+        "line": 204,
+        "delegates_to": "self.connection.in_transaction"
+      }
+    ],
+    "property_count": 10,
+    "all_existing_code_and_assertions_unchanged": true,
+    "production_files_unchanged": true
+  },
+  "patch_sha256": "8d5725f687a655b9bf5ae1d96400ea5f2ed8371b2a65c44e0925119118dafada",
+  "source_sha256": {
+    "apps/camctl/tests/integration/acceptance/test_atomicity.py": {
+      "before": "1df6d128b74ff50aaf26f08e2cfd5645197f785f052f5c114ec081e3222e6cfa",
+      "after": "d3b3d17fb7a16b2ade993edbf0f10a97d4e6a930f66c5fd138766a96c93c7a49"
+    },
+    "apps/camctl/tests/integration/reporting/test_ack_sync.py": {
+      "before": "4962f543b42e3ffc584ac5371ca89cf5a17893068f2faeafb36d385337dd5459",
+      "after": "8ac2dc91113ed0c62edff1c3e31104495b5fca6c6f2f789a18801c51f07e9608"
+    },
+    "apps/camctl/tests/integration/reporting/test_freeze.py": {
+      "before": "4e99621525c1977041e61c94f378c00637c90ce3e66cda20f6fda67243bd5a36",
+      "after": "c2fac2d0e0a568f90519bc47e9512c84c2119f73d9ffb498b3d5931030bc8854"
+    },
+    "apps/camctl/tests/integration/reporting/test_freeze_reuse.py": {
+      "before": "6b440691da7f85c063ba6899bd30a629864635d4653f115b41c2c0676ac201e3",
+      "after": "91aabf05b0414b02624f080cb5b205d32eb4391439d51c5cb402826d7c86743b"
+    },
+    "apps/camctl/tests/integration/reporting/test_management_reuse.py": {
+      "before": "6381400c04eac0d80d7332ee2005b126a937e541e37635096136fff1d8819590",
+      "after": "e9c6097de0b93c4a5d2d54ce53f2e501b319175135cd43cc23c7aed1a47701e2"
+    },
+    "apps/camctl/tests/integration/reporting/test_publish.py": {
+      "before": "35ebb560e7de8043e6ae4c1a5e15a4dd2bde5fc57625a55edc5177bcebffe523",
+      "after": "0fc8341db18b4d94207c36ddee4ecb98ea62dbb9060c92fe31b1c2db82deff16"
+    },
+    "apps/camctl/tests/integration/session/test_submit_boundary.py": {
+      "before": "c727966193c1ce4873e35945981486c2656779f9ece676d1d013c9915fb67081",
+      "after": "98c545e391a259f98b849ccd2e7c9732b69467423d0099403dbcfe4ea5335627"
+    }
+  },
+  "runs": {
+    "before-reporting-failures": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result",
+          "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary",
+          "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key",
+          "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key",
+          "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key",
+          "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/before-reporting-failures",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/before-reporting-failures.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:43:29.741641+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 330102,
+        "exit_code": 1,
+        "elapsed_seconds": 4.66312040000048,
+        "end_utc": "2026-10-24T22:43:35.495018+00:00"
+      },
+      "exec_session_id": 33299,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "20",
+          "skipped": "0",
+          "tests": "20",
+          "time": "4.234",
+          "timestamp": "2026-10-25T06:43:29.930387+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "before-acceptance-failures": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/before-acceptance-failures",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/before-acceptance-failures.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:43:59.419967+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 331211,
+        "exit_code": 1,
+        "elapsed_seconds": 1.0837982349985396,
+        "end_utc": "2026-10-24T22:44:00.506164+00:00"
+      },
+      "exec_session_id": null,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "2",
+          "skipped": "0",
+          "tests": "2",
+          "time": "0.677",
+          "timestamp": "2026-10-25T06:43:59.655970+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "before-session-failures": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+          "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+          "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success",
+          "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/before-session-failures",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/before-session-failures.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:44:14.185124+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 331916,
+        "exit_code": 1,
+        "elapsed_seconds": 4.137036429005093,
+        "end_utc": "2026-10-24T22:44:18.326212+00:00"
+      },
+      "exec_session_id": 70336,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "6",
+          "skipped": "0",
+          "tests": "6",
+          "time": "3.386",
+          "timestamp": "2026-10-25T06:44:14.485693+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "before-bootstrap-failures": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_directory_switch_history.py::test_process_exit_preserves_whole_binding_and_business",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/before-bootstrap-failures",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/before-bootstrap-failures.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:44:45.044818+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 333247,
+        "exit_code": 0,
+        "elapsed_seconds": 7.809412082002382,
+        "end_utc": "2026-10-24T22:44:52.855906+00:00"
+      },
+      "exec_session_id": 14656,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "2",
+          "time": "6.856",
+          "timestamp": "2026-10-25T06:44:45.349192+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "after-reporting": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/reporting",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/after-reporting",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/after-reporting.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:45:54.593152+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 335976,
+        "exit_code": 0,
+        "elapsed_seconds": 115.13709899300011,
+        "end_utc": "2026-10-24T22:47:53.324816+00:00"
+      },
+      "exec_session_id": 31666,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "446",
+          "time": "114.394",
+          "timestamp": "2026-10-25T06:45:54.886874+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "after-acceptance-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/after-acceptance-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/after-acceptance-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:47:59.799244+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 340814,
+        "exit_code": 0,
+        "elapsed_seconds": 2.9099350340038654,
+        "end_utc": "2026-10-24T22:48:02.713476+00:00"
+      },
+      "exec_session_id": 63036,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "12",
+          "time": "2.381",
+          "timestamp": "2026-10-25T06:48:00.040767+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    },
+    "after-session-file": {
+      "execution": {
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/session/test_submit_boundary.py",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes/after-session-file",
+          "--junitxml",
+          "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/after-session-file.xml"
+        ],
+        "cwd": "/tmp/camctl-itopt-connection-fakes",
+        "python": "3.11.17",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "sqlite": "3.53.1",
+        "start_utc": "2026-10-24T22:48:29.407123+00:00",
+        "head": "2acc661103638de99620ca558e66679e136810f1",
+        "env": {
+          "PYTHONPATH": "/tmp/camctl-itopt-connection-fakes/apps/camctl/src",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/camctl-itopt-connection-fakes/.local/tmp/itopt-connection-fakes"
+        },
+        "pid": 342229,
+        "exit_code": 0,
+        "elapsed_seconds": 6.920250883005792,
+        "end_utc": "2026-10-24T22:48:36.331069+00:00"
+      },
+      "exec_session_id": 18526,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "35",
+          "time": "6.168",
+          "timestamp": "2026-10-25T06:48:29.643995+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ]
+    }
+  },
+  "recovered_partitions": [
+    {
+      "classname": "tests.integration.reporting.test_ack_sync",
+      "node": "test_unknown_commit_preserves_atomic_sync_result[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_ack_sync",
+      "node": "test_unknown_commit_preserves_atomic_sync_result[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze",
+      "node": "test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze",
+      "node": "test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze",
+      "node": "test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze",
+      "node": "test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze_reuse",
+      "node": "test_unknown_commit_is_resolved_with_same_freeze_key[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_freeze_reuse",
+      "node": "test_unknown_commit_is_resolved_with_same_freeze_key[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_management_reuse",
+      "node": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_management_reuse",
+      "node": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_management_reuse",
+      "node": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_management_reuse",
+      "node": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.reporting.test_publish",
+      "node": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-reporting"
+    },
+    {
+      "classname": "tests.integration.acceptance.test_atomicity",
+      "node": "test_unknown_commit_is_checked_by_original_key_before_retry[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-acceptance-file"
+    },
+    {
+      "classname": "tests.integration.acceptance.test_atomicity",
+      "node": "test_unknown_commit_is_checked_by_original_key_before_retry[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-acceptance-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_submit_before_close_keeps_acceptor_responsible",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_close_before_submit_requests_later_run",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_submit_unknown_commit_does_not_return_handoff_success[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_submit_unknown_commit_does_not_return_handoff_success[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_close_transaction_failure_keeps_released_admission_closed[False]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    },
+    {
+      "classname": "tests.integration.session.test_submit_boundary",
+      "node": "test_close_transaction_failure_keeps_released_admission_closed[True]",
+      "before": "failed",
+      "after": "passed",
+      "after_scope": "after-session-file"
+    }
+  ],
+  "original_full_reporting_run": {
+    "id": "camctl/reporting",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/reporting",
+    "targets": [
+      "apps/camctl/tests/integration/reporting"
+    ],
+    "estimated_seconds": 103.14239218303919,
+    "status": "failed",
+    "number": 22,
+    "worker": 1,
+    "artifacts": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/artifacts",
+    "cwd": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/source",
+    "started_utc": "2026-10-24T22:37:34.252745+00:00",
+    "command": [
+      "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/source/apps/camctl/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "apps/camctl/tests/integration/reporting",
+      "-q",
+      "--durations=0",
+      "-p",
+      "integration_progress",
+      "--basetemp",
+      "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/tmp/pytest"
+    ],
+    "environment": {
+      "PYTHONPATH": "/tmp/camctl-itopt-full-20261025/control:/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/source/apps/camctl/src",
+      "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-full-20261025/workers/1/project-env",
+      "UV_CACHE_DIR": "/tmp/camctl-itopt-full-20261025/workers/1/uv-cache",
+      "UV_OFFLINE": "1",
+      "TMPDIR": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/tmp"
+    },
+    "preparations": [
+      {
+        "label": "package-resources",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/source/apps/camctl/scripts/sync_resources.py"
+        ],
+        "cwd": "/tmp/camctl-itopt-full-20261025/tasks/022-camctl-reporting/source",
+        "started_utc": "2026-10-24T22:37:34.681520+00:00",
+        "pid": 316880,
+        "exit_code": 0,
+        "finished_utc": "2026-10-24T22:37:34.726618+00:00",
+        "wall_seconds": 0.04509947699989425
+      }
+    ],
+    "preparation": "package-resources",
+    "preparation_pid": 316880,
+    "pid": 316885,
+    "execution_started_utc": "2026-10-24T22:37:34.728579+00:00",
+    "progress": {
+      "status": "finished",
+      "exit_code": 1,
+      "collected": 446,
+      "outcomes": {
+        "passed": 426,
+        "failed": 20
+      },
+      "subchecks": {},
+      "elapsed_seconds": 102.77000646800298,
+      "utc": "2026-10-24T22:39:21.014988+00:00",
+      "pid": 316885
+    },
+    "exit_code": 1,
+    "finished_utc": "2026-10-24T22:39:21.706046+00:00",
+    "wall_seconds": 104.16629973799718,
+    "source_head": "507763857649d894ba9e6ec34c728ddfad9d9354",
+    "observed_result": {
+      "passed": 426,
+      "failed": 20,
+      "pytest_seconds": 102.79
+    }
+  },
+  "root_c_module_observation": {
+    "evidence": "/tmp/camctl-itopt-full-20261025/tasks/012-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+    "observed": "3 failed：首例三个拍摄动作已EXPIRED，后两例等待超时；日志没有in_transaction或连接属性错误。本补丁没有改变根C模块、业务或时序。",
+    "remaining_root_causes": "后两项超时的具体根因尚未在本分支核验；交由对应范围调查。"
+  },
+  "limits": [
+    "修复只增加7个测试文件中的10个属性；生产、容量、row_facts和页缓存均未改变。",
+    "原完整首轮冻结50776385仍继续；本分支没有修改冻结快照或发起第二整轮。",
+    "不同同期负载及带进度诊断的原整轮耗时不用于比较性能。"
+  ],
+  "design_gaps": [],
+  "archive": {
+    "source_receipt": "/tmp/camctl-itopt-connection-fakes/.local/verification/itopt/connection-fakes/summary.json",
+    "source_sha256": "5813ff5046244d8f04a5c91ccd720ff271522744bcaf298db34b1fede6ca1d69",
+    "source_bytes": 73953,
+    "note": "临时路径只作原始执行定位；必要结论、命令和事实已随本回执纳入版本控制。"
+  }
+}

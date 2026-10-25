@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import base64
-from copy import deepcopy
+from contextlib import closing
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -54,7 +55,7 @@ def json_write(path, data):
 
 
 def rows(database, sql, params=()):
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=30) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=30)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(sql, params)]
 
@@ -176,6 +177,7 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
                 for name in (
                     "test_device_file_cleanup_roundtrip.py",
                     "_cleanup_roundtrip_support.py",
+                    "_cleanup_source_snapshot.py",
                     "_cleanup_roundtrip_adb.py",
                     "_cleanup_roundtrip_fault.py",
                     "_osmo_builtin_adb.py",
@@ -196,18 +198,23 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
 
 
 class World:
-    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, osmo=True):
+    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, osmo=True,
+                 prepared=None, case_id=None):
         self.package = package
         self.root = tmp_path / "world"
-        self.deployment = Deployment(self.root, devices=False)
+        self.case_id = case_id or tmp_path.name
+        if prepared is None:
+            self.deployment = Deployment(self.root, devices=False)
+        else:
+            assert self.root == prepared.root
+            assert package is prepared.package and osmo == prepared.with_osmo
+            self.deployment = copy(prepared.deployment)
         self.db = self.deployment.state_db
         self.demo_path = host_demo
         self.monkeypatch = monkeypatch
         self.env = dict(package.env)
         self.tools = self.root / "tools"
-        self.tools.mkdir()
         self.remote = self.root / "remote"
-        (self.remote / "mnt/media_rw/emulated/DCIM").mkdir(parents=True)
         self.clock = self.root / "clock.json"
         self.calls_path = self.root / "adb.jsonl"
         self.manifest = self.root / "manifest.json"
@@ -218,12 +225,20 @@ class World:
         self.host = None
         self.config_extra = ""
         self.with_osmo = osmo
-        self.config_original = self.deployment.config_path.read_text()
-        self.write_config()
+        self.config_original = (self.deployment.config_path.read_text()
+                                if prepared is None else prepared.config_original)
         self.monkeypatch.chdir(self.root)
         self.deployment.run_client_driver = self.client
         self.params = {"type": "osmo360ii_record", "duration_s": 1,
                        "bitrate": "high", "exposure": {"mode": "auto"}}
+        if prepared is not None:
+            self.env = dict(prepared.env)
+            self.clock_cli = self.tools / "clock-cli"
+            self.register_sources()
+            return
+        self.tools.mkdir()
+        (self.remote / "mnt/media_rw/emulated/DCIM").mkdir(parents=True)
+        self.write_config()
         for source in ("_osmo_builtin_clock.py", "_osmo_builtin_clock_entry.py", "_osmo_builtin_adb.py",
                        "_cleanup_roundtrip_adb.py", "_cleanup_roundtrip_fault.py"):
             if (HERE / source).is_file():
@@ -257,7 +272,7 @@ class World:
         self.stop()
         if self.db.exists():
             json_write(self.root / "final-db.json", self.snapshot())
-        archive = ARTIFACTS / (self.root.parent.name + "-" + str(os.getpid()))
+        archive = ARTIFACTS / (self.case_id + "-" + str(os.getpid()))
         shutil.copytree(self.root, archive, dirs_exist_ok=True)
 
     def write_config(self, max_d=3, max_q=3, timeout="10", interval="0", query_timeout="10"):
@@ -321,19 +336,23 @@ max_query_attempts={max_q}
             return
         identities = []
         host_pid = self.host._host_pid
+        # 先固定主程序的子进程集合，后续收场和验收采用同一组身份。
+        os.kill(host_pid, signal.SIGSTOP)
         identities.append(process_identity(host_pid))
+        observed = []
         for path in Path("/proc").glob("[0-9]*/stat"):
             try:
                 item = process_identity(int(path.parent.name))
             except (OSError, ValueError):
                 continue
-            if item["ppid"] == host_pid or item["pgid"] in {row["pgid"] for row in identities if row["ppid"] == host_pid}:
-                identities.append(item)
+            observed.append(item)
+        groups = {item["pgid"] for item in observed if item["ppid"] == host_pid}
+        identities.extend(item for item in observed
+                          if item["ppid"] == host_pid or item["pgid"] in groups)
         log = self.host.log_path.read_bytes() if self.host.log_path.exists() else b""
         (self.root / f"host-{len(list(self.root.glob('host-*.log')))}.log").write_bytes(log)
         self.host.stop()
         self.host = None
-        groups = {item["pid"] for item in identities if item["pid"] == item["pgid"] and item["ppid"] == host_pid}
         def active():
             found = []
             for path in Path("/proc").glob("[0-9]*/stat"):
@@ -378,7 +397,7 @@ max_query_attempts={max_q}
             assert [row["status"] for row in result] == [int(enum_for("actions.status")[expected])] * len(result)
         return result
 
-    def prepare_osmo(self):
+    def prepare_osmo(self, *, start_host=True):
         if not all(shutil.which(tool) for tool in ("ffmpeg", "ffprobe")):
             pytest.skip("R6 媒体准备要求真实 ffmpeg/ffprobe；完整验收尚未完成")
         self.command("ffmpeg", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=10:d=3",
@@ -408,10 +427,10 @@ max_query_attempts={max_q}
         stops = [row for row in calls if row.get("kind") == "stop"]
         assert len(starts) == len(stops) == 1
         directory = next(row for row in calls if row.get("kind") == "directory" and row["started_ns"] > stops[0]["returned_ns"])
-        assert directory["started_ns"] - stops[0]["returned_ns"] >= 30_000_000_000
+        assert directory["started_ns"] - stops[0]["returned_ns"] >= 3_000_000_000
         returns = rows(self.db, "SELECT result_json FROM operation_attempts WHERE result_json IS NOT NULL")
         completions = [json.loads(row["result_json"])["settlement"]["evidence"]["data"].get("file_completion") for row in returns]
-        assert any(value and value["required_wait_ms"] == 30000 and value["completed"] and value["observed_wait_ns"] >= 30_000_000_000 for value in completions)
+        assert any(value and value["required_wait_ms"] == 3000 and value["completed"] and value["observed_wait_ns"] >= 3_000_000_000 for value in completions)
         self.register_sources()
         assert {"osv", "lrf", "repaired"} <= self.sources.keys(), self.snapshot()
         self.probe(self.path("repaired"), 1)
@@ -432,7 +451,8 @@ max_query_attempts={max_q}
         repaired, = rows(self.db, "SELECT * FROM intermediate_files WHERE id=?", (processing["repair_output_file_id"],))
         content = self.path("repaired").read_bytes()
         assert (repaired["size_bytes"], repaired["sha256"]) == (len(content), sha(content))
-        self.start()
+        if start_host:
+            self.start()
 
     def probe(self, path, minimum):
         from decimal import Decimal
@@ -500,7 +520,7 @@ max_query_attempts={max_q}
                 parent = str(PurePosixPath(path).parent)
                 targets.append({"output_id": source["id"], "path": path, "parent": parent,
                                 "scan_root": parent + "/", "operations": ["delete", "query"]})
-        json_write(self.manifest, {"root": str(self.remote.resolve()), "case": self.root.parent.name,
+        json_write(self.manifest, {"root": str(self.remote.resolve()), "case": self.case_id,
             "request_id": request, "targets": targets, "database": str(self.db),
             "fault": fault, "query_unknown": query_unknown, "marker": str(self.marker),
             "fault_output_id": output_id})

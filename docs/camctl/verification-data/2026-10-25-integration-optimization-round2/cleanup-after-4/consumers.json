@@ -1,0 +1,218 @@
+[
+  {
+    "task_directory": "002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "case": "test_cleanup_interrupted_delet0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.07748790599725908,
+    "body_seconds": 22.18360295399907,
+    "consumer_seconds": 22.366458219999913,
+    "final_inventory_digest": "d69c23fdf43fd1b3ed64a3e9753accc23239c840b1febc6a69738bbc270ec0ab"
+  },
+  {
+    "task_directory": "002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "case": "test_cleanup_query_present_or_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.049816117993032094,
+    "body_seconds": 22.130564822997258,
+    "consumer_seconds": 22.281936298997607,
+    "final_inventory_digest": "58cc23e692a879d33b443b42594911a55bc2a739683c48c98533e094c76afaa9"
+  },
+  {
+    "task_directory": "002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "case": "test_cleanup_query_present_or_1",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.037597752998408396,
+    "body_seconds": 21.116337897001358,
+    "consumer_seconds": 21.267439014998672,
+    "final_inventory_digest": "6c17da50d331f42a2102a724cbb1207480d5c91b0b3e8c005392a187114689ab"
+  },
+  {
+    "task_directory": "002-root-test_device_file_cleanup_roundtrip-shard-4",
+    "case": "test_cleanup_query_present_or_2",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+    "baseline_digest": "fb04d869db8518cbfb1a76046be83e368fbcf2b96d4bb55e2356d68a4177f163",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.045540899998741224,
+    "body_seconds": 21.208669304003706,
+    "consumer_seconds": 21.341783581003256,
+    "final_inventory_digest": "f474d12bc7b1084d111608159d9cdeff7b18b9334ba231523437c06b1b0f14b8"
+  },
+  {
+    "task_directory": "003-root-test_device_file_cleanup_roundtrip-shard-2",
+    "case": "test_exact_outputs_and_non_cas0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+    "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.08037176299694693,
+    "body_seconds": 167.82320165599958,
+    "consumer_seconds": 168.02639055599866,
+    "final_inventory_digest": "6222636459a9f4527ba7c61c5fcdaca6a912ab07e8ebcbe3d76fe3a88b8f69aa"
+  },
+  {
+    "task_directory": "003-root-test_device_file_cleanup_roundtrip-shard-2",
+    "case": "test_cleanup_saved_result_and_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+    "baseline_digest": "bfb57e0981ac44ba43d09486ef820d6f989861e5a4d2c5a28bf67a27c2e36d3c",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.04115396899578627,
+    "body_seconds": 17.806658205998247,
+    "consumer_seconds": 17.937618835996545,
+    "final_inventory_digest": "dc959b5dbd3663391708e9188dd035bf68e2bbade017c8ef05cba3bc68025c01"
+  },
+  {
+    "task_directory": "004-root-test_device_file_cleanup_roundtrip-shard-3",
+    "case": "test_cleanup_new_request_for_c0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.09712484100600705,
+    "body_seconds": 36.027238162001595,
+    "consumer_seconds": 36.2398849070014,
+    "final_inventory_digest": "a427783d39d685138fe0d016dd27109ea0cdaa434257f8729edb04a53bfed2b3"
+  },
+  {
+    "task_directory": "004-root-test_device_file_cleanup_roundtrip-shard-3",
+    "case": "test_cleanup_saved_result_and_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.05551703800301766,
+    "body_seconds": 21.189732542996353,
+    "consumer_seconds": 21.352420346003782,
+    "final_inventory_digest": "227976aa854d8fe5835067f1940142d5571e58e60aef47c387aa4fb734a616de"
+  },
+  {
+    "task_directory": "004-root-test_device_file_cleanup_roundtrip-shard-3",
+    "case": "test_cleanup_cancel_inflight_d0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.052224544997443445,
+    "body_seconds": 25.934211484003754,
+    "consumer_seconds": 26.09858465399884,
+    "final_inventory_digest": "c4504d86b512c7da5774fd0a4064aaee0c1a5efa2fe825c6e34807c7d71f2f0f"
+  }
+]

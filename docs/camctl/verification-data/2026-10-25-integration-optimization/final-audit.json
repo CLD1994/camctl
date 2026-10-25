@@ -1,0 +1,2873 @@
+{
+  "status": "finished",
+  "expected": {
+    "expected_total": 10339,
+    "expected_scopes": {
+      "camctl": 9951,
+      "node": 118,
+      "root": 270
+    },
+    "expected_subchecks": 342
+  },
+  "actual_collected_primary_count": 10339,
+  "actual_primary_count": 10339,
+  "actual_complete_primary_count": 10339,
+  "actual_outcomes": {
+    "passed": 10290,
+    "skipped": 5,
+    "failed": 44
+  },
+  "actual_complete_outcomes": {
+    "passed": 10290,
+    "skipped": 5,
+    "failed": 44
+  },
+  "actual_scopes": {
+    "camctl": 9951,
+    "root": 270,
+    "node": 118
+  },
+  "collection_complete": true,
+  "execution_reporting_complete": true,
+  "issues": [],
+  "duplicate_primary_nodes": {},
+  "collected_missing_nodes": [],
+  "collected_extra_nodes": [],
+  "timing": {
+    "runner_wall_seconds": 2820.160148387993,
+    "sum_task_wall_seconds": 11036.69750244003,
+    "pytest_primary_phase_seconds": 10764.81825276924,
+    "pytest_primary_event_seconds": 10764.81825276924,
+    "note": "子检查嵌在主call，不再加时；任务耗时包括其准备；runner_wall_seconds是完整入口的单调耗时。UTC端点跨度另外记录并保留未解释差异。Node时长保留于TAP原日志。",
+    "comparison_boundary": "44项业务失败、节点变换和不同并发负载保留；2820.160s只是本轮实际墙钟，不能称为等价通过的提速结果。",
+    "utc_endpoint_span_seconds": 2836.430527,
+    "utc_span_minus_runner_monotonic_seconds": 16.27037861200688,
+    "clock_boundary": "源码main先读time.monotonic并记录started_utc；最终execute记录finished_utc，再由save计算monotonic差值。名义覆盖同一完整轮，但UTC端点来自datetime.now，runner_wall_seconds来自time.monotonic，两者不是同一时钟读数。",
+    "unresolved_timing_observation": "UTC端点跨度比单调计时大16.270378612秒；现有证据未解释差异原因。保留两项原始数值，不互相替代，也不据此推断并发或环境机制。",
+    "clock_source": "冻结源码scripts/run-integration.py:455（起点）、449/314（终点与耗时）。"
+  },
+  "date_utc": "2026-10-25",
+  "purpose": "冻结48d2ee64完整运行的独立身份、阶段完整性与失败分类审计；不以补测改写原运行结果。",
+  "source": {
+    "head": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+    "status": "",
+    "snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818"
+  },
+  "run": {
+    "raw_output": "/tmp/camctl-itopt-final-20261025",
+    "started_utc": "2026-10-24T23:26:24.815162+00:00",
+    "finished_utc": "2026-10-25T00:13:41.245689+00:00",
+    "exit_code": 1,
+    "jobs": 4,
+    "runner_pid": 389002,
+    "runner_pid_present_after_finish": false,
+    "tasks": 84,
+    "task_outcomes": {
+      "passed": 56,
+      "failed": 28
+    },
+    "environment": {
+      "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+      "version": [
+        3,
+        11
+      ],
+      "sqlite": "3.53.1",
+      "pytest": "9.1.1",
+      "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+      "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+      "node": "v24.22.1",
+      "git": "git version 2.43.0"
+    }
+  },
+  "test_validation_passed": false,
+  "integrity": {
+    "source_manifest_files_checked": 1841,
+    "all_source_manifest_files_match": true,
+    "control_plugin_matches_snapshot": true,
+    "all_finish_and_progress_exit_codes_match_processes": true,
+    "pytest_primary_count": 10221,
+    "pytest_primary_outcomes": {
+      "passed": 10172,
+      "skipped": 5,
+      "failed": 44
+    },
+    "phase_reports": 30660,
+    "phase_counts": {
+      "setup": 10221,
+      "call": 10218,
+      "teardown": 10221
+    },
+    "failed_phase_counts": {
+      "call": 44
+    },
+    "by_scope": {
+      "camctl": {
+        "passed": 9930,
+        "failed": 18,
+        "skipped": 3
+      },
+      "root_pytest": {
+        "passed": 242,
+        "failed": 26,
+        "skipped": 2
+      },
+      "node_tap": {
+        "passed": 118,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "setup_skips_without_call": 3,
+    "source_manifest_digest_matches_record": true
+  },
+  "counting_rules": [
+    "以task.scope/path/cwd和真实源码确定身份：camctl原始tests/integration/...补apps/camctl/；root路径保持，不按同名函数合并。",
+    "每task inventory/cases/phase events完整身份一致；phase只出现一次，outcome和耗时由phase重算并核progress、finish和process退出码。",
+    "分片collection只验证并集互斥，不再计执行；Node按实际TAP顶层叶节点计118，四个文件不当四项。",
+    "SQL subcheck按完整parent nodeid和本parent报告序号单列，不加到主实例或父call耗时。"
+  ],
+  "sql_subchecks": {
+    "expected": 342,
+    "actual": 342,
+    "outcomes": {
+      "passed": 342
+    },
+    "parent_and_ordinal_identities_match_original_csv": true,
+    "parent_counts": [
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_missing_or_malformed_version_is_rejected",
+        "actual_count": 9
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_version_boundaries_use_numeric_comparison_and_exact_backports",
+        "actual_count": 15
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_canceled_cleanup_only_records_actual_delete_error",
+        "actual_count": 7
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_complete_state_matrix",
+        "actual_count": 192
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_directory_binding_requires_three_distinct_absolute_paths",
+        "actual_count": 18
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_expiration_keeps_start_attempts_and_limits_residual_stop",
+        "actual_count": 8
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_metadata_requires_valid_order_and_events",
+        "actual_count": 8
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_history_report_and_snapshot_type_scopes",
+        "actual_count": 10
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_obtain_source_dependency_requires_permanent_delivery",
+        "actual_count": 10
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_output_cleanup_availability_and_error_matrix",
+        "actual_count": 60
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_probe_and_cursor_use_covering_indexes_with_or_without_statistics",
+        "actual_count": 2
+      },
+      {
+        "parent_nodeid": "tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_target_rejects_event_sequence_mismatch_at_commit",
+        "actual_count": 3
+      }
+    ],
+    "comparison_boundary": "原CSV保存parent与序号，不保存context；不宣称旧/新context文本逐字相同。"
+  },
+  "original_38": {
+    "actual_outcomes": {
+      "failed": 28,
+      "passed": 10
+    },
+    "unexecuted": 0,
+    "mapping": [
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 4.221538371995848,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 4.104919429999427,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.9931156870006816,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/capture",
+        "call_seconds": 0.94732458100043,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.4827602709992789,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 1.6893608270038385,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.9279179450022639,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.9806944590018247,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.9122590240003774,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.5152810119980131,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.5508819899987429,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.5494573690011748,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 0.5150229199934984,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "call_seconds": 1.5311941510008182,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/devices",
+        "call_seconds": 0.11384105999604799,
+        "complete": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "camctl",
+        "task": "camctl/devices",
+        "call_seconds": 0.03375826999399578,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_action6_segmented_recovery_roundtrip/shard-1",
+        "call_seconds": 87.19037677899905,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_c_module_roundtrip/shard-1",
+        "call_seconds": 8.787327919002564,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_device_capability_declarations/shard-1",
+        "call_seconds": 6.375446808997367,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_media_roundtrip/shard-1",
+        "call_seconds": 62.7902425650027,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_process_recovery/shard-1",
+        "call_seconds": 6.126927852994413,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-3",
+        "call_seconds": 10.394975208997494,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_session_recovery/shard-3",
+        "call_seconds": 13.763706978999835,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_cancellation_roundtrip",
+        "call_seconds": 11.430436079004721,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_exact_outputs_and_non_cascade",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-2",
+        "call_seconds": 272.87086467899644,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_device_capability_declarations/shard-4",
+        "call_seconds": 5.212687788000039,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_hasselblad_photo_parameters/shard-1",
+        "call_seconds": 8.150651657997514,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+        "call_seconds": 85.66529424000328,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_timelapse_time_parameters/shard-1",
+        "call_seconds": 11.7612436529962,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+        "call_seconds": 75.38095302999864,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_timelapse_time_parameters/shard-2",
+        "call_seconds": 10.166078563001065,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P3]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+        "call_seconds": 79.14931847900152,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+        "call_seconds": 87.11917359200015,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+        "call_seconds": 68.92810699699476,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+        "call_seconds": 70.9020763419976,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[commit_unknown]",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-2",
+        "call_seconds": 62.92471799300256,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_interrupted_delete_absent",
+        "baseline_outcome": "failed",
+        "current_outcome": "passed",
+        "scope": "root",
+        "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+        "call_seconds": 67.86616153400246,
+        "complete": true
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
+        "baseline_outcome": "failed",
+        "current_outcome": "failed",
+        "scope": "root",
+        "task": "root/test_camctl_process_recovery/shard-3",
+        "call_seconds": 4.223858941004437,
+        "complete": true
+      }
+    ],
+    "cleared_classification": {
+      "fixture_result_mode_interface": 9,
+      "action6_reached_copy_progress": 1
+    },
+    "remaining_failure_boundary": "28项同身份仍失败；同身份不表示具体原因不变，实际末端见current_failures.cases。"
+  },
+  "current_failures": {
+    "count": 44,
+    "original_failed_same_identity": 28,
+    "previously_passed_same_identity": 16,
+    "not_in_baseline": 0,
+    "new_failed_nodeids": [
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+      "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+      "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+      "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+      "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+      "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+      "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+      "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+      "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+      "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+      "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+      "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report"
+    ],
+    "cases": [
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 4.221538371995848,
+        "total_phase_seconds": 4.2257051239867,
+        "failure_point": {
+          "class": "版本号断言不符",
+          "traceback_end": "assert format_version == 2; observed 3",
+          "location": "apps/camctl/tests/integration/bootstrap/test_distribution.py:973"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 4.104919429999427,
+        "total_phase_seconds": 4.107091893994948,
+        "failure_point": {
+          "class": "版本号断言不符",
+          "traceback_end": "assert format_version == 2; observed 3",
+          "location": "apps/camctl/tests/integration/bootstrap/test_distribution.py:973"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 6.024622889002785,
+        "total_phase_seconds": 6.0264275560111855,
+        "failure_point": {
+          "class": "capture动作终态不符",
+          "traceback_end": "expected actions status [(3,)]; observed [(4,)]",
+          "location": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py:76"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 7.667908522002108,
+        "total_phase_seconds": 8.34973782900488,
+        "failure_point": {
+          "class": "capture动作终态不符",
+          "traceback_end": "expected actions status [(3,)]; observed [(4,)]",
+          "location": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py:76"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.5150229199934984,
+        "total_phase_seconds": 0.6025214539913577,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.5152810119980131,
+        "total_phase_seconds": 0.5390297299964004,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:528"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.4827602709992789,
+        "total_phase_seconds": 0.5172660419993917,
+        "failure_point": {
+          "class": "恢复结果状态不符",
+          "traceback_end": "expected status 4 and adb_foreground_recovery; observed status 3",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:521"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.5508819899987429,
+        "total_phase_seconds": 0.6116554570035078,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 1.5311941510008182,
+        "total_phase_seconds": 1.7020817430093302,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.5494573690011748,
+        "total_phase_seconds": 0.6562999750094605,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 1.6893608270038385,
+        "total_phase_seconds": 1.72049514700484,
+        "failure_point": {
+          "class": "operation_attempt状态不符",
+          "traceback_end": "expected status 4; observed 3",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:152"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.9279179450022639,
+        "total_phase_seconds": 0.9774751660006586,
+        "failure_point": {
+          "class": "device_files行不符",
+          "traceback_end": "expected identity/size (..., 50); observed size_bytes None",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:274"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.9806944590018247,
+        "total_phase_seconds": 1.1221645190016716,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.9122590240003774,
+        "total_phase_seconds": 1.0049948879968724,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:345"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+        "scope": "camctl",
+        "task": "camctl/bootstrap",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.9931156870006816,
+        "total_phase_seconds": 1.0211904349998804,
+        "failure_point": {
+          "class": "action状态不符",
+          "traceback_end": "expected status 3; observed 4",
+          "location": "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py:245"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy",
+        "scope": "camctl",
+        "task": "camctl/capture",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.94732458100043,
+        "total_phase_seconds": 0.9535498100012774,
+        "failure_point": {
+          "class": "恢复读取偏移不符",
+          "traceback_end": "expected [0]; observed [0, 0]",
+          "location": "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py:108"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/004-camctl-capture/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+        "scope": "camctl",
+        "task": "camctl/devices",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.11384105999604799,
+        "total_phase_seconds": 0.14207941699714866,
+        "failure_point": {
+          "class": "初始化读取元数据时报异常",
+          "traceback_end": "AttributeError: 'NoneType' object has no attribute 'format_version'",
+          "location": "apps/camctl/src/camctl/bootstrap/lifecycle.py:615"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/044-camctl-devices/artifacts/output.log"
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]",
+        "scope": "camctl",
+        "task": "camctl/devices",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 0.03375826999399578,
+        "total_phase_seconds": 0.06147423399670515,
+        "failure_point": {
+          "class": "初始化读取元数据时报异常",
+          "traceback_end": "AttributeError: 'NoneType' object has no attribute 'format_version'",
+          "location": "apps/camctl/src/camctl/bootstrap/lifecycle.py:615"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/044-camctl-devices/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+        "scope": "root",
+        "task": "root/test_action6_segmented_recovery_roundtrip/shard-3",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 55.86891780699807,
+        "total_phase_seconds": 55.871613164003065,
+        "failure_point": {
+          "class": "等待时发现明确run错误",
+          "traceback_end": "E                   AssertionError: 全部绑定取回终态后，Action6 检查副本仍未完成清理: 本次 host 的 run 调用 1 已失败：\nE                   call=1 command=run pid=466076 stream=exit_observed data=exit record retained; group settlement pending\nE                   call=1 command=run pid=466076 stream=group_reaped data=all execution stopped; child record reaped\nE                   call=1 command=run pid=466076 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0\nE                   call=1 stdout={\"kind\" : \"error\", \"body\" : {\"reason\" : \"state_db_error\", \"details\" : {\"error\" : \"原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属\"}}}",
+          "location": "/tmp/camctl-itopt-final-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/source/tests/integration/_wsl_host_demo.py:94",
+          "exception_line": "E                   AssertionError: 全部绑定取回终态后，Action6 检查副本仍未完成清理: 本次 host 的 run 调用 1 已失败："
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+        "scope": "root",
+        "task": "root/test_action6_segmented_recovery_roundtrip/shard-4",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 237.86132819199702,
+        "total_phase_seconds": 237.86618649100274,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: 全部绑定取回终态后，Action6 检查副本仍未完成清理",
+          "location": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/source/tests/integration/_wsl_host_demo.py:96",
+          "exception_line": "E           AssertionError: 等待超时: 全部绑定取回终态后，Action6 检查副本仍未完成清理"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+        "scope": "root",
+        "task": "root/test_camctl_c_module_roundtrip/shard-3",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 10.41573690399673,
+        "total_phase_seconds": 28.396905781992245,
+        "failure_point": {
+          "class": "当前请求动作进入不相容终态",
+          "traceback_end": "E                   AssertionError: 拍摄与自动取回未全部成功: 请求 6409151102845835801 的动作已进入不相容终态：[(1, 'shoot', 'EXPIRED', None, None)]\nE                   本次 host 日志：\nE                   call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0\nE                   call=2 submit accepted path=/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/tmp/pytest/test_auto_preview_roundtrip_vi0/client-plan-1.json\nE                   call=1 attempt=1 command=run pid=489472 spawned execution=unknown",
+          "location": "tests/integration/_wsl_host_demo.py:94",
+          "exception_line": "E                   AssertionError: 拍摄与自动取回未全部成功: 请求 6409151102845835801 的动作已进入不相容终态：[(1, 'shoot', 'EXPIRED', None, None)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "scope": "root",
+        "task": "root/test_camctl_c_module_roundtrip/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 8.787327919002564,
+        "total_phase_seconds": 21.762438669000403,
+        "failure_point": {
+          "class": "当前请求动作进入不相容终态",
+          "traceback_end": "E                   AssertionError: 六动作未全部成功: 请求 3916433605583334935 的动作已进入不相容终态：[(2, '拍录', 'EXPIRED', None, None), (3, '延时', 'EXPIRED', None, None)]\nE                   本次 host 日志：\nE                   call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0\nE                   call=2 submit accepted path=/tmp/camctl-itopt-final-20261025/tasks/016-root-test_camctl_c_module_roundtrip-shard-1/tmp/pytest/test_capture_obtain_cleanup_ro0/client-plan-1.json\nE                   call=1 attempt=1 command=run pid=454356 spawned execution=unknown",
+          "location": "tests/integration/_wsl_host_demo.py:94",
+          "exception_line": "E                   AssertionError: 六动作未全部成功: 请求 3916433605583334935 的动作已进入不相容终态：[(2, '拍录', 'EXPIRED', None, None), (3, '延时', 'EXPIRED', None, None)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/016-root-test_camctl_c_module_roundtrip-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+        "scope": "root",
+        "task": "root/test_camctl_cancellation_roundtrip",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 11.430436079004721,
+        "total_phase_seconds": 11.431795014010277,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,)] == [(3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_cancellation_roundtrip.py:113",
+          "exception_line": "E       assert [(5,)] == [(3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/058-root-test_camctl_cancellation_roundtrip/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+        "scope": "root",
+        "task": "root/test_camctl_capture_roundtrip",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 31.659740736002277,
+        "total_phase_seconds": 31.662499397003558,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT 1 FROM history_events WHERE event_type = 15 AND json_extract(body_json, '$.reason') = 1\nE           assert 38148.685175341 < 38148.684183863\nE            +  where 38148.685175341 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_capture_roundtrip.py:46",
+          "exception_line": "E           AssertionError: 等待超时: SELECT 1 FROM history_events WHERE event_type = 15 AND json_extract(body_json, '$.reason') = 1"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/045-root-test_camctl_capture_roundtrip/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+        "scope": "root",
+        "task": "root/test_camctl_media_roundtrip/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 62.7902425650027,
+        "total_phase_seconds": 62.79257839899947,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT started_at FROM device_activities WHERE started_at IS NOT NULL\nE           assert 38119.018498199 < 38119.017612761\nE            +  where 38119.018498199 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_media_roundtrip.py:70",
+          "exception_line": "E           AssertionError: 等待超时: SELECT started_at FROM device_activities WHERE started_at IS NOT NULL"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+        "scope": "root",
+        "task": "root/test_camctl_media_roundtrip/shard-2",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 62.40319251299661,
+        "total_phase_seconds": 62.40513998700044,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT started_at FROM device_activities WHERE started_at IS NOT NULL\nE           assert 38125.160588624 < 38125.158281379\nE            +  where 38125.160588624 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_media_roundtrip.py:70",
+          "exception_line": "E           AssertionError: 等待超时: SELECT started_at FROM device_activities WHERE started_at IS NOT NULL"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/041-root-test_camctl_media_roundtrip-shard-2/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-3",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 11.794615000995691,
+        "total_phase_seconds": 11.796302495989949,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (4,)] == [(3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_output_roundtrip.py:281",
+          "exception_line": "E       assert [(5,), (4,)] == [(3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-1",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 22.641364215000067,
+        "total_phase_seconds": 22.644253776998085,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (5,), (4,)] == [(3,), (3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_output_roundtrip.py:784",
+          "exception_line": "E       assert [(5,), (5,), (4,)] == [(3,), (3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/033-root-test_camctl_output_roundtrip-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-2",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 13.879555727995466,
+        "total_phase_seconds": 13.882294281000213,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (4,)] == [(3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_output_roundtrip.py:142",
+          "exception_line": "E       assert [(5,), (4,)] == [(3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/035-root-test_camctl_output_roundtrip-shard-2/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-4",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 10.804979303000437,
+        "total_phase_seconds": 10.806191379997472,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (4,), (4,)] == [(3,), (3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_output_roundtrip.py:672",
+          "exception_line": "E       assert [(5,), (4,), (4,)] == [(3,), (3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/038-root-test_camctl_output_roundtrip-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+        "scope": "root",
+        "task": "root/test_camctl_output_roundtrip/shard-3",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 10.394975208997494,
+        "total_phase_seconds": 10.396304315996531,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (5,), (5,), (4,), (4,)] == [(3,), (3,), (3,), (3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_output_roundtrip.py:585",
+          "exception_line": "E       assert [(5,), (5,), (5,), (4,), (4,)] == [(3,), (3,), (3,), (3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+        "scope": "root",
+        "task": "root/test_camctl_process_recovery/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 6.126927852994413,
+        "total_phase_seconds": 33.52029697999387,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       StopIteration",
+          "location": "见原output.log",
+          "exception_line": "E       StopIteration"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
+        "scope": "root",
+        "task": "root/test_camctl_process_recovery/shard-3",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 4.223858941004437,
+        "total_phase_seconds": 23.808784549008124,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       StopIteration",
+          "location": "见原output.log",
+          "exception_line": "E       StopIteration"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/056-root-test_camctl_process_recovery-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+        "scope": "root",
+        "task": "root/test_camctl_session_recovery/shard-3",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 13.763706978999835,
+        "total_phase_seconds": 13.765311305003706,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E       assert [(5,), (5,)] == [(3,), (3,)]\nE         \nE         At index 0 diff: (5,) != (3,)\nE         Use -v to get more diff",
+          "location": "tests/integration/test_camctl_session_recovery.py:349",
+          "exception_line": "E       assert [(5,), (5,)] == [(3,), (3,)]"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "scope": "root",
+        "task": "root/test_camctl_session_recovery/shard-1",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 44.24227614499978,
+        "total_phase_seconds": 44.2480405959941,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT 1 FROM operation_runs r JOIN actions a ON a.id = r.action_id WHERE a.name = 'timelapse' AND r.responsibility_key = 'start/' || a.id AND r.status IN (3, 4)\nE           assert 38171.037018264 < 38171.035955222\nE            +  where 38171.037018264 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_session_recovery.py:65",
+          "exception_line": "E           AssertionError: 等待超时: SELECT 1 FROM operation_runs r JOIN actions a ON a.id = r.action_id WHERE a.name = 'timelapse' AND r.responsibility_key = 'start/' || a.id AND r.status IN (3, 4)"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/047-root-test_camctl_session_recovery-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "scope": "root",
+        "task": "root/test_camctl_session_recovery/shard-4",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 42.01906334800151,
+        "total_phase_seconds": 42.0214588739982,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT id FROM actions WHERE name = ? AND status = ?\nE           assert 38065.573151817 < 38065.570999093\nE            +  where 38065.573151817 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_session_recovery.py:65",
+          "exception_line": "E           AssertionError: 等待超时: SELECT id FROM actions WHERE name = ? AND status = ?"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "scope": "root",
+        "task": "root/test_camctl_session_recovery/shard-2",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 42.86753337599657,
+        "total_phase_seconds": 42.874180562997935,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: SELECT 1 FROM operation_attempts a JOIN operation_runs r ON a.run_id = r.id JOIN actions t ON t.id = r.action_id WHERE t.name = 'timelapse' AND a.status = 1\nE           assert 38183.992802926 < 38183.991410687\nE            +  where 38183.992802926 = <built-in function monotonic>()\nE            +    where <built-in function monotonic> = time.monotonic",
+          "location": "tests/integration/test_camctl_session_recovery.py:65",
+          "exception_line": "E           AssertionError: 等待超时: SELECT 1 FROM operation_attempts a JOIN operation_runs r ON a.run_id = r.id JOIN actions t ON t.id = r.action_id WHERE t.name = 'timelapse' AND a.status = 1"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+        "scope": "root",
+        "task": "root/test_device_capability_declarations/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 6.375446808997367,
+        "total_phase_seconds": 15.954065457997785,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       AssertionError: 命令失败 [PosixPath('/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/source/apps/client/node_modules/.bin/vitest'), 'run', 'tests/integration/browser-camera-parameters.test.ts', 'tests/integration/browser-editing.test.ts', '-t', '能力源']:\nE         \nE          RUN  v5.0.5 /tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/source/apps/client\nE         \nE          ❯ tests/integration/browser-editing.test.ts (69 tests | 69 skipped) 55ms",
+          "location": "tests/integration/test_device_capability_declarations.py:67",
+          "exception_line": "E       AssertionError: 命令失败 [PosixPath('/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/source/apps/client/node_modules/.bin/vitest'), 'run', 'tests/integration/browser-camera-parameters.test.ts', 'tests/integration/browser-editing.test.ts', '-t', '能力源']:"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+        "scope": "root",
+        "task": "root/test_device_capability_declarations/shard-4",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 5.212687788000039,
+        "total_phase_seconds": 10.094084675991326,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       AssertionError: 命令失败 ['node', '--import', PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/apps/client/node_modules/tsx/dist/loader.mjs'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/tests/integration/device_capability_browser.ts'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/browser-store'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/current.json'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/changed.json'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/visibility.json')]:\nE         \nE         browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell\nE         ╔════════════════════════════════════════════════════════════╗\nE         ║ Looks like Playwright was just installed or updated.       ║",
+          "location": "tests/integration/test_device_capability_declarations.py:67",
+          "exception_line": "E       AssertionError: 命令失败 ['node', '--import', PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/apps/client/node_modules/tsx/dist/loader.mjs'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/tests/integration/device_capability_browser.ts'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/browser-store'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/current.json'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/changed.json'), PosixPath('/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest/test_installed_sources_control0/visibility.json')]:"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+        "scope": "root",
+        "task": "root/test_hasselblad_photo_parameters/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 8.150651657997514,
+        "total_phase_seconds": 10.647630871986621,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       AssertionError: Node/Chromium 参数接缝失败:\nE         \nE         browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell\nE         ╔════════════════════════════════════════════════════════════╗\nE         ║ Looks like Playwright was just installed or updated.       ║",
+          "location": "tests/integration/test_hasselblad_photo_parameters.py:326",
+          "exception_line": "E       AssertionError: Node/Chromium 参数接缝失败:"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "scope": "root",
+        "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 185.4546335510022,
+        "total_phase_seconds": 185.45685159900313,
+        "failure_point": {
+          "class": "等待成功条件超时",
+          "traceback_end": "E           AssertionError: 等待超时: jpeg-device-0.000333/capture 的 succeeded 报告; /tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3",
+          "location": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/source/tests/integration/_wsl_host_demo.py:96",
+          "exception_line": "E           AssertionError: 等待超时: jpeg-device-0.000333/capture 的 succeeded 报告; /tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+        "scope": "root",
+        "task": "root/test_timelapse_time_parameters/shard-1",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 11.7612436529962,
+        "total_phase_seconds": 11.765653455993743,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       AssertionError: 客户端驱动失败: browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell\nE       ╔════════════════════════════════════════════════════════════╗\nE       ║ Looks like Playwright was just installed or updated.       ║\nE       ║ Please run the following command to download new browsers: ║\nE       ║                                                            ║",
+          "location": "tests/integration/camctl_fixtures.py:195",
+          "exception_line": "E       AssertionError: 客户端驱动失败: browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+        "scope": "root",
+        "task": "root/test_timelapse_time_parameters/shard-2",
+        "baseline_status": "failed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 10.166078563001065,
+        "total_phase_seconds": 10.17325013300433,
+        "failure_point": {
+          "class": "执行异常或失败断言，具体内容见exception_line",
+          "traceback_end": "E       AssertionError: 客户端驱动失败: browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell\nE       ╔════════════════════════════════════════════════════════════╗\nE       ║ Looks like Playwright was just installed or updated.       ║\nE       ║ Please run the following command to download new browsers: ║\nE       ║                                                            ║",
+          "location": "tests/integration/camctl_fixtures.py:195",
+          "exception_line": "E       AssertionError: 客户端驱动失败: browserType.launch: Executable doesn't exist at /home/cld/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+        "scope": "root",
+        "task": "root/test_video_size_estimate",
+        "baseline_status": "passed",
+        "actual_outcome": "failed",
+        "failed_phases": [
+          "call"
+        ],
+        "call_seconds": 17.43569949099765,
+        "total_phase_seconds": 17.43774671299616,
+        "failure_point": {
+          "class": "断言的实际状态或数值不符",
+          "traceback_end": "E           assert 5 == 3",
+          "location": "tests/integration/test_video_size_estimate.py:57",
+          "exception_line": "E           assert 5 == 3"
+        },
+        "raw_output": "/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/artifacts/output.log"
+      }
+    ],
+    "by_failure_point_class": {
+      "版本号断言不符": 2,
+      "capture动作终态不符": 2,
+      "action状态不符": 8,
+      "恢复结果状态不符": 1,
+      "operation_attempt状态不符": 1,
+      "device_files行不符": 1,
+      "恢复读取偏移不符": 1,
+      "初始化读取元数据时报异常": 2,
+      "等待时发现明确run错误": 1,
+      "等待成功条件超时": 8,
+      "当前请求动作进入不相容终态": 2,
+      "断言的实际状态或数值不符": 8,
+      "执行异常或失败断言，具体内容见exception_line": 7
+    },
+    "classification_boundary": "这里只分类实际失败步骤/断言/异常；不把等待超时自动解释为产品超时，也不据EXPIRED自动归因环境并发。"
+  },
+  "skip_retention": {
+    "original": 5,
+    "actual": 5,
+    "missing_original": [],
+    "new": [],
+    "windows_only": 3,
+    "nonapplicable_parameter_partitions": 2,
+    "cases": [
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py::TestInitializeStateDirectorySwitch::test_case_alias_roots_rejected",
+        "baseline_outcome": "skipped",
+        "current_outcome": "skipped",
+        "classification": "Windows专属",
+        "baseline_reason": "('/workspaces/camctl/apps/camctl/tests/integration/bootstrap/test_directory_switch.py', 620, 'Skipped: 大小写别名核对依赖 Windows 文件系统的大小写不敏感性')",
+        "phase_outcomes": {
+          "setup": "skipped",
+          "teardown": "passed"
+        }
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/outputs/test_grant_reuse.py::test_rejection_key_ignores_changed_read_config[host]",
+        "baseline_outcome": "skipped",
+        "current_outcome": "skipped",
+        "classification": "参数分区不适用",
+        "baseline_reason": "('/workspaces/camctl/apps/camctl/tests/integration/outputs/test_grant_reuse.py', 393, 'Skipped: 主机源候选不携带读取配置')",
+        "phase_outcomes": {
+          "setup": "passed",
+          "call": "skipped",
+          "teardown": "passed"
+        }
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/outputs/test_shared_file_ownership.py::test_shared_file_operation_keeps_qualification_until_actual_end[internal-move]",
+        "baseline_outcome": "skipped",
+        "current_outcome": "skipped",
+        "classification": "参数分区不适用",
+        "baseline_reason": "('/workspaces/camctl/apps/camctl/tests/integration/outputs/test_shared_file_ownership.py', 37, 'Skipped: 内部副本不执行普通 delivery 发布')",
+        "phase_outcomes": {
+          "setup": "passed",
+          "call": "skipped",
+          "teardown": "passed"
+        }
+      },
+      {
+        "nodeid": "tests/integration/test_ready_report_observer.py::test_failed_file_object_handoff_releases_descriptor",
+        "baseline_outcome": "skipped",
+        "current_outcome": "skipped",
+        "classification": "Windows专属",
+        "baseline_reason": "('/workspaces/camctl/tests/integration/test_ready_report_observer.py', 95, 'Skipped: Windows 文件句柄到 Python reader 的归属验证')",
+        "phase_outcomes": {
+          "setup": "skipped",
+          "teardown": "passed"
+        }
+      },
+      {
+        "nodeid": "tests/integration/test_ready_report_observer.py::test_failed_handle_handoff_releases_windows_handle",
+        "baseline_outcome": "skipped",
+        "current_outcome": "skipped",
+        "classification": "Windows专属",
+        "baseline_reason": "('/workspaces/camctl/tests/integration/test_ready_report_observer.py', 84, 'Skipped: Windows 文件句柄到 Python reader 的归属验证')",
+        "phase_outcomes": {
+          "setup": "skipped",
+          "teardown": "passed"
+        }
+      }
+    ]
+  },
+  "added_witnesses": [
+    {
+      "file": "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+      "expected_count": 10,
+      "actual_count": 10,
+      "actual_outcomes": {
+        "passed": 10
+      }
+    },
+    {
+      "file": "tests/integration/test_host_wait_failures.py",
+      "expected_count": 12,
+      "actual_count": 12,
+      "actual_outcomes": {
+        "passed": 12
+      }
+    }
+  ],
+  "hasselblad_normal_matrix": {
+    "expected_count": 12,
+    "observed_count": 12,
+    "pass_count": 11,
+    "fail_count": 1,
+    "results": [
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-2",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.001624258999072481
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 106.73606166800164
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006368530011968687
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "outcome": "failed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-4",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0014196789998095483
+          },
+          "call": {
+            "outcome": "failed",
+            "duration_seconds": 185.4546335510022
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007983690011315048
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/cases.json",
+        "output_log": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/output.log"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-1",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0019509580015437678
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 120.20982668900251
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00037561300268862396
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-4",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0014328489996842109
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 110.75031188499997
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0012116779980715364
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-3",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0013499369961209595
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 102.61407715100358
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0003913469990948215
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-2",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0016188529989449307
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 122.1675726609974
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005390110018197447
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-2",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 13.337485377000121
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 104.01076150000154
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00046387300244532526
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-4",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.000888964998011943
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 110.42587514500337
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005869400047231466
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-3",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0009997849992942065
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 105.4687901990037
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0004563170004985295
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-1",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 14.994074144997285
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 115.94104347800021
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007180930042522959
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-3",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 14.838343158997304
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 89.95317629499914
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00044875800085719675
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts/cases.json",
+        "output_log": null
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+        "outcome": "passed",
+        "task_id": "root/test_hasselblad_photo_roundtrip/shard-4",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 15.878812474998995
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 118.20644994300528
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005477389931911603
+          }
+        },
+        "cases_json": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/cases.json",
+        "output_log": null
+      }
+    ]
+  },
+  "task_integrity": [
+    {
+      "task": "camctl/history",
+      "scope": "camctl",
+      "collected": 344,
+      "outcomes": {
+        "passed": 344
+      },
+      "exit_code": 0,
+      "phase_reports": 1032,
+      "reported_cases": 344,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/persistence",
+      "scope": "camctl",
+      "collected": 935,
+      "outcomes": {
+        "passed": 935
+      },
+      "exit_code": 0,
+      "phase_reports": 2805,
+      "reported_cases": 935,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/bootstrap",
+      "scope": "camctl",
+      "collected": 1366,
+      "outcomes": {
+        "passed": 1350,
+        "skipped": 1,
+        "failed": 15
+      },
+      "exit_code": 1,
+      "phase_reports": 4097,
+      "reported_cases": 1366,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "camctl/capture",
+      "scope": "camctl",
+      "collected": 2127,
+      "outcomes": {
+        "failed": 1,
+        "passed": 2126
+      },
+      "exit_code": 1,
+      "phase_reports": 6381,
+      "reported_cases": 2127,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "camctl/outputs",
+      "scope": "camctl",
+      "collected": 2516,
+      "outcomes": {
+        "passed": 2514,
+        "skipped": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 7548,
+      "reported_cases": 2516,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 5,
+      "outcomes": {
+        "passed": 5
+      },
+      "exit_code": 0,
+      "phase_reports": 15,
+      "reported_cases": 5,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 6,
+      "outcomes": {
+        "passed": 6
+      },
+      "exit_code": 0,
+      "phase_reports": 18,
+      "reported_cases": 6,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+      "scope": "root",
+      "collected": 9,
+      "outcomes": {
+        "passed": 8,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 27,
+      "reported_cases": 9,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 9,
+      "outcomes": {
+        "passed": 9
+      },
+      "exit_code": 0,
+      "phase_reports": 27,
+      "reported_cases": 9,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_action6_segmented_recovery_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_osmo_builtin_timelapse_roundtrip",
+      "scope": "root",
+      "collected": 4,
+      "outcomes": {
+        "passed": 4
+      },
+      "exit_code": 0,
+      "phase_reports": 12,
+      "reported_cases": 4,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_c_module_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_motor_recovery",
+      "scope": "root",
+      "collected": 21,
+      "outcomes": {
+        "passed": 21
+      },
+      "exit_code": 0,
+      "phase_reports": 63,
+      "reported_cases": 21,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_action6_segmented_recovery_roundtrip/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 1,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_action6_segmented_recovery_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 3,
+      "outcomes": {
+        "passed": 2,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 9,
+      "reported_cases": 3,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_action6_segmented_recovery_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/cancellation",
+      "scope": "camctl",
+      "collected": 332,
+      "outcomes": {
+        "passed": 332
+      },
+      "exit_code": 0,
+      "phase_reports": 996,
+      "reported_cases": 332,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/reporting",
+      "scope": "camctl",
+      "collected": 446,
+      "outcomes": {
+        "passed": 446
+      },
+      "exit_code": 0,
+      "phase_reports": 1338,
+      "reported_cases": 446,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_action6_builtin_segmented_roundtrip",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_device_capability_declarations/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_real_camera_demo_roundtrip",
+      "scope": "root",
+      "collected": 4,
+      "outcomes": {
+        "passed": 4
+      },
+      "exit_code": 0,
+      "phase_reports": 12,
+      "reported_cases": 4,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/acceptance",
+      "scope": "camctl",
+      "collected": 331,
+      "outcomes": {
+        "passed": 331
+      },
+      "exit_code": 0,
+      "phase_reports": 993,
+      "reported_cases": 331,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_motor_notifications",
+      "scope": "root",
+      "collected": 5,
+      "outcomes": {
+        "passed": 5
+      },
+      "exit_code": 0,
+      "phase_reports": 15,
+      "reported_cases": 5,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_report_roundtrip",
+      "scope": "root",
+      "collected": 6,
+      "outcomes": {
+        "passed": 6
+      },
+      "exit_code": 0,
+      "phase_reports": 18,
+      "reported_cases": 6,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_action6_builtin_timelapse_roundtrip",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_action6_builtin_demo_roundtrip",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_video_size_estimate",
+      "scope": "root",
+      "collected": 12,
+      "outcomes": {
+        "failed": 1,
+        "passed": 11
+      },
+      "exit_code": 1,
+      "phase_reports": 36,
+      "reported_cases": 12,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_device_file_cleanup_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_output_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_host_deployment",
+      "scope": "root",
+      "collected": 5,
+      "outcomes": {
+        "passed": 5
+      },
+      "exit_code": 0,
+      "phase_reports": 15,
+      "reported_cases": 5,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_output_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "failed": 1,
+        "passed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_session_recovery/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "failed": 1,
+        "passed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_session_recovery/shard-3",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "failed": 1,
+        "passed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_output_roundtrip/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 1,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_output_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "failed": 2
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_media_roundtrip/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_media_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_c_module_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/operations",
+      "scope": "camctl",
+      "collected": 314,
+      "outcomes": {
+        "passed": 314
+      },
+      "exit_code": 0,
+      "phase_reports": 942,
+      "reported_cases": 314,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/devices",
+      "scope": "camctl",
+      "collected": 223,
+      "outcomes": {
+        "passed": 221,
+        "failed": 2
+      },
+      "exit_code": 1,
+      "phase_reports": 669,
+      "reported_cases": 223,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_capture_roundtrip",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 1,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "camctl/contracts",
+      "scope": "camctl",
+      "collected": 442,
+      "outcomes": {
+        "passed": 442
+      },
+      "exit_code": 0,
+      "phase_reports": 1326,
+      "reported_cases": 442,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_session_recovery/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_process_recovery/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_session_recovery/shard-2",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_device_file_cleanup_roundtrip/shard-4",
+      "scope": "root",
+      "collected": 4,
+      "outcomes": {
+        "passed": 4
+      },
+      "exit_code": 0,
+      "phase_reports": 12,
+      "reported_cases": 4,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_device_file_cleanup_roundtrip/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_c_module_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_device_file_cleanup_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 4,
+      "outcomes": {
+        "passed": 4
+      },
+      "exit_code": 0,
+      "phase_reports": 12,
+      "reported_cases": 4,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/session",
+      "scope": "camctl",
+      "collected": 194,
+      "outcomes": {
+        "passed": 194
+      },
+      "exit_code": 0,
+      "phase_reports": 582,
+      "reported_cases": 194,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_process_recovery/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_process_recovery/shard-3",
+      "scope": "root",
+      "collected": 3,
+      "outcomes": {
+        "failed": 1,
+        "passed": 2
+      },
+      "exit_code": 1,
+      "phase_reports": 9,
+      "reported_cases": 3,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_directory_switch",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_cancellation_roundtrip",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_device_capability_declarations/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 1,
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_camctl_process_recovery/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_device_capability_declarations/shard-3",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_device_capability_declarations/shard-2",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/scheduling",
+      "scope": "camctl",
+      "collected": 136,
+      "outcomes": {
+        "passed": 136
+      },
+      "exit_code": 0,
+      "phase_reports": 408,
+      "reported_cases": 136,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_parameters/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_timelapse_time_parameters/shard-1",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "node/report-dependencies.test",
+      "scope": "node",
+      "collected": 32,
+      "outcomes": {
+        "passed": 32
+      },
+      "exit_code": 0
+    },
+    {
+      "task": "root/test_timelapse_time_parameters/shard-2",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "failed": 1
+      },
+      "exit_code": 1,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 1
+    },
+    {
+      "task": "root/test_action6_segmented_media_fixtures",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_parameters/shard-2",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_parameters/shard-3",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_hasselblad_photo_parameters/shard-4",
+      "scope": "root",
+      "collected": 2,
+      "outcomes": {
+        "passed": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 6,
+      "reported_cases": 2,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/host_files",
+      "scope": "camctl",
+      "collected": 121,
+      "outcomes": {
+        "passed": 121
+      },
+      "exit_code": 0,
+      "phase_reports": 363,
+      "reported_cases": 121,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "camctl/logging_runtime",
+      "scope": "camctl",
+      "collected": 112,
+      "outcomes": {
+        "passed": 112
+      },
+      "exit_code": 0,
+      "phase_reports": 336,
+      "reported_cases": 112,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "node/event-transitions.test",
+      "scope": "node",
+      "collected": 58,
+      "outcomes": {
+        "passed": 58
+      },
+      "exit_code": 0
+    },
+    {
+      "task": "camctl/motor",
+      "scope": "camctl",
+      "collected": 12,
+      "outcomes": {
+        "passed": 12
+      },
+      "exit_code": 0,
+      "phase_reports": 36,
+      "reported_cases": 12,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_database_history_sql",
+      "scope": "root",
+      "collected": 27,
+      "outcomes": {
+        "passed": 27
+      },
+      "exit_code": 0,
+      "phase_reports": 81,
+      "reported_cases": 27,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_timelapse_time_parameters/shard-3",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camera_demo_transport",
+      "scope": "root",
+      "collected": 43,
+      "outcomes": {
+        "passed": 43
+      },
+      "exit_code": 0,
+      "phase_reports": 129,
+      "reported_cases": 43,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_ready_report_observer",
+      "scope": "root",
+      "collected": 19,
+      "outcomes": {
+        "passed": 17,
+        "skipped": 2
+      },
+      "exit_code": 0,
+      "phase_reports": 55,
+      "reported_cases": 19,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_camctl_acceptance_map",
+      "scope": "root",
+      "collected": 3,
+      "outcomes": {
+        "passed": 3
+      },
+      "exit_code": 0,
+      "phase_reports": 9,
+      "reported_cases": 3,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "node/video-coverage-protocol.test",
+      "scope": "node",
+      "collected": 3,
+      "outcomes": {
+        "passed": 3
+      },
+      "exit_code": 0
+    },
+    {
+      "task": "node/report-dependency-conditions.test",
+      "scope": "node",
+      "collected": 25,
+      "outcomes": {
+        "passed": 25
+      },
+      "exit_code": 0
+    },
+    {
+      "task": "root/test_camctl_media_roundtrip/shard-3",
+      "scope": "root",
+      "collected": 1,
+      "outcomes": {
+        "passed": 1
+      },
+      "exit_code": 0,
+      "phase_reports": 3,
+      "reported_cases": 1,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    },
+    {
+      "task": "root/test_host_wait_failures",
+      "scope": "root",
+      "collected": 12,
+      "outcomes": {
+        "passed": 12
+      },
+      "exit_code": 0,
+      "phase_reports": 36,
+      "reported_cases": 12,
+      "missing_results": 0,
+      "finish_event_exit": 0
+    }
+  ],
+  "supplements": {
+    "hasselblad": "hasselblad-window.json：新源两项补测与窗口修正独立于本冻结full，HB原失败仍计入44。",
+    "installed_tool_interpreter": "另有同链解释器补测正式记录；不以其2pass替换本full两个失败。",
+    "other_new_failure_causes": "责任Agent的根因调查由协调者维护；本审计只记实际末端，未知原因不归为环境或并发。"
+  },
+  "reproduction_inputs": {
+    "baseline_csv": [
+      "../2026-10-25-integration-timing/camctl-cases.csv",
+      "../2026-10-25-integration-timing/cross-component-cases.csv",
+      "../2026-10-25-integration-timing/cross-component-subchecks.csv"
+    ],
+    "runtime_files": [
+      "source.json",
+      "snapshot/",
+      "summary.json",
+      "plan.json",
+      "tasks/*/artifacts/{command,result,inventory,cases,progress}.json",
+      "tasks/*/artifacts/events.jsonl",
+      "tasks/*/artifacts/output.log",
+      "collection/*/artifacts/inventory.json"
+    ],
+    "method": "CPython3.11.17标准库只读核对，按counting_rules重建；原38与5skip从原CSV完整nodeid匹配。逐实例CSV/manifest另行归档，本文件不复制完整主实例清单。",
+    "formal_scope_records": [
+      "final-expected-scope.json",
+      "final-plan-audit.json"
+    ]
+  }
+}

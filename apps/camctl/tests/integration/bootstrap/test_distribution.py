@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
@@ -546,10 +547,27 @@ def _run_installed_generator(installed, stem, capabilities, output, *, sample_pa
                           capture_output=True, text=True, timeout=30)
 
 
-def _installed_timelapse_capabilities(installed, tmp_path, stem):
-    """经安装 CLI 的测试合同 describe 取得唯一候选参数类型。"""
+@pytest.fixture(scope="module")
+def installed_camera_capabilities(installed, tmp_path_factory):
+    """每种型号经安装 CLI 导出一次只读能力，供独立样例世界消费。"""
     if str(_CROSS_DIR) not in sys.path:
         sys.path.insert(0, str(_CROSS_DIR))
+    from camctl_fixtures import Deployment
+    from camera_demo_fixtures import camera_spec, timelapse_params
+    from camctl.devices.drivers.adb_cameras.commands import CameraModel
+
+    documents = {}
+    for model in CameraModel:
+        deployment = Deployment(tmp_path_factory.mktemp(f"capabilities-{model}"), devices=False)
+        spec = camera_spec(deployment, model, timelapse_params(model))
+        described = installed.cli("describe", "--config", str(deployment.config_path), driver=spec)
+        assert described.returncode == 0, described.stderr
+        documents[model] = described.stdout
+    return MappingProxyType(documents)
+
+
+def _installed_timelapse_capabilities(installed_camera_capabilities, tmp_path, stem):
+    """复制型号能力输入，保留各用例独立的部署、输入及输出路径。"""
     from camctl_fixtures import Deployment
     from camera_demo_fixtures import camera_spec, timelapse_params
     from camctl.devices.drivers.adb_cameras.commands import CameraModel
@@ -557,18 +575,15 @@ def _installed_timelapse_capabilities(installed, tmp_path, stem):
     model = (CameraModel.ACTION6 if stem.startswith("action6")
              else CameraModel.OSMO360II)
     deployment = Deployment(tmp_path, devices=False)
-    spec = camera_spec(deployment, model, timelapse_params(model))
-    initialized = installed.cli("init", "--config", str(deployment.config_path))
-    assert initialized.returncode == 0, initialized.stderr
-    described = installed.cli("describe", "--config", str(deployment.config_path), driver=spec)
-    assert described.returncode == 0, described.stderr
+    camera_spec(deployment, model, timelapse_params(model))
     capabilities = tmp_path / f"{stem}-capabilities.json"
-    capabilities.write_text(described.stdout, encoding="utf-8")
+    capabilities.write_text(installed_camera_capabilities[model], encoding="utf-8")
     return deployment, capabilities
 
 
 @pytest.mark.parametrize("stem", ["action6-record", "action6-timelapse", "osmo360ii-record", "osmo360ii-timelapse"])
-def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp_path, stem):
+def test_installed_camera_sample_is_accepted_from_actual_describe(
+        installed, installed_camera_capabilities, tmp_path, stem):
     """安装后的样例消费实际能力说明，经正式受理保存原参数。"""
     sys.path.insert(0, str(_CROSS_DIR))
     from camctl_fixtures import Deployment
@@ -614,10 +629,8 @@ def test_installed_camera_sample_is_accepted_from_actual_describe(installed, tmp
     spec = camera_spec(deployment, model, expected)
     initialized = installed.cli("init", "--config", str(deployment.config_path))
     assert initialized.returncode == 0, initialized.stderr
-    described = installed.cli("describe", "--config", str(deployment.config_path), driver=spec)
-    assert described.returncode == 0, described.stderr
     capabilities = tmp_path / "capabilities.json"
-    capabilities.write_text(described.stdout)
+    capabilities.write_text(installed_camera_capabilities[model], encoding="utf-8")
     plan_path = tmp_path / "sample-plan.json"
     generator = _demo_generator(installed)
     _run([str(installed.python), str(generator), stem, "--capabilities", str(capabilities),
@@ -855,7 +868,7 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
     fake_executable.parent.mkdir()
     call_log = tmp_path / "hb-cli-argv.jsonl"
     fake_executable.write_text(
-        _hasselblad_tool_source(call_log, "TEST-HASSELBLAD-SERIAL"), encoding="utf-8")
+        _hasselblad_tool_source(call_log, "TEST-HASSELBLAD-SERIAL", installed_python=installed.python), encoding="utf-8")
     fake_executable.chmod(0o700)
     configured = (packaged_config
                   .replace("$HOME/.camctl/hasselblad-demo", str(data_root))
@@ -1213,11 +1226,13 @@ def test_installed_sample_rejects_missing_matching_capability_before_plan(instal
 
 
 @pytest.mark.parametrize("stem", ["action6-timelapse", "osmo360ii-timelapse"])
-def test_installed_generator_rejects_duplicate_matching_parameter_type(installed, tmp_path, stem):
+def test_installed_generator_rejects_duplicate_matching_parameter_type(
+        installed, installed_camera_capabilities, tmp_path, stem):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.transaction import encode_json_value
 
-    deployment, capabilities_path = _installed_timelapse_capabilities(installed, tmp_path, stem)
+    deployment, capabilities_path = _installed_timelapse_capabilities(
+        installed_camera_capabilities, tmp_path, stem)
     capabilities = parse_exact_json(capabilities_path.read_text(encoding="utf-8"))
     camera = next(device for device in capabilities["devices"] if device["device_id"] == "camera")
     action = next(item for item in camera["actions"] if item["type"] == "camera_timelapse")
@@ -1247,11 +1262,12 @@ def test_installed_generator_rejects_duplicate_matching_parameter_type(installed
 ], ids=["equal", "reverse", "boolean-interval", "string-duration",
         "neighboring-decimal", "out-of-domain-interval", "out-of-domain-duration"])
 def test_installed_generator_rejects_invalid_timelapse_time_before_plan(
-        installed, tmp_path, stem, case, interval_s, duration_s):
+        installed, installed_camera_capabilities, tmp_path, stem, case, interval_s, duration_s):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.transaction import encode_json_value
 
-    deployment, capabilities_path = _installed_timelapse_capabilities(installed, tmp_path, stem)
+    deployment, capabilities_path = _installed_timelapse_capabilities(
+        installed_camera_capabilities, tmp_path, stem)
     sample_path = (REPO_ROOT / "docs/camctl/examples/camera-demo" / f"{stem}.json")
     sample = parse_exact_json(sample_path.read_text(encoding="utf-8"))
     params = sample["actions"][0]["params"]

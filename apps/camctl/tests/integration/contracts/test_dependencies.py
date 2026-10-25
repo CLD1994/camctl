@@ -16,11 +16,8 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
-
-SRC_ROOT = Path(__file__).resolve().parents[3] / "src" / "camctl"
 
 #: 业务流程模块（module-contracts.md 依赖图中的 U 层）。
 FLOW_PREFIXES = (
@@ -77,13 +74,6 @@ HISTORY_APPLY_PREFIXES = (
 SHARED_ALLOWED = ("camctl.contracts", "camctl.resources")
 
 
-def _module_name(path: Path) -> str:
-    parts = list(path.relative_to(SRC_ROOT.parent).with_suffix("").parts)
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(parts)
-
-
 def _import_key(module: str) -> str:
     """内部依赖保留完整路径；外部依赖归并到顶级名。"""
     if module.startswith("camctl"):
@@ -91,13 +81,13 @@ def _import_key(module: str) -> str:
     return module.split(".")[0]
 
 
-def _imported_modules(name: str, source: str) -> dict[str, set[str]]:
+def _imported_modules(name: str, source: str | ast.AST) -> dict[str, set[str]]:
     """解析一个模块源码的导入：被导入模块 → from-import 名字。
 
     普通导入语句没有名字级信息，映射到空集合；``from camctl import x``
     展开为 ``camctl.x``。相对导入按源模块的包层级解析成绝对名。
     """
-    tree = ast.parse(source)
+    tree = ast.parse(source) if isinstance(source, str) else source
     imports: dict[str, set[str]] = {}
     package = name.rsplit(".", 1)[0] if "." in name else name
 
@@ -133,13 +123,12 @@ def _imported_modules(name: str, source: str) -> dict[str, set[str]]:
     return imports
 
 
-def _import_graph() -> dict[str, dict[str, set[str]]]:
-    """扫描全部源码文件，返回 模块 → 导入映射 的真实导入图。"""
+@pytest.fixture(scope="module")
+def import_graph(source_inspection) -> dict[str, dict[str, set[str]]]:
+    """每条依赖规则读取相同的真实源码导入图。"""
     return {
-        _module_name(path): _imported_modules(
-            _module_name(path), path.read_text(encoding="utf-8")
-        )
-        for path in sorted(SRC_ROOT.rglob("*.py"))
+        name: facts["imports"]
+        for name, facts in source_inspection.items()
     }
 
 
@@ -255,9 +244,9 @@ def _forbidden_edges(
 
 
 class TestImportGraph:
-    def test_graph_is_not_empty(self) -> None:
+    def test_graph_is_not_empty(self, import_graph) -> None:
         """检查对象不是空包：真实源码被完整扫描。"""
-        graph = _import_graph()
+        graph = import_graph
         assert len(graph) >= 100
         for anchor in (
             "camctl.contracts.public_projection",
@@ -269,9 +258,9 @@ class TestImportGraph:
         ):
             assert anchor in graph, f"导入图缺少锚点模块: {anchor}"
 
-    def test_rules_do_not_import_adapters(self) -> None:
+    def test_rules_do_not_import_adapters(self, import_graph) -> None:
         """真实导入图不含任何禁止边。"""
-        assert _forbidden_edges(_import_graph()) == []
+        assert _forbidden_edges(import_graph) == []
 
 
 class TestCheckerDetectsViolations:

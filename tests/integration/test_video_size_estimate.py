@@ -7,12 +7,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import closing
 from decimal import Decimal
 
 import pytest
 
-from camctl_fixtures import Deployment, future_schedule, stub_driver_spec, video_file
+from _wsl_host_demo import query_state, wait_for
+from camctl_fixtures import (
+    CliResult, Deployment, future_schedule, stub_driver_spec,
+    terminate_process_tree, video_file,
+)
 
 
 def _action(action_type="camera_record", params=None):
@@ -37,9 +42,7 @@ def _estimate(deployment, action, *, replacement=None, action_text=None):
         *arguments, output=deployment.root / "estimate-receipt.json")
 
 
-def _execute_and_import(deployment, driver, action):
-    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
-    assert initialized.exit_code == 0, initialized.stderr
+def _execute_and_import(deployment, driver, action, expected_params):
     plan, receipt = deployment.export_plan_with_client({
         "name": "估算与文件事实", "actions": [action],
     })
@@ -49,13 +52,55 @@ def _execute_and_import(deployment, driver, action):
         "submit", str(plan), "--config", str(deployment.config_path), driver=driver)
     assert submitted.exit_code == 0, submitted.stderr
     assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
-    executed = deployment.camctl("run", "--config", str(deployment.config_path), driver=driver)
+    frozen = deployment.freeze_at(action["scheduled_at"])
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
+        "run", "--config", str(deployment.config_path), driver=driver)
+    try:
+        def start_result():
+            rows = query_state(deployment.state_db,
+                "SELECT p.result_json FROM operation_attempts p"
+                " JOIN operation_runs r ON r.id=p.run_id"
+                " JOIN actions a ON a.id=r.action_id"
+                " WHERE a.name=? AND p.result_event_id IS NOT NULL",
+                (action["name"],))
+            return next((json.loads(result) for (result,) in rows
+                         if any(item["type"] in ("start_confirmed", "timelapse_sent")
+                                for item in json.loads(result)["observations"])), None)
+
+        def start_failure():
+            from camctl.contracts.enums import enum_for
+
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                return (f"本次 run 已退出且没有 START 结果，退出码={process.returncode}"
+                        f"\n{stdout}\n{stderr}")
+            statuses = enum_for("actions.status")
+            rows = query_state(deployment.state_db,
+                "SELECT status,error_code,error_details_json FROM actions WHERE name=?",
+                (action["name"],))
+            for status, error, details in rows:
+                if status in {statuses[name] for name in ("FAILED", "CANCELED", "EXPIRED")}:
+                    return f"动作已进入不相容终态：{statuses(status).name} {error} {details}"
+            return None
+
+        wait_for(start_result, timeout_s=max(0, deadline - time.monotonic()),
+                 message="拍摄 START 结果未保存",
+                 failure=start_failure)
+        running = deployment.resume_clock()
+        assert running["utc_anchor_us"] == frozen["utc_us"]
+        assert running["monotonic_anchor_ns"] == frozen["monotonic_ns"]
+        stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
+        executed = CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
     assert executed.exit_code == 0, executed.stderr
     assert executed.message() == {"kind": "succeeded"}
     with closing(sqlite3.connect(deployment.state_db)) as connection:
         effective, status = connection.execute(
             "SELECT effective_params_json, status FROM actions").fetchone()
-        assert json.loads(effective) == action["params"]
+        assert json.loads(effective) == expected_params
         assert status == 3
     reports = list(deployment.ready.glob("status-report-*.json"))
     assert len(reports) == 1
@@ -63,7 +108,7 @@ def _execute_and_import(deployment, driver, action):
     assert "video_size_estimate" not in reports[0].read_text(encoding="utf-8")
     recorded = report["plans"][0]["actions"][0]
     assert recorded["status"] == "succeeded"
-    assert recorded["effective_params"] == action["params"]
+    assert recorded["effective_params"] == expected_params
     assert recorded["outputs"][0]["size"] == 8192
     imported = deployment.import_reports_with_client(deployment.ready)
     assert imported["saved_report_ids"] == [report["report_id"]]
@@ -72,7 +117,7 @@ def _execute_and_import(deployment, driver, action):
 
 
 def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     driver = stub_driver_spec({"1": [video_file("record-1")]})
     driver["video_size_estimate_json"] = {"camera_record": json.dumps({
         "bitrate_mbps": 130,
@@ -87,7 +132,11 @@ def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
     assert result["http_estimate"] == expected
     assert result["drafts_before"] == result["drafts_after"]
     assert len(result["drafts_before"]) == 1
-    _execute_and_import(deployment, driver, action)
+    assert result["http_action"] == action
+    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    execution_action = {**action, "scheduled_at": deployment.schedule(3)}
+    _execute_and_import(deployment, driver, execution_action, action["params"])
 
 
 def _schema(parameter_type, properties, required):
@@ -98,7 +147,7 @@ def _schema(parameter_type, properties, required):
 
 
 def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path):
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     driver = stub_driver_spec({"1": [video_file("timelapse-1")]})
     driver["parameter_schema_json"] = {"camera_timelapse": json.dumps(_schema(
         "timelapse", {"capture_duration_s": {"type": "integer", "minimum": 1},
@@ -118,7 +167,11 @@ def test_timelapse_estimate_uses_same_capture_duration_as_execution(tmp_path):
     expected = {"kind": "ready", "sizeBytes": 2_187_500,
                 "playbackSeconds": 0.1, "bitrateMbps": 175}
     assert result["estimate"] == result["http_estimate"] == expected
-    _execute_and_import(deployment, driver, action)
+    assert result["http_action"] == action
+    initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+    assert initialized.exit_code == 0, initialized.stderr
+    execution_action = {**action, "scheduled_at": deployment.schedule(3)}
+    _execute_and_import(deployment, driver, execution_action, action["params"])
     with closing(sqlite3.connect(deployment.state_db)) as connection:
         # 参数3秒进入执行定义；估算成片0.1秒不替换采集时长。
         execution = json.loads(connection.execute(

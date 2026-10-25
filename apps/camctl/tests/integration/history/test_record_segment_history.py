@@ -208,33 +208,35 @@ async def test_snapshot_maintenance_uses_stream_source(tmp_path,monkeypatch):
         owned.connection.close()
 
 
-@pytest.mark.asyncio
-async def test_snapshot_same_s_compares_all_bytes_and_broken_content_fails(tmp_path):
+async def _assert_same_s_snapshot_bytes(
+        owned, runtime, repo, ref, history, boundary, previous_paths):
+    """从当前投影重新准备来源，核对同 S 字节并拒绝来源及存储损坏。"""
     from camctl.history.snapshots import prepare_snapshot,SnapshotMaintenanceError
-    owned,runtime,repo,ref,history = await _fixture(tmp_path,220)
+    with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=7) as handle:
+        prepared=prepare_snapshot(handle)
     try:
-        boundary=history.current_boundary()
-        with history.open_segment_history(ref.action_id,boundary,batch_size=7) as handle:
-            prepared=prepare_snapshot(handle)
-        try:
-            assert prepared.length > 65536
+        assert prepared.path not in previous_paths, '同 S 核验必须使用新准备的独立磁盘来源'
+        assert prepared.path.exists() and prepared.length > 65540
+        assert prepared.boundary == boundary
+        await _save(history,prepared)
+        assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0] == 1
+        assert history.current_boundary() == boundary, '同 S 核验不得推进业务历史'
+        with prepared.path.open('r+b') as source:
+            source.seek(65540)
+            before=source.read(1)
+            assert len(before) == 1
+            source.seek(65540)
+            source.write(b'x' if before != b'x' else b'y')
+        with pytest.raises(SnapshotMaintenanceError):
             await _save(history,prepared)
-            with prepared.path.open('r+b') as source:
-                source.seek(65540)
-                before=source.read(1)
-                source.seek(65540)
-                source.write(b'x' if before != b'x' else b'y')
-            with pytest.raises(SnapshotMaintenanceError):
-                await _save(history,prepared)
-            # 存储中的损坏也不能降级到另一恢复路径。
-            snapshot_id=owned.connection.execute('SELECT id FROM entity_snapshots').fetchone()[0]
-            with owned.connection.blobopen('entity_snapshots','content',snapshot_id) as blob:
-                blob.seek(65540);blob.write(b'\xff')
-            _version(owned,runtime,repo,ref,2)
-            with pytest.raises(ConsistencyError):
-                history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=7)
-        finally:prepared.close()
-    finally:owned.connection.close()
+        # 存储中的损坏也不能降级到另一恢复路径。
+        snapshot_id=owned.connection.execute('SELECT id FROM entity_snapshots').fetchone()[0]
+        with owned.connection.blobopen('entity_snapshots','content',snapshot_id) as blob:
+            blob.seek(65540);blob.write(b'\xff')
+        _version(owned,runtime,repo,ref,2)
+        with pytest.raises(ConsistencyError):
+            history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=7)
+    finally:prepared.close()
 
 
 @pytest.mark.asyncio

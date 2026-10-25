@@ -1,0 +1,1148 @@
+{
+  "purpose": "安装链的hb_cli替身使用该链实际安装的Python；独立补测与冻结最终整轮分开保存。",
+  "base_commit": "a423fad5e708d5205462896af592d96f584a3a24",
+  "change": {
+    "paths": [
+      "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py"
+    ],
+    "added_installed_python_keywords": 2,
+    "all_other_test_code_and_assertions_unchanged": true,
+    "helper_default_unchanged": true,
+    "production_unchanged": true,
+    "patch_sha256": "5cce5dd051f59f2b7db64ea84e844f586eb987c8e3c70680f569c2bfa09dc33b",
+    "source_sha256": {
+      "apps/camctl/tests/integration/bootstrap/test_distribution.py": "33403526313ead839e44ffa01f06fb4b5ef8c12ae495d9a2931af8c057f1bd52",
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py": "511f384dc8108956c841515bd5a3400eee6f565000a25ffec216052f62e182f6"
+    }
+  },
+  "classification": {
+    "new_failed_cases_in_final_run": 2,
+    "historical_status": "两项原CSV均通过；首轮均未执行；冻结48d2ee64的最终轮新增失败。",
+    "direct_cause": "已受理并进入START后，工具list子进程在import camctl处失败。替身shebang采用当前pytest解释器，安装版CLI移除源码PYTHONPATH，而该任务解释器只引用测试依赖，未安装camctl。",
+    "attribution": "隔离执行条件暴露了既有夹具的解释器依赖；直接失败点是测试工具启动，不是相机拍摄/下载业务或时间窗口超限。",
+    "evidence_of_existing_fixture_dependency": {
+      "9da49b20dcd1273074bb70b918b36ee4f1eb095c": {
+        "_hasselblad_tool_source": "d530977bd6658003ca5bf6c9f85fafbcc3fd7e953fd061c0951cd5c9474648ab",
+        "_clean_environment": "59bef154ed415f33013d6a54306074c651018c14697313555dfa2a896ff05559",
+        "_production_cli": "0fd3471c0f907361e3b4ad79773d945982e5f4cd5e2645ebf7d73ec84c3add34",
+        "test_installed_device_photo_reclaims_then_downloads_both_sources_twice": "02550003eced8fe217365b1d6ad7e17d29f835022f55656803ef1f64b1a623a8"
+      },
+      "cd228b16": {
+        "_hasselblad_tool_source": "d530977bd6658003ca5bf6c9f85fafbcc3fd7e953fd061c0951cd5c9474648ab",
+        "_clean_environment": "59bef154ed415f33013d6a54306074c651018c14697313555dfa2a896ff05559",
+        "_production_cli": "0fd3471c0f907361e3b4ad79773d945982e5f4cd5e2645ebf7d73ec84c3add34",
+        "test_installed_device_photo_reclaims_then_downloads_both_sources_twice": "02550003eced8fe217365b1d6ad7e17d29f835022f55656803ef1f64b1a623a8"
+      },
+      "50776385": {
+        "_hasselblad_tool_source": "d530977bd6658003ca5bf6c9f85fafbcc3fd7e953fd061c0951cd5c9474648ab",
+        "_clean_environment": "59bef154ed415f33013d6a54306074c651018c14697313555dfa2a896ff05559",
+        "_production_cli": "0fd3471c0f907361e3b4ad79773d945982e5f4cd5e2645ebf7d73ec84c3add34",
+        "test_installed_device_photo_reclaims_then_downloads_both_sources_twice": "02550003eced8fe217365b1d6ad7e17d29f835022f55656803ef1f64b1a623a8"
+      },
+      "48d2ee64": {
+        "_hasselblad_tool_source": "d530977bd6658003ca5bf6c9f85fafbcc3fd7e953fd061c0951cd5c9474648ab",
+        "_clean_environment": "59bef154ed415f33013d6a54306074c651018c14697313555dfa2a896ff05559",
+        "_production_cli": "0fd3471c0f907361e3b4ad79773d945982e5f4cd5e2645ebf7d73ec84c3add34",
+        "test_installed_device_photo_reclaims_then_downloads_both_sources_twice": "02550003eced8fe217365b1d6ad7e17d29f835022f55656803ef1f64b1a623a8"
+      }
+    },
+    "narrow_fix": "只在两个由真实安装版CLI调用的生成点显式传入installed.python。"
+  },
+  "counterexamples": [
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+      "original_csv": {
+        "status": "passed",
+        "total_seconds": "20.837781844002166"
+      },
+      "first_run": {
+        "status": "not_executed",
+        "reason": "首轮bootstrap观测器中断，此节点在811项未执行清单中。"
+      },
+      "final_frozen_run": {
+        "status": "failed",
+        "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/camera-source/state.db",
+        "database_sha256": "6ba84897f639a675b98fdaecc1c528bb5c98ce32ae5f0240427315c5946ba0cb",
+        "database_backup": "/tmp/camctl-itopt-installed-hb-python/.local/verification/itopt/installed-hb-python/raw-state.db",
+        "action": {
+          "id": 1,
+          "plan_id": 1,
+          "input_index": 0,
+          "name": "capture",
+          "type": 1,
+          "device_id": "hb0",
+          "scheduled_at": 1792884844000000,
+          "group_name": null,
+          "input_fields_json": "{\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"P\",\"iso\":100},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"MF\"}},\"policy\":{\"max_delay_ms\":60000}}",
+          "effective_params_json": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"P\",\"iso\":100},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"MF\"}}",
+          "driver_id": "hasselblad_cfv100c",
+          "max_delay_ms": 60000,
+          "execution_spec_json": "{\"output_storage\":\"device\",\"start_call_timeout_s\":180}",
+          "status": 4,
+          "execution_started": 1,
+          "cancel_requested": 0,
+          "error_code": 13,
+          "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"device_failed\"}",
+          "first_window_observed_at": 1792884851774086,
+          "expiration_reason": null,
+          "source_resolution_state": null,
+          "resolved_source_plan_id": null,
+          "target_selection_state": null,
+          "created_event_id": 1,
+          "last_event_id": 19,
+          "change_count": 10
+        },
+        "device_activity": {
+          "id": 1,
+          "action_id": 1,
+          "task_key": "7b186ee8e7184589815cd237acc34e51",
+          "task_locator_json": null,
+          "state_query_supported": 0,
+          "stop_supported": 0,
+          "safe_repeat_stop": 0,
+          "start_return_meaning": 3,
+          "completion_mode": 1,
+          "ownership_mode": 1,
+          "output_scope_json": "{}",
+          "baseline_state": 1,
+          "baseline_first_event_id": null,
+          "baseline_last_event_id": null,
+          "dispatch_state": 4,
+          "activity_state": 1,
+          "occupancy_state": 2,
+          "sent_at": null,
+          "started_at": null,
+          "result_wait_margin_ms": null,
+          "extra_wait_ms_used": null,
+          "expected_check_at": null,
+          "wait_completed_event_id": null,
+          "capture_json": null,
+          "control_elapsed_ns": null,
+          "completion_basis": 1,
+          "completion_evidence_json": null,
+          "result_set_state": 1,
+          "result_check_json": null,
+          "output_set_finalized_event_id": null,
+          "last_error_json": null
+        },
+        "operation_run": {
+          "id": 1,
+          "action_id": 1,
+          "delivery_id": null,
+          "kind": 1,
+          "query_purpose": null,
+          "responsibility_key": "start/1",
+          "activity_id": 1,
+          "copy_id": null,
+          "cleanup_item_id": null,
+          "obtain_item_id": null,
+          "session_key": null,
+          "status": 4,
+          "attempts_used": 1,
+          "max_attempts_used": 1,
+          "timeout_s_json": "180",
+          "retry_interval_s_json": null,
+          "retry_wait_required": 0,
+          "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}"
+        },
+        "operation_attempt": {
+          "id": 1,
+          "run_id": 1,
+          "attempt_no": 1,
+          "copy_round": null,
+          "status": 3,
+          "intent_event_id": 13,
+          "result_event_id": 14,
+          "result_first_page_event_id": null,
+          "result_last_page_event_id": null,
+          "max_attempts_used": 1,
+          "timeout_s_json": "180",
+          "retry_interval_s_json": null,
+          "effect_state": 2,
+          "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"hasselblad_start_entered\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":1}},\"diagnostics\":{\"version\":1,\"call_limit\":14,\"calls\":[{\"step_index\":1,\"step_name\":\"list\",\"stdout\":{\"state\":\"complete\",\"hex\":\"\"},\"stderr\":{\"state\":\"complete\",\"hex\":\"54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a202046696c6520222f746d702f63616d63746c2d69746f70742d66696e616c2d32303236313032352f7461736b732f3030332d63616d63746c2d626f6f7473747261702f746d702f7079746573742f746573745f696e7374616c6c65645f6465766963655f70686f746f5f7265302f68625f636c69222c206c696e6520362c20696e203c6d6f64756c653e0a20202020696d706f72742063616d63746c0a4d6f64756c654e6f74466f756e644572726f723a204e6f206d6f64756c65206e616d6564202763616d63746c270a\"}}]}}",
+          "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}"
+        },
+        "decoded_stderr": "Traceback (most recent call last):\n  File \"/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/hb_cli\", line 6, in <module>\n    import camctl\nModuleNotFoundError: No module named 'camctl'\n",
+        "device_files": [],
+        "outputs": [],
+        "intermediate_files": [
+          {
+            "id": 1,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "purpose": 5,
+            "relative_path": "capture-originals/1.3fr",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": null,
+            "sha256": null,
+            "last_error_json": null,
+            "created_event_id": 12,
+            "last_event_id": 26,
+            "change_count": 4
+          },
+          {
+            "id": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "purpose": 6,
+            "relative_path": "capture-previews/2.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": null,
+            "sha256": null,
+            "last_error_json": null,
+            "created_event_id": 12,
+            "last_event_id": 29,
+            "change_count": 4
+          }
+        ],
+        "window_lateness_seconds": 7.774086,
+        "material_history": [
+          {
+            "event_id": 1,
+            "event_type": 2,
+            "reason": 1,
+            "occurred_at": 1792884848051158
+          },
+          {
+            "event_id": 8,
+            "event_type": 7,
+            "reason": 1,
+            "occurred_at": 1792884851774086
+          },
+          {
+            "event_id": 12,
+            "event_type": 26,
+            "reason": 1,
+            "occurred_at": 1792884851795786
+          },
+          {
+            "event_id": 13,
+            "event_type": 11,
+            "reason": 1,
+            "occurred_at": 1792884851800262
+          },
+          {
+            "event_id": 14,
+            "event_type": 12,
+            "reason": 2,
+            "occurred_at": 1792884851975022
+          },
+          {
+            "event_id": 17,
+            "event_type": 8,
+            "reason": 2,
+            "occurred_at": 1792884851975022
+          },
+          {
+            "event_id": 26,
+            "event_type": 26,
+            "reason": 4,
+            "occurred_at": 1792884852218726
+          },
+          {
+            "event_id": 29,
+            "event_type": 26,
+            "reason": 4,
+            "occurred_at": 1792884852218726
+          }
+        ]
+      }
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+      "original_csv": {
+        "status": "passed",
+        "total_seconds": "19.562136984997778"
+      },
+      "first_run": {
+        "status": "not_executed",
+        "reason": "首轮bootstrap观测器中断，此节点在811项未执行清单中。"
+      },
+      "final_frozen_run": {
+        "status": "failed",
+        "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "snapshot_sha256": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/camera-source/state.db",
+        "database_sha256": "b180e013c762c0863935941b3bde051e212239a2a6a1076f041f184a627da37a",
+        "database_backup": "/tmp/camctl-itopt-installed-hb-python/.local/verification/itopt/installed-hb-python/jpeg-state.db",
+        "action": {
+          "id": 1,
+          "plan_id": 1,
+          "input_index": 0,
+          "name": "capture",
+          "type": 1,
+          "device_id": "hb0",
+          "scheduled_at": 1792884852000000,
+          "group_name": null,
+          "input_fields_json": "{\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"P\",\"iso\":100},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"MF\"}},\"policy\":{\"max_delay_ms\":60000}}",
+          "effective_params_json": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"P\",\"iso\":100},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"MF\"}}",
+          "driver_id": "hasselblad_cfv100c",
+          "max_delay_ms": 60000,
+          "execution_spec_json": "{\"output_storage\":\"device\",\"start_call_timeout_s\":180}",
+          "status": 4,
+          "execution_started": 1,
+          "cancel_requested": 0,
+          "error_code": 13,
+          "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"device_failed\"}",
+          "first_window_observed_at": 1792884858025265,
+          "expiration_reason": null,
+          "source_resolution_state": null,
+          "resolved_source_plan_id": null,
+          "target_selection_state": null,
+          "created_event_id": 1,
+          "last_event_id": 19,
+          "change_count": 10
+        },
+        "device_activity": {
+          "id": 1,
+          "action_id": 1,
+          "task_key": "f660381029f14f6598a8ba3ecf409f7b",
+          "task_locator_json": null,
+          "state_query_supported": 0,
+          "stop_supported": 0,
+          "safe_repeat_stop": 0,
+          "start_return_meaning": 3,
+          "completion_mode": 1,
+          "ownership_mode": 1,
+          "output_scope_json": "{}",
+          "baseline_state": 1,
+          "baseline_first_event_id": null,
+          "baseline_last_event_id": null,
+          "dispatch_state": 4,
+          "activity_state": 1,
+          "occupancy_state": 2,
+          "sent_at": null,
+          "started_at": null,
+          "result_wait_margin_ms": null,
+          "extra_wait_ms_used": null,
+          "expected_check_at": null,
+          "wait_completed_event_id": null,
+          "capture_json": null,
+          "control_elapsed_ns": null,
+          "completion_basis": 1,
+          "completion_evidence_json": null,
+          "result_set_state": 1,
+          "result_check_json": null,
+          "output_set_finalized_event_id": null,
+          "last_error_json": null
+        },
+        "operation_run": {
+          "id": 1,
+          "action_id": 1,
+          "delivery_id": null,
+          "kind": 1,
+          "query_purpose": null,
+          "responsibility_key": "start/1",
+          "activity_id": 1,
+          "copy_id": null,
+          "cleanup_item_id": null,
+          "obtain_item_id": null,
+          "session_key": null,
+          "status": 4,
+          "attempts_used": 1,
+          "max_attempts_used": 1,
+          "timeout_s_json": "180",
+          "retry_interval_s_json": null,
+          "retry_wait_required": 0,
+          "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}"
+        },
+        "operation_attempt": {
+          "id": 1,
+          "run_id": 1,
+          "attempt_no": 1,
+          "copy_round": null,
+          "status": 3,
+          "intent_event_id": 13,
+          "result_event_id": 14,
+          "result_first_page_event_id": null,
+          "result_last_page_event_id": null,
+          "max_attempts_used": 1,
+          "timeout_s_json": "180",
+          "retry_interval_s_json": null,
+          "effect_state": 2,
+          "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"hasselblad_start_entered\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":1}},\"diagnostics\":{\"version\":1,\"call_limit\":14,\"calls\":[{\"step_index\":1,\"step_name\":\"list\",\"stdout\":{\"state\":\"complete\",\"hex\":\"\"},\"stderr\":{\"state\":\"complete\",\"hex\":\"54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a202046696c6520222f746d702f63616d63746c2d69746f70742d66696e616c2d32303236313032352f7461736b732f3030332d63616d63746c2d626f6f7473747261702f746d702f7079746573742f746573745f696e7374616c6c65645f6465766963655f70686f746f5f7265312f68625f636c69222c206c696e6520362c20696e203c6d6f64756c653e0a20202020696d706f72742063616d63746c0a4d6f64756c654e6f74466f756e644572726f723a204e6f206d6f64756c65206e616d6564202763616d63746c270a\"}}]}}",
+          "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}"
+        },
+        "decoded_stderr": "Traceback (most recent call last):\n  File \"/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/hb_cli\", line 6, in <module>\n    import camctl\nModuleNotFoundError: No module named 'camctl'\n",
+        "device_files": [],
+        "outputs": [],
+        "intermediate_files": [
+          {
+            "id": 1,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "purpose": 5,
+            "relative_path": "capture-originals/1.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": null,
+            "sha256": null,
+            "last_error_json": null,
+            "created_event_id": 12,
+            "last_event_id": 26,
+            "change_count": 4
+          },
+          {
+            "id": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "purpose": 6,
+            "relative_path": "capture-previews/2.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": null,
+            "sha256": null,
+            "last_error_json": null,
+            "created_event_id": 12,
+            "last_event_id": 29,
+            "change_count": 4
+          }
+        ],
+        "window_lateness_seconds": 6.025265,
+        "material_history": [
+          {
+            "event_id": 1,
+            "event_type": 2,
+            "reason": 1,
+            "occurred_at": 1792884855005021
+          },
+          {
+            "event_id": 8,
+            "event_type": 7,
+            "reason": 1,
+            "occurred_at": 1792884858025265
+          },
+          {
+            "event_id": 12,
+            "event_type": 26,
+            "reason": 1,
+            "occurred_at": 1792884858040695
+          },
+          {
+            "event_id": 13,
+            "event_type": 11,
+            "reason": 1,
+            "occurred_at": 1792884858044023
+          },
+          {
+            "event_id": 14,
+            "event_type": 12,
+            "reason": 2,
+            "occurred_at": 1792884858168777
+          },
+          {
+            "event_id": 17,
+            "event_type": 8,
+            "reason": 2,
+            "occurred_at": 1792884858168777
+          },
+          {
+            "event_id": 26,
+            "event_type": 26,
+            "reason": 4,
+            "occurred_at": 1792884858385819
+          },
+          {
+            "event_id": 29,
+            "event_type": 26,
+            "reason": 4,
+            "occurred_at": 1792884858385819
+          }
+        ]
+      }
+    }
+  ],
+  "final_failure_trace": {
+    "path": "/tmp/camctl-itopt-installed-hb-python/.local/verification/itopt/installed-hb-python/final-full-failure-trace.log",
+    "sha256": "e7363fc6baded6d87c72c29318d34640dc4a230b7ac4da1b0544385a05bc9261",
+    "text": "_ test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw] __\n\ninstalled = _Installed(python=PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution1/e...=PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution1/requirements.txt'))\ntmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0')\ncapture_format = 'raw'\n\n    @pytest.mark.parametrize(\"capture_format\", [\"raw\", \"jpeg\"])\n    def test_installed_device_photo_reclaims_then_downloads_both_sources_twice(\n            installed, tmp_path, capture_format):\n        home = tmp_path / \"camera-source\"\n        config = tmp_path / \"device.toml\"\n        tool = tmp_path / \"hb_cli\"\n        log = tmp_path / \"calls.jsonl\"\n        tool.write_text(_hasselblad_tool_source(log, \"SERIAL-1\"))\n        tool.chmod(0o700)\n        config.write_text(f'''[paths]\n    state_db=\"{home}/state.db\"\n    log_file=\"{home}/camctl.log\"\n    staging=\"{home}/staging\"\n    ready=\"{home}/ready\"\n    processing=\"{home}/processing\"\n    [devices.hb0]\n    kind=\"camera\"\n    driver=\"hasselblad_cfv100c\"\n    [devices.hb0.hasselblad]\n    executable=\"{tool}\"\n    serial=\"SERIAL-1\"\n    output_storage=\"device\"\n    [devices.hb0.copy]\n    max_read_attempts=1\n    retry_interval_s=\"0\"\n    ''')\n        init = _production_cli(installed, \"init\", \"--config\", str(config))\n        assert init.returncode == 0, (init.stdout, init.stderr)\n    \n        def run_plan(number, actions):\n            now = (datetime.now(timezone.utc) - timedelta(seconds=1)).strftime(\n                \"%Y-%m-%d %H:%M:%S\")\n            for action in actions:\n                action[\"scheduled_at\"] = now\n            plan = tmp_path / f\"plan-{number}.json\"\n            plan.write_text(json.dumps({\n                \"request_id\": str(number), \"created_at\": now,\n                \"name\": f\"业务{number}\", \"actions\": actions,\n            }), encoding=\"utf-8\")\n            result = _production_cli(installed, \"run\", str(plan), \"--config\", str(config))\n            assert result.returncode == 0, (result.stdout, result.stderr)\n    \n        sample_params = deepcopy(_HASSELBLAD_PHOTO_SAMPLE_PARAMS)\n        sample_params[\"capture_format\"] = capture_format\n        run_plan(1, [{\n            \"name\": \"capture\", \"type\": \"camera_take_photo\", \"device_id\": \"hb0\",\n            \"params\": sample_params, \"policy\": {\"max_delay_ms\": 60000},\n        }])\n    \n        database = home / \"state.db\"\n        with closing(sqlite3.connect(database)) as connection:\n>           assert connection.execute(\"SELECT status FROM actions\").fetchall() == [(3,)]\nE           assert [(4,)] == [(3,)]\nE             \nE             At index 0 diff: (4,) != (3,)\nE             Use -v to get more diff\n\napps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py:76: AssertionError\n_ test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg] _\n\ninstalled = _Installed(python=PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution1/e...=PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution1/requirements.txt'))\ntmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1')\ncapture_format = 'jpeg'\n\n    @pytest.mark.parametrize(\"capture_format\", [\"raw\", \"jpeg\"])\n    def test_installed_device_photo_reclaims_then_downloads_both_sources_twice(\n            installed, tmp_path, capture_format):\n        home = tmp_path / \"camera-source\"\n        config = tmp_path / \"device.toml\"\n        tool = tmp_path / \"hb_cli\"\n        log = tmp_path / \"calls.jsonl\"\n        tool.write_text(_hasselblad_tool_source(log, \"SERIAL-1\"))\n        tool.chmod(0o700)\n        config.write_text(f'''[paths]\n    state_db=\"{home}/state.db\"\n    log_file=\"{home}/camctl.log\"\n    staging=\"{home}/staging\"\n    ready=\"{home}/ready\"\n    processing=\"{home}/processing\"\n    [devices.hb0]\n    kind=\"camera\"\n    driver=\"hasselblad_cfv100c\"\n    [devices.hb0.hasselblad]\n    executable=\"{tool}\"\n    serial=\"SERIAL-1\"\n    output_storage=\"device\"\n    [devices.hb0.copy]\n    max_read_attempts=1\n    retry_interval_s=\"0\"\n    ''')\n        init = _production_cli(installed, \"init\", \"--config\", str(config))\n        assert init.returncode == 0, (init.stdout, init.stderr)\n    \n        def run_plan(number, actions):\n            now = (datetime.now(timezone.utc) - timedelta(seconds=1)).strftime(\n                \"%Y-%m-%d %H:%M:%S\")\n            for action in actions:\n                action[\"scheduled_at\"] = now\n            plan = tmp_path / f\"plan-{number}.json\"\n            plan.write_text(json.dumps({\n                \"request_id\": str(number), \"created_at\": now,\n                \"name\": f\"业务{number}\", \"actions\": actions,\n            }), encoding=\"utf-8\")\n            result = _production_cli(installed, \"run\", str(plan), \"--config\", str(config))\n            assert result.returncode == 0, (result.stdout, result.stderr)\n    \n        sample_params = deepcopy(_HASSELBLAD_PHOTO_SAMPLE_PARAMS)\n        sample_params[\"capture_format\"] = capture_format\n        run_plan(1, [{\n            \"name\": \"capture\", \"type\": \"camera_take_photo\", \"device_id\": \"hb0\",\n            \"params\": sample_params, \"policy\": {\"max_delay_ms\": 60000},\n        }])\n    \n        database = home / \"state.db\"\n        with closing(sqlite3.connect(database)) as connection:\n>           assert connection.execute(\"SELECT status FROM actions\").fetchall() == [(3,)]\nE           assert [(4,)] == [(3,)]\nE             \nE             At index 0 diff: (4,) != (3,)\nE             Use -v to get more diff\n\napps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py:76: AssertionError\n"
+  },
+  "same_kind_call_audit": [
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+      "line": 393,
+      "scope": "test_hasselblad_tool_source_rejects_settings_outside_sample",
+      "installed_python": null,
+      "boundary": "current_test_interpreter_parameter_rejection",
+      "changed": false
+    },
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+      "line": 871,
+      "scope": "test_installed_hasselblad_photo_pair_obtain_and_source_reuse",
+      "installed_python": "installed.python",
+      "boundary": "installed_cli_interpreter",
+      "changed": true
+    },
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py",
+      "line": 32,
+      "scope": "test_installed_device_photo_reclaims_then_downloads_both_sources_twice",
+      "installed_python": "installed.python",
+      "boundary": "installed_cli_interpreter",
+      "changed": true
+    },
+    {
+      "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+      "line": 328,
+      "scope": "PhotoWorld.__init__",
+      "installed_python": "installed.python",
+      "boundary": "installed_cli_interpreter",
+      "changed": false
+    }
+  ],
+  "verification": {
+    "kind": "independent_supplement",
+    "run_root": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025",
+    "source": {
+      "root": "/tmp/camctl-itopt-installed-hb-python",
+      "head": "a423fad5e708d5205462896af592d96f584a3a24",
+      "status": "M apps/camctl/tests/integration/bootstrap/test_distribution.py\n M apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py",
+      "snapshot_sha256": "4fdd3ffcf52c0ecc2f248ea75eee067d1d2f52784fc6e97cb61b8ef0d476ce26"
+    },
+    "source_status_note": "在a423fad5基线上冻结两个调用点的未提交修改；归档JSON在补测后生成。",
+    "summary": {
+      "started_utc": "2026-10-24T23:50:57.694934+00:00",
+      "source": {
+        "root": "/tmp/camctl-itopt-installed-hb-python",
+        "head": "a423fad5e708d5205462896af592d96f584a3a24",
+        "status": "M apps/camctl/tests/integration/bootstrap/test_distribution.py\n M apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py",
+        "snapshot_sha256": "4fdd3ffcf52c0ecc2f248ea75eee067d1d2f52784fc6e97cb61b8ef0d476ce26"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "runner_pid": 444967,
+      "jobs": 1,
+      "scope": "all",
+      "selection": [
+        "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py"
+      ],
+      "status": "finished",
+      "updated_utc": "2026-10-24T23:52:28.936744+00:00",
+      "wall_seconds": 90.74591447099374,
+      "exit_code": 0,
+      "finished_utc": "2026-10-24T23:52:28.936658+00:00"
+    },
+    "task_result": {
+      "id": "camctl/bootstrap",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/bootstrap",
+      "targets": [
+        "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py"
+      ],
+      "estimated_seconds": 733.239981505747,
+      "status": "passed",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/artifacts",
+      "cwd": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source",
+      "started_utc": "2026-10-24T23:50:59.045098+00:00",
+      "command": [
+        "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/control:/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source",
+          "started_utc": "2026-10-24T23:51:10.225925+00:00",
+          "pid": 445516,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T23:51:10.333891+00:00",
+          "wall_seconds": 0.10795175399834989
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 445516,
+      "pid": 445522,
+      "execution_started_utc": "2026-10-24T23:51:10.349145+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 2,
+        "outcomes": {
+          "passed": 2
+        },
+        "subchecks": {},
+        "elapsed_seconds": 76.2332326839969,
+        "utc": "2026-10-24T23:52:28.781166+00:00",
+        "pid": 445522
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-24T23:52:28.934920+00:00",
+      "wall_seconds": 89.39391956700274
+    },
+    "task_command": {
+      "id": "camctl/bootstrap",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/bootstrap",
+      "targets": [
+        "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py"
+      ],
+      "estimated_seconds": 733.239981505747,
+      "status": "running",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/artifacts",
+      "cwd": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source",
+      "started_utc": "2026-10-24T23:50:59.045098+00:00",
+      "command": [
+        "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/control:/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/source",
+          "started_utc": "2026-10-24T23:51:10.225925+00:00",
+          "pid": 445516,
+          "exit_code": 0,
+          "finished_utc": "2026-10-24T23:51:10.333891+00:00",
+          "wall_seconds": 0.10795175399834989
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 445516,
+      "pid": 445522,
+      "execution_started_utc": "2026-10-24T23:51:10.349145+00:00",
+      "progress": {
+        "status": "starting",
+        "nodeid": "apps/camctl/tests/integration/bootstrap"
+      },
+      "source": "4fdd3ffcf52c0ecc2f248ea75eee067d1d2f52784fc6e97cb61b8ef0d476ce26",
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      }
+    },
+    "cases": [
+      {
+        "nodeid": "tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 1.2140460289956536
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 43.4842169409967
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007516580008086748
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 44.699014627993165
+      },
+      {
+        "nodeid": "tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0018188449976150878
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 30.986133680999046
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0008189650034182705
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 30.98877149100008
+      }
+    ],
+    "runner_exec_session": 23671,
+    "output_log": {
+      "path": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/artifacts/output.log",
+      "sha256": "69137632182a2802cc7888245c4cbcb4d6c77825d72382a60cdac747b6d8d8df",
+      "tail": "..                                                                       [100%]\n============================== slowest durations ===============================\n43.48s call     tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]\n30.99s call     tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]\n1.21s setup    tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]\n\n(3 durations < 0.005s hidden.  Use -vv to show these durations.)\n2 passed in 76.20s (0:01:16)\n"
+    },
+    "postconditions": [
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+        "database": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/camera-source/state.db",
+        "database_sha256": "5d5806ebadc859f80668e9dae2ef3846a7193807d8daf2c0ec196170c2287787",
+        "actual_tool_shebang": "#!/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/b7-distribution0/env/bin/python",
+        "calls_log": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/calls.jsonl",
+        "calls_sha256": "f66626071dea0f01b2882c07b85d062da7c8e2b1ee1a145b60e038e446b64d1d",
+        "actions": [
+          {
+            "id": 1,
+            "plan_id": 1,
+            "name": "capture",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"output_storage\":\"device\",\"start_call_timeout_s\":180}"
+          },
+          {
+            "id": 2,
+            "plan_id": 2,
+            "name": "original-2",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 3,
+            "plan_id": 2,
+            "name": "preview-2",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":2}"
+          },
+          {
+            "id": 4,
+            "plan_id": 3,
+            "name": "original-3",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 5,
+            "plan_id": 3,
+            "name": "preview-3",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":2}"
+          },
+          {
+            "id": 6,
+            "plan_id": 4,
+            "name": "corrupt-original",
+            "status": 4,
+            "error_code": 21,
+            "error_details_json": "{}",
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 7,
+            "plan_id": 4,
+            "name": "corrupt-preview",
+            "status": 4,
+            "error_code": 21,
+            "error_details_json": "{}",
+            "execution_spec_json": "{\"selection_mode\":2}"
+          }
+        ],
+        "device_files": [
+          {
+            "id": 1,
+            "identity_key": "[\"hb0\",\"hasselblad_cfv100c\",\"[\\\"hb-download-v2\\\",\\\"/CAMERA/DCIM/100HASSELBL/camera-copy.3fr\\\",\\\"camera-copy.3fr\\\",\\\"original\\\",\\\"ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0\\\"]\"]",
+            "size_bytes": 29,
+            "sha256": "ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0",
+            "locator_json": "{\"camera_path\":\"/CAMERA/DCIM/100HASSELBL/camera-copy.3fr\",\"camera_name\":\"camera-copy.3fr\",\"variant\":\"original\",\"sha256\":\"ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0\"}"
+          },
+          {
+            "id": 2,
+            "identity_key": "[\"hb0\",\"hasselblad_cfv100c\",\"[\\\"hb-download-v2\\\",\\\"/CAMERA/DCIM/100HASSELBL/camera-copy.3fr\\\",\\\"camera-copy.3fr\\\",\\\"thumbnail\\\",\\\"31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400\\\"]\"]",
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400",
+            "locator_json": "{\"camera_path\":\"/CAMERA/DCIM/100HASSELBL/camera-copy.3fr\",\"camera_name\":\"camera-copy.3fr\",\"variant\":\"thumbnail\",\"sha256\":\"31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400\"}"
+          }
+        ],
+        "deliveries": [
+          {
+            "plan_id": 2,
+            "id": 1,
+            "output_id": 1,
+            "file_name": "1.3fr",
+            "status": 5,
+            "target_file_id": 3,
+            "size_bytes": 29,
+            "sha256": "ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0"
+          },
+          {
+            "plan_id": 2,
+            "id": 2,
+            "output_id": 2,
+            "file_name": "2.jpg",
+            "status": 5,
+            "target_file_id": 4,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          },
+          {
+            "plan_id": 3,
+            "id": 3,
+            "output_id": 1,
+            "file_name": "3.3fr",
+            "status": 5,
+            "target_file_id": 5,
+            "size_bytes": 29,
+            "sha256": "ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0"
+          },
+          {
+            "plan_id": 3,
+            "id": 4,
+            "output_id": 2,
+            "file_name": "4.jpg",
+            "status": 5,
+            "target_file_id": 6,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          },
+          {
+            "plan_id": 4,
+            "id": 5,
+            "output_id": 1,
+            "file_name": "5.3fr",
+            "status": 6,
+            "target_file_id": 7,
+            "size_bytes": null,
+            "sha256": null
+          },
+          {
+            "plan_id": 4,
+            "id": 6,
+            "output_id": 2,
+            "file_name": "6.jpg",
+            "status": 6,
+            "target_file_id": 8,
+            "size_bytes": null,
+            "sha256": null
+          }
+        ],
+        "capture_intermediate_files": [
+          {
+            "id": 1,
+            "relative_path": "capture-originals/1.3fr",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": 29,
+            "sha256": "ccd572c3b6713e033355ad42367e887a4b6fecc3aaadf657e05d1f45251438b0"
+          },
+          {
+            "id": 2,
+            "relative_path": "capture-previews/2.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          }
+        ],
+        "independent_successful_deliveries": 4,
+        "unique_delivery_ids": 4,
+        "unique_target_ids": 4,
+        "unique_file_names": 4,
+        "capture_calls": 1,
+        "download_original_thumbnail_pairs": [
+          [
+            "original",
+            "camera-copy.3fr"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.3fr"
+          ],
+          [
+            "original",
+            "camera-copy.3fr"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.3fr"
+          ],
+          [
+            "original",
+            "camera-copy.3fr"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.3fr"
+          ]
+        ],
+        "read_download_directory_empty": true,
+        "ready_media_empty_after_test_cleanup": true
+      },
+      {
+        "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+        "database": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/camera-source/state.db",
+        "database_sha256": "1ad68351112927831928ca85429b3cfb9f623734e37454d1299789e3b7d946ba",
+        "actual_tool_shebang": "#!/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/b7-distribution0/env/bin/python",
+        "calls_log": "/tmp/camctl-itopt-installed-hb-python-supplement-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/calls.jsonl",
+        "calls_sha256": "9df76305a6897a1bad8e60702c840a98c123089f77f3a40657d8b70507f9165d",
+        "actions": [
+          {
+            "id": 1,
+            "plan_id": 1,
+            "name": "capture",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"output_storage\":\"device\",\"start_call_timeout_s\":180}"
+          },
+          {
+            "id": 2,
+            "plan_id": 2,
+            "name": "original-2",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 3,
+            "plan_id": 2,
+            "name": "preview-2",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":2}"
+          },
+          {
+            "id": 4,
+            "plan_id": 3,
+            "name": "original-3",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 5,
+            "plan_id": 3,
+            "name": "preview-3",
+            "status": 3,
+            "error_code": null,
+            "error_details_json": null,
+            "execution_spec_json": "{\"selection_mode\":2}"
+          },
+          {
+            "id": 6,
+            "plan_id": 4,
+            "name": "corrupt-original",
+            "status": 4,
+            "error_code": 21,
+            "error_details_json": "{}",
+            "execution_spec_json": "{\"selection_mode\":1}"
+          },
+          {
+            "id": 7,
+            "plan_id": 4,
+            "name": "corrupt-preview",
+            "status": 4,
+            "error_code": 21,
+            "error_details_json": "{}",
+            "execution_spec_json": "{\"selection_mode\":2}"
+          }
+        ],
+        "device_files": [
+          {
+            "id": 1,
+            "identity_key": "[\"hb0\",\"hasselblad_cfv100c\",\"[\\\"hb-download-v2\\\",\\\"/CAMERA/DCIM/100HASSELBL/camera-copy.jpg\\\",\\\"camera-copy.jpg\\\",\\\"original\\\",\\\"c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7\\\"]\"]",
+            "size_bytes": 31,
+            "sha256": "c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7",
+            "locator_json": "{\"camera_path\":\"/CAMERA/DCIM/100HASSELBL/camera-copy.jpg\",\"camera_name\":\"camera-copy.jpg\",\"variant\":\"original\",\"sha256\":\"c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7\"}"
+          },
+          {
+            "id": 2,
+            "identity_key": "[\"hb0\",\"hasselblad_cfv100c\",\"[\\\"hb-download-v2\\\",\\\"/CAMERA/DCIM/100HASSELBL/camera-copy.jpg\\\",\\\"camera-copy.jpg\\\",\\\"thumbnail\\\",\\\"31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400\\\"]\"]",
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400",
+            "locator_json": "{\"camera_path\":\"/CAMERA/DCIM/100HASSELBL/camera-copy.jpg\",\"camera_name\":\"camera-copy.jpg\",\"variant\":\"thumbnail\",\"sha256\":\"31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400\"}"
+          }
+        ],
+        "deliveries": [
+          {
+            "plan_id": 2,
+            "id": 1,
+            "output_id": 1,
+            "file_name": "1.jpg",
+            "status": 5,
+            "target_file_id": 3,
+            "size_bytes": 31,
+            "sha256": "c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7"
+          },
+          {
+            "plan_id": 2,
+            "id": 2,
+            "output_id": 2,
+            "file_name": "2.jpg",
+            "status": 5,
+            "target_file_id": 4,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          },
+          {
+            "plan_id": 3,
+            "id": 3,
+            "output_id": 1,
+            "file_name": "3.jpg",
+            "status": 5,
+            "target_file_id": 5,
+            "size_bytes": 31,
+            "sha256": "c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7"
+          },
+          {
+            "plan_id": 3,
+            "id": 4,
+            "output_id": 2,
+            "file_name": "4.jpg",
+            "status": 5,
+            "target_file_id": 6,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          },
+          {
+            "plan_id": 4,
+            "id": 5,
+            "output_id": 1,
+            "file_name": "5.jpg",
+            "status": 6,
+            "target_file_id": 7,
+            "size_bytes": null,
+            "sha256": null
+          },
+          {
+            "plan_id": 4,
+            "id": 6,
+            "output_id": 2,
+            "file_name": "6.jpg",
+            "status": 6,
+            "target_file_id": 8,
+            "size_bytes": null,
+            "sha256": null
+          }
+        ],
+        "capture_intermediate_files": [
+          {
+            "id": 1,
+            "relative_path": "capture-originals/1.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": 31,
+            "sha256": "c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7"
+          },
+          {
+            "id": 2,
+            "relative_path": "capture-previews/2.jpg",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "size_bytes": 25,
+            "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400"
+          }
+        ],
+        "independent_successful_deliveries": 4,
+        "unique_delivery_ids": 4,
+        "unique_target_ids": 4,
+        "unique_file_names": 4,
+        "capture_calls": 1,
+        "download_original_thumbnail_pairs": [
+          [
+            "original",
+            "camera-copy.jpg"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.jpg"
+          ],
+          [
+            "original",
+            "camera-copy.jpg"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.jpg"
+          ],
+          [
+            "original",
+            "camera-copy.jpg"
+          ],
+          [
+            "thumbnail",
+            "camera-copy.jpg"
+          ]
+        ],
+        "read_download_directory_empty": true,
+        "ready_media_empty_after_test_cleanup": true
+      }
+    ],
+    "timing_note": "冻结最终轮在list工具导入阶段失败；本补测实际完成拍摄及后续取回、错误内容拒绝与清理，前后覆盖阶段不同，耗时不作为性能对照。"
+  },
+  "interpretation": "冻结48d2ee64的最终整轮结果保持不变。本记录只说明修改后的独立定向补测通过，不能把两次运行合并成一次全量通过。",
+  "scope_limits": [
+    "补测执行完整device源文件的raw/jpeg两态，包含每种格式两轮独立原图/预览取回、固定大小/SHA、源身份、实际文件字节、配置变化和等长错误内容拒绝。",
+    "主机源调用点已做静态接口审计；其原format_version断言保持，本次未单独执行该场景。",
+    "capture旧失败仅完成证据交接，未修改或重测。"
+  ],
+  "design_gaps": []
+}

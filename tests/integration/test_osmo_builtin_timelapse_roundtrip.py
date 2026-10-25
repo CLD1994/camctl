@@ -607,7 +607,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         tmp_path, host_demo, osmo_package, monkeypatch, action_type, include_preview):
     """正式 OSMO 合同经客户端、C host、安装 CLI、恢复、取回与 ACK。
 
-    受控时钟只接入既有业务时钟模块。driver 的 asyncio.sleep(30) 与
+    受控时钟只接入既有业务时钟模块。driver 的 asyncio.sleep(3) 与
     ADB 记录的真实单调时长保持原样。
     """
     package = osmo_package
@@ -722,7 +722,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         assert original_execution["video_result_mode"] == "single_file"
         expected_target_ms = 10000 if action_type == "camera_record" else 300000
         assert original_execution["target_duration_ms"] == expected_target_ms
-        assert original_execution["file_completion_wait_ms"] == 30000
+        assert original_execution["file_completion_wait_ms"] == 3000
         assert original_execution["startup_margin_ms"] == 0
         from camctl.devices.tasks import EndControl, StartReturn
 
@@ -866,7 +866,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
 
         if action_type == "camera_record":
             # 主机计时录像在 10 秒目标后发唯一 STOP 00，
-            # 再由 driver 独立等待 30 秒。
+            # 再由 driver 独立等待 3 秒。
             assert len(stops) == 1, all_calls
             assert stops[0]["started_clock_ns"] - response["returned_clock_ns"] >= 10 * 1_000_000_000
             assert stops[0]["started_clock_utc_us"] - response["returned_clock_utc_us"] >= 10 * 1_000_000
@@ -876,7 +876,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
             directories = [call for call in all_calls if call.get("kind") == "directory"
                            and call.get("started_ns", 0) >= stops[0]["returned_ns"]]
             assert directories, all_calls
-            assert directories[0]["started_ns"] - stops[0]["returned_ns"] >= 30_000_000_000
+            assert directories[0]["started_ns"] - stops[0]["returned_ns"] >= 3_000_000_000
             completion = None
             for (encoded,) in result_rows:
                 document = json.loads(encoded)
@@ -886,8 +886,8 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
                     break
             assert completion is not None
             assert completion["method"] == "stop_return_and_wait"
-            assert completion["required_wait_ms"] == 30000
-            assert completion["observed_wait_ns"] >= 30_000_000_000
+            assert completion["required_wait_ms"] == 3000
+            assert completion["observed_wait_ns"] >= 3_000_000_000
             assert completion["completed"] is True
         else:
             # DEVICE/SENT/TIME_AND_OUTPUTS 自然完成等待 300 秒目标和 30 秒结果余量，

@@ -1,0 +1,3116 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-25",
+  "stage": "S6",
+  "status": "静态覆盖映射；尚未实施或重测",
+  "base_commit": "f8121feb5bfcb2c38839cb5f240b7a4de32fca66",
+  "scope": {
+    "normal_worlds": 12,
+    "fault_worlds": 6,
+    "directed_browser_cases_unchanged": 3,
+    "pytest_primary_identities_unchanged": 29,
+    "before_photo_ui_prefixes": 21,
+    "mapped_photo_ui_prefixes": 9,
+    "normal_ui_worlds": 6,
+    "normal_application_worlds": 6,
+    "fault_application_worlds": 6,
+    "runtime_tests_run_in_this_stage": 0,
+    "builds_run_in_this_stage": 0
+  },
+  "contracts": [
+    {
+      "path": "docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+      "line": 344,
+      "meaning": "四种格式×来源组合分别贯通完整业务过程，三种短快门至少覆盖；六个网页代表包含全部四组合和六类参数"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-21-hasselblad-photo-parameters.md",
+      "line": 244,
+      "meaning": "旧 H8 的已完成实施记录明确逐请求从选值、预设重开和导出开始；新 S6 明确授权覆盖迁移，不改写该历史，也不改变业务最低四组合"
+    },
+    {
+      "path": "tests/integration/README.md",
+      "line": 131,
+      "meaning": "当前运行说明在实施时必须同步六代表与真实 Application 导出事实；本次静态阶段没有改运行说明"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-25-integration-test-optimization.md",
+      "line": 57,
+      "meaning": "当前 S6 的覆盖迁移授权；S5 稳定接口交付后才能修改运行文件"
+    }
+  ],
+  "capability_evidence": {
+    "origin": "已完成的最终冻结轮留存能力文件，仅只读复核；不是本阶段新测",
+    "source_commit": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+    "worlds": [
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+        "task": "006-root-test_hasselblad_photo_roundtrip-shard-3",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot0",
+        "case": "raw-host-0.000333",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+          "size_bytes": 369,
+          "sha256": "da211b0c3314b812233729a192253262236c461fcdc5187482240a96e476fd3c"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+        "task": "006-root-test_hasselblad_photo_roundtrip-shard-3",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot1",
+        "case": "raw-device-0.000667",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot1/photo-input.json",
+          "size_bytes": 429,
+          "sha256": "76d75f1fd803e7e42f9f3ffa9f7f9f36cd74558de2a19da017ee8525a8c75050"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot1/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+        "task": "006-root-test_hasselblad_photo_roundtrip-shard-3",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot2",
+        "case": "jpeg-host-0.000333",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot2/photo-input.json",
+          "size_bytes": 371,
+          "sha256": "d30d8f0984807a1b07ad224096bdbc964723775b6858ca246f744b0086f99075"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest/test_installed_hasselblad_phot2/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+        "task": "007-root-test_hasselblad_photo_roundtrip-shard-2",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot0",
+        "case": "raw-device-0.00025",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+          "size_bytes": 386,
+          "sha256": "0fc04d0a85bce1f0f7d0d251cbb62515b349c7133f71172574d73a11fef7506b"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+        "task": "007-root-test_hasselblad_photo_roundtrip-shard-2",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot1",
+        "case": "jpeg-host-0.000667",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot1/photo-input.json",
+          "size_bytes": 429,
+          "sha256": "c1e638bb8c1707d95030c62fd617de1fbd76f870191e87bee296d72dedc1db15"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot1/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+        "task": "007-root-test_hasselblad_photo_roundtrip-shard-2",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot2",
+        "case": "jpeg-device-0.00025",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot2/photo-input.json",
+          "size_bytes": 388,
+          "sha256": "03c8ffb3a60e1c651fe1c5db92e4f7fac2f24ff8f2cd35ee3085017baa1bdf39"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/tmp/pytest/test_installed_hasselblad_phot2/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+        "task": "008-root-test_hasselblad_photo_roundtrip-shard-4",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot0",
+        "case": "raw-host-0.000667",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+          "size_bytes": 427,
+          "sha256": "c9327c67482f8559ad437a908273b941fbb85624594528ce071b6f6e3b09c028"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+        "task": "008-root-test_hasselblad_photo_roundtrip-shard-4",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot1",
+        "case": "raw-device-0.000333",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot1/photo-input.json",
+          "size_bytes": 371,
+          "sha256": "8a97ad54fe9722d12627576add1b558665bb7594e63258310c75ecc258684ea1"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot1/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+        "task": "008-root-test_hasselblad_photo_roundtrip-shard-4",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot2",
+        "case": "jpeg-host-0.00025",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot2/photo-input.json",
+          "size_bytes": 386,
+          "sha256": "4eeb4e13c5343ea123b25daaf97ff14620b38053fb4e17afe88ca523dbc45630"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot2/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "task": "008-root-test_hasselblad_photo_roundtrip-shard-4",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot3",
+        "case": "jpeg-device-0.000333",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/photo-input.json",
+          "size_bytes": 373,
+          "sha256": "f1e9c9bff930161789d4a021168ca50967d85c8f49e261726a988832717c9692"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+        "task": "009-root-test_hasselblad_photo_roundtrip-shard-1",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot0",
+        "case": "raw-host-0.00025",
+        "source": "host",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_phot0/photo-input.json",
+          "size_bytes": 384,
+          "sha256": "5c87671f1c5e852c463d1316a65020d5cbc7adba2d12c10539aaca5f1db56116"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+          "size_bytes": 8760,
+          "sha256": "7c371c549d46caed915c487e25347f55f0bd9837d26d70f3abb060ffa854c982"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      },
+      {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+        "task": "009-root-test_hasselblad_photo_roundtrip-shard-1",
+        "world_relative_root": "tmp/pytest/test_installed_hasselblad_phot1",
+        "case": "jpeg-device-0.000667",
+        "source": "device",
+        "input": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_phot1/photo-input.json",
+          "size_bytes": 431,
+          "sha256": "03facd5d8c45283e69adb8f0ccac87f85d923c1c95ac2bd82de4423636fb24e8"
+        },
+        "capabilities": {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/009-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_phot1/client-store/device-capabilities.json",
+          "size_bytes": 8761,
+          "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+        },
+        "without_delete_sha256": "ff94448deefc8cb8094d956bbfce0f54927e870a7dd2078ab8986c9a1e48fb71"
+      }
+    ],
+    "host_count": 6,
+    "device_count": 6,
+    "only_difference": "/devices/0/delete_supported",
+    "host_value": true,
+    "device_value": false,
+    "same_schema_sha256": "ec4052db7c130a18fcee5ec885426424b4f48a4e16b81101f41740d6eeb3b200",
+    "hash_encoding": "排序 UTF-8 JSON；Decimal 数字保存为带 decimal 标签的精确字符串，不作 float 投影",
+    "runtime_source_equivalence": "仅能力说明等值；host/device 的文件归档、回收和下载语义分别保留真实执行世界"
+  },
+  "input_classes": [
+    {
+      "class_id": "raw-0.000667",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "full_ui_world": "raw-host-0.000667",
+      "application_world": "raw-device-0.000667",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/0",
+          "mode": "M",
+          "present_fields": [
+            "aperture",
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "aperture",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/7",
+          "mode": "manual",
+          "present_fields": [
+            "mode",
+            "temperature_k"
+          ],
+          "required_fields": [
+            "mode",
+            "temperature_k"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/0",
+          "mode": "MF",
+          "present_fields": [
+            "mode",
+            "relative_move"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "class_id": "raw-0.00025",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "full_ui_world": "raw-host-0.00025",
+      "application_world": "raw-device-0.00025",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/0",
+          "mode": "M",
+          "present_fields": [
+            "aperture",
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "aperture",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/1",
+          "mode": "daylight",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/0",
+          "mode": "MF",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "class_id": "raw-0.000333",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "full_ui_world": "raw-device-0.000333",
+      "application_world": "raw-host-0.000333",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/2",
+          "mode": "S",
+          "present_fields": [
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/0",
+          "mode": "auto",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/1",
+          "mode": "AF-S",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "class_id": "jpeg-0.000333",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "full_ui_world": "jpeg-host-0.000333",
+      "application_world": "jpeg-device-0.000333",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/2",
+          "mode": "S",
+          "present_fields": [
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/0",
+          "mode": "auto",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/1",
+          "mode": "AF-S",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "class_id": "jpeg-0.000667",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "full_ui_world": "jpeg-device-0.000667",
+      "application_world": "jpeg-host-0.000667",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/0",
+          "mode": "M",
+          "present_fields": [
+            "aperture",
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "aperture",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/7",
+          "mode": "manual",
+          "present_fields": [
+            "mode",
+            "temperature_k"
+          ],
+          "required_fields": [
+            "mode",
+            "temperature_k"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/0",
+          "mode": "MF",
+          "present_fields": [
+            "mode",
+            "relative_move"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "class_id": "jpeg-0.00025",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "full_ui_world": "jpeg-device-0.00025",
+      "application_world": "jpeg-host-0.00025",
+      "same_params_text": true,
+      "branches": {
+        "exposure": {
+          "schema_path": "/properties/exposure/oneOf/0",
+          "mode": "M",
+          "present_fields": [
+            "aperture",
+            "iso",
+            "mode",
+            "shutter_s"
+          ],
+          "required_fields": [
+            "mode",
+            "iso",
+            "aperture",
+            "shutter_s"
+          ],
+          "additionalProperties": false
+        },
+        "white_balance": {
+          "schema_path": "/properties/white_balance/oneOf/1",
+          "mode": "daylight",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "focus": {
+          "schema_path": "/properties/focus/oneOf/0",
+          "mode": "MF",
+          "present_fields": [
+            "mode"
+          ],
+          "required_fields": [
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "normal_world_mapping": [
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-host-0.000667",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "raw-host-0.000667",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_all_media",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-host-0.000333",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "raw-device-0.000333",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "media_then_report",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-host-0.00025",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "raw-host-0.00025",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_originals_only",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-device-0.000667",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "raw-host-0.000667",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_all_media",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-device-0.000333",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "raw-device-0.000333",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "media_then_report",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-device-0.00025",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "raw-host-0.00025",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_originals_only",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.000667",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "jpeg-device-0.000667",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_all_media",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.000333",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "jpeg-host-0.000333",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "media_then_report",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.00025",
+      "source": "host",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "jpeg-device-0.00025",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_originals_only",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-device-0.000667",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "jpeg-device-0.000667",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_all_media",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-device-0.000333",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "real_application_export",
+      "ui_partition_witness": "jpeg-host-0.000333",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "media_then_report",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-device-0.00025",
+      "source": "device",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\"}}",
+      "prefix": "full_browser_preset",
+      "ui_partition_witness": "jpeg-device-0.00025",
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "upload_order": "report_then_originals_only",
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_photo_roundtrip",
+        "start_line": 631,
+        "end_line": 733
+      }
+    }
+  ],
+  "fault_world_mapping": [
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.000667",
+      "focus_override": null,
+      "fault": "after-start-result",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [
+        "jpeg-device-0.000667"
+      ],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "precision_and_sources_after_success": true,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_saved_start_recovers_without_replay",
+        "start_line": 865,
+        "end_line": 910
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "raw-device-0.000333",
+      "focus_override": null,
+      "fault": "after-start-result",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"raw\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [
+        "raw-device-0.000333"
+      ],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "precision_and_sources_after_success": true,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_saved_start_recovers_without_replay",
+        "start_line": 865,
+        "end_line": 910
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.000667",
+      "focus_override": null,
+      "fault": "complete-receipt-loss",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [
+        "jpeg-device-0.000667"
+      ],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "precision_and_sources_after_success": true,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+        "start_line": 914,
+        "end_line": 949
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-device-0.000333",
+      "focus_override": null,
+      "fault": "complete-receipt-loss",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [
+        "jpeg-host-0.000333"
+      ],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "precision_and_sources_after_success": true,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+        "start_line": 914,
+        "end_line": 949
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-host-0.00025",
+      "focus_override": [
+        "MF",
+        5
+      ],
+      "fault": "before-start-result",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.00025},\"white_balance\":{\"mode\":\"daylight\"},\"focus\":{\"mode\":\"MF\",\"relative_move\":5}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 0,
+      "precision_and_sources_after_success": false,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_missing_start_result_never_replays",
+        "start_line": 983,
+        "end_line": 1049
+      }
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "world_relative_root": ". (PhotoWorld.root == 本 pytest 实例的 tmp_path)",
+      "case": "jpeg-device-0.000667",
+      "focus_override": [
+        "MF",
+        null
+      ],
+      "fault": "report-before-publish",
+      "params_text": "{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\"}}",
+      "prefix": "real_application_export",
+      "same_complete_params_ui_worlds": [],
+      "claims_gui_execution": false,
+      "capture_count": 1,
+      "independent_deliveries": 4,
+      "precision_and_sources_after_success": true,
+      "preserved_body": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+        "start_line": 1052,
+        "end_line": 1137
+      }
+    }
+  ],
+  "identity_key": [
+    "pytest nodeid",
+    "各实例 tmp_path 下的 world_relative_root"
+  ],
+  "pytest_nodeid_inventory": [
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[False]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[True]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes"
+  ],
+  "identity_inventory_evidence": {
+    "prior_actual_cases": {
+      "path": "/tmp/camctl-itopt-s6-coverage/docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv",
+      "size_bytes": 6174279,
+      "sha256": "36395dd531a119e016ddaa50032470800d274f72c87e9d57e07a702dc9fbe4d2"
+    },
+    "matched_identities": 29,
+    "method": "当前AST展开参数身份，与最终冻结轮真实CSV中的本文件29项精确集合比较；不使用该历史结果宣称S6通过"
+  },
+  "photo_case_ast_sha256": "cf26ae697d3d2800e3362b977d05dfde04601e51f6585ec1b1092649ffe067a1",
+  "photo_case_same_as_frozen_final_source": true,
+  "directed_browser_mapping": {
+    "original": {
+      "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+      "symbol": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "start_line": 59,
+      "end_line": 122
+    },
+    "unchanged": true,
+    "shutters": [
+      "0.000667",
+      "0.000333",
+      "0.00025"
+    ],
+    "params": "JPEG/M/manual 5500K/MF relative_move=5，三个独立快门",
+    "limits": "三例不代表 RAW/S/auto/AF-S/daylight 或 MF 不移动的网页分支；由六个正常网页代表补足这些原有分区"
+  },
+  "ui_assertion_handoff": [
+    {
+      "id": "ui-token-source_draft_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "source_draft_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-reopened_draft_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "reopened_draft_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-applied_draft_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "applied_draft_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-request_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "request_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "自身真实 request_text 精确检查",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-preset_params_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "preset_params_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-reopened_preset_params_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "reopened_preset_params_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "ui-token-preset_http_text",
+      "original": {
+        "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+        "symbol": "assert_precision_and_sources",
+        "start_line": 501,
+        "end_line": 566
+      },
+      "observed_field": "preset_http_text",
+      "condition": "shutter_s 原数字词元等于 case.shutter",
+      "full_ui_owner": "六个正常网页代表逐个保留；三个原定向网页用例继续执行",
+      "application_owner": "不填充此字段；相关网页证据由同输入类代表承接，两个 override 只承接已覆盖的字段分支",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "schema-binding",
+      "condition": "安装能力按 device_id/action_type/params.type 查找真实参数 Schema",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 707
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "exact-scalars",
+      "condition": "以 exactJsonValueIdentity 选中 capture_format/iso/aperture/shutter/relative_move 的真实选项",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 777
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "object-branches",
+      "condition": "实际选择 exposure/white_balance/focus 的 mode 分支并填写存在成员",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 803
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "draft-saved",
+      "condition": "每次编辑后等真实 save-status，保存后读取真实 draft.content.text",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 838
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "preset-save",
+      "condition": "真实 POST /api/presets，记录状态及正文，等待预设已保存",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 854
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "close-reopen",
+      "condition": "关闭 browser/HTTP/Files/Application/store 后重新构造，读取原 draft 与 preset",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 870
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "independent-apply",
+      "condition": "创建新草稿，实际点击应用预设，并显式禁用自动预览意图",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 886
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "schedule-only-refresh",
+      "condition": "真实刷新 scheduled_at 后完整正文除该字段外相等",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 931
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "source-preset-stable",
+      "condition": "应用及刷新后原草稿原文和预设参数原文保持",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 948
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    },
+    {
+      "id": "download",
+      "condition": "实际等待网页 download 并保存原请求正文和生成身份",
+      "original": {
+        "path": "tests/integration/client_driver.ts",
+        "line": 953
+      },
+      "full_ui_owner": "六个正常网页代表及三个原定向网页用例",
+      "application_owner": "只执行实际 Application 草稿创建、后端校验、保存和下载；不声明此网页步骤已执行",
+      "application_claims_same_ui_step": false
+    }
+  ],
+  "application_evidence_requirements": {
+    "existing_path": [
+      "Application.createDraft",
+      "Application.exportDraft",
+      "Application.downloadRequest"
+    ],
+    "existing_driver_export": {
+      "path": "tests/integration/client_driver.ts",
+      "line": 86
+    },
+    "current_gap": "现 export 接缝只保存 request_id/created_at/ACK 摘要，需补充实际保存的 draft.content.text 和完整 request_text；回执分别表达实际执行路径",
+    "assertion_placement": "每个 export_photo 实际导出完成后、启动或提交前先核对自身真实 draft/request；missing-start-result 不经过成功的 assert_precision_and_sources，不能只在那里增加分支",
+    "minimum_receipt": [
+      "实际 prefix 类型",
+      "实际 capability bytes SHA-256",
+      "实际 draft id/revision/content.text",
+      "实际 exportedRequest.id/draftId/body/copyContent（可取保存记录）",
+      "实际 downloadRequest 原文及磁盘计划原文"
+    ],
+    "equivalence_checks": [
+      "真实草稿及请求恰有一个 capture，device_id/type/name/policy 与原链一致，max_delay_ms=60000",
+      "params 的完整精确值及 shutter_s 原词元与各自 PhotoCase.params_text 相同，两个 focus_override 原样保留",
+      "计划名称采用原 applied 草稿名称；scheduled_at 在准备结束时取得，request_id/created_at 仍由真实客户端分配",
+      "无派生预览动作；保持原显式关闭自动预览的执行意图，不手写派生动作或请求身份",
+      "导出真实持久化 draft→request 关联；磁盘文件全文等于实际 downloadRequest 序列化正文",
+      "Application 路径不提供 preset/reopened/server_open_count 等未发生的网页凭据；网页与应用路径使用各自实际证据检查"
+    ]
+  },
+  "ui_coverage_limits": {
+    "scope": "只承接原21个前缀有输入见证的正向分区，不宣称覆盖 browserPhotoExport 的全部错误或预览分支",
+    "preview_static_route": "原21与映射后9个完整前缀均从整份JSON填入的新草稿开始：元数据清除后 intent=unset，应用预设只改params，再经尚未设置菜单显式禁用预览",
+    "unwitnessed_preview_routes": [
+      "enabled 按钮分支",
+      "初始 disabled 或不匹配文案的无操作分支"
+    ],
+    "preview_observation_limit": "当前回执未记录初始意图或实际分支，本阶段仅核对源码数据流，未重新验证浏览器渲染",
+    "direct_vs_http": "Application.exportDraft 使用当前能力版本的默认参数；HTTP 导出显式传入浏览器能力版本，DOM选值/预设/HTTP/网页下载由保留UI世界承接，不能称每个服务世界都执行了这些步骤"
+  },
+  "retained_runtime_checks": [
+    "12 个正常世界和 6 个故障世界各一次真实 capture；不重放既有请求或共享可变世界",
+    "原图/预览 output_id、源动作、preview_of_output_id、角色及源文件关联保持；JPEG 同类型同内容仍独立",
+    "SQLite input/effective 参数和 execution_spec；报告及 HistoryRepository 的精确参数与原固定 H；180 秒调用期限",
+    "host 离线仍交付；device 生产回收工作副本后用原 basename 和 original/thumbnail 下载",
+    "每个正常及五个成功故障世界的原图/预览各两次新请求、独立 delivery/name/真实字节/size/SHA/READ 工作目录收场",
+    "12 正常世界实际 Files.upload、三种到达/缺失顺序、网页自动 ACK、C host 提交与原水位持久化继续执行",
+    "原请求重送后 START/attempt 不增，执行定义和 device locator 保持；晚期交付/重送/ACK 前后新进程读取三个 H 的完整事实保持",
+    "已保存 START 结果后杀旧执行组、新组恢复；完整 COMMIT 回执丢失用独立只读连接核实原申请/H；结果未保存保持 UNKNOWN/原占用/原工作文件，不新增 output",
+    "报告发布失败及沿原 H 重建相同 report_id/name/bytes/size/SHA，真实 INTENT/PUBLISHED 事务证据保持"
+  ],
+  "fault_precision_limit": "missing-start-result 原场景没有调用 assert_precision_and_sources；保留原 UNKNOWN/无产物断言，并仅增加自身真实 draft/request 等值检查，不虚称它原有成功历史或 ACK 断言",
+  "original_python_assertions": [
+    {
+      "owner": "_client",
+      "line": 33,
+      "end_line": 33,
+      "text": "assert client_root != REPO and REPO not in client_root.parents",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_client",
+      "line": 41,
+      "end_line": 41,
+      "text": "assert completed.returncode == 0",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_token",
+      "line": 54,
+      "end_line": 54,
+      "text": "assert isinstance(value, _NumberToken), (path, value)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 87,
+      "end_line": 87,
+      "text": "assert receipt[\"source_draft_id\"] != receipt[\"applied_draft_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 88,
+      "end_line": 88,
+      "text": "assert receipt[\"preset_id\"] == receipt[\"reopened_preset_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 99,
+      "end_line": 99,
+      "text": "assert document == expected, field",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 100,
+      "end_line": 100,
+      "text": "assert _token(receipt[field], (*path, \"exposure\", \"shutter_s\")) == shutter, field",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 101,
+      "end_line": 101,
+      "text": "assert plan.read_text() == receipt[\"request_text\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 103,
+      "end_line": 103,
+      "text": "assert len(request[\"actions\"]) == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 107,
+      "end_line": 107,
+      "text": "assert source_action == reopened_action",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 108,
+      "end_line": 108,
+      "text": "assert source_action[\"scheduled_at\"] == scheduled_at",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 109,
+      "end_line": 109,
+      "text": "assert source_action[\"policy\"] == {\"max_delay_ms\": 60000}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 110,
+      "end_line": 110,
+      "text": "assert applied_action == {**source_action, \"scheduled_at\": request[\"actions\"][0][\"scheduled_at\"]}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 111,
+      "end_line": 111,
+      "text": "assert request[\"actions\"][0] == applied_action",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 113,
+      "end_line": 113,
+      "text": "assert request[\"actions\"][0][\"scheduled_at\"] != scheduled_at",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 114,
+      "end_line": 114,
+      "text": "assert datetime.strptime(request[\"actions\"][0][\"scheduled_at\"], \"%Y-%m-%d %H:%M:%S\").replace(tzinfo=timezone.utc) >= before_browser",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 116,
+      "end_line": 116,
+      "text": "assert request[\"actions\"][0][\"scheduled_at\"] == scheduled_at",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 117,
+      "end_line": 117,
+      "text": "assert str(request[\"request_id\"]) == receipt[\"request_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 118,
+      "end_line": 118,
+      "text": "assert receipt[\"capabilities_sha256\"] == hashlib.sha256(description.encode()).hexdigest()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 119,
+      "end_line": 119,
+      "text": "assert receipt[\"server_open_count\"] == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 120,
+      "end_line": 120,
+      "text": "assert receipt[\"preset_http_status\"] == 201",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 121,
+      "end_line": 121,
+      "text": "assert _token(receipt[\"preset_http_text\"], (\"params\", \"exposure\", \"shutter_s\")) == shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_browser_preset_keeps_precise_shutter",
+      "line": 122,
+      "end_line": 122,
+      "text": "assert not package.device_marker.exists()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 163,
+      "end_line": 163,
+      "text": "assert first[\"saved_report_ids\"] == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 164,
+      "end_line": 164,
+      "text": "assert first[\"media\"][0][\"status\"] == \"waiting_report\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 167,
+      "end_line": 167,
+      "text": "assert first[\"saved_report_ids\"] == [\"1\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 168,
+      "end_line": 168,
+      "text": "assert first[\"media\"] == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 170,
+      "end_line": 170,
+      "text": "assert final[\"worker_error\"] is None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 171,
+      "end_line": 171,
+      "text": "assert final[\"saved_report_ids\"] == [\"1\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 172,
+      "end_line": 172,
+      "text": "assert final[\"coverage\"] == 20",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 173,
+      "end_line": 173,
+      "text": "assert final[\"ack_id\"] == \"1\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 174,
+      "end_line": 174,
+      "text": "assert [row[\"kind\"] for row in final[\"imports\"]].count(\"report\") == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 175,
+      "end_line": 175,
+      "text": "assert [row[\"kind\"] for row in final[\"imports\"]].count(\"media\") == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 177,
+      "end_line": 177,
+      "text": "assert row[\"status\"] == \"verified\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 178,
+      "end_line": 178,
+      "text": "assert row[\"fileName\"] == media.name",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 179,
+      "end_line": 179,
+      "text": "assert row[\"sha256\"] == delivery[\"sha256\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 180,
+      "end_line": 180,
+      "text": "assert row[\"size\"] == delivery[\"size\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 182,
+      "end_line": 182,
+      "text": "assert row[\"id\"] == original_id",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 183,
+      "end_line": 183,
+      "text": "assert row[\"path\"] == first[\"media\"][0][\"path\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 184,
+      "end_line": 184,
+      "text": "assert Path(row[\"path\"]).read_bytes() == media.read_bytes()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 185,
+      "end_line": 185,
+      "text": "assert final[\"snapshot\"][\"plans\"][0][\"actions\"][1][\"deliveries\"][0] == delivery",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 193,
+      "end_line": 193,
+      "text": "assert ack[\"last_report_id\"] == \"1\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 194,
+      "end_line": 194,
+      "text": "assert ack_plan.read_text() == ack[\"request_text\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_files_upload_preserves_arrival_order",
+      "line": 195,
+      "end_line": 195,
+      "text": "assert json.loads(ack[\"request_text\"])[\"last_report_id\"] == \"1\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoCase.params_text",
+      "line": 219,
+      "end_line": 219,
+      "text": "assert self.focus_override in ((\"MF\", 5), (\"MF\", None))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoCase.settings_argv",
+      "line": 242,
+      "end_line": 242,
+      "text": "assert self.focus_override in ((\"MF\", 5), (\"MF\", None))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.__init__",
+      "line": 330,
+      "end_line": 330,
+      "text": "assert not root.resolve().is_relative_to(REPO)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.report.found",
+      "line": 445,
+      "end_line": 445,
+      "text": "assert action[\"status\"] == status, action",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.claim",
+      "line": 459,
+      "end_line": 459,
+      "text": "assert target.read_bytes() == path.read_bytes()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 504,
+      "end_line": 504,
+      "text": "assert _token(self.browser[field], (\"actions\", 0, \"params\", \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "七路 UI 词元按下方逐字段承接矩阵迁移；真实网页代表保留，Application 路径新增自身真实 draft/request 词元核对"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 506,
+      "end_line": 506,
+      "text": "assert _token(self.browser[field], (\"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "七路 UI 词元按下方逐字段承接矩阵迁移；真实网页代表保留，Application 路径新增自身真实 draft/request 词元核对"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 507,
+      "end_line": 507,
+      "text": "assert _token(self.browser[\"preset_http_text\"], (\"params\", \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "七路 UI 词元按下方逐字段承接矩阵迁移；真实网页代表保留，Application 路径新增自身真实 draft/request 词元核对"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 510,
+      "end_line": 510,
+      "text": "assert _token(row[\"input_fields_json\"], (\"params\", \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 511,
+      "end_line": 511,
+      "text": "assert _token(row[\"effective_params_json\"], (\"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 512,
+      "end_line": 512,
+      "text": "assert json.loads(row[\"input_fields_json\"], parse_float=Decimal)[\"params\"] == expected",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 513,
+      "end_line": 513,
+      "text": "assert json.loads(row[\"effective_params_json\"], parse_float=Decimal) == expected",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 514,
+      "end_line": 514,
+      "text": "assert json.loads(row[\"execution_spec_json\"])[\"output_storage\"] == self.case.source",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 515,
+      "end_line": 515,
+      "text": "assert json.loads(row[\"execution_spec_json\"])[\"start_call_timeout_s\"] == 180",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 523,
+      "end_line": 524,
+      "text": "assert _token(report_text, (\"plans\", report_location[0], \"actions\", report_location[1],\n                                        field, \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 542,
+      "end_line": 542,
+      "text": "assert _token(history[\"action\"][field], (*prefix, \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 543,
+      "end_line": 543,
+      "text": "assert json.loads(history[\"action\"][\"execution_spec_json\"]) == json.loads(row[\"execution_spec_json\"])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 544,
+      "end_line": 544,
+      "text": "assert history[\"to_wm\"] == report[\"to_wm\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 546,
+      "end_line": 546,
+      "text": "assert len(sources) == 2 and sources[0][\"id\"] != sources[1][\"id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 548,
+      "end_line": 548,
+      "text": "assert pair[\"original_output_id\"] == sources[0][\"id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 551,
+      "end_line": 551,
+      "text": "assert [row[\"id\"] for row in files] == [row[\"device_file_id\"] for row in sources]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 552,
+      "end_line": 552,
+      "text": "assert files[1][\"original_device_file_id\"] == files[0][\"id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 556,
+      "end_line": 556,
+      "text": "assert locator[\"camera_name\"] == name",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 557,
+      "end_line": 557,
+      "text": "assert locator[\"camera_path\"] == \"/CAMERA/DCIM/100HASSELBL/\" + name",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 558,
+      "end_line": 558,
+      "text": "assert locator[\"variant\"] == variant",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 562,
+      "end_line": 562,
+      "text": "assert [row[\"purpose\"] for row in files] == [5, 6]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 563,
+      "end_line": 563,
+      "text": "assert [row[\"id\"] for row in files] == [row[\"intermediate_file_id\"] for row in sources]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_precision_and_sources",
+      "line": 564,
+      "end_line": 564,
+      "text": "assert files[0][\"relative_path\"] != files[1][\"relative_path\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 574,
+      "end_line": 574,
+      "text": "assert waiting[\"saved_report_ids\"] == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 575,
+      "end_line": 575,
+      "text": "assert len(waiting[\"media\"]) == 4",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 576,
+      "end_line": 576,
+      "text": "assert {row[\"status\"] for row in waiting[\"media\"]} == {\"waiting_report\"}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 581,
+      "end_line": 582,
+      "text": "assert (row[\"id\"], row[\"path\"], row[\"sha256\"], row[\"size\"]) == (\n                    previous[\"id\"], previous[\"path\"], previous[\"sha256\"], previous[\"size\"])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 585,
+      "end_line": 585,
+      "text": "assert first[\"media\"] == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 589,
+      "end_line": 589,
+      "text": "assert final[\"worker_error\"] is None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 590,
+      "end_line": 590,
+      "text": "assert len(final[\"media\"]) == expected_count",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 591,
+      "end_line": 591,
+      "text": "assert {row[\"status\"] for row in final[\"media\"]} == {\"verified\"}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 592,
+      "end_line": 592,
+      "text": "assert len({row[\"id\"] for row in final[\"media\"]}) == expected_count",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 593,
+      "end_line": 593,
+      "text": "assert len([row for row in final[\"imports\"] if row[\"kind\"] == \"media\"]) == expected_count",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 597,
+      "end_line": 597,
+      "text": "assert delivery[\"file_name\"] not in by_name",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 600,
+      "end_line": 600,
+      "text": "assert (row[\"sha256\"], row[\"size\"]) == (delivery[\"sha256\"], delivery[\"size\"])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 601,
+      "end_line": 601,
+      "text": "assert Path(row[\"path\"]).read_bytes() == (archive / delivery[\"file_name\"]).read_bytes()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 605,
+      "end_line": 605,
+      "text": "assert len(capture[\"outputs\"]) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 608,
+      "end_line": 608,
+      "text": "assert {row[\"delivery_id\"] for row in imported_deliveries} == {row[\"delivery_id\"] for row in deliveries}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 613,
+      "end_line": 614,
+      "text": "assert _token(receipt_text, (\"snapshot\", \"plans\", pi, \"actions\", ai, field,\n                                         \"exposure\", \"shutter_s\")) == self.case.shutter",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 616,
+      "end_line": 616,
+      "text": "assert ack[\"last_report_id\"] == final[\"ack_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 618,
+      "end_line": 618,
+      "text": "assert acknowledged[\"to_wm\"] == final[\"coverage\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "PhotoWorld.assert_upload_and_ack",
+      "line": 624,
+      "end_line": 624,
+      "text": "assert self.argv() == before_calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 638,
+      "end_line": 638,
+      "text": "assert \"result\" not in capture",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 639,
+      "end_line": 639,
+      "text": "assert not {\"steps\", \"diagnostics\", \"observations\", \"call_info\"} & capture.keys()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 640,
+      "end_line": 640,
+      "text": "assert json.loads(case.params_text, parse_float=Decimal) == capture[\"input_params\"] == capture[\"effective_params\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 642,
+      "end_line": 642,
+      "text": "assert set(outputs) == {\"original\", \"preview\"}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 643,
+      "end_line": 643,
+      "text": "assert outputs[\"original\"][\"output_id\"] != outputs[\"preview\"][\"output_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 644,
+      "end_line": 644,
+      "text": "assert outputs[\"preview\"][\"preview_of_output_id\"] == outputs[\"original\"][\"output_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 645,
+      "end_line": 645,
+      "text": "assert outputs[\"original\"][\"source_action_instance_id\"] == outputs[\"preview\"][\"source_action_instance_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 650,
+      "end_line": 650,
+      "text": "assert settings == list(case.settings_argv)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 652,
+      "end_line": 652,
+      "text": "assert len(captures) == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 663,
+      "end_line": 663,
+      "text": "assert len(capture_files) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 664,
+      "end_line": 664,
+      "text": "assert all(row[\"retention_state\"] == 2 and row[\"cleanup_state\"] == 4 for row in capture_files)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 665,
+      "end_line": 665,
+      "text": "assert all(not (world.deployment.staging / row[\"relative_path\"]).exists() for row in capture_files)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 678,
+      "end_line": 678,
+      "text": "assert delivery[\"output_id\"] == outputs[role][\"output_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 679,
+      "end_line": 679,
+      "text": "assert delivery[\"source_action_instance_id\"] == capture[\"action_instance_id\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 680,
+      "end_line": 680,
+      "text": "assert delivery[\"delivery_id\"] not in [row[\"delivery_id\"] for row in deliveries]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 681,
+      "end_line": 681,
+      "text": "assert delivery[\"file_name\"] not in [row[\"file_name\"] for row in deliveries]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 684,
+      "end_line": 684,
+      "text": "assert content == (world.original_bytes if role == \"original\" else world.preview_bytes)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 685,
+      "end_line": 685,
+      "text": "assert delivery[\"size\"] == len(content)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 686,
+      "end_line": 686,
+      "text": "assert delivery[\"sha256\"] == hashlib.sha256(content).hexdigest()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 696,
+      "end_line": 696,
+      "text": "assert after == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 699,
+      "end_line": 701,
+      "text": "assert [row[4:6] for row in downloads] == [\n                [role, \"camera-copy\" + (\".3fr\" if case.capture_format == \"raw\" else \".jpg\")]\n                for role in (\"original\", \"thumbnail\", \"original\", \"thumbnail\")]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 702,
+      "end_line": 702,
+      "text": "assert len({row[-1] for row in downloads}) == 4",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 704,
+      "end_line": 704,
+      "text": "assert world.argv() == after",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 706,
+      "end_line": 706,
+      "text": "assert len(_rows(world.deployment.state_db, \"SELECT * FROM operation_runs WHERE responsibility_key=?\", (f\"start/{action_id}\",))) == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 707,
+      "end_line": 707,
+      "text": "assert len(_rows(world.deployment.state_db, \"SELECT * FROM operation_attempts WHERE run_id=(SELECT id FROM operation_runs WHERE responsibility_key=?)\", (f\"start/{action_id}\",))) == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 708,
+      "end_line": 708,
+      "text": "assert _rows(world.deployment.state_db, \"SELECT execution_spec_json FROM actions WHERE id=?\", (action_id,))[0][\"execution_spec_json\"] == world.frozen_execution_spec",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 710,
+      "end_line": 711,
+      "text": "assert [row[\"locator_json\"] for row in _rows(world.deployment.state_db,\n                    \"SELECT locator_json FROM device_files WHERE source_action_id=? ORDER BY role\", (action_id,))] == world.frozen_locators",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 713,
+      "end_line": 713,
+      "text": "assert outputs[\"original\"][\"media_type\"] == outputs[\"preview\"][\"media_type\"] == \"image/jpeg\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 714,
+      "end_line": 714,
+      "text": "assert outputs[\"original\"][\"checksum\"] == outputs[\"preview\"][\"checksum\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 719,
+      "end_line": 719,
+      "text": "assert before[\"facts\"] == after[\"facts\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 720,
+      "end_line": 720,
+      "text": "assert before[\"provenance\"][\"pid\"] != after[\"provenance\"][\"pid\"]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 722,
+      "end_line": 722,
+      "text": "assert {row[\"kind\"] for row in provenance} == {\"camctl\", \"hb_cli\"}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 724,
+      "end_line": 724,
+      "text": "assert row[\"python\"] == str(world.package.python)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 725,
+      "end_line": 725,
+      "text": "assert Path(row[\"camctl\"]).is_relative_to(world.package.python.parent.parent)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 726,
+      "end_line": 726,
+      "text": "assert Path(row[\"cwd\"]).is_relative_to(tmp_path)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 728,
+      "end_line": 728,
+      "text": "assert row[\"fault_environment\"][\"value\"] in (None, \"\")",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_photo_roundtrip",
+      "line": 731,
+      "end_line": 731,
+      "text": "assert environments[field][\"value\"] in (None, \"\")",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_capture_target",
+      "line": 746,
+      "end_line": 746,
+      "text": "assert target[\"device_id\"] == \"hb-host\" and target[\"driver_id\"] == \"hasselblad_cfv100c\"",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_stop_fault_host",
+      "line": 802,
+      "end_line": 802,
+      "text": "assert live == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 817,
+      "end_line": 817,
+      "text": "assert set(outputs) == {'original', 'preview'}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 818,
+      "end_line": 818,
+      "text": "assert outputs['original']['output_id'] != outputs['preview']['output_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 819,
+      "end_line": 819,
+      "text": "assert outputs['preview']['preview_of_output_id'] == outputs['original']['output_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 839,
+      "end_line": 839,
+      "text": "assert delivery['output_id'] == outputs[role]['output_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 840,
+      "end_line": 840,
+      "text": "assert delivery['source_action_instance_id'] == capture['action_instance_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 841,
+      "end_line": 841,
+      "text": "assert delivery['delivery_id'] not in [item['delivery_id'] for item in deliveries]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 842,
+      "end_line": 842,
+      "text": "assert delivery['file_name'] not in [item['file_name'] for item in deliveries]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 845,
+      "end_line": 845,
+      "text": "assert content == (world.original_bytes if role == 'original' else world.preview_bytes)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 846,
+      "end_line": 846,
+      "text": "assert delivery['size'] == len(content) and delivery['sha256'] == hashlib.sha256(content).hexdigest()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 851,
+      "end_line": 852,
+      "text": "assert download[4:6] == ['original' if role == 'original' else 'thumbnail',\n                                      'camera-copy' + ('.3fr' if world.case.capture_format == 'raw' else '.jpg')]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 855,
+      "end_line": 855,
+      "text": "assert [row for row in world.argv() if row[3] in replay_commands] == [row for row in calls if row[3] in replay_commands]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 857,
+      "end_line": 857,
+      "text": "assert world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_fault_pair",
+      "line": 860,
+      "end_line": 860,
+      "text": "assert len(downloads) == len({row[-1] for row in downloads}) == 4",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 872,
+      "end_line": 872,
+      "text": "assert marker['target'] == target",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 875,
+      "end_line": 875,
+      "text": "assert target['run_kind'] == codes['start_kind']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 876,
+      "end_line": 876,
+      "text": "assert (before['status'], before['effect_state']) == (codes['attempt_succeeded'], codes['effect_confirmed'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 877,
+      "end_line": 879,
+      "text": "assert marker['ticket'] == {'attempt_id':before['attempt_no'], 'operation':'control',\n                                    'target_id':str(target['activity_id']), 'responsibility_key':target['responsibility_key'],\n                                    'run_id':target['run_id']}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 880,
+      "end_line": 880,
+      "text": "assert before['result_event_id'] is not None and before['result_json'] is not None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 882,
+      "end_line": 882,
+      "text": "assert [row['type'] for row in result['observations']] == ['photo_taken', 'hasselblad_start_entered']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 883,
+      "end_line": 884,
+      "text": "assert all(row['version'] == 1 and row['data']['activity_id'] == str(target['activity_id'])\n                   for row in result['observations'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 887,
+      "end_line": 887,
+      "text": "assert transaction['operation_key'] == marker['operation_key']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 888,
+      "end_line": 888,
+      "text": "assert marker['result_event_id'] == before['result_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 889,
+      "end_line": 889,
+      "text": "assert marker['boundary'] == {'txn_id': transaction['id'], 'last_event_id': transaction['last_event_id']}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 890,
+      "end_line": 890,
+      "text": "assert marker['in_transaction'] is False",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 891,
+      "end_line": 891,
+      "text": "assert _rows(world.deployment.state_db, \"SELECT id FROM history_events WHERE json_extract(body_json,'$.evidence.host_photo_request.original_file_id') IS NOT NULL\") == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 892,
+      "end_line": 892,
+      "text": "assert transaction['first_event_id'] <= event['id'] <= transaction['last_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 893,
+      "end_line": 893,
+      "text": "assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 897,
+      "end_line": 897,
+      "text": "assert len(actual) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 898,
+      "end_line": 898,
+      "text": "assert sorted(path.read_bytes() for path in actual) == sorted((world.original_bytes, world.preview_bytes))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 903,
+      "end_line": 903,
+      "text": "assert _capture_target(world) == target and _attempt(world, target) == before",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 904,
+      "end_line": 904,
+      "text": "assert _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (transaction['id'],)) == [transaction]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 905,
+      "end_line": 905,
+      "text": "assert world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_saved_start_recovers_without_replay",
+      "line": 908,
+      "end_line": 908,
+      "text": "assert [row for row in world.argv() if row[3] in ('set','focus','autofocus','capture')] == [row for row in calls if row[3] in ('set','focus','autofocus','capture')]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 922,
+      "end_line": 922,
+      "text": "assert saved['request'] == verified['request']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 923,
+      "end_line": 923,
+      "text": "assert saved['operation_key'] == verified['operation_key']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 924,
+      "end_line": 924,
+      "text": "assert saved['boundary'] == verified['boundary']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 925,
+      "end_line": 925,
+      "text": "assert saved['in_transaction'] is False and saved['returned_receipt'] == 'unknown'",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 926,
+      "end_line": 926,
+      "text": "assert verified['returned_receipt'] == 'completed' and verified['query_only'] == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 927,
+      "end_line": 927,
+      "text": "assert verified['write_connection'] == saved['write_connection'] != verified['verifier_connection']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 929,
+      "end_line": 929,
+      "text": "assert saved['target'] == target",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 931,
+      "end_line": 931,
+      "text": "assert (transaction['id'], transaction['last_event_id']) == (saved['boundary']['txn_id'], saved['boundary']['last_event_id'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 933,
+      "end_line": 933,
+      "text": "assert len(files) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 935,
+      "end_line": 935,
+      "text": "assert file['id'] == saved['request'][prefix+'_file_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 936,
+      "end_line": 936,
+      "text": "assert file['size_bytes'] == saved['request'][prefix+'_size_bytes']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 937,
+      "end_line": 937,
+      "text": "assert file['sha256'] == saved['request'][prefix+'_sha256']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 938,
+      "end_line": 938,
+      "text": "assert len(_rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],))) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 939,
+      "end_line": 939,
+      "text": "assert len(_rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],))) == 1",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 945,
+      "end_line": 945,
+      "text": "assert repeated['outputs'] == capture['outputs']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+      "line": 946,
+      "end_line": 946,
+      "text": "assert _attempt(world, target) == before and world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_no_private_details",
+      "line": 979,
+      "end_line": 979,
+      "text": "assert not keys(action) & {'diagnostics','steps','stdout','stderr','executable','local_exit_code','transport_error'}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "_no_private_details",
+      "line": 980,
+      "end_line": 980,
+      "text": "assert str(world.root) not in json.dumps(action, default=str)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 992,
+      "end_line": 992,
+      "text": "assert marker['target'] == target and target['run_kind'] == codes['start_kind']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 994,
+      "end_line": 994,
+      "text": "assert marker['in_transaction'] is False",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 995,
+      "end_line": 997,
+      "text": "assert marker['ticket'] == {'attempt_id':before['attempt_no'], 'operation':'control',\n                                    'target_id':str(target['activity_id']), 'responsibility_key':target['responsibility_key'],\n                                    'run_id':target['run_id']}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 998,
+      "end_line": 998,
+      "text": "assert before['status'] == codes['attempt_running']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 999,
+      "end_line": 999,
+      "text": "assert before['result_event_id'] is None and before['result_json'] is None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1000,
+      "end_line": 1000,
+      "text": "assert before['intent_event_id'] is not None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1003,
+      "end_line": 1003,
+      "text": "assert len(files) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1004,
+      "end_line": 1004,
+      "text": "assert sorted(p.read_bytes() for p in files) == sorted((world.original_bytes, world.preview_bytes))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1005,
+      "end_line": 1005,
+      "text": "assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1011,
+      "end_line": 1011,
+      "text": "assert _capture_target(world) == target",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1012,
+      "end_line": 1012,
+      "text": "assert after['id'] == before['id'] and after['intent_event_id'] == before['intent_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1013,
+      "end_line": 1013,
+      "text": "assert (after['status'], after['effect_state']) == (codes['attempt_unknown'], codes['effect_unknown'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1014,
+      "end_line": 1014,
+      "text": "assert after['result_event_id'] is not None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1015,
+      "end_line": 1015,
+      "text": "assert (world.root / 'start-recovery-observed.json').is_file(), '缺少真实 recover_attempt 观察，不能据结果推造恢复依据'",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1017,
+      "end_line": 1017,
+      "text": "assert recovery['target'] == target and recovery['ticket'] == marker['ticket']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1018,
+      "end_line": 1018,
+      "text": "assert recovery['intent_event_id'] == before['intent_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1019,
+      "end_line": 1019,
+      "text": "assert recovery['boundary'] == 'HOST_LOCAL_SETTLED'",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1020,
+      "end_line": 1020,
+      "text": "assert recovery['horizon'] is not None and before['intent_event_id'] <= recovery['horizon'] <= recovery['max_event_before']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1021,
+      "end_line": 1021,
+      "text": "assert recovery['local_entry_active'] is False and recovery['returned'] is True and recovery['diagnostic'] is None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1022,
+      "end_line": 1022,
+      "text": "assert recovery['attempt_status_before'] == codes['attempt_running']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1024,
+      "end_line": 1024,
+      "text": "assert result['settlement'] == {'basis':'assumed','evidence':{'type':'local_control_recovery','version':1,'data':{}}}",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1025,
+      "end_line": 1025,
+      "text": "assert result['observations'] == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1026,
+      "end_line": 1026,
+      "text": "assert 'diagnostics' not in result and 'call_info' not in result",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1028,
+      "end_line": 1028,
+      "text": "assert run['status'] == codes['run_unconfirmed']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1030,
+      "end_line": 1030,
+      "text": "assert action['error_code'] == codes['capture_error']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1033,
+      "end_line": 1033,
+      "text": "assert capture['error'] == expected_error",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1034,
+      "end_line": 1034,
+      "text": "assert 'result' not in capture and not capture.get('outputs')",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1036,
+      "end_line": 1036,
+      "text": "assert activity['started_at'] is None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1037,
+      "end_line": 1037,
+      "text": "assert (activity['activity_state'],activity['occupancy_state']) == (codes['activity_unknown'],codes['occupancy_held'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1041,
+      "end_line": 1041,
+      "text": "assert capture['device_execution'] == execution",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1043,
+      "end_line": 1043,
+      "text": "assert world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1044,
+      "end_line": 1044,
+      "text": "assert all(path.is_file() for path in files)",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1045,
+      "end_line": 1045,
+      "text": "assert sorted(path.read_bytes() for path in files) == sorted((world.original_bytes, world.preview_bytes))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1046,
+      "end_line": 1046,
+      "text": "assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_missing_start_result_never_replays",
+      "line": 1047,
+      "end_line": 1047,
+      "text": "assert _rows(world.deployment.state_db, 'SELECT oo.id FROM output_origins oo JOIN outputs o ON o.id=oo.output_id WHERE o.source_action_id=?', (target['action_id'],)) == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1061,
+      "end_line": 1061,
+      "text": "assert marker['target'] == target",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1065,
+      "end_line": 1065,
+      "text": "assert frozen['last_event_id'] == marker['boundary']['last_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1066,
+      "end_line": 1066,
+      "text": "assert marker['in_transaction'] is False",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1070,
+      "end_line": 1070,
+      "text": "assert transaction['operation_key'] == management['operation_key']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1071,
+      "end_line": 1071,
+      "text": "assert transaction['first_event_id'] == management['first_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1072,
+      "end_line": 1072,
+      "text": "assert (transaction['id'], transaction['last_event_id']) == (management['boundary']['txn_id'], management['boundary']['last_event_id'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1073,
+      "end_line": 1073,
+      "text": "assert json.loads(event['body_json']) == management['event_body']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1075,
+      "end_line": 1075,
+      "text": "assert changed['table'] == 'reports' and changed['id'] == report_id",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1076,
+      "end_line": 1076,
+      "text": "assert (row['from_wm'],row['to_wm'],row['frozen_event_id']) == (marker['from_wm'],marker['to_wm'],marker['boundary']['last_event_id'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1079,
+      "end_line": 1079,
+      "text": "assert row['size_bytes'] == len(original_bytes) and row['sha256'] == hashlib.sha256(original_bytes).hexdigest()",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1081,
+      "end_line": 1081,
+      "text": "assert capture['status'] == 'succeeded' and len(capture['outputs']) == 2",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1084,
+      "end_line": 1084,
+      "text": "assert list(world.deployment.ready.iterdir()) == []",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1091,
+      "end_line": 1091,
+      "text": "assert failed['sha256'] == row['sha256'] and failed['size_bytes'] == row['size_bytes']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1092,
+      "end_line": 1092,
+      "text": "assert failed['last_error_json'] is not None",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1094,
+      "end_line": 1094,
+      "text": "assert all(value in actual_error for value in ('withdraw_failed', 'list_failed', 'NotADirectoryError', str(world.deployment.ready)))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1096,
+      "end_line": 1096,
+      "text": "assert world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1100,
+      "end_line": 1100,
+      "text": "assert not list((world.deployment.staging/'reports').glob(f'status-report-{report_id}-*.json'))",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1103,
+      "end_line": 1103,
+      "text": "assert rebuilt['report_id'] == report_id and rebuilt['pid'] != marker['pid']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1104,
+      "end_line": 1104,
+      "text": "assert rebuilt['in_transaction'] is False and rebuilt['returned_receipt'] == 'completed'",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1105,
+      "end_line": 1105,
+      "text": "assert rebuilt['publication']['report_id'] == report_id",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1106,
+      "end_line": 1106,
+      "text": "assert rebuilt['publication']['published_event_id'] == rebuilt['management']['event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1108,
+      "end_line": 1108,
+      "text": "assert new.read_bytes() == original_bytes",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1112,
+      "end_line": 1112,
+      "text": "assert current['last_published_event_id'] == publication_event['id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1113,
+      "end_line": 1113,
+      "text": "assert json.loads(publication_event['body_json']) == rebuilt['management']['event_body']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1114,
+      "end_line": 1114,
+      "text": "assert publication_transaction['operation_key'] == rebuilt['management']['operation_key']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1115,
+      "end_line": 1115,
+      "text": "assert publication_transaction['first_event_id'] == rebuilt['management']['first_event_id']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1116,
+      "end_line": 1116,
+      "text": "assert (publication_transaction['id'], publication_transaction['last_event_id']) == (rebuilt['management']['boundary']['txn_id'], rebuilt['management']['boundary']['last_event_id'])",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1124,
+      "end_line": 1124,
+      "text": "assert current[key] == row[key]",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1125,
+      "end_line": 1125,
+      "text": "assert current['publication_count'] == 1 and current['status'] == codes['report_published']",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1128,
+      "end_line": 1128,
+      "text": "assert delivered.read_bytes() == original_bytes",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1130,
+      "end_line": 1130,
+      "text": "assert world.argv() == calls",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1134,
+      "end_line": 1134,
+      "text": "assert delivered.read_bytes() == original_bytes",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    },
+    {
+      "owner": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+      "line": 1135,
+      "end_line": 1135,
+      "text": "assert (saved/original_name).read_bytes() == original_bytes",
+      "handoff": "保持原责任函数及原成功/失败分区；不随前缀选择删减或放宽"
+    }
+  ],
+  "source_evidence": [
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/tests/integration/test_hasselblad_photo_roundtrip.py",
+      "size_bytes": 68470,
+      "sha256": "a9706a27ddce136b0fd029aba0c934ddef6a07b84754e8d8c141b71ca7d7475f",
+      "repo_path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+      "frozen_final_source_sha256": "2406529e6eb2f9ec73c88631cf29e00b846f2a88d31fad019b219c46b5a15aaa",
+      "same_as_frozen_final_source": false
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/tests/integration/client_driver.ts",
+      "size_bytes": 36902,
+      "sha256": "d0be65294a9a4877cfb57f02222d93d1d91346f693dd1131558d26128ee49aed",
+      "repo_path": "tests/integration/client_driver.ts",
+      "frozen_final_source_sha256": "ea05ad64a903954b04d2a8205f45e679cb488dd3d4d7b9350c675e1950674040",
+      "same_as_frozen_final_source": false
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/client/src/server/application.ts",
+      "size_bytes": 29049,
+      "sha256": "e9a1c36597793cf62f6782ac36c92fba53408137da413a349218ad7a25017d5b",
+      "repo_path": "apps/client/src/server/application.ts",
+      "frozen_final_source_sha256": "e9a1c36597793cf62f6782ac36c92fba53408137da413a349218ad7a25017d5b",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/client/src/shared/json.ts",
+      "size_bytes": 15230,
+      "sha256": "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc",
+      "repo_path": "apps/client/src/shared/json.ts",
+      "frozen_final_source_sha256": "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/client/src/shared/capabilities.ts",
+      "size_bytes": 4072,
+      "sha256": "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156",
+      "repo_path": "apps/client/src/shared/capabilities.ts",
+      "frozen_final_source_sha256": "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/devices/catalog.py",
+      "size_bytes": 14239,
+      "sha256": "3170606cd908bbf144116925060fad67bf1ea6df721d19e67d00664fdd818c8e",
+      "repo_path": "apps/camctl/src/camctl/devices/catalog.py",
+      "frozen_final_source_sha256": "3170606cd908bbf144116925060fad67bf1ea6df721d19e67d00664fdd818c8e",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/devices/drivers/hasselblad/definitions.py",
+      "size_bytes": 3630,
+      "sha256": "6de9e0d3579d9afc92899942f5a7d823807c90a3278735a7bef89f8c325b260e",
+      "repo_path": "apps/camctl/src/camctl/devices/drivers/hasselblad/definitions.py",
+      "frozen_final_source_sha256": "6de9e0d3579d9afc92899942f5a7d823807c90a3278735a7bef89f8c325b260e",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/devices/drivers/hasselblad/configuration.py",
+      "size_bytes": 3128,
+      "sha256": "9c5cd8333f91d0c822897c54556172232b9ecbf4573e2695717f53e7229ed01d",
+      "repo_path": "apps/camctl/src/camctl/devices/drivers/hasselblad/configuration.py",
+      "frozen_final_source_sha256": "9c5cd8333f91d0c822897c54556172232b9ecbf4573e2695717f53e7229ed01d",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/devices/drivers/hasselblad/parameters.py",
+      "size_bytes": 15851,
+      "sha256": "c6ef75aea9dc331aab304cc6e8cc312b368c93c935aedc4a1628ff33bf374286",
+      "repo_path": "apps/camctl/src/camctl/devices/drivers/hasselblad/parameters.py",
+      "frozen_final_source_sha256": "c6ef75aea9dc331aab304cc6e8cc312b368c93c935aedc4a1628ff33bf374286",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/devices/task_metadata.py",
+      "size_bytes": 863,
+      "sha256": "746af685907da574616d9171ea6be8f7e1313676d0c75667e5d629585f265cfe",
+      "repo_path": "apps/camctl/src/camctl/devices/task_metadata.py",
+      "frozen_final_source_sha256": "746af685907da574616d9171ea6be8f7e1313676d0c75667e5d629585f265cfe",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/apps/camctl/src/camctl/host_files/declarations.py",
+      "size_bytes": 880,
+      "sha256": "6c8d5bc3d2f10eef2f2bb430ea9150d3d0e1cdd694bd580664cf5fc425a66dea",
+      "repo_path": "apps/camctl/src/camctl/host_files/declarations.py",
+      "frozen_final_source_sha256": "6c8d5bc3d2f10eef2f2bb430ea9150d3d0e1cdd694bd580664cf5fc425a66dea",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/protocol/schemas/capabilities.schema.json",
+      "size_bytes": 8685,
+      "sha256": "78bea069ea44dae6e242a47499dcd8dc8ad94b657916275ad1e4e8e74bb32ba7",
+      "repo_path": "protocol/schemas/capabilities.schema.json",
+      "frozen_final_source_sha256": "78bea069ea44dae6e242a47499dcd8dc8ad94b657916275ad1e4e8e74bb32ba7",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+      "size_bytes": 41505,
+      "sha256": "731a541eeb9a3d265158631f5222a9394b106b7f8eb8a9605b61883124681902",
+      "repo_path": "docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+      "frozen_final_source_sha256": "731a541eeb9a3d265158631f5222a9394b106b7f8eb8a9605b61883124681902",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/docs/superpowers/plans/2026-10-25-integration-test-optimization.md",
+      "size_bytes": 27861,
+      "sha256": "a64bb96def320c52669f8961c88cc16dad68c5accdd8ad9275bea92db11005f8",
+      "repo_path": "docs/superpowers/plans/2026-10-25-integration-test-optimization.md",
+      "frozen_final_source_sha256": "81747f25accfb60772d131d3e007602cc2cb2ab58266bd9cd80b09ae767938f0",
+      "same_as_frozen_final_source": false
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/docs/superpowers/plans/2026-10-21-hasselblad-photo-parameters.md",
+      "size_bytes": 56710,
+      "sha256": "4f25a5206fada1cc68727ae42caab963c03679d1a97e8f54d7fa983953d10e63",
+      "repo_path": "docs/superpowers/plans/2026-10-21-hasselblad-photo-parameters.md",
+      "frozen_final_source_sha256": "4f25a5206fada1cc68727ae42caab963c03679d1a97e8f54d7fa983953d10e63",
+      "same_as_frozen_final_source": true
+    },
+    {
+      "path": "/tmp/camctl-itopt-s6-coverage/tests/integration/README.md",
+      "size_bytes": 28590,
+      "sha256": "8d095b76b3bd90d21012772a5feb23ac7d90e8fe0cd7d795520f90c643049c4c",
+      "repo_path": "tests/integration/README.md",
+      "frozen_final_source_sha256": "2b5be99e21de187ad597bb48c35e18cea922378f18f74beef60701fc11737255",
+      "same_as_frozen_final_source": false
+    }
+  ],
+  "implementation_dependency": "等待 root 提供 S5 稳定提交与每 World 客户端接口；当前不修改 PHOTO/DRIVER/README，不启动 pytest/Node/build"
+}

@@ -1,0 +1,413 @@
+{
+  "source_commit": "4bdf77959dde6db08a8a79c84a2505634ac53475",
+  "interface_proxy_commit": "afd564c09589187cd064d9c4bf29269c30a71577",
+  "base_commit": "e32ab0b36377ae69e9fb968feb9d3a747c4edfbe",
+  "implementation": "同连接、事务和独立事件校验范围内，最多保存三份原SQLite历史行tuple及完整事务范围；每次命中重新解码，miss先释放一份旧输入，首次完整关系校验后才缓存。row_facts直接遍历原description。",
+  "verified": {
+    "interface_proxy": {
+      "execution_log": {
+        "historical_filename": "interface-proxy-green.log",
+        "sha256": "811cd6e008b88a9c6bf8aaa3c119199e1e220cabc2387229cc478f582172f8b5",
+        "text": "............\n============================== slowest durations ===============================\n0.17s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[False]\n0.05s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[command]\n0.04s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[True]\n0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_ordinary_operation_and_rollback_errors_keep_ordered_group\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[control]\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[complete_result]\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[sqlite-error]\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_preserves_operation_error_and_is_not_retried\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_does_not_replace_earlier_control\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[complete_result]\n0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[command]\n0.01s setup    tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_ordinary_operation_and_rollback_errors_keep_ordered_group\n\n(24 durations < 0.005s hidden.  Use -vv to show these durations.)\n12 passed in 0.72s\n",
+        "is_tail_excerpt": false
+      },
+      "result": "12 passed; exit0"
+    },
+    "unit": {
+      "execution_log": {
+        "historical_filename": "unit-compact-row-final.log",
+        "sha256": "ef889b17174f98ddf405a2a5bb7facaa6bcf41986433334e7a621e664e037071",
+        "text": "st_action6_record_aperture_response_is_retained_and_does_not_block_one_start[e3-f4.0-9001-exposure0]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_identity_guard_checks_event_facts_when_proposal_is_not_provided[results/4/activity]\n0.01s call     tests/unit/persistence/test_saved_transactions.py::test_existing_key_with_invalid_group_is_not_absent[range-value2]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_identity_guard_checks_event_facts_when_proposal_is_not_provided[query/start/7/4/start]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_osmo_record_rejects_unopened_settings[fov-wide]\n0.01s call     tests/unit/capture/test_emergency_guard.py::TestEmergencyConfiguration::test_attempted_configuration_must_be_complete[missing-timeout_s_json-attempt]\n0.01s teardown tests/unit/capture/test_start_gate.py::test_valid_trigger_keeps_existing_gate_conditions[1-100]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_rejects_mixed_target_columns[stop/7/activity]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_read_identity_requires_complete_parent_and_unique_physical_flow[no_original_flow-identity_case0]\n0.01s call     tests/unit/devices/test_adb_camera_driver.py::test_action6_record_aperture_response_is_retained_and_does_not_block_one_start[00-f2.8-1801-exposure1]\n0.01s call     tests/unit/devices/test_adb_camera_driver.py::test_action6_start_tool_start_error_returns_all_prior_setting_calls_without_retry\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_read_identity_requires_complete_parent_and_unique_physical_flow[wrong_copy_id-identity_case1]\n0.01s call     tests/unit/persistence/test_flow_context.py::test_query_confirmation_context_releases_cursor[QueryPurpose.RESIDUAL_STOP_CONFIRMATION-8-read_error]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_osmo_record_rejects_unopened_settings[white_balance_k-5200]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_invalid_record_duration_is_rejected[9223372036854776-dji-osmo360-ii]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_invalid_record_duration_is_rejected[0.001-dji-osmo360-ii]\n0.01s call     tests/unit/devices/test_read_parameters.py::test_all_session_entries_reject_invalid_timeouts[None-False]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_identity_guard_current_creation_rejects_invalid_or_future_relations[foreign_parent-file_copies-identity_case0]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_rejects_invalid_identity_fields[action_id-False-delete/3/cleanup]\n0.01s call     tests/unit/devices/test_read_session_settlement.py::test_cancel_failure_without_active_read_still_settles_source[False]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_accepts_its_actual_owner[stop/7/activity]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_rejects_invalid_identity_fields[query_purpose-99-exists/3/cleanup]\n0.01s call     tests/unit/scheduling/test_capture_scope.py::test_scope_guard_distinguishes_unstarted_task_from_held_baseline[3-3-1-directories2-True]\n0.01s setup    tests/unit/persistence/test_flow_context.py::test_cleanup_context_releases_cursor[found-OperationKind.CHECK_FILE_EXISTS]\n0.01s call     tests/unit/devices/test_read_parameters.py::test_invalid_read_limit_leaves_session_available[-1]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_read_identity_requires_complete_parent_and_unique_physical_flow[two_parents-identity_case1]\n0.01s call     tests/unit/persistence/test_row_history.py::test_report_row_history_uses_directory_count_without_projected_counter[missing]\n0.01s call     tests/unit/persistence/test_flow_context.py::test_query_confirmation_context_releases_cursor[QueryPurpose.STOP_CONFIRMATION-2-missing_record]\n0.01s setup    tests/unit/reporting/test_encoding.py::test_numbers_reject_non_exact_or_non_finite_values[False]\n0.01s setup    tests/unit/contracts/test_historical_json_projection.py::test_workflow_registry_resource_failure_preserves_rule_error_and_cause[resource-error-registered_error]\n0.01s call     tests/unit/capture/test_result_error_guards.py::test_activity_rejects_actual_error_shape_or_registered_meaning[code-type-last_error]\n0.01s call     tests/unit/devices/test_read_session_settlement.py::test_invalid_source_return_cannot_advance_position[False-cde]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_rejects_invalid_identity_fields[responsibility_key-unrelated/21-query/activity/7/4/activity]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_read_identity_requires_complete_parent_and_unique_physical_flow[two_flows-identity_case1]\n0.01s call     tests/unit/devices/test_osmo360ii_settings.py::test_unknown_or_non_string_bitrate_is_rejected[1-record]\n0.01s setup    tests/unit/persistence/test_flow_context.py::test_query_confirmation_context_releases_cursor[QueryPurpose.RESIDUAL_STOP_CONFIRMATION-8-execute_error]\n0.01s setup    tests/unit/history/test_decoding.py::test_history_decode_rejects_noninteger_prepare_row_values[retention_state-1-true]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_invalid_record_duration_is_rejected[true-dji-osmo360-ii]\n0.01s call     tests/unit/devices/test_adb_camera_parameters.py::test_invalid_record_duration_is_rejected[1.234-dji-osmo360-ii]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_identity_guard_current_creation_requires_parent[file_copies-identity_case0]\n0.01s setup    tests/unit/persistence/test_attempt_identity.py::test_fixed_identity_rejects_invalid_identity_fields[session_key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-delete/3/cleanup]\n\n(19896 durations < 0.005s hidden.  Use -vv to show these durations.)\n7147 passed, 1 skipped, 2 warnings in 99.67s (0:01:39)\n",
+        "is_tail_excerpt": true
+      },
+      "historical_execution": {
+        "cwd": "/tmp/camctl-itopt-verification",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/unit",
+          "-q",
+          "-s",
+          "--durations=0",
+          "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/unit-compact-row-final-tmp"
+        ],
+        "python": "Python 3.11.17",
+        "head": "afd564c09589187cd064d9c4bf29269c30a71577",
+        "branch": "work/itopt-verification",
+        "started_utc": "2026-10-24T22:46:41.174220+00:00",
+        "exitstatus": 0,
+        "wall_seconds": 102.50620503900427,
+        "finished_utc": "2026-10-24T22:48:26.682267+00:00"
+      },
+      "result": "7147 passed, 1 skipped, 2 existing warnings; 99.67s; exit0"
+    },
+    "counterexamples": {
+      "execution_log": {
+        "historical_filename": "compact-row-counterexamples.log",
+        "sha256": "33296fe030d5dd0511373c028225e604d2881f528836c147d83fb5d78baf4a0f",
+        "text": ".....................\n============================== slowest durations ===============================\n0.70s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[missing_index-False]\n0.36s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[physical_attempt-True]\n0.25s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[format-False]\n0.21s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[baseline-False]\n0.20s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[physical_attempt-False]\n0.19s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[rollback]\n0.18s call     tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction\n0.18s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[activity-False]\n0.17s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[binding-False]\n0.16s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[baseline-True]\n0.16s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[format-True]\n0.16s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[binding-True]\n0.15s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[reference]\n0.15s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[activity-True]\n0.15s call     tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[missing_index-True]\n0.15s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[attempt_range]\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[commit]\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[unknown_commit]\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_page_record_from_another_connection_cannot_hide_changed_relations\n0.14s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[cancel]\n0.01s setup    tests/integration/persistence/test_segment_file_pairing.py::test_independent_guard_rechecks_actual_proof_after_proposal[format-False]\n\n(41 durations < 0.005s hidden.  Use -vv to show these durations.)\n21 passed in 5.62s\n",
+        "is_tail_excerpt": false
+      },
+      "result": "21 passed; exit0"
+    },
+    "real_capacity": {
+      "execution_log": {
+        "historical_filename": "capacity-compact-row-final.log",
+        "sha256": "95ee63995726d44c208f50ecd3483ba0a3eb194085c3271b0070faa68c57ed2c",
+        "text": "P3A_GROWTH [{\"N\": 20, \"B\": 4, \"write_peak\": 662766, \"verify_peak\": 260570, \"cache_size\": -2000, \"lookup_vm_steps\": 23, \"lookup_rows\": 1, \"lookup_plan\": [\"SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)\"], \"max_fetch\": 20, \"fetched_rows\": 13441, \"sql_calls\": 12417, \"whole_group_checks\": 2}, {\"N\": 200, \"B\": 4, \"write_peak\": 1852301, \"verify_peak\": 1515165, \"cache_size\": -2000, \"lookup_vm_steps\": 23, \"lookup_rows\": 1, \"lookup_plan\": [\"SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)\"], \"max_fetch\": 128, \"fetched_rows\": 147114, \"sql_calls\": 120461, \"whole_group_checks\": 2}, {\"N\": 400, \"B\": 4, \"write_peak\": 1774515, \"verify_peak\": 1690353, \"cache_size\": -2000, \"lookup_vm_steps\": 23, \"lookup_rows\": 1, \"lookup_plan\": [\"SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)\"], \"max_fetch\": 128, \"fetched_rows\": 326904, \"sql_calls\": 256521, \"whole_group_checks\": 2}]\n.\n============================== slowest durations ===============================\n176.93s call     tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency\n\n(2 durations < 0.005s hidden.  Use -vv to show these durations.)\n1 passed in 178.16s (0:02:58)\n",
+        "is_tail_excerpt": false
+      },
+      "historical_execution": {
+        "cwd": "/tmp/camctl-itopt-verification",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+          "-q",
+          "-s",
+          "--durations=0",
+          "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/capacity-compact-row-final-tmp"
+        ],
+        "python": "Python 3.11.17",
+        "head": "afd564c09589187cd064d9c4bf29269c30a71577",
+        "branch": "work/itopt-verification",
+        "started_utc": "2026-10-24T22:46:38.802108+00:00",
+        "exitstatus": 0,
+        "wall_seconds": 178.80350646100123,
+        "finished_utc": "2026-10-24T22:49:43.149053+00:00"
+      },
+      "result": "1 passed; 176.93s call; exit0",
+      "sizes": [
+        20,
+        200,
+        400
+      ],
+      "write_peak": [
+        662766,
+        1852301,
+        1774515
+      ],
+      "verify_peak": [
+        260570,
+        1515165,
+        1690353
+      ],
+      "whole_group_checks": [
+        2,
+        2,
+        2
+      ],
+      "lookup_vm_steps": [
+        23,
+        23,
+        23
+      ],
+      "max_fetch": [
+        20,
+        128,
+        128
+      ],
+      "batch_size": 4,
+      "increment_limit_bytes": 400000,
+      "write_increment_bytes": -77786,
+      "verify_increment_bytes": 175188
+    },
+    "history_growth": {
+      "execution_log": {
+        "historical_filename": "history-compact-row-final.log",
+        "sha256": "fe4d914ce10be079408fc941e9256c47dc5a97cb66d577172528ce4e4680c3fc",
+        "text": "GROWTH [(16, 636400, 72956, {'projection_rows': 57, 'events': 0, 'candidate_pages': 27}), (64, 294499, 74196, {'projection_rows': 201, 'events': 0, 'candidate_pages': 48}), (256, 394718, 77356, {'projection_rows': 777, 'events': 0, 'candidate_pages': 130})]\n.LARGE_GROWTH {'members': 256, 'gaps': 254, 'peak_python': 388273, 'rss_highwater_kib': 77384, 'disk_bytes': 610304, 'cache_kib': 2048, 'source': {'fetch_calls': 1775, 'fetch_rows': 2430, 'largest_fetch': 7, 'vm_steps': 48403}, 'handle': {'projection_rows': 777, 'events': 0, 'candidate_pages': 130}}\nLARGE_GROWTH {'members': 2048, 'gaps': 2046, 'peak_python': 804589, 'rss_highwater_kib': 80884, 'disk_bytes': 4562944, 'cache_kib': 2048, 'source': {'fetch_calls': 12527, 'fetch_rows': 17790, 'largest_fetch': 7, 'vm_steps': 348435}, 'handle': {'projection_rows': 6153, 'events': 0, 'candidate_pages': 898}}\n.\n============================== slowest durations ===============================\n103.29s call     tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity\n15.05s call     tests/integration/history/test_record_segment_history.py::test_growth_has_bounded_python_peak_and_linear_projection_reads\n\n(4 durations < 0.005s hidden.  Use -vv to show these durations.)\n2 passed in 118.93s (0:01:58)\n",
+        "is_tail_excerpt": false
+      },
+      "historical_execution": {
+        "cwd": "/tmp/camctl-itopt-verification",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_record_segment_history.py::test_growth_has_bounded_python_peak_and_linear_projection_reads",
+          "apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity",
+          "-q",
+          "-s",
+          "--durations=0",
+          "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/history-compact-row-final-tmp",
+          "-p",
+          "proof_counts"
+        ],
+        "python": "Python 3.11.17",
+        "head": "afd564c09589187cd064d9c4bf29269c30a71577",
+        "branch": "work/itopt-verification",
+        "started_utc": "2026-10-24T22:51:45.457286+00:00",
+        "exitstatus": 0,
+        "wall_seconds": 119.29639094500453,
+        "finished_utc": "2026-10-24T22:53:46.193698+00:00"
+      },
+      "result": "2 passed; exit0",
+      "call_seconds": [
+        15.05,
+        103.29
+      ],
+      "counters": [
+        {
+          "nodeid": "tests/integration/history/test_record_segment_history.py::test_growth_has_bounded_python_peak_and_linear_projection_reads",
+          "counts": {
+            "camctl.persistence.repositories.result_pages._decode": 3112,
+            "camctl.persistence.repositories.result_pages._at_record": 3103,
+            "camctl.persistence.repositories.result_pages.decode_event_row": 9724,
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 72,
+            "_fixture": 3
+          },
+          "inclusive_seconds": {
+            "camctl.persistence.repositories.result_pages._decode": 2.6214059861085843,
+            "camctl.persistence.repositories.result_pages.decode_event_row": 3.622720602696063,
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 2.333453493032721,
+            "camctl.persistence.repositories.result_pages._at_record": 7.320959087999654,
+            "_fixture": 12.158665855997242
+          },
+          "pages": {
+            "34": 16,
+            "82": 16,
+            "146": 18,
+            "276": 22
+          }
+        },
+        {
+          "nodeid": "tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity",
+          "counts": {
+            "camctl.persistence.repositories.result_pages._decode": 21132,
+            "camctl.persistence.repositories.result_pages._at_record": 21034,
+            "camctl.persistence.repositories.result_pages.decode_event_row": 80064,
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 450,
+            "_large_fixture": 2
+          },
+          "inclusive_seconds": {
+            "camctl.persistence.repositories.result_pages._decode": 20.508216047739552,
+            "camctl.persistence.repositories.result_pages.decode_event_row": 29.342312746404787,
+            "camctl.persistence.repositories.result_pages._verify_page_relations": 21.273258733890543,
+            "camctl.persistence.repositories.result_pages._at_record": 58.057405647872656,
+            "_large_fixture": 85.90512038399902
+          },
+          "pages": {
+            "146": 52,
+            "532": 44,
+            "918": 22,
+            "1304": 22,
+            "1690": 22,
+            "2076": 22,
+            "2462": 22,
+            "2848": 22,
+            "3234": 22,
+            "3620": 22,
+            "4006": 22,
+            "4392": 22,
+            "4778": 22,
+            "5164": 22,
+            "5550": 22,
+            "5936": 68
+          }
+        }
+      ],
+      "large_2048": {
+        "gaps": 2046,
+        "peak_python": 804589,
+        "disk_bytes": 4562944,
+        "sqlite_cache_kib": 2048,
+        "largest_fetch": 7,
+        "vm_steps": 348435
+      },
+      "sizes": {
+        "bounded_python_and_projection": [
+          16,
+          64,
+          256
+        ],
+        "page_and_disk_capacity": [
+          256,
+          2048
+        ]
+      },
+      "growth_measurements": [
+        {
+          "members": 16,
+          "peak_python": 636400,
+          "projection_rows": 57,
+          "decoded_events": 0
+        },
+        {
+          "members": 64,
+          "peak_python": 294499,
+          "projection_rows": 201,
+          "decoded_events": 0
+        },
+        {
+          "members": 256,
+          "peak_python": 394718,
+          "projection_rows": 777,
+          "decoded_events": 0
+        }
+      ]
+    },
+    "native": {
+      "execution_log": {
+        "historical_filename": "native-compact-row-final.log",
+        "sha256": "888c8ca4673dc9ad0fa222e2c6ec954d7bed6523352ce3b83ce2685938dd11c9",
+        "text": ".....\n============================== slowest durations ===============================\n25.36s call     tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]\n25.04s call     tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-True]\n24.75s call     tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[middle-False]\n22.92s call     tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[middle-True]\n0.20s call     tests/integration/capture/test_native_segment_completion.py::test_native_recovery_before_first_result_page_keeps_result_unknown\n\n(10 durations < 0.005s hidden.  Use -vv to show these durations.)\n5 passed in 98.91s (0:01:38)\n",
+        "is_tail_excerpt": false
+      },
+      "historical_execution": {
+        "cwd": "/tmp/camctl-itopt-verification",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_native_segment_completion.py",
+          "-q",
+          "-s",
+          "--durations=0",
+          "--basetemp=/tmp/camctl-itopt-verification/.local/verification/itopt/native-compact-row-final-tmp",
+          "-p",
+          "proof_counts"
+        ],
+        "python": "Python 3.11.17",
+        "head": "afd564c09589187cd064d9c4bf29269c30a71577",
+        "branch": "work/itopt-verification",
+        "started_utc": "2026-10-24T22:53:46.247244+00:00",
+        "exitstatus": 0,
+        "wall_seconds": 99.28064183599781,
+        "finished_utc": "2026-10-24T22:55:26.934326+00:00"
+      },
+      "result": "5 passed; exit0",
+      "four_state_call_seconds": [
+        25.36,
+        25.04,
+        24.75,
+        22.92
+      ],
+      "tail_false_counters": {
+        "nodeid": "tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity[tail-False]",
+        "counts": {
+          "consumer_world": 1,
+          "camctl.persistence.repositories.result_pages._decode": 10797,
+          "camctl.persistence.repositories.result_pages.read_page": 1885,
+          "camctl.persistence.repositories.result_pages._at_record": 8909,
+          "camctl.persistence.repositories.result_pages.decode_event_row": 18103,
+          "camctl.persistence.repositories.result_pages._verify_page_relations": 189,
+          "camctl.persistence.repositories.result_pages.committed_page_proof": 2351,
+          "camctl.persistence.repositories.result_pages.read_last_page": 2,
+          "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 1
+        },
+        "inclusive_seconds": {
+          "consumer_world": 0.37713691699900664,
+          "camctl.persistence.repositories.result_pages._decode": 2.309625670663081,
+          "camctl.persistence.repositories.result_pages.decode_event_row": 4.411030772665981,
+          "camctl.persistence.repositories.result_pages._verify_page_relations": 0.5636845569242723,
+          "camctl.persistence.repositories.result_pages._at_record": 4.654945898844744,
+          "camctl.persistence.repositories.result_pages.read_page": 1.5486558588163462,
+          "camctl.persistence.repositories.result_pages.committed_page_proof": 5.009362818957015,
+          "camctl.persistence.repositories.result_pages.read_last_page": 0.012355127997579984,
+          "camctl.persistence.repositories.segment_transactions.finish_segment_recording": 18.96236975699867
+        },
+        "pages": {
+          "21": 189
+        }
+      },
+      "pytest_seconds": 98.91
+    },
+    "existing_2048_and_strict_window": [
+      {
+        "mode": "actual_legacy_member_scan",
+        "window": 2,
+        "members": 2048,
+        "seconds": 1.6518141699998523,
+        "full_page_proofs": 16,
+        "proofs_by_page": {
+          "146": 1,
+          "532": 1,
+          "918": 1,
+          "1304": 1,
+          "1690": 1,
+          "2076": 1,
+          "2462": 1,
+          "2848": 1,
+          "3234": 1,
+          "3620": 1,
+          "4006": 1,
+          "4392": 1,
+          "4778": 1,
+          "5164": 1,
+          "5550": 1,
+          "5936": 1
+        }
+      },
+      {
+        "mode": "direct_committed_page_proof_window",
+        "window": 2,
+        "repetitions": 5,
+        "source_final_page": 5936,
+        "seconds": 1.0580211080014124,
+        "full_page_proofs": 15,
+        "proofs_by_page": {
+          "5936": 5,
+          "146": 5,
+          "5550": 5
+        }
+      },
+      {
+        "mode": "actual_legacy_member_scan",
+        "window": 3,
+        "members": 2048,
+        "seconds": 1.2445736279987614,
+        "full_page_proofs": 16,
+        "proofs_by_page": {
+          "146": 1,
+          "532": 1,
+          "918": 1,
+          "1304": 1,
+          "1690": 1,
+          "2076": 1,
+          "2462": 1,
+          "2848": 1,
+          "3234": 1,
+          "3620": 1,
+          "4006": 1,
+          "4392": 1,
+          "4778": 1,
+          "5164": 1,
+          "5550": 1,
+          "5936": 1
+        }
+      },
+      {
+        "mode": "direct_committed_page_proof_window",
+        "window": 3,
+        "repetitions": 5,
+        "source_final_page": 5936,
+        "seconds": 0.2508952709977166,
+        "full_page_proofs": 3,
+        "proofs_by_page": {
+          "5936": 1,
+          "146": 1,
+          "5550": 1
+        }
+      }
+    ]
+  },
+  "interpretation": [
+    "原冻结全轮12个persistence失败仍保留；当前修复的容量和故障替身分别由原完整目标复核。",
+    "容量与状态规模、原资源阈值及全部真实写入不变；没有生产gc.collect或守卫替换。",
+    "保留三键避免严格current/first/previous循环重复完整证明；只读成员扫描的legacy路径与直接strict窗口分别标记。",
+    "最终compact命中重新解码有明确成本，不能使用此前已解码缓存的7.23/18.92/65秒作为当前实现耗时。",
+    "计时为本容器对应会话实际结果，同期存在其它任务；原CSV时长用于参考，不是目标硬件或严格受控加速倍数承诺。",
+    "命令记录的 HEAD 为 afd564c0，执行时包含尚未提交的紧凑行改动；source_commit 锁定随后提交的相同生产行为。"
+  ],
+  "historical_worktree": "/tmp/camctl-itopt-verification",
+  "diagnostic_evidence": "page-proof-memory-diagnostic.json",
+  "archive": {
+    "source_artifact": "memory-fix-summary.json",
+    "source_sha256": "409454fc57374cb0082ab6803ae84eaa32696514b02c1cb7d4af31a683d68fb2",
+    "note": "执行目录与原始命令保留为历史元数据；必要日志内容和数值已内嵌，本记录不依赖原临时工作区。 单元日志较长，只内嵌末尾摘要并保留完整原日志摘要值；is_tail_excerpt 标明截取。"
+  },
+  "strict_consumer_evidence": "page-proof-strict-three-page.json"
+}

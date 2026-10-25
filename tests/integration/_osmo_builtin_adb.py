@@ -184,6 +184,8 @@ def _shell_kind(script: str) -> str:
     from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
 
     tools = ShellFileTools()
+    if script == tools.directory_scan_script(REMOTE_DIRECTORY):
+        return "directory"
     known_files = tuple(path for path, _ in _scenario_files())
     batch_line = next((line.strip() for line in script.splitlines()
         if line.strip().startswith("for path in ") and line.strip().endswith("; do")), None)

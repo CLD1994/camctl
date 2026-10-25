@@ -1,0 +1,1541 @@
+{
+  "purpose": "S5/S6最终Hasselblad完整29项默认8路顺序after，同时作为S8并发与分片档位数据。",
+  "source": {
+    "root": "/tmp/camctl-itopt-round2-final",
+    "head": "8164851c8d5aa2a25f7bbd59bd09a6d970b38369",
+    "status": "",
+    "snapshot_sha256": "adc908968f11d3f9baf35589aa632fe7ad0b5b02bb2845cf077cf8c4c180bab3"
+  },
+  "run_root": "/tmp/camctl-itopt-round2-hb-after-8",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-final",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "--jobs",
+    "8",
+    "--output",
+    "/tmp/camctl-itopt-round2-hb-after-8"
+  ],
+  "exec_session": 99841,
+  "runner_pid": 752223,
+  "status": "finished",
+  "exit_code": 1,
+  "jobs": 8,
+  "root_shards": 8,
+  "task_count": 8,
+  "task_outcomes": {
+    "passed": 3,
+    "failed": 5
+  },
+  "primary_count": 29,
+  "unique_primary_count": 29,
+  "complete_primary_count": 29,
+  "primary_outcomes": {
+    "passed": 24,
+    "failed": 5
+  },
+  "same_primary_nodeids_as_before": true,
+  "all_progress_finished": true,
+  "timing": {
+    "runner_wall_seconds": 542.5151312269954,
+    "collector_monotonic_wall_seconds": 542.7189352679998,
+    "task_wall_sum_seconds": 3590.9085479669957,
+    "pytest_phase_seconds": {
+      "setup": 355.4566252980003,
+      "call": 2547.9938860130205,
+      "teardown": 0.10726085098576732
+    },
+    "pytest_phase_sum_seconds": 2903.5577721620066,
+    "before_complete_pass_cohort": {
+      "count": 28,
+      "after_outcomes": {
+        "passed": 23,
+        "failed": 5
+      },
+      "all_passed_after": false,
+      "source": "../hb-before-4/cases.json",
+      "phase_seconds": {
+        "setup": 355.4494257019978,
+        "call": 2495.065096307022,
+        "teardown": 0.10628366798482602
+      },
+      "phase_sum_seconds": 2850.6208056770047
+    },
+    "preparations": {
+      "hasselblad-client-build": {
+        "count": 8,
+        "wall_sum_seconds": 392.3807473460038
+      },
+      "package-resources": {
+        "count": 8,
+        "wall_sum_seconds": 1.3901814709970495
+      }
+    }
+  },
+  "world_sessions": {
+    "count": 18,
+    "identity": "Python metrics nodeid + canonical metrics.parent，校验同目录Node的session_id/node_pid一致；只取primary pytest树，真实路径去重，排除current与.local归档副本。",
+    "counts": {
+      "node_process_starts": 18,
+      "application_starts": 24,
+      "files_starts": 24,
+      "http_server_starts": 24,
+      "browser_starts": 24
+    },
+    "business_operations": {
+      "application-photo-export": 12,
+      "browser-plan-export": 70,
+      "upload-files": 20,
+      "browser-photo-export": 6
+    },
+    "photo_export_modes": {
+      "application": 12,
+      "browser": 4
+    },
+    "missing_photo_receipt_worlds": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]"
+    ],
+    "node_terminal_statuses": {
+      "closed": 16,
+      "ready": 1,
+      "failed": 1
+    },
+    "all_closed": false,
+    "evidence": "worlds.json",
+    "scope": "counts只覆盖18个PhotoWorld，独立one-shot预设/上传另列；Node CPU只当前会话Node，不含Chrome或安装CLI。"
+  },
+  "one_shot_client_commands": {
+    "count": 7,
+    "by_operation": {
+      "browser-photo-export": 1,
+      "upload-files": 4,
+      "browser-plan-export": 2
+    },
+    "exit_codes": {
+      "1": 1,
+      "0": 6
+    },
+    "photo_receipt_export_modes": {},
+    "evidence": "client-commands.jsonl",
+    "photo_test_inputs": 3,
+    "photo_receipt_files": 0,
+    "photo_proofs": "one-shot-photo-proofs.json",
+    "scope": "真实已保存独立Node命令记录；subprocess超时可能未生成命令record，因此失败档该count不表示所有启动尝试。另列真实photo输入/回执及原pytest超时trace，不把静态推算的Application/browser次数混入显式world recorder。"
+  },
+  "resource_scope": "Metadata git rev-parse/status children finish before children_before and start time. The measured interval has exactly one runner child; CPU/I/O deltas exclude prior metadata usage. RUSAGE_CHILDREN contains waited descendant usage propagated by child reaping. Raw ru_maxrss is the lifetime maximum single descendant process (including prior metadata git); children_before retains its prior value. It is not concurrent tree memory. inblock/oublock are raw kernel block-operation counts, not bytes. No complete per-process CPU/I/O sample or device-throughput claim.",
+  "browser_observation_scope": "resource.json的legacy observed_browser_roots_count仅表示符合executable/argv过滤的唯一PID/start_ticks观察，可能漏采或误分类；不是browser launch/session精确数或下界，不替代显式world生命周期。",
+  "comparison_limits": [
+    "before含1个尚未capture的正常链失败；总wall仅作各轮事实，同28完整pass身份的phase另列，不将29全pass后的新增工作当作退化。",
+    "S5生命周期和S6预设分区一起实施；不声称各自独立性能百分比。",
+    "默认root-shards随jobs改变，6/8同时包含并发与额外会话准备成本；各轮无并行其他bench，结果为单次采样。",
+    "阶段耗时含共享fixture和等待，准备归属变化会影响单项setup；不能逐行差直接当操作收益。"
+  ],
+  "dependencies": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "node": "v24.22.1",
+    "node_modules": "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "node_package_lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+    "playwright_core": "1.63.0",
+    "chromium_revision": "1243",
+    "uv_cache_source": "/home/cld/.cache/uv"
+  },
+  "integrity": {
+    "unique_primary_world_keys": 18,
+    "node_python_session_id_pid_match": true,
+    "all_browser_processes_inactive": false,
+    "all_python_close_passed": false,
+    "existing_export_receipts_have_request_and_capabilities": true,
+    "complete_photo_receipt_world_count": 16
+  },
+  "files": [
+    {
+      "path": "cases.json",
+      "sha256": "7cb60a3dcd8013e359dd6c59f45c17fd93f665e1fb23d8d2b466d0b0e98a79c7",
+      "bytes": 17689
+    },
+    {
+      "path": "client-commands.jsonl",
+      "sha256": "da67340bf65679aad038311a3575453357db0293cfb0d5127ea72c6b47f6dfee",
+      "bytes": 12901
+    },
+    {
+      "path": "collector-source.txt",
+      "sha256": "bb3571f2c51c3e5855ccbeade4e8fce348096b432d63478cd5168971f5edb406",
+      "bytes": 6534
+    },
+    {
+      "path": "driver.log",
+      "sha256": "3452770a7d25f5e971542047f9e40bd04b3aa2c2592112ef74f864ea20b2a543",
+      "bytes": 39832
+    },
+    {
+      "path": "one-shot-photo-inputs/001/browser-input.json",
+      "sha256": "62fde2dbf07820a3b9aad5bb616e7de1ad18b53d4041c1ed2bc4ee2b3566a3b4",
+      "bytes": 468
+    },
+    {
+      "path": "one-shot-photo-inputs/001/browser-receipt.json.failure.png",
+      "sha256": "df21df651a031d689b17a309269859f0ed6992f3592b00506263678ee77be2aa",
+      "bytes": 290644
+    },
+    {
+      "path": "one-shot-photo-inputs/002/browser-input.json",
+      "sha256": "36c7dc2bc48b31ec7cf0cd5bd023ac536c538d409fbc715c2410c36ef7aa38c9",
+      "bytes": 469
+    },
+    {
+      "path": "one-shot-photo-inputs/003/browser-input.json",
+      "sha256": "ea10d8835e21b07f1682bf0aea1687862ea538574d58c4cd32afb499643487c1",
+      "bytes": 467
+    },
+    {
+      "path": "one-shot-photo-proofs.json",
+      "sha256": "fad6038930d5428497903786a698e3a92b50db0a0df22bf4071c9a2b6f649cd4",
+      "bytes": 777
+    },
+    {
+      "path": "one-shots/001/browser-input.json",
+      "sha256": "62fde2dbf07820a3b9aad5bb616e7de1ad18b53d4041c1ed2bc4ee2b3566a3b4",
+      "bytes": 468
+    },
+    {
+      "path": "one-shots/001/browser-receipt.json.failure.png",
+      "sha256": "df21df651a031d689b17a309269859f0ed6992f3592b00506263678ee77be2aa",
+      "bytes": 290644
+    },
+    {
+      "path": "one-shots/002/first-receipt.json",
+      "sha256": "1b9702f50a523f4683948146e8a0a05874d852ac20250be43b9991dec5f70943",
+      "bytes": 905
+    },
+    {
+      "path": "one-shots/003/second-receipt.json",
+      "sha256": "47b650dd323f6ed746fcd0f5ee5661cc8c44a8d768a348c46afb3decce9bdcda",
+      "bytes": 2717
+    },
+    {
+      "path": "one-shots/004/ack-receipt.json",
+      "sha256": "909e8d015208ad1c24dafd20c8aee2e31ef59bffa16ad2009f48a2e691333304",
+      "bytes": 394
+    },
+    {
+      "path": "one-shots/005/first-receipt.json",
+      "sha256": "e287ff606fa37cd10859d960fa74e58c1ab27b75338ede6cbf21c6a128796bf3",
+      "bytes": 1776
+    },
+    {
+      "path": "one-shots/006/second-receipt.json",
+      "sha256": "cbec5262cad4758d7f8aed45a4c8005131c0cb1ff05df3433bc6a315d89d5122",
+      "bytes": 2757
+    },
+    {
+      "path": "one-shots/007/ack-receipt.json",
+      "sha256": "78e4dbedba415ed2e2d8b281db56645b7427e911b55d41c02bab35ba45420740",
+      "bytes": 394
+    },
+    {
+      "path": "plan.json",
+      "sha256": "670dc0d98cde4c543d143a6e6296e8e6d3a69b0f85ecd95795d041d112b63851",
+      "bytes": 7804
+    },
+    {
+      "path": "resource-start.json",
+      "sha256": "00ceb0ae2b2c2b57d34960875484e3e65f4ca085b4aac2e24ed9a7836d09e453",
+      "bytes": 958
+    },
+    {
+      "path": "resource.json",
+      "sha256": "f91331bc62e294c14e2dd4eb4f8d591c50d1a38431b93cd27b7c2147d3812a64",
+      "bytes": 88801
+    },
+    {
+      "path": "source.json",
+      "sha256": "5ca030f0e4b85fcd8d1621850475896c1352b18bafd8807e999af90848d823a3",
+      "bytes": 346812
+    },
+    {
+      "path": "summary.json",
+      "sha256": "ca584604b740dbf3b7fa17a9b8e15b9fb3b4158d464c6ab5ed9ddce7aad10115",
+      "bytes": 41673
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/cases.json",
+      "sha256": "6fd7d35edfbc5311924f12f438dff062f717845a7701dbb1d9e3cf4da2092abf",
+      "bytes": 1657
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/command.json",
+      "sha256": "26415be448528b6bb384eaa07ff7ff431d4374eb7b10011ce8d8107d388548bd",
+      "bytes": 4803
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/events.jsonl",
+      "sha256": "78d25481cfbe208befe82cff2c387eb682318017045bed0511e3172cf0a67af4",
+      "bytes": 6640
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/inventory.json",
+      "sha256": "320f15c880a6b458ad6d60ed4289456aeec8be41a1b72364d4912c02b0e36891",
+      "bytes": 393
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/output.log",
+      "sha256": "814fa12f082de0dfb6069bf0345bd6e9ed18211dacd247da48bc5d9bd6c26680",
+      "bytes": 1105
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/progress.json",
+      "sha256": "f72dd451aa6c4a8bb1b0e5ce69d0c69a2bf1fa6cf47a34bf58e597ed65200c9c",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/result.json",
+      "sha256": "cc708267e0892461427231f6e14ffbc16b94b0114f83655aa879fb169870035c",
+      "bytes": 4520
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/cases.json",
+      "sha256": "55eb8ce6199b44c0d6cae964dca29035bb31014ff0d04961aa1b76fec8144b22",
+      "bytes": 1632
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/command.json",
+      "sha256": "543af3e4272968e205c0f66c95cc7a8ba86119d72fcdaf91da9e5bab8545dc42",
+      "bytes": 4748
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/events.jsonl",
+      "sha256": "6aaeabc1a66655d3cb757c4edfc4e9f4ed9ef419c314c1c3b7d8594ec8f2f392",
+      "bytes": 6438
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/inventory.json",
+      "sha256": "dc2bc2536358e2b1be0f3508f8cd9bd84f10ddfc5c1825a08ce0be3a6d3ec86c",
+      "bytes": 366
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/output.log",
+      "sha256": "6935ce9c0e1034041edf7b8beb53d50facd35f3cb697765f211a1094d204e8db",
+      "bytes": 5438
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/progress.json",
+      "sha256": "4e9b495f984909e1d95bbe8175990fbe3ac6904680effb7da5c275b58e3daf23",
+      "bytes": 239
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-7/result.json",
+      "sha256": "ef25f47c4ade93f6bd81bcbd5bf9cbb44721dec28c70bbe9d0c2a18fdd5d22e2",
+      "bytes": 4484
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/cases.json",
+      "sha256": "68db248bacad961040863ea05b61d17ca0187e8764ecaa095443f3dbee10491c",
+      "bytes": 1665
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/command.json",
+      "sha256": "7b675ebf0753abe898421d0597ede41883fff3dedf0c9fe8bd962c44930ffa82",
+      "bytes": 4836
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/events.jsonl",
+      "sha256": "741a33429da4ef1e6324a11ef7303e0476d9e083ee31998bc1ae4afa6933a162",
+      "bytes": 6775
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/inventory.json",
+      "sha256": "b02c569e2b0e468bb8ae886ca3e78d73a74739dace931942b69187d445617e1c",
+      "bytes": 409
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/output.log",
+      "sha256": "ecefea8deb1c2122218bd1634508931d2ad6e605cf747d7378174129082a7f07",
+      "bytes": 10616
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/progress.json",
+      "sha256": "6f0d5970fb083d0d3eb7721282e5d214563d17b46cd44864c82f1e7cd749cf6b",
+      "bytes": 239
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-1/result.json",
+      "sha256": "3e3ab1a1af9913ddc840907965158cb4aa75fb32084bf33a6c600fb42afbe285",
+      "bytes": 4573
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/cases.json",
+      "sha256": "ff6fe6299acb874da5d12b0268ea0c30bca47b832e6134f9c692d643c805ea38",
+      "bytes": 1637
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/command.json",
+      "sha256": "4655ba214bc1f96ad723dfa426eadd204413be616d3da94519b756d6a303f32a",
+      "bytes": 4774
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/events.jsonl",
+      "sha256": "3301f53daef63dc7cfab8a6286975d970fb0d4b813ede1233a6ceb4bde4d609f",
+      "bytes": 6528
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/inventory.json",
+      "sha256": "088bd236b99ce2ecb222a182a774b4c6af4057c4e8911d757dc064730fce9b7f",
+      "bytes": 378
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/output.log",
+      "sha256": "f57197fa4c4049e4f292d9e00b8de7c1a104371bd29b904498cb730e84ea81b1",
+      "bytes": 6230
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/progress.json",
+      "sha256": "8db2150bd599f6fa373d9315fadee629d8d1157e0e91fad53b9145a2e2530d50",
+      "bytes": 238
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/result.json",
+      "sha256": "4d347d04fc7091b9a635221f697bb0f7e08921faf2b39dfdca5db934bc4b30a2",
+      "bytes": 4510
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/cases.json",
+      "sha256": "cdf0e012b67aa758bdf5a8302c77dc94e38d3cef8a070b94f070627b79c296cd",
+      "bytes": 1641
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/command.json",
+      "sha256": "81ecf993acd51215b61598b9b437b27c88c40ad5888274450fe3be531e23dc76",
+      "bytes": 4768
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/events.jsonl",
+      "sha256": "6c31aeac0a7ccf6654f4199a04b7f9fe0266a8c63b0dd1074feaff567e0caec6",
+      "bytes": 6517
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/inventory.json",
+      "sha256": "5d308ca9c40cfb3e729c7a7f93c16404cd1fb3df475d48f519689f018aba49b1",
+      "bytes": 376
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/output.log",
+      "sha256": "23f2adc1e4b9610ad5d05d5fb7c2669d15f07759f3d69f001b5173801aa50a28",
+      "bytes": 6365
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/progress.json",
+      "sha256": "f891f1299219d6a3d69fdc124a137265b33d75a5d51927ec89c3897d45c2ea31",
+      "bytes": 239
+    },
+    {
+      "path": "tasks/005-root-test_hasselblad_photo_roundtrip-shard-6/result.json",
+      "sha256": "482854a39a6ad0c41714a7dc168cfe14797d97dfbdd337f4375154bc6b59f2bb",
+      "bytes": 4505
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/cases.json",
+      "sha256": "d278f4581632c73350040a0fa76198c6adbac27fcbf2bc7abb09f1ec5ed1a3bb",
+      "bytes": 1632
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/command.json",
+      "sha256": "0041f05780e499f5d6714315bdeebf1a393758af7d0c28fe87a293dc3876c147",
+      "bytes": 4759
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/events.jsonl",
+      "sha256": "6e8dd4c00f5b4f73d7daf22b2c642826b4d48bced3b5d2c5fe6c950bffde060f",
+      "bytes": 6473
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/inventory.json",
+      "sha256": "504e0f2c6e9ee4681e98efc16f3b2a833b226ef078f349e0536bb0af96219ff3",
+      "bytes": 371
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/output.log",
+      "sha256": "39bae81675a3a61ff9e4b70a1053714dc529a717fb27415b265697ae078e73e0",
+      "bytes": 5580
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/progress.json",
+      "sha256": "40adbc30a55e0cefc64c275d8d42dbd1c6295ae3c243a396cbc98e13768bd6ad",
+      "bytes": 238
+    },
+    {
+      "path": "tasks/006-root-test_hasselblad_photo_roundtrip-shard-8/result.json",
+      "sha256": "bd3105ecf6295f6096a1e4479119dfa7a5112e7881e2cb8422ea6ad90637d64e",
+      "bytes": 4495
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/cases.json",
+      "sha256": "26235c8f3fd9e10912264b96d425b98fd05e09137383fa91d9e4d7c083aac6d5",
+      "bytes": 1654
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/command.json",
+      "sha256": "044953c72e25db53e7f84031ee303d38c467f3d2e2fe16cf5ba9809f52d33adc",
+      "bytes": 4807
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/events.jsonl",
+      "sha256": "1eff728239358991a1ccb667a2ae20cef6ba0ebb8ddccd7348efe074abdba258",
+      "bytes": 6650
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/inventory.json",
+      "sha256": "823ba8340fe1b659700c2ba9b487d9c0bf2c60ee5863a17d72dc9791e6396ac0",
+      "bytes": 395
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/output.log",
+      "sha256": "1b537e783f10f40292d281ed5a874dcf5f16ae8160ea2b4dd6a4a90112dfc8be",
+      "bytes": 1237
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/progress.json",
+      "sha256": "3ed519edad6e909ffe2667f3a1ddca6fee37e6efadc2a8ad4486228d7175a159",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/007-root-test_hasselblad_photo_roundtrip-shard-2/result.json",
+      "sha256": "e6711a83ff3e0ce5041957f039919edf64dccd14fccf8b13ee77b0b4032f62ad",
+      "bytes": 4524
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/cases.json",
+      "sha256": "9ab3d9a8bd1fc460512e045c5527a54144192b7b7b2627a7bdafe3e9ddb54a9a",
+      "bytes": 4452
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/command.json",
+      "sha256": "615bcfedc8a2e64f340b0613a33d482e798a95948d8437497c679b9c6617e1b4",
+      "bytes": 6127
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/events.jsonl",
+      "sha256": "90d2f0235b886cf1d950d2916b23154127bc11b34c85a310d16a67306c740e9a",
+      "bytes": 16813
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/inventory.json",
+      "sha256": "7aa03286b7a07253fd56fb9ac2edc48685b6f9f216832604b71aa63dddd41122",
+      "bytes": 1045
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/output.log",
+      "sha256": "1f088bb99d529d81c44540fd0d052e959db55d61103b904428cdc98c61bdc520",
+      "bytes": 1370
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/progress.json",
+      "sha256": "02ace61184c49fa0e679d90814db19524946be6792f2c2338428f85a5654bc0b",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/008-root-test_hasselblad_photo_roundtrip-shard-5/result.json",
+      "sha256": "fb4fb17967f925f241d64bdc0d3e067833aceb0b6eedd13fcd33426bcecabc39",
+      "bytes": 5845
+    },
+    {
+      "path": "tasks.csv",
+      "sha256": "67b5620b50f5669ba8355a7837ee81d4849e67707b965be940322304ca7e52e1",
+      "bytes": 855
+    },
+    {
+      "path": "worlds/001/client-session-node.json",
+      "sha256": "fd9b2afe29afe5a6a035e43bcd21304982b0641a4ef7a6dc5927c562b543fca7",
+      "bytes": 7952
+    },
+    {
+      "path": "worlds/001/client-session-python.json",
+      "sha256": "d6ad37ba8c57fde37c0db04c96ce0c680151a2d14f0c250324f3c4b338da0e1f",
+      "bytes": 5795
+    },
+    {
+      "path": "worlds/001/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/001/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/001/photo-input.json",
+      "sha256": "6717a4bb00c8e41f7a313a3689b886b46d5bb0af30d78e8d137038b5d46f0e58",
+      "bytes": 459
+    },
+    {
+      "path": "worlds/001/receipts/001-photo-application.json",
+      "sha256": "6714ffc0e6a5331ce953857d11be6fdc7addbfaa60029eb7de2edf7aa07ea586",
+      "bytes": 2203
+    },
+    {
+      "path": "worlds/001/receipts/002-fault-obtain-1-original-browser.json",
+      "sha256": "aafb931822a05e461949c863518968d394a29d45f8bb01b2ac712e08690deb36",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/001/receipts/003-fault-obtain-2-preview-browser.json",
+      "sha256": "1831e4792dab59b6f7e37107719ddcacdbff033e1f7f0211b198e912115b41be",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/001/receipts/004-fault-obtain-3-original-browser.json",
+      "sha256": "bb2485f73219b8a739b47ca6d928bff1aba802c97aaccb1813e5f4629566891a",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/001/receipts/005-fault-obtain-4-preview-browser.json",
+      "sha256": "f8fad66a8f627a2ef1032df4483960d2ff63ad68d28748cfce39072c92593671",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/002/client-session-node.json",
+      "sha256": "90eda79334b41740a3e8f9fea19c0c38b6d62626095b30c2afa07c18baf80aef",
+      "bytes": 11303
+    },
+    {
+      "path": "worlds/002/client-session-python.json",
+      "sha256": "1d8d3b9e247f4a2801b9c6e5a5bed5eeaf3dde1961ad807460768f8cc141510e",
+      "bytes": 7822
+    },
+    {
+      "path": "worlds/002/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/002/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/002/photo-input.json",
+      "sha256": "8900ebe23a51257dec65f22715fa1606842304ab8c2ed9f472d5d7bbe1d86520",
+      "bytes": 459
+    },
+    {
+      "path": "worlds/002/receipts/001-photo-application.json",
+      "sha256": "480102db32c2335fde59ee7838ceeddfbf88f780208f7fddfaca6fb9404bd078",
+      "bytes": 2203
+    },
+    {
+      "path": "worlds/002/receipts/002-obtain-1-original-browser.json",
+      "sha256": "897d2a627bf79d5cababf534cb5bbd963f7a928949852bf184450c49e2d94207",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/002/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "a2f6c81a3421ea83f028e37a7f5c0b2fd6cd1de8cd2ede3af41cf32737bad49f",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/002/receipts/004-obtain-3-original-browser.json",
+      "sha256": "7784bfb99794f3003c475e56a6ce7a5d24175774b8758f1d2be2091a4db658ef",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/002/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "004dd71b88e4eb129ca13b0257e0d6d0136f0751e6519242ee56bbb787b44172",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/002/receipts/006-reports-before-media-receipt.json",
+      "sha256": "34e1b6b18f5b5bae8b8f8513625d0282ca2dd6df68af7eb77df76a1097566b2a",
+      "bytes": 6480
+    },
+    {
+      "path": "worlds/002/receipts/007-media-after-reports-receipt.json",
+      "sha256": "adf2aad5f2ce6d68d11ad064e8b8edbab25dcef41f7400c8792483c159037a1a",
+      "bytes": 10407
+    },
+    {
+      "path": "worlds/002/receipts/008-ack-browser.json",
+      "sha256": "c90ca9b074eaa53dc932964429d06454bfa993323952814063a661ff4876f67f",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/003/client-session-node.json",
+      "sha256": "f560bebdadfbe22ee749f5e6b013e9cab38637266754e5d60d7d88aac52dd56b",
+      "bytes": 7948
+    },
+    {
+      "path": "worlds/003/client-session-python.json",
+      "sha256": "63ca6de10fdf9d3748a25bcd6553347fd5ff62c4ec751b20a7153a04e0226745",
+      "bytes": 5768
+    },
+    {
+      "path": "worlds/003/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/003/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/003/photo-input.json",
+      "sha256": "5b42c89aa49530166b4c80acf7fe500be49c903509269da119dec55577424f1c",
+      "bytes": 441
+    },
+    {
+      "path": "worlds/003/receipts/001-photo-application.json",
+      "sha256": "8a4afecb104cee1214824697ce40bdfd43dbb0e9ec936e716bdfc5afeb02652f",
+      "bytes": 2149
+    },
+    {
+      "path": "worlds/003/receipts/002-fault-obtain-1-original-browser.json",
+      "sha256": "bd3b9f5752a393f158d56e50753125b2e74758e2a07df20147b34fe6d2c273fe",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/003/receipts/003-fault-obtain-2-preview-browser.json",
+      "sha256": "aa15b29aa61af950a31400abc0f9b5fc852a087787a3fbf6f35ac44e0384e4ef",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/003/receipts/004-fault-obtain-3-original-browser.json",
+      "sha256": "21fe310cc3dac11e7b49bcabda3919406c825ec648ace49722543a1dc905cb12",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/003/receipts/005-fault-obtain-4-preview-browser.json",
+      "sha256": "f963f7979c6836b5a0bdd29b698b2329af45c51d407955bdc4c493ed0eb818b8",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/004/client-session-node.json",
+      "sha256": "77fb6856503b0785edf2e3a6b9650742a1a389e70f7b7a3fa9e4b665dc07921b",
+      "bytes": 2690
+    },
+    {
+      "path": "worlds/004/client-session-python.json",
+      "sha256": "565cc620854e95a99522bdaf1098cd52efc50851d29681a8d71e0c1ece7c8c1c",
+      "bytes": 2524
+    },
+    {
+      "path": "worlds/004/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/004/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/004/photo-input.json",
+      "sha256": "e45dff70b3f6e2e6a2a80c1d2c84ff7abd658191afb0bb888a7420ce7dd56a55",
+      "bytes": 436
+    },
+    {
+      "path": "worlds/004/receipts/001-photo-application.json",
+      "sha256": "b97338c607614546ddbe5e4136048cc36300c2331cb5fd59975d627adbd7344e",
+      "bytes": 2134
+    },
+    {
+      "path": "worlds/005/client-session-node.json",
+      "sha256": "7064782ab9a8fadf85aefdc9aa279ef78040c46bfde50583bb744f95fd9ba8c4",
+      "bytes": 1587
+    },
+    {
+      "path": "worlds/005/client-session-python.json",
+      "sha256": "d9a15f097e1e185bfdea9ffdb5fe6978be745778f7d0d5bf19b0fbf9419a1145",
+      "bytes": 2891
+    },
+    {
+      "path": "worlds/005/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/005/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/005/photo-input.json",
+      "sha256": "24e19095472b304ee3b6927e5b235dd12d6697bee5d97f3b9a48a6b0dfaf89dd",
+      "bytes": 401
+    },
+    {
+      "path": "worlds/006/client-session-node.json",
+      "sha256": "07214aa7a75fb8ffc717e3fa5d67935260ac993003141879f2846e728930b5ec",
+      "bytes": 11299
+    },
+    {
+      "path": "worlds/006/client-session-python.json",
+      "sha256": "7aba4674bc4d8010d5a26d8aa1a824e0ccae21825a5f52ba8fdc88d59078014c",
+      "bytes": 7693
+    },
+    {
+      "path": "worlds/006/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/006/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/006/photo-input.json",
+      "sha256": "c526b0a4a93acb807e10aec0e9deb9d8dd3e662e002d340848d1ea5853b15873",
+      "bytes": 416
+    },
+    {
+      "path": "worlds/006/receipts/001-photo-application.json",
+      "sha256": "56b128603ca5c44089f288193c4253f5de4ea7a8d499555b7ee2a8b167b92518",
+      "bytes": 2074
+    },
+    {
+      "path": "worlds/006/receipts/002-obtain-1-original-browser.json",
+      "sha256": "7155242294a4544c69f75c6ed10d3d0adda700ae003206bdf0c1c564b1d5d3b6",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/006/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "d016054fc29bd28a1672c09c5d801593ef1a478560d3d2fcfbcb6b6984b7a119",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/006/receipts/004-obtain-3-original-browser.json",
+      "sha256": "2914d4a4c0ac17b1e981464612f6eb74aabd88679ac55054c73201bed89bb0f2",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/006/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "222f853b394082918b51d8c2c3866d24fbdf90a0a37e9df3002cce5343493434",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/006/receipts/006-reports-before-media-receipt.json",
+      "sha256": "2407cbc3ebada80ce998170272c69750557e935cfca1a5e1c15929ef800b1d8e",
+      "bytes": 6399
+    },
+    {
+      "path": "worlds/006/receipts/007-media-after-reports-receipt.json",
+      "sha256": "c6319d5fc142861ba0af7477064b6a62c245cff1711e65ef787224b63039e5c6",
+      "bytes": 8362
+    },
+    {
+      "path": "worlds/006/receipts/008-ack-browser.json",
+      "sha256": "fae70fb25b90bed113ffee4ffac401a7a975136e288c68213cd7114ad2b74399",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/007/client-session-node.json",
+      "sha256": "b5c3282385d3fca4f528c690bbe5506b79df69ebff4b0d0633ce70e59c952ebc",
+      "bytes": 7941
+    },
+    {
+      "path": "worlds/007/client-session-python.json",
+      "sha256": "ca025d6641a75351e4347518359ccc67e93a25d4cc1dfd63ae81beba5fff1dc3",
+      "bytes": 5799
+    },
+    {
+      "path": "worlds/007/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/007/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/007/photo-input.json",
+      "sha256": "c0b5c6e8caa297145d1168c22700fe86fb2044d74c0edc65a8e919ee3aa8705b",
+      "bytes": 403
+    },
+    {
+      "path": "worlds/007/receipts/001-photo-application.json",
+      "sha256": "ea3848ab1096b100fdbb5fb526b6f527356693932a10b9a721960b0664c5b49e",
+      "bytes": 2035
+    },
+    {
+      "path": "worlds/007/receipts/002-fault-obtain-1-original-browser.json",
+      "sha256": "2b9c1fd40d38583e4c8db28f5e47fa5110761123376c1b76958779c87c50a6d9",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/007/receipts/003-fault-obtain-2-preview-browser.json",
+      "sha256": "b082fafd082a97366089cddd24e614810645d2e79eda9721692c4dedf6ba0c00",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/007/receipts/004-fault-obtain-3-original-browser.json",
+      "sha256": "3b91772e73ef29f20fe6f66127a5a866df3eb0b7845812ffdfbbd6fa3a492d71",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/007/receipts/005-fault-obtain-4-preview-browser.json",
+      "sha256": "1e70d29285c2e206d7208db75927c55e702171b034b7fb80333afc347cb3b4bd",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/008/client-session-node.json",
+      "sha256": "bfefbe7f0000deca59f50a157f3b9c1eb028d941a4098225802c925d02c97a03",
+      "bytes": 11406
+    },
+    {
+      "path": "worlds/008/client-session-python.json",
+      "sha256": "bfa6a497a6aefb58bc919872b234baeb5cb9c755a5431696053b6e1f3f888bdc",
+      "bytes": 7688
+    },
+    {
+      "path": "worlds/008/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/008/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/008/photo-input.json",
+      "sha256": "c95dd5b26a410062ee3e84e941f67309abd0332810ffd57a26a3855dbb5d9e75",
+      "bytes": 461
+    },
+    {
+      "path": "worlds/008/receipts/001-photo-browser.json",
+      "sha256": "b7eba50794eee84325892c61c529e9a6b461d300d607b58826a0deb093857f19",
+      "bytes": 5157
+    },
+    {
+      "path": "worlds/008/receipts/002-obtain-1-original-browser.json",
+      "sha256": "5faea932bc4e1af68fb523245503c85713f9a9047220429562c29ef0439a83fa",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/008/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "cbc521439cedfddcde52674c97d84c6899f297abef2289e6ab43043be3ae9bac",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/008/receipts/004-obtain-3-original-browser.json",
+      "sha256": "e94755b12dac256e43afc2b85b7aff04ee9262bab0b052b36db08f74d0ea8176",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/008/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "19dfe5b1f043f268eb6e33d33d68cb88726c93b590177d42993bf8d5ed50bacd",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/008/receipts/006-reports-before-media-receipt.json",
+      "sha256": "bd01f789dd206103c6e990add15c1eff51d7dedfa100471de22f71c2fd8687ab",
+      "bytes": 6475
+    },
+    {
+      "path": "worlds/008/receipts/007-media-after-reports-receipt.json",
+      "sha256": "07e814b033ea04b573da776197286379f0a81106378bc13392bba8e797d839d1",
+      "bytes": 10402
+    },
+    {
+      "path": "worlds/008/receipts/008-ack-browser.json",
+      "sha256": "f13d4c9194b266204a4a83aa4daedf403577b04df0ac4c9939eca1ccb5e8de59",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/009/client-session-node.json",
+      "sha256": "32d023373fedb094d9fbb863497359700b69c3aa0f3abc896ba5630622eb76e9",
+      "bytes": 11405
+    },
+    {
+      "path": "worlds/009/client-session-python.json",
+      "sha256": "3e9ae48517cb0dfb9c36cf81341aaa572eab44bb4beab3ce5fd475d007dc30a6",
+      "bytes": 7686
+    },
+    {
+      "path": "worlds/009/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/009/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/009/photo-input.json",
+      "sha256": "7759251424559bc67835e8d906e0fcfb8edf83b09ba96453b18ea410e9de1799",
+      "bytes": 457
+    },
+    {
+      "path": "worlds/009/receipts/001-photo-browser.json",
+      "sha256": "09c2cd60e67dd7a2d7282edb5cc98042889d4e7a92106c650193dbdb752f0794",
+      "bytes": 5143
+    },
+    {
+      "path": "worlds/009/receipts/002-obtain-1-original-browser.json",
+      "sha256": "619c1d0a886fab25e11ba30a2b58483aa3f2d7920408c6c441f3127517184e79",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/009/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "b6f5dbbc69b3d8dac4e234eeaef1689154c9e7c5fcb25506aa867fe6b19e3073",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/009/receipts/004-obtain-3-original-browser.json",
+      "sha256": "e99a382e864cd396f59f2bc30444bebceeeb6328a68d1dc7ee231936c35b93b2",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/009/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "aaf75bf6f064b4e4419a1e27c3239e76aa88271f3c7ad618b52839790aa623d1",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/009/receipts/006-reports-before-media-receipt.json",
+      "sha256": "2f2e39dc5b83b3167f18920ca01467afa81caa29c7a22d997e0d302ede34f81d",
+      "bytes": 6473
+    },
+    {
+      "path": "worlds/009/receipts/007-media-after-reports-receipt.json",
+      "sha256": "7946b51702341f0375d41ccbf4d16bccbb3b7394a02748449e225ee8a673b9de",
+      "bytes": 10400
+    },
+    {
+      "path": "worlds/009/receipts/008-ack-browser.json",
+      "sha256": "3239c079227ea7f3049e0e7cd7fd012ff7a14be16813cc030f15ac21f646b58e",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/010/client-session-node.json",
+      "sha256": "f5686ef608e99bd305ff49721e2cdc0c5cf3e07e2263dc50151a0c2b25b54c39",
+      "bytes": 11298
+    },
+    {
+      "path": "worlds/010/client-session-python.json",
+      "sha256": "be1737e78541257ce6ae1a49aaaa479e00cd9feebadaf725a19e20ec41f74e03",
+      "bytes": 7694
+    },
+    {
+      "path": "worlds/010/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/010/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/010/photo-input.json",
+      "sha256": "dd585786d3f0acde12fb2638fd0b324e64409a2e528f4ea139ecf786392a283c",
+      "bytes": 403
+    },
+    {
+      "path": "worlds/010/receipts/001-photo-application.json",
+      "sha256": "b6cfc98f9d36758ee18708f8f1619b466d69e0eca2e4f17f792e2b08666ce6a5",
+      "bytes": 2035
+    },
+    {
+      "path": "worlds/010/receipts/002-obtain-1-original-browser.json",
+      "sha256": "308f89440562ebbbd404e086d165942d2b6a704f1492773a8c8b6545a5d6dc94",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/010/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "92433261ad51f3d68b73212d04646770484f7d8a1af1f3448ee6e3ba62db832b",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/010/receipts/004-obtain-3-original-browser.json",
+      "sha256": "5a44ed769fbff102d9176763a2253b723ad33f492b4da4c9ac41c3b9c9711b61",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/010/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "bb24032950d7ed78e67ffcd01dbd11a93cbba379370a5755d650ce51e051d868",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/010/receipts/006-media-before-report-receipt.json",
+      "sha256": "e0aeb312dc71cf43ffba38a724d11c326210065de4c92a02a442ea1317177147",
+      "bytes": 3191
+    },
+    {
+      "path": "worlds/010/receipts/007-reports-after-media-receipt.json",
+      "sha256": "386bfe7e49803755399823b2b75769917395860569215cca3d2313ea1a257ed3",
+      "bytes": 10137
+    },
+    {
+      "path": "worlds/010/receipts/008-ack-browser.json",
+      "sha256": "1eba28265f88b60dec49e00fa77a99f0f903554d77fded474379b0b5b162a534",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/011/client-session-node.json",
+      "sha256": "e3a0abd6da4eab9308bf9c8107417b157a9682abaf274ed629c5942b6e2f0153",
+      "bytes": 11297
+    },
+    {
+      "path": "worlds/011/client-session-python.json",
+      "sha256": "284f3b39251ea8906362ca6ec8ac3b59f757b789dde05d4fc549e64ab0f0903a",
+      "bytes": 7689
+    },
+    {
+      "path": "worlds/011/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/011/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/011/photo-input.json",
+      "sha256": "1d97c1185e54baca807281adf2e03936529c1315c03745aad210c309e23c36ba",
+      "bytes": 399
+    },
+    {
+      "path": "worlds/011/receipts/001-photo-application.json",
+      "sha256": "21dfcf1bf27c10bb575eb50a9d66bfddaa2f28c0e7837131d191b76998288187",
+      "bytes": 2023
+    },
+    {
+      "path": "worlds/011/receipts/002-obtain-1-original-browser.json",
+      "sha256": "07c2a07c74639e9544a43fe813120aefe946e7c7b1488048cb1db565ad47cce4",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/011/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "9e1a9bfd95987bf146bc809918ee2e6ed2178ccc05d49b680bbbe2ac8e0cded2",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/011/receipts/004-obtain-3-original-browser.json",
+      "sha256": "88dfbe949e754f8ba5edff80e925b5fbe5a3d68573a7cee076f0c6b3a80be0c1",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/011/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "08db7e25f5c9418663264e13b6b097ac3642b64e53e6f57ba7c565a679d938c6",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/011/receipts/006-media-before-report-receipt.json",
+      "sha256": "0a250ad1056ab2ba1bd87f242a294f6c1ced819658bf4e0e05d341d1c770d67e",
+      "bytes": 3191
+    },
+    {
+      "path": "worlds/011/receipts/007-reports-after-media-receipt.json",
+      "sha256": "e8153ae3fdc4f1da2b4af8391bc8f6b1a7d9f8f5b50597c46cd088dc5d10a9ec",
+      "bytes": 10133
+    },
+    {
+      "path": "worlds/011/receipts/008-ack-browser.json",
+      "sha256": "1d118cf2b61814b6245c7e736af259942d8f69a0f68992c22230e29b9533fc8e",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/012/client-session-node.json",
+      "sha256": "5ac194ae725f12873a319ab48daf412702c9523d68a57822cb2ab6f1fee11008",
+      "bytes": 11396
+    },
+    {
+      "path": "worlds/012/client-session-python.json",
+      "sha256": "ca26eedf4855265c79425a30ddb7f443a3c1338a801ec7e80afc19278f5f8615",
+      "bytes": 7686
+    },
+    {
+      "path": "worlds/012/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/012/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/012/photo-input.json",
+      "sha256": "773797e7603ccee1deb332422ffbf2e1fa3f97997bcc5fceba29e7533f97bec3",
+      "bytes": 418
+    },
+    {
+      "path": "worlds/012/receipts/001-photo-browser.json",
+      "sha256": "e9198a326aa46c13f0e966a7a49c59407170708e67cb6962ad41fead6a5b9f2b",
+      "bytes": 4697
+    },
+    {
+      "path": "worlds/012/receipts/002-obtain-1-original-browser.json",
+      "sha256": "3db821f76f7288f67867196c6bd9ca77f447e37dd1eb7f08bb7c10632ab24b19",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/012/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "65ec7f5e329221aad94a9be7aa2537efcb646c182b4e3700962a2a70f46948b7",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/012/receipts/004-obtain-3-original-browser.json",
+      "sha256": "cfb3cb1bd261df895756e431fcaa111611ad61852310f4da350b337b9febff8f",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/012/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "2ead88acea814f94eda9fc0e64df2c7ded2e20dadb0e74dc593463c355f88072",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/012/receipts/006-reports-before-media-receipt.json",
+      "sha256": "d467bb407d6f335c9a6a2d2e933f54b178fd9323fc8147b936c4fc02032af45e",
+      "bytes": 6393
+    },
+    {
+      "path": "worlds/012/receipts/007-media-after-reports-receipt.json",
+      "sha256": "e08ac0f5a01bb65a47e0dcc1469aef289ccaf7e93c958661d9bced8cf290faae",
+      "bytes": 8356
+    },
+    {
+      "path": "worlds/012/receipts/008-ack-browser.json",
+      "sha256": "6d4a6aeaa7852577a08df4de5d210867a087fe3c0b78ceb218daaecfbf68a87d",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/013/client-session-node.json",
+      "sha256": "aa7d8c4aa162652873c973b6408c83470e7972ef0173f0a569aeef05f6bd044f",
+      "bytes": 2707
+    },
+    {
+      "path": "worlds/013/client-session-python.json",
+      "sha256": "c7b286b3308075d7a708df700dd6561b464c05251984d6f72669563e1d3f8f26",
+      "bytes": 2883
+    },
+    {
+      "path": "worlds/013/client-session.stderr.log",
+      "sha256": "e120efd625499e5d9bc7888530395a56d615575e012b04ca9cbf6aa0e4ce381a",
+      "bytes": 1156
+    },
+    {
+      "path": "worlds/013/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/013/photo-input.json",
+      "sha256": "a12e91d6ef54f1c211f6cc129c4452fe440a8605c3a5a0eafe3c9b70b04cbae4",
+      "bytes": 414
+    },
+    {
+      "path": "worlds/014/client-session-node.json",
+      "sha256": "45b49870f904d51bf8cbb294ec639d1587e1663abc531faf40d300e4994618d8",
+      "bytes": 11390
+    },
+    {
+      "path": "worlds/014/client-session-python.json",
+      "sha256": "6a918a8f869f95f2024854b726135e52875ca5955412fd0f5cd0f56f19c076e2",
+      "bytes": 7684
+    },
+    {
+      "path": "worlds/014/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/014/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/014/photo-input.json",
+      "sha256": "dac0b4418cae571b64aa884615e5ec95fb515bcb8a25a1b7d1453ddd820de21c",
+      "bytes": 401
+    },
+    {
+      "path": "worlds/014/receipts/001-photo-browser.json",
+      "sha256": "13514663c3e1466d6353926265152008c1a89da0f9b50d9e9d6df3392d1cbcc1",
+      "bytes": 4474
+    },
+    {
+      "path": "worlds/014/receipts/002-obtain-1-original-browser.json",
+      "sha256": "836d1c1c93e9d78bf7036ee7d8474b0d0232a99dffae87bb7719458a24bac42d",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/014/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "f49774a278cdf97f0b9bb81e9bba9b2eff9da8dd1c3b6a36dafd0443c439b75b",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/014/receipts/004-obtain-3-original-browser.json",
+      "sha256": "d289c27bcaa4c069af21fecfad4f66ed61bb537ba3f911f296fa2db8f2ea323f",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/014/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "92a79cbd52b76aa6be819cedec9f7caec8f9c2237fcd53d584f5b59f1cb8bb22",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/014/receipts/006-media-before-report-receipt.json",
+      "sha256": "0794e868ccce90686ca9e95f7ede0a73032a2aae0c1339ba54133d70370518cd",
+      "bytes": 3191
+    },
+    {
+      "path": "worlds/014/receipts/007-reports-after-media-receipt.json",
+      "sha256": "5fae22d9ec961a957fbcea36e23e1556b8a8a6300bf5a9dc5b926732f5f358e3",
+      "bytes": 10127
+    },
+    {
+      "path": "worlds/014/receipts/008-ack-browser.json",
+      "sha256": "3c0217b8b4fae1913d412fc8f600196c0f5f101c76af2c2387ffb35d002e2519",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/015/client-session-node.json",
+      "sha256": "b78904f2b090293bee8317faf4cce9833f2f08a06f6445dc4bab16252b0c8be8",
+      "bytes": 11305
+    },
+    {
+      "path": "worlds/015/client-session-python.json",
+      "sha256": "9b401d9629a175f8cdb0f3d17276eae19dee343f18ccf00837403ca76b289654",
+      "bytes": 7692
+    },
+    {
+      "path": "worlds/015/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/015/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/015/photo-input.json",
+      "sha256": "b1d50c5515b5b8b5e75df4cfe68a0a406fb147ed43674aadaf738e1331847809",
+      "bytes": 459
+    },
+    {
+      "path": "worlds/015/receipts/001-photo-application.json",
+      "sha256": "80d400518e6bb1f7154aac84306824adcaef3a38c8825ede012b28cba2d107f2",
+      "bytes": 2203
+    },
+    {
+      "path": "worlds/015/receipts/002-obtain-1-original-browser.json",
+      "sha256": "c984eb424a651dea0360fa3103d550c31ea2401d6bc9fb4efef90de8e5bc5661",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/015/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "5304d816c33735633b6c4377a2583d43624e2e47037e370605210f5ad74f798d",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/015/receipts/004-obtain-3-original-browser.json",
+      "sha256": "b91bc99d644386cf217cd0b5e44f48c589b5835e4b557d4a70c0e9990b1a4b4c",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/015/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "2cfbc676f5d50d6409080aaac665220894b929ae729056a982d1d9cf24db41c8",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/015/receipts/006-reports-before-media-receipt.json",
+      "sha256": "7498288dd684083fb28369e23e9f15ada39202343a124e91189cfd792e92d816",
+      "bytes": 6465
+    },
+    {
+      "path": "worlds/015/receipts/007-media-after-reports-receipt.json",
+      "sha256": "d112cb5c3649169125db47849e4b3fc84f907b08f2a235cf7ec23011c3de63f6",
+      "bytes": 10392
+    },
+    {
+      "path": "worlds/015/receipts/008-ack-browser.json",
+      "sha256": "d619ca689755747b04d8fc6c77654c4850e4ef68e78627d64e69bc3d9434bfa6",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/016/client-session-node.json",
+      "sha256": "e069595e233a610457ae437fa224bd3493e1975411cc5dff995fb8a56692bedd",
+      "bytes": 7949
+    },
+    {
+      "path": "worlds/016/client-session-python.json",
+      "sha256": "b32b5965b7943d08bb8e7579122274bcb60d37e9d3e59a74d7b54ab1afd25b44",
+      "bytes": 5792
+    },
+    {
+      "path": "worlds/016/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/016/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/016/photo-input.json",
+      "sha256": "6c566d2720c4ac696748b128cf75e72f06e0ad8cda0eeb2a1585305c14c6c5db",
+      "bytes": 401
+    },
+    {
+      "path": "worlds/016/receipts/001-photo-application.json",
+      "sha256": "792c1b68c5b7310365e735de6565047a1c5830d70a7004209a040f1ac02a5a9d",
+      "bytes": 2029
+    },
+    {
+      "path": "worlds/016/receipts/002-fault-obtain-1-original-browser.json",
+      "sha256": "34b6de548a3d7dcc31c182d7e48c7a0bfba68412a26729c3899ffb3384dfbc4b",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/016/receipts/003-fault-obtain-2-preview-browser.json",
+      "sha256": "506d790876f717c7680a2c3835eb1b4dbafa211b32298bca104ec7a90c3f901c",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/016/receipts/004-fault-obtain-3-original-browser.json",
+      "sha256": "c4948d47a6fa9b2efdaff2482b794da3f200cb7479ad069b842abbde4d7a8ddf",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/016/receipts/005-fault-obtain-4-preview-browser.json",
+      "sha256": "78e0a009cbe5939847345ecbbe6423dc3e68317e2653c8961daf3b5ad1e11bd7",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/017/client-session-node.json",
+      "sha256": "8b10f36a8bf37331b3ca3ae3d7c514fd5aafcd2af48afb1d7dccfff3d86b69a6",
+      "bytes": 11305
+    },
+    {
+      "path": "worlds/017/client-session-python.json",
+      "sha256": "a8522cdb97c2f4a73ece7547b6825b772ecad5d32dc5ec30c1624ce8c7372270",
+      "bytes": 7819
+    },
+    {
+      "path": "worlds/017/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/017/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/017/photo-input.json",
+      "sha256": "4932f722959bcba1842c4264118828d28e26d226a73065f86c76fddf43c93c59",
+      "bytes": 416
+    },
+    {
+      "path": "worlds/017/receipts/001-photo-application.json",
+      "sha256": "74b880591c3ba452d5dfe7cd239ba162d30f4e1f171dbd4d484e2839f0439fd3",
+      "bytes": 2074
+    },
+    {
+      "path": "worlds/017/receipts/002-obtain-1-original-browser.json",
+      "sha256": "4b69276ba4fdc7ca9b09a714356670d2f261df252ddb2b0935b1ed955b92ff9c",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/017/receipts/003-obtain-2-preview-browser.json",
+      "sha256": "1272d4c5bb5e99e93a7da6d49cbfe3e5e549220ce06153c42633dc12e440043c",
+      "bytes": 546
+    },
+    {
+      "path": "worlds/017/receipts/004-obtain-3-original-browser.json",
+      "sha256": "10b31d93faa63e1a65f9eb31f2e1e3ef65c943beef2f1ee277592062a6348fd6",
+      "bytes": 550
+    },
+    {
+      "path": "worlds/017/receipts/005-obtain-4-preview-browser.json",
+      "sha256": "ff2a61571542f0d83d08d629991cdb13a7be28da9863929935fc570ffebb9389",
+      "bytes": 548
+    },
+    {
+      "path": "worlds/017/receipts/006-reports-before-media-receipt.json",
+      "sha256": "ec63ac09c2aa79014c280a29f94d8cb7435230d60f354dcbe0b0f01f957ae1fb",
+      "bytes": 6383
+    },
+    {
+      "path": "worlds/017/receipts/007-media-after-reports-receipt.json",
+      "sha256": "af5a7941186073c01b03f90e6dcef1bac98c685fdfd16586de404297c4df756d",
+      "bytes": 8346
+    },
+    {
+      "path": "worlds/017/receipts/008-ack-browser.json",
+      "sha256": "91a1dbfb8b17db595ae5ecac0834aad9619d97b3ce2c54564ace1807a1a7d27c",
+      "bytes": 381
+    },
+    {
+      "path": "worlds/018/client-session-node.json",
+      "sha256": "937f2d39e2455c814f3ed3ba2468d103f3ecb20c8f19e801d6b517aa2e4d3e42",
+      "bytes": 7953
+    },
+    {
+      "path": "worlds/018/client-session-python.json",
+      "sha256": "3a701ce4bb5a0d4985cce1941752ad30edac28f370072dab9297add71f2c10c4",
+      "bytes": 5789
+    },
+    {
+      "path": "worlds/018/client-session.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/018/client-session.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "worlds/018/photo-input.json",
+      "sha256": "4f6c33d280b71e05e738263f9b5ec568edf151794904f1d4af46f1cb03b84055",
+      "bytes": 459
+    },
+    {
+      "path": "worlds/018/receipts/001-photo-application.json",
+      "sha256": "870fadeaec4e1143554a3473052c61a777f1bc735b2419dc53857228b8dd25d5",
+      "bytes": 2203
+    },
+    {
+      "path": "worlds/018/receipts/002-fault-obtain-1-original-browser.json",
+      "sha256": "8473f6310155a2664321ec5b571c071dc6be0cd571da5ad4fcbce09c5bc199dd",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/018/receipts/003-fault-obtain-2-preview-browser.json",
+      "sha256": "94b959a9751a43fba34f8a61e1bcd8e0f7c1da84bcbaabfbfe7b4d98ce981e95",
+      "bytes": 560
+    },
+    {
+      "path": "worlds/018/receipts/004-fault-obtain-3-original-browser.json",
+      "sha256": "f6808085cd0bebcdba79b1984b0a8cfd2e2093db4561a08bf76f56ecd86f3a43",
+      "bytes": 562
+    },
+    {
+      "path": "worlds/018/receipts/005-fault-obtain-4-preview-browser.json",
+      "sha256": "4151178eae1e5df3cf7103826cfca0928a46dd95f7b937ab0045a590ce4b060d",
+      "bytes": 560
+    },
+    {
+      "path": "worlds.json",
+      "sha256": "f6a88c8d420b9c95d772ee5d718351487ea9acf1dade0e47a69a353ae923b3dd",
+      "bytes": 26077
+    }
+  ]
+}

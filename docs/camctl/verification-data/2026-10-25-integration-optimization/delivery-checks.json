@@ -1,0 +1,39 @@
+{
+  "code_source_commit": "37b7bb17727ad029468861d45c5658daf99b1f05",
+  "documentation_links": {
+    "command": [
+      "node",
+      "scripts/check-doc-links.mjs"
+    ],
+    "exit_code": 0,
+    "local_links": 5478,
+    "anchors_checked": false
+  },
+  "diff_whitespace": {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0
+  },
+  "unit_input_equivalence": {
+    "from": "53e3f549",
+    "paths": [
+      "apps/camctl/src",
+      "apps/camctl/tests/unit",
+      "apps/camctl/tests/conftest.py",
+      "apps/camctl/pyproject.toml",
+      "apps/camctl/uv.lock",
+      "apps/camctl/build_hooks.py",
+      "protocol",
+      "docs/camctl/database",
+      "docs/camctl/sqlite-runtime.json"
+    ],
+    "changed": [],
+    "note": "实际7148 passed/1 skipped的输入及生产代码保持；不重复运行无变更单元。"
+  },
+  "complete_scope_receipt": "final-audit.json",
+  "combined_validation_receipt": "combined-validation.json",
+  "delivery_note": "完整冻结47分钟与后续受影响补测分开；原失败和两项维护缺陷已交接。"
+}

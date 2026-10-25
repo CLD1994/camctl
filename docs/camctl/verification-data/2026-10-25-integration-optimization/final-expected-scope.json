@@ -1,0 +1,643 @@
+{
+  "source_ref": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+  "before_ref": "cd228b16",
+  "basis": "既有有效CSV主实例+当前源文件静态变换；不是本次实际运行结果",
+  "baseline_count": 10394,
+  "baseline_outcomes": {
+    "passed": 10351,
+    "failed": 38,
+    "skipped": 5
+  },
+  "groups": [
+    {
+      "label": "acceptance局部重复断言",
+      "kind": "existing_unit",
+      "old_nodes": 7,
+      "replacement_integration_nodes": 0,
+      "existing_target_nodes": 0,
+      "delta": -7,
+      "contract": "六项精确数字与非法Schema的同输入/同预期由既有unit/acceptance同名节点承接；真实正文、登记与引用见证保留。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_bool_and_string_numbers_rejected",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_bool_and_string_numbers_rejected"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_defaults_applied_and_original_preserved",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_defaults_applied_and_original_preserved"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_exponent_form_integer_satisfies",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_exponent_form_integer_satisfies"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_integral_decimals_satisfy_integer",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_integral_decimals_satisfy_integer"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_multiple_of_uses_exact_fraction",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_multiple_of_uses_exact_fraction"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestPreciseNumbers::test_near_integer_long_decimal_rejected",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestPreciseNumbers::test_near_integer_long_decimal_rejected"
+        },
+        {
+          "old": "apps/camctl/tests/integration/acceptance/test_validation.py::TestRuleErrors::test_invalid_schema_is_rule_error",
+          "current": "apps/camctl/tests/unit/acceptance/test_validation.py::TestRuleErrors::test_invalid_schema_is_rule_error"
+        }
+      ]
+    },
+    {
+      "label": "资源名拒绝迁移",
+      "kind": "migrate_unit",
+      "old_nodes": 1,
+      "replacement_integration_nodes": 0,
+      "existing_target_nodes": 0,
+      "delta": -1,
+      "contract": "六个路径反例全部拒绝；新单元节点使用内存登记并阻断真实资源入口，wheel字节及同步集成见证保留。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/bootstrap/test_package.py::test_resource_names_reject_arbitrary_paths",
+          "current": "apps/camctl/tests/unit/test_resources.py::test_resource_names_reject_arbitrary_paths"
+        }
+      ]
+    },
+    {
+      "label": "test_original_source_cannot_disappear_behind_preview_label",
+      "kind": "merge",
+      "old_nodes": 48,
+      "replacement_integration_nodes": 8,
+      "existing_target_nodes": 0,
+      "delta": -40,
+      "contract": "按(state,kind)共享8个世界，三basis与两个入口48个拒绝组合保留；每次精确回滚、事务结束、完整dump与取消标记不变。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-1-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-2-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[guard-3-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-1-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-2-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-action-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-action-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-group-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-group-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-plan-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-plan-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-request-entered]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[repository-3-request-unknown]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]"
+        }
+      ]
+    },
+    {
+      "label": "test_complete_model_rejects_omissions_extra_members_and_wrong_effects",
+      "kind": "merge",
+      "old_nodes": 14,
+      "replacement_integration_nodes": 3,
+      "existing_target_nodes": 0,
+      "delta": -11,
+      "contract": "按真实初始(state,kind)共享3个世界；七种错误成员/效果与两个入口14个拒绝组合保留。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries1-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries1-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries5-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries5-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries6-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entries6-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entries3-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entry_sets2]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entries3-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entry_sets2]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entries4-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entry_sets2]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entries4-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entry_sets2]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entries0-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entry_sets0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entries0-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entry_sets0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entries2-guard]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entry_sets0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entries2-repository]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entry_sets0]"
+        }
+      ]
+    },
+    {
+      "label": "test_original_sql_and_complete_rows_keep_same_start_partition",
+      "kind": "merge",
+      "old_nodes": 14,
+      "replacement_integration_nodes": 7,
+      "existing_target_nodes": 0,
+      "delta": -7,
+      "contract": "七个state世界逐一核对HB与generic两类driver，14个SQL/完整行START分区比较保留。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[entered-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[entered-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[entered]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[no_effect-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[no_effect]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[no_effect-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[no_effect]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[ready-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[ready]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[ready-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[ready]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[terminal-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[terminal]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[terminal-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[terminal]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[zero_tools-hb]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[zero_tools]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[zero_tools-other]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[zero_tools]"
+        }
+      ]
+    },
+    {
+      "label": "test_complete_scope_requires_authoritative_address_links_and_start_ranges",
+      "kind": "merge",
+      "old_nodes": 10,
+      "replacement_integration_nodes": 4,
+      "existing_target_nodes": 0,
+      "delta": -6,
+      "contract": "按kind共享4个世界；10种覆盖键缺失逐个拒绝，检查事务、完整dump和标记不变。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing0]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing5]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing6]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing7]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing8]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing9]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[group-missing1]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[group-missing_ranges1]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[plan-missing2]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[plan-missing_ranges2]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[request-missing3]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[request-missing_ranges3]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[request-missing4]",
+          "current": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[request-missing_ranges3]"
+        }
+      ]
+    },
+    {
+      "label": "同S快照串入middle取消场景",
+      "kind": "merge",
+      "old_nodes": 1,
+      "replacement_integration_nodes": 1,
+      "existing_target_nodes": 1,
+      "delta": -1,
+      "contract": "同一220成员/H世界；先完成真实worker、来源清理、快照行数并恢复包装，再从current投影准备独立来源，核对同S完整字节、偏移65540来源损坏及BLOB损坏。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/history/test_record_segment_history.py::test_snapshot_same_s_compares_all_bytes_and_broken_content_fails",
+          "current": "apps/camctl/tests/integration/history/test_snapshot_fix_round1.py::test_cancel_started_save_keeps_source_until_actual_completion[middle]"
+        }
+      ]
+    },
+    {
+      "label": "缺段报告与清理后字节重建",
+      "kind": "merge",
+      "old_nodes": 2,
+      "replacement_integration_nodes": 1,
+      "existing_target_nodes": 0,
+      "delta": -1,
+      "contract": "同一(7,8,10)来源先核对保留产物、9号缺口及默认范围，再改变清理事实并按原冻结依据核对bytes/size/SHA。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_gap_report_preserves_retained_outputs_and_default_prefix",
+          "current": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup"
+        },
+        {
+          "old": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_segment_report_rebuilds_identical_bytes_after_cleanup",
+          "current": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup"
+        }
+      ]
+    },
+    {
+      "label": "候选容量三次独立扫描",
+      "kind": "merge",
+      "old_nodes": 3,
+      "replacement_integration_nodes": 1,
+      "existing_target_nodes": 0,
+      "delta": -2,
+      "contract": "同库先12再120候选，(12,1)/(120,1)/(120,3)均执行新owner/连接探针；批次、弱引用/GC、游标、数量、查询计划保留并核数据库不变。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total[12-1]",
+          "current": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total"
+        },
+        {
+          "old": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total[120-1]",
+          "current": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total"
+        },
+        {
+          "old": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total[120-3]",
+          "current": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total"
+        }
+      ]
+    },
+    {
+      "label": "跨页目录轮换合并与保留分区重命名",
+      "kind": "merge_and_rename",
+      "old_nodes": 3,
+      "replacement_integration_nodes": 3,
+      "existing_target_nodes": 1,
+      "delta": -1,
+      "contract": "轮换0999→0001并入已有两页成功场景，保留四原片、默认前三、两个精确LRF配对、实际页与幂等；preview-only和未知顺序按原输入保留并重命名。",
+      "mapping": [
+        {
+          "old": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order[names0-3-2-2-nonempty-2]",
+          "current": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media"
+        },
+        {
+          "old": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order[names1-4-1-1-empty-0]",
+          "current": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_preserves_preview_only_start_and_unknown_order[names0-4-1-1-empty-0]"
+        },
+        {
+          "old": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order[names2-4-1-1-unknown-0]",
+          "current": "apps/camctl/tests/integration/capture/test_record_segment_scope_recovery.py::test_handler_preserves_preview_only_start_and_unknown_order[names1-4-1-1-unknown-0]"
+        }
+      ]
+    }
+  ],
+  "additions": [
+    {
+      "file": "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+      "count": 10,
+      "nodes": [
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_page_record_from_another_connection_cannot_hide_changed_relations",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[reference]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[attempt_range]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[commit]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[rollback]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[unknown_commit]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[cancel]",
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope"
+      ],
+      "contract": "同一读事务内复用；跨连接与变更关系拒绝；reference/attempt_range动态校验；候选页未完整提交前重新核验及回滚；commit/rollback/unknown_commit/cancel前清空；严格成员消费者跨页续读和重复读取保持页身份、未知文件完成与所有权证明，并复用三页的完整关系核验。"
+    },
+    {
+      "file": "tests/integration/test_host_wait_failures.py",
+      "count": 12,
+      "nodes": [
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[error]",
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[abnormal]",
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[success]",
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[not_started]",
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[abnormal_once]",
+        "tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[not_started_once]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[PENDING]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[RUNNING]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[SUCCEEDED]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[FAILED]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[EXPIRED]",
+        "tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[CANCELED]"
+      ],
+      "contract": "真实C host的error/abnormal/success/not_started及两种首次故障后重试成功；同一host后续提交和旧日志隔离；SQLite六动作状态按request_id与动作名限定。"
+    }
+  ],
+  "expected_total": 10339,
+  "expected_scopes": {
+    "camctl": 9951,
+    "node": 118,
+    "root": 270
+  },
+  "expected_subchecks": 342,
+  "skip_baseline": [
+    {
+      "suite": "camctl-outputs",
+      "nodeid": "apps/camctl/tests/integration/outputs/test_grant_reuse.py::test_rejection_key_ignores_changed_read_config[host]",
+      "reason": "('/workspaces/camctl/apps/camctl/tests/integration/outputs/test_grant_reuse.py', 393, 'Skipped: 主机源候选不携带读取配置')"
+    },
+    {
+      "suite": "camctl-outputs",
+      "nodeid": "apps/camctl/tests/integration/outputs/test_shared_file_ownership.py::test_shared_file_operation_keeps_qualification_until_actual_end[internal-move]",
+      "reason": "('/workspaces/camctl/apps/camctl/tests/integration/outputs/test_shared_file_ownership.py', 37, 'Skipped: 内部副本不执行普通 delivery 发布')"
+    },
+    {
+      "suite": "camctl-bootstrap",
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_directory_switch.py::TestInitializeStateDirectorySwitch::test_case_alias_roots_rejected",
+      "reason": "('/workspaces/camctl/apps/camctl/tests/integration/bootstrap/test_directory_switch.py', 620, 'Skipped: 大小写别名核对依赖 Windows 文件系统的大小写不敏感性')"
+    },
+    {
+      "suite": "root-pytest",
+      "nodeid": "tests/integration/test_ready_report_observer.py::test_failed_handle_handoff_releases_windows_handle",
+      "reason": "('/workspaces/camctl/tests/integration/test_ready_report_observer.py', 84, 'Skipped: Windows 文件句柄到 Python reader 的归属验证')"
+    },
+    {
+      "suite": "root-pytest",
+      "nodeid": "tests/integration/test_ready_report_observer.py::test_failed_file_object_handoff_releases_descriptor",
+      "reason": "('/workspaces/camctl/tests/integration/test_ready_report_observer.py', 95, 'Skipped: Windows 文件句柄到 Python reader 的归属验证')"
+    }
+  ],
+  "deltas_note": "history目标和capture轮换被并入已存在节点，实际并集计数各减1。",
+  "input_sources": {
+    "original_csv_source_commit": "9da49b20dcd1273074bb70b918b36ee4f1eb095c",
+    "csv_files": [
+      {
+        "path": "docs/camctl/verification-data/2026-10-25-integration-timing/camctl-cases.csv",
+        "sha256": "403fe28c03990bf4bdf9b39fe5f5f52f2aafe9625ec66cf63a6983ddd0762519"
+      },
+      {
+        "path": "docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+        "sha256": "a1eb35cc74879da6abda7056664d59e1415f97bacf0c06512fff601a9610580a"
+      },
+      {
+        "path": "docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-subchecks.csv",
+        "sha256": "1d9c2428df7b4692303904f6d1979b24bfd731b099dfa0b30eda11d9a6067fdc"
+      }
+    ],
+    "source_to_before_test_code_changes": []
+  },
+  "reproduction": {
+    "working_directory": "仓库根目录",
+    "interpreter": "Python 3.11；本次归档验证使用 CPython 3.11.17。",
+    "command": [
+      "python3.11",
+      "docs/camctl/verification-data/2026-10-25-integration-optimization/derive_scope.py",
+      "--repo",
+      ".",
+      "--ref",
+      "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+      "--expected-total",
+      "10339",
+      "--output",
+      "docs/camctl/verification-data/2026-10-25-integration-optimization/final-expected-scope.json"
+    ],
+    "result_boundary": "只从已登记输入推导范围；不读取实际测试结果，不代表通过。"
+  }
+}

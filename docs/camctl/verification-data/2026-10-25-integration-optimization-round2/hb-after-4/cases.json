@@ -1,0 +1,582 @@
+[
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 26.7087044209984
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 57.50373877200036
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016064889932749793
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 84.21404968199204
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017625030013732612
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 54.9363804290042
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005393409956013784
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 54.93868227300118
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013572790048783645
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 87.37496918000397
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006004779934301041
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 87.37692693700228
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018329919985262677
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 48.98859815399919
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008183880054275505
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 48.991249534003146
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017745739969541319
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 50.94624880400079
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008764080048422329
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 50.948899786002585
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 2.648712946996966
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 46.357907707002596
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006860479988972656
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 49.00730670199846
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00126758999977028
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 33.00310802600143
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005648299993481487
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 33.004940446000546
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 15.123680902004708
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 54.38275397399411
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006748070009052753
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 69.50710968299973
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011757649990613572
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 58.43929695800034
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005051620028098114
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 58.44097788500221
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008956070014392026
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 86.82406397200248
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019128499989164993
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 86.82687242900283
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020939840032951906
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 49.96445781499642
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007195369980763644
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 49.96727133599779
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 2.6154089880001266
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 44.18215560899989
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00038500600203406066
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 46.79794960300205
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010621760011417791
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.328851277001377
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006037260027369484
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.3305171790052555
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007712950027780607
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.28144974199676653
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000582021995796822
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2828030589953414
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006284350019996054
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015160650000325404
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012364900030661374
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0033809900050982833
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007222789936349727
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.001711883996904362
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042956099787261337
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002863723988411948
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 15.040535084997828
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 88.56318432599801
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016507209948031232
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 103.60537013199064
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029916450002929196
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 84.79865537900332
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007088490019668825
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 84.80235587300558
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019338099955348298
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 56.95227349400375
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008520600022166036
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 56.9550593640015
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015692909946665168
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 51.929131138997036
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000556999999389518
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 51.93125742999109
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 2.737522193994664
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 15.283300868999504
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013636180010507815
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 18.02218668099522
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009441840011277236
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.015195762993243989
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001406916999258101
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.017546863993629813
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009456039988435805
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.35424535300262505
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009246919944416732
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3561156489959103
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006348829992930405
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018188910034950823
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007309960055863485
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0031847700083744712
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 15.681758036000247
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 82.42809841700364
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005368959973566234
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 98.11039334900124
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012964079942321405
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 88.73891741099942
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009293900002376176
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 88.74114320899389
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.005987110002024565
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 54.5423036889988
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004637419988284819
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 54.54875454099965
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016344550022040494
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 53.547124787997745
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006275890045799315
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 53.54938683200453
+  },
+  {
+    "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014627679993282072
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.354810210999858
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00046140899939928204
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 14.356734387998586
+  }
+]

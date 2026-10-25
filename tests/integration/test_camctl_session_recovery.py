@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from camctl_fixtures import (
+    CliResult,
     Deployment,
     future_schedule,
     photo_file,
@@ -55,13 +56,16 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 
 def _await_row(state_db: Path, sql: str, params=(), *,
-               timeout_s: float = 30.0) -> list[tuple]:
+               timeout_s: float = 30.0, process=None) -> list[tuple]:
     """轮询查询直到出现行；同步点，不使用随机 sleep。"""
     deadline = time.monotonic() + timeout_s
     while True:
         rows = _query(state_db, sql, params)
         if rows:
             return rows
+        if process is not None and process.poll() is not None:
+            raise AssertionError(
+                f"本次 run 已退出，退出码={process.returncode}，尚未保存所等事实: {sql}")
         assert time.monotonic() < deadline, f"等待超时: {sql}"
 
 
@@ -71,6 +75,38 @@ def _await_status(state_db: Path, name: str, status: int) -> None:
         state_db,
         "SELECT id FROM actions WHERE name = ? AND status = ?",
         (name, status))
+
+
+def _await_gate_entry(
+        deployment: Deployment, port: str, process, *, deadline: float) -> None:
+    """确认本次真实 CLI 已进入原故障门，门本身仍保持关闭。"""
+    marker = deployment.gates / f"{port}.gate.entered"
+    while not marker.exists():
+        assert process.poll() is None, "CLI 在进入故障门前已经退出"
+        assert time.monotonic() < deadline, f"等待进入故障门超时: {marker}"
+        time.sleep(.01)
+    entry = json.loads(marker.read_text())
+    assert entry == {"port": port, "pid": process.pid}
+    (deployment.root / f"{port}-gate-entry.json").write_text(json.dumps(entry))
+
+
+def _resume_after_capture_start(
+        deployment: Deployment, process, name: str, *, deadline: float) -> CliResult:
+    """实际 START 责任收场后推进业务钟，保留原进程完成预算。"""
+    try:
+        _await_row(
+            deployment.state_db,
+            "SELECT r.id FROM operation_runs r"
+            " JOIN actions a ON a.id = r.action_id"
+            " WHERE a.name = ? AND r.responsibility_key = 'start/' || a.id"
+            " AND r.status IN (3, 4)", (name,), process=process)
+        deployment.resume_clock()
+        stdout, stderr = process.communicate(
+            timeout=max(0, deadline - time.monotonic()))
+        return CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
 
 
 def _ready_report(deployment: Deployment) -> dict:
@@ -91,15 +127,14 @@ def _past_schedule(seconds: int) -> str:
 def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
     """run 进程执行中被终止：已保存事实不丢，下一个会话恢复剩余等
     待并完成迟到提交的新计划；运行间配置重载不破坏既有事实。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
-    # 等待时长 5 秒：结果列举被门阻塞，制造会话必须跨进程恢复的
-    # 执行中事实。启动调用与等待安排先行完成，中断落在结果等待
-    # 阶段；恢复会话按各自动作主键回询结果列举（剧本 files 的键），
-    # 两份计划分别核实自己的文件。
+    # 等待时长 5 秒：启动与首次等待安排保存后中断，恢复会话继续
+    # 原等待。结果门保留设备边界，恢复时按各自动作主键回询结果
+    # 列举（剧本 files 的键），两份计划分别核实自己的文件。
     spec = stub_driver_spec(
         {"1": [video_file("seq-1")], "2": [photo_file("shot-a")]},
         timelapse_duration_s=5.0,
@@ -108,8 +143,9 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
                       "shot-a": "photo-payload-a"})
     deployment.install_client_capabilities(spec)
 
+    shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
-        timelapse_plan("0", future_schedule(1)))
+        timelapse_plan("0", shoot_at))
     submitted = deployment.camctl(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=spec)
@@ -118,6 +154,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
     # 第一个 run 会话推进到启动责任收场（等待阶段）后被进程级终
     # 止（真实重启，不是会话正常退出）；终止不落在启动调用在途的
     # 窗口内，避免把未保存的调用结果留给恢复语义之外的状态。
+    deployment.freeze_at(shoot_at)
     first = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
@@ -127,6 +164,14 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
         " JOIN actions a ON a.id = r.action_id"
         " WHERE a.name = 'timelapse'"
         " AND r.responsibility_key = 'start/' || a.id AND r.status IN (3, 4)")
+    _await_row(
+        state_db,
+        "SELECT 1 FROM device_activities d"
+        " JOIN actions a ON a.id = d.action_id"
+        " WHERE a.name = 'timelapse' AND d.sent_at IS NOT NULL"
+        " AND d.expected_check_at = d.sent_at + 5000000"
+        " AND d.wait_completed_event_id IS NULL")
+    photo_at = deployment.schedule(6)
     # 会话存活期间提交第二份计划：关闭阶段到达的输入不丢失。
     photo_path, _ = deployment.export_plan_with_client({
         "request_id": "1",
@@ -136,7 +181,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
             "name": "shoot",
             "type": "camera_take_photo",
             "device_id": "cam-1",
-            "scheduled_at": future_schedule(6),
+            "scheduled_at": photo_at,
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
@@ -163,6 +208,7 @@ def test_process_restart_resumes_interrupted_work(tmp_path: Path) -> None:
         encoding="utf-8")
     (deployment.gates / "result.gate").write_text("", encoding="utf-8")
 
+    deployment.resume_clock()
     recovered = deployment.camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
     assert recovered.exit_code == 0, recovered.stderr
@@ -193,7 +239,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
     """启动调用在途时进程被终止：恢复会话不重复启动、不补造发送时
     间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
     正常退出。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -207,22 +253,29 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
         device_files={"shot-late": "photo-payload-late"})
     deployment.install_client_capabilities(spec)
 
+    shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client(
-        timelapse_plan("0", future_schedule(1)))
+        timelapse_plan("0", shoot_at))
     submitted = deployment.camctl(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=spec)
     assert submitted.exit_code == 0, submitted.stderr
 
+    deployment.freeze_at(shoot_at)
     first = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
     state_db = deployment.state_db
+    start_deadline = time.monotonic() + 30
     _await_row(
         state_db,
         "SELECT 1 FROM operation_attempts a"
         " JOIN operation_runs r ON a.run_id = r.id"
         " JOIN actions t ON t.id = r.action_id"
         " WHERE t.name = 'timelapse' AND a.status = 1")
+    _await_gate_entry(deployment, "control", first, deadline=start_deadline)
+    deployment.resume_clock()
+    deployment.pause_clock()
+    photo_at = deployment.schedule(2)
     photo_path, _ = deployment.export_plan_with_client({
         "request_id": "1",
         "created_at": "2026-01-15 08:00:00",
@@ -231,7 +284,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
             "name": "shoot",
             "type": "camera_take_photo",
             "device_id": "cam-1",
-            "scheduled_at": future_schedule(2),
+            "scheduled_at": photo_at,
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
@@ -253,8 +306,12 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
     ) == [(None,)]
 
     (deployment.gates / "control.gate").write_text("", encoding="utf-8")
-    recovered = deployment.camctl(
+    deployment.freeze_at(photo_at)
+    deadline = time.monotonic() + 180
+    recovering = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
+    recovered = _resume_after_capture_start(
+        deployment, recovering, "shoot", deadline=deadline)
     assert recovered.exit_code == 0, recovered.stderr
 
     # 延时任务按无法确认失败收场：错误如实表达启动未知，启动流程
@@ -354,24 +411,25 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
 
 def test_future_action_waits_and_past_window_expires(
         tmp_path: Path) -> None:
-    """未来动作不阻塞会话退出；启动窗口已过的动作按过期收场。"""
+    """驻留会话等到未来时间再启动；窗口已过的动作按过期收场。"""
     deployment = Deployment(tmp_path)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
 
     spec = stub_driver_spec({"1": [photo_file("shot-1")]})
-    deployment.install_client_capabilities(spec)
 
-    future_path, _ = deployment.export_plan_with_client({
-        "request_id": "0",
+    # 本例核对真实 CLI 的时间窗口；客户端导出由完整交付链独立覆盖。
+    future_path = deployment.write_plan({
+        "request_id": "1",
         "created_at": "2026-01-15 08:00:00",
         "name": "far-future",
         "actions": [{
             "name": "shoot-future",
             "type": "camera_take_photo",
             "device_id": "cam-1",
-            "scheduled_at": future_schedule(5),
+            # 给真实 CLI 冷启动与首轮报告留出准备时间；启动窗口仍为五秒。
+            "scheduled_at": future_schedule(15),
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
@@ -396,10 +454,14 @@ def test_future_action_waits_and_past_window_expires(
     assert _query(
         state_db, "SELECT status FROM actions WHERE name = 'shoot-future'"
     ) == [(3,)]
+    assert _query(state_db,
+        "SELECT first_window_observed_at BETWEEN scheduled_at"
+        " AND scheduled_at + 5000000 FROM actions WHERE name='shoot-future'"
+    ) == [(1,)]
 
     # 启动窗口已过且从未派发：按过期收场，不执行设备调用。
-    past_path, _ = deployment.export_plan_with_client({
-        "request_id": "1",
+    past_path = deployment.write_plan({
+        "request_id": "2",
         "created_at": "2026-01-15 08:00:00",
         "name": "missed-window",
         "actions": [{
@@ -444,7 +506,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
         tmp_path: Path) -> None:
     """报告文件交接失败不阻止设备动作：动作与计划按事实终态，报告
     责任保留并由后续会话补交付。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -458,6 +520,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
     shutil.rmtree(deployment.ready)
     deployment.ready.write_text("", encoding="utf-8")
 
+    shoot_at = deployment.schedule(1)
     plan_path, _ = deployment.export_plan_with_client({
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -466,7 +529,7 @@ def test_report_failure_preserves_device_work_and_redelivers(
             "name": "shoot",
             "type": "camera_take_photo",
             "device_id": "cam-1",
-            "scheduled_at": future_schedule(1),
+            "scheduled_at": shoot_at,
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
@@ -476,13 +539,19 @@ def test_report_failure_preserves_device_work_and_redelivers(
         driver=spec)
     assert submitted.exit_code == 0, submitted.stderr
 
-    failing = deployment.camctl(
+    deployment.freeze_at(shoot_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
+    failing = _resume_after_capture_start(
+        deployment, process, "shoot", deadline=deadline)
+    assert failing.exit_code != 0, failing.stderr
     state_db = deployment.state_db
     # 设备动作与计划不被报告交接失败拖住：按事实成功终态。
     _await_status(state_db, "shoot", 3)
     assert _query(state_db, "SELECT status FROM plans") == [(3,)]
     assert _query(state_db, "SELECT kind FROM outputs") == [(1,)]
+    assert _query(state_db, "SELECT id FROM reports WHERE last_error_json IS NOT NULL")
     assert not glob.glob("status-report-*.json", root_dir=str(deployment.ready))
 
     # 恢复部署绑定目录后，报告责任由新的会话补交付。

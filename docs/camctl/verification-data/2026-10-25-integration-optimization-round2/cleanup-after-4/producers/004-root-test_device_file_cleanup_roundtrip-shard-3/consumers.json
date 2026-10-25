@@ -1,0 +1,71 @@
+[
+  {
+    "case": "test_cleanup_new_request_for_c0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_new_request_for_cleaned_output",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.09712484100600705,
+    "body_seconds": 36.027238162001595,
+    "consumer_seconds": 36.2398849070014,
+    "final_inventory_digest": "a427783d39d685138fe0d016dd27109ea0cdaa434257f8729edb04a53bfed2b3"
+  },
+  {
+    "case": "test_cleanup_saved_result_and_0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_saved_result_and_terminal_companions[terminal_companions]",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.05551703800301766,
+    "body_seconds": 21.189732542996353,
+    "consumer_seconds": 21.352420346003782,
+    "final_inventory_digest": "227976aa854d8fe5835067f1940142d5571e58e60aef47c387aa4fb734a616de"
+  },
+  {
+    "case": "test_cleanup_cancel_inflight_d0",
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+    "baseline_digest": "f2c3ca5d35a559e8b9aa82f9a782d0ea158293bf3d4b8d41142a761d00be70be",
+    "restored_database_layouts": {
+      "deployment/state.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      },
+      "client-store/client.db": {
+        "journal_mode": "wal",
+        "page_size": 4096,
+        "write_version": 2,
+        "read_version": 2
+      }
+    },
+    "restore_seconds": 0.052224544997443445,
+    "body_seconds": 25.934211484003754,
+    "consumer_seconds": 26.09858465399884,
+    "final_inventory_digest": "c4504d86b512c7da5774fd0a4064aaee0c1a5efa2fe825c6e34807c7d71f2f0f"
+  }
+]

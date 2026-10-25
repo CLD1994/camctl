@@ -1,0 +1,83 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+___ test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667] ___
+
+tmp_path = PosixPath('/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f30846ec110>
+shutter = '0.000667'
+
+    @pytest.mark.parametrize("shutter", ("0.000667", "0.000333", "0.00025"))
+    def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
+        tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str,
+    ):
+        package = installed_camctl
+        store = tmp_path / "client-store"
+        store.mkdir()
+        description = package.cli("describe", "--config", str(package.config_path)).stdout
+        (store / "device-capabilities.json").write_text(description)
+        params_text = (
+            '{"type":"hasselblad_photo","capture_format":"jpeg",'
+            '"exposure":{"mode":"M","iso":100,"aperture":8,"shutter_s":' + shutter + '},'
+            '"white_balance":{"mode":"manual","temperature_k":5500},'
+            '"focus":{"mode":"MF","relative_move":5}}'
+        )
+        input_path = tmp_path / "browser-input.json"
+        refresh_schedule = shutter == "0.000333"
+        before_browser = datetime.now(timezone.utc).replace(microsecond=0)
+        scheduled_at = (before_browser + timedelta(minutes=-2 if refresh_schedule else 5)).strftime("%Y-%m-%d %H:%M:%S")
+        input_path.write_text(json.dumps({
+            "device_id": "hb-host", "action_type": "camera_take_photo",
+            "action_name": "capture", "case_name": f"网页精确快门-{shutter}",
+            "params_text": params_text,
+            "scheduled_at": scheduled_at,
+            "refresh_scheduled_at": refresh_schedule,
+        }, ensure_ascii=False))
+        plan = tmp_path / "downloaded-plan.json"
+>       receipt = _client(package, "browser-photo-export", str(store), str(input_path), str(plan),
+                          output=tmp_path / "browser-receipt.json")
+
+tests/integration/test_hasselblad_photo_roundtrip.py:88: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_hasselblad_photo_roundtrip.py:41: in _client
+    completed = package.run([
+tests/integration/test_hasselblad_photo_parameters.py:126: in run
+    completed = subprocess.run(
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/subprocess.py:550: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/subprocess.py:1209: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/subprocess.py:2116: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['node', '--import', 'tsx', '/tmp/camctl-itopt-...>
+endtime = 47926.889083329, orig_timeout = 180, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['node', '--import', 'tsx', '/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/client-candidate/tests/integration/client_driver.ts', 'browser-photo-export', '/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0/client-store', '/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0/browser-input.json', '/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0/downloaded-plan.json', '/tmp/camctl-itopt-round2-hb-after-8/tasks/004-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_brow0/browser-receipt.json']' timed out after 180 seconds
+
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/subprocess.py:1253: TimeoutExpired
+============================== slowest durations ===============================
+182.72s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+180.00s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]
+52.93s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+32.06s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]
+6.05s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+0.01s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+
+(3 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+1 failed, 2 passed in 455.16s (0:07:35)

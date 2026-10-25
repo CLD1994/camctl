@@ -1,0 +1,36 @@
+{
+  "collector_pid": 723009,
+  "runner_pid": 723016,
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-final",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "--jobs",
+    "6",
+    "--output",
+    "/tmp/camctl-itopt-round2-hb-after-6"
+  ],
+  "cwd": "/tmp/camctl-itopt-round2-final",
+  "source_head": "8164851c8d5aa2a25f7bbd59bd09a6d970b38369",
+  "started_utc": "2026-10-25T02:37:38.068019+00:00",
+  "children_before": {
+    "ru_utime": 0.0032419999999999997,
+    "ru_stime": 0.116351,
+    "ru_maxrss": 17068,
+    "ru_inblock": 0,
+    "ru_oublock": 0,
+    "ru_minflt": 714,
+    "ru_majflt": 0,
+    "ru_nvcsw": 8,
+    "ru_nivcsw": 4
+  },
+  "sampling_interval_seconds": 0.25
+}

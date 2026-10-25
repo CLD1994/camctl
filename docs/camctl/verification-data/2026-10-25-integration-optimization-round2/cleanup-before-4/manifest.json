@@ -1,0 +1,434 @@
+{
+  "purpose": "S7相同b82源码cleanup完整11项四路before；单独保存真实九次OSMO来源构造。",
+  "source": {
+    "root": "/tmp/camctl-itopt-round2-baseline",
+    "head": "b82d96e0b5607b7d0e5f79a4dc9385f06f6a400e",
+    "status": "",
+    "snapshot_sha256": "f7443853ca5bdef6f762f451adee6a2ab220706f00510c06fa4db1c1e2e347dc"
+  },
+  "run_root": "/tmp/camctl-itopt-round2-cleanup-before-4",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-baseline",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_device_file_cleanup_roundtrip.py",
+    "--jobs",
+    "4",
+    "--output",
+    "/tmp/camctl-itopt-round2-cleanup-before-4"
+  ],
+  "exec_session": 13284,
+  "runner_pid": 653119,
+  "status": "finished",
+  "exit_code": 0,
+  "jobs": 4,
+  "root_shards": 4,
+  "task_count": 4,
+  "task_outcomes": {
+    "passed": 4
+  },
+  "primary_count": 11,
+  "unique_primary_count": 11,
+  "complete_primary_count": 11,
+  "primary_outcomes": {
+    "passed": 11
+  },
+  "all_progress_finished": true,
+  "timing": {
+    "runner_wall_seconds": 335.1003527840003,
+    "collector_monotonic_wall_seconds": 335.2430912359996,
+    "task_wall_sum_seconds": 996.1059346740076,
+    "pytest_phase_seconds": {
+      "setup": 125.61500212300598,
+      "call": 823.094516971003,
+      "teardown": 0.03015042800689116
+    },
+    "pytest_phase_sum_seconds": 948.7396695220159,
+    "preparations": {
+      "package-resources": {
+        "count": 4,
+        "wall_sum_seconds": 0.35874078599590575
+      }
+    }
+  },
+  "osmo_producers": {
+    "actual_runs": 9,
+    "containing_shards": 3,
+    "by_task_directory": {
+      "002-root-test_device_file_cleanup_roundtrip-shard-4": 4,
+      "003-root-test_device_file_cleanup_roundtrip-shard-2": 2,
+      "004-root-test_device_file_cleanup_roundtrip-shard-3": 3
+    },
+    "stop_to_directory_monotonic_seconds": [
+      30.206072092,
+      30.138670192,
+      30.163183676,
+      30.230412815,
+      30.141928062,
+      30.184048905,
+      30.18517731,
+      30.19387565,
+      30.158254836
+    ],
+    "proof": "producer-proof.json",
+    "scope": "只对primary pytest世界按真实路径去重，排除current符号链接与.local归档副本。每个世界实际ffmpeg生成sample.OSV、START与STOP各一次，STOP后首次目录读取至少30秒；最终capture-osmo action成功、repair_state成功，原target1000/control_elapsed3e9。每份原adb.jsonl、媒体生成命令及final-db.json已归档。"
+  },
+  "resource_scope": "Metadata git rev-parse/status children finish before children_before and start time. The measured interval has exactly one runner child; CPU/I/O deltas exclude prior metadata usage. RUSAGE_CHILDREN contains waited descendant usage propagated by child reaping. Raw ru_maxrss is the lifetime maximum single descendant process (including prior metadata git); children_before retains its prior value. It is not concurrent tree memory. inblock/oublock are raw kernel block-operation counts, not bytes. No complete per-process CPU/I/O sample or device-throughput claim.",
+  "browser_observation": {
+    "interval_seconds": 0.25,
+    "samples": 1322,
+    "scan_wall_seconds": 4.379983315055142,
+    "read_races": 59,
+    "observed_browser_roots_count": 0,
+    "roots": [],
+    "coverage": "Sampled runner-descendant Chromium root processes, excluding --type subprocesses. Count means sampled unique PID/start_ticks root process identities, not browser sessions or exact launch requests. The 0.25 second wait follows each scan, so actual intervals also include scan and scheduling time. Roots shorter than actual intervals, between scans, or reparented before observation can be missed."
+  },
+  "comparison_limits": [
+    "与后续同源码范围、同jobs/root-shards和相同依赖结果分别比较。历史48d旧失败截断成本不作为本阶段before。",
+    "task与pytest阶段为墙钟之和，不是CPU；resource user/sys是已回收后代累计CPU，raw block计数不是字节或吞吐量；maxrss不是并发树内存。",
+    "0.25秒是每轮扫描后的等待下限；未观察到Chromium根PID不证明不存在短于实际采样间隔的进程。"
+  ],
+  "dependencies": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "node": "v24.22.1",
+    "node_modules": "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "node_package_lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+    "playwright_core": "1.63.0",
+    "chromium_revision": "1243",
+    "uv_cache_source": "/home/cld/.cache/uv"
+  },
+  "files": [
+    {
+      "path": "cases.json",
+      "sha256": "a50a13ab861ce861e168e7d3304bf25117cc074d89b56f26c069e3eb5dff2e6a",
+      "bytes": 6554
+    },
+    {
+      "path": "collector-source.txt",
+      "sha256": "8bcf475d5d2d5459d98ed251f2732fc20a7de9fc11b5d622942d1ad83c30a735",
+      "bytes": 6378
+    },
+    {
+      "path": "driver.log",
+      "sha256": "42d0bfc74741b8bd687463798ed2e87bb3a290c4dd3e1495c048b0b115723d4d",
+      "bytes": 11856
+    },
+    {
+      "path": "plan.json",
+      "sha256": "fdc7c3d2450dced4cf64543589ae42f3033e806ca8b1d35579698de75ea5efb2",
+      "bytes": 3321
+    },
+    {
+      "path": "producer-proof.json",
+      "sha256": "8a383c9753bf9aa0d399888ccf8796d606c0a2c20b3c2a4379db25176ad838d4",
+      "bytes": 23799
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_interrupted_delet0/adb.jsonl",
+      "sha256": "8929cea16192675a6955e8af2ba0354ecd9f889986c41dfaddb2abe189bcfcee",
+      "bytes": 56395
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_interrupted_delet0/command-0003.json",
+      "sha256": "d3a224dec6cf06aee07f20c51dc3c08443b7cba388974b598379098cab6cff3e",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_interrupted_delet0/final-db.json",
+      "sha256": "f4140ae2468da7fd6ffdea5821f6764665e3f2cd1957819358c58c34e1f2fea5",
+      "bytes": 122519
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_0/adb.jsonl",
+      "sha256": "c271d52a851ffc123f3dc8617b3010ebc4befc5d188e83228ccd7301a71ce5e3",
+      "bytes": 60254
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_0/command-0003.json",
+      "sha256": "b4a033789307b96ea238dbbf539ca561b66ae810f2bab86c91457125f5d5c9ee",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_0/final-db.json",
+      "sha256": "a391a73f977641ca216dd942c75f13dd6ddc47915786d92099c95a896c1dfa9b",
+      "bytes": 125904
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_1/adb.jsonl",
+      "sha256": "1410cdefd43583839222903dd05e74aa2b346260802e572514803e79c635e055",
+      "bytes": 53035
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_1/command-0003.json",
+      "sha256": "3d3be72ed019706ec554074438ff839c0ba7c27265f11f2b3eaf54a659f5c61e",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_1/final-db.json",
+      "sha256": "3e06e85550baedaf85e024b916860af5d06dc2c7b229b8bf3f5df5e6ecaa2353",
+      "bytes": 123999
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_2/adb.jsonl",
+      "sha256": "d62de7edfc13f230177e7788f25ea928055353489b90be79ab6ad1f7bb6d58a4",
+      "bytes": 53043
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_2/command-0003.json",
+      "sha256": "89b7316fb2113e4fe03c2e897b1a9287ccbc08732acb0b431b4cba77c4dae177",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/002-root-test_device_file_cleanup_roundtrip-shard-4/test_cleanup_query_present_or_2/final-db.json",
+      "sha256": "59fbd1addad6cc98600116e106d72e2fe23565a9f170f8b50a0c121e058a2a3b",
+      "bytes": 124269
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_cleanup_saved_result_and_0/adb.jsonl",
+      "sha256": "bb8c8f69af47a52ccd08682d09e53f35dc2426161e646636eb1bbe13fc201cfa",
+      "bytes": 49536
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_cleanup_saved_result_and_0/command-0003.json",
+      "sha256": "06832162024628e1d95148d2660aa3a4a919bf0c28415c2b5ca744bad09f4e2f",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_cleanup_saved_result_and_0/final-db.json",
+      "sha256": "54602a06edafab002446d8543cc86bca2d03ac9bc029b941e8d5a5f3cd8e8af2",
+      "bytes": 118081
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_exact_outputs_and_non_cas0/adb.jsonl",
+      "sha256": "34b400c27d28802113d781cdab3c5c4e2adb661821a0e0983ad3c92f19385781",
+      "bytes": 65485
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_exact_outputs_and_non_cas0/command-0003.json",
+      "sha256": "89d0b1283c32c7c1b4c5857666521fd4bf82749990a4a5533f7da9cc4b2e0fef",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/003-root-test_device_file_cleanup_roundtrip-shard-2/test_exact_outputs_and_non_cas0/final-db.json",
+      "sha256": "8d8d4b7ff853d39cbafc463433dff55b44a0adad7e4fdd4c105aa38190b09ce2",
+      "bytes": 499494
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_cancel_inflight_d0/adb.jsonl",
+      "sha256": "2e40e9080f2d4acd67a354a39940b5b0535c4fc4347eb3dfa8de721785a79580",
+      "bytes": 53018
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_cancel_inflight_d0/command-0003.json",
+      "sha256": "59f7c7e040e5c4dd55d24f5ce643e0e1fd7b67101f21154f28cad4b2662b4284",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_cancel_inflight_d0/final-db.json",
+      "sha256": "5e79a971c0e617b1699742c8cecdd650cc451f20e841037b543345d6799aeba8",
+      "bytes": 139766
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_new_request_for_c0/adb.jsonl",
+      "sha256": "94ce0c01584c08d534f8892bbbf973929ce33444c32e48247b7e592c26a61564",
+      "bytes": 49536
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_new_request_for_c0/command-0003.json",
+      "sha256": "bfd9b175f4d23ced84b55c3d1241ec028ec7eb120e85d83c13bb1c96175f73d8",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_new_request_for_c0/final-db.json",
+      "sha256": "934810cf5ad7c3b24e45db75760a79a0f3fba139581851b34b95a2a4410a64bb",
+      "bytes": 138930
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_saved_result_and_0/adb.jsonl",
+      "sha256": "a917d7dbdf4551cbc71cd3b5197fba97403f282e8e7bea8b8f06bb9c433689f6",
+      "bytes": 49536
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_saved_result_and_0/command-0003.json",
+      "sha256": "d3da7e2314cf26b469345d6746e3566312b9ee71a3f8259e935d4cce759c91a0",
+      "bytes": 9857
+    },
+    {
+      "path": "producers/004-root-test_device_file_cleanup_roundtrip-shard-3/test_cleanup_saved_result_and_0/final-db.json",
+      "sha256": "41cb9eb49135764ea7ed1996c1acf2fb7db57dac607e104a7d0f0239e94257c8",
+      "bytes": 118081
+    },
+    {
+      "path": "resource-start.json",
+      "sha256": "0edc083007f84dfc398cb7f9a65ab2cfb6081b3ffa6f4eab8886ac11bd853986",
+      "bytes": 987
+    },
+    {
+      "path": "resource.json",
+      "sha256": "c3341c8158dd98a01ba5fc45ec43560f79d931eca0dd17b273286d821cf139bd",
+      "bytes": 2946
+    },
+    {
+      "path": "source.json",
+      "sha256": "8beb96aee7a7eb7c971e39b4b53ec67d6b481fd1e424551f0555780623f673f6",
+      "bytes": 316823
+    },
+    {
+      "path": "summary.json",
+      "sha256": "0e60a3ff073f167c21c2fd8ccb5a38726f54ceb4c70a6d7b1c651acb67639b20",
+      "bytes": 17216
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/cases.json",
+      "sha256": "4d7981e14594007c9b67a760536a789e5b38c1166cb2a1b03b8df8ed7681557c",
+      "bytes": 539
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/command.json",
+      "sha256": "9e7911f17eaf2c77573ae317ff25334f0de2d6a1ff8bc85261de82b38ca18bc0",
+      "bytes": 3618
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/events.jsonl",
+      "sha256": "268041797bc8cfdc48dc48a56f705173f201c498b462d38c6a093893cf9662e4",
+      "bytes": 2488
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/inventory.json",
+      "sha256": "3e489f7efb06e387d4a33f268eecb274af583eb6b21bcce6499e12e8ace19f69",
+      "bytes": 120
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/output.log",
+      "sha256": "5cba69fd7da6ccfd01dba3b1c7f14b7273d4684a4855df0e5f2528aa00d3b0c2",
+      "bytes": 512
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/progress.json",
+      "sha256": "d061bda3a444989f4d3bae18e412271f21da7d9c03f776be9f6ce76252889eee",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/001-root-test_device_file_cleanup_roundtrip-shard-1/result.json",
+      "sha256": "836152a65e04242a7871770027330f3b9408fea2c4a99149d44b06c4104d749c",
+      "bytes": 3332
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/cases.json",
+      "sha256": "613c591d1d73c01bacb0e0269185537404ba18e6813263aa0adc1a799550f189",
+      "bytes": 2100
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/command.json",
+      "sha256": "fa25ac65267bd988ed181330eb3598fa11d7772f296e9dbac21883beb27c1a4d",
+      "bytes": 4222
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/events.jsonl",
+      "sha256": "af95433c3568ab6cb0558d4946fa85c3ec0e8a81c50d34ecbc8425fceb33ce12",
+      "bytes": 7819
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/inventory.json",
+      "sha256": "4dc731ef383326ef01ec94750fba217fec9a2e943102605b92156febf9d77445",
+      "bytes": 416
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/output.log",
+      "sha256": "374db7800d66d993479651e5e999630c4fcfe312eadee2151314220f5b496caa",
+      "bytes": 940
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/progress.json",
+      "sha256": "7bd676b683dbf83096a18e5074e90714153d1f416c4b7290d5a9a004f498ce9b",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/002-root-test_device_file_cleanup_roundtrip-shard-4/result.json",
+      "sha256": "b2574a20e65e511364a8138b4616e35394d81362900601f796092a2a32738f40",
+      "bytes": 3937
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/cases.json",
+      "sha256": "66640e1a7e3776c4cff6ea491b73a102f9ae4b5d257d8f467429127b23cfec5f",
+      "bytes": 1072
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/command.json",
+      "sha256": "d79cb3da5f63ea53b037828fc70204b0e9d81ffa29b6a309840897da1c91c15b",
+      "bytes": 3837
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/events.jsonl",
+      "sha256": "76629601e0ecc45af671f83386b6319eb00446e45d09a90a746379da12f328f6",
+      "bytes": 4343
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/inventory.json",
+      "sha256": "1e6c7fd1bc208316cfe2a07d70375a206a208edb8826625285bb895ae411dcc3",
+      "bytes": 228
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/output.log",
+      "sha256": "226739eff81488b4322e15a02421e6a14d31eac9bacdd5e52d640d8d1bbff183",
+      "bytes": 751
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/progress.json",
+      "sha256": "b6c288037bf05e0ea42356f20be599e1594562c8c703887fe4479bc09b58e03c",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/003-root-test_device_file_cleanup_roundtrip-shard-2/result.json",
+      "sha256": "7fb0cbb46ea00f34fda5811ecc305b0bb491d08eec8160e88b7fcaceb7c7f3e7",
+      "bytes": 3550
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/cases.json",
+      "sha256": "def7d760c44351a3396e7628e04a95e7dd991a599d30704781cbe06235a5da79",
+      "bytes": 2159
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/command.json",
+      "sha256": "2e3ca9337910609b9f89e0c73c83fef8ad5ca035233ac09e691bba761554dcb6",
+      "bytes": 4325
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/events.jsonl",
+      "sha256": "da5437c279abe037b096e09ade60b97896865d16a6bc2c6aa438470959665e82",
+      "bytes": 8240
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/inventory.json",
+      "sha256": "ae22d79d037c082b7462ddfa1788b1aca7ad29442eb4751db4bb7b281b243a46",
+      "bytes": 468
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/output.log",
+      "sha256": "8c1aa5c8a7f93ee5342fcac4172313f2e0825c9be37e4a9d27549b1262722085",
+      "bytes": 998
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/progress.json",
+      "sha256": "852464fac1e378f46d7d867ca3d8296b3b708aaef2ae010dc6394838c246ba41",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/004-root-test_device_file_cleanup_roundtrip-shard-3/result.json",
+      "sha256": "35a011df5f94c59f83eb69307eb5d942bd112a6b867f4aa701bda5bf9af9ba01",
+      "bytes": 4038
+    },
+    {
+      "path": "tasks.csv",
+      "sha256": "85e5f50abdbf5eb5ba132d954d69d5974af947d51ed3885bbd6de79de57c927b",
+      "bytes": 475
+    }
+  ]
+}

@@ -1,0 +1,2550 @@
+{
+  "plans": [
+    {
+      "id": 1,
+      "request_id": 8940167691379770183,
+      "name": "capture-osmo",
+      "created_at": 1792893976000000,
+      "status": 3,
+      "created_event_id": 2,
+      "last_event_id": 77,
+      "change_count": 3
+    },
+    {
+      "id": 2,
+      "request_id": 5398158251989497113,
+      "name": "cleanup-osv",
+      "created_at": 1792894019000000,
+      "status": 3,
+      "created_event_id": 81,
+      "last_event_id": 114,
+      "change_count": 3
+    },
+    {
+      "id": 3,
+      "request_id": 4374927488223534811,
+      "name": "ack-and-new-facts",
+      "created_at": 1792894032000000,
+      "status": 3,
+      "created_event_id": 121,
+      "last_event_id": 133,
+      "change_count": 3
+    }
+  ],
+  "actions": [
+    {
+      "id": 1,
+      "plan_id": 1,
+      "input_index": 0,
+      "name": "capture-osmo",
+      "type": 2,
+      "device_id": "osmo",
+      "scheduled_at": 1792893973000000,
+      "group_name": null,
+      "input_fields_json": "{\"params\":{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}},\"policy\":{\"max_delay_ms\":60000}}",
+      "effective_params_json": "{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}}",
+      "driver_id": "dji-osmo360-ii",
+      "max_delay_ms": 60000,
+      "execution_spec_json": "{\"target_duration_ms\":1000,\"video_result_mode\":\"single_file\",\"ownership_mode\":2,\"output_scope\":{\"directories\":[\"/mnt/media_rw/emulated/DCIM\"]},\"product_rules\":[{\"kind\":\"video\",\"format_id\":\"osv\",\"min_count\":1,\"exact_count\":1,\"require_pairing\":false,\"min_size_bytes\":1}],\"file_completion_wait_ms\":30000,\"start_return_meaning\":1,\"startup_margin_ms\":0}",
+      "status": 3,
+      "execution_started": 1,
+      "cancel_requested": 0,
+      "error_code": null,
+      "error_details_json": null,
+      "first_window_observed_at": 1792893973000000,
+      "expiration_reason": null,
+      "source_resolution_state": null,
+      "resolved_source_plan_id": null,
+      "target_selection_state": null,
+      "created_event_id": 1,
+      "last_event_id": 78,
+      "change_count": 36
+    },
+    {
+      "id": 2,
+      "plan_id": 2,
+      "input_index": 0,
+      "name": "cleanup-osv",
+      "type": 5,
+      "device_id": null,
+      "scheduled_at": 1792894017000000,
+      "group_name": null,
+      "input_fields_json": "{\"params\":{\"output_ids\":[\"2\"]}}",
+      "effective_params_json": null,
+      "driver_id": null,
+      "max_delay_ms": null,
+      "execution_spec_json": "{}",
+      "status": 4,
+      "execution_started": 1,
+      "cancel_requested": 0,
+      "error_code": 22,
+      "error_details_json": "{}",
+      "first_window_observed_at": null,
+      "expiration_reason": null,
+      "source_resolution_state": null,
+      "resolved_source_plan_id": null,
+      "target_selection_state": 2,
+      "created_event_id": 80,
+      "last_event_id": 113,
+      "change_count": 16
+    },
+    {
+      "id": 3,
+      "plan_id": 3,
+      "input_index": 0,
+      "name": "ack-and-new-facts",
+      "type": 7,
+      "device_id": null,
+      "scheduled_at": 1792894030000000,
+      "group_name": null,
+      "input_fields_json": "{\"params\":{\"scope\":\"full\"}}",
+      "effective_params_json": null,
+      "driver_id": null,
+      "max_delay_ms": null,
+      "execution_spec_json": "{}",
+      "status": 3,
+      "execution_started": 1,
+      "cancel_requested": 0,
+      "error_code": null,
+      "error_details_json": null,
+      "first_window_observed_at": null,
+      "expiration_reason": null,
+      "source_resolution_state": null,
+      "resolved_source_plan_id": null,
+      "target_selection_state": null,
+      "created_event_id": 120,
+      "last_event_id": 132,
+      "change_count": 3
+    }
+  ],
+  "outputs": [
+    {
+      "id": 1,
+      "source_action_id": 1,
+      "kind": 3,
+      "device_file_id": 1,
+      "intermediate_file_id": null,
+      "original_name": "VID_0001.LRF",
+      "media_type": null,
+      "availability": 1,
+      "cleanup_status": 1,
+      "cleanup_error_json": null,
+      "media_json": "{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}}",
+      "error_json": null,
+      "created_event_id": 74,
+      "last_event_id": 74,
+      "change_count": 1
+    },
+    {
+      "id": 2,
+      "source_action_id": 1,
+      "kind": 1,
+      "device_file_id": 2,
+      "intermediate_file_id": null,
+      "original_name": "VID_0001.OSV",
+      "media_type": null,
+      "availability": 2,
+      "cleanup_status": 5,
+      "cleanup_error_json": "{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"cleanup\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}",
+      "media_json": "{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}}",
+      "error_json": null,
+      "created_event_id": 73,
+      "last_event_id": 110,
+      "change_count": 4
+    },
+    {
+      "id": 3,
+      "source_action_id": 1,
+      "kind": 2,
+      "device_file_id": null,
+      "intermediate_file_id": 2,
+      "original_name": "VID_0001.mp4",
+      "media_type": "video/mp4",
+      "availability": 1,
+      "cleanup_status": 1,
+      "cleanup_error_json": null,
+      "media_json": "{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}}",
+      "error_json": null,
+      "created_event_id": 75,
+      "last_event_id": 75,
+      "change_count": 1
+    }
+  ],
+  "device_files": [
+    {
+      "id": 1,
+      "observer_action_id": 1,
+      "source_action_id": 1,
+      "identity_key": "[\"osmo\",\"dji-osmo360-ii\",\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]",
+      "locator_json": "{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"}",
+      "ownership_evidence_json": "{\"method\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"activity_id\":1}",
+      "original_name": "VID_0001.LRF",
+      "media_type": null,
+      "role": 3,
+      "original_device_file_id": 2,
+      "pairing_evidence_json": "{\"method\":1,\"observation\":{\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"}}",
+      "presence_state": 2,
+      "completion_state": 3,
+      "completion_evidence_json": "{\"basis\":3,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"activity_id\":1,\"result_page_event_id\":39,\"stop_result_event_id\":27}",
+      "size_bytes": 36,
+      "checksum_support": 1,
+      "sha256": null,
+      "last_error_json": null,
+      "created_event_id": 37,
+      "last_event_id": 46,
+      "change_count": 4
+    },
+    {
+      "id": 2,
+      "observer_action_id": 1,
+      "source_action_id": 1,
+      "identity_key": "[\"osmo\",\"dji-osmo360-ii\",\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"]",
+      "locator_json": "{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"}",
+      "ownership_evidence_json": "{\"method\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1}",
+      "original_name": "VID_0001.OSV",
+      "media_type": null,
+      "role": 2,
+      "original_device_file_id": null,
+      "pairing_evidence_json": null,
+      "presence_state": 2,
+      "completion_state": 3,
+      "completion_evidence_json": "{\"basis\":3,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1,\"result_page_event_id\":39,\"stop_result_event_id\":27}",
+      "size_bytes": 4384,
+      "checksum_support": 2,
+      "sha256": null,
+      "last_error_json": null,
+      "created_event_id": 38,
+      "last_event_id": 48,
+      "change_count": 5
+    }
+  ],
+  "intermediate_files": [
+    {
+      "id": 1,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 2,
+      "relative_path": "recording-inputs/1.osv",
+      "retention_state": 2,
+      "cleanup_state": 4,
+      "size_bytes": 4384,
+      "sha256": "26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e",
+      "last_error_json": null,
+      "created_event_id": 49,
+      "last_event_id": 96,
+      "change_count": 5
+    },
+    {
+      "id": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 4,
+      "relative_path": "derived/2.mp4",
+      "retention_state": 3,
+      "cleanup_state": 1,
+      "size_bytes": 3252,
+      "sha256": "cc7e186b24ef445731c713313f233ed2df01a067cdde7b519b6f0925d6135e94",
+      "last_error_json": null,
+      "created_event_id": 60,
+      "last_event_id": 76,
+      "change_count": 3
+    }
+  ],
+  "recording_processing": [
+    {
+      "id": 1,
+      "action_id": 1,
+      "source_device_file_id": 2,
+      "check_state": 1,
+      "check_decision": 2,
+      "check_basis_json": "{\"reason\":3,\"target_duration_ms\":1000,\"control_elapsed_ns\":3000000000}",
+      "media_json": "{}",
+      "repair_state": 5,
+      "repair_basis_json": "{\"reason\":2,\"target_duration_ms\":1000,\"threshold_s\":1,\"control_elapsed_ns\":3000000000}",
+      "repair_output_file_id": 2,
+      "repair_error_json": null,
+      "discard_state": 1,
+      "discard_error_json": null
+    }
+  ],
+  "cleanup_items": [
+    {
+      "id": 1,
+      "action_id": 2,
+      "requested_output_id": 2,
+      "output_id": 2,
+      "status": 5,
+      "restriction_state": 4,
+      "outcome": null,
+      "final_event_id": 109,
+      "error_code": 3,
+      "error_details_json": "{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}"
+    }
+  ],
+  "cancel_items": [],
+  "operation_runs": [
+    {
+      "id": 1,
+      "action_id": 1,
+      "delivery_id": null,
+      "kind": 1,
+      "query_purpose": null,
+      "responsibility_key": "start/1",
+      "activity_id": 1,
+      "copy_id": null,
+      "cleanup_item_id": null,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 3,
+      "attempts_used": 1,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "retry_wait_required": 0,
+      "error_json": null
+    },
+    {
+      "id": 2,
+      "action_id": 1,
+      "delivery_id": null,
+      "kind": 2,
+      "query_purpose": null,
+      "responsibility_key": "stop/1",
+      "activity_id": 1,
+      "copy_id": null,
+      "cleanup_item_id": null,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 3,
+      "attempts_used": 1,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "retry_wait_required": 0,
+      "error_json": null
+    },
+    {
+      "id": 3,
+      "action_id": 1,
+      "delivery_id": null,
+      "kind": 7,
+      "query_purpose": null,
+      "responsibility_key": "results/1",
+      "activity_id": 1,
+      "copy_id": null,
+      "cleanup_item_id": null,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 3,
+      "attempts_used": 1,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "retry_wait_required": 0,
+      "error_json": null
+    },
+    {
+      "id": 4,
+      "action_id": 1,
+      "delivery_id": null,
+      "kind": 3,
+      "query_purpose": null,
+      "responsibility_key": "read/1",
+      "activity_id": null,
+      "copy_id": 1,
+      "cleanup_item_id": null,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 3,
+      "attempts_used": 1,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "retry_wait_required": 0,
+      "error_json": null
+    },
+    {
+      "id": 5,
+      "action_id": 2,
+      "delivery_id": null,
+      "kind": 4,
+      "query_purpose": null,
+      "responsibility_key": "delete/1",
+      "activity_id": null,
+      "copy_id": null,
+      "cleanup_item_id": 1,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 4,
+      "attempts_used": 1,
+      "max_attempts_used": 2,
+      "timeout_s_json": "7.125",
+      "retry_interval_s_json": "0.625",
+      "retry_wait_required": 0,
+      "error_json": "{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}"
+    },
+    {
+      "id": 6,
+      "action_id": 2,
+      "delivery_id": null,
+      "kind": 5,
+      "query_purpose": null,
+      "responsibility_key": "exists/1",
+      "activity_id": null,
+      "copy_id": null,
+      "cleanup_item_id": 1,
+      "obtain_item_id": null,
+      "session_key": null,
+      "status": 4,
+      "attempts_used": 1,
+      "max_attempts_used": 1,
+      "timeout_s_json": "11.5",
+      "retry_interval_s_json": "0",
+      "retry_wait_required": 0,
+      "error_json": "{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}"
+    }
+  ],
+  "operation_attempts": [
+    {
+      "id": 1,
+      "run_id": 1,
+      "attempt_no": 1,
+      "copy_round": null,
+      "status": 2,
+      "intent_event_id": 13,
+      "result_event_id": 18,
+      "result_first_page_event_id": null,
+      "result_last_page_event_id": null,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "effect_state": 3,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"control_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"recording_sent\",\"version\":1,\"data\":{\"activity_id\":\"1\",\"response_payload\":\"00\",\"confirmation_basis\":\"osmo360ii_record_ack/v1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}",
+      "error_json": null
+    },
+    {
+      "id": 2,
+      "run_id": 2,
+      "attempt_no": 1,
+      "copy_round": null,
+      "status": 2,
+      "intent_event_id": 26,
+      "result_event_id": 27,
+      "result_first_page_event_id": null,
+      "result_last_page_event_id": null,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "effect_state": 3,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"stop_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"stop_confirmed\",\"version\":1,\"data\":{\"activity_id\":\"1\",\"response_payload\":\"00\",\"confirmation_basis\":\"osmo360ii_record_ack/v1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}",
+      "error_json": null
+    },
+    {
+      "id": 3,
+      "run_id": 3,
+      "attempt_no": 1,
+      "copy_round": null,
+      "status": 2,
+      "intent_event_id": 32,
+      "result_event_id": 62,
+      "result_first_page_event_id": 39,
+      "result_last_page_event_id": 39,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "effect_state": 3,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"result_returned\",\"version\":1,\"data\":{\"file_completion\":{\"method\":\"stop_return_and_wait\",\"version\":1,\"activity_id\":\"1\",\"stop_result_event_id\":27,\"required_wait_ms\":30000,\"observed_wait_ns\":30019181165,\"completed\":true},\"file_completion_source_page_event_id\":null,\"calls\":[{\"kind\":\"directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"}],\"call_count\":4,\"optional_preview_observations\":[{\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"state\":\"paired\",\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]},{\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"state\":\"paired\",\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]}]}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}",
+      "error_json": null
+    },
+    {
+      "id": 4,
+      "run_id": 4,
+      "attempt_no": 1,
+      "copy_round": 1,
+      "status": 2,
+      "intent_event_id": 53,
+      "result_event_id": 57,
+      "result_first_page_event_id": null,
+      "result_last_page_event_id": null,
+      "max_attempts_used": 3,
+      "timeout_s_json": "10",
+      "retry_interval_s_json": "3",
+      "effect_state": 1,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+      "error_json": null
+    },
+    {
+      "id": 5,
+      "run_id": 5,
+      "attempt_no": 1,
+      "copy_round": null,
+      "status": 4,
+      "intent_event_id": 91,
+      "result_event_id": 103,
+      "result_first_page_event_id": null,
+      "result_last_page_event_id": null,
+      "max_attempts_used": 2,
+      "timeout_s_json": "7.125",
+      "retry_interval_s_json": "0.625",
+      "effect_state": 1,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"assumed\",\"evidence\":{\"type\":\"adb_foreground_recovery\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+      "error_json": "{\"code\":\"result_not_saved\",\"stage\":\"recovery\",\"details\":{}}"
+    },
+    {
+      "id": 6,
+      "run_id": 6,
+      "attempt_no": 1,
+      "copy_round": null,
+      "status": 3,
+      "intent_event_id": 106,
+      "result_event_id": 107,
+      "result_first_page_event_id": null,
+      "result_last_page_event_id": null,
+      "max_attempts_used": 1,
+      "timeout_s_json": "11.5",
+      "retry_interval_s_json": "0",
+      "effect_state": 1,
+      "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"query_returned\",\"version\":1,\"data\":{}}},\"observations\":[],\"call_info\":{\"local_exit\":{\"exit_code\":1}}}",
+      "error_json": "{\"code\":\"adb_file_query_failed\",\"stage\":\"device_file_access\",\"details\":{\"scan_exit_code\":1,\"reason\":\"unknown\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":1,\"local_signal\":null}}"
+    }
+  ],
+  "reports": [
+    {
+      "id": 1,
+      "frozen_event_id": 3,
+      "from_wm": 0,
+      "to_wm": 2,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 585,
+      "sha256": "e5773d340fc4f2d15e24e22ae42543708074bb70983e1d2b32b48ddb86a7af50",
+      "publication_count": 1,
+      "last_published_event_id": 7,
+      "last_error_json": null,
+      "created_event_id": 4,
+      "last_event_id": 7
+    },
+    {
+      "id": 2,
+      "frozen_event_id": 13,
+      "from_wm": 0,
+      "to_wm": 6,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 585,
+      "sha256": "9b886a4216c5f77e5ef440b0ee6b9d2352bbbcf3b8b9b7b07d9430654734cb6b",
+      "publication_count": 1,
+      "last_published_event_id": 17,
+      "last_error_json": null,
+      "created_event_id": 14,
+      "last_event_id": 17
+    },
+    {
+      "id": 3,
+      "frozen_event_id": 20,
+      "from_wm": 0,
+      "to_wm": 7,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 585,
+      "sha256": "6e281367ebca658ac0d2b3a04492fabf99b08c761826eed81c382d5d5009f029",
+      "publication_count": 1,
+      "last_published_event_id": 25,
+      "last_error_json": null,
+      "created_event_id": 21,
+      "last_event_id": 25
+    },
+    {
+      "id": 4,
+      "frozen_event_id": 32,
+      "from_wm": 0,
+      "to_wm": 9,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 585,
+      "sha256": "62fe880aa01a061d7d72c92f34bb3d65ede6a6e67a058f4fee1a17c486a9dba6",
+      "publication_count": 1,
+      "last_published_event_id": 36,
+      "last_error_json": null,
+      "created_event_id": 33,
+      "last_event_id": 36
+    },
+    {
+      "id": 5,
+      "frozen_event_id": 63,
+      "from_wm": 0,
+      "to_wm": 10,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 586,
+      "sha256": "a1e827ed1336c655ebe84ba32fe79816dae953f04c7dcac39bceecc7f042d54c",
+      "publication_count": 1,
+      "last_published_event_id": 67,
+      "last_error_json": null,
+      "created_event_id": 64,
+      "last_event_id": 67
+    },
+    {
+      "id": 6,
+      "frozen_event_id": 78,
+      "from_wm": 0,
+      "to_wm": 16,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 1651,
+      "sha256": "de135585b4e6dd2310f6f8f2724a949772b837362c5a3f77aefb27b5e761dbec",
+      "publication_count": 1,
+      "last_published_event_id": 85,
+      "last_error_json": null,
+      "created_event_id": 79,
+      "last_event_id": 85
+    },
+    {
+      "id": 7,
+      "frozen_event_id": 98,
+      "from_wm": 0,
+      "to_wm": 25,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 2022,
+      "sha256": "e073be860ef1283f1e3409d27e05bc420636a24187b12edbd05485b0b90a7a37",
+      "publication_count": 1,
+      "last_published_event_id": 102,
+      "last_error_json": null,
+      "created_event_id": 99,
+      "last_event_id": 102
+    },
+    {
+      "id": 8,
+      "frozen_event_id": 115,
+      "from_wm": 0,
+      "to_wm": 29,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 2358,
+      "sha256": "318242ce6f6f4887b9513f3880b6192171176cc426f6f086058b3573cb1884c1",
+      "publication_count": 1,
+      "last_published_event_id": 119,
+      "last_error_json": null,
+      "created_event_id": 116,
+      "last_event_id": 119
+    },
+    {
+      "id": 9,
+      "frozen_event_id": 126,
+      "from_wm": 0,
+      "to_wm": 34,
+      "format_version": 1,
+      "status": 4,
+      "size_bytes": 2676,
+      "sha256": "2aa5f9d13c12517a6c1e93b08d010df53523a9b1a2023b3894ee6e6c9d69e6f4",
+      "publication_count": 1,
+      "last_published_event_id": 130,
+      "last_error_json": null,
+      "created_event_id": 127,
+      "last_event_id": 130
+    }
+  ],
+  "runtime_state": [
+    {
+      "id": 1,
+      "acknowledged_wm": 29,
+      "acknowledged_report_id": 8,
+      "trusted_time_lower_bound": 1792894034428509,
+      "trusted_time_event_id": 123,
+      "cleanup_cursor_file_id": 1
+    }
+  ],
+  "history_events": [
+    {
+      "id": 1,
+      "transaction_id": 1,
+      "event_type": 2,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 1,
+      "change_seq": 1,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"plan_id\":1,\"input_index\":0,\"name\":\"capture-osmo\",\"type\":2,\"device_id\":\"osmo\",\"scheduled_at\":1792893973000000,\"group_name\":null,\"input_fields_json\":{\"params\":{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}},\"policy\":{\"max_delay_ms\":60000}},\"driver_id\":\"dji-osmo360-ii\",\"max_delay_ms\":60000,\"target_selection_state\":null,\"execution_started\":0,\"cancel_requested\":0,\"first_window_observed_at\":null,\"expiration_reason\":null,\"status\":1,\"error_code\":null,\"error_details_json\":null,\"effective_params_json\":{\"type\":\"osmo360ii_record\",\"duration_s\":1,\"bitrate\":\"high\",\"exposure\":{\"mode\":\"auto\"}},\"execution_spec_json\":{\"target_duration_ms\":1000,\"video_result_mode\":\"single_file\",\"ownership_mode\":2,\"output_scope\":{\"directories\":[\"/mnt/media_rw/emulated/DCIM\"]},\"product_rules\":[{\"kind\":\"video\",\"format_id\":\"osv\",\"min_count\":1,\"exact_count\":1,\"require_pairing\":false,\"min_size_bytes\":1}],\"file_completion_wait_ms\":30000,\"start_return_meaning\":1,\"startup_margin_ms\":0},\"source_resolution_state\":null,\"resolved_source_plan_id\":null}}}]}"
+    },
+    {
+      "id": 2,
+      "transaction_id": 1,
+      "event_type": 1,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 1,
+      "change_seq": 2,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"request_id\":8940167691379770183,\"name\":\"capture-osmo\",\"created_at\":1792893976000000,\"status\":1}}}]}"
+    },
+    {
+      "id": 3,
+      "transaction_id": 2,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":null,\"trusted_time_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792893973000000,\"trusted_time_event_id\":3}}}]}"
+    },
+    {
+      "id": 4,
+      "transaction_id": 3,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":3,\"from_wm\":0,\"to_wm\":2,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 5,
+      "transaction_id": 4,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":585,\"sha256\":\"e5773d340fc4f2d15e24e22ae42543708074bb70983e1d2b32b48ddb86a7af50\"}}}]}"
+    },
+    {
+      "id": 6,
+      "transaction_id": 5,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 7,
+      "transaction_id": 6,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":7}}}]}"
+    },
+    {
+      "id": 8,
+      "transaction_id": 7,
+      "event_type": 7,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"first_window_observed_at\":null}},\"after\":{\"exists\":true,\"values\":{\"first_window_observed_at\":1792893973000000}}}]}"
+    },
+    {
+      "id": 9,
+      "transaction_id": 8,
+      "event_type": 5,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": 3,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"execution_started\":0}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"execution_started\":1}}},{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"source_device_file_id\":null,\"check_state\":1,\"check_decision\":1,\"check_basis_json\":null,\"media_json\":{},\"repair_state\":1,\"repair_basis_json\":null,\"repair_output_file_id\":null,\"repair_error_json\":null,\"discard_state\":1,\"discard_error_json\":null}}}]}"
+    },
+    {
+      "id": 10,
+      "transaction_id": 8,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": 4,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":1}},\"after\":{\"exists\":true,\"values\":{\"status\":2}}}]}"
+    },
+    {
+      "id": 11,
+      "transaction_id": 8,
+      "event_type": 13,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": 5,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"task_key\":\"0c84ee9a6fe44562a07b5697501ae116\",\"task_locator_json\":null,\"state_query_supported\":0,\"stop_supported\":1,\"safe_repeat_stop\":1,\"start_return_meaning\":1,\"completion_mode\":2,\"ownership_mode\":2,\"output_scope_json\":{\"directories\":[\"/mnt/media_rw/emulated/DCIM\"]},\"baseline_state\":2,\"baseline_first_event_id\":null,\"baseline_last_event_id\":null,\"dispatch_state\":1,\"activity_state\":1,\"occupancy_state\":1,\"sent_at\":null,\"started_at\":null,\"result_wait_margin_ms\":null,\"extra_wait_ms_used\":null,\"expected_check_at\":null,\"wait_completed_event_id\":null,\"capture_json\":null,\"control_elapsed_ns\":null,\"completion_basis\":null,\"completion_evidence_json\":null,\"result_set_state\":1,\"result_check_json\":null,\"output_set_finalized_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 12,
+      "transaction_id": 9,
+      "event_type": 14,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"activity_id\":1,\"chunk_count\":0,\"entry_count\":0},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"baseline_state\":2}},\"after\":{\"exists\":true,\"values\":{\"baseline_state\":3}}}]}"
+    },
+    {
+      "id": 13,
+      "transaction_id": 10,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": 6,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":1,\"attempt_no\":1,\"copy_round\":null,\"status\":1,\"intent_event_id\":13,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"delivery_id\":null,\"kind\":1,\"query_purpose\":null,\"responsibility_key\":\"start/1\",\"activity_id\":1,\"copy_id\":null,\"cleanup_item_id\":null,\"obtain_item_id\":null,\"session_key\":null,\"status\":2,\"attempts_used\":1,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"retry_wait_required\":0,\"error_json\":null}}},{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"dispatch_state\":1}},\"after\":{\"exists\":true,\"values\":{\"dispatch_state\":2}}}]}"
+    },
+    {
+      "id": 14,
+      "transaction_id": 11,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":13,\"from_wm\":0,\"to_wm\":6,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 15,
+      "transaction_id": 12,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":585,\"sha256\":\"9b886a4216c5f77e5ef440b0ee6b9d2352bbbcf3b8b9b7b07d9430654734cb6b\"}}}]}"
+    },
+    {
+      "id": 16,
+      "transaction_id": 13,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 17,
+      "transaction_id": 14,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":17}}}]}"
+    },
+    {
+      "id": 18,
+      "transaction_id": 15,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"effect_state\":1,\"result_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"result_event_id\":18,\"effect_state\":3,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"control_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"recording_sent\",\"version\":1,\"data\":{\"activity_id\":\"1\",\"response_payload\":\"00\",\"confirmation_basis\":\"osmo360ii_record_ack/v1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}}}}]}"
+    },
+    {
+      "id": 19,
+      "transaction_id": 15,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 20,
+      "transaction_id": 15,
+      "event_type": 13,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": 7,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"sent_at\":null,\"dispatch_state\":2}},\"after\":{\"exists\":true,\"values\":{\"sent_at\":1792893973000000,\"dispatch_state\":3}}}]}"
+    },
+    {
+      "id": 21,
+      "transaction_id": 16,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893973000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":20,\"from_wm\":0,\"to_wm\":7,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 22,
+      "transaction_id": 17,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792893973000000,\"trusted_time_event_id\":3}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792893976000000,\"trusted_time_event_id\":22}}}]}"
+    },
+    {
+      "id": 23,
+      "transaction_id": 18,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":585,\"sha256\":\"6e281367ebca658ac0d2b3a04492fabf99b08c761826eed81c382d5d5009f029\"}}}]}"
+    },
+    {
+      "id": 24,
+      "transaction_id": 19,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 25,
+      "transaction_id": 20,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":25}}}]}"
+    },
+    {
+      "id": 26,
+      "transaction_id": 21,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":2,\"attempt_no\":1,\"copy_round\":null,\"status\":1,\"intent_event_id\":26,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"delivery_id\":null,\"kind\":2,\"query_purpose\":null,\"responsibility_key\":\"stop/1\",\"activity_id\":1,\"copy_id\":null,\"cleanup_item_id\":null,\"obtain_item_id\":null,\"session_key\":null,\"status\":2,\"attempts_used\":1,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"retry_wait_required\":0,\"error_json\":null}}}]}"
+    },
+    {
+      "id": 27,
+      "transaction_id": 22,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"effect_state\":1,\"result_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"result_event_id\":27,\"effect_state\":3,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"stop_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"stop_confirmed\",\"version\":1,\"data\":{\"activity_id\":\"1\",\"response_payload\":\"00\",\"confirmation_basis\":\"osmo360ii_record_ack/v1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}}}}]}"
+    },
+    {
+      "id": 28,
+      "transaction_id": 22,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 29,
+      "transaction_id": 22,
+      "event_type": 13,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 8,
+      "body_json": "{\"reason\":2,\"evidence\":{\"observation\":{\"stop_result_event_id\":27}},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"activity_state\":1}},\"after\":{\"exists\":true,\"values\":{\"activity_state\":3}}}]}"
+    },
+    {
+      "id": 30,
+      "transaction_id": 23,
+      "event_type": 18,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"check_decision\":1,\"check_basis_json\":null}},\"after\":{\"exists\":true,\"values\":{\"check_decision\":2,\"check_basis_json\":{\"reason\":3,\"target_duration_ms\":1000,\"control_elapsed_ns\":3000000000}}}}]}"
+    },
+    {
+      "id": 31,
+      "transaction_id": 24,
+      "event_type": 18,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 9,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"repair_state\":1,\"repair_basis_json\":null}},\"after\":{\"exists\":true,\"values\":{\"repair_state\":3,\"repair_basis_json\":{\"reason\":2,\"target_duration_ms\":1000,\"threshold_s\":1,\"control_elapsed_ns\":3000000000}}}}]}"
+    },
+    {
+      "id": 32,
+      "transaction_id": 25,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":3,\"attempt_no\":1,\"copy_round\":null,\"status\":1,\"intent_event_id\":32,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"delivery_id\":null,\"kind\":7,\"query_purpose\":null,\"responsibility_key\":\"results/1\",\"activity_id\":1,\"copy_id\":null,\"cleanup_item_id\":null,\"obtain_item_id\":null,\"session_key\":null,\"status\":2,\"attempts_used\":1,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"retry_wait_required\":0,\"error_json\":null}}}]}"
+    },
+    {
+      "id": 33,
+      "transaction_id": 26,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":4,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":32,\"from_wm\":0,\"to_wm\":9,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 34,
+      "transaction_id": 27,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":585,\"sha256\":\"62fe880aa01a061d7d72c92f34bb3d65ede6a6e67a058f4fee1a17c486a9dba6\"}}}]}"
+    },
+    {
+      "id": 35,
+      "transaction_id": 28,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 36,
+      "transaction_id": 29,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":36}}}]}"
+    },
+    {
+      "id": 37,
+      "transaction_id": 30,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"osmo\\\",\\\"dji-osmo360-ii\\\",\\\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"ownership_evidence_json\":null,\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 38,
+      "transaction_id": 30,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"osmo\\\",\\\"dji-osmo360-ii\\\",\\\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"ownership_evidence_json\":null,\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 39,
+      "transaction_id": 30,
+      "event_type": 35,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{\"attempt_id\":3,\"result_page\":{\"run_id\":3,\"attempt_no\":1,\"activity_id\":1,\"page_no\":1,\"cursor\":null,\"outcome\":{\"status\":2,\"effect_state\":3,\"error\":null,\"result\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"result_returned\",\"version\":1,\"data\":{\"file_completion\":{\"method\":\"stop_return_and_wait\",\"version\":1,\"activity_id\":\"1\",\"stop_result_event_id\":27,\"required_wait_ms\":30000,\"observed_wait_ns\":30019181165,\"completed\":true},\"file_completion_source_page_event_id\":null,\"calls\":[{\"kind\":\"directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"}],\"call_count\":4,\"optional_preview_observations\":[{\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"state\":\"paired\",\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]},{\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"state\":\"paired\",\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]}]}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}},\"baseline_position\":null,\"last_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"file_ids\":[[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",1],[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",2]]}},\"rows\":[{\"table\":\"operation_attempts\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"result_first_page_event_id\":null,\"result_last_page_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"result_first_page_event_id\":39,\"result_last_page_event_id\":39}}}]}"
+    },
+    {
+      "id": 40,
+      "transaction_id": 30,
+      "event_type": 35,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{\"result_page_index\":{\"page_event_id\":39}},\"rows\":[{\"table\":\"result_page_files\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":40,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":39,\"file_id\":1,\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001\",\"family_stem\":\"VID_0001\",\"family_role\":2}}},{\"table\":\"result_page_files\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":40,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":39,\"file_id\":2,\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001\",\"family_stem\":\"VID_0001\",\"family_role\":1}}}]}"
+    },
+    {
+      "id": 41,
+      "transaction_id": 31,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"presence_state\":1}},\"after\":{\"exists\":true,\"values\":{\"presence_state\":2}}}]}"
+    },
+    {
+      "id": 42,
+      "transaction_id": 32,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"source_action_id\":null,\"ownership_evidence_json\":null,\"role\":1}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"ownership_evidence_json\":{\"method\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1},\"role\":2}}}]}"
+    },
+    {
+      "id": 43,
+      "transaction_id": 33,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"completion_request\":{\"locator\":null,\"original_name\":null,\"media_type\":null}},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null}},\"after\":{\"exists\":true,\"values\":{\"completion_state\":3,\"completion_evidence_json\":{\"basis\":3,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1,\"result_page_event_id\":39,\"stop_result_event_id\":27},\"size_bytes\":4384}}}]}"
+    },
+    {
+      "id": 44,
+      "transaction_id": 34,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"presence_state\":1}},\"after\":{\"exists\":true,\"values\":{\"presence_state\":2}}}]}"
+    },
+    {
+      "id": 45,
+      "transaction_id": 35,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"source_action_id\":null,\"ownership_evidence_json\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"ownership_evidence_json\":{\"method\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"activity_id\":1},\"role\":3,\"original_device_file_id\":2,\"pairing_evidence_json\":{\"method\":1,\"observation\":{\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"}}}}}]}"
+    },
+    {
+      "id": 46,
+      "transaction_id": 36,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"completion_request\":{\"locator\":null,\"original_name\":null,\"media_type\":null}},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null}},\"after\":{\"exists\":true,\"values\":{\"completion_state\":3,\"completion_evidence_json\":{\"basis\":3,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"activity_id\":1,\"result_page_event_id\":39,\"stop_result_event_id\":27},\"size_bytes\":36}}}]}"
+    },
+    {
+      "id": 47,
+      "transaction_id": 37,
+      "event_type": 18,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"source_device_file_id\":null}},\"after\":{\"exists\":true,\"values\":{\"source_device_file_id\":2}}}]}"
+    },
+    {
+      "id": 48,
+      "transaction_id": 38,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"checksum_support\":1}},\"after\":{\"exists\":true,\"values\":{\"checksum_support\":2}}}]}"
+    },
+    {
+      "id": 49,
+      "transaction_id": 39,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"owner_action_id\":1,\"owner_delivery_id\":null,\"purpose\":2,\"relative_path\":\"recording-inputs/1.osv\",\"retention_state\":1,\"cleanup_state\":1,\"size_bytes\":null,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 50,
+      "transaction_id": 39,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":4,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":1,\"delivery_id\":null,\"kind\":3,\"query_purpose\":null,\"responsibility_key\":\"read/1\",\"activity_id\":null,\"copy_id\":1,\"cleanup_item_id\":null,\"obtain_item_id\":null,\"session_key\":null,\"status\":1,\"attempts_used\":0,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"retry_wait_required\":0,\"error_json\":null}}}]}"
+    },
+    {
+      "id": 51,
+      "transaction_id": 39,
+      "event_type": 22,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"file_copies\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"delivery_id\":null,\"processing_id\":1,\"inspection_id\":null,\"source_device_file_id\":2,\"source_intermediate_file_id\":null,\"target_file_id\":1,\"round\":1,\"recopies_used\":0,\"max_recopies_used\":0,\"source_size\":4384,\"source_sha256\":null,\"committed_bytes\":0,\"reset_state\":1,\"slot_device_id\":null,\"verification_state\":1,\"target_sha256\":null,\"verification_error_json\":null}}}]}"
+    },
+    {
+      "id": 52,
+      "transaction_id": 40,
+      "event_type": 22,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":6,\"evidence\":{},\"rows\":[{\"table\":\"file_copies\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"slot_device_id\":null}},\"after\":{\"exists\":true,\"values\":{\"slot_device_id\":\"osmo\"}}}]}"
+    },
+    {
+      "id": 53,
+      "transaction_id": 41,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":4,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":4,\"attempt_no\":1,\"copy_round\":1,\"status\":1,\"intent_event_id\":53,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":3,\"timeout_s_json\":10,\"retry_interval_s_json\":3,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"attempts_used\":0}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"attempts_used\":1}}}]}"
+    },
+    {
+      "id": 54,
+      "transaction_id": 42,
+      "event_type": 22,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"file_copies\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"committed_bytes\":0}},\"after\":{\"exists\":true,\"values\":{\"committed_bytes\":4384}}}]}"
+    },
+    {
+      "id": 55,
+      "transaction_id": 43,
+      "event_type": 22,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"file_copies\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"verification_state\":1,\"source_sha256\":null,\"target_sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"verification_state\":3,\"source_sha256\":\"26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e\",\"target_sha256\":\"26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e\"}}}]}"
+    },
+    {
+      "id": 56,
+      "transaction_id": 44,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"size_bytes\":4384,\"sha256\":\"26edec9b315408fe41a80111a4442e3becd5db84069e5ee9abe0648e7207824e\"}}}]}"
+    },
+    {
+      "id": 57,
+      "transaction_id": 45,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"result_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"result_event_id\":57,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}}}}]}"
+    },
+    {
+      "id": 58,
+      "transaction_id": 45,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":4,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 59,
+      "transaction_id": 46,
+      "event_type": 22,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":6,\"evidence\":{},\"rows\":[{\"table\":\"file_copies\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"slot_device_id\":\"osmo\"}},\"after\":{\"exists\":true,\"values\":{\"slot_device_id\":null}}}]}"
+    },
+    {
+      "id": 60,
+      "transaction_id": 47,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"owner_action_id\":1,\"owner_delivery_id\":null,\"purpose\":4,\"relative_path\":\"derived/2.mp4\",\"retention_state\":1,\"cleanup_state\":1,\"size_bytes\":null,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 61,
+      "transaction_id": 47,
+      "event_type": 19,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 10,
+      "body_json": "{\"reason\":2,\"evidence\":{\"source_probe\":{\"duration_s\":3.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":64,\"height\":64,\"duration_s\":3.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10},{\"index\":1,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":64,\"height\":64,\"duration_s\":3.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]}},\"rows\":[{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"repair_state\":3}},\"after\":{\"exists\":true,\"values\":{\"repair_state\":4}}}]}"
+    },
+    {
+      "id": 62,
+      "transaction_id": 48,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"effect_state\":1,\"result_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"result_event_id\":62,\"effect_state\":3,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"result_returned\",\"version\":1,\"data\":{\"file_completion\":{\"method\":\"stop_return_and_wait\",\"version\":1,\"activity_id\":\"1\",\"stop_result_event_id\":27,\"required_wait_ms\":30000,\"observed_wait_ns\":30019181165,\"completed\":true},\"file_completion_source_page_event_id\":null,\"calls\":[{\"kind\":\"directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"preview_metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"}],\"call_count\":4,\"optional_preview_observations\":[{\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"state\":\"paired\",\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]},{\"original_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"state\":\"paired\",\"preview_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"osv_count\":1,\"lrf_count\":1,\"size_bytes\":36,\"scan_complete\":true,\"observed_original_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"],\"observed_preview_identities\":[\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"]}]}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF\"},\"complete\":true,\"size_bytes\":36,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"paired_identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},{\"identity\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV\"},\"complete\":true,\"size_bytes\":4384,\"kind\":\"video\",\"format_id\":\"osv\",\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}}}}]}"
+    },
+    {
+      "id": 63,
+      "transaction_id": 48,
+      "event_type": 6,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"retry_wait_required\":0}},\"after\":{\"exists\":true,\"values\":{\"retry_wait_required\":1}}}]}"
+    },
+    {
+      "id": 64,
+      "transaction_id": 49,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":5,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":63,\"from_wm\":0,\"to_wm\":10,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 65,
+      "transaction_id": 50,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":586,\"sha256\":\"a1e827ed1336c655ebe84ba32fe79816dae953f04c7dcac39bceecc7f042d54c\"}}}]}"
+    },
+    {
+      "id": 66,
+      "transaction_id": 51,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 67,
+      "transaction_id": 52,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":67}}}]}"
+    },
+    {
+      "id": 68,
+      "transaction_id": 53,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"size_bytes\":3252,\"sha256\":\"cc7e186b24ef445731c713313f233ed2df01a067cdde7b519b6f0925d6135e94\"}}}]}"
+    },
+    {
+      "id": 69,
+      "transaction_id": 53,
+      "event_type": 19,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 11,
+      "body_json": "{\"reason\":2,\"evidence\":{\"output_probe\":{\"duration_s\":1.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":64,\"height\":64,\"duration_s\":1.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10},{\"index\":1,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":64,\"height\":64,\"duration_s\":1.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]}},\"rows\":[{\"table\":\"recording_processing\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"repair_state\":4,\"repair_output_file_id\":null}},\"after\":{\"exists\":true,\"values\":{\"repair_state\":5,\"repair_output_file_id\":2}}}]}"
+    },
+    {
+      "id": 70,
+      "transaction_id": 54,
+      "event_type": 16,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{\"attempt_id\":3,\"result_page_event_id\":39},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"output_set_finalized_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"output_set_finalized_event_id\":70}}}]}"
+    },
+    {
+      "id": 71,
+      "transaction_id": 55,
+      "event_type": 13,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"device_activities\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"occupancy_state\":1}},\"after\":{\"exists\":true,\"values\":{\"occupancy_state\":2}}}]}"
+    },
+    {
+      "id": 72,
+      "transaction_id": 56,
+      "event_type": 8,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 12,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 73,
+      "transaction_id": 56,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 13,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"kind\":1,\"device_file_id\":2,\"intermediate_file_id\":null,\"original_name\":\"VID_0001.OSV\",\"media_type\":null,\"availability\":1,\"cleanup_status\":1,\"cleanup_error_json\":null,\"media_json\":{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}},\"error_json\":null}}}]}"
+    },
+    {
+      "id": 74,
+      "transaction_id": 56,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 14,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"kind\":3,\"device_file_id\":1,\"intermediate_file_id\":null,\"original_name\":\"VID_0001.LRF\",\"media_type\":null,\"availability\":1,\"cleanup_status\":1,\"cleanup_error_json\":null,\"media_json\":{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}},\"error_json\":null}}},{\"table\":\"output_origins\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"output_id\":1,\"original_output_id\":2}}}]}"
+    },
+    {
+      "id": 75,
+      "transaction_id": 56,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 15,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"kind\":2,\"device_file_id\":null,\"intermediate_file_id\":2,\"original_name\":\"VID_0001.mp4\",\"media_type\":\"video/mp4\",\"availability\":1,\"cleanup_status\":1,\"cleanup_error_json\":null,\"media_json\":{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}},\"error_json\":null}}},{\"table\":\"output_origins\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"output_id\":3,\"original_output_id\":2}}}]}"
+    },
+    {
+      "id": 76,
+      "transaction_id": 56,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"retention_state\":1}},\"after\":{\"exists\":true,\"values\":{\"retention_state\":3}}}]}"
+    },
+    {
+      "id": 77,
+      "transaction_id": 56,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": 16,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 78,
+      "transaction_id": 56,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"stale_run_request\":{\"kind\":\"stale_run_finish\",\"responsibility_keys\":[\"results/1\"],\"status\":3,\"error\":null}},\"rows\":[{\"table\":\"operation_runs\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":2,\"retry_wait_required\":1}},\"after\":{\"exists\":true,\"values\":{\"status\":3,\"retry_wait_required\":0}}}]}"
+    },
+    {
+      "id": 79,
+      "transaction_id": 57,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792893976000000,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":6,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":78,\"from_wm\":0,\"to_wm\":16,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 80,
+      "transaction_id": 58,
+      "event_type": 2,
+      "event_version": 1,
+      "occurred_at": 1792894020487786,
+      "clock_status": 1,
+      "change_seq": 17,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"plan_id\":2,\"input_index\":0,\"name\":\"cleanup-osv\",\"type\":5,\"device_id\":null,\"scheduled_at\":1792894017000000,\"group_name\":null,\"input_fields_json\":{\"params\":{\"output_ids\":[\"2\"]}},\"driver_id\":null,\"max_delay_ms\":null,\"target_selection_state\":1,\"execution_started\":0,\"cancel_requested\":0,\"first_window_observed_at\":null,\"expiration_reason\":null,\"status\":1,\"error_code\":null,\"error_details_json\":null,\"effective_params_json\":null,\"execution_spec_json\":{},\"source_resolution_state\":null,\"resolved_source_plan_id\":null}}}]}"
+    },
+    {
+      "id": 81,
+      "transaction_id": 58,
+      "event_type": 1,
+      "event_version": 1,
+      "occurred_at": 1792894020487786,
+      "clock_status": 1,
+      "change_seq": 18,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"request_id\":5398158251989497113,\"name\":\"cleanup-osv\",\"created_at\":1792894019000000,\"status\":1}}}]}"
+    },
+    {
+      "id": 82,
+      "transaction_id": 59,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792894020532220,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792893976000000,\"trusted_time_event_id\":22}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894020532220,\"trusted_time_event_id\":82}}}]}"
+    },
+    {
+      "id": 83,
+      "transaction_id": 60,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":1651,\"sha256\":\"de135585b4e6dd2310f6f8f2724a949772b837362c5a3f77aefb27b5e761dbec\"}}}]}"
+    },
+    {
+      "id": 84,
+      "transaction_id": 61,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 85,
+      "transaction_id": 62,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":85}}}]}"
+    },
+    {
+      "id": 86,
+      "transaction_id": 63,
+      "event_type": 5,
+      "event_version": 1,
+      "occurred_at": 1792894023017620,
+      "clock_status": 2,
+      "change_seq": 19,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"execution_started\":0}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"execution_started\":1}}}]}"
+    },
+    {
+      "id": 87,
+      "transaction_id": 63,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 1792894023017620,
+      "clock_status": 2,
+      "change_seq": 20,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":1}},\"after\":{\"exists\":true,\"values\":{\"status\":2}}}]}"
+    },
+    {
+      "id": 88,
+      "transaction_id": 64,
+      "event_type": 4,
+      "event_version": 1,
+      "occurred_at": 1792894023017620,
+      "clock_status": 2,
+      "change_seq": 21,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"target_selection_state\":1}},\"after\":{\"exists\":true,\"values\":{\"target_selection_state\":2}}},{\"table\":\"cleanup_items\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":2,\"requested_output_id\":2,\"output_id\":null,\"status\":1,\"restriction_state\":1,\"outcome\":null,\"final_event_id\":null,\"error_code\":null,\"error_details_json\":null}}}]}"
+    },
+    {
+      "id": 89,
+      "transaction_id": 65,
+      "event_type": 24,
+      "event_version": 1,
+      "occurred_at": 1792894023025201,
+      "clock_status": 2,
+      "change_seq": 22,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"cleanup_items\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"output_id\":null,\"status\":1,\"restriction_state\":1}},\"after\":{\"exists\":true,\"values\":{\"output_id\":2,\"status\":2,\"restriction_state\":2}}}]}"
+    },
+    {
+      "id": 90,
+      "transaction_id": 65,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792894023025201,
+      "clock_status": 2,
+      "change_seq": 23,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"availability\":1,\"cleanup_status\":1}},\"after\":{\"exists\":true,\"values\":{\"availability\":2,\"cleanup_status\":2}}}]}"
+    },
+    {
+      "id": 91,
+      "transaction_id": 66,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792894023037663,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":5,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":5,\"attempt_no\":1,\"copy_round\":null,\"status\":1,\"intent_event_id\":91,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":2,\"timeout_s_json\":7.125,\"retry_interval_s_json\":0.625,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":5,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":2,\"delivery_id\":null,\"kind\":4,\"query_purpose\":null,\"responsibility_key\":\"delete/1\",\"activity_id\":null,\"copy_id\":null,\"cleanup_item_id\":1,\"obtain_item_id\":null,\"session_key\":null,\"status\":2,\"attempts_used\":1,\"max_attempts_used\":2,\"timeout_s_json\":7.125,\"retry_interval_s_json\":0.625,\"retry_wait_required\":0,\"error_json\":null}}}]}"
+    },
+    {
+      "id": 92,
+      "transaction_id": 66,
+      "event_type": 24,
+      "event_version": 1,
+      "occurred_at": 1792894023037663,
+      "clock_status": 2,
+      "change_seq": 24,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"cleanup_items\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 93,
+      "transaction_id": 66,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792894023037663,
+      "clock_status": 2,
+      "change_seq": 25,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"cleanup_status\":2}},\"after\":{\"exists\":true,\"values\":{\"cleanup_status\":3}}}]}"
+    },
+    {
+      "id": 94,
+      "transaction_id": 67,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792894023057709,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"retention_state\":1,\"cleanup_state\":1}},\"after\":{\"exists\":true,\"values\":{\"retention_state\":2,\"cleanup_state\":2}}}]}"
+    },
+    {
+      "id": 95,
+      "transaction_id": 68,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792894023057709,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"intermediate_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"cleanup_state\":2}},\"after\":{\"exists\":true,\"values\":{\"cleanup_state\":3}}}]}"
+    },
+    {
+      "id": 96,
+      "transaction_id": 69,
+      "event_type": 26,
+      "event_version": 1,
+      "occurred_at": 1792894023057709,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{\"cleanup_request\":{\"advance_cursor\":true}},\"rows\":[{\"table\":\"intermediate_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"cleanup_state\":3}},\"after\":{\"exists\":true,\"values\":{\"cleanup_state\":4}}}]}"
+    },
+    {
+      "id": 97,
+      "transaction_id": 69,
+      "event_type": 32,
+      "event_version": 1,
+      "occurred_at": 1792894023057709,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"cleanup_cursor_file_id\":null}},\"after\":{\"exists\":true,\"values\":{\"cleanup_cursor_file_id\":1}}}]}"
+    },
+    {
+      "id": 98,
+      "transaction_id": 70,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792894023899675,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894020532220,\"trusted_time_event_id\":82}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894023899675,\"trusted_time_event_id\":98}}}]}"
+    },
+    {
+      "id": 99,
+      "transaction_id": 71,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792894023913246,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":7,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":98,\"from_wm\":0,\"to_wm\":25,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 100,
+      "transaction_id": 72,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":7,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":2022,\"sha256\":\"e073be860ef1283f1e3409d27e05bc420636a24187b12edbd05485b0b90a7a37\"}}}]}"
+    },
+    {
+      "id": 101,
+      "transaction_id": 73,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":7,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 102,
+      "transaction_id": 74,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":7,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":102}}}]}"
+    },
+    {
+      "id": 103,
+      "transaction_id": 75,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792894026128938,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"result_json\":null,\"error_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"result_event_id\":103,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"assumed\",\"evidence\":{\"type\":\"adb_foreground_recovery\",\"version\":1,\"data\":{}}},\"observations\":[]},\"error_json\":{\"code\":\"result_not_saved\",\"stage\":\"recovery\",\"details\":{}}}}}]}"
+    },
+    {
+      "id": 104,
+      "transaction_id": 75,
+      "event_type": 6,
+      "event_version": 1,
+      "occurred_at": 1792894026128938,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"retry_wait_required\":0}},\"after\":{\"exists\":true,\"values\":{\"retry_wait_required\":1}}}]}"
+    },
+    {
+      "id": 105,
+      "transaction_id": 75,
+      "event_type": 24,
+      "event_version": 1,
+      "occurred_at": 1792894026128938,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"cleanup_items\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"restriction_state\":2}},\"after\":{\"exists\":true,\"values\":{\"restriction_state\":4}}}]}"
+    },
+    {
+      "id": 106,
+      "transaction_id": 76,
+      "event_type": 11,
+      "event_version": 1,
+      "occurred_at": 1792894026178993,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":6,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"run_id\":6,\"attempt_no\":1,\"copy_round\":null,\"status\":1,\"intent_event_id\":106,\"result_event_id\":null,\"result_first_page_event_id\":null,\"result_last_page_event_id\":null,\"max_attempts_used\":1,\"timeout_s_json\":11.5,\"retry_interval_s_json\":0,\"effect_state\":1,\"result_json\":null,\"error_json\":null}}},{\"table\":\"operation_runs\",\"id\":6,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":2,\"delivery_id\":null,\"kind\":5,\"query_purpose\":null,\"responsibility_key\":\"exists/1\",\"activity_id\":null,\"copy_id\":null,\"cleanup_item_id\":1,\"obtain_item_id\":null,\"session_key\":null,\"status\":2,\"attempts_used\":1,\"max_attempts_used\":1,\"timeout_s_json\":11.5,\"retry_interval_s_json\":0,\"retry_wait_required\":0,\"error_json\":null}}}]}"
+    },
+    {
+      "id": 107,
+      "transaction_id": 77,
+      "event_type": 12,
+      "event_version": 1,
+      "occurred_at": 1792894026312771,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"operation_attempts\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"result_event_id\":null,\"result_json\":null,\"error_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":3,\"result_event_id\":107,\"result_json\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"query_returned\",\"version\":1,\"data\":{}}},\"observations\":[],\"call_info\":{\"local_exit\":{\"exit_code\":1}}},\"error_json\":{\"code\":\"adb_file_query_failed\",\"stage\":\"device_file_access\",\"details\":{\"scan_exit_code\":1,\"reason\":\"unknown\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":1,\"local_signal\":null}}}}}]}"
+    },
+    {
+      "id": 108,
+      "transaction_id": 77,
+      "event_type": 6,
+      "event_version": 1,
+      "occurred_at": 1792894026312771,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"operation_runs\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"retry_wait_required\":0}},\"after\":{\"exists\":true,\"values\":{\"retry_wait_required\":1}}}]}"
+    },
+    {
+      "id": 109,
+      "transaction_id": 78,
+      "event_type": 24,
+      "event_version": 1,
+      "occurred_at": 1792894026368522,
+      "clock_status": 2,
+      "change_seq": 26,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"cleanup_items\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"final_event_id\":null,\"error_code\":null,\"error_details_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":5,\"final_event_id\":109,\"error_code\":3,\"error_details_json\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}}]}"
+    },
+    {
+      "id": 110,
+      "transaction_id": 78,
+      "event_type": 20,
+      "event_version": 1,
+      "occurred_at": 1792894026368522,
+      "clock_status": 2,
+      "change_seq": 27,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"outputs\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"cleanup_status\":3,\"cleanup_error_json\":null}},\"after\":{\"exists\":true,\"values\":{\"cleanup_status\":5,\"cleanup_error_json\":{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"cleanup\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}}}]}"
+    },
+    {
+      "id": 111,
+      "transaction_id": 79,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792894026640028,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"stale_run_request\":{\"kind\":\"stale_run_finish\",\"responsibility_keys\":[\"delete/1\",\"exists/1\"],\"status\":4,\"error\":{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}},\"rows\":[{\"table\":\"operation_runs\",\"id\":5,\"before\":{\"exists\":true,\"values\":{\"status\":2,\"retry_wait_required\":1,\"error_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"retry_wait_required\":0,\"error_json\":{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}}}]}"
+    },
+    {
+      "id": 112,
+      "transaction_id": 79,
+      "event_type": 10,
+      "event_version": 1,
+      "occurred_at": 1792894026640028,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"stale_run_request\":{\"kind\":\"stale_run_finish\",\"responsibility_keys\":[\"delete/1\",\"exists/1\"],\"status\":4,\"error\":{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}},\"rows\":[{\"table\":\"operation_runs\",\"id\":6,\"before\":{\"exists\":true,\"values\":{\"status\":2,\"retry_wait_required\":1,\"error_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"retry_wait_required\":0,\"error_json\":{\"code\":\"file_query_attempts_exhausted\",\"stage\":\"query\",\"details\":{\"output_id\":\"2\",\"max_attempts\":1,\"attempts_used\":1}}}}}]}"
+    },
+    {
+      "id": 113,
+      "transaction_id": 80,
+      "event_type": 8,
+      "event_version": 1,
+      "occurred_at": 1792894026350413,
+      "clock_status": 2,
+      "change_seq": 28,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":2,\"error_code\":null,\"error_details_json\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"error_code\":22,\"error_details_json\":{}}}}]}"
+    },
+    {
+      "id": 114,
+      "transaction_id": 80,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 1792894026350413,
+      "clock_status": 2,
+      "change_seq": 29,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 115,
+      "transaction_id": 81,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792894027332386,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894023899675,\"trusted_time_event_id\":98}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894027332386,\"trusted_time_event_id\":115}}}]}"
+    },
+    {
+      "id": 116,
+      "transaction_id": 82,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792894027346865,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":8,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":115,\"from_wm\":0,\"to_wm\":29,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 117,
+      "transaction_id": 83,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":8,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":2358,\"sha256\":\"318242ce6f6f4887b9513f3880b6192171176cc426f6f086058b3573cb1884c1\"}}}]}"
+    },
+    {
+      "id": 118,
+      "transaction_id": 84,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":8,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 119,
+      "transaction_id": 85,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":8,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":119}}}]}"
+    },
+    {
+      "id": 120,
+      "transaction_id": 86,
+      "event_type": 2,
+      "event_version": 1,
+      "occurred_at": 1792894033233516,
+      "clock_status": 1,
+      "change_seq": 30,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"plan_id\":3,\"input_index\":0,\"name\":\"ack-and-new-facts\",\"type\":7,\"device_id\":null,\"scheduled_at\":1792894030000000,\"group_name\":null,\"input_fields_json\":{\"params\":{\"scope\":\"full\"}},\"driver_id\":null,\"max_delay_ms\":null,\"target_selection_state\":null,\"execution_started\":0,\"cancel_requested\":0,\"first_window_observed_at\":null,\"expiration_reason\":null,\"status\":1,\"error_code\":null,\"error_details_json\":null,\"effective_params_json\":null,\"execution_spec_json\":{},\"source_resolution_state\":null,\"resolved_source_plan_id\":null}}}]}"
+    },
+    {
+      "id": 121,
+      "transaction_id": 86,
+      "event_type": 1,
+      "event_version": 1,
+      "occurred_at": 1792894033233516,
+      "clock_status": 1,
+      "change_seq": 31,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"request_id\":4374927488223534811,\"name\":\"ack-and-new-facts\",\"created_at\":1792894032000000,\"status\":1}}}]}"
+    },
+    {
+      "id": 122,
+      "transaction_id": 86,
+      "event_type": 30,
+      "event_version": 1,
+      "occurred_at": 1792894033233516,
+      "clock_status": 1,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"acknowledged_wm\":0,\"acknowledged_report_id\":null}},\"after\":{\"exists\":true,\"values\":{\"acknowledged_wm\":29,\"acknowledged_report_id\":8}}}]}"
+    },
+    {
+      "id": 123,
+      "transaction_id": 87,
+      "event_type": 31,
+      "event_version": 1,
+      "occurred_at": 1792894034428509,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"runtime_state\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894027332386,\"trusted_time_event_id\":115}},\"after\":{\"exists\":true,\"values\":{\"trusted_time_lower_bound\":1792894034428509,\"trusted_time_event_id\":123}}}]}"
+    },
+    {
+      "id": 124,
+      "transaction_id": 88,
+      "event_type": 5,
+      "event_version": 1,
+      "occurred_at": 1792894034443576,
+      "clock_status": 2,
+      "change_seq": 32,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"execution_started\":0}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"execution_started\":1}}}]}"
+    },
+    {
+      "id": 125,
+      "transaction_id": 88,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 1792894034443576,
+      "clock_status": 2,
+      "change_seq": 33,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":1}},\"after\":{\"exists\":true,\"values\":{\"status\":2}}}]}"
+    },
+    {
+      "id": 126,
+      "transaction_id": 88,
+      "event_type": 29,
+      "event_version": 1,
+      "occurred_at": 1792894034443576,
+      "clock_status": 2,
+      "change_seq": 34,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"state_syncs\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"action_id\":3,\"mode\":1,\"after_report_id\":null,\"from_wm\":0,\"started_boundary_event_id\":126,\"status\":1,\"local_report_id\":null,\"ack_report_id\":null,\"ended_event_id\":null}}}]}"
+    },
+    {
+      "id": 127,
+      "transaction_id": 89,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 1792894034443576,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":9,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"frozen_event_id\":126,\"from_wm\":0,\"to_wm\":34,\"format_version\":1,\"status\":1,\"size_bytes\":null,\"sha256\":null,\"publication_count\":0,\"last_published_event_id\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 128,
+      "transaction_id": 90,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":9,\"before\":{\"exists\":true,\"values\":{\"status\":1,\"size_bytes\":null,\"sha256\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":2,\"size_bytes\":2676,\"sha256\":\"2aa5f9d13c12517a6c1e93b08d010df53523a9b1a2023b3894ee6e6c9d69e6f4\"}}}]}"
+    },
+    {
+      "id": 129,
+      "transaction_id": 91,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":9,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 130,
+      "transaction_id": 92,
+      "event_type": 28,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":4,\"evidence\":{},\"rows\":[{\"table\":\"reports\",\"id\":9,\"before\":{\"exists\":true,\"values\":{\"status\":3,\"publication_count\":0,\"last_published_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"status\":4,\"publication_count\":1,\"last_published_event_id\":130}}}]}"
+    },
+    {
+      "id": 131,
+      "transaction_id": 93,
+      "event_type": 29,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": 35,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"state_syncs\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"local_report_id\":null}},\"after\":{\"exists\":true,\"values\":{\"local_report_id\":9}}}]}"
+    },
+    {
+      "id": 132,
+      "transaction_id": 93,
+      "event_type": 8,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": 36,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"actions\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    },
+    {
+      "id": 133,
+      "transaction_id": 93,
+      "event_type": 9,
+      "event_version": 1,
+      "occurred_at": 0,
+      "clock_status": 2,
+      "change_seq": 37,
+      "body_json": "{\"reason\":2,\"evidence\":{},\"rows\":[{\"table\":\"plans\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"status\":2}},\"after\":{\"exists\":true,\"values\":{\"status\":3}}}]}"
+    }
+  ],
+  "history_transactions": [
+    {
+      "id": 1,
+      "operation_key": "19abada121e88be1063bbb530db2f16e",
+      "first_event_id": 1,
+      "last_event_id": 2
+    },
+    {
+      "id": 2,
+      "operation_key": "4b540540f41350c897335c258d2a57a6",
+      "first_event_id": 3,
+      "last_event_id": 3
+    },
+    {
+      "id": 3,
+      "operation_key": "b1b7cb66ea6768b510ce4ad257d838cf",
+      "first_event_id": 4,
+      "last_event_id": 4
+    },
+    {
+      "id": 4,
+      "operation_key": "91899482bd6beffb406b0d03579e7e58",
+      "first_event_id": 5,
+      "last_event_id": 5
+    },
+    {
+      "id": 5,
+      "operation_key": "987f584c9f3e631c0ab01c4f4d1ae71a",
+      "first_event_id": 6,
+      "last_event_id": 6
+    },
+    {
+      "id": 6,
+      "operation_key": "a9544780beac5b9fd3bd6b9f4b7398b2",
+      "first_event_id": 7,
+      "last_event_id": 7
+    },
+    {
+      "id": 7,
+      "operation_key": "e58d265b7a2576678aec3ed0d1e26be8",
+      "first_event_id": 8,
+      "last_event_id": 8
+    },
+    {
+      "id": 8,
+      "operation_key": "add1e8d1675e66edf7e379b1c9327b80",
+      "first_event_id": 9,
+      "last_event_id": 11
+    },
+    {
+      "id": 9,
+      "operation_key": "ab12bddcfe5cd4ed402fe1a29d1694b0",
+      "first_event_id": 12,
+      "last_event_id": 12
+    },
+    {
+      "id": 10,
+      "operation_key": "f063244707f3838667f9ad70f4097c65",
+      "first_event_id": 13,
+      "last_event_id": 13
+    },
+    {
+      "id": 11,
+      "operation_key": "34ab7d851792b7487c839a8d1f5f8b3c",
+      "first_event_id": 14,
+      "last_event_id": 14
+    },
+    {
+      "id": 12,
+      "operation_key": "0fe45c7eb7520981eab3452d5b266b43",
+      "first_event_id": 15,
+      "last_event_id": 15
+    },
+    {
+      "id": 13,
+      "operation_key": "effeb412b503552abfbf40bbf8b4974f",
+      "first_event_id": 16,
+      "last_event_id": 16
+    },
+    {
+      "id": 14,
+      "operation_key": "f474a311fd644db9d35862120e6d7804",
+      "first_event_id": 17,
+      "last_event_id": 17
+    },
+    {
+      "id": 15,
+      "operation_key": "751ea15f781727522dcf888966be4577",
+      "first_event_id": 18,
+      "last_event_id": 20
+    },
+    {
+      "id": 16,
+      "operation_key": "fffba408f2c60c571f807a88c89a1987",
+      "first_event_id": 21,
+      "last_event_id": 21
+    },
+    {
+      "id": 17,
+      "operation_key": "2d32a02fd3a7db7dd4e56b0115fb6555",
+      "first_event_id": 22,
+      "last_event_id": 22
+    },
+    {
+      "id": 18,
+      "operation_key": "c238700466db99cac887241d370f763a",
+      "first_event_id": 23,
+      "last_event_id": 23
+    },
+    {
+      "id": 19,
+      "operation_key": "044e86ec260ee3b314fd6ea95cd61c83",
+      "first_event_id": 24,
+      "last_event_id": 24
+    },
+    {
+      "id": 20,
+      "operation_key": "c05905152df1a89b9a9fe2fe4ac6140f",
+      "first_event_id": 25,
+      "last_event_id": 25
+    },
+    {
+      "id": 21,
+      "operation_key": "829a1f01cd3adbe24ece04f278630823",
+      "first_event_id": 26,
+      "last_event_id": 26
+    },
+    {
+      "id": 22,
+      "operation_key": "8b00ea3c24bf42489755247a005aa79f",
+      "first_event_id": 27,
+      "last_event_id": 29
+    },
+    {
+      "id": 23,
+      "operation_key": "75892238c503bdedc91ac201cd8a0b37",
+      "first_event_id": 30,
+      "last_event_id": 30
+    },
+    {
+      "id": 24,
+      "operation_key": "605823987eb8711629d98da8474400c9",
+      "first_event_id": 31,
+      "last_event_id": 31
+    },
+    {
+      "id": 25,
+      "operation_key": "d1afb6c8322ebb5c427a72078feebc78",
+      "first_event_id": 32,
+      "last_event_id": 32
+    },
+    {
+      "id": 26,
+      "operation_key": "ebb8dbf702d09af18c1470f14181fe64",
+      "first_event_id": 33,
+      "last_event_id": 33
+    },
+    {
+      "id": 27,
+      "operation_key": "c4b13a02f61ff9998d1a5ceb4961cea5",
+      "first_event_id": 34,
+      "last_event_id": 34
+    },
+    {
+      "id": 28,
+      "operation_key": "e8f8e89aeb366a2a5ec2472bafe5a82b",
+      "first_event_id": 35,
+      "last_event_id": 35
+    },
+    {
+      "id": 29,
+      "operation_key": "8a20c8fb8e2694b218065980b378753d",
+      "first_event_id": 36,
+      "last_event_id": 36
+    },
+    {
+      "id": 30,
+      "operation_key": "cc0a7a45e33e217713730b8dc4c8f7f0",
+      "first_event_id": 37,
+      "last_event_id": 40
+    },
+    {
+      "id": 31,
+      "operation_key": "70f3cb81d8df08c2bdce711b6681c651",
+      "first_event_id": 41,
+      "last_event_id": 41
+    },
+    {
+      "id": 32,
+      "operation_key": "9f6596bcae3cb59d1cd2fc28af611f65",
+      "first_event_id": 42,
+      "last_event_id": 42
+    },
+    {
+      "id": 33,
+      "operation_key": "39ff94e951db453bff18c46c706d64f7",
+      "first_event_id": 43,
+      "last_event_id": 43
+    },
+    {
+      "id": 34,
+      "operation_key": "7de4bc88ba35e4424ff754d7c03dbdfb",
+      "first_event_id": 44,
+      "last_event_id": 44
+    },
+    {
+      "id": 35,
+      "operation_key": "96c804f29eb652098127f7f70c4c1a6c",
+      "first_event_id": 45,
+      "last_event_id": 45
+    },
+    {
+      "id": 36,
+      "operation_key": "eecd5b1cc2891ed982e1bb6fd32677b1",
+      "first_event_id": 46,
+      "last_event_id": 46
+    },
+    {
+      "id": 37,
+      "operation_key": "d85a44e6a830d5a6cc69b6e12f8a79d8",
+      "first_event_id": 47,
+      "last_event_id": 47
+    },
+    {
+      "id": 38,
+      "operation_key": "6c47474b28699a9a05dfa0fdf92f05f5",
+      "first_event_id": 48,
+      "last_event_id": 48
+    },
+    {
+      "id": 39,
+      "operation_key": "a45536342ddbebc470f21d47df9c249b",
+      "first_event_id": 49,
+      "last_event_id": 51
+    },
+    {
+      "id": 40,
+      "operation_key": "f4d4007ab1dcc7ac3352ba1a54bad8fc",
+      "first_event_id": 52,
+      "last_event_id": 52
+    },
+    {
+      "id": 41,
+      "operation_key": "2744c9e2c625f2a9984880b4c558b59f",
+      "first_event_id": 53,
+      "last_event_id": 53
+    },
+    {
+      "id": 42,
+      "operation_key": "b06fc4248958d71cc634fb63f6e7ab39",
+      "first_event_id": 54,
+      "last_event_id": 54
+    },
+    {
+      "id": 43,
+      "operation_key": "2384cfae0e92aa8a542fcbc07f23bb45",
+      "first_event_id": 55,
+      "last_event_id": 55
+    },
+    {
+      "id": 44,
+      "operation_key": "01990e8c39ea6fb152b73dec8024a908",
+      "first_event_id": 56,
+      "last_event_id": 56
+    },
+    {
+      "id": 45,
+      "operation_key": "e5f711cffe20099c6537739fb08c7413",
+      "first_event_id": 57,
+      "last_event_id": 58
+    },
+    {
+      "id": 46,
+      "operation_key": "4632674a497952d20873c4846d76cc06",
+      "first_event_id": 59,
+      "last_event_id": 59
+    },
+    {
+      "id": 47,
+      "operation_key": "047fa7f35c852fdf4cb9d8b17e2276b5",
+      "first_event_id": 60,
+      "last_event_id": 61
+    },
+    {
+      "id": 48,
+      "operation_key": "309634200a829e6acacd4829dd6d9a57",
+      "first_event_id": 62,
+      "last_event_id": 63
+    },
+    {
+      "id": 49,
+      "operation_key": "1a288bbd64e91d63c5545f6ecfa07cc4",
+      "first_event_id": 64,
+      "last_event_id": 64
+    },
+    {
+      "id": 50,
+      "operation_key": "acda298b45237467664640543cffea84",
+      "first_event_id": 65,
+      "last_event_id": 65
+    },
+    {
+      "id": 51,
+      "operation_key": "70d4918d5729913d0b9af41203b43fe4",
+      "first_event_id": 66,
+      "last_event_id": 66
+    },
+    {
+      "id": 52,
+      "operation_key": "2ad01a90148d4d6233b163908027d8a4",
+      "first_event_id": 67,
+      "last_event_id": 67
+    },
+    {
+      "id": 53,
+      "operation_key": "3e9533de0218f9efc04eaf1991fa7391",
+      "first_event_id": 68,
+      "last_event_id": 69
+    },
+    {
+      "id": 54,
+      "operation_key": "dae201c666b0db0a846ac85587e83eb6",
+      "first_event_id": 70,
+      "last_event_id": 70
+    },
+    {
+      "id": 55,
+      "operation_key": "c0997ce7b60645a31cdb6e73baf680ae",
+      "first_event_id": 71,
+      "last_event_id": 71
+    },
+    {
+      "id": 56,
+      "operation_key": "01af6c979724d74655be92508866c45e",
+      "first_event_id": 72,
+      "last_event_id": 78
+    },
+    {
+      "id": 57,
+      "operation_key": "ec2ba06fb7235128567f5e5df85fb8c5",
+      "first_event_id": 79,
+      "last_event_id": 79
+    },
+    {
+      "id": 58,
+      "operation_key": "5ce9fb96e04d84b45abab1f7716d1827",
+      "first_event_id": 80,
+      "last_event_id": 81
+    },
+    {
+      "id": 59,
+      "operation_key": "447a0a41df6a8434bcd45a34edfe6735",
+      "first_event_id": 82,
+      "last_event_id": 82
+    },
+    {
+      "id": 60,
+      "operation_key": "3f801d17217923d04698161d57ed15d9",
+      "first_event_id": 83,
+      "last_event_id": 83
+    },
+    {
+      "id": 61,
+      "operation_key": "9d6b61ae5ac90a8e488c40c8b55f4f87",
+      "first_event_id": 84,
+      "last_event_id": 84
+    },
+    {
+      "id": 62,
+      "operation_key": "c674055e24b6781b713765772e2d8e4b",
+      "first_event_id": 85,
+      "last_event_id": 85
+    },
+    {
+      "id": 63,
+      "operation_key": "f63a91e18235d3c1fb11e0fae1a5c1ce",
+      "first_event_id": 86,
+      "last_event_id": 87
+    },
+    {
+      "id": 64,
+      "operation_key": "cab0048121d364ceb9db20193b9c6337",
+      "first_event_id": 88,
+      "last_event_id": 88
+    },
+    {
+      "id": 65,
+      "operation_key": "edf5937fd42387dc5a793f49933dd340",
+      "first_event_id": 89,
+      "last_event_id": 90
+    },
+    {
+      "id": 66,
+      "operation_key": "513f699dcbcd34a6d6346d987edc683f",
+      "first_event_id": 91,
+      "last_event_id": 93
+    },
+    {
+      "id": 67,
+      "operation_key": "b8328efd6f62c0c3b55db9a55c657125",
+      "first_event_id": 94,
+      "last_event_id": 94
+    },
+    {
+      "id": 68,
+      "operation_key": "b838dfd6d2ecebdb195d67fe82193de6",
+      "first_event_id": 95,
+      "last_event_id": 95
+    },
+    {
+      "id": 69,
+      "operation_key": "1e43f96f4a18408367ab8b2c4030ba42",
+      "first_event_id": 96,
+      "last_event_id": 97
+    },
+    {
+      "id": 70,
+      "operation_key": "09156adbb621f71e8880eadae4d80db5",
+      "first_event_id": 98,
+      "last_event_id": 98
+    },
+    {
+      "id": 71,
+      "operation_key": "7a949fbc715aed09129cdab20217c377",
+      "first_event_id": 99,
+      "last_event_id": 99
+    },
+    {
+      "id": 72,
+      "operation_key": "be9ffc11dca2339a1aff5c936054c5e7",
+      "first_event_id": 100,
+      "last_event_id": 100
+    },
+    {
+      "id": 73,
+      "operation_key": "f69d2f09c9f77f6fc7b51a11a9fe7c3e",
+      "first_event_id": 101,
+      "last_event_id": 101
+    },
+    {
+      "id": 74,
+      "operation_key": "e44aa0f2cc464eaff9778b48abf6d562",
+      "first_event_id": 102,
+      "last_event_id": 102
+    },
+    {
+      "id": 75,
+      "operation_key": "f29d788ad680e121bfc57745e6c650c1",
+      "first_event_id": 103,
+      "last_event_id": 105
+    },
+    {
+      "id": 76,
+      "operation_key": "943f060b2970a2900b0338227c8f3789",
+      "first_event_id": 106,
+      "last_event_id": 106
+    },
+    {
+      "id": 77,
+      "operation_key": "6c200ad4186517bd57930b835e39343f",
+      "first_event_id": 107,
+      "last_event_id": 108
+    },
+    {
+      "id": 78,
+      "operation_key": "44562ede4bb513f3f781a7300293dfbd",
+      "first_event_id": 109,
+      "last_event_id": 110
+    },
+    {
+      "id": 79,
+      "operation_key": "df9d2b741e18433376ee61e04402a6d5",
+      "first_event_id": 111,
+      "last_event_id": 112
+    },
+    {
+      "id": 80,
+      "operation_key": "68e9649fcd725122269c838e52c5a04c",
+      "first_event_id": 113,
+      "last_event_id": 114
+    },
+    {
+      "id": 81,
+      "operation_key": "575eabfbc12d8d93d82d3ac8bc407675",
+      "first_event_id": 115,
+      "last_event_id": 115
+    },
+    {
+      "id": 82,
+      "operation_key": "0d217c323961e7f7d7763a3916b89002",
+      "first_event_id": 116,
+      "last_event_id": 116
+    },
+    {
+      "id": 83,
+      "operation_key": "96a9d1a3571bce2988f9e8fcab19dde8",
+      "first_event_id": 117,
+      "last_event_id": 117
+    },
+    {
+      "id": 84,
+      "operation_key": "22e40ca860dc2cf150884cac50615cd6",
+      "first_event_id": 118,
+      "last_event_id": 118
+    },
+    {
+      "id": 85,
+      "operation_key": "8b1e972c5c12b34e75afa872189d03fd",
+      "first_event_id": 119,
+      "last_event_id": 119
+    },
+    {
+      "id": 86,
+      "operation_key": "4e2079358f917dcb52919c92b7c31f15",
+      "first_event_id": 120,
+      "last_event_id": 122
+    },
+    {
+      "id": 87,
+      "operation_key": "69813d7eca57df31013b227fbd554f02",
+      "first_event_id": 123,
+      "last_event_id": 123
+    },
+    {
+      "id": 88,
+      "operation_key": "c35d7a7370cf02e544be6b7bb2b290df",
+      "first_event_id": 124,
+      "last_event_id": 126
+    },
+    {
+      "id": 89,
+      "operation_key": "e53477731dcfaefd2897551fee4d4774",
+      "first_event_id": 127,
+      "last_event_id": 127
+    },
+    {
+      "id": 90,
+      "operation_key": "cfde9d0656840d1cb7ee7cc202148554",
+      "first_event_id": 128,
+      "last_event_id": 128
+    },
+    {
+      "id": 91,
+      "operation_key": "3e8c085ab86b1d167114626f2d903c3f",
+      "first_event_id": 129,
+      "last_event_id": 129
+    },
+    {
+      "id": 92,
+      "operation_key": "1f25cbe839c2a115774fecbb1f2e2f4a",
+      "first_event_id": 130,
+      "last_event_id": 130
+    },
+    {
+      "id": 93,
+      "operation_key": "d67eb96e66c1ddbe1da98eda409a4336",
+      "first_event_id": 131,
+      "last_event_id": 133
+    }
+  ]
+}

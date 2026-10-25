@@ -2,6 +2,14 @@
 
 本目录用于客户端、camctl CLI 和 C 接入模块之间的真实协作验证。终端演示使用同一模块；组件内部测试放在各自目录，目前客户端测试入口为 `apps/client/tests`。
 
+完整跨组件回归可以使用[隔离并行入口](../../scripts/README.md#隔离并行集成测试)：`--scope root` 从实际源码发现全部根 pytest 模块，`--scope node` 发现全部 Node 集成文件，默认 `--scope all` 同时包含这两层与 camctl 组件目录。没有历史失败的短模块保持一个进程与一次模块／会话准备；历史长模块或含失败的模块按当前真实收集结果分片，各片拥有独立准备，完整 Hasselblad 十二组正常链不被筛掉。`--target` 可选文件或 pytest nodeid，适合定向验证。
+
+直接运行本目录的测试时，客户端构建可能改写当前工作区的 `apps/client/dist`，wheel 构建会同步 camctl 包资源，因而不能仅凭 pytest 临时目录不同就并发使用同一源码。并行入口为每个任务准备独立源码、临时根和安装环境，为每个执行槽复制独立 uv 缓存与客户端依赖；同一槽内顺序复用依赖。C 构建使用现有辅助中的随机唯一目录或任务临时目录。依赖、Chromium、媒体工具与部署版 Python 3.11 仍须事先准备，入口不连接真实设备。命令、资源边界、进度和失败回执的完整说明由上述入口文档统一维护。
+
+部分成功与恢复场景通过 [Deployment](camctl_fixtures.py) 显式启用 `controlled_clock=True`，复用既有受控业务时钟端口。每个世界保存独立 UTC／单调钟状态与读数日志；init、submit、run 及该世界的 C launcher 使用同一状态，默认场景继续使用原真实时钟。`schedule` 从当前业务时间选时，`freeze_at` 将两个读数按同一差量单调向前移动；真实 START 或原在途门闩已保存后，`resume_clock` 从同一对读数恢复按真实经过时间推进。`pause_clock` 只在执行已停止或确已进入既定门闩时使用。
+
+该模式只把软件准备从业务窗口中分离，不写入虚构的启动事实，不增加 `max_delay_ms`，也不替换父进程、C 主程序或门闩的真实超时。受控桥在实际进入驱动门时保存端口和 PID，测试须核对当前进程身份；原中断点仍以各场景的已提交事实为准。真正未来等待、过期及驱动实际等待的专项保持原边界。切换状态的读者先读取完整状态，再采样实际单调时间，避免把旧采样与新 running 锚点组合。
+
 `test_device_capability_declarations.py` 在仓库外离线构建并安装 wheel 与锁定运行依赖，比较安装版和源码的正式能力导出，核对全部内置驱动、Hasselblad 两种正式源、同驱动的独立设备配置，以及任意驱动标识和无拍摄任务设备。真实 `init`、`submit` 与 SQLite 核对配置切换后旧执行定义保持，新请求使用新来源；同一份安装版 JSON 经根 Schema、wheel 资源、客户端实际加载、HTTP、参数表单和设备指南消费。Action6 普通录像表单读取实际必填光圈／码率，原生延时表单读取实际参数类型、三种输出和预览声明；Action6 的 `delete_supported=true`、Hasselblad 设备源的 `false` 也按安装版输出核对。非法删除声明的重载保留旧有效目录，旧说明缺字段仍为未知，有效空目录整体替换。设备工具边界禁止调用，不连接真实相机。
 
 页面联合链使用两份实际安装版导出验证当前源变更、逐设备指南及动作／产物清理入口。非法字段和重复键重载失败后仍按旧有效目录展示；首次加载失败与有效空目录按未知保留入口。混合来源、原片、预览、修复成品和产物状态分别核对，草稿及已导出原请求保持不变。
@@ -63,7 +71,9 @@ UV_PROJECT_ENVIRONMENT="$PWD/apps/camctl/.venv311" uv run --frozen --project app
 
 `test_device_file_cleanup_roundtrip.py` 从仓库外构建并独立安装 wheel，核对正式内置登记、DELETE／FILE_QUERY 工厂、端口及模块来源，经真实客户端导出、C host、CLI、SQLite、文件、报告导入及累计 ACK 验证已有独立动作 `delete_action_outputs`。该模块的 10 个分区覆盖 repaired／OSV／LRF／主机原图／主机预览逐份精确清理、不支持设备源与主机源混合、已清理产物的新请求，以及删除中断、独立预算、原配置保存、提交回执未知、终态伴随和在途取消恢复。外部 ADB 模型只识别已审阅的精确脚本及原目标，不替换生产文件工厂、解释器或状态机。
 
-正式修复样本含两路 H.264 主视频，源与成品均实际运行 ffprobe 和全流解码；STOP 后的 30 秒等待使用真实单调钟。每例独立数据库、远端树和进程组，保存原请求／票据／结果／文件及报告事实。取消分区在结束旧组前断言目标取消已提交、DELETE 仍 RUNNING、结果事件为空、门闩进程仍活动且未发 QUERY，再由新 host 沿原尝试恢复 UNKNOWN，只核实一次，不重放删除。
+正式修复样本含两路 H.264 主视频，源与成品均实际运行 ffprobe 和全流解码；STOP 后的 3 秒等待使用真实单调钟。每例独立数据库、远端树和进程组，保存原请求／票据／结果／文件及报告事实。取消分区在结束旧组前断言目标取消已提交、DELETE 仍 RUNNING、结果事件为空、门闩进程仍活动且未发 QUERY，再由新 host 沿原尝试恢复 UNKNOWN，只核实一次，不重放删除。
+
+使用 OSMO 来源的消费者在同一 pytest 分片内共享一次真实完成的拍摄准备。来源全部断言完成并停止旧进程后，测试保存完整只读目录基线；每个消费者在同一物理根路径恢复新的完整副本，再创建独立环境和进程。这样保留数据库中的绝对目录绑定，并隔离清理、取消及恢复的状态变化。两份 SQLite 备份包含已提交 WAL，恢复前逐库核对日志模式、文件头、页大小及完整内容；父测试进程的连接和已登记的世界进程须已收场。每例的完整变更目录先独立归档，随后才允许下一次恢复。来源证明保存在 `source-proof.json`，消费者的恢复与耗时回执为 `source-reuse.json`；来源准备次数取决于实际选中的分片，不是固定全局常数。
 
 此清理模块中的 OSMO 来源由测试入口显式声明 `result_policy=null` 和精确一份 OSV，并核对实际冻结值，继续验证单原片修复、修复成品与清理链。正式分段任务由下方独立模块验证。
 
@@ -104,7 +114,7 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_re
 
 `test_osmo_builtin_timelapse_roundtrip.py` 从源码目录外构建并安装当前 wheel 与锁定运行依赖，比较源码及安装版 `describe`，并核对安装 wheel 内的 OSMO 配置、普通录像和延时样例与权威资料逐字节一致。该模块共四个用例：一个源码／安装版能力与资源核对，以及三个业务组合——普通录像配 LRF、原生延时配 LRF、原生延时不配 LRF。
 
-业务链使用真实客户端计划导出、C host、安装版 CLI、SQLite、独立取回、报告导入及累计 ACK；只替换 PATH 中的 ADB 子进程边界和已声明的业务时钟入口。测试从整秒 UTC 与单调钟冻结值开始，让同一对读数供 ADB START 响应和保存 `sent_at` 使用；恢复阶段另设 epoch（时钟状态代次）并记录 CLI PID、实际读取的业务读数、真实单调时刻及已安装 `camctl.capture.handlers` 的调用位置。普通录像使用十秒目标与 0 毫秒启动余量，只发送一次 START；恢复进程在 `A+9/U+9` 决策点至少跨一个真实 0.5 秒轮询周期读取同一冻结值，期间不发送 STOP、不尝试结果核实、不生成结果页、文件或输出。测试随后在仍运行的同一进程中释放到 `A+10/U+10`，核对唯一正常 STOP；取得 `00` STOP 确认后，driver 仍使用真实单调钟实际等待完整 30 秒再读取文件。原生延时样例采用 2 秒间隔、300 秒设备目标和 0 毫秒启动余量，另保留 30 秒结果余量；测试先在 `A+329/U+329` 观察恢复决策持续读取且没有 STOP、结果列举、结果页、文件或输出，再于同一进程释放到 `A+330/U+330` 后核对结果核实。ADB 日志分别保存冻结业务 UTC／单调读数和真实进程单调时刻。对原片和可选预览分别取回后，测试通过 `client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>` 调用客户端真实 `Files.upload`；保存回执核对报告中的 delivery、output 与源动作身份，并将导入文件大小和 SHA-256 与对应交付事实比对。测试还验证取回中断及同一请求恢复时沿用原交付和已提交偏移。
+业务链使用真实客户端计划导出、C host、安装版 CLI、SQLite、独立取回、报告导入及累计 ACK；只替换 PATH 中的 ADB 子进程边界和已声明的业务时钟入口。测试从整秒 UTC 与单调钟冻结值开始，让同一对读数供 ADB START 响应和保存 `sent_at` 使用；恢复阶段另设 epoch（时钟状态代次）并记录 CLI PID、实际读取的业务读数、真实单调时刻及已安装 `camctl.capture.handlers` 的调用位置。普通录像使用十秒目标与 0 毫秒启动余量，只发送一次 START；恢复进程在 `A+9/U+9` 决策点至少跨一个真实 0.5 秒轮询周期读取同一冻结值，期间不发送 STOP、不尝试结果核实、不生成结果页、文件或输出。测试随后在仍运行的同一进程中释放到 `A+10/U+10`，核对唯一正常 STOP；取得 `00` STOP 确认后，driver 仍使用真实单调钟实际等待完整 3 秒再读取文件。原生延时样例采用 2 秒间隔、300 秒设备目标和 0 毫秒启动余量，另保留 30 秒结果余量；测试先在 `A+329/U+329` 观察恢复决策持续读取且没有 STOP、结果列举、结果页、文件或输出，再于同一进程释放到 `A+330/U+330` 后核对结果核实。ADB 日志分别保存冻结业务 UTC／单调读数和真实进程单调时刻。对原片和可选预览分别取回后，测试通过 `client_driver.ts import-media <客户端存储目录> <已领取文件路径> <输出凭据路径>` 调用客户端真实 `Files.upload`；保存回执核对报告中的 delivery、output 与源动作身份，并将导入文件大小和 SHA-256 与对应交付事实比对。测试还验证取回中断及同一请求恢复时沿用原交付和已提交偏移。
 
 该普通录像恢复场景只有一份非零尾段，跨会话没有可靠控制时长，也没有充分分段下界；来源按 `capture_result_unconfirmed/completion_unknown` 结束，已确定的原片范围继续允许独立取回。正常控制成功和充分分段下界的成功分区由八场景模块及组件测试分别验证。结果原页保留未配对的 LRF 观察，完成扫描后以实际配对事实关联原片。
 
@@ -120,11 +130,15 @@ apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_ti
 
 `test_hasselblad_photo_roundtrip.py` 的网页定向用例把实际安装 wheel 的能力交给当前构建首页，在真实控件选择三个短快门，保存预设后重建 Application、Files、HTTP 和浏览器，再重开原草稿并将预设应用到独立草稿，最终保留网页下载原请求。上传定向用例从权威正常报告派生小型图片映射，实际执行 `Files.createBatch/upload/idle`，分别观察报告先到和媒体先到的等待与核验，以及网页导出自动累计 ACK；这两组定向证据不代表已经执行相机拍摄或 C host 交付。
 
-正常链矩阵把 RAW/JPEG、host/device 与三个精确短快门组合为十二个独立软件世界，每个世界只有一次 capture。各行由真实网页导出，经当前 C host-demo、仓库外 wheel 安装 CLI 和受 hb_cli 契约约束的进程替身，核对 SQLite、生效参数、固定 H 历史、报告和实际 argv。原图与预览各经两份新请求取回；host 工具离线后仍从正式源交付，device 等生产回收工作副本后按原 camera basename 和 original/thumbnail 下载。JPEG 同内容双角色也分别保留身份。报告与媒体随后实际上传，分别覆盖报告先到、媒体先到和缺预览三种顺序，再由网页自动导出累计 ACK，经 C host 核实原水位持久化。此链仍是软件证据，不连接物理相机。
+正常链矩阵把 RAW/JPEG、host/device 与三个精确短快门组合为十二个独立软件世界，每个世界只有一次 capture。六个世界保留完整网页选值、预设保存、关闭重开、应用到独立草稿和下载；它们覆盖两种格式与三组曝光／白平衡／对焦参数，并包含全部四种格式×来源组合。同参数的另一来源世界通过真实 `Application.createDraft/exportDraft/downloadRequest` 保存并导出计划。每次照片导出在提交前核对实际草稿和请求的完整参数及精确词元，回执按真实路径区分 `browser` 与 `application`。代表选择与逐条承接见[覆盖映射](../../docs/camctl/verification-data/2026-10-25-integration-optimization-round2/s6-coverage-map.md)。原三个定向网页用例继续独立执行。
+
+每个拍摄世界独占一个 Node 客户端会话及存储目录，后续网页计划、文件上传和网页累计 ACK 复用同一真实 Application、Files、HTTP 和浏览器；完整预设路径仍实际关闭并重建这些协作者。所有十二组计划继续经当前 C host-demo、仓库外 wheel 安装 CLI 和受 hb_cli 契约约束的进程替身，核对 SQLite、生效参数、固定 H 历史、报告和实际 argv。原图与预览各经两份新请求取回；host 工具离线后仍从正式源交付，device 等生产回收工作副本后按原 camera basename 和 original/thumbnail 下载。JPEG 同内容双角色也分别保留身份。报告与媒体随后实际上传，分别覆盖报告先到、媒体先到和缺预览三种顺序，再由网页自动导出累计 ACK，经 C host 核实原水位持久化。此链仍是软件证据，不连接物理相机。
 
 正常用例还按实际下载 request_id 定位原 START、双文件完成和产物登记各自的完整事务 H，核版本化结果、同 activity 的照片与 entered 观察、实际步骤和诊断双流。安装入口的私有历史观察模式通过真实 HistoryRepository 恢复登记 owner 的完整关联行；晚期取回、原请求重送及 ACK 后，新安装子进程再读同三个 H 并逐项比较 before/after。晚于该 H 创建的实体保持不存在。窄反例验证中间事件不能冒充 H，缺失观察、错误 activity、角色和摘要会被拒绝。
 
 五个恢复用例在同一安装链使用测试专用入口包装真实仓储。两个 START 已提交用例通过明确门闩终止真实旧执行组，由新 host 重送原请求；两个完整照片事务回执丢失用例保留真实 COMMIT，并由不同的只读连接真实核实原 request/key/H；一个 START 结果未保存用例仅观察实际 HOST_LOCAL_SETTLED 和固定恢复 horizon，核对 UNKNOWN、未知占用与工作文件保留。各世界只执行一次 capture，成功恢复后原图与预览各经两份独立新请求取回，设置和对焦不重放。门闩、原事务、进程组收场、实际字节与 argv 分别保存，测试不注入恢复依据。
+
+六个恢复及报告重建世界均从真实 Application 草稿导出，各自保存实际草稿／请求正文、身份关联及精确参数，包含两个不同的 `focus_override` 输入。它们的故障与业务断言继续独立执行；网页预设步骤由上述代表承接，应用路径回执只记录实际执行的步骤。每个会话记录各操作耗时、启动计数及收场结果，世界身份使用 pytest nodeid 与世界根共同区分。
 
 报告重建用例在真实 publish intent 保存后，以原冻结 H 恢复成功照片及两个独立 output owner，再暂停发布。父进程领取既有 ready 文件、将空 ready 目录替换成普通文件，并明确释放门闩；真实目录列出失败由生产流程保存到原报告。移出失败 staging 文件后，新安装进程沿原 H 重建相同 report_id、文件名和 bytes/size/SHA。原报告真实保存 PUBLISHED 后的观察门闩供 C 领取，随后明确释放；两处门闩不改变发布返回、覆盖范围或水位。原冻结 H 与 INTENT/PUBLISH 管理事件的完整事务/key 分别保存。
 
@@ -137,7 +151,7 @@ CAMCTL_HB_TEST_CLIENT_ROOT=/absolute/private/candidate \
   apps/camctl/.venv311/bin/python -m pytest tests/integration/test_hasselblad_photo_roundtrip.py -q
 ```
 
-测试驱动新增三个显式入口：`browser-photo-export <store> <input.json> <plan> <receipt>`、`browser-plan-export <store> <body.json> <plan> <receipt>` 和 `upload-files <store> <manifest.json> <receipt>`。照片输入含 `device_id/action_type/action_name/case_name/params_text/scheduled_at`，精确参数以正文字符串传递。普通计划入口也操作真实网页并下载文件。上传清单是非空 `[{path,kind:"report"|"media"}]`，图片使用 media；媒体先到不要求已有报告。凭据包含实际 import、媒体、报告覆盖和原始快门正文；原有 import 命令仍是直接报告应用接缝，与上传证据分别解释。
+测试驱动的独立入口包括 `browser-photo-export <store> <input.json> <plan> <receipt>`、`browser-plan-export <store> <body.json> <plan> <receipt>` 和 `upload-files <store> <manifest.json> <receipt>`；拍摄世界通过私有 `session` 连接按序调用这些操作及 `application-photo-export`，存储目录固定为该世界的 `client-store`。照片输入含 `device_id/action_type/action_name/case_name/params_text/scheduled_at`，精确参数以正文字符串传递。普通计划入口也操作真实网页并下载文件。上传清单是非空 `[{path,kind:"report"|"media"}]`，图片使用 media；媒体先到不要求已有报告。凭据包含实际 import、媒体、报告覆盖和原始快门正文；原有 import 命令仍是直接报告应用接缝，与上传证据分别解释。
 
 `test_video_size_estimate.py` 使用同源虚构驱动，经真实 `describe` 导出、客户端整份加载及 HTTP 状态交接验证视频估算，再通过客户端计划导出、camctl 受理和执行、报告发布及客户端导入核对实际文件事实。它覆盖精确小数、数学整数帧数、非法声明的整份失败和重载保留、合法但无法估算的导出，以及估算不进入生效参数或报告。`client_driver.ts` 的估算命令只提供测试凭据，没有新增产品接口。该文件无需 C 构建或真实设备；安装物资源由组件的包测试核对，真实相机的固定假定参考值另按[估算设计](../../docs/superpowers/specs/2026-10-10-video-size-estimate-design.md#实施状态与设备接入前提)解释。
 

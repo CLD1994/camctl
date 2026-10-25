@@ -114,7 +114,7 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
         assert json.loads(effective) == params and sent == initial["utc_us"] and started is None
         spec = json.loads(execution)
         assert {key: spec[key] for key in ("target_duration_ms", "startup_margin_ms", "result_wait_margin_ms", "file_completion_wait_ms")} == {
-            "target_duration_ms": 300000, "startup_margin_ms": 0, "result_wait_margin_ms": 30000, "file_completion_wait_ms": 30000}
+            "target_duration_ms": 300000, "startup_margin_ms": 0, "result_wait_margin_ms": 30000, "file_completion_wait_ms": 3000}
         assert [o["type"] for o in json.loads(start_json)["observations"]] == ["timelapse_sent"]
         assert query_state(deployment.state_db, "SELECT id FROM outputs") == []
         demo.stop()

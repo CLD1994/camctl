@@ -41,6 +41,13 @@ def _trace_dispatch() -> None:
 
 
 def _main(argv: list[str]) -> int:
+    clock_path = os.environ.get("CAMCTL_TEST_CLOCK_FILE")
+    if clock_path:
+        from _osmo_builtin_clock import ControlledClock
+        from _osmo_builtin_clock_entry import _install_clock_ports
+
+        _install_clock_ports(ControlledClock(
+            Path(clock_path), Path(os.environ["CAMCTL_TEST_CLOCK_LOG"])))
     spec_path = os.environ.get("CAMCTL_TEST_DRIVER_SPEC")
     if spec_path:
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))

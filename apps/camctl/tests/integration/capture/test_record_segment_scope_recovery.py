@@ -317,9 +317,12 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
     try:
         context = _stop_context(owned, action_id)
         names = [
-            f"CAM_001/CAM_20261022100000_{index:04d}_D.OSV" for index in (7, 8, 9, 10)
+            "CAM_001/CAM_20261022100000_0998_D.OSV",
+            "CAM_001/CAM_20261022100000_0999_D.OSV",
+            "CAM_002/CAM_20261022110000_0001_D.OSV",
+            "CAM_002/CAM_20261022110000_0002_D.OSV",
         ]
-        preview = names[0].removesuffix("OSV") + "LRF"
+        previews = [name.removesuffix("OSV") + "LRF" for name in names[1:3]]
         cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, "/DCIM/" + names[1])
 
         async def read(request, batch):
@@ -329,14 +332,14 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
                 return _completed_result(
                     request.ticket,
                     context,
-                    entries=[_entry(preview), _entry(names[0]), _entry(names[1])],
+                    entries=[_entry(names[0]), _entry(previews[0]), _entry(names[1])],
                     next_cursor=cursor,
                 )
             return _completed_result(
                 request.ticket,
                 context,
                 cursor=cursor,
-                entries=[_entry(names[2]), _entry(names[3])],
+                entries=[_entry(previews[1]), _entry(names[2]), _entry(names[3])],
                 finalized=True,
             )
 
@@ -348,13 +351,48 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
         ).fetchone() == (2, 1)
         assert owned.connection.execute(
             "SELECT kind,COUNT(*) FROM outputs GROUP BY kind ORDER BY kind"
-        ).fetchall() == [(1, 4), (3, 1)]
+        ).fetchall() == [(1, 4), (3, 2)]
         assert owned.connection.execute(
             "SELECT COUNT(DISTINCT device_file_id) FROM outputs"
-        ).fetchone() == (5,)
+        ).fetchone() == (6,)
+        assert owned.connection.execute(
+            "SELECT json_extract(preview.locator_json,'$.path'),"
+            "json_extract(original.locator_json,'$.path'),p.kind,o.kind FROM output_origins relation"
+            " JOIN outputs p ON p.id=relation.output_id"
+            " JOIN outputs o ON o.id=relation.original_output_id"
+            " JOIN device_files preview ON preview.id=p.device_file_id"
+            " JOIN device_files original ON original.id=o.device_file_id"
+            " WHERE p.kind=3 AND preview.original_device_file_id=original.id"
+            " ORDER BY json_extract(preview.locator_json,'$.path')"
+        ).fetchall() == [
+            ("/DCIM/" + preview, "/DCIM/" + original, 3, 1)
+            for preview, original in zip(previews, names[1:3])
+        ]
+        pages = owned.connection.execute(
+            "SELECT member.identity,member.page_event_id FROM segment_members member"
+            " JOIN outputs output ON output.device_file_id=member.file_id"
+            " WHERE output.kind=1 ORDER BY member.directory_number,member.segment_index"
+        ).fetchall()
+        assert [identity for identity, _ in pages] == ["/DCIM/" + name for name in names]
+        assert pages[0][1] == pages[1][1] < pages[2][1] == pages[3][1]
+        assert owned.connection.execute(
+            "SELECT json_extract(assessment_json,'$.default_scope.state') FROM segment_sets"
+            " WHERE published_event_id IS NOT NULL"
+        ).fetchone() == (int(enum_for("segment_sets.assessment_json.scope_state").NONEMPTY),)
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members WHERE output_id IS NOT NULL"
         ).fetchone() == (3,)
+        assert owned.connection.execute(
+            "SELECT scope.ordinal,member.identity,json_extract(file.locator_json,'$.path'),output.kind"
+            " FROM segment_scope_members scope"
+            " JOIN segment_members member ON member.id=scope.member_id"
+            " JOIN outputs output ON output.id=scope.output_id AND output.device_file_id=member.file_id"
+            " JOIN device_files file ON file.id=output.device_file_id"
+            " ORDER BY scope.ordinal"
+        ).fetchall() == [
+            (ordinal, "/DCIM/" + name, "/DCIM/" + name, 1)
+            for ordinal, name in enumerate(names[:3], 1)
+        ]
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM file_copies"
         ).fetchone() == (0,)
@@ -388,19 +426,6 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
     [
         (
             (
-                "CAM_001/CAM_20261022100000_0999_D.LRF",
-                "CAM_001/CAM_20261022100000_0999_D.OSV",
-                "CAM_002/CAM_20261022110000_0001_D.LRF",
-                "CAM_002/CAM_20261022110000_0001_D.OSV",
-            ),
-            3,
-            2,
-            2,
-            "nonempty",
-            2,
-        ),
-        (
-            (
                 "CAM_001/CAM_20261022100000_0007_D.LRF",
                 "CAM_001/CAM_20261022100000_0008_D.LRF",
                 "CAM_001/CAM_20261022100000_0008_D.OSV",
@@ -414,7 +439,7 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
         (("CAM_001/unknown.LRF", "CAM_001/unknown.OSV"), 4, 1, 1, "unknown", 0),
     ],
 )
-async def test_handler_publishes_directory_rollover_preview_only_start_and_unknown_order(
+async def test_handler_preserves_preview_only_start_and_unknown_order(
     tmp_path, names, status, original_count, preview_count, scope_state, scope_count
 ):
     owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)

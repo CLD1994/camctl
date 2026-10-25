@@ -1,0 +1,293 @@
+{
+  "purpose": "S5当前源码Hasselblad29项四路before；不并入旧47分钟或后续复验。",
+  "source": {
+    "root": "/tmp/camctl-itopt-round2-baseline",
+    "head": "b82d96e0b5607b7d0e5f79a4dc9385f06f6a400e",
+    "status": "",
+    "snapshot_sha256": "f7443853ca5bdef6f762f451adee6a2ab220706f00510c06fa4db1c1e2e347dc"
+  },
+  "run_root": "/tmp/camctl-itopt-round2-hb-before-4",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "scripts/run-integration.py",
+    "--source",
+    "/tmp/camctl-itopt-round2-baseline",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "--target",
+    "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "--jobs",
+    "4",
+    "--output",
+    "/tmp/camctl-itopt-round2-hb-before-4"
+  ],
+  "exec_session": 59737,
+  "runner_pid": 612770,
+  "status": "finished",
+  "exit_code": 1,
+  "jobs": 4,
+  "root_shards": 4,
+  "task_count": 4,
+  "task_outcomes": {
+    "passed": 3,
+    "failed": 1
+  },
+  "primary_count": 29,
+  "unique_primary_count": 29,
+  "complete_primary_count": 29,
+  "primary_outcomes": {
+    "passed": 28,
+    "failed": 1
+  },
+  "failed_nodes": [
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]"
+  ],
+  "all_progress_finished": true,
+  "timing": {
+    "runner_wall_seconds": 751.7251479909974,
+    "collector_monotonic_wall_seconds": 751.9153211750017,
+    "task_wall_sum_seconds": 2817.3557927879956,
+    "pytest_phase_seconds": {
+      "setup": 111.41457898500812,
+      "call": 2449.585030322007,
+      "teardown": 0.03326756100432249
+    },
+    "pytest_phase_sum_seconds": 2561.0328768680192,
+    "preparations": {
+      "package-resources": {
+        "count": 4,
+        "wall_sum_seconds": 0.4576560290006455
+      },
+      "hasselblad-client-build": {
+        "count": 4,
+        "wall_sum_seconds": 142.65694267000072
+      }
+    }
+  },
+  "client_driver_commands": {
+    "count": 124,
+    "by_operation": {
+      "browser-photo-export": 21,
+      "browser-plan-export": 77,
+      "upload-files": 26
+    },
+    "evidence": "client-commands.jsonl",
+    "scope": "真实命令记录，包括失败命令；不是Application、browser或会话启动次数。"
+  },
+  "browser_observation": {
+    "unique_root_process_identities": 120,
+    "evidence": "resource.json",
+    "scope": "只表示采样观察到的Chromium根进程PID/start_ticks身份，不是会话数或精确启动请求数。0.25秒为每轮扫描后的等待下限，实际间隔还包括扫描与调度；短命或先被重新挂接的进程可能漏采。"
+  },
+  "resource_scope": "resource.json保存fresh采集器唯一runner子进程前后RUSAGE_CHILDREN的原始值和差值。CPU为已回收后代累计user/sys时间，raw inblock/oublock不是字节；Linux ru_maxrss为最大单进程峰值KiB，不是并发进程树总内存。collector自身CPU和scan wall另外保存，不能当零开销。",
+  "comparison_limits": [
+    "before的jpeg-device-0.000333在browser-photo-export的datetime-local locator.fill报Malformed value，尚未执行capture。整轮wall仅描述本次事实，不能与全29通过after作等价业务完成量的纯提速结论。",
+    "后续成本对照分别报告共同完整通过身份集、真实操作/准备次数及总wall；不以一次失败重跑整29，也不将失败路径替代成功链。",
+    "所有wall与pytest阶段分别保存；阶段耗时含真实等待和准备，不等于CPU。未采集完整进程树CPU或设备I/O利用率。"
+  ],
+  "dependencies": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "node": "v24.22.1",
+    "node_modules": "/tmp/camctl-itopt-runner-npm-client/node_modules",
+    "node_package_lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+    "node_package_lock_matches_external": true,
+    "playwright_core": "1.63.0",
+    "chromium_revision": "1243",
+    "uv_cache_source": "/home/cld/.cache/uv"
+  },
+  "files": [
+    {
+      "path": "cases.json",
+      "sha256": "81877dc218ec9adb02ba0a56a09facf17ef61dd909c9b493981fdb1c4044e920",
+      "bytes": 17726
+    },
+    {
+      "path": "client-commands.jsonl",
+      "sha256": "913228d159ea63784519a06357c487555116a1b4f3b82152b36b3e3c54875921",
+      "bytes": 181150
+    },
+    {
+      "path": "collector-source.txt",
+      "sha256": "f621485f6ec3d33e42affe81e612fdb9f46fc9c3e67557604ffd90f290bf5381",
+      "bytes": 5766
+    },
+    {
+      "path": "driver.log",
+      "sha256": "084c9653506fc75aaac034c22899069e4bb84c099f430fca4a31e737c2076017",
+      "bytes": 33014
+    },
+    {
+      "path": "plan.json",
+      "sha256": "e7cb8af9956741829c228b64d05dcbd3d9321eac37bc32ec0d55ffa8956e7c55",
+      "bytes": 5816
+    },
+    {
+      "path": "resource-start.json",
+      "sha256": "2aee532b5127234e0dd9f15279ea8ed32be86ed4339645bf6b7a907a53e18140",
+      "bytes": 960
+    },
+    {
+      "path": "resource.json",
+      "sha256": "1e1a39569eadc6c01ea0121bc278155dcff725efbeb0bbc697ce44253fa48562",
+      "bytes": 323988
+    },
+    {
+      "path": "source.json",
+      "sha256": "8beb96aee7a7eb7c971e39b4b53ec67d6b481fd1e424551f0555780623f673f6",
+      "bytes": 316823
+    },
+    {
+      "path": "summary.json",
+      "sha256": "a5aa0d17784a88778432cad0600a6c37e4605b514fd89a13bc73a04e0b0a0f10",
+      "bytes": 25284
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/cases.json",
+      "sha256": "23dee1a8fd0b659b245a93e1b7356ed1c491ae7b8b64955e384e37a66061fb53",
+      "bytes": 2778
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/command.json",
+      "sha256": "cd081dc7b23841256e54f660ae6a31dc8f040580b6ccdc24233881179e1e9799",
+      "bytes": 5373
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/events.jsonl",
+      "sha256": "c0ae809849b7f771ec5da49f55a693fe92c2f64899e88ed4fd11ad5f0285ff1e",
+      "bytes": 10803
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/inventory.json",
+      "sha256": "189b8c3b5446ce76399cdbe1c798dcd4f9d1a61ac927bcd203a2f6fd0410d3af",
+      "bytes": 666
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/output.log",
+      "sha256": "93d7711df94eafc14f68b2c1f1e7aa22128344f3919801889b9366b7b12b7d13",
+      "bytes": 1110
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/progress.json",
+      "sha256": "4a09c8186f509c519e037c3bff8636da92f6b410abbf6826e45a337bed6e3639",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/001-root-test_hasselblad_photo_roundtrip-shard-3/result.json",
+      "sha256": "2cf3aa4c260ca4444c9138e656deb83813ef2cf1e67bb4105b71dc8f87b46368",
+      "bytes": 5089
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/cases.json",
+      "sha256": "148df716da704ee64eea5bd995a485f7e8708df4a388eecfc5c99da88dc49428",
+      "bytes": 3280
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/command.json",
+      "sha256": "5e2a08f072ddd92c9caca726b68e2b2c1b8ea5936ca4de9e7e672e2eaf944bce",
+      "bytes": 5544
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/events.jsonl",
+      "sha256": "0fcdf7703a17f5ceea54ca72692159d3473508a8096b1f04345b145f3f5ce7a3",
+      "bytes": 12454
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/inventory.json",
+      "sha256": "b103970185511bf943f2f6d02adeac4beb63d794c729cadfabbf686d6967df0a",
+      "bytes": 749
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/output.log",
+      "sha256": "e87f15cafd1838e0bd05ed56c19c995fcd546c569ae55dc325c4d1d24d751a89",
+      "bytes": 1347
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/progress.json",
+      "sha256": "b30c10e94bd66a82dde3e3847251f091b2d89736f40c8d5165aca5c9da72adc8",
+      "bytes": 221
+    },
+    {
+      "path": "tasks/002-root-test_hasselblad_photo_roundtrip-shard-2/result.json",
+      "sha256": "014e8225b053364718663f4a76ea7dc4b2a8be210588b43ca35dc2577ac60c65",
+      "bytes": 5261
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/cases.json",
+      "sha256": "982f635d5b07647e561c7c1c9fdcc94e62c3567c2314280047735f5e70693689",
+      "bytes": 4965
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/command.json",
+      "sha256": "28f8b75cd0d925d449d7e92552030ce12a96ca129466eeed2bb9ad5092551fc2",
+      "bytes": 6340
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/events.jsonl",
+      "sha256": "adc02f7ded253a8b7c6a361245378fcc4d3ce90d17cbce3493c31032c8184ccb",
+      "bytes": 18598
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/inventory.json",
+      "sha256": "1fc66fbb760d378bd45c995407b7a5e40482bca380c5f636c3cc2c3f29c9fed4",
+      "bytes": 1143
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/output.log",
+      "sha256": "b66320309c33f17b49d861b471d0662cc4e43c87af07777e1e63482a938c4d3b",
+      "bytes": 8463
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/progress.json",
+      "sha256": "7605096fb87b2952b5f8cc4fb8e7ecd4749106432950e4cbbdf7ce1c6666a464",
+      "bytes": 238
+    },
+    {
+      "path": "tasks/003-root-test_hasselblad_photo_roundtrip-shard-4/result.json",
+      "sha256": "4b4260cc6cdaf5ebc5941737f6792a143582bc54f0b373dbc938a1c9dd9837f1",
+      "bytes": 6076
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/cases.json",
+      "sha256": "dcc0d5ca763d2be601bcc9d711e5cc62b94e94a50d336b10b9a475ab9f96642d",
+      "bytes": 4972
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/command.json",
+      "sha256": "0001b01d55af7238572d091e729d66e52796f9e98119b8d662f0924ccd883424",
+      "bytes": 6383
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/events.jsonl",
+      "sha256": "724d86db807525ad2dadd0557f4d4ae8217f902a0d844e5a73adefe22c05e296",
+      "bytes": 18731
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/inventory.json",
+      "sha256": "2464fa8914dffc3f0e4fa9ecd576e04323060b34d5a8ff8fe2d06e5e499d9db8",
+      "bytes": 1163
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/output.log",
+      "sha256": "fe9f891f140a706f1855fb39d2f721a4450601b54019f4589bfb5cf6f41ad3f2",
+      "bytes": 1930
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/progress.json",
+      "sha256": "7b41a396a2ae5175f0f04406fc8f296b5e29f1fb76a0014cbf0581f0c9984781",
+      "bytes": 220
+    },
+    {
+      "path": "tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/result.json",
+      "sha256": "f24f16ca41c0f228c091607f99cea6cb936dc21bf53540b2a7c1818cc7144a16",
+      "bytes": 6098
+    },
+    {
+      "path": "tasks.csv",
+      "sha256": "9456e07aca8d6cfa0d2cf57cdfa11e13964014cecbd5991c69da382edb1347db",
+      "bytes": 461
+    }
+  ]
+}
