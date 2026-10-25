@@ -189,6 +189,7 @@ class DbExecutor:
         self._results: dict[OperationKey, asyncio.Future] = {}
         self._stopping = False
         self._closed = False
+        self._worker_error: BaseException | None = None
         self._thread: threading.Thread | None = None
         self._loop = asyncio.get_running_loop()
 
@@ -242,6 +243,8 @@ class DbExecutor:
             await self._loop.run_in_executor(None, thread.join)
         with self._lock:
             self._closed = True
+        if self._worker_error is not None:
+            raise self._worker_error
 
     # -- 内部：提交路径 -----------------------------------------------
 
@@ -319,7 +322,10 @@ class DbExecutor:
             with self._lock:
                 self._core.complete(job.key)
         if owned is not None:
-            owned.connection.close()
+            try:
+                owned.connection.close()
+            except BaseException as error:
+                self._worker_error = error
 
     def _execute(self, job: DbJob, owned: OwnedConnection) -> OwnedConnection | None:
         """在数据库线程执行一项操作；返回继续使用的连接。
@@ -368,7 +374,8 @@ class DbExecutor:
                 owned.connection.close()
             except BaseException as error:
                 outcome = replace(outcome, secondary_errors=(*outcome.secondary_errors, error))
-        if outcome.kind is DbOutcomeKind.COMPLETED and self._confirmed_write_observer is not None:
+        if (outcome.kind is DbOutcomeKind.COMPLETED and job.priority is DbPriority.BUSINESS
+                and self._confirmed_write_observer is not None):
             try:
                 self._confirmed_write_observer(owned, outcome, job.key)
             except BaseException as error:
