@@ -24,6 +24,7 @@ from camctl.contracts.values import (
     new_operation_key,
 )
 from camctl.devices.read_session import ReadChunk, ReadEnd
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
     sync_target,
@@ -444,14 +445,31 @@ class SegmentSaveOutcome:
     reason: str | None = None
 
 
-class CopySegmentError(RuntimeError):
+class CopySegmentError(DiagnosticError, RuntimeError):
     """一段拷贝失败；保留实际阶段，不猜测未确认尾部的效果。"""
 
-    def __init__(self, stage: str, detail: str, *, source_failed: bool = False) -> None:
-        super().__init__(f"{stage}: {detail}")
+    def __init__(self, stage: str, detail: str, *, source_failed: bool = False,
+                 result: SegmentResult | None = None) -> None:
+        segment = None if result is None else {
+            "error": None if result.error is None else result.error.value,
+            "processed_end": result.processed_end, "synced": result.synced,
+            "write_extent_known": result.write_extent_known,
+            "failure": exception_diagnostic(result.failure),
+            "source_end": None if result.source_end is None else {
+                "stopped": result.source_end.stopped,
+                "bytes_read": result.source_end.bytes_read,
+                "error": result.source_end.error,
+            },
+            "source_close_error": exception_diagnostic(result.source_close_error),
+        }
+        super().__init__(f"{stage}: {detail}", diagnostic_details={
+            "stage": stage, "detail": detail, "source_failed": source_failed,
+            "segment_result": segment,
+        })
         self.stage = stage
         self.detail = detail
         self.source_failed = source_failed
+        self.result = result
 
 
 @dataclass(frozen=True)
@@ -549,12 +567,13 @@ async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
     result = await asyncio.to_thread(_transfer_segment, ref, context.roots, plan, spec,
                                      context.session)
     if result.error is SegmentFailure.SYNC_FAILED:
-        raise CopySegmentError("segment_sync_failed", str(result.failure))
+        raise CopySegmentError("segment_sync_failed", str(result.failure), result=result) from result.failure
     if result.error is not None:
-        raise CopySegmentError("segment_transfer_failed", str(result.error), source_failed=result.error in (
-            SegmentFailure.NO_DATA, SegmentFailure.SOURCE_EOF_EARLY, SegmentFailure.READ_FAILED))
+        raise CopySegmentError("segment_transfer_failed", str(result.error), result=result,
+            source_failed=result.error in (SegmentFailure.NO_DATA, SegmentFailure.SOURCE_EOF_EARLY,
+                SegmentFailure.READ_FAILED)) from result.failure
     if not result.synced:
-        raise CopySegmentError("segment_sync_failed", "段尾同步未确认")
+        raise CopySegmentError("segment_sync_failed", "段尾同步未确认", result=result) from result.failure
     key = context.key if context.key is not None else new_operation_key()
     request = ReliableSegment(
         copy_id=copy_id, copy_round=facts.round,
@@ -569,7 +588,8 @@ async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
             "segment_save_unknown" if outcome.kind is DbOutcomeKind.UNKNOWN
             else "segment_save_failed",
             str(outcome.error),
-        )
+            result=result,
+        ) from outcome.error
     return SegmentStep(plan=plan, saved=outcome.value, transfer=result)
 
 
