@@ -83,6 +83,29 @@ def discard_operation_facts(connection):
         state.discard()
 
 
+def operation_fact_boundary(connection):
+    """返回内核拥有的C0，不提供推进或登记结论的接口。"""
+    state = _facts(connection)
+    return None if state is None else state.boundary
+
+
+@contextmanager
+def opened_operation_fact_scope(connection, opened):
+    """新开只读事务取得自身C0；已有事务沿用其拥有者的范围。"""
+    if not opened or _facts(connection) is not None:
+        yield
+        return
+    with closing(connection.execute('SELECT id,last_event_id FROM history_transactions ORDER BY id DESC LIMIT 1')) as cursor:
+        latest = cursor.fetchone()
+    with closing(connection.execute('SELECT MAX(id) FROM history_events')) as cursor:
+        maximum = cursor.fetchone()[0] or 0
+    boundary = INITIAL_BOUNDARY if latest is None else HistoryBoundary(*latest)
+    if boundary.last_event_id != maximum:
+        raise ConsistencyError('只读事实范围缺少完整提交边界')
+    with operation_fact_scope(connection, boundary):
+        yield
+
+
 def _cached(state, key):
     if state is None or key not in state.entries:
         return None

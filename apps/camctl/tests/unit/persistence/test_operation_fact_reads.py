@@ -27,6 +27,10 @@ def database(monkeypatch):
         elif 'FROM history_events WHERE id=' in sql:
             state['events'] += 1
             cursor.fetchone.return_value = state['event']
+        elif sql.startswith('SELECT id,last_event_id FROM history_transactions'):
+            cursor.fetchone.return_value = (1, 3)
+        elif sql.startswith('SELECT MAX(id) FROM history_events'):
+            cursor.fetchone.return_value = (3,)
         elif sql.startswith('SELECT * FROM sample'):
             cursor.fetchone.return_value = (1, state['current'])
             cursor.description = (('id',), ('value',))
@@ -110,3 +114,13 @@ def test_fixed_file_is_separate_from_mutable_rows_and_returns_owned_values(datab
         second = facts.reuse_fixed_file(connection, 9, 2, HistoryBoundary(1, 3), lambda: source(connection, 'device_files', 9))
         assert second['nested'] == [1]
     source.assert_called_once()
+
+
+@pytest.mark.parametrize('opened,reads', [(False, 2), (True, 1)])
+def test_readonly_scope_belongs_only_to_transaction_owner(database, facts, opened, reads):
+    connection, state = database
+    with facts.opened_operation_fact_scope(connection, opened):
+        facts.read_event(connection, 2)
+        facts.read_event(connection, 2)
+    assert state['events'] == reads
+    assert facts.operation_fact_boundary(connection) is None
