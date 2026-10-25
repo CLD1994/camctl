@@ -106,6 +106,8 @@ OSMO 单原片清理链的任务包装器已透传真实工厂的 `result_mode` 
 
 页缓存开始读取 SQLite 的 `in_transaction` 后，原故障代理遗漏该接口，使首轮部分测试在预定故障点之前失败。审计覆盖组件测试 762 份和根 tests 51 份 Python，以及嵌入源码，识别出 10 个真实事务代理缺口，均精确转发底层连接状态；原故障注入、同步点和断言不变。reporting 446 项、acceptance 12 项及 session 35 项分别通过，其他已有正确委托、继承及窄查询探针保持。详见[代理接口审计](verification-data/2026-10-25-integration-optimization/connection-fakes.json)。
 
+最终冻结运行另暴露两项安装版 device 来源的夹具依赖：生成的 `hb_cli` 使用 pytest 解释器，但安装版 CLI 清除了源码导入路径，替身在导入 `camctl` 时退出，尚未产生设备文件或开始两轮取回。两个安装链调用现显式传入已有 `installed_python=installed.python`，同类四处调用的边界也已审查；helper 默认、生产代码及全部业务／格式版本断言保持。独立隔离补测 raw／jpeg 两态全部通过，pytest 76.20 秒、入口墙钟 90.746 秒，真实执行一次 capture、两轮独立原图／预览取回和等长错误内容拒绝。该补测与 `48d2ee64` 冻结运行分别记录，详见[安装解释器回执](verification-data/2026-10-25-integration-optimization/installed-hasselblad-python.json)。
+
 ## 并行调度、启动与结果采集
 
 [隔离运行入口](../../scripts/README.md#隔离并行集成测试)为每个任务冻结独立源码，分别隔离包资源、客户端构建、数据库和交接目录；四个执行槽各自复用私有工具缓存和客户端依赖。一个协调进程可以同时驱动四个测试进程，agent 数量不决定测试并发数。分片依据本次真实收集清单，历史数据只影响排序和均衡权重，不决定覆盖。
