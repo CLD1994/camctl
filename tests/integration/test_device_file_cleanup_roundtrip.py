@@ -11,6 +11,7 @@ import pytest
 from _cleanup_roundtrip_support import (
     RAW, PREVIEW, World, _hb_tool, cleanup_package, json_write, process_identity, records, rows, sha, wait,
 )
+from _cleanup_source_snapshot import cleanup_osmo_source
 from camctl.contracts.enums import enum_for
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
 
@@ -28,9 +29,8 @@ def test_cleanup_hasselblad_tool_rejects_unrecognized_setting(tmp_path):
     assert refused.returncode != 0, "清理替身意外接受了未声明的相机参数"
 
 
-def test_exact_outputs_and_non_cascade(tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_exact_outputs_and_non_cascade(tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.prepare_hasselblad()
         world.publish_copies()
         for source in ("repaired", "osv", "lrf", "hb-original", "hb-preview"):
@@ -104,9 +104,8 @@ def test_cleanup_device_delete_unsupported_with_host_files(
         assert reported["result"]["items"][0]["error"]["code"] == "file_delete_failed"
 
 
-def test_cleanup_new_request_for_cleaned_output(tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_cleanup_new_request_for_cleaned_output(tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.clean_exact("osv")
         old_items = rows(world.db, "SELECT * FROM cleanup_items")
         old_runs = rows(world.db, "SELECT * FROM operation_runs")
@@ -159,9 +158,8 @@ def _interrupt(world, *, fault="before"):
     return {"request": request, "attempt": attempt}, intent
 
 
-def test_cleanup_interrupted_delete_absent(tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_cleanup_interrupted_delete_absent(tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         original, intent = _interrupt(world, fault="after")
         item = world.recover(original["request"], "SUCCEEDED", max_d=1, max_q=1)
         _assert_original_attempt(world, original, intent)
@@ -175,9 +173,8 @@ def test_cleanup_interrupted_delete_absent(tmp_path, host_demo, cleanup_package,
 
 
 @pytest.mark.parametrize("partition", ["P1", "P2", "P3"])
-def test_cleanup_query_present_or_unknown(partition, tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_cleanup_query_present_or_unknown(partition, tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         original, intent = _interrupt(world)
         expected = "SUCCEEDED" if partition == "P1" else "FAILED"
         item = world.recover(original["request"], expected, max_d={"P1": 3, "P2": 1, "P3": 2}[partition],
@@ -221,9 +218,8 @@ def test_cleanup_query_present_or_unknown(partition, tmp_path, host_demo, cleanu
 
 
 @pytest.mark.parametrize("phase", ["commit_unknown", "terminal_companions"])
-def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         request = world.begin_cleanup(persistence_fault=phase)
         marker = world.wait_marker("cli_exited_after_unknown" if phase == "commit_unknown" else "terminal_before_companions")
         before = world.cleanup_item(request)
@@ -252,9 +248,8 @@ def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, host_demo
         world.assert_terminal_report(request, "SUCCEEDED")
 
 
-def test_cleanup_cancel_inflight_delete_recover(tmp_path, host_demo, cleanup_package, monkeypatch):
-    with World(cleanup_package, tmp_path, host_demo, monkeypatch) as world:
-        world.prepare_osmo()
+def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, monkeypatch):
+    with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
         world.write_config(max_d=2, max_q=1, timeout="30")
         request = world.begin_cleanup(fault="before")
         marker = world.wait_marker("entered")

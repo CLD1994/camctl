@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import closing
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -177,6 +177,7 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
                 for name in (
                     "test_device_file_cleanup_roundtrip.py",
                     "_cleanup_roundtrip_support.py",
+                    "_cleanup_source_snapshot.py",
                     "_cleanup_roundtrip_adb.py",
                     "_cleanup_roundtrip_fault.py",
                     "_osmo_builtin_adb.py",
@@ -197,18 +198,23 @@ print(json.dumps({"version":importlib.metadata.version("camctl"),"distribution":
 
 
 class World:
-    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, osmo=True):
+    def __init__(self, package, tmp_path, host_demo, monkeypatch, *, osmo=True,
+                 prepared=None, case_id=None):
         self.package = package
         self.root = tmp_path / "world"
-        self.deployment = Deployment(self.root, devices=False)
+        self.case_id = case_id or tmp_path.name
+        if prepared is None:
+            self.deployment = Deployment(self.root, devices=False)
+        else:
+            assert self.root == prepared.root
+            assert package is prepared.package and osmo == prepared.with_osmo
+            self.deployment = copy(prepared.deployment)
         self.db = self.deployment.state_db
         self.demo_path = host_demo
         self.monkeypatch = monkeypatch
         self.env = dict(package.env)
         self.tools = self.root / "tools"
-        self.tools.mkdir()
         self.remote = self.root / "remote"
-        (self.remote / "mnt/media_rw/emulated/DCIM").mkdir(parents=True)
         self.clock = self.root / "clock.json"
         self.calls_path = self.root / "adb.jsonl"
         self.manifest = self.root / "manifest.json"
@@ -219,12 +225,20 @@ class World:
         self.host = None
         self.config_extra = ""
         self.with_osmo = osmo
-        self.config_original = self.deployment.config_path.read_text()
-        self.write_config()
+        self.config_original = (self.deployment.config_path.read_text()
+                                if prepared is None else prepared.config_original)
         self.monkeypatch.chdir(self.root)
         self.deployment.run_client_driver = self.client
         self.params = {"type": "osmo360ii_record", "duration_s": 1,
                        "bitrate": "high", "exposure": {"mode": "auto"}}
+        if prepared is not None:
+            self.env = dict(prepared.env)
+            self.clock_cli = self.tools / "clock-cli"
+            self.register_sources()
+            return
+        self.tools.mkdir()
+        (self.remote / "mnt/media_rw/emulated/DCIM").mkdir(parents=True)
+        self.write_config()
         for source in ("_osmo_builtin_clock.py", "_osmo_builtin_clock_entry.py", "_osmo_builtin_adb.py",
                        "_cleanup_roundtrip_adb.py", "_cleanup_roundtrip_fault.py"):
             if (HERE / source).is_file():
@@ -258,7 +272,7 @@ class World:
         self.stop()
         if self.db.exists():
             json_write(self.root / "final-db.json", self.snapshot())
-        archive = ARTIFACTS / (self.root.parent.name + "-" + str(os.getpid()))
+        archive = ARTIFACTS / (self.case_id + "-" + str(os.getpid()))
         shutil.copytree(self.root, archive, dirs_exist_ok=True)
 
     def write_config(self, max_d=3, max_q=3, timeout="10", interval="0", query_timeout="10"):
@@ -383,7 +397,7 @@ max_query_attempts={max_q}
             assert [row["status"] for row in result] == [int(enum_for("actions.status")[expected])] * len(result)
         return result
 
-    def prepare_osmo(self):
+    def prepare_osmo(self, *, start_host=True):
         if not all(shutil.which(tool) for tool in ("ffmpeg", "ffprobe")):
             pytest.skip("R6 媒体准备要求真实 ffmpeg/ffprobe；完整验收尚未完成")
         self.command("ffmpeg", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64:r=10:d=3",
@@ -437,7 +451,8 @@ max_query_attempts={max_q}
         repaired, = rows(self.db, "SELECT * FROM intermediate_files WHERE id=?", (processing["repair_output_file_id"],))
         content = self.path("repaired").read_bytes()
         assert (repaired["size_bytes"], repaired["sha256"]) == (len(content), sha(content))
-        self.start()
+        if start_host:
+            self.start()
 
     def probe(self, path, minimum):
         from decimal import Decimal
@@ -505,7 +520,7 @@ max_query_attempts={max_q}
                 parent = str(PurePosixPath(path).parent)
                 targets.append({"output_id": source["id"], "path": path, "parent": parent,
                                 "scan_root": parent + "/", "operations": ["delete", "query"]})
-        json_write(self.manifest, {"root": str(self.remote.resolve()), "case": self.root.parent.name,
+        json_write(self.manifest, {"root": str(self.remote.resolve()), "case": self.case_id,
             "request_id": request, "targets": targets, "database": str(self.db),
             "fault": fault, "query_unknown": query_unknown, "marker": str(self.marker),
             "fault_output_id": output_id})
