@@ -343,12 +343,25 @@ fieldset {
   align-items: flex-start;
 }
 .save-feedback {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  width: 100%;
+  gap: 8px 12px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.save-summary {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+.save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  min-height: 40px;
+  gap: 8px;
 }
 .preview-control {
   display: flex;
@@ -1436,6 +1449,17 @@ progress {
   width: 100%;
   max-height: 380px;
 }
+.product-actions {
+  margin-top: 10px;
+}
+.product-technical {
+  margin-top: 12px;
+  border-top: 1px solid #e8eeea;
+  padding-top: 10px;
+}
+.product-technical h5 {
+  margin: 0 0 8px;
+}
 .thumbnail {
   display: block;
   width: 100%;
@@ -1496,6 +1520,14 @@ progress {
   margin-left: 1.25rem;
   border-left: 3px solid var(--accent, #287463);
 }
+.automatic-preview-status {
+  margin: 12px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.automatic-preview-status p {
+  margin: 4px 0;
+}
 .video-size-estimate {
   margin: 14px 0;
   padding: 12px 16px;
@@ -1526,10 +1558,49 @@ progress {
   }
 }
 /* 完整版本比较各自保持原有顺序；技术原文在窄屏内独立滚动。 */
-.draft-conflict-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
-.draft-difference-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
-.draft-difference-sides section { min-width: 0; }
-.draft-conflict-dialog pre, .draft-operation-notice pre { max-height: 320px; overflow: auto; white-space: pre; }
-.draft-operation-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
-.save-feedback { flex-wrap: wrap; }
-@media (max-width: 650px) { .draft-difference-sides { grid-template-columns: minmax(0, 1fr); } }
+.draft-conflict-dialog {
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.draft-difference-sides {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.draft-difference-sides section {
+  min-width: 0;
+}
+.draft-conflict-dialog pre,
+.draft-operation-notice pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}
+.draft-operation-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+@media (max-width: 650px) {
+  .save-feedback {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .draft-difference-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.record-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  margin: 0.6rem 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.status-timeline ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+}

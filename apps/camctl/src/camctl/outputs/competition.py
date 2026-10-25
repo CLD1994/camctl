@@ -6,7 +6,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import is_json_integer
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, parse_object_id
 from camctl.history.reads import ProductReadScope
-from camctl.outputs.definitions import SelectionMode, read_selection_request
+from camctl.outputs.definitions import SelectionMode, read_excluded_output_ids, read_selection_request
 from camctl.outputs.sources import (
     ActionFacts, OriginalOutputs, ResolutionState, SourceSpec, resolve_source,
     select_for_original,
@@ -299,10 +299,13 @@ def _obtain_targets(reads: CompetitionReads, identity: int, action: Row, output_
                 raise ConsistencyError("尚未固定的选择不能已有成员")
     try:
         mode, requested = read_selection_request(action["execution_spec_json"], action["input_fields_json"])
+        excluded = read_excluded_output_ids(action["input_fields_json"])
     except (TypeError, ValueError) as error:
         raise ConsistencyError("候选的取回选择定义与原请求不一致") from error
     if mode == SelectionMode.EXPLICIT_IDS:
         return output_id in requested
+    if output_id in excluded:
+        return False
     family = reads.family(output_id)
     selected = select_for_original(family.source_action_id, family.original, mode,
                                    preview=family.preview, repaired=family.repaired)

@@ -48,6 +48,12 @@ const plans = [
 const videos = [
   { id: "v2", fileName: "d2.png", status: "verified" },
 ] as Video[];
+it("本次取回的产物可使用其他交付的合格副本而不改变本次交付统计", () => {
+  const products = resultProducts(obtain("d1"), plans, videos);
+  expect(products[0].localCopy?.id).toBe("v2");
+  expect(products[0].localCopy?.downloadName).toBe("照片");
+  expect(products[0].state).toBe("waiting");
+});
 it.each([
   ["pending", undefined, "尚未"],
   ["running", undefined, "开始处理"],
@@ -116,6 +122,37 @@ it("报告类型未知不从文件名猜测图片", () => {
     [],
   )[0];
   expect(row.group).toBe("other");
+});
+it.each(["LRF", "osv"])("%s 原片归入视频并提供预览类型", (extension) => {
+  const row = resultProducts(
+    {
+      ...capture,
+      outputs: [
+        {
+          ...output,
+          original_name: `拍摄.${extension}`,
+          media_type: "application/octet-stream",
+        },
+      ],
+    },
+    [],
+    [],
+  )[0];
+  expect(row.group).toBe("video");
+  expect(row.mediaType).toBe("video/mp4");
+  expect(row.output!.media_type).toBe("application/octet-stream");
+});
+it("没有来源快照时使用交付名称识别 OSV 视频", () => {
+  const action = obtain("d1");
+  action.deliveries![0].file_name = "d1.OSV";
+  const row = resultProducts(
+    action,
+    [],
+    [{ ...videos[0], fileName: "d1.OSV" }],
+  )[0];
+  expect(row.group).toBe("video");
+  expect(row.mediaType).toBe("video/mp4");
+  expect(row.state).toBe("ready");
 });
 it("没有来源快照的交付仍可查看状态", () => {
   const rows = resultProducts(obtain("d2"), [], videos);

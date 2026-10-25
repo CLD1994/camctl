@@ -78,6 +78,9 @@ class _ReportReads:
         return self.repository.related_primary_rows_at_h(
             entity, column, value, boundary, event_batch_size=self.event_batch_size)
 
+    def status_history(self, entity, identity, boundary, current_status):
+        return self.repository.status_history(entity, identity, boundary, current_status)
+
     def open_report_action(self, identity, boundary):
         return self.repository.open_report_action(
             identity, boundary, event_batch_size=self.event_batch_size)
@@ -204,9 +207,10 @@ def _action_facts(repo, handle, boundary):
     return facts
 
 
-def _project(entity, identity, facts):
+def _project(entity, identity, facts, *, status_histories=None):
     return project_public(
-        ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED)
+        ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED,
+                        status_histories=status_histories or {})
     )
 
 
@@ -719,7 +723,10 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
 
     with ExitStack() as stack:
         handle = stack.enter_context(repo.open_report_action(identity, boundary))
-        finite = _project("action", identity, _action_facts(repo, handle, boundary))
+        facts = _action_facts(repo, handle, boundary)
+        histories = {("action", identity): repo.status_history(
+            "action", identity, boundary, facts["actions"][identity]["status"])}
+        finite = _project("action", identity, facts, status_histories=histories)
         expansion = _SegmentExpansion(
             repo, boundary, binding, finite.get("error"), stack, source_handle=handle
         )
@@ -896,9 +903,12 @@ def report_tokens(repo, spec, boundary, stream):
             yield from stream.open_array(name)
             count, last = 0, None
             for identity in chain((first,), identities):
-                finite = _project(
-                    entity, identity, _primary_facts(repo, entity, identity, boundary)
-                )
+                facts = _primary_facts(repo, entity, identity, boundary)
+                histories = {}
+                if entity == "plan":
+                    histories[(entity, identity)] = repo.status_history(
+                        entity, identity, boundary, facts["plans"][identity]["status"])
+                finite = _project(entity, identity, facts, status_histories=histories)
                 if entity == "plan":
                     node = gate.item_plan(path).begin(
                         gate.child_binding(path, identity), finite

@@ -84,7 +84,7 @@ from camctl.outputs.work_files import (
     RetentionDisposition, RetentionRelease, RetentionReleaseOutcome,
     WorkFileFailure, WorkFileFacts, WorkFileOutcome,
 )
-from camctl.outputs.definitions import read_selection_request
+from camctl.outputs.definitions import read_excluded_output_ids, read_selection_request
 from camctl.outputs.obtain_summary import (
     ObtainFacts, ObtainAggregate,
     ObtainItemStage,
@@ -693,7 +693,8 @@ class _FixSelectionCommand:
         )
         expected = select_outputs(
             SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_action_id,),
-                             source_plan_id=source["plan_id"]), facts, mode, requested)
+                             source_plan_id=source["plan_id"]), facts, mode, requested,
+            excluded_output_ids=read_excluded_output_ids(owner["input_fields_json"]))
         if not _same_selection(snapshot, expected):
             raise TransactionError("选择快照与已保存请求及当前来源事实不一致")
         for table, current in reads.state_rows.items():
@@ -5579,7 +5580,7 @@ class _FinishObtainCommand:
         if decision.failed:
             action_status = int(_ACTION_STATUS.FAILED)
             error_code = registered_error(_OBTAIN_ITEMS_FAILED)["action_error_id"]
-        elif decision.prepared:
+        elif decision.prepared or self._empty_exclusion_proof(connection, action):
             action_status = int(_ACTION_STATUS.SUCCEEDED)
             error_code = None
         else:
@@ -5635,6 +5636,26 @@ class _FinishObtainCommand:
         """从已保存行装配汇总事实；装载规则与选择、条目、交付状态一致。"""
         return load_obtain_facts(connection, self._command.action_id)
 
+    def _empty_exclusion_proof(self, connection, action) -> bool:
+        """原排除请求及已固定的无错来源共同证明零条目是完整选择。
+
+        每条来源选择首次固定时已经由独立守卫核对完整目录和排除。
+        完成阶段沿用这些事实，不按后来变化的目录重新选择。
+        """
+        mode, _ = read_selection_request(action["execution_spec_json"], action["input_fields_json"])
+        if (mode is not SelectionMode.DEFAULT
+                or not read_excluded_output_ids(action["input_fields_json"])
+                or action["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)):
+            return False
+        with closing(connection.execute(
+            "SELECT COUNT(*), COUNT(*) FILTER (WHERE s.status<>? OR s.error_code IS NOT NULL)"
+            " FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id"
+            " WHERE d.action_id=?",
+            (int(_SELECTION_STATUS.FIXED), action["id"]),
+        )) as cursor:
+            count, invalid = cursor.fetchone()
+        return count > 0 and invalid == 0
+
     def _unpublished_deliveries(self, connection) -> tuple[int, ...]:
         """汇总确定后仍处于准备或发布中的成功交付。"""
         with closing(connection.execute(
@@ -5684,6 +5705,10 @@ class _FinishObtainCommand:
         if decision.phase is not ObtainPhase.READY_TO_PUBLISH:
             raise TransactionError(
                 f"取回汇总事实与终态不符: {decision.phase.value}")
+        if (action["status"] == int(_ACTION_STATUS.SUCCEEDED)
+                and not decision.prepared and not decision.failed
+                and not self._empty_exclusion_proof(connection, action)):
+            raise TransactionError("零条目成功缺少原排除请求及固定选择依据")
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["actions"][action["id"]] = action
@@ -6199,7 +6224,8 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
             entries,
             checked_output_sources=checked,
             source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
-        ), mode, requested)
+        ), mode, requested,
+        excluded_output_ids=read_excluded_output_ids(owner["input_fields_json"]))
     return source_id, expected
 
 

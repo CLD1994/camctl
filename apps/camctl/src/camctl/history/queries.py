@@ -14,14 +14,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import BoundaryError, HistoryBoundary
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId
+from camctl.history.events import EventEnvelope
+
+
+def status_transitions(rows: Iterable[Sequence[int | None]], current_status: int) -> list[dict[str, Any]]:
+    """校验目录中的创建与真实转换，按事件顺序交付状态和时钟事实。"""
+    result: list[dict[str, Any]] = []
+    previous_event = 0
+    status = None
+    for event_id, before_status, after_status, occurred_at, clock_status in rows:
+        if event_id <= previous_event:
+            raise ConsistencyError("状态历史事件身份未严格递增")
+        if before_status != status or after_status is None or after_status == before_status:
+            raise ConsistencyError("状态历史创建或转换前后值不连续")
+        result.append({"status": after_status, "changed_at": occurred_at, "clock_status": clock_status})
+        previous_event, status = event_id, after_status
+    if not result or status != current_status:
+        raise ConsistencyError("状态历史未从创建完整覆盖至 H 的当前状态")
+    return result
+
 
 __all__ = [
+    "status_transitions",
     "PlanSubtree",
     "ReportScope",
     "ReportScopeRequest",

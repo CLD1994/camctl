@@ -33,7 +33,10 @@ import { sourceActionFailedReport } from "../helpers/source-action-failed";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
+  });
 }, 20000);
 afterAll(async () => {
   await browser?.close();
@@ -214,8 +217,14 @@ it("原片预览与已收到修复成品独立显示，取回仍使用真实成�
       exact: true,
     }),
   });
-  await repaired.locator("summary").filter({ hasText: "更多操作" }).click();
-  await repaired.getByRole("button", { name: "准备取回", exact: true }).click();
+  await browserExpect(repaired.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+  await browserExpect(repaired.getByRole("button", { name: "取回", exact: true })).toHaveCount(0);
+  await repaired.getByRole("checkbox").check();
+  await capture.getByRole("button", { name: "取回所选产物", exact: true }).click();
+  await browserExpect(capture.getByRole("status")).toContainText("已全部取回");
+  expect(application.store.all<Draft>("drafts")).toHaveLength(0);
+  await originalCard.getByRole("checkbox").check();
+  await capture.getByRole("button", { name: "取回所选产物", exact: true }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "加入草稿", exact: true })
@@ -227,7 +236,7 @@ it("原片预览与已收到修复成品独立显示，取回仍使用真实成�
   expect(
     JSON.parse(application.store.all<Draft>("drafts")[0].content.text)
       .actions[0].params.output_ids,
-  ).toEqual(["11"]);
+  ).toEqual([original.output_id]);
 }, 20000);
 async function setup() {
   const directory = mkdtempSync(join(tmpdir(), "camctl-browser-"));
@@ -267,6 +276,34 @@ async function setup() {
   expect(response?.status(), "构建后的客户端首页应可访问").toBe(200);
   return { application, files, page, base };
 }
+it.each([1280, 390])("状态时间展示报告事实并兼容缺失时间，宽度 %i", async (width) => {
+  const { page, application } = await setup();
+  await page.setViewportSize({ width, height: 900 });
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("time-preview"));
+  Object.assign(report.plans![0], { status_history: [
+    { status: "pending", changed_at: "2026-01-01 00:00:00", clock_status: "trusted" },
+    { status: "completed", changed_at: null, clock_status: "trusted" },
+  ] });
+  Object.assign(report.plans![0].actions![0], { status_history: [
+    { status: "pending", changed_at: "2026-01-01 00:00:00", clock_status: "unchecked" },
+    { status: "running", changed_at: "2026-01-01 00:00:02", clock_status: "invalid" },
+    { status: "succeeded", changed_at: "2026-01-01 00:00:01", clock_status: "trusted" },
+  ] });
+  application.applyReports([reportInput(report)]);
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await browserExpect(page.locator(".record-times")).toContainText("受理时间：2026");
+  await browserExpect(page.locator(".record-times")).toContainText("结束时间：未记录");
+  const action = page.locator(`[data-action-id="${report.plans![0].actions![0].action_instance_id}"]`);
+  await action.getByRole("button", { name: /^展开动作/ }).click();
+  await browserExpect(action.locator(".status-timeline li")).toHaveCount(3);
+  await browserExpect(action.locator(".status-timeline li").nth(0)).toContainText("未核验");
+  await browserExpect(action.locator(".status-timeline li").nth(1)).toContainText("无效");
+  await browserExpect(action.locator(".status-timeline li").nth(2)).toContainText("成功");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 it.each([1280, 390])(
   "三态开关、完整替换确认与草稿复制保留可靠意图，宽度 %i",
   async (width) => {
@@ -409,6 +446,47 @@ it("重载先等旧轮询结束，同generation的失败和随后恢复不被旧
     1,
   );
 }, 20000);
+it("自动预览只在拍摄详情显示状态，完整动作默认收在技术详情", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("preview fixture"));
+  const [capture, automatic] = report.plans![0].actions!;
+  automatic.automation = {
+    purpose: "auto_preview",
+    source_action_instance_id: capture.action_instance_id,
+  };
+  application.applyReports([reportInput(report)]);
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  const card = page.locator(`[data-action-id="${capture.action_instance_id}"]`);
+  const automaticCard = page.locator(
+    `[data-action-id="${automatic.action_instance_id}"]`,
+  );
+  await browserExpect(automaticCard).not.toBeVisible();
+  await browserExpect(
+    card.locator(".automatic-preview-status"),
+  ).not.toBeVisible();
+  await card
+    .getByRole("button", { name: `展开动作 ${capture.name}`, exact: true })
+    .click();
+  await browserExpect(card.locator(".automatic-preview-status")).toContainText(
+    "自动预览",
+  );
+  await browserExpect(card.locator(".automatic-preview-status")).toContainText(
+    "成功",
+  );
+  await browserExpect(card.locator(".automatic-preview-status")).toContainText(
+    "等待接收 1",
+  );
+  await browserExpect(
+    card.locator(":scope > div > .media-results"),
+  ).toContainText("1 个产物");
+  await browserExpect(automaticCard).not.toBeVisible();
+  await card.locator(":scope > div > details.advanced > summary").click();
+  await browserExpect(automaticCard).toBeVisible();
+  await browserExpect(automaticCard).toContainText("主机已发布");
+}, 20000);
 it("报告独有自动取回在来源晚到后归并，保留展开与选择且不借手动副本", async () => {
   const { page, application, files } = await setup();
   await page.getByTestId("initialize-button").click();
@@ -467,6 +545,19 @@ it("报告独有自动取回在来源晚到后归并，保留展开与选择且�
   };
   application.applyReports([reportInput(newer)]);
   expect(application.coverage()).toBe(newer.to_wm);
+  await browserExpect(auto).not.toBeVisible();
+  const capture = page.locator(`[data-action-id="${c.action_instance_id}"]`);
+  await capture
+    .getByRole("button", { name: `展开动作 ${c.name}`, exact: true })
+    .click();
+  await browserExpect(
+    capture.locator(".automatic-preview-status"),
+  ).toContainText("等待接收 1");
+  await browserExpect(
+    capture.locator(".automatic-preview-status"),
+  ).toContainText("已核验 0");
+  await capture.locator(":scope > div > details.advanced > summary").click();
+  await browserExpect(auto).toBeVisible();
   await browserExpect(auto).toHaveClass(/automatic-result/);
   await browserExpect(auto).toContainText("已选择 1");
   await browserExpect(auto).toContainText("本次自动取回已收到并核验 0");
@@ -474,9 +565,6 @@ it("报告独有自动取回在来源晚到后归并，保留展开与选择且�
   await browserExpect(page.locator('[data-action-id="3"]')).not.toHaveClass(
     /automatic-result/,
   );
-  await page.getByRole("button", { name: "查看全部动作", exact: true }).click();
-  await browserExpect(auto).not.toHaveClass(/automatic-result/);
-  await browserExpect(auto).toContainText("已选择 1");
   await page.getByRole("button", { name: "折叠计划", exact: true }).click();
   await page.getByRole("button", { name: "展开计划", exact: true }).click();
   await browserExpect(auto).toContainText("已选择 1");
@@ -491,7 +579,19 @@ it("自动预览摘要说明失败来源没有产物并保留原始错误详情"
   await page.reload();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
+  const capture = page.locator('[data-action-id="10"]');
   const automatic = page.locator('[data-action-id="20"]');
+  await browserExpect(automatic).not.toBeVisible();
+  await browserExpect(
+    capture.locator(":scope > .action-summary"),
+  ).toContainText("自动预览");
+  await browserExpect(
+    capture.locator(":scope > .action-summary"),
+  ).toContainText("失败");
+  await capture
+    .getByRole("button", { name: "展开动作 准备失败录像", exact: true })
+    .click();
+  await capture.locator(":scope > div > details.advanced > summary").click();
   await browserExpect(automatic).toContainText("准备失败录像");
   await browserExpect(automatic).toContainText("来源动作失败");
   await browserExpect(automatic).toContainText("未生成可取回产物或预览");
@@ -559,6 +659,18 @@ it("可靠来源的多个受理失败和缺少来源ID的动作全部可见", as
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
   await browserExpect(page.locator(".automatic-result")).toHaveCount(3);
+  for (const a of failures)
+    await browserExpect(
+      page.locator(`[data-action-id="${a.action_instance_id}"]`),
+    ).not.toBeVisible();
+  const capture = page.locator(`[data-action-id="${c.action_instance_id}"]`);
+  await browserExpect(
+    capture.locator(":scope > .action-summary"),
+  ).toContainText("自动预览");
+  await capture
+    .getByRole("button", { name: `展开动作 ${c.name}`, exact: true })
+    .click();
+  await capture.locator(":scope > div > details.advanced > summary").click();
   for (const a of failures)
     await browserExpect(
       page.locator(`[data-action-id="${a.action_instance_id}"]`),
@@ -844,6 +956,7 @@ it("复制拍摄分配独立来源及自动取回身份，改名删项保持对�
   await browserExpect(
     page.locator('[data-testid="derived-preview"]'),
   ).toHaveCount(2);
+  await browserExpect(page.locator("article.action-card .step")).toHaveText(["1", "2"]);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -875,10 +988,36 @@ it("复制拍摄分配独立来源及自动取回身份，改名删项保持对�
   await browserExpect(
     page.locator('[data-testid="derived-preview"]'),
   ).toHaveCount(1);
+  await browserExpect(page.locator("article.action-card .step")).toHaveText(["1"]);
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   expect(
     application.draft(d.id).content.automaticPreviews!.actions.map((a) => a.id),
   ).toEqual(d.content.automaticPreviews!.actions.map((a) => a.id));
+}, 20000);
+it("自动预览跟随源名称，用户动作计数和新增序号连续，保存重开保持", async () => {
+  const { page, application } = await setup();
+  await page.getByTestId("initialize-button").click();
+  const draft = previewDraft(application);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  const editor = page.getByTestId("draft-editor");
+  const cards = editor.locator("article.action-card");
+  await page.getByLabel("动作名称", { exact: true }).fill("室外录像");
+  const automatic = page.getByTestId("derived-preview");
+  await browserExpect(automatic.locator("summary")).toContainText("室外录像预览");
+  await automatic.locator("summary").click();
+  expect(JSON.parse(await automatic.locator("pre").innerText()).name).toBe("室外录像预览");
+  await page.getByRole("button", { name: "添加动作", exact: true }).click();
+  await browserExpect(cards.locator(".step")).toHaveText(["1", "2"]);
+  await browserExpect(page.getByLabel("动作名称", { exact: true }).last()).toHaveValue("动作 2");
+  await browserExpect(editor.locator(".section-head > h3").first()).toHaveText("动作 2");
+  await browserExpect(editor.locator(".validation")).toContainText("动作 2");
+  await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
+  expect(JSON.parse(application.draft(draft.id).content.text).actions).toHaveLength(3);
+  await page.reload();
+  await page.getByTestId("draft-open-button").click();
+  await browserExpect(cards.locator(".step")).toHaveText(["1", "2"]);
+  await browserExpect(automatic.locator("summary")).toContainText("室外录像预览");
 }, 20000);
 it("能力重载等待所有开放会话的在途保存，旧轮询不能回退失败观察", async () => {
   const { page, application } = await setup();

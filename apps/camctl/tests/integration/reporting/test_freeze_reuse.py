@@ -112,7 +112,7 @@ async def test_freeze_rejects_unreliable_original_definition(environment, tmp_pa
             event_id = cursor.fetchone()[0]
         with closing(connection.execute("SELECT body_json FROM history_events WHERE id = ?", (event_id,))) as cursor:
             body = json.loads(cursor.fetchone()[0])
-        body["rows"][0]["after"]["values"]["format_version"] = 2
+        body["rows"][0]["after"]["values"]["format_version"] = 3
         connection.execute("UPDATE history_events SET body_json = ? WHERE id = ?", (json.dumps(body), event_id))
     else:
         column, value = {"frozen": ("frozen_event_id", 1), "from": ("from_wm", 1),

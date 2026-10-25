@@ -14,10 +14,11 @@ import asyncio
 import hashlib
 import os
 import re
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, Protocol, Sequence
+from typing import Callable, NamedTuple, Protocol, Sequence
 
 from camctl.contracts.values import ObjectId, new_operation_key
 from camctl.host_files.handoff import (
@@ -260,13 +261,16 @@ class PublicationSession(Protocol):
 
 class DbPublicationSession:
     """每项报告管理操作各自提交完整事务。"""
-    def __init__(self, database: BusinessDatabase) -> None:
+    def __init__(self, database: BusinessDatabase, *,
+                 occurred_at: Callable[[], int] | None = None) -> None:
         self._database = database
+        self._occurred_at = occurred_at if occurred_at is not None else lambda: time.time_ns() // 1000
 
     async def _write(self, method, *args, **kwargs):
         key = new_operation_key()
+        occurred_at = self._occurred_at()
         return await self._database.write(
-            lambda owned: method(key, owned, *args, **kwargs), key=key)
+            lambda owned: method(key, owned, *args, occurred_at=occurred_at, **kwargs), key=key)
 
     async def prepare(self, report_id, contents):
         return await self._write(policy.record_report_bytes, report_id, contents)
@@ -282,7 +286,7 @@ class DbPublicationSession:
 
     async def settle_local(self, action_id, report_id):
         return await self._write(policy.record_local_report, action_id=action_id,
-            local_report_id=report_id, occurred_at=0)
+            local_report_id=report_id)
 
 
 def _report_staging_directory(staging_root: Path) -> Path:

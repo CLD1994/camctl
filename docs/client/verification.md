@@ -2,6 +2,86 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 自动预览名称与用户动作序号（2026-10-26）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，`automatic-previews`、`validation-presentation`、`preview-renaming`、`preview-current-state`、`preview-editor`、`preview-reload`、`web-editing` 七个单元文件的 273 项通过，`automatic-previews` 集成文件的 76 项通过。覆盖源动作改名后派生名称与引用同步、重名及 128 字符边界、能力不可用、无效名称保留，以及多个来源消除名称冲突后保存、重开、复制和直接导出。
+
+`browser-previews` 中两个重点场景通过，实际操作名称输入、新增、复制、删除及保存重开，核对技术详情中的派生名称、普通动作连续序号、动作总数及校验位置。测试使用独立临时数据库与 HTTP 服务。类型检查和生产构建退出 0，构建保留既有主包超过 500 kB 的提示；未执行完整客户端测试套件。
+
+## 计划下载文件名与创建时间（2026-10-26）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，`creation-time`、`protocol`、`reports`、`request-id`、`http`、`requests` 六个测试文件的 572 项通过。创建时间用例先观察到原实现拒绝三位毫秒、导出正文丢失毫秒，再验证合法日期、零与非零毫秒、旧秒级记录及非法精度。HTTP 用例在导出后推进到另一日期，确认正文时间与文件名固定，旧秒级记录的名称补 `000` 且正文不改写。
+
+`requests` 用例确认首次导出 `created_at` 为 `2026-10-26 07:08:23.047`，关闭并重新打开真实数据库后原请求保持一致。浏览器导出与再次下载场景通过，核对实际建议名称、正文时间及复制后的新请求身份。类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。camctl 的相关验证单独记录在[软件验证记录](../camctl/verification.md#计划创建时间的毫秒精度2026-10-26)。
+
+日志位于 `tmp/created-at-ms-client-red.log`、`tmp/created-at-ms-client-green.log`、`tmp/created-at-ms-browser.log`、`tmp/created-at-ms-typecheck.log` 和 `tmp/created-at-ms-build.log`。测试使用独立临时数据，未运行完整客户端测试套件。
+
+## 草稿输入响应与保存布局（2026-10-25）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查和生产构建通过；构建保留既有主包超过 500 kB 的提示。`capability-observation`、`state-observations`、`preview-reload`、`web-session`、`draft-session-conflicts`、`validation-presentation`、`current-validation`、`preview-editor` 和 `video-estimate-state` 九个单元文件的 661 项通过。同版本能力复用用例先在原入口失败，覆盖版本切换、版本缺失、不可用变化与本次错误保留。
+
+新增 `browser-editor-responsiveness` 的三项使用真实客户端、独立临时数据库和 HTTP 保存接口。1416 与 390 像素视口的用例分别先复现 20 和 46.59375 像素移动；修复后，已保存、等待保存、保存中及后续轮询时的输入字段文档位置相同，且核对完整输入确实写入。另一项更改能力文件并成功重载，确认新版本仍重新校验当前输入。三个既有浏览器测试入口补齐可选的 `CAMCTL_TEST_BROWSER_CHANNEL`，与组件内其他入口一致；未设置时仍使用默认 Chromium。
+
+既有 `browser-validation`、`browser-video-estimate`、`browser-draft-conflict-ui`、`browser-previews` 和 `browser-workflow` 五个文件的 179 项全部通过，命令使用 `--maxWorkers=1` 与 `CAMCTL_TEST_BROWSER_CHANNEL=chrome`。该范围与新增三项合计 182 项浏览器用例，验证现有的未完成输入、保存恢复、冲突选择、预览协调、重载暂停和业务操作。独立只读评审核对能力版本来源、会话内容替换、报告校验依据和保存恢复按钮，未发现需要修复的问题。
+
+性能复测只复制当前服务草稿与能力到独立临时目录，未改写原资料。前后均使用 1416×1244 视口、同一包含录像和自动预览的草稿，等待页面就绪后记录 2.4 秒空闲，再依次输入计划名称和最大延迟。基线空闲时观察到三次 62、66、66 毫秒长任务；后续输入及等待阶段另有五次 58–67 毫秒长任务。修复后相同观察阶段均未出现超过 50 毫秒的长任务。计划名称字段在保存状态切换期间的文档纵坐标变化从 20 像素变为 0。输入事件至下一帧的采样前后仍约为 7–17 毫秒，不能把该指标解释为完整输入延迟或将单次结果外推到所有草稿与环境。
+
+本地服务提供新版构建，Codex 内置浏览器已刷新 `http://localhost:4310/`，重新打开原“新计划”草稿，核对保存依据和原参数。日志位于 `tmp/editor-cache-red.log`、`tmp/editor-cache-green.log`、`tmp/editor-layout-red.log`、`tmp/editor-layout-green.log`、`tmp/editor-unit.log`、`tmp/editor-browser-regression.log`、`tmp/editor-typecheck.log` 和 `tmp/editor-build.log`。性能原始数据分别为 `tmp/editor-input-before.json` 与 `tmp/editor-input-profile.json`，页面截图为 `tmp/editor-input-final.png`。文档本地文件链接检查的 5591 个链接通过，Git 差异空白检查通过。本项没有向设备递交请求，未执行完整客户端测试套件。
+
+## 产物技术详情字段展示（2026-10-25）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查与生产构建退出 0，构建保留既有主包超过 500 kB 的提示。`output-facts` 与 `web-facts` 两个单元文件的 10 项通过，覆盖源文件 SHA-256、未检查与未知时长、零秒和精确数值、检查完成仍保留问题，以及清理与检查错误的原始诊断。首轮 7 项回归用例均在原嵌套呈现方式下失败，确认字段含义与表格层级问题。
+
+`browser-media-download` 的 11 项通过，覆盖技术详情的明确字段与单层双列、390 像素窄屏下长校验值换行，以及既有的可读名称、完整字节、LRF/OSV 播放和范围下载。首轮浏览器测试在准备阶段生成空 MP4，11 项未执行；装配改为读取项目生成的固定 32618 字节 VP9 MP4 夹具后，保留原播放和下载断言并全部通过。测试使用独立临时目录。
+
+本地服务继续使用原数据目录，在 Codex 内置浏览器的 `http://localhost:4310/` 展开真实 OSV 产物确认“源文件 SHA-256／尚未取得”“主机媒体检查／未执行”和“媒体时长／未知”均直接显示，没有中间状态列。日志位于 `tmp/output-facts-red.log`、`tmp/output-facts-unit.log`、`tmp/output-facts-typecheck.log`、`tmp/output-facts-build.log` 和 `tmp/output-facts-browser-final.log`，页面截图为 `tmp/output-facts-final.png`。本项没有递交设备请求，未运行完整客户端测试套件。
+
+## 终态取消入口与计划标识（2026-10-25）
+
+Windows、Node.js 24.22.1 和系统 Chrome 中，类型检查与生产构建退出 0；`browser-workflow` 和 `browser-previews` 两个文件、45 项通过。新增用例覆盖三种计划状态、运行中计划内动作状态的独立判断，以及四种动作终态；终态取消入口隐藏后，取回入口仍可见。既有精确取消操作改用含待执行动作的运行中计划，仍核对导出目标 ID、原报告不变及草稿写入。
+
+首轮用例证实已结束计划与成功动作仍错误显示取消按钮。测试准备时，执行中录像携带正式产物的夹具被公共协议拒绝，已改为保留完成的录像并加入待执行同步动作。动态画布录制曾只产生 110 字节的不可解码文件；媒体装配改用仓库内固定、可播放的 WebM 夹具，保留真实导入、核验、播放、进度和范围下载断言。该装配函数的全部浏览器调用方均在上述两文件中完成验证。
+
+使用原数据目录的本地服务已提供新版网页。Codex 内置浏览器在 `http://localhost:4310/` 确认真实已结束计划和成功动作均无取消快捷入口，主机报告卡片明确显示“计划实例 ID”。原请求与报告状态仍分别展示。证据位于 `tmp/terminal-cancel-red.log`、`tmp/terminal-cancel-build.log`、`tmp/terminal-cancel-final-browser.log` 和 `tmp/terminal-cancel-final.png`；文档本地文件链接与 Git 差异格式检查通过。本项没有向设备递交请求，也未运行完整客户端测试套件。
+
+## 产物卡片与可读下载名称（2026-10-25）
+
+Windows 环境使用 Node.js 24.22.1 和系统 Chrome，在 `implement_camctl` 验证单产物操作行、折叠技术详情和交付显示名称下载。浏览器测试使用独立临时目录，不向当前服务的数据目录导入夹具。
+
+| 验证范围 | 实际结果 |
+| --- | --- |
+| `result-model`、`media` 单元及 `media` 集成 | 三个文件、44 项通过；包含其他交付副本的名称关联、媒体类型和真实 HTTP 文件访问。 |
+| `browser-media-download`、`browser-workflow`、`browser-recovery` | 最终三个文件、33 项通过；核对卡片及大图的中文下载名称、HTTP 附件名称和完整字节，保留 LRF/OSV 播放与范围读取、核验失败恢复和精确产物操作。 |
+| `browser-media` | 八项通过；包含跨交付副本查看、混合来源设备的清理资格及大量媒体的分页浏览。与上述最终复测合计四个浏览器文件、41 项。 |
+| 类型检查、生产构建及文档文件链接 | 均退出 0；生产构建保留主包超过 500 kB 的体积提示。 |
+
+产物可用时省略状态徽标并展示适用的清理入口；已清理或未知时保留状态和本地下载，隐藏清理按钮。浏览器断言同时核对取回与下载互斥、默认可见的清理操作、单一技术详情入口和详细事实保留。首轮未知状态夹具缺少协议要求的错误字段，补齐后导入并通过；混合导入的视频夹具仅生成文件头，画布加入文档后取得真实视频帧并通过播放断言。MP4 夹具明确请求画布帧，仍核对真实播放和下载字节。
+
+本地服务已在 `http://localhost:4310/` 使用现有数据目录重新部署，并在 Codex 内置浏览器核对实际 OSV 取回、LRF 下载和清理按钮，以及收起后的卡片布局。命令输出保存于仓库临时目录 `tmp/product-card-*.log`，页面截图为 `tmp/product-card-final.png`。本项未运行完整客户端测试套件，也不包含新的主机报告或设备操作验收。
+
+## 结果操作与主机状态时间（2026-10-25）
+
+Windows 环境使用 Node.js 24.22.1、系统 Chrome、Python 3.11.12 和 SQLite 3.54.1。客户端修改在 `implement_camctl` 集成；独立主机工作树完成后按提交合并。媒体测试明确选择 VP9 编码的 MP4，并主动请求画布帧；网页混合导入等待文件实际核验完成后再断言播放，报告覆盖水位不充当媒体核验完成条件。
+
+| 验证范围 | 实际结果 |
+| --- | --- |
+| 客户端完整单元 `vitest run tests/unit --maxWorkers=2` | 68 个文件、3260 项通过；随后新增的两个默认取回单元与报告单元一起运行，449 项通过。 |
+| 客户端非浏览器集成 `vitest run tests/integration --exclude 'tests/integration/browser-*.test.ts' --maxWorkers=1` | 22 个文件、1066 项通过，包含文件即时可读取性、删除后状态更新，以及中间报告缺字段和重启后拒绝改写状态时间。 |
+| `browser-media-download`、`browser-previews` | 两个文件、31 项通过，包含真实下载字节、LRF/OSV 播放和范围读取、所选过滤、全收到零写入及桌面和窄屏时间展示。 |
+| `browser-media`、`browser-navigation`、`browser-workflow` | 最终三个文件、31 项通过，包含其他交付副本打开大图、跨来源已移走文件仍被取回、默认操作与弹窗焦点恢复。 |
+| `browser-recovery`、`browser-segment-results` | 两个文件、9 项通过。 |
+| `browser-media` 新增的计划与动作默认取回导出 | 两项定向运行通过，核对来源范围与本地排除列表。七个相关浏览器文件累计 73 项；其他浏览器文件未在此范围重跑。 |
+| 类型检查、生产构建与公共登记检查 | 全部退出 0；构建保留主包超过 500 kB 的体积提示。协议 Schema、报告依赖、事件登记和文档链接通过。 |
+| 集成后的主机时间、报告格式升级与默认排除专项 | 分目录顺序运行，分别为 6、6、23 项通过。 |
+| 主机默认取回相关验证 | `outputs` 单元 862 项、相关集成 276 项，以及测试连接代理事务 33 项通过。 |
+| 主机时间相关验证 | 单元 2079 项通过、4 项已在基线重现的 Windows 路径用例排除；报告目录 449 项通过、2 项在基线重现的状态准备断言失败。 |
+
+两项主机报告基线失败位于 `test_generation.py`：`test_generation_writes_schema_valid_staging_file` 预期计划已完成但得到执行中，`test_failed_source_error_rebuilds_at_the_frozen_history_boundary` 预期来源失败但得到执行中。四项单元排除来自 `test_capture_preparation_init.py` 的既有 Windows 路径绑定夹具。对照使用独立 `ab088fa2` 源码快照，没有修改这些断言或生产规则。
+
+Python 在真实临时 SQLite 中生成格式 2 的连续两份报告，客户端通过正式导入入口依次接受，覆盖推进至 8，计划和动作完整的三步状态历史均保留，墙钟回退没有改变数组顺序。浏览器导出的计划与动作默认取回 JSON 均通过主机正式 Schema 校验、参数解析和产物选择函数，排除已收到的产物后只选择未收到的默认产物。独立审查核对了默认选择与修复替代、全部排除、历史知识、格式传递、旧字节重建、显式升级和零时间占位识别。服务使用原客户端数据目录部署到 `http://localhost:4310/`，在 Codex 内置浏览器核对按钮、取回/下载互斥及全收到提示。原计划报告缺少时间数组，页面明确显示“报告未提供”；没有升级用户的主机状态库或向设备递交请求。
+
+命令输出及基线证据保存于仓库临时目录 `tmp/result-operations-*.log` 和 `tmp/result-operations-evidence/`。专项输出为 `tmp/report-status-integrated.log`、`tmp/report-upgrade-integrated.log`、`tmp/default-exclusions-integrated.log`。这些结果不包括目标设备性能、实际设备控制、物理断电或新的安装包验收。
+
 ## 开发容器重建后的客户端验证（2026-10-24 UTC）
 
 使用 Node.js 24.22.1、npm 11.21.1 和原 `package-lock.json` 安装开发依赖。类型检查与生产构建退出 0；完整单元测试 67 个文件、3229 项通过，51 项报告导入集成和 19 项预览浏览器集成分别通过，均退出 0。测试使用 `--maxWorkers=2`，按单元、报告导入、浏览器的顺序运行。记录器总耗时分别为 61.447、5.510、58.663 秒；它包含测试进程启动和收尾，不等同于用例耗时。

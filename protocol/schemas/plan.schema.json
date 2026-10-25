@@ -8,7 +8,7 @@
       "$ref": "status-report.schema.json#/$defs/request_id"
     },
     "created_at": {
-      "$ref": "status-report.schema.json#/$defs/timestamp"
+      "$ref": "status-report.schema.json#/$defs/creation_timestamp"
     },
     "name": {
       "$ref": "status-report.schema.json#/$defs/name"
@@ -156,10 +156,30 @@
             },
             "purpose": {
               "const": "manual"
+            },
+            "exclude_output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "status-report.schema.json#/$defs/entity_id"
+              },
+              "minItems": 1,
+              "uniqueItems": true
             }
           },
           "required": [
             "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "required": ["exclude_output_ids"]
+              },
+              "then": {
+                "properties": {
+                  "filter": {"const": "default"}
+                }
+              }
+            }
           ],
           "additionalProperties": false
         },
@@ -667,7 +687,7 @@
           "$ref": "status-report.schema.json#/$defs/request_id"
         },
         "created_at": {
-          "$ref": "status-report.schema.json#/$defs/timestamp"
+          "$ref": "status-report.schema.json#/$defs/creation_timestamp"
         },
         "name": {
           "$ref": "status-report.schema.json#/$defs/name"

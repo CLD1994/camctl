@@ -88,7 +88,7 @@ async def _source(
     return owned, runtime, aid
 
 
-def _obtain(owned, runtime, source_id, mode, request_id):
+def _obtain(owned, runtime, source_id, mode, request_id, *, exclude_output_ids=None):
     now = runtime.wall_us()
     instant = datetime.fromtimestamp(now // 1000000, timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -102,6 +102,8 @@ def _obtain(owned, runtime, source_id, mode, request_id):
         params["filter"] = "preview"
     elif isinstance(mode, list):
         params["output_ids"] = [str(identity) for identity in mode]
+    if exclude_output_ids is not None:
+        params["exclude_output_ids"] = [str(identity) for identity in exclude_output_ids]
     request = {
         "request_id": str(request_id),
         "created_at": instant,
@@ -574,7 +576,8 @@ async def test_failed_segment_explicit_id_keeps_item_not_found_error(tmp_path):
 
 
 @pytest.mark.parametrize("scope", ["empty", "unknown"])
-async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, scope):
+@pytest.mark.parametrize("exclude", [False, True])
+async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, scope, exclude):
     from camctl.contracts.workflow_errors import item_error_id
     from camctl.operations.attempts import RetryWaitGate
     from camctl.outputs.handoff import DeliveryDirectories
@@ -592,7 +595,9 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
         finalized=scope != "unknown",
     )
     try:
-        action, selection = _obtain(owned, runtime, aid, "default", 2)
+        identities = [row[0] for row in owned.connection.execute("SELECT id FROM outputs")]
+        action, selection = _obtain(owned, runtime, aid, "default", 2,
+                                    exclude_output_ids=identities if exclude else None)
         obtain = ObtainRuntime(
             owned,
             {},
@@ -636,5 +641,40 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM deliveries"
         ).fetchone() == (0,)
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize("all_excluded", [False, True])
+async def test_default_segment_exclusions_keep_scope_and_replay(tmp_path, all_excluded):
+    from camctl.persistence.repositories.outputs import FinishObtain
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+
+    owned, runtime, aid = await _source(tmp_path)
+    try:
+        originals = [row[0] for row in owned.connection.execute(
+            "SELECT id FROM outputs WHERE kind=1 ORDER BY id")]
+        excluded = originals if all_excluded else [originals[0], originals[-1], 9909]
+        expected = [] if all_excluded else originals[1:3]
+        action, selection = _obtain(owned, runtime, aid, "default", 2,
+                                    exclude_output_ids=excluded)
+        request, key = FixSegmentSelection(selection, runtime.wall_us()), new_operation_key()
+        for iteration in range(2):
+            receipt = fix_segment_selection(request, key, owned)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            actual = [row[0] for row in owned.connection.execute(
+                "SELECT output_id FROM obtain_items WHERE selection_id=? ORDER BY id", (selection,))]
+            assert actual == expected
+            if iteration == 0:
+                owned.connection.close()
+                owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+                runtime.owned = owned
+        if all_excluded:
+            for operation_key in (new_operation_key(), new_operation_key()):
+                done = OutputsRepository().finish_obtain(
+                    FinishObtain(action, runtime.wall_us()), operation_key, owned)
+                assert done.kind is DbOutcomeKind.COMPLETED, done.error
+                assert (done.value.action_status, done.value.prepared, done.value.failed) == (3, 0, 0)
+        assert owned.connection.execute("SELECT COUNT(*) FROM deliveries").fetchone() == (0,)
     finally:
         owned.connection.close()

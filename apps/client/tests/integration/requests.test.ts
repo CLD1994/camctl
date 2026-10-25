@@ -136,12 +136,22 @@ describe("导出与请求身份", () => {
     expect(app.draft(draft.id)).toEqual(draft);
   });
 
-  it("导出正文的创建时间符合公共协议秒级格式", () => {
+  it("首次导出的毫秒创建时间可靠保存并在重开后保持", () => {
     const app = setup(new SequenceRandom([31n]));
-    const exported = app.exportDraft(app.createDraft(content).id, 1, content);
-    expect(exported.body.created_at).toMatch(
-      /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/,
-    );
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.parse("2026-10-26T07:08:23.047Z"));
+    let exported: ExportedRequest;
+    try {
+      exported = app.exportDraft(app.createDraft(content).id, 1, content);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(exported.body.created_at).toBe("2026-10-26 07:08:23.047");
+    app.store.close();
+    const reopened = new Application(app.store.directory);
+    apps.push(reopened);
+    expect(reopened.request(exported.id)).toEqual(exported);
   });
 
   it("test_export_retry_preserves_request_identity", () => {

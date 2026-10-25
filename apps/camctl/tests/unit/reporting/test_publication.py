@@ -162,3 +162,31 @@ def test_intent_guard_converts_json_comparison_recursion_error(monkeypatch):
                         last_error_json={"reason": "old failure"}),
                {"status": 3, "last_error_json": {"reason": "old failure"}})
     assert isinstance(raised.value.__cause__, RecursionError)
+
+
+@pytest.mark.asyncio
+async def test_publication_session_reads_injected_clock_at_each_write(monkeypatch):
+    from unittest.mock import create_autospec
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+    from camctl.persistence.runtime import OwnedConnection
+    from camctl.reporting import publication
+    times = iter([9_000_001, 9_000_002, 9_000_003, 9_000_004, 9_000_005])
+    recorded = []
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED)
+    for name in ("record_report_bytes", "record_report_publish_intent", "publish_report", "record_report_failure", "record_local_report"):
+        def write(*args, **kwargs):
+            recorded.append(kwargs["occurred_at"])
+            return outcome
+        monkeypatch.setattr(publication.policy, name, create_autospec(
+            getattr(publication.policy, name), side_effect=write))
+    database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+    owned = create_autospec(OwnedConnection, instance=True)
+    database.write.side_effect = lambda callback, **kwargs: callback(owned)
+    session = publication.DbPublicationSession(database, occurred_at=lambda: next(times))
+    assert await session.prepare(1, object()) is outcome
+    assert await session.record_intent(1) is outcome
+    assert await session.save_publication(1, object()) is outcome
+    assert await session.record_failure(1, {}) is outcome
+    assert await session.settle_local(2, 1) is outcome
+    assert recorded == [9_000_001, 9_000_002, 9_000_003, 9_000_004, 9_000_005]

@@ -63,6 +63,8 @@ class EntityEventLink:
     entity_id: int
     event_id: int
     change_count: int
+    before_status: int | None = None
+    after_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -362,6 +364,7 @@ def derive_changes(
                 ReportEntityChange(entity_type, entity_id, event.event_id, event.change_seq)
             )
         event_entities: dict[EntityRef, None] = {}
+        statuses: dict[EntityRef, tuple[int | None, int]] = {}
         for row in event.rows:
             ref = validated.row_owners.get((row.table, row.row_id))
             if ref is None:
@@ -369,11 +372,17 @@ def derive_changes(
                     f"事件 {event.event_id} 的行 {row.table}#{row.row_id} 缺少历史归属"
                 )
             event_entities.setdefault(ref, None)
+            if row.table in ("plans", "actions") and "status" in row.after.values:
+                before_status = row.before.values.get("status") if row.before.exists else None
+                after_status = row.after.values["status"]
+                if not row.before.exists or before_status != after_status:
+                    statuses[ref] = (before_status, after_status)
         for ref in event_entities:
             base = counts.get(ref, 0)
             counts[ref] = base + 1
             touched.add(ref)
-            links.append(EntityEventLink(ref[0], ref[1], event.event_id, base + 1))
+            links.append(EntityEventLink(ref[0], ref[1], event.event_id, base + 1,
+                                         *statuses.get(ref, (None, None))))
         for row in event.rows:
             if not row.after.exists:
                 raise ChangeDerivationError(

@@ -236,6 +236,10 @@ def check_integer_definitions(db: sqlite3.Connection, write_doc: bool) -> None:
             verify(name.endswith('.error_code') and rule['key'] == expected and name in error_groups, f'错误来源与所属表一致：{name}')
             members = error_groups[name]
             external_errors.add(name)
+        elif source == 'columns':
+            verify(set(rule) == {'source', 'columns'}, f'列编号来源引用完整：{name}')
+            codes = {value for column in rule['columns'] for value in definitions['enums'][column]['members'].values()}
+            members = {f'STATUS_{value}': value for value in sorted(codes)}
         elif source in ('events', 'event_versions'):
             verify(set(rule) == {'source'}, f'事件来源引用完整：{name}')
             if source == 'events':

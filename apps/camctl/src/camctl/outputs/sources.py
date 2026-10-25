@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol
 
@@ -451,6 +451,8 @@ def select_outputs(
     facts: SelectionFacts,
     mode: SelectionMode,
     requested_output_ids: tuple[int, ...] = (),
+    *,
+    excluded_output_ids: frozenset[int] = frozenset(),
 ) -> SelectionSnapshot:
     """按已保存的选择方式计算一个来源的完整选择。
 
@@ -460,6 +462,8 @@ def select_outputs(
     """
     if source.state != ResolutionState.FIXED:
         raise ValueError("只有 FIXED 来源能进行产物选择")
+    if excluded_output_ids and mode != SelectionMode.DEFAULT:
+        raise ValueError("排除产物只适用于默认取回")
     by_id = {entry.output_id: entry for entry in facts.outputs}
     if len(by_id) != len(facts.outputs):
         raise ConsistencyError("完整来源目录不能重复登记同一产物身份")
@@ -486,7 +490,11 @@ def select_outputs(
                 is_fixed=True,
                 source_error_code=SELECTION_SOURCE_ACTION_FAILED,
             )
-        return _select_families(facts, SelectionMode(mode))
+        snapshot = _select_families(facts, SelectionMode(mode))
+        if excluded_output_ids:
+            snapshot = replace(snapshot, items=tuple(
+                item for item in snapshot.items if item.output_id not in excluded_output_ids))
+        return snapshot
     return _select_explicit(facts, requested_output_ids, by_id)
 
 

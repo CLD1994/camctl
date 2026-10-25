@@ -7,6 +7,7 @@ import {
   mergeReport,
   reportDecision,
   selectSyncReport,
+  StatusHistoryKnowledge,
 } from "../../src/domain/reports";
 import type {
   StatusReport,
@@ -82,6 +83,52 @@ function previewReport(): StatusReport {
   });
   return r;
 }
+const statusEntry = (status: string, changed_at: string | null = "2026-01-01 00:00:00") =>
+  ({ status, changed_at, clock_status: "trusted" });
+it("报告允许完整状态历史、同秒迁移和墙钟回退", () => {
+  const r = report();
+  Object.assign(r.plans![0], { status_history: [statusEntry("pending"), statusEntry("completed")] });
+  Object.assign(r.plans![0].actions![0], { status_history: [
+    statusEntry("pending", "2026-01-01 00:00:02"),
+    statusEntry("running", "2026-01-01 00:00:01"), statusEntry("succeeded"),
+  ] });
+  expect(() => validateReport(r)).not.toThrow();
+});
+it.each([
+  [], [statusEntry("running"), statusEntry("succeeded")],
+  [statusEntry("pending"), statusEntry("running")],
+  [statusEntry("pending"), statusEntry("pending"), statusEntry("succeeded")],
+  [statusEntry("pending"), statusEntry("failed"), statusEntry("succeeded")],
+  [statusEntry("pending"), statusEntry("running"), statusEntry("pending"), statusEntry("succeeded")],
+  [statusEntry("pending", "2026-02-30 00:00:00"), statusEntry("succeeded")],
+].map((history) => [history]))("报告拒绝不完整或非法状态历史 %#", (history) => {
+  const r = report();
+  Object.assign(r.plans![0].actions![0], { status_history: history });
+  expect(() => validateReport(r)).toThrow();
+});
+it("后续报告不能改写已有状态历史时间", () => {
+  const old = report(), next = report(); next.report_id = "2"; next.to_wm = 21;
+  Object.assign(old.plans![0].actions![0], { status_history: [statusEntry("pending"), statusEntry("succeeded")] });
+  Object.assign(next.plans![0].actions![0], { status_history: [statusEntry("pending"), statusEntry("succeeded", "2026-01-01 00:00:01")] });
+  expect(() => validateReportAgainstHistory(old, next)).toThrow();
+});
+it("中间旧版报告缺少数组不能移除已有状态时间证据", () => {
+  const old = report();
+  Object.assign(old.plans![0].actions![0], { status_history: [statusEntry("pending"), statusEntry("succeeded")] });
+  const missing = report(); missing.report_id = "2"; missing.to_wm = 21;
+  const merged = mergeReport(old, missing);
+  expect(merged.plans![0].actions![0].status_history).toEqual(old.plans![0].actions![0].status_history);
+  const next = report(); next.report_id = "3"; next.to_wm = 22;
+  Object.assign(next.plans![0].actions![0], { status_history: [statusEntry("pending"), statusEntry("succeeded", "2026-01-01 00:00:01")] });
+  const knowledge = new StatusHistoryKnowledge();
+  knowledge.add(old); knowledge.add(missing);
+  expect(() => knowledge.add(next)).toThrow();
+});
+it("默认取回报告拒绝交付已排除的产物", () => {
+  const r = report();
+  Object.assign(r.plans![0].actions![1].input_params!, { exclude_output_ids: ["1"] });
+  expect(() => validateReport(r)).toThrow();
+});
 function linkedCancellation(target: unknown): StatusReport {
   const r = report();
   r.plans![0].actions![0].group = "采集";

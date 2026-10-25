@@ -54,6 +54,7 @@ class ProjectionInput:
     tables: Mapping[str, Mapping[int, Mapping[str, Any]]]
     selected_entities: Mapping[str, Mapping[int, Mapping[str, Any]]] = field(default_factory=dict)
     deferred_fields: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    status_histories: Mapping[tuple[str, int], Sequence[Mapping[str, Any]]] | None = None
 
 
 PublicFragment = dict[str, Any]
@@ -380,6 +381,8 @@ def _eval(node: Mapping[str, Any], context: _Context) -> Any:
         return OMIT
     if op == "error":
         raise PublicProjectionError(f"登记要求状态库错误: {node['code']}")
+    if op == "status_history":
+        return _status_history(node, context)
     if op == "read":
         return _read(node, context)
     if op == "enum":
@@ -461,10 +464,10 @@ def _read(node: Mapping[str, Any], context: _Context) -> Any:
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise PublicProjectionError(f"{node['column']} 不是合法对象 ID: {value!r}")
         return str(value)
-    if encoding == "utc_seconds":
+    if encoding in ("utc_seconds", "utc_milliseconds"):
         if not isinstance(value, int) or isinstance(value, bool):
             raise PublicProjectionError(f"{node['column']} 不是整数微秒: {value!r}")
-        return format_utc_micros(value)
+        return format_utc_micros(value, allow_milliseconds=encoding == "utc_milliseconds")
     if encoding == "json":
         document = _json(node["column"], context)
         if "schema" in node:
@@ -537,6 +540,7 @@ def _project(projection_name: str, context: _Context) -> Any:
             tables=context.input.tables,
             selected_entities=context.input.selected_entities,
             deferred_fields=context.input.deferred_fields,
+            status_histories=context.input.status_histories,
         )
     )
 
@@ -562,6 +566,7 @@ def _entities(node: Mapping[str, Any], context: _Context) -> Any:
                     tables=context.input.tables,
                     selected_entities=subtree,
                     deferred_fields=context.input.deferred_fields,
+                    status_histories=context.input.status_histories,
                 )
             )
         )
@@ -580,6 +585,7 @@ def _rows(node: Mapping[str, Any], context: _Context) -> Any:
                 tables=context.input.tables,
                 selected_entities=context.input.selected_entities,
                 deferred_fields=context.input.deferred_fields,
+                status_histories=context.input.status_histories,
             )
         )
         for _table, row_id in matched
@@ -787,3 +793,18 @@ def _failure_union(node: Mapping[str, Any], context: _Context) -> Any:
         return OMIT
     entries.sort(key=lambda entry: entry[0])
     return [fragment for _order, _index, _identity, fragment in entries]
+
+
+def _status_history(node: Mapping[str, Any], context: _Context) -> Any:
+    """时间历史复用所属实体的公开状态映射，时钟枚举来自全局登记。"""
+    if context.input.status_histories is None:
+        # 通用纯投影允许调用方不请求时间；报告装配始终显式提供此输入。
+        return OMIT
+    transitions = context.input.status_histories.get((context.input.entity, context.row_id))
+    if not transitions:
+        raise PublicProjectionError("缺少从创建至 H 的状态历史")
+    mapping = _dependencies()["projections"][context.input.entity]["fields"]["status"]["value"]["map"]
+    return [{"status": mapping[_enum_member(node["column"], item["status"])],
+             "changed_at": format_utc_micros((item["changed_at"] // 1_000_000) * 1_000_000),
+             "clock_status": _enum_member("history_events.clock_status", item["clock_status"]).lower()}
+            for item in transitions]

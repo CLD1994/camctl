@@ -22,6 +22,7 @@ import { Files } from "../../src/server/files";
 import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import type { Draft } from "../../src/server/models";
+import type { StatusReport } from "../../src/shared/types";
 import { makeMediaFixture } from "../helpers/media";
 import { mappedReport, reportInput } from "./fixtures";
 
@@ -30,7 +31,10 @@ let fixtures: Awaited<ReturnType<typeof makeMediaFixture>>;
 let fixtureDirectory: string;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
+  });
   fixtureDirectory = mkdtempSync(join(tmpdir(), "camctl-browser-media-"));
   fixtures = await makeMediaFixture(fixtureDirectory);
 }, 20000);
@@ -102,8 +106,20 @@ it("网页初始化并恢复未完成的草稿输入", async () => {
 it("报告独有详情按准确对象准备取回清理和取消，主机事实保持", async () => {
   const { page, application } = await setup();
   await page.getByTestId("initialize-button").click();
+  const report = JSON.parse(fixtures.reportBytes.toString()) as StatusReport;
+  report.plans![0].status = "running";
+  report.plans![0].actions!.push({
+    action_instance_id: "3",
+    name: "等待同步",
+    type: "report_status",
+    status: "pending",
+    input_params: { scope: "full" },
+  });
+  const input = reportInput(report);
+  const reportPath = join(fixtureDirectory, input.file.fileName);
+  writeFileSync(reportPath, input.bytes);
   await page.getByTestId("nav-import").click();
-  await page.getByTestId("import-files").setInputFiles(fixtures.reportPath);
+  await page.getByTestId("import-files").setInputFiles(reportPath);
   await browserExpect.poll(() => application.coverage()).toBe(20);
   const snapshot = JSON.stringify(application.snapshot());
   await page.getByTestId("nav-plans").click();
@@ -118,23 +134,17 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
       .getByRole("button", { name: /^展开动作 / })
       .first()
       .click();
-  for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
-    .all())
+  for (const summary of await page.getByText("技术详情", { exact: true }).all())
     await summary.click();
   await browserExpect(page.getByTestId("download-request-button")).toHaveCount(
     0,
   );
   await browserExpect(page.getByTestId("copy-request-button")).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "准备取回", exact: true })
-    .first()
-    .click();
+  await page.getByRole("button", { name: "取回", exact: true }).first().click();
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   const draft = application.store.all<Draft>("drafts")[0];
-  expect(JSON.parse(draft.content.text).actions[0]).toEqual({
-    name: "取回产物",
+  expect(JSON.parse(draft.content.text).actions[0]).toMatchObject({
     type: "obtain_action_outputs",
     params: { source: { action_instance_id: "1" }, output_ids: ["4"] },
   });
@@ -151,7 +161,7 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
         .first()
         .click();
     for (const summary of await page
-      .getByText("更多操作与交付记录", { exact: true })
+      .getByText("技术详情", { exact: true })
       .all())
       await summary.click();
     await page
@@ -162,18 +172,18 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
     await page.getByRole("button", { name: "加入草稿", exact: true }).click();
     await browserExpect(page.getByRole("dialog")).toHaveCount(0);
   };
-  await append("准备清理源产物");
-  await append("准备取消动作");
-  await append("准备取消计划");
-  await append("准备取回计划默认产物");
-  await append("准备清理计划全部源产物");
-  await append("准备取回默认产物");
-  await append("准备清理动作全部源产物");
+  await append("清理产物");
+  await append("取消动作");
+  await append("取消计划");
+  await append("取回计划产物");
+  await append("清理计划产物");
+  await append("取回默认产物");
+  await append("清理全部产物");
   const actions = JSON.parse(application.draft(draft.id).content.text).actions;
   expect(actions.map((a: { params: unknown }) => a.params)).toEqual([
     { source: { action_instance_id: "1" }, output_ids: ["4"] },
     { output_ids: ["4"] },
-    { target: { action_instance_id: "1" } },
+    { target: { action_instance_id: "3" } },
     { target: { plan_instance_id: "1" } },
     { source: { plan_instance_id: "1" } },
     { source: { plan_instance_id: "1" } },
@@ -200,6 +210,84 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   );
   expect(JSON.stringify(application.snapshot())).toBe(snapshot);
 }, 20000);
+it.each([
+  {
+    planStatus: "pending",
+    cancelPlan: 1,
+    actions: [["pending", 1]],
+  },
+  {
+    planStatus: "running",
+    cancelPlan: 1,
+    actions: [
+      ["pending", 1],
+      ["running", 1],
+      ["succeeded", 0],
+      ["failed", 0],
+      ["canceled", 0],
+      ["expired", 0],
+    ],
+  },
+  {
+    planStatus: "completed",
+    cancelPlan: 0,
+    actions: [
+      ["succeeded", 0],
+      ["failed", 0],
+      ["canceled", 0],
+      ["expired", 0],
+    ],
+  },
+] as const)(
+  "$planStatus 计划按各对象的报告状态提供取消入口",
+  async ({ planStatus, cancelPlan, actions }) => {
+    const { page, application } = await setup();
+    await page.getByTestId("initialize-button").click();
+    const report = mappedReport(Buffer.from("probe"));
+    const plan = report.plans![0];
+    const capture = plan.actions![0];
+    plan.status = planStatus;
+    plan.actions = actions.map(([status], index) => ({
+      ...capture,
+      action_instance_id: String(21 + index),
+      name: `状态 ${status}`,
+      status,
+      expiration_reason: status === "expired" ? "window_missed" : undefined,
+      outputs: undefined,
+      result: undefined,
+      error:
+        status === "failed"
+          ? { code: "future_code", stage: "execution", details: {} }
+          : undefined,
+    }));
+    application.applyReports([reportInput(report)]);
+    expect(
+      application.coverage(),
+      JSON.stringify(application.state().imports),
+    ).toBe(20);
+    const snapshot = JSON.stringify(application.snapshot());
+    await page.reload();
+    await page.getByTestId("tab-records").click();
+    await page.getByTestId("record-open-button").click();
+    await browserExpect(
+      page.getByRole("button", { name: "取消计划", exact: true }),
+    ).toHaveCount(cancelPlan);
+    for (const [index, [status, cancelAction]] of actions.entries()) {
+      await page
+        .getByRole("button", { name: `展开动作 状态 ${status}`, exact: true })
+        .click();
+      const card = page.locator(`[data-action-id="${21 + index}"]`);
+      await browserExpect(
+        card.getByRole("button", { name: "取消动作", exact: true }),
+      ).toHaveCount(cancelAction);
+      await browserExpect(
+        card.getByRole("button", { name: "取回默认产物", exact: true }),
+      ).toBeVisible();
+    }
+    expect(JSON.stringify(application.snapshot())).toBe(snapshot);
+    expect(application.store.all("drafts")).toHaveLength(0);
+  },
+);
 it("报告只有历史计划身份时仍可准备范围动作并核实追加回执丢失", async () => {
   const { page, application } = await setup();
   await page.getByTestId("initialize-button").click();
@@ -215,7 +303,7 @@ it("报告只有历史计划身份时仍可准备范围动作并核实追加回�
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
-  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await page.getByRole("button", { name: "取回计划产物" }).click();
   await browserExpect(page.getByRole("dialog")).toContainText("默认产物");
   await choose(page.getByLabel("目标草稿"), draft.id);
   await page.route("**/api/drafts/*/actions", async (route) => {
@@ -271,7 +359,7 @@ it.each(["camera_take_photo", "camera_timelapse", "camera_record"] as const)(
     await page.getByTestId("tab-records").click();
     await page.getByTestId("record-open-button").click();
     await page.getByRole("button", { name: "展开动作 未开始拍摄" }).click();
-    await page.getByRole("button", { name: "准备清理动作全部源产物" }).click();
+    await page.getByRole("button", { name: "清理全部产物" }).click();
     await choose(page.getByLabel("目标草稿"), draft.id);
     let once = true;
     await page.route("**/api/drafts/*/actions", async (route) => {
@@ -387,14 +475,14 @@ it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来�
     ["预览", "5"],
     ["修复成品", "6"],
   ]) {
-    for (const operation of ["准备取回", "准备清理源产物"]) {
+    for (const operation of ["取回", "清理产物"]) {
       await page.getByTestId("tab-records").click();
       await page.getByTestId("record-open-button").click();
       await page.getByRole("button", { name: /^展开动作 / }).click();
       const product = page
         .locator(".product-card")
         .filter({ has: page.getByText(name, { exact: true }) });
-      await product.getByText("更多操作与交付记录", { exact: true }).click();
+      await product.getByText("技术详情", { exact: true }).click();
       await product
         .getByRole("button", { name: operation, exact: true })
         .click();
@@ -405,7 +493,7 @@ it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来�
         application.draft(draft.id).content.text,
       ).actions.at(-1);
       expect(action.params).toEqual(
-        operation === "准备取回"
+        operation === "取回"
           ? {
               source: { action_instance_id: capture.action_instance_id },
               output_ids: [id],
@@ -470,16 +558,15 @@ it("交付来源缺少快照时仍按同源或跨来源选择准备精确取回"
   await open();
   await page.getByLabel("选择 来源甲一").check();
   await page.getByLabel("选择 来源甲二").check();
-  await page
-    .getByRole("button", { name: "准备取回所选产物", exact: true })
-    .click();
+  await page.getByRole("button", { name: "取回所选产物", exact: true }).click();
   await append();
   await open();
   await page.getByLabel("选择 来源甲一").check();
   await page.getByLabel("选择 来源乙", { exact: true }).check();
   await browserExpect(
-    page.getByRole("button", { name: "准备取回所选产物", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "取回所选产物", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "取回所选产物", exact: true }).click();
   await page.getByRole("button", { name: /准备取回来源 92 的所选/ }).click();
   await append();
   expect(
@@ -546,9 +633,7 @@ it("未发布交付没有本地文件时不暗示文件等待送达", async () =
       .getByRole("button", { name: /^展开动作 / })
       .first()
       .click();
-  for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
-    .all())
+  for (const summary of await page.getByText("技术详情", { exact: true }).all())
     await summary.click();
   const failed = page.locator(".delivery").filter({ hasText: "3.mp4" }).first();
   await browserExpect(failed).toContainText("尚无本地副本");
@@ -579,14 +664,24 @@ it("网页导出与再次下载保持同一请求，复制后产生新请求", a
   );
   const firstEvent = page.waitForEvent("download");
   await page.getByTestId("export-button").click();
-  const first = JSON.parse(
-    readFileSync((await (await firstEvent).path())!, "utf8"),
+  const firstDownload = await firstEvent;
+  expect(firstDownload.suggestedFilename()).toMatch(
+    /^plan-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.json$/,
+  );
+  const first = JSON.parse(readFileSync((await firstDownload.path())!, "utf8"));
+  expect(firstDownload.suggestedFilename()).toContain(
+    first.created_at.replace(" ", "_").replaceAll(":", "-").replace(".", "-"),
   );
   const nextEvent = page.waitForEvent("download");
   await page.getByTestId("download-request-button").click();
-  const next = JSON.parse(
-    readFileSync((await (await nextEvent).path())!, "utf8"),
+  const nextDownload = await nextEvent;
+  expect(nextDownload.suggestedFilename()).toMatch(
+    /^plan-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.json$/,
   );
+  expect(nextDownload.suggestedFilename()).toBe(
+    firstDownload.suggestedFilename(),
+  );
+  const next = JSON.parse(readFileSync((await nextDownload.path())!, "utf8"));
   expect(next.request_id).toBe(first.request_id);
   await page.getByTestId("copy-request-button").click();
   const copyEvent = page.waitForEvent("download");
@@ -605,6 +700,17 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
     .getByTestId("import-files")
     .setInputFiles([fixtures.videoPath, fixtures.reportPath]);
   await browserExpect.poll(() => application.coverage()).toBe(20);
+  await browserExpect
+    .poll(
+      () =>
+        application.store
+          .all<{ status: string }>("videos")
+          .map((video) => video.status),
+      {
+        message: JSON.stringify(application.state().imports),
+      },
+    )
+    .toEqual(["verified"]);
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
@@ -617,9 +723,7 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
       .getByRole("button", { name: /^展开动作 / })
       .first()
       .click();
-  for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
-    .all())
+  for (const summary of await page.getByText("技术详情", { exact: true }).all())
     await summary.click();
   const video = page.locator("video").first();
   await browserExpect(video).toBeVisible();
@@ -650,7 +754,7 @@ it("能力版本变化后后续追加从最新观察准备重试", async () => {
   await page.reload();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
-  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await page.getByRole("button", { name: "取回计划产物" }).click();
   await choose(page.getByLabel("目标草稿"), draft.id);
   let first = true;
   await page.route("**/api/drafts/*/actions", async (route) => {

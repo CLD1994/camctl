@@ -3,7 +3,6 @@
 from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 from unittest.mock import create_autospec
 
@@ -27,6 +26,7 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
     """只改变同 H 关联行的返回值；分页选择和历史恢复均委托真实仓储。"""
     actual = HistoryRepository(spec.db_path)
     reader = create_autospec(HistoryRepository, instance=True, spec_set=True)
+    reader.status_history.side_effect = actual.status_history
     reader.frozen_registration.side_effect = actual.frozen_registration
     reader.open_report_selection.side_effect = actual.open_report_selection
     reader.restore_primary_at_h.side_effect = actual.restore_primary_at_h
@@ -36,7 +36,7 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
 
     @contextmanager
     def open_history(entity_id, boundary, **options):
-        with actual.open_segment_history(entity_id, boundary, **options) as handle:
+        with actual.open_report_action(entity_id, boundary, **options) as handle:
             related = handle.related_rows
 
             def rows(table, column=None, value=None):
@@ -55,7 +55,7 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
             handle.related_rows = rows
             yield handle
 
-    reader.open_segment_history.side_effect = open_history
+    reader.open_report_action.side_effect = open_history
     return reader, supplied
 
 
@@ -128,8 +128,7 @@ async def test_uninterpretable_frozen_error_stops_worker_without_publish(tmp_pat
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
-        monkeypatch.setattr(worker, "generate_report_file",
-                            partial(generate_report_file, repository=reader))
+        monkeypatch.setattr(worker, "HistoryRepository", lambda *args, **options: reader)
         before = _snapshot(owned, report, runtime)
         job = _job(owned, spec)
         try:

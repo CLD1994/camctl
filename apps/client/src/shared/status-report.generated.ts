@@ -12,12 +12,12 @@ export type EntityId1 = string;
  */
 export type Uint = number;
 /**
- * 固定到秒的 UTC 时间字面量 YYYY-MM-DD HH:mm:ss；不接受小数秒，日期和时间的实际有效性另按语义校验。
+ * 计划创建时间为 UTC，新的客户端输出三位毫秒；兼容已有秒级时间。实际日期有效性另行校验。
  *
  * This interface was referenced by `Camctl`'s JSON-Schema
- * via the `definition` "timestamp".
+ * via the `definition` "creation_timestamp".
  */
-export type Timestamp = string;
+export type CreationTimestamp = string;
 /**
  * 首尾 Unicode 空白按输入契约另作语义校验，不依赖不同正则引擎对空白的不同解释。
  *
@@ -66,6 +66,7 @@ export type Action = {
   deliveries?: Delivery[];
   automation?: Automation;
   device_execution?: DeviceExecution;
+  status_history?: ActionStatusHistory;
 };
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
@@ -217,6 +218,54 @@ export type Delivery = {
   status: "pending" | "preparing" | "prepared" | "publishing" | "published" | "failed" | "canceled" | "withdrawn";
   error?: Error;
 };
+/**
+ * @minItems 1
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "action_status_history".
+ */
+export type ActionStatusHistory = [
+  {
+    status: ActionStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  },
+  ...{
+    status: ActionStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  }[]
+];
+/**
+ * 固定到秒的 UTC 时间字面量 YYYY-MM-DD HH:mm:ss；不接受小数秒，日期和时间的实际有效性另按语义校验。
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "timestamp".
+ */
+export type Timestamp = string;
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "clock_status".
+ */
+export type ClockStatus = "unchecked" | "trusted" | "invalid";
+/**
+ * @minItems 1
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "plan_status_history".
+ */
+export type PlanStatusHistory = [
+  {
+    status: PlanStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  },
+  ...{
+    status: PlanStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  }[]
+];
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "diagnostic".
@@ -427,10 +476,11 @@ export interface Plan {
       }
   ) &
     string;
-  created_at: Timestamp;
+  created_at: CreationTimestamp;
   name: Name;
   status: PlanStatus;
   actions?: Action[];
+  status_history?: PlanStatusHistory;
 }
 /**
  * 错误码及阶段为生产者登记的标识；驱动可提供具体原因。未知码保留展示，不改变实体状态或合并规则。details 按对应错误契约解释。

@@ -792,7 +792,7 @@ it("时间和类型的Pointer恢复仍由共享协调处理", () => {
   const removed = app.saveDraft(preserved.id, preserved.revision, known);
   expect(
     JSON.parse(removed.content.text).actions.map((a: any) => a.name),
-  ).toEqual(["A", "B", "自动B", "手动"]);
+  ).toEqual(["A", "B", "B预览", "手动"]);
 });
 it("未知保存保留原始改名依据并在重读后确认同一提交", async () => {
   const { DraftSession } = await import("../../src/web/session");
@@ -873,8 +873,8 @@ it("待恢复来源复制为独立拍摄，保留原自动归属", () => {
   expect(actions.map((a: any) => a.name)).toEqual([
     "B",
     "B",
-    "自动A",
-    "自动B",
+    "A预览",
+    "B预览",
     "手动",
     "B 2",
     "B 2预览",
@@ -924,6 +924,7 @@ it.each(["reopen", "copy", "recovery"])(
       ).toBe("B");
       expect(meta.actions[auto].sourceId).toBe(before.sourceId);
       expect(meta.actions[auto].rename!.pending).toBe(false);
+      expect(JSON.parse(saved.content.text).actions[auto].name).toBe("B预览");
       const fixed = reopened.exportDraft(
         saved.id,
         saved.revision,

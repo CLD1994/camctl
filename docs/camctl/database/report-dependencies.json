@@ -337,7 +337,7 @@
           "value": {
             "op": "read",
             "column": "plans.created_at",
-            "encoding": "utc_seconds"
+            "encoding": "utc_milliseconds"
           }
         },
         "name": {
@@ -378,6 +378,17 @@
             "order_by": "actions.id",
             "empty": "omit",
             "encoding_order": 1
+          }
+        },
+        "status_history": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "status_history",
+            "column": "plans.status",
+            "schema": "#/$defs/plan_status_history"
           }
         }
       }
@@ -858,6 +869,17 @@
           "value": {
             "op": "project",
             "projection": "device_execution"
+          }
+        },
+        "status_history": {
+          "when": {
+            "op": "literal",
+            "value": true
+          },
+          "value": {
+            "op": "status_history",
+            "column": "actions.status",
+            "schema": "#/$defs/action_status_history"
           }
         }
       },

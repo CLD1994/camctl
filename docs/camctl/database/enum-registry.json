@@ -899,6 +899,20 @@
     },
     "history_events.event_version": {
       "source": "event_versions"
+    },
+    "entity_event_links.before_status": {
+      "source": "columns",
+      "columns": [
+        "plans.status",
+        "actions.status"
+      ]
+    },
+    "entity_event_links.after_status": {
+      "source": "columns",
+      "columns": [
+        "plans.status",
+        "actions.status"
+      ]
     }
   },
   "fixed_columns": {

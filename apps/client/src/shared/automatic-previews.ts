@@ -46,11 +46,23 @@ export const sameContent = (a: DraftContent, b: DraftContent) =>
     stringifyJson(b.automaticPreviews ?? null);
 export const previewIntent = (c: DraftContent): PreviewIntent =>
   c.automaticPreviews?.intent ?? "unset";
-const automatic = (a: unknown) =>
+export const isAutomaticPreviewAction = (a: unknown) =>
   isObject(a) &&
   a.type === "obtain_action_outputs" &&
   isObject(a.params) &&
   a.params.purpose === "auto_preview";
+const automatic = isAutomaticPreviewAction;
+
+function previewName(sourceName: string, names: readonly unknown[]): string {
+  let suffix = 1;
+  while (true) {
+    const tail = suffix === 1 ? "预览" : `预览 ${suffix}`;
+    const name =
+      [...sourceName].slice(0, 128 - [...tail].length).join("") + tail;
+    if (!names.includes(name)) return name;
+    suffix++;
+  }
+}
 type PreviewPlan = Record<string, unknown> & {
   actions: Record<string, unknown>[];
 };
@@ -368,9 +380,27 @@ export function coordinatePreviews(
     const autoIndex = links.get(metadata.actions[i].id);
     if (state === "unneeded" && autoIndex !== undefined) removed.add(autoIndex);
   });
-  const names = root.actions
-    .filter((_, i) => !removed.has(i))
-    .map((a) => a.name);
+  const names = new Map(
+    root.actions.flatMap((a, i) =>
+      removed.has(i) ? [] : [[i, a.name] as const],
+    ),
+  );
+  const readyNames = new Set<number>();
+  root.actions.forEach((a, i) => {
+    if (
+      !automatic(a) &&
+      states.get(i) !== "unneeded" &&
+      !hasPending(content, `/actions/${i}/name`) &&
+      isName(a.name) &&
+      [...names.values()].filter((name) => name === a.name).length === 1
+    )
+      readyNames.add(i);
+  });
+  // 先释放所有会重算的派生名称，避免前一个来源占用后一个即将释放的名称。
+  for (const i of readyNames) {
+    const autoIndex = links.get(metadata.actions[i].id);
+    if (autoIndex !== undefined) names.delete(autoIndex);
+  }
   let changed = removed.size > 0;
   for (let i = 0; i < root.actions.length; i++) {
     const a = root.actions[i],
@@ -380,10 +410,7 @@ export function coordinatePreviews(
       state = states.get(i)!,
       prefix = `/actions/${i}`;
     if (state === "unneeded") continue;
-    const nameReady =
-      !hasPending(content, prefix + "/name") &&
-      isName(a.name) &&
-      names.filter((n) => n === a.name).length === 1;
+    const nameReady = readyNames.has(i);
     if (
       autoIndex !== undefined &&
       nameReady &&
@@ -400,6 +427,15 @@ export function coordinatePreviews(
       changed = true;
     }
     if (!nameReady) issues.push(`动作 ${a.name} 的名称尚未有效`);
+    if (autoIndex !== undefined && nameReady) {
+      const auto = working.actions[autoIndex];
+      const name = previewName(a.name as string, [...names.values()]);
+      names.set(autoIndex, name);
+      if (auto.name !== name) {
+        auto.name = name;
+        changed = true;
+      }
+    }
     if (state === "unknown") {
       issues.push(`动作 ${a.name} 的类型、设备、参数或能力尚不能确认`);
       continue;
@@ -420,15 +456,8 @@ export function coordinatePreviews(
       }
       continue;
     }
-    let suffix = 1,
-      name = "";
-    do {
-      const tail = suffix === 1 ? "预览" : `预览 ${suffix}`;
-      name =
-        [...String(a.name)].slice(0, 128 - [...tail].length).join("") + tail;
-      suffix++;
-    } while (names.includes(name));
-    names.push(name);
+    const name = previewName(a.name as string, [...names.values()]);
+    names.set(working.actions.length, name);
     working.actions.push({
       name,
       type: "obtain_action_outputs",

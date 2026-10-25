@@ -83,7 +83,7 @@ def validate_new_body(raw: JsonValue, catalog: StaticActionCatalog) -> BodyDecis
 
     # 公共时间字段的实际有效性（模式之外）按语义整份校验。
     try:
-        to_utc_micros(raw["created_at"])
+        to_utc_micros(raw["created_at"], allow_milliseconds=True)
     except ValueFormatError as error:
         return BodyDecision(
             is_whole_rejection=True,

@@ -1,5 +1,5 @@
 import { it, expect } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -66,6 +66,15 @@ it.each([
       );
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+      const received = () => fetch(`${base}/api/media/availability`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ output_ids: [capture.outputs![0].output_id, "999"] }),
+      }).then((response) => response.json());
+      expect(await received()).toEqual({ received_output_ids: [capture.outputs![0].output_id] });
+      unlinkSync(files.videos()[0].path);
+      expect(await received()).toEqual({ received_output_ids: [] });
+      expect(files.videos()[0].status).toBe("unavailable");
     } finally {
       await files.idle();
       await new Promise<void>((resolve) => server.close(() => resolve()));

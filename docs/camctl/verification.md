@@ -10,6 +10,24 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 状态目录与远端异步数据库集成（2026-10-26）
+
+客户端修改与状态目录实现合入本地 `implement_camctl`，远端基线同步至 `8db533570eb73919b19aed152842e017becb0f55`。异步报告发布继续为每次写入取得实际时间，产物选择继续应用已取回文件的排除集合。状态目录的结构、派生、读取及投影契约见[历史目录](database/history.md)、[报告字段](../architecture/report-format.md)与[实施计划](../superpowers/plans/2026-10-26-state-directory-integration.md)。
+
+最终单元验证在 WSL Ubuntu 24.04、CPython 3.11.15 中执行。从仓库根运行 `/home/cld/.cache/camctl-state-directory-python311/bin/python -m pytest apps/camctl/tests/unit -q --tb=short`，8681 项通过、1 项跳过，退出 0，耗时 126.81 秒。跳过项只验证非 Linux 平台的父进程守护无操作行为；两项警告来自同步测试上的 asyncio 标记。会话为 `27648`，完整输出保存在 `tmp/state-directory-wsl-unit.log`。此解释器链接 SQLite 3.50.4，单元用例隔离数据库操作；本次结果不承担真实 SQLite 运行条件验证。
+
+状态目录的真实数据库证据来自 Windows、CPython 3.11.12、SQLite 3.54.1：有限与有界事务的提交、回滚文件共 7 项通过；合入远端 `1924faf0` 后，状态时间专项 6 项通过，覆盖完整转换、非单调时钟、冻结字节重建、真实本地完成时间、稀疏索引访问及损坏目录拒绝。结构检查通过 3966 项断言，客户端报告相关 4 个测试文件共 560 项通过。日志分别为 `tmp/state-directory-history-focused.log`、`tmp/state-directory-latest-status.log`、`tmp/state-directory-database.log` 与 `tmp/state-directory-client.log`。
+
+Windows 的全量单元初次复验为 8599 项通过、30 项失败、2 项 setup 错误，其中本地时间注入测试已按异步接口修复，并进入最终 Linux 全量通过范围。其他失败涉及 POSIX 路径假设，两个 setup 错误涉及超长参数产生的 Windows 环境变量限制，原日志为 `tmp/state-directory-latest-unit.log`。远端 `1924faf0` 的报告集成尝试为 151 项通过、291 项失败、10 项错误，已确认的失败入口包括旧夹具向 `CaptureRuntime` 传递 `owned`、向异步受理传递 `OwnedConnection`；日志为 `tmp/state-directory-latest-reporting.log`。后续验证范围限定为单元测试，完整集成测试另行处理；未把此前专项通过或最终单元通过解释为完整集成验收。
+
+## 计划创建时间的毫秒精度（2026-10-26）
+
+Windows、CPython 3.11.12 中，时间值类型的 90 项单元测试通过，覆盖精确整数毫秒换算、起点两侧、零毫秒、旧秒级时间和非法精度。真实受理、数据库写入及公共投影的新增用例先因 `plans.created_at` 整秒约束失败；按契约放宽到整毫秒后，`integration/acceptance/test_acceptance.py` 的 52 项通过，数据库实际保存 `1736899200047000` 并投影为 `2025-01-15 00:00:00.047`。
+
+受理测试使用独立的 `created-at-python311-sqlite` 环境，链接 SQLite 3.54.1；原环境链接 3.47.1，不满足仓库运行条件，其受理结果不计作业务验证。`integration/contracts` 的 442 项通过，模块依赖检查另有一项失败；独立读取基线 `142b7925` 的源码导入图与当前源码，所得九条违规边完全相同。受理目录完整运行另有五项未通过，涉及事务替身的 `total_changes`、Windows 输出捕获与设备描述；本项只据已通过的受理文件和时间投影用例确认新增行为，没有将目录结果计作全绿。
+
+数据库结构检查通过 3925 项断言，公共协议、报告依赖登记与文档链接检查通过。日志位于 `tmp/created-at-ms-python-unit.log`、`tmp/created-at-ms-python-contracts.log`、`tmp/created-at-ms-python-acceptance-sqlite.log`、`tmp/created-at-ms-python-acceptance-focused.log`、`tmp/created-at-ms-database.log` 与 `tmp/created-at-ms-baseline-imports.log`。本项直接更新当前开发结构；未连接真实设备，未执行完整 Python 测试套件。
+
 ## 共享数据库事实读取与正常运行快照维护的验证（2026-10-26）
 
 [本次计划](../superpowers/plans/2026-10-26-read-sharing-snapshot-runtime.md)完成剩余实际输入共享，并将正常运行的业务操作及快照维护接入同一个数据库执行器。连接在所属线程创建、使用和关闭，有限事实跨线程交付；设备、文件和运行时状态继续由所属协程管理。启动发现遗留候选，可靠提交及外部对象发现唤醒维护，候选为空时等待通知。业务优先于尚未开始的维护，已经执行的维护不能被抢占；快照积压不延长会话。正常报告的轻量变化探测仍有周期读取。

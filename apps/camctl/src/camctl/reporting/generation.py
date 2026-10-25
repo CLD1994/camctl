@@ -82,6 +82,8 @@ class _ReportReader(Protocol):
 
     def related_entity_ids(self, table: str, column: str, value: int) -> list[int]: ...
 
+    def status_history(self, entity: str, identity: int, boundary, current_status: int) -> list[dict]: ...
+
 
 def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSpec) -> "HistoryBoundary":
     """核验生成输入与状态库中登记的冻结依据一致，返回完整 H。"""
@@ -144,8 +146,17 @@ def _generate_report_file(spec, repo, buffer_size) -> GeneratedFile:
             yield from stream.open()
             for subtree in scope.plans:
                 facts = _plan_facts(repo, subtree, boundary)
+                histories = {}
+                objects = [
+                    ("plan", "plans", subtree.plan_id),
+                    *(("action", "actions", identity) for identity in scope.action_ids_of(subtree.plan_id)),
+                ]
+                for entity, table, identity in objects:
+                    histories[(entity, identity)] = repo.status_history(
+                        entity, identity, boundary, facts[table][identity]["status"])
                 fragment = project_public(ProjectionInput(
-                    "plan", subtree.plan_id, facts, dict(subtree.selection)))
+                    "plan", subtree.plan_id, facts, dict(subtree.selection),
+                    status_histories=histories))
                 yield from stream.section("plans", fragment)
             for diagnostic_id in scope.diagnostics:
                 facts = _diagnostic_facts(repo, diagnostic_id, boundary)

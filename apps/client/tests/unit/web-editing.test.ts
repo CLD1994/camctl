@@ -35,6 +35,10 @@ const paramsContent = (params: unknown): DraftContent => ({
   text: JSON.stringify({ name: "计划", actions: [{ name: "操作", params }] }),
 });
 const paramsPath = ["actions", 0, "params"];
+it.each(["exact", "preview"] as const)("切换到 %s 选择会移除默认排除列表", (selection) => {
+  const next = editing.changeObtainSelection(paramsContent({ source: { action_instance_id: "1" }, exclude_output_ids: ["2"] }), paramsPath, selection);
+  expect(valueAt(parseDraft(next), [...paramsPath, "exclude_output_ids"])).toBeUndefined();
+});
 it.each([
   ["action_name", { action_name: "" }],
   ["group", { group: "" }],

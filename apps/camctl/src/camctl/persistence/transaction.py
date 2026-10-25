@@ -366,8 +366,8 @@ def _write_bounded_plan(plan, scope, operation_key):
                 "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
                 (event.event_id,event.transaction_id,event.event_type,event.event_version,event.occurred_at,event.clock_status,event.change_seq,_encode_body(event)))
             for link in changes.links:
-                connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
-                    (link.entity_type,link.entity_id,link.event_id,link.change_count))
+                connection.execute("INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count,before_status,after_status) VALUES(?,?,?,?,?,?)",
+                    (link.entity_type,link.entity_id,link.event_id,link.change_count,link.before_status,link.after_status))
             for link in changes.report_changes:
                 connection.execute("INSERT INTO report_entity_changes(entity_type,entity_id,event_id,change_seq) VALUES(?,?,?,?)",
                     (link.entity_type,link.entity_id,link.event_id,link.change_seq))
@@ -925,9 +925,9 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                 )
             for link in change_set.links:
                 connection.execute(
-                    "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count)"
-                    " VALUES (?, ?, ?, ?)",
-                    (link.entity_type, link.entity_id, link.event_id, link.change_count),
+                    "INSERT INTO entity_event_links (entity_type, entity_id, event_id, change_count, before_status, after_status)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (link.entity_type, link.entity_id, link.event_id, link.change_count, link.before_status, link.after_status),
                 )
             for report_change in change_set.report_changes:
                 connection.execute(

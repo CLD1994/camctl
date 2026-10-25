@@ -53,6 +53,9 @@ const labels: Record<string, string> = {
   published: "主机已发布",
   withdrawn: "已撤回",
   not_needed: "无需执行",
+  original: "原文件",
+  preview: "预览文件",
+  repaired: "修复成品",
 };
 const own = (dictionary: Record<string, string>, key: string) =>
   Object.hasOwn(dictionary, key) ? dictionary[key] : undefined;
@@ -168,6 +171,22 @@ const resultContainers = new Set([
   "items",
   "result",
 ]);
+export function FactRow({
+  field,
+  title,
+  children,
+}: {
+  field: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <dt>{title ?? own(fieldNames, field) ?? field}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
 export function Facts({
   value,
   business = false,
@@ -199,21 +218,18 @@ export function Facts({
     return (
       <dl className="facts">
         {Object.entries(value).map(([k, v]) => (
-          <div key={k}>
-            <dt>{own(fieldNames, k) ?? k}</dt>
-            <dd>
-              {business && statusFields.has(k) && typeof v === "string" ? (
-                <span>{label(v)}</span>
-              ) : (
-                <Facts
-                  value={v}
-                  business={business && resultContainers.has(k)}
-                  parent={value}
-                  field={k}
-                />
-              )}
-            </dd>
-          </div>
+          <FactRow key={k} field={k}>
+            {business && statusFields.has(k) && typeof v === "string" ? (
+              <span>{label(v)}</span>
+            ) : (
+              <Facts
+                value={v}
+                business={business && resultContainers.has(k)}
+                parent={value}
+                field={k}
+              />
+            )}
+          </FactRow>
         ))}
       </dl>
     );
@@ -249,5 +265,6 @@ const fieldNames: Record<string, string> = {
   original_name: "源文件名称",
   media_type: "媒体类型",
   derived_from_output_id: "派生产物来源",
+  preview_of_output_id: "对应原文件 ID",
   result: "结果",
 };

@@ -17,7 +17,7 @@ from camctl.history.events import business_columns, load_event_registry
 from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.validators import EventContext
 from camctl.outputs.catalog import OutputKind
-from camctl.outputs.definitions import SelectionMode, read_selection_request
+from camctl.outputs.definitions import SelectionMode, read_excluded_output_ids, read_selection_request
 from camctl.outputs.sources import (
     SourceResolution,
     ResolutionState,
@@ -264,6 +264,7 @@ def qualify(db, request, *, saved=None, batch=128):
         setrow=setrow,
         mode=mode,
         requested=requested,
+        excluded=read_excluded_output_ids(owner["input_fields_json"]),
         error=error,
         details=details,
         batch=batch,
@@ -318,6 +319,12 @@ def _photo_items(db, q):
 
 
 def items(db, q):
+    for item in _selected_items(db, q):
+        if item.output_id not in q["excluded"]:
+            yield item
+
+
+def _selected_items(db, q):
     source_id = q["source"]["id"]
     mode = q["mode"]
     if mode is SelectionMode.EXPLICIT_IDS:

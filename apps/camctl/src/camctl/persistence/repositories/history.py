@@ -155,6 +155,7 @@ class HistoryRepository:
         self._report_validator: ProjectionRowValidator | None = None
         # 不可变历史允许复用已核验的组；只保留固定 H 和上一页末组。
         self._validated_ranges: dict[int, TransactionRange] = {}
+        self._status_history_range: TransactionRange | None = None
         self._current_range: TransactionRange | None = None
 
     def _connect(self) -> sqlite3.Connection:
@@ -191,6 +192,7 @@ class HistoryRepository:
         finally:
             self._report_connection = None
             self._report_resources = None
+            self._status_history_range = None
             self._report_validator = None
             self._validated_ranges.clear()
             self._current_range = None
@@ -493,6 +495,41 @@ class HistoryRepository:
         except BaseException:
             handle.close()
             raise
+
+    def status_history(self, entity, identity, boundary, current_status):
+        """通过稀疏状态目录读取创建至 H 的转换，不读取其他事件正文。"""
+        from camctl.contracts.enums import decode_member, EnumRegistryError
+        from camctl.history.queries import status_transitions
+        if entity not in ("plan", "action"):
+            raise ConsistencyError("状态时间只适用于计划和动作")
+        ObjectId(identity)
+        spec = load_enum_registry()["history_objects"][entity]
+        with self._read_connection() as connection:
+            checked = self._status_history_range if self._report_resources is not None else None
+            transaction = _transaction_range(connection, boundary.txn_id,
+                checked if checked is not None and checked.txn_id == boundary.txn_id
+                else self._validated_ranges.get(boundary.txn_id))
+            if transaction.last_event_id != boundary.last_event_id:
+                raise ConsistencyError("状态历史 H 不是完整已提交边界")
+            if self._report_resources is not None:
+                self._status_history_range = transaction
+            with closing(connection.execute(
+                    "SELECT l.event_id,l.before_status,l.after_status,e.occurred_at,e.clock_status"
+                    " FROM entity_event_links AS l JOIN history_events AS e ON e.id=l.event_id"
+                    " WHERE l.entity_type=? AND l.entity_id=? AND l.after_status IS NOT NULL"
+                    " AND l.event_id<=? ORDER BY l.event_id",
+                    (spec["id"], identity, boundary.last_event_id))) as cursor:
+                # 当前状态模型无回环；数量只随真实状态转换增长。
+                rows = cursor.fetchall()
+        try:
+            for _, before, after, _, clock in rows:
+                for status in (before, after):
+                    if status is not None:
+                        decode_member(spec["table"] + ".status", status)
+                decode_member("history_events.clock_status", clock)
+        except EnumRegistryError as error:
+            raise ConsistencyError("状态目录编号与所属实体或时钟定义不符") from error
+        return status_transitions(rows, current_status)
 
     def restore_primary_at_h(self, entity, entity_id, boundary, *, event_batch_size=128):
         """仅恢复对象主行；子表增长不会进入有限主行消费者。"""

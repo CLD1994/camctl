@@ -94,7 +94,7 @@ def prepare_plan(decision: BodyDecision, allocated: PlanIdentities) -> PreparedP
     return PreparedPlan(
         plan_id=allocated.plan_id,
         request_id=raw["request_id"],
-        created_at_micros=to_utc_micros(raw["created_at"]),
+        created_at_micros=to_utc_micros(raw["created_at"], allow_milliseconds=True),
         name=raw["name"],
         raw=raw,
         actions=tuple(prepared),

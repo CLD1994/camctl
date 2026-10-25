@@ -35,7 +35,7 @@ async function setup() {
     () => files.idle(),
     () => app.store.close(),
   );
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL });
   const page = await browser.newPage();
   cleanup.push(async () => {
     await browser.close();
@@ -110,14 +110,14 @@ it("核验通过但媒体不能解码时保留原视频下载和核验结果", a
       .first()
       .click();
   for (const summary of await page
-    .getByText("更多操作与交付记录", { exact: true })
+    .getByText("技术详情", { exact: true })
     .all())
     await summary.click();
   await browserExpect(
     page.getByRole("alert").filter({ hasText: "无法在浏览器播放" }).first(),
   ).toBeVisible();
   await browserExpect(
-    page.getByRole("button", { name: "下载原视频", exact: true }).first(),
+    page.getByRole("button", { name: "下载", exact: true }).first(),
   ).toBeEnabled();
   expect(files.videos()[0].status).toBe("verified");
   expect(app.snapshot().plans![0].status).toBe("completed");

@@ -26,6 +26,7 @@ import { recordsFor, parseDraft, utcToLocal } from "./editing";
 import { Editor } from "./Editor";
 import type { EstimateReloadPhase } from "./video-estimate-state";
 import { StateObservations, SupersededStateReadError } from "./state-observations";
+import { stabilizeCapabilities } from "./capability-observation";
 import { DeviceGuide } from "./DeviceGuide";
 import { useFeedback } from "./feedback";
 import { stringifyJson } from "../shared/json";
@@ -66,15 +67,15 @@ export function App() {
     draftTab = useRef<HTMLElement | null>(null),
     recordTab = useRef<HTMLElement | null>(null),
     plansNav = useRef<HTMLButtonElement | null>(null);
-  const captureFollowEntry = () => {
+  const captureFollowEntry = (entry?: HTMLElement) => {
     followEntry.current =
-      document.activeElement instanceof HTMLElement
+      entry ?? (document.activeElement instanceof HTMLElement
         ? document.activeElement
-        : null;
+        : null);
     followDestination.current = false;
   };
   const startFollow = (input: Followup) => {
-    captureFollowEntry();
+    captureFollowEntry(input.entry);
     setActiveFollow(undefined);
     setFollow(input);
   };
@@ -98,6 +99,13 @@ export function App() {
         () => captureStateContext(),
         (value, { consumerId }) => {
           if (!mounted.current) return;
+          value = {
+            ...value,
+            capabilities: stabilizeCapabilities(
+              capabilityObservation.current,
+              value.capabilities,
+            ),
+          };
           // 对所有已打开会话消费同一份完整集合，可靠缺失和读取异常分别分类。
           for (const [id, session] of sessions.current)
             if (id !== consumerId)
@@ -470,10 +478,7 @@ export function App() {
           : old,
       );
       finishExportNavigation(current, record.id, generation);
-      await download(
-        `/requests/${record.id}/download`,
-        `plan-${record.id}.json`,
-      );
+      await download(`/requests/${record.id}/download`);
       await refresh();
     });
   const handoff = (id: string, marked: boolean) =>

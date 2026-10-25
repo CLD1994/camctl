@@ -21,7 +21,10 @@ import { initializePreviewMetadata } from "../../src/shared/automatic-previews";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
+  });
 });
 afterAll(async () => {
   await browser.close();

@@ -235,13 +235,13 @@ def _writer(monkeypatch, *, kind):
     gate.item_plan.return_value = plan
     gate.state.return_value = SimpleNamespace(value="undecided")
     stream = create_autospec(ReportStream, instance=True)
-    monkeypatch.setattr(generation, "_action_facts", lambda *args: {})
+    monkeypatch.setattr(generation, "_action_facts", lambda *args: {"actions": {8: {"status": 3}}})
     monkeypatch.setattr(generation, "_expansion_arrays", lambda *args: {})
     monkeypatch.setattr(generation, "_coverage_arrays", lambda *args: {})
     monkeypatch.setattr(generation, "projection_structure", lambda *args:
                         SimpleNamespace(entity_fields=()))
     project = create_autospec(generation._project)
-    project.side_effect = lambda name, identity, facts: (
+    project.side_effect = lambda name, identity, facts, **kwargs: (
         {"type": kind, "result": {}} if name == "action" else {"status": "completed"})
     monkeypatch.setattr(generation, "_project", project)
     return repo, handle, plan, gate, stream, project
@@ -328,7 +328,7 @@ def test_action_writer_reuses_the_open_source_for_segment_error(monkeypatch):
     handle.boundary = H
     handle.primary.return_value = {"type": 2, "execution_started": True, "status": 3}
     handle.active_result_ref.return_value = object()
-    project.side_effect = lambda *args: {
+    project.side_effect = lambda *args, **kwargs: {
         "type": "record_video", "error": {
             "code": "default_segment_scope_empty", "details": {}}}
     header = SegmentErrorHeader(8, 0, DefaultScopeState.UNKNOWN, None, 0)

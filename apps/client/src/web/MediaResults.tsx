@@ -4,12 +4,15 @@ import type { Product } from "./result-model";
 import type { Followup } from "./Records";
 import { previewKind } from "../shared/media";
 import { download } from "./api";
-import { Badge, Facts } from "./common";
+import { receivedOutputIds } from "./obtain";
+import { Badge, Facts, label } from "./common";
+import { OutputFacts } from "./OutputFacts";
 import { cleanupEntryVisible } from "./device-options";
 import type { Capabilities } from "../shared/types";
 
 const groupNames = { video: "视频", image: "图片", other: "其他文件" };
-const source = (id: string) => `/api/media/${encodeURIComponent(id)}/content`;
+const mediaPath = (id: string) => `/media/${encodeURIComponent(id)}/content`;
+const source = (id: string) => `/api${mediaPath(id)}`;
 type Props = {
   products: Product[];
   capabilities: Capabilities | null;
@@ -17,7 +20,6 @@ type Props = {
   active: boolean;
   follow: (f: Followup) => void;
   run: (fn: () => Promise<void>) => void;
-  open: (id: string) => void;
 };
 export function MediaResults({
   products,
@@ -26,17 +28,35 @@ export function MediaResults({
   sourceDevices,
   follow,
   run,
-  open,
-}: Props) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  selected,
+  setSelected,
+}: Props & {
+  selected: Set<string>;
+  setSelected: (update: (previous: Set<string>) => Set<string>) => void;
+}) {
   const chosen = products.filter((p) => selected.has(p.id));
+  const [obtainNotice, setObtainNotice] = useState("");
+  const [pendingRows, setPendingRows] = useState<Product[]>();
+  useEffect(() => {
+    setPendingRows(undefined);
+    setObtainNotice("");
+  }, [selected]);
   const change = (ids: string[], value: boolean) =>
     setSelected((old) => {
       const next = new Set(old);
       for (const id of ids) value ? next.add(id) : next.delete(id);
       return next;
     });
-  function obtain(rows: Product[]) {
+  const prepare = (rows: Product[], entry: HTMLElement) =>
+    run(() => obtain(rows, entry));
+  async function obtain(rows: Product[], entry: HTMLElement) {
+    const received = await receivedOutputIds(rows.map((p) => p.id));
+    rows = rows.filter((p) => !received.has(p.id));
+    if (!rows.length) {
+      setObtainNotice("所选产物已全部取回，无需重复取回。");
+      return;
+    }
+    setObtainNotice("");
     // 每次选择归属于一个来源动作；跨来源操作分开准备，保留现有草稿流程。
     const sources = new Map<string, string[]>();
     for (const p of rows) {
@@ -44,8 +64,14 @@ export function MediaResults({
       if (id) sources.set(id, [...(sources.get(id) ?? []), p.id]);
     }
     const [id, output_ids] = [...sources][0] ?? [];
+    if (sources.size > 1) {
+      setPendingRows(rows);
+      setObtainNotice("剩余产物来自多个拍摄动作，请按来源分别加入草稿。");
+      return;
+    }
     if (id)
       follow({
+        entry,
         action: {
           name: "取回所选产物",
           type: "obtain_action_outputs",
@@ -54,45 +80,53 @@ export function MediaResults({
         summary: `取回所选 ${output_ids.length} 个产物`,
       });
   }
-  const sourceIds = new Set(chosen.map(sourceActionId));
+  const remaining =
+    pendingRows ?? chosen.filter((product) => !product.localCopy);
+  const sourceIds = new Set(remaining.map(sourceActionId));
   return (
     <section className="media-results">
       <div className="button-row">
         <strong>已报告 {products.length} 个产物</strong>
         <span>已选择 {chosen.length} 个文件</span>
         <button
-          disabled={!chosen.length || sourceIds.size !== 1}
-          onClick={() => obtain(chosen)}
+          disabled={!chosen.length}
+          onClick={(event) => prepare(chosen, event.currentTarget)}
         >
-          准备取回所选产物
+          取回所选产物
         </button>
         <button
           disabled={!chosen.length}
-          onClick={() => setSelected(new Set())}
+          onClick={() => setSelected(() => new Set())}
         >
           清空选择
         </button>
       </div>
+      {obtainNotice && (
+        <p role="status" className="notice">
+          {obtainNotice}
+        </p>
+      )}
       {sourceIds.size > 1 && (
         <div className="notice">
           <p>所选文件来自多个拍摄动作，按来源分别加入草稿：</p>
           {[...sourceIds].map((id) => (
             <button
               key={id}
-              onClick={() =>
-                obtain(
+              onClick={(event) =>
+                prepare(
                   chosen.filter(
                     (p) =>
                       (p.output?.source_action_instance_id ??
                         p.deliveries[0]?.delivery.source_action_instance_id) ===
                       id,
                   ),
+                  event.currentTarget,
                 )
               }
             >
               准备取回来源 {id} 的所选{" "}
               {
-                chosen.filter(
+                remaining.filter(
                   (p) =>
                     (p.output?.source_action_instance_id ??
                       p.deliveries[0]?.delivery.source_action_instance_id) ===
@@ -115,12 +149,12 @@ export function MediaResults({
               sourceDevices,
               follow,
               run,
-              open,
               selected,
               change,
             }}
             name={groupNames[group]}
             products={rows}
+            obtainProduct={(product, entry) => prepare([product], entry)}
           />
         ) : null;
       })}
@@ -135,13 +169,14 @@ function ProductGroup({
   sourceDevices,
   follow,
   run,
-  open,
   selected,
   change,
+  obtainProduct,
 }: Props & {
   name: string;
   selected: Set<string>;
   change: (ids: string[], value: boolean) => void;
+  obtainProduct: (product: Product, entry: HTMLElement) => void;
 }) {
   const [page, setPage] = useState(1),
     [filter, setFilter] = useState("all");
@@ -153,7 +188,7 @@ function ProductGroup({
     number = Math.min(page, pages);
   const rows = filtered.slice((number - 1) * 12, number * 12);
   const images = filtered.filter(
-    (p) => previewKind(p.mediaType) === "image" && p.state === "ready",
+    (p) => previewKind(p.mediaType) === "image" && !!p.localCopy,
   );
   const image = current ? images.find((p) => p.id === current) : undefined;
   const trigger = useRef<HTMLElement | null>(null);
@@ -235,7 +270,8 @@ function ProductGroup({
           <ProductCard
             key={p.id}
             product={p}
-            {...{ active, capabilities, sourceDevices, follow, run, open }}
+            obtainProduct={obtainProduct}
+            {...{ active, capabilities, sourceDevices, follow, run }}
             selected={selected.has(p.id)}
             select={(v) => change([p.id], v)}
             preview={(e) => {
@@ -293,10 +329,10 @@ function ProductCard({
   sourceDevices,
   follow,
   run,
-  open,
   selected,
   select,
   preview,
+  obtainProduct,
 }: {
   product: Product;
   active: boolean;
@@ -304,13 +340,12 @@ function ProductCard({
   sourceDevices: Map<string, string | undefined>;
   follow: Props["follow"];
   run: Props["run"];
-  open: Props["open"];
   selected: boolean;
   select: (v: boolean) => void;
   preview: (e: HTMLElement) => void;
+  obtainProduct: (product: Product, entry: HTMLElement) => void;
 }) {
-  const available = p.deliveries.find((d) => d.video?.status === "verified");
-  const video = available?.video;
+  const video = p.localCopy;
   const kind = previewKind(p.mediaType);
   const [broken, setBroken] = useState<string>();
   const invalid = video && broken === video.id;
@@ -370,47 +405,28 @@ function ProductCard({
           ，可以下载原文件查看。
         </p>
       )}
-      {video && (
-        <button
-          onClick={() =>
-            run(() =>
-              download(source(video.id) + "?download=true", video.fileName),
-            )
-          }
-        >
-          {kind === "video"
-            ? "下载原视频"
-            : kind === "image"
-              ? "下载原图片"
-              : "下载原文件"}
-        </button>
-      )}
-      <details className="advanced">
-        <summary>更多操作与交付记录</summary>
-        <button
-          onClick={() =>
-            follow({
-              action: {
-                name: "取回产物",
-                type: "obtain_action_outputs",
-                params: {
-                  source: {
-                    action_instance_id:
-                      p.output?.source_action_instance_id ??
-                      p.deliveries[0]?.delivery.source_action_instance_id,
-                  },
-                  output_ids: [p.id],
-                },
-              },
-              summary: "取回产物 " + p.name,
-            })
-          }
-        >
-          准备取回
-        </button>
-        {p.output && (
-          <div className="button-row">
-            <Badge value={p.output.availability} />
+      <div className="button-row product-actions">
+        {video && (
+          <button
+            onClick={() =>
+              run(() =>
+                download(
+                  mediaPath(video.id) + "?download=true",
+                  video.downloadName,
+                ),
+              )
+            }
+          >
+            下载
+          </button>
+        )}
+        {!video && (
+          <button onClick={(event) => obtainProduct(p, event.currentTarget)}>
+            取回
+          </button>
+        )}
+        {p.output?.availability === "available" && (
+          <>
             {(p.output.kind === "repaired" ||
               cleanupEntryVisible(
                 capabilities,
@@ -420,23 +436,29 @@ function ProductCard({
                 onClick={() =>
                   follow({
                     action: {
-                      name: "清理源产物",
+                      name: "清理产物",
                       type: "delete_action_outputs",
                       params: { output_ids: [p.id] },
                     },
-                    summary: `清理源文件 ${p.name}`,
+                    summary: `清理产物 ${p.name}`,
                   })
                 }
               >
-                准备清理源产物
+                清理产物
               </button>
             )}
-          </div>
+          </>
         )}
-        {p.deliveries.map(({ delivery: d, video: v, owner }) => (
+        {p.output && p.output.availability !== "available" && (
+          <Badge value={p.output.availability} />
+        )}
+      </div>
+      <details className="advanced product-technical">
+        <summary>技术详情</summary>
+        {p.output && <OutputFacts output={p.output} />}
+        {p.deliveries.map(({ delivery: d, video: v }) => (
           <section className="delivery" key={d.delivery_id}>
-            <strong>{d.display_name}</strong>
-            <Badge value={d.status} />
+            <h5>交付 {d.delivery_id}</h5>
             {!v && (
               <p>
                 本地文件：
@@ -445,39 +467,9 @@ function ProductCard({
             )}
             {v && <Badge value={v.status} />}
             {v?.message && <p>{v.message}</p>}
-            {owner?.request_id && (
-              <button onClick={() => open(owner?.request_id)}>
-                查看取回计划：{owner!.name}
-              </button>
-            )}
-            {v?.status === "verified" && (
-              <button
-                onClick={() =>
-                  run(() =>
-                    download(source(v.id) + "?download=true", v.fileName),
-                  )
-                }
-              >
-                下载此次交付
-              </button>
-            )}
-            <details>
-              <summary>技术详情</summary>
-              <Facts value={d} business />
-            </details>
+            <Facts value={d} business />
           </section>
         ))}
-        {p.sourcePlan && (
-          <button onClick={() => open(p.sourcePlan!.request_id)}>
-            查看来源计划：{p.sourcePlan.name}
-          </button>
-        )}
-        {p.output && (
-          <details>
-            <summary>产物技术详情</summary>
-            <Facts value={p.output} business />
-          </details>
-        )}
       </details>
     </article>
   );
@@ -492,12 +484,7 @@ function ProductRelation({ product: p }: { product: Product }) {
   if (!p.output) return <p>产物角色尚未确认 · {p.id}</p>;
   return (
     <p className="product-relation">
-      {p.output.kind === "original"
-        ? "原文件"
-        : p.output.kind === "preview"
-          ? "预览文件"
-          : "修复成品"}{" "}
-      · {p.id}
+      {label(p.output.kind)} · {p.id}
       {p.original && (
         <>
           {" "}
@@ -533,9 +520,7 @@ function ImageDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [broken, setBroken] = useState<string>();
-  const video = product?.deliveries.find(
-    (d) => d.video?.status === "verified",
-  )?.video;
+  const video = product?.localCopy;
   useEffect(() => {
     ref.current?.showModal();
     return () => ref.current?.close();
@@ -588,11 +573,14 @@ function ImageDialog({
           <button
             onClick={() =>
               run(() =>
-                download(source(video.id) + "?download=true", video.fileName),
+                download(
+                  mediaPath(video.id) + "?download=true",
+                  video.downloadName,
+                ),
               )
             }
           >
-            下载原图片
+            下载
           </button>
         )}
       </div>

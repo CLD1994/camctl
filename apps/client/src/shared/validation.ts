@@ -57,6 +57,14 @@ export function isTimestamp(value: unknown): value is string {
     second <= 59
   );
 }
+export function isCreationTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    (value.length === 19 ||
+      (value.length === 23 && /^\.[0-9]{3}$/.test(value.slice(19)))) &&
+    isTimestamp(value.slice(0, 19))
+  );
+}
 export function createValidator() {
   const ajv = new Ajv2020({
     strict: true,

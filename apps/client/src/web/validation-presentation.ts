@@ -15,6 +15,7 @@ import { createProtocolValidator } from "../shared/protocol-validation";
 import type { ValidateFunction } from "ajv";
 import { pointer, pointerPath, type Path } from "./editing";
 import { objectBranches, objectBranchState } from "./object-branches";
+import { userActionOrdinals } from "./action-order";
 
 export interface IssuePresentation {
   target: string | null;
@@ -49,6 +50,7 @@ const names: Record<string, string> = {
   request_id: "请求 ID",
   current_plan: "当前整个计划",
   output_ids: "产物 ID 列表",
+  exclude_output_ids: "跳过的产物 ID 列表",
   scope: "报告范围",
   after_report_id: "同步起点报告",
   position: "位置",
@@ -277,9 +279,19 @@ function locateInput(
     isObject(action) && typeof action.name === "string"
       ? `「${action.name}」`
       : "";
+  const ordinal =
+    index !== undefined &&
+    isObject(plan) &&
+    Array.isArray(plan.actions) &&
+    index < plan.actions.length
+      ? userActionOrdinals(plan.actions)[index]
+      : index === undefined
+        ? undefined
+        : index + 1;
+  const actionPosition = ordinal === undefined ? "自动预览" : `动作 ${ordinal}`;
   const location =
     index !== undefined
-      ? `动作 ${index + 1}${actionName} · ${field}`
+      ? `${actionPosition}${actionName} · ${field}`
       : parts === null
         ? `计划 JSON（${path}）`
         : field;

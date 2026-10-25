@@ -1,4 +1,4 @@
-import { fileMediaType, previewKind } from "../shared/media";
+import { fileDisplayName, fileMediaType, previewKind } from "../shared/media";
 import { isCanonicalId } from "../shared/validation";
 import express from "express";
 import { createReadStream } from "node:fs";
@@ -95,6 +95,23 @@ export function createHttpApp(
     });
   });
   app.post(
+    "/api/media/availability",
+    tracked(async (req, res) => {
+      const ids = req.body?.output_ids;
+      if (
+        !Array.isArray(ids) ||
+        !ids.every(isCanonicalId) ||
+        new Set(ids).size !== ids.length
+      )
+        throw new AppError(
+          "invalid_output_ids",
+          "产物 ID 必须是唯一的规范 ID 数组",
+        );
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ received_output_ids: await files.receivedOutputIds(ids) });
+    }),
+  );
+  app.post(
     "/api/initialize",
     tracked(async (_req, res) => {
       const state = application.store.initialize();
@@ -170,16 +187,17 @@ export function createHttpApp(
     ),
   );
   app.get("/api/requests/:id/download", (req, res) => {
+    const body = application.downloadRequest(String(req.params.id));
+    const createdAt = (body.created_at as string)
+      .padEnd(23, ".000")
+      .replace(" ", "_")
+      .replaceAll(":", "-")
+      .replace(".", "-");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="plan-${req.params.id}.json"`,
+      `attachment; filename="plan-${createdAt}.json"`,
     );
-    res
-      .type("application/json")
-      .send(
-        stringifyJson(application.downloadRequest(String(req.params.id)), 2) +
-          "\n",
-      );
+    res.type("application/json").send(stringifyJson(body, 2) + "\n");
   });
   app.post("/api/requests/:id/copy", (req, res) =>
     res.status(201).json(application.copyRequest(String(req.params.id))),
@@ -237,7 +255,7 @@ export function createHttpApp(
       if (req.query.download === "true" || !previewKind(mediaType))
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename*=UTF-8''${encodeURIComponent(video.fileName)}`,
+          `attachment; filename*=UTF-8''${encodeURIComponent(fileDisplayName(application.snapshot(), video.fileName))}`,
         );
       else res.setHeader("Content-Disposition", "inline");
       res.type(

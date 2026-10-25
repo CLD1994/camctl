@@ -13,7 +13,7 @@ import { mappedReport, reportInput } from "./fixtures";
 let browser: Browser;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL });
 });
 afterAll(async () => {
   await browser.close();
@@ -94,7 +94,7 @@ it("记录后续入口共用弹窗，选择列表先处理 Escape", async () => 
   await page.getByRole("tab", { name: /计划记录/ }).click();
   await page.getByTestId("record-open-button").first().click();
   const entry = page.getByRole("button", {
-    name: "准备取回计划默认产物",
+    name: "取回计划产物",
     exact: true,
   });
   await entry.click();
@@ -134,7 +134,7 @@ it("挂起追加期间禁止关闭和重复提交，成功后聚焦当前草稿�
   });
   try {
     await page
-      .getByRole("button", { name: "准备取回计划默认产物", exact: true })
+      .getByRole("button", { name: "取回计划产物", exact: true })
       .click();
     const dialog = page.getByRole("dialog");
     const submit = dialog.getByRole("button", {

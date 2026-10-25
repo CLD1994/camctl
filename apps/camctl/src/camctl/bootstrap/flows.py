@@ -897,7 +897,7 @@ def report_flow(
                 f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
 
     async def _recover_or_generate(
-            report_id: int, business: Any, now_us: int) -> str | None:
+            report_id: int, business: Any, now_us: int, clock) -> str | None:
         """推进一份报告；失败时返回已确认的实际失败摘要。"""
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
@@ -1026,7 +1026,7 @@ def report_flow(
                 StagedReport(name=Path(success.path).name,
                              size_bytes=success.size_bytes, sha256=success.sha256),
                 HandoffDirectories(staging, ready),
-                DbPublicationSession(business),
+                DbPublicationSession(business, occurred_at=clock),
                 local_actions=local_actions,
             )
         except prerequisite_errors:
@@ -1107,7 +1107,8 @@ def report_flow(
             progress.remaining_reports = ()
             for index, report_id in enumerate(pending):
                 progress.remaining_reports = pending[index + 1:]
-                failure_detail = await _recover_or_generate(report_id, business, now_us)
+                failure_detail = await _recover_or_generate(
+                    report_id, business, now_us, context.clock.utc_micros)
                 if failure_detail is not None:
                     round_clean = False
                     if on_failure is not None:

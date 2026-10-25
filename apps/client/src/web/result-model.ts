@@ -5,7 +5,7 @@ import type {
   Delivery,
 } from "../shared/types";
 import type { Video } from "../server/models";
-import { mediaGroup } from "../shared/media";
+import { mediaGroup, playbackMediaType } from "../shared/media";
 import { isObject } from "../shared/validation";
 import { isCameraAction } from "../shared/actions";
 import {
@@ -73,51 +73,60 @@ function videoCoverageNote(coverage: VideoCoverage) {
 
 export interface ResultActionRow {
   action: ReportAction;
-  source?: ReportAction;
+  automaticActions: ReportAction[];
   association?: string;
 }
-/** 只消费可靠报告关系；平铺同级组件，使归并和全部视图保持动作身份。 */
-export function resultActionRows(
-  plan: ReportPlan,
-  all = false,
-): ResultActionRow[] {
+/** 只按报告中的可靠关系，将自动取回归入拍摄详情。 */
+export function resultActionRows(plan: ReportPlan): ResultActionRow[] {
   const actions = plan.actions ?? [];
   const index = new Map(
     actions.map((action) => [action.action_instance_id, action]),
   );
-  const rows = actions.map((action): ResultActionRow => {
-    if (action.automation?.purpose !== "auto_preview")
-      return {
-        action,
-        ...(isObject(action.input_params) &&
-        action.input_params.purpose === "auto_preview"
-          ? { association: "自动取回关联尚未确认" }
-          : {}),
-      };
-    const id = action.automation.source_action_instance_id;
-    if (!id) return { action, association: "自动取回关联尚未确认" };
-    const source = index.get(id);
-    if (!source)
-      return { action, association: `等待来源动作 ${id} 的报告明细` };
-    if (!isCameraAction(source.type))
-      throw Error("自动预览报告来源不是拍摄动作");
-    return { action, source };
-  });
-  if (all) return rows;
-  const associated = new Map<string, ResultActionRow[]>();
+  const rows = actions.map(
+    (action): ResultActionRow & { source?: ReportAction } => {
+      if (action.automation?.purpose !== "auto_preview")
+        return {
+          action,
+          automaticActions: [],
+          ...(isObject(action.input_params) &&
+          action.input_params.purpose === "auto_preview"
+            ? { association: "自动取回关联尚未确认" }
+            : {}),
+        };
+      const id = action.automation.source_action_instance_id;
+      if (!id)
+        return {
+          action,
+          automaticActions: [],
+          association: "自动取回关联尚未确认",
+        };
+      const source = index.get(id);
+      if (!source)
+        return {
+          action,
+          automaticActions: [],
+          association: `等待来源动作 ${id} 的报告明细`,
+        };
+      if (!isCameraAction(source.type))
+        throw Error("自动预览报告来源不是拍摄动作");
+      return { action, automaticActions: [], source };
+    },
+  );
+  const associated = new Map<string, ReportAction[]>();
   for (const row of rows)
     if (row.source) {
       const id = row.source.action_instance_id;
       const group = associated.get(id) ?? [];
-      group.push(row);
+      group.push(row.action);
       associated.set(id, group);
     }
   return rows
     .filter((r) => !r.source)
-    .flatMap((row) => [
-      row,
-      ...(associated.get(row.action.action_instance_id) ?? []),
-    ]);
+    .map(({ action, association }) => ({
+      action,
+      association,
+      automaticActions: associated.get(action.action_instance_id) ?? [],
+    }));
 }
 
 export function automaticResult(
@@ -291,6 +300,7 @@ export function resultNotes(
 }
 
 export interface Product {
+  localCopy?: Video & { downloadName: string };
   id: string;
   name: string;
   output?: Output;
@@ -364,6 +374,17 @@ export function resultProducts(
   )
     owners.push({ actions: [action] });
   const files = new Map(videos.map((v) => [v.fileName, v]));
+  const copies = new Map<string, NonNullable<Product["localCopy"]>>();
+  for (const { actions } of owners)
+    for (const candidate of actions)
+      for (const delivery of candidate.deliveries ?? []) {
+        const copy = files.get(delivery.file_name);
+        if (copy?.status === "verified")
+          copies.set(delivery.output_id, {
+            ...copy,
+            downloadName: delivery.display_name,
+          });
+      }
   for (const { owner, actions } of owners)
     for (const a of actions)
       for (const delivery of a.deliveries ?? []) {
@@ -381,6 +402,13 @@ export function resultProducts(
         }
       }
   for (const row of rows.values()) {
+    row.localCopy = copies.get(row.id);
+    row.mediaType = playbackMediaType(
+      row.mediaType,
+      row.output?.original_name,
+      ...row.deliveries.map((d) => d.delivery.file_name),
+    );
+    row.group = mediaGroup(row.mediaType);
     row.problems = row.deliveries.filter(
       (d) =>
         ["failed", "canceled", "withdrawn"].includes(d.delivery.status) ||

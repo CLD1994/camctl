@@ -90,10 +90,16 @@ it.each(["B", "", 42, undefined])(
       value === undefined,
     );
     expect(JSON.parse(c.text).actions[2].params.source.action_name).toBe("A");
-    expect(
-      coordinatePreviews(c, { active: null, error: "缺目录", generation: 0 })
-        .content,
-    ).toEqual(c);
+    const result = coordinatePreviews(c, {
+      active: null,
+      error: "缺目录",
+      generation: 0,
+    }).content;
+    const expected = JSON.parse(c.text);
+    // 无冲突的 B 仍同步派生名称，A 的最后可靠引用与名称继续保留。
+    if (value !== "B") expected.actions[3].name = "B预览";
+    expect(JSON.parse(result.text)).toEqual(expected);
+    expect(result.automaticPreviews).toEqual(c.automaticPreviews);
   },
 );
 it.each(["source", "pending", "duplicate", "missing", "external"])(

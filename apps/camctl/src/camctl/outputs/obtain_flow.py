@@ -249,7 +249,7 @@ def _source_spec(action: Mapping) -> SourceSpec:
 async def _fix_pending_selections(
         runtime: ObtainRuntime, now: int) -> None:
     """对每个待固定的选择计算快照并保存；来源未完成保持等待。"""
-    from camctl.outputs.definitions import read_selection_request
+    from camctl.outputs.definitions import read_excluded_output_ids, read_selection_request
 
     from camctl.persistence.repositories.segment_selections import (
         FixSegmentSelection,
@@ -294,10 +294,13 @@ async def _fix_pending_selections(
             await save_selection(int(selection_id), request, key)
             continue
         action, mode, requested, facts = inputs_value
+        input_fields = parse_exact_json(action["input_fields_json"])
         snapshot = select_outputs(
             SourceResolution(state=ResolutionState.FIXED,
                 member_action_ids=(int(member_id),),
-                source_plan_id=action["resolved_source_plan_id"]), facts, mode, requested)
+                source_plan_id=action["resolved_source_plan_id"]),
+            facts, mode, requested,
+            excluded_output_ids=read_excluded_output_ids(input_fields))
         if not isinstance(snapshot, SelectionSnapshot) or not snapshot.is_fixed:
             continue
         outcome = await _save_repository(runtime, runtime.outputs.fix_selection,

@@ -75,3 +75,17 @@ def test_nonexplicit_mode_still_requires_original_parameter_object(mode, raw):
 def test_explicit_default_filter_retains_default_mode():
     assert definitions.read_selection_request({"selection_mode": 1},
         {"params": {"filter": "default"}}) == (1, ())
+
+
+@pytest.mark.parametrize("mode,params", [
+    (1, {"exclude_output_ids": []}),
+    (1, {"exclude_output_ids": ["1", "1"]}),
+    (1, {"exclude_output_ids": [True]}),
+    (1, {"exclude_output_ids": ["01"]}),
+    (2, {"filter": "preview", "exclude_output_ids": ["1"]}),
+    (3, {"output_ids": ["2"], "exclude_output_ids": ["1"]}),
+    (1, {"purpose": "auto_preview", "exclude_output_ids": ["1"]}),
+])
+def test_saved_exclusions_require_manual_default_and_unique_ids(mode, params):
+    with pytest.raises(ValueError):
+        definitions.read_selection_request({"selection_mode": mode}, {"params": params})

@@ -52,14 +52,13 @@ import {
   selectSyncReport,
   validateReportAgainstHistory,
   SegmentReportKnowledge,
+  StatusHistoryKnowledge,
 } from "../domain/reports";
 import { formatProtocolTime, type UtcText } from "../domain/protocol-time";
 
-function utc(): UtcText {
+function utc(date = new Date()): UtcText {
   // toISOString 恒为 UTC 且格式固定；截到秒符合公共协议时间字面量。
-  return formatProtocolTime(
-    new Date().toISOString().slice(0, 19).replace("T", " "),
-  );
+  return formatProtocolTime(date.toISOString().slice(0, 19).replace("T", " "));
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -542,7 +541,8 @@ export class Application {
           );
         }
       });
-      const now = utc();
+      const exportTime = new Date(Date.now());
+      const now = utc(exportTime);
       const {
         last_report_id: ack,
         request_id: oldId,
@@ -552,7 +552,11 @@ export class Application {
       const record: ExportedRequest = {
         id: requestId,
         draftId: id,
-        body: { ...intent, request_id: requestId, created_at: now },
+        body: {
+          ...intent,
+          request_id: requestId,
+          created_at: exportTime.toISOString().slice(0, -1).replace("T", " "),
+        },
         exportedAt: now,
         handedAt: null,
         copyContent: cloneClientJson(content),
@@ -755,15 +759,20 @@ export class Application {
       const current = this.snapshot();
       // 展示投影可合法省略可选引用；成功原文（含 covered）仍保留分段详情及其引用的实体身份观察。
       const segmentKnowledge = new SegmentReportKnowledge();
+      const statusKnowledge = new StatusHistoryKnowledge();
       try {
-        for (const saved of this.store.acceptedReportSources())
-          segmentKnowledge.add(parseReport(saved.file_name, saved.bytes));
+        for (const saved of this.store.acceptedReportSources()) {
+          const savedReport = parseReport(saved.file_name, saved.bytes);
+          segmentKnowledge.add(savedReport);
+          statusKnowledge.add(savedReport);
+        }
         segmentKnowledge.add(current);
+        statusKnowledge.add(current);
         segmentKnowledge.validate();
       } catch (error) {
         if (error instanceof DataError) throw error;
         throw new DataError(
-          `已接受报告的分段事实无法核实：${errorMessage(error)}`,
+          `已接受报告的历史事实无法核实：${errorMessage(error)}`,
         );
       }
       let merged: StatusReport | undefined;
@@ -777,6 +786,7 @@ export class Application {
             throw new Error("电机动作原始参数的数学值或类型改变");
         }
         segmentKnowledge.add(report);
+        statusKnowledge.add(report);
         segmentKnowledge.validate();
         validateReportAgainstHistory(current, report);
         if (decision !== "gap") merged = mergeReport(current, report);

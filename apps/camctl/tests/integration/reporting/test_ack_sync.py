@@ -389,6 +389,10 @@ def test_unknown_commit_preserves_atomic_sync_result(sync_environment, tmp_path,
 
     class LostCommitResponse:
         @property
+        def total_changes(self):
+            return connection.total_changes
+
+        @property
         def in_transaction(self):
             return connection.in_transaction
 

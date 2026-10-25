@@ -381,6 +381,9 @@ it("改名跟随稳定来源身份，删除拍摄同步移除派生并搬移资�
   expect(
     (parseClientJson(renamed.text) as any).actions[1].params.source.action_name,
   ).toBe("新拍摄");
+  expect((parseClientJson(renamed.text) as any).actions[1].name).toBe(
+    "新拍摄预览",
+  );
   const appended = appendDraftAction(
     renamed,
     {
@@ -481,6 +484,36 @@ it("生成名称满足协议长度且不覆盖已有用户名称", () => {
   expect([...actions[2].name].length).toBeLessThanOrEqual(128);
   expect(actions[1].name).toBe("拍摄预览");
 });
+it.each(["新拍摄", "😀".repeat(128)])(
+  "已有自动预览改名遵守唯一性和长度限制，能力不可用时仍同步：%s",
+  async (name) => {
+    const { setValue } = await import("../../src/web/editing");
+    const base = coordinatePreviews(content(), capabilities()).content;
+    const collision = [...name].slice(0, 126).join("") + "预览";
+    const withManual = appendContentAction(
+      base,
+      { name: collision, type: "report_status" },
+      false,
+      createActionAllocation(),
+    );
+    const unavailable = { ...capabilities(), error: "无法读取能力说明" };
+    const result = coordinatePreviews(
+      setValue(withManual, ["actions", 0, "name"], name),
+      unavailable,
+    ).content;
+    const actions = (parseClientJson(result.text) as any).actions;
+    const expected = [...name].slice(0, 124).join("") + "预览 2";
+    expect(actions[1].name).toBe(expected);
+    expect([...actions[1].name].length).toBeLessThanOrEqual(128);
+    expect(actions[2].name).toBe(collision);
+    expect(result.automaticPreviews!.actions[1].id).toBe(
+      base.automaticPreviews!.actions[1].id,
+    );
+    expect(
+      sameContent(result, coordinatePreviews(result, unavailable).content),
+    ).toBe(true);
+  },
+);
 it("无效年份不能据已解析旧值生成自动动作", () => {
   const c = initializePreviewMetadata(
     {

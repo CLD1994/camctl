@@ -54,7 +54,7 @@ const delivery = (id: string, status: Delivery["status"] = "published") =>
     display_name: id,
     status,
   }) as Delivery;
-it("可靠关系只改变排列，所有同源自动动作均保留，手动动作独立", () => {
+it("可靠关联的全部自动动作收进拍摄详情，手动动作独立", () => {
   const autos = [automatic("2"), automatic("3"), automatic("4")].map(
     (a) =>
       ({
@@ -74,16 +74,13 @@ it("可靠关系只改变排列，所有同源自动动作均保留，手动动�
   expect(
     rows.map((r) => [
       r.action.action_instance_id,
-      r.source?.action_instance_id,
+      r.automaticActions.map((a) => a.action_instance_id),
     ]),
   ).toEqual([
-    ["5", undefined],
-    ["1", undefined],
-    ["2", "1"],
-    ["3", "1"],
-    ["4", "1"],
+    ["5", []],
+    ["1", ["2", "3", "4"]],
   ]);
-  expect(rows[2].action).toBe(autos[0]);
+  expect(rows[1].automaticActions[0]).toBe(autos[0]);
 });
 it.each([undefined, "99"])("缺少可靠来源 %s 时保留独立动作及诊断", (source) => {
   const a = automatic();
@@ -93,17 +90,17 @@ it.each([undefined, "99"])("缺少可靠来源 %s 时保留独立动作及诊断
   };
   const [row] = model.resultActionRows(plan([a]));
   expect(row.action).toBe(a);
-  expect(row.source).toBeUndefined();
+  expect(row.automaticActions).toEqual([]);
   expect(row.association).toBeTruthy();
   if (source) expect(row.association).toContain(source);
 });
-it("来源晚到后同一动作归并，全部动作视图仍保留其身份", () => {
+it("来源晚到后自动动作保留身份并归入来源详情", () => {
   const a = automatic();
-  expect(model.resultActionRows(plan([a]))[0].source).toBeUndefined();
-  expect(model.resultActionRows(plan([a, capture]))[1].action).toBe(a);
-  expect(
-    model.resultActionRows(plan([a, capture]), true).map((r) => r.action),
-  ).toEqual([a, capture]);
+  expect(model.resultActionRows(plan([a]))[0].action).toBe(a);
+  const rows = model.resultActionRows(plan([a, capture]));
+  expect(rows).toHaveLength(1);
+  expect(rows[0].action).toBe(capture);
+  expect(rows[0].automaticActions).toEqual([a]);
 });
 it("原输入的自动用途及 delivery 来源不能补造 automation 关系", () => {
   const a = {
@@ -113,7 +110,7 @@ it("原输入的自动用途及 delivery 来源不能补造 automation 关系", 
     deliveries: [delivery("20")],
   };
   const row = model.resultActionRows(plan([capture, a]))[1];
-  expect(row.source).toBeUndefined();
+  expect(row.automaticActions).toEqual([]);
   expect(row.association).toBeTruthy();
 });
 it.each([

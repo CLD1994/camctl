@@ -45,7 +45,10 @@ beforeAll(async () => {
   });
   await fixtureServer.listen();
   fixtureBase = `http://127.0.0.1:${(fixtureServer.httpServer!.address() as { port: number }).port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL,
+  });
 });
 afterEach(async () => {
   for (const close of clean.splice(0)) await close();

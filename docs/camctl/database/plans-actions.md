@@ -49,7 +49,7 @@
 | `plans.id` | `INTEGER PRIMARY KEY`，正整数 | 计划身份及首次成功受理顺序；按受理写事务分配 |
 | `plans.request_id` | `INTEGER NOT NULL UNIQUE`，正整数 | 调用方提供的请求身份，范围与转换遵守[请求身份与成功受理关联](#请求身份与成功受理关联) |
 | `plans.name` | `TEXT NOT NULL` | 已通过公共结构校验的计划名称，不要求跨计划唯一 |
-| `plans.created_at` | `INTEGER NOT NULL` | 客户端创建计划的 UTC 时间，单位为微秒；合法输入固定到秒，值为整秒对应的微秒数，不证明主机时间可信 |
+| `plans.created_at` | `INTEGER NOT NULL` | 客户端创建计划的 UTC 时间，单位为微秒；按[创建时间字面量](../../architecture/plan-input.md#时间字面量)精确保存毫秒或历史整秒值，不证明主机时间可信 |
 | `actions.id` | `INTEGER PRIMARY KEY`，正整数 | 动作身份 |
 | `actions.plan_id` | `INTEGER NOT NULL`，引用 `plans.id` | 所属计划 |
 | `actions.input_index` | `INTEGER NOT NULL`，非负整数 | 动作在首次受理的输入数组中的位置，从 0 开始 |

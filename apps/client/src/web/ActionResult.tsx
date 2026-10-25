@@ -14,6 +14,15 @@ import { cleanupEntryVisible } from "./device-options";
 import type { Capabilities, ReportAction, ReportPlan } from "../shared/types";
 import type { Video } from "../server/models";
 import type { Followup } from "./Records";
+import { defaultObtainParams } from "./obtain";
+import { StatusTimeline, statusTimeText } from "./StatusTimes";
+
+export type ActionView = { expanded: boolean; selected: Set<string> };
+export type ActionViews = {
+  views: Record<string, ActionView>;
+  updateView: (id: string, update: (view: ActionView) => ActionView) => void;
+};
+const initialActionView: ActionView = { expanded: false, selected: new Set() };
 
 export function ActionResult({
   action,
@@ -29,6 +38,9 @@ export function ActionResult({
   source,
   merged,
   association,
+  automaticActions = [],
+  views,
+  updateView,
 }: {
   active: boolean;
   capabilities: Capabilities | null;
@@ -36,6 +48,7 @@ export function ActionResult({
   source?: ReportAction;
   merged?: boolean;
   association?: string;
+  automaticActions?: ReportAction[];
   action: ReportAction;
   plan: ReportPlan;
   allPlans: ReportPlan[];
@@ -43,8 +56,14 @@ export function ActionResult({
   follow: (f: Followup) => void;
   run: (f: () => Promise<void>) => void;
   open: (id: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
+} & ActionViews) {
+  const view = views[action.action_instance_id] ?? initialActionView;
+  const { expanded, selected } = view;
+  const [technicalOpen, setTechnicalOpen] = useState(false);
+  const previews = automaticActions.map((preview) => ({
+    action: preview,
+    summary: automaticResult(preview, allPlans, videos),
+  }));
   const automatic =
     action.automation?.purpose === "auto_preview"
       ? automaticResult(action, allPlans, videos)
@@ -108,12 +127,20 @@ export function ActionResult({
         <button
           aria-label={`${expanded ? "折叠" : "展开"}动作 ${action.name}`}
           aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
+          onClick={() =>
+            updateView(action.action_instance_id, (old) => ({
+              ...old,
+              expanded: !old.expanded,
+            }))
+          }
         >
           {expanded ? "收起详情" : "展开详情"}
         </button>
       </div>
       <div className="action-summary">
+        <p className="muted">
+          当前状态时间：{statusTimeText(action.status_history?.at(-1))}
+        </p>
         {automatic && (
           <>
             <p>{executionText(action)}</p>
@@ -171,8 +198,24 @@ export function ActionResult({
         {problems > 0 && (
           <p className="notice error">{problems} 次交付或文件核验异常</p>
         )}
+        {previews
+          .filter(
+            ({ action: preview, summary }) =>
+              ["failed", "canceled", "expired"].includes(preview.status) ||
+              summary.problems > 0 ||
+              summary.notes.some((note) => note.error),
+          )
+          .map(({ action: preview, summary }) => (
+            <p key={preview.action_instance_id} className="notice error">
+              自动预览异常 · {preview.name} <Badge value={preview.status} />
+              {summary.problems > 0 &&
+                ` · ${summary.problems} 次交付或文件核验异常`}
+              {" · 原因见执行技术详情"}
+            </p>
+          ))}
       </div>
       <div hidden={!expanded}>
+        <StatusTimeline history={action.status_history} />
         <div className="button-row">
           <span>{executionText(action)}</span>
           {typeof action.device_id === "string" && (
@@ -184,41 +227,46 @@ export function ActionResult({
               {utcToLocal(action.scheduled_at).replace("T", " ") || "时间无效"}
             </span>
           )}
-          <button
-            onClick={() =>
-              follow({
-                action: {
-                  name: `取消 ${action.name}`,
-                  type: "cancel_task",
-                  params: {
-                    target: { action_instance_id: action.action_instance_id },
+          {(action.status === "pending" || action.status === "running") && (
+            <button
+              onClick={() =>
+                follow({
+                  action: {
+                    name: `取消 ${action.name}`,
+                    type: "cancel_task",
+                    params: {
+                      target: { action_instance_id: action.action_instance_id },
+                    },
                   },
-                },
-                summary: `取消动作 ${action.name}`,
-              })
-            }
-          >
-            准备取消动作
-          </button>
+                  summary: `取消动作 ${action.name}`,
+                })
+              }
+            >
+              取消动作
+            </button>
+          )}
           {isCameraAction(action.type) && (
             <>
               <button
-                onClick={() =>
-                  follow({
-                    action: {
-                      name: `取回 ${action.name}`,
-                      type: "obtain_action_outputs",
-                      params: {
-                        source: {
-                          action_instance_id: action.action_instance_id,
-                        },
+                onClick={(event) => {
+                  const entry = event.currentTarget;
+                  run(async () =>
+                    follow({
+                      entry,
+                      action: {
+                        name: `取回 ${action.name}`,
+                        type: "obtain_action_outputs",
+                        params: await defaultObtainParams(
+                          { action_instance_id: action.action_instance_id },
+                          allPlans,
+                        ),
                       },
-                    },
-                    summary: `按 ${action.name} 已保存的默认范围取回：排除预览，并优先对应修复成品`,
-                  })
-                }
+                      summary: `按 ${action.name} 已保存的默认范围取回：排除预览，并优先对应修复成品`,
+                    }),
+                  );
+                }}
               >
-                准备取回默认产物
+                取回默认产物
               </button>
               {cleanupEntryVisible(capabilities, action.device_id) && (
                 <button
@@ -237,7 +285,7 @@ export function ActionResult({
                     })
                   }
                 >
-                  准备清理动作全部源产物
+                  清理全部产物
                 </button>
               )}
             </>
@@ -260,6 +308,19 @@ export function ActionResult({
             准备完整状态同步
           </button>
         )}
+        {previews.length > 0 && (
+          <div className="automatic-preview-status">
+            {previews.map(({ action: preview, summary }) => (
+              <p key={preview.action_instance_id}>
+                自动预览 <Badge value={preview.status} />
+                {summary.products.length > 0 &&
+                  ` · 已核验 ${summary.ready} / ${summary.products.length} 个文件`}
+                {summary.waitingPublished > 0 &&
+                  ` · 等待接收 ${summary.waitingPublished} 个文件`}
+              </p>
+            ))}
+          </div>
+        )}
         {products.length > 0 && (
           <MediaResults
             products={products}
@@ -268,15 +329,45 @@ export function ActionResult({
             active={active && expanded}
             follow={follow}
             run={run}
-            open={open}
+            selected={selected}
+            setSelected={(update) =>
+              updateView(action.action_instance_id, (old) => ({
+                ...old,
+                selected: update(old.selected),
+              }))
+            }
           />
         )}
-        <details className="advanced">
+        <details
+          className="advanced"
+          onToggle={(event) => setTechnicalOpen(event.currentTarget.open)}
+        >
           <summary>执行技术详情</summary>
           <p className="identifier">{action.action_instance_id}</p>
           {action.automation && <Facts value={action.automation} />}
           {action.error && <Facts value={action.error} />}{" "}
           {action.result && <Facts value={action.result} business />}
+          {automaticActions.length > 0 && <h4>自动预览取回详情</h4>}
+          {automaticActions.map((preview) => (
+            <ActionResult
+              key={preview.action_instance_id}
+              action={preview}
+              source={action}
+              merged
+              active={active && expanded && technicalOpen}
+              {...{
+                plan,
+                allPlans,
+                videos,
+                follow,
+                run,
+                open,
+                capabilities,
+                views,
+                updateView,
+              }}
+            />
+          ))}
         </details>
         <details>
           <summary>输入与生效参数</summary>

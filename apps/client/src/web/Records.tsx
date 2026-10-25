@@ -11,7 +11,11 @@ import { utcToLocal } from "./editing";
 import { Badge, Facts, Empty } from "./common";
 import { stringifyJson } from "../shared/json";
 import { resultActionRows } from "./result-model";
+import type { ActionView } from "./ActionResult";
+import { defaultObtainParams } from "./obtain";
+import { statusTimeText } from "./StatusTimes";
 export type Followup = {
+  entry?: HTMLElement;
   action: Record<string, unknown>;
   summary: string;
   sync?: boolean;
@@ -38,7 +42,13 @@ export function RecordDetail({
 }: Props) {
   const { request, plan } = record;
   const [expanded, setExpanded] = useState(true);
-  const [allActions, setAllActions] = useState(false);
+  // 以动作身份保留展开与选择，来源报告晚到后移入技术详情时也不丢失。
+  const [views, setViews] = useState<Record<string, ActionView>>({});
+  const updateView = (id: string, update: (view: ActionView) => ActionView) =>
+    setViews((old) => ({
+      ...old,
+      [id]: update(old[id] ?? { expanded: false, selected: new Set() }),
+    }));
   const allPlans = state.snapshot?.plans ?? [];
   const diagnostics =
     state.snapshot?.plan_file_diagnostics?.filter(
@@ -54,6 +64,21 @@ export function RecordDetail({
           {expanded ? "折叠计划" : "展开计划"}
         </button>
       </div>
+      {plan && (
+        <div className="record-times">
+          <span>受理时间：{statusTimeText(plan.status_history?.[0])}</span>
+          <span>
+            结束时间：
+            {plan.status === "completed"
+              ? statusTimeText(
+                  plan.status_history?.find(
+                    (entry) => entry.status === "completed",
+                  ),
+                )
+              : "尚未结束"}
+          </span>
+        </div>
+      )}
       <div hidden={!expanded}>
         <p className="identifier">请求 ID · {record.id}</p>
         <div className="evidence-grid">
@@ -84,7 +109,7 @@ export function RecordDetail({
             <strong>
               {plan ? "已取得计划受理及报告状态" : "尚无计划执行依据"}
             </strong>
-            {plan && <span>{plan.plan_instance_id}</span>}
+            {plan && <span>计划实例 ID：{plan.plan_instance_id}</span>}
           </div>
         </div>
         {request && (
@@ -93,12 +118,7 @@ export function RecordDetail({
               data-testid="download-request-button"
               disabled={busy}
               onClick={() =>
-                run(() =>
-                  download(
-                    `/requests/${record.id}/download`,
-                    `plan-${record.id}.json`,
-                  ),
-                )
+                run(() => download(`/requests/${record.id}/download`))
               }
             >
               再次下载原请求
@@ -133,27 +153,26 @@ export function RecordDetail({
               <h3>执行与结果</h3>
               <div className="button-row">
                 <button
-                  aria-pressed={allActions}
-                  onClick={() => setAllActions(!allActions)}
-                >
-                  {allActions ? "按拍摄归并自动取回" : "查看全部动作"}
-                </button>
-                <button
                   disabled={busy}
-                  onClick={() =>
-                    follow({
-                      action: {
-                        name: `取回 ${plan.name}`,
-                        type: "obtain_action_outputs",
-                        params: {
-                          source: { plan_instance_id: plan.plan_instance_id },
+                  onClick={(event) => {
+                    const entry = event.currentTarget;
+                    run(async () =>
+                      follow({
+                        entry,
+                        action: {
+                          name: `取回 ${plan.name}`,
+                          type: "obtain_action_outputs",
+                          params: await defaultObtainParams(
+                            { plan_instance_id: plan.plan_instance_id },
+                            allPlans,
+                          ),
                         },
-                      },
-                      summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
-                    })
-                  }
+                        summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
+                      }),
+                    );
+                  }}
                 >
-                  准备取回计划默认产物
+                  取回计划产物
                 </button>
                 <button
                   disabled={busy}
@@ -170,25 +189,27 @@ export function RecordDetail({
                     })
                   }
                 >
-                  准备清理计划全部源产物
+                  清理计划产物
                 </button>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    follow({
-                      action: {
-                        name: `取消 ${plan.name}`,
-                        type: "cancel_task",
-                        params: {
-                          target: { plan_instance_id: plan.plan_instance_id },
+                {plan.status !== "completed" && (
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      follow({
+                        action: {
+                          name: `取消 ${plan.name}`,
+                          type: "cancel_task",
+                          params: {
+                            target: { plan_instance_id: plan.plan_instance_id },
+                          },
                         },
-                      },
-                      summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
-                    })
-                  }
-                >
-                  准备取消计划
-                </button>
+                        summary: `取消计划 ${plan.name} · ${plan.plan_instance_id}`,
+                      })
+                    }
+                  >
+                    取消计划
+                  </button>
+                )}
               </div>
             </div>
             {plan.status === "completed" && (
@@ -197,13 +218,14 @@ export function RecordDetail({
               </p>
             )}
             <Suspense fallback={<p>正在加载动作摘要…</p>}>
-              {resultActionRows(plan, allActions).map(
-                ({ action, source, association }) => (
+              {resultActionRows(plan).map(
+                ({ action, automaticActions, association }) => (
                   <ActionResult
                     key={action.action_instance_id}
                     action={action}
-                    source={source}
-                    merged={!!source && !allActions}
+                    automaticActions={automaticActions}
+                    views={views}
+                    updateView={updateView}
                     association={association}
                     motorInputText={
                       state.motorInputTexts?.[action.action_instance_id]
