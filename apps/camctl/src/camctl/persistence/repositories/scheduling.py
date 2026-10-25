@@ -1340,6 +1340,7 @@ class ReservePreparationCommand:
         allocation = scope.allocate(1)
         identity = _next_id(connection, "device_activities")
         values = _new_activity_values(action, capabilities)
+        state["device_activities"] = {}
         event = _envelope(allocation.first_event_id, allocation.txn_id, 13, 1,
             (_row("device_activities", identity, values),), request.occurred_at,
             evidence={"preparation_request": self._evidence()})

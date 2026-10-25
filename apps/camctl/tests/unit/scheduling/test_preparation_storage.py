@@ -12,6 +12,8 @@ from camctl.persistence.transaction import TransactionError, TransactionScope
 from camctl.persistence.repositories.capture_facts import StartFacts
 from camctl.persistence.repositories.capture_facts import unstarted_events
 from camctl.contracts.workflow_errors import validate_error_details
+from camctl.history.changes import event_report_targets
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 
 
 @pytest.fixture
@@ -144,6 +146,22 @@ def test_reserve_creates_only_pending_activity(reserve):
     assert row.table == "device_activities" and row.row_id == 11
     assert row.after.values["dispatch_state"] == 1
     assert row.after.values["occupancy_state"] == 1
+
+
+@pytest.mark.parametrize("action_type", CAPTURE_ACTION_TYPES)
+def test_preparation_reservation_supplies_before_facts_for_report_target(
+    request, action_type,
+):
+    fixture_name = "photo_reserve" if action_type == 1 else "reserve"
+    action, scope = request.getfixturevalue(fixture_name)
+    action["type"] = action_type
+    plan = scheduling.ReservePreparationCommand(
+        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10")),
+        new_operation_key()).plan(scope)
+
+    assert event_report_targets(plan.events[0], plan.state_rows) == ((1, 7),)
+    assert plan.state_rows["device_activities"] == {}
+    assert plan.events[0].rows[0].row_id not in plan.state_rows["device_activities"]
 
 
 @pytest.mark.parametrize("now,lead,reason", [
