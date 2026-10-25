@@ -168,7 +168,8 @@ class DbExecutor:
     submit_write 与 submit_read 返回结果句柄（asyncio.Future）：
     等待者取消后句柄仍然有效，需要接手时以 asyncio.shield 保留
     句柄并交给责任监督器。入队等待超过时限的操作以 NOT_EXECUTED
-    结果返回，并且以后也不会执行。
+    结果返回，并且以后也不会执行。同键申请在原结果交付前明确
+    拒绝，原结果交付后才允许复用该键核实已保存事实。
     """
 
     def __init__(
@@ -260,6 +261,8 @@ class DbExecutor:
         with self._lock:
             if self._closed or self._stopping:
                 raise DbExecutorError("执行器已关闭，不再接纳操作")
+            if job.key in self._results:
+                raise DbExecutorError(f"操作 {job.key} 尚未交付结果，不能重复提交")
             self._results[job.key] = result
             if self._core.try_admit(job):
                 self._ensure_thread_locked()
@@ -277,7 +280,11 @@ class DbExecutor:
         except TimeoutError:
             with self._lock:
                 timed_out = self._core.settle_timeout(admission)
-                result = self._results.pop(admission.job.key, None) if timed_out else None
+                # 已撤回申请的超时通知可能迟到；该键此时可能已经
+                # 由新申请复用，只能结算原申请自己拥有的句柄。
+                result = None
+                if timed_out and self._results.get(admission.job.key) is admission.result:
+                    result = self._results.pop(admission.job.key)
             if result is not None and not result.done():
                 result.set_result(
                     DbOutcome(
