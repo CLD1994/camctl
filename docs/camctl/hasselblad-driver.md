@@ -12,7 +12,9 @@ Hasselblad CFV 100C 通过 ARM Linux 主机上的现有 `hb_cli` 二进制接入
 
 驱动将配置中的整数产品标识传给 `hb_cli --pid` 时，使用带 `0x` 前缀的四位小写十六进制形式，例如 `10` 写作 `0x000a`。
 
-设置与拍摄共用一次已持久化的 START 尝试和完整调用期限。整次调用按[START 取消边界](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#start-调用与取消边界)及[采集效果与步骤事实](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#尝试结果采集效果与步骤事实)分别解释；每条新命令仍须满足时间窗口及剩余期限，设置成功不代替拍摄完成。单张任务的完整调用期限覆盖准备、参数设置、曝光、原图及缩略图传输，作为首次受理的固定执行依据保存；后续恢复沿用原值。
+哈苏通过[公共拍摄准备流程](../superpowers/specs/2026-10-25-capture-preparation-design.md)提前核对机身并设置参数，准备期间保持动作未开始。对焦模式随参数提前设置；MF 的相对调焦与 AF-S 的自动对焦仍在真正 START 内执行，二者按原参数分支互斥。准备不派发 `capture`，也不创建照片文件责任。默认提前量、设备占用、原调用保存及新会话凭据核验均由公共合同管理。
+
+实际 START 持有匹配准备凭据时，仅执行对应对焦与拍摄步骤；旧的完整控制入口仍支持在同一次调用内核对身份、设置和拍摄。START 按[取消边界](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#start-调用与取消边界)及[采集效果与步骤事实](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#尝试结果采集效果与步骤事实)分别解释，每条新命令仍须满足时间窗口及剩余期限。实际 START 的完整调用期限作为首次受理的固定执行依据保存，涵盖该调用内的对焦、曝光、原图及缩略图传输；后续恢复沿用原值。设置成功不能代替拍摄完成。
 
 ## 正式源的部署选择
 

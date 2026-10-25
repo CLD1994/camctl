@@ -345,7 +345,7 @@ CLI：
 
 ### `prepare_lead_s`
 
-时效设备动作允许提前准备通信。声明独立拍摄准备能力的 ADB 相机还提前完成设置和目录基准，完整规则由[拍摄提前准备规格](../superpowers/specs/2026-10-25-capture-preparation-design.md)定义；准备期间保持动作未开始，并独立保存设备占用及调用责任。
+时效设备动作允许提前准备通信。声明独立拍摄准备能力的相机还提前完成可重复设置及适用的目录基准，单张照片、录像和延时摄影的完整规则由[拍摄提前准备规格](../superpowers/specs/2026-10-25-capture-preparation-design.md)定义；准备期间保持动作未开始，并独立保存设备占用及调用责任。
 
 ```text
 prepare_at =
