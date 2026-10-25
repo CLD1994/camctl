@@ -6,6 +6,7 @@ import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.page_read_cache import opened_read_page_scope, page_read_scope
+from camctl.persistence.read_reuse import read_reuse_scope
 from camctl.persistence.repositories import result_pages
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..capture.result_consumer_fixtures import consumer_world
@@ -36,7 +37,7 @@ async def test_committed_page_is_reused_only_inside_one_read_transaction(tmp_pat
     try:
         db.execute('BEGIN')
         try:
-            with opened_read_page_scope(db, True):
+            with read_reuse_scope(db), opened_read_page_scope(db, True):
                 saved = result_pages.read_page(ref, owned)
                 assert saved.ref == ref
                 released = weakref.ref(saved)
@@ -67,7 +68,7 @@ async def test_page_record_from_another_connection_cannot_hide_changed_relations
     try:
         db.execute('BEGIN')
         try:
-            with opened_read_page_scope(db, True):
+            with read_reuse_scope(db), opened_read_page_scope(db, True):
                 result_pages.read_page(ref, owned)
                 other.connection.execute('UPDATE result_page_files SET identity=? WHERE page_event_id=?', ('changed', ref.event_id))
                 with pytest.raises(ConsistencyError):
@@ -90,7 +91,7 @@ async def test_reused_page_keeps_current_reference_and_attempt_range_checks(tmp_
         db.execute('BEGIN IMMEDIATE')
         try:
             upper = db.execute('SELECT MAX(id) FROM history_events').fetchone()[0]
-            with page_read_scope(db, upper):
+            with read_reuse_scope(db), page_read_scope(db, upper):
                 result_pages.read_page(ref, owned)
                 if damage == 'reference':
                     changed = replace(ref, page_no=ref.page_no + 1)
@@ -266,7 +267,7 @@ async def test_three_page_strict_members_reuse_each_committed_page_within_scope(
         monkeypatch.setattr(result_pages, '_verify_page_relations', verify)
         db.execute('BEGIN')
         try:
-            with opened_read_page_scope(db, True):
+            with read_reuse_scope(db), opened_read_page_scope(db, True):
                 first = repo.read_members(ref, prefix.next_cursor, 2, owned)
                 repeated = repo.read_members(ref, prefix.next_cursor, 2, owned)
                 assert first.items == repeated.items

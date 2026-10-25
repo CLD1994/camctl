@@ -5,6 +5,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from camctl.persistence.read_reuse import clear_read_reuse
+
 
 @dataclass
 class _PageReads:
@@ -29,6 +31,7 @@ def page_read_scope(connection, upper_event_id):
     if not connection.in_transaction:
         yield
         return
+    clear_read_reuse(connection)
     reads = _PageReads(connection, upper_event_id)
     token = _CURRENT.set(reads)
     try:
@@ -59,6 +62,11 @@ def _reads(connection):
         discard_page_records(connection)
         return None
     return current
+
+
+def page_read_scope_active(connection):
+    """有限原页范围优先，避免通用缓存保留另一份完整解码页。"""
+    return _reads(connection) is not None
 
 
 def cached_page_record(connection, event_id):

@@ -59,6 +59,7 @@ from camctl.history.validators import (
 )
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.page_read_cache import clear_page_records, discard_page_records, page_read_scope
+from camctl.persistence.read_reuse import clear_read_reuse, read_reuse_scope
 from camctl.logging_runtime.transaction_timing import (
     TransactionPhase, db_count, db_phase, timed_connection, trace_transaction,
 )
@@ -328,6 +329,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         with db_phase(TransactionPhase.CONTEXT):
             context = plan.context(proposed, transaction)
             clear_page_records(connection)
+            clear_read_reuse(connection)
             context, reads = _bind_event_reads(
                 context, proposed, transaction, segment_guard_state,
                 source_guard_state, connection, operation_key,
@@ -687,6 +689,11 @@ def commit_operation(
     派生目录。业务拒绝由命令作为普通结果返回，同样是已提交结果。
     """
     connection: sqlite3.Connection = timed_connection(owned.connection)
+    with read_reuse_scope(connection):
+        return _commit_operation(command, operation_key, connection)
+
+
+def _commit_operation(command, operation_key, connection) -> WriteReceipt:
     begun = False
     committing = False
     rollback_attempted = False
@@ -719,6 +726,7 @@ def commit_operation(
             with db_phase(TransactionPhase.PLAN):
                 plan = command.plan(scope)
                 clear_page_records(connection)
+                clear_read_reuse(connection)
         except SchemaRuleError:
             raise
         except Exception as error:
@@ -841,6 +849,7 @@ def commit_operation(
                                    SqlEventReads(connection, read_scope, validated, sequenced)),
                 )
                 clear_page_records(connection)
+                clear_read_reuse(connection)
                 context, reads = _bind_event_reads(
                     context, event, transaction_range, segment_guard_state,
                     source_guard_state, connection, operation_key,
