@@ -178,7 +178,7 @@ from camctl.outputs.catalog import (
     OutputKind,
 )
 from camctl.persistence.models import db_outcome_for, DatabaseAccessError, DbOutcomeKind
-from camctl.persistence.business import BusinessDatabase, settle_required
+from camctl.persistence.business import BusinessDatabase, SharedSave, settle_required
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     FinishBindingFailure,
@@ -373,6 +373,7 @@ class PendingCaptureCompletion:
     key: OperationKey
     request: CaptureCompletionRequest
     input_reads: PendingCaptureInputReads | None = None
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
     @property
     def action_id(self) -> int:
@@ -391,6 +392,7 @@ class PendingResultCheckClose:
 
     key: OperationKey
     request: ResultSetSave | ResultRunClose | OutputSetFinalizationSave | FiniteCancelEndSave
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 async def resume_result_check_closes(
@@ -399,41 +401,47 @@ async def resume_result_check_closes(
     retry_gate: RetryWaitGate | None = None,
 ) -> None:
     """只核已形成的收尾申请，不取得新的设备或业务资格。"""
+    repository = CaptureRepository() if capture is None else capture
+
+    async def save_one(identity, pending):
+        if pending.request.action_id != identity:
+            raise ConsistencyError("原核实收尾申请与所属动作不一致")
+        if isinstance(pending.request, ResultSetSave):
+            method = repository.close_result_check_unconfirmed
+        elif isinstance(pending.request, ResultRunClose):
+            method = repository.close_unconfirmed_result_run
+        elif isinstance(pending.request, OutputSetFinalizationSave):
+            method = repository.finalize_output_set
+        elif isinstance(pending.request, FiniteCancelEndSave):
+            method = save_finite_cancel_end
+        else:
+            raise ConsistencyError("原核实收尾申请类型无效")
+        notification_error = None
+        try:
+            receipt = await database.write(lambda owned: method(pending.request, pending.key, owned), key=pending.key)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            notification_error = error
+        complete = (receipt.kind is DbOutcomeKind.COMPLETED
+            and (not isinstance(pending.request, ResultSetSave) or receipt.value is not None))
+        if not complete:
+            raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
+        if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
+            activity = await database.read(lambda owned: _activity_id_of_connection(owned.connection, identity))
+            retry_gate.cleared(f"results/{activity}")
+        del pending_result_closes[identity]
+        if notification_error is not None:
+            raise notification_error
+
     async def save_and_apply():
-        repository = CaptureRepository() if capture is None else capture
         for identity, pending in tuple(pending_result_closes.items()):
             if action_id is not None and identity != action_id:
                 continue
-            if pending.request.action_id != identity:
-                raise ConsistencyError("原核实收尾申请与所属动作不一致")
-            if isinstance(pending.request, ResultSetSave):
-                method = repository.close_result_check_unconfirmed
-            elif isinstance(pending.request, ResultRunClose):
-                method = repository.close_unconfirmed_result_run
-            elif isinstance(pending.request, OutputSetFinalizationSave):
-                method = repository.finalize_output_set
-            elif isinstance(pending.request, FiniteCancelEndSave):
-                method = save_finite_cancel_end
-            else:
-                raise ConsistencyError("原核实收尾申请类型无效")
-            notification_error = None
-            try:
-                receipt = await database.write(lambda owned: method(pending.request, pending.key, owned), key=pending.key)
-            except BaseException as error:
-                receipt = db_outcome_for(error)
-                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
-                    raise
-                notification_error = error
-            complete = (receipt.kind is DbOutcomeKind.COMPLETED
-                and (not isinstance(pending.request, ResultSetSave) or receipt.value is not None))
-            if not complete:
-                raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
-            if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
-                activity = await database.read(lambda owned: _activity_id_of_connection(owned.connection, identity))
-                retry_gate.cleared(f"results/{activity}")
-            del pending_result_closes[identity]
-            if notification_error is not None:
-                raise notification_error
+            if pending_result_closes.get(identity) is pending:
+                pending.shared.retry_failed()
+            await pending.shared.run(lambda: save_one(identity, pending))
     return await settle_required(save_and_apply())
 
 
@@ -485,94 +493,102 @@ async def resume_capture_completions(
     scheduling: SchedulingRepository | None = None,
 ) -> None:
     """核实已持有的完整拍摄申请，不取得时钟或设备端口。"""
-    async def save_and_apply():
-        repository = CaptureRepository() if capture is None else capture
-        for identity, pending in tuple(pending_capture_completions.items()):
-            if action_id is not None and identity != action_id:
-                continue
-            if pending.action_id != identity:
-                raise ConsistencyError("原拍摄完整申请与所属动作不一致")
-            notification_error = None
-            canceled = isinstance(pending.request, FinishCanceledCapture)
-            start_close = isinstance(pending.request, StartCloseRequest)
-            stop_close = isinstance(pending.request, StopCloseRequest)
-            stop_only = stop_close and pending.request.action_finish is None
-            if pending.input_reads is None:
-                receipt = await _write_capture_completion(database, pending, repository, scheduling)
-                if (receipt.kind in (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED)
-                        and type(pending.request) is FinishCapture
-                        and pending.request.failure is None and pending.request.baseline_error is None):
-                    # 原普通完成确定未提交；同一已取得产物按新取消事实形成另一份申请。
-                    current = await database.read(lambda owned: row_facts(owned.connection, "actions", identity))
-                    if current is not None and current["status"] == 2 and current["cancel_requested"]:
-                        command = pending.request
-                        pending = PendingCaptureCompletion(new_operation_key(), FinishCanceledCapture(
-                            action_id=command.action_id, occurred_at=command.occurred_at,
-                            drafts=command.drafts, catalog_facts=command.catalog_facts))
-                        pending_capture_completions[identity] = pending
-                        canceled = True
-                        receipt = await _write_capture_completion(database, pending, repository, scheduling)
-                notification_error = receipt.handoff_error
-                if receipt.kind is not DbOutcomeKind.COMPLETED:
-                    raise ConsistencyError(
-                        f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
-                if isinstance(pending.request, ExpireActionRequest):
-                    if receipt.value is None or receipt.value.outcome is not ExpireOutcome.EXPIRED:
-                        raise ConsistencyError("原准备后过期申请未取得可靠过期结果")
+    repository = CaptureRepository() if capture is None else capture
+
+    async def save_one(identity, pending):
+        if pending.action_id != identity:
+            raise ConsistencyError("原拍摄完整申请与所属动作不一致")
+        notification_error = None
+        canceled = isinstance(pending.request, FinishCanceledCapture)
+        start_close = isinstance(pending.request, StartCloseRequest)
+        stop_close = isinstance(pending.request, StopCloseRequest)
+        stop_only = stop_close and pending.request.action_finish is None
+        if pending.input_reads is None:
+            receipt = await _write_capture_completion(database, pending, repository, scheduling)
+            if (receipt.kind in (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED)
+                    and type(pending.request) is FinishCapture
+                    and pending.request.failure is None and pending.request.baseline_error is None):
+                # 原普通完成确定未提交；同一已取得产物按新取消事实形成另一份申请。
+                current = await database.read(lambda owned: row_facts(owned.connection, "actions", identity))
+                if current is not None and current["status"] == 2 and current["cancel_requested"]:
+                    command = pending.request
+                    pending = PendingCaptureCompletion(new_operation_key(), FinishCanceledCapture(
+                        action_id=command.action_id, occurred_at=command.occurred_at,
+                        drafts=command.drafts, catalog_facts=command.catalog_facts))
+                    pending_capture_completions[identity] = pending
+                    return await pending.shared.run(lambda: save_one(identity, pending))
+            notification_error = receipt.handoff_error
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(
+                    f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
+            if isinstance(pending.request, ExpireActionRequest):
+                if receipt.value is None or receipt.value.outcome is not ExpireOutcome.EXPIRED:
+                    raise ConsistencyError("原准备后过期申请未取得可靠过期结果")
+                del pending_capture_completions[identity]
+                if notification_error is not None:
+                    raise notification_error
+                return
+            if not start_close and not stop_only:
+                if receipt.value is None:
+                    raise ConsistencyError("原拍摄收场缺少可靠处理结果")
+                if receipt.value.disposition is FinishDisposition.RETIRED:
+                    if stop_close and retry_gate is not None:
+                        for responsibility in pending.request.finish.responsibility_keys:
+                            retry_gate.cleared(responsibility)
                     del pending_capture_completions[identity]
                     if notification_error is not None:
                         raise notification_error
-                    continue
-                if not start_close and not stop_only:
-                    if receipt.value is None:
-                        raise ConsistencyError("原拍摄收场缺少可靠处理结果")
-                    if receipt.value.disposition is FinishDisposition.RETIRED:
-                        if stop_close and retry_gate is not None:
-                            for responsibility in pending.request.finish.responsibility_keys:
-                                retry_gate.cleared(responsibility)
-                        del pending_capture_completions[identity]
-                        if notification_error is not None:
-                            raise notification_error
-                        continue
-                if (start_close or stop_close) and retry_gate is not None:
-                    for responsibility in pending.request.finish.responsibility_keys:
-                        retry_gate.cleared(responsibility)
-                elif (retry_gate is not None
-                        and isinstance(pending.request, (FinishRecordingResults, FinishCanceledCapture))):
-                    if canceled:
-                        def read_responsibilities(owned):
-                            with closing(owned.connection.execute(
-                                "SELECT responsibility_key FROM operation_runs WHERE action_id=? AND kind=?",
-                                (identity, int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
-                            )) as cursor:
-                                return tuple(row[0] for row in cursor.fetchall())
-                        responsibilities = await database.read(read_responsibilities)
-                    else:
-                        run = await database.read(lambda owned: row_facts(owned.connection, "operation_runs", pending.request.run_id))
-                        if run is None:
-                            raise ConsistencyError("已保存录像收场缺少原核实责任")
-                        responsibilities = (run["responsibility_key"],)
-                    for responsibility in responsibilities:
-                        retry_gate.cleared(responsibility)
-                input_reads = await database.read(lambda owned: _capture_input_read_finish(owned, pending.request, identity))
-                if input_reads is not None:
-                    pending = replace(pending, input_reads=input_reads)
-                    pending_capture_completions[identity] = pending
-            if pending.input_reads is not None:
-                try:
-                    result = await database.write(lambda owned: OperationRepository().finish_stale_runs(
-                        pending.input_reads.request, pending.input_reads.key, owned), key=pending.input_reads.key)
-                except BaseException as error:
-                    result = db_outcome_for(error)
-                    if result is None or result.kind is not DbOutcomeKind.COMPLETED:
-                        raise
-                    notification_error = notification_error or error
-                if result.kind is not DbOutcomeKind.COMPLETED:
-                    raise ConsistencyError(
-                        f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}")
-            del pending_capture_completions[identity]
-            if notification_error is not None:
-                raise notification_error
+                    return
+            if (start_close or stop_close) and retry_gate is not None:
+                for responsibility in pending.request.finish.responsibility_keys:
+                    retry_gate.cleared(responsibility)
+            elif (retry_gate is not None
+                    and isinstance(pending.request, (FinishRecordingResults, FinishCanceledCapture))):
+                if canceled:
+                    def read_responsibilities(owned):
+                        with closing(owned.connection.execute(
+                            "SELECT responsibility_key FROM operation_runs WHERE action_id=? AND kind=?",
+                            (identity, int(_RUN_KIND.CHECK_CAPTURE_RESULTS)),
+                        )) as cursor:
+                            return tuple(row[0] for row in cursor.fetchall())
+                    responsibilities = await database.read(read_responsibilities)
+                else:
+                    run = await database.read(lambda owned: row_facts(owned.connection, "operation_runs", pending.request.run_id))
+                    if run is None:
+                        raise ConsistencyError("已保存录像收场缺少原核实责任")
+                    responsibilities = (run["responsibility_key"],)
+                for responsibility in responsibilities:
+                    retry_gate.cleared(responsibility)
+            input_reads = await database.read(lambda owned: _capture_input_read_finish(owned, pending.request, identity))
+            if input_reads is not None:
+                pending = replace(pending, input_reads=input_reads)
+                pending_capture_completions[identity] = pending
+        if pending.input_reads is not None:
+            try:
+                result = await database.write(lambda owned: OperationRepository().finish_stale_runs(
+                    pending.input_reads.request, pending.input_reads.key, owned), key=pending.input_reads.key)
+            except BaseException as error:
+                result = db_outcome_for(error)
+                if result is None or result.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                notification_error = notification_error or error
+            if result.kind is not DbOutcomeKind.COMPLETED:
+                raise ConsistencyError(
+                    f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}")
+        del pending_capture_completions[identity]
+        if notification_error is not None:
+            raise notification_error
+
+    async def save_and_apply():
+        for identity, pending in tuple(pending_capture_completions.items()):
+            if action_id is not None and identity != action_id:
+                continue
+            current = pending_capture_completions.get(identity)
+            if current is not None and current.shared is pending.shared:
+                # 原收场已经进入输入读取阶段时，核实必须继续使用该阶段的原申请。
+                pending = current
+                pending.shared.retry_failed()
+            await pending.shared.run(lambda: save_one(identity, pending))
     return await settle_required(save_and_apply())
 
 
@@ -639,6 +655,7 @@ class PendingFileFact:
     command: FilePresenceSave | OwnershipSave | FileCompletionSave | FileChecksumSave
     key: OperationKey
     response: ObservationOutcome | None = None
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 class FileFactStage(Enum):
@@ -675,6 +692,8 @@ class PendingFileObservation:
     response: ObservationOutcome | None = None
     facts: dict[FileFactStage, PendingFileFact] = field(default_factory=dict)
     registration: FileRegistration = field(default_factory=FileRegistration)
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    registration_shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 def _same_file_request(left, right) -> bool:
@@ -730,9 +749,9 @@ class _FileObservationSaves:
         """业务筛选前核实原发现；后续文件事实可靠保存前保持首次响应。"""
         for identity, pending in tuple(self.pending_file_observations.items()):
             if identity[0] == action_id and identity in self.pending_file_observations:
-                await _register_observed(self, action_id, pending.entries,
-                    occurred_at=pending.command.occurred_at, registered_files=pending.registered_files,
-                    registration=pending.registration)
+                pending.registration_shared.retry_failed()
+                await pending.registration_shared.run(lambda: _apply_observed(
+                    self, action_id, pending.entries, pending.registered_files, pending.registration))
 
     async def _save_file_observations(self, action_id: int) -> None:
         """仅核实持有的发现请求；整批事实保存负责释放生命周期。"""
@@ -759,7 +778,8 @@ class _FileObservationSaves:
                         return
                     error = receipt.error
                 raise ConsistencyError(f"原文件发现未可靠保存，原请求仍持有: {error}")
-            await settle_required(save_and_apply())
+            pending.shared.retry_failed()
+            await pending.shared.run(save_and_apply)
 
     async def _save_file_fact(self, identity: tuple[int, str], stage: FileFactStage,
                         command: FilePresenceSave | OwnershipSave | FileCompletionSave | FileChecksumSave) -> None:
@@ -797,7 +817,8 @@ class _FileObservationSaves:
                     return
                 error = receipt.error
             raise ConsistencyError(f"原文件事实未可靠保存，原申请仍持有: {error}")
-        await settle_required(save_and_apply())
+        pending.shared.retry_failed()
+        await pending.shared.run(save_and_apply)
 
     async def action_id_of_ticket(self, ticket: AttemptTicket) -> int:
         run = await self.database.read(lambda owned: row_facts(owned.connection, "operation_runs", ticket.run_id))
@@ -2152,8 +2173,10 @@ async def _register_observed(
     # 第一阶段按列举顺序保存发现与在场事实，并建立身份到文件主
     # 键的映射供配对解析。
     registration = FileRegistration() if registration is None else registration
-    file_ids: dict[str, int] = {identity: item[1] for identity, item in registration.pairing_files.items()}
     saved_files = {} if registered_files is None else registered_files
+    shared = next((pending.registration_shared
+        for entry in entries
+        if (pending := runtime.pending_file_observations.get((action_id, entry.identity))) is not None), SharedSave())
     for entry in entries:
         if entry.identity in saved_files:
             continue
@@ -2170,11 +2193,19 @@ async def _register_observed(
         pending = runtime.pending_file_observations.get(identity)
         if pending is None:
             runtime.pending_file_observations[identity] = PendingFileObservation(
-                command, new_operation_key(), entries, saved_files, registration=registration)
+                command, new_operation_key(), entries, saved_files, registration=registration,
+                registration_shared=shared)
         elif (not _same_file_request(pending.command, command)
                 or not _same_observed_files(pending.entries, entries)
                 or pending.registered_files != saved_files or pending.registration != registration):
             raise ConsistencyError("待存文件发现的原完整请求不可替换")
+    shared.retry_failed()
+    return await shared.run(lambda: _apply_observed(runtime, action_id, entries, saved_files, registration))
+
+
+async def _apply_observed(runtime, action_id, entries, saved_files, registration):
+    """沿原发现请求完成整批派生事实与调用结果应用。"""
+    file_ids = {identity: item[1] for identity, item in registration.pairing_files.items()}
     await runtime._save_file_observations(action_id)
     for entry in entries:
         if entry.identity in saved_files:
