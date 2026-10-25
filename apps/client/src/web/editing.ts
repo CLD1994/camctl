@@ -426,6 +426,13 @@ export function changeObtainSelection(
   selection: "exact" | "default" | "preview" | "implicit",
 ): DraftContent {
   requireCompleteParams(content, path);
+  if (selection === "exact" || selection === "preview")
+    content = setValue(
+      content,
+      [...path, "exclude_output_ids"],
+      undefined,
+      true,
+    );
   if (selection === "exact") {
     const next = setValue(content, [...path, "filter"], undefined, true);
     return setValue(next, [...path, "output_ids"], []);

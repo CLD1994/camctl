@@ -30,7 +30,7 @@ let browser: Browser,
   directory: string,
   base: string;
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL });
 });
 afterAll(async () => {
   await browser.close();
@@ -155,7 +155,7 @@ it("来源缺段、成功前缀取回、本地缺片与错误副本分别展示"
     "succeeded",
   ]);
   await card
-    .getByRole("button", { name: "准备取回默认产物", exact: true })
+    .getByRole("button", { name: "取回默认产物", exact: true })
     .click();
   await check(page.getByText(/已保存的默认范围取回/)).toBeVisible();
 });

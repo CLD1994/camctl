@@ -66,6 +66,7 @@ export type Action = {
   deliveries?: Delivery[];
   automation?: Automation;
   device_execution?: DeviceExecution;
+  status_history?: ActionStatusHistory;
 };
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
@@ -217,6 +218,47 @@ export type Delivery = {
   status: "pending" | "preparing" | "prepared" | "publishing" | "published" | "failed" | "canceled" | "withdrawn";
   error?: Error;
 };
+/**
+ * @minItems 1
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "action_status_history".
+ */
+export type ActionStatusHistory = [
+  {
+    status: ActionStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  },
+  ...{
+    status: ActionStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  }[]
+];
+/**
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "clock_status".
+ */
+export type ClockStatus = "unchecked" | "trusted" | "invalid";
+/**
+ * @minItems 1
+ *
+ * This interface was referenced by `Camctl`'s JSON-Schema
+ * via the `definition` "plan_status_history".
+ */
+export type PlanStatusHistory = [
+  {
+    status: PlanStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  },
+  ...{
+    status: PlanStatus;
+    changed_at: Timestamp | null;
+    clock_status: ClockStatus;
+  }[]
+];
 /**
  * This interface was referenced by `Camctl`'s JSON-Schema
  * via the `definition` "diagnostic".
@@ -431,6 +473,7 @@ export interface Plan {
   name: Name;
   status: PlanStatus;
   actions?: Action[];
+  status_history?: PlanStatusHistory;
 }
 /**
  * 错误码及阶段为生产者登记的标识；驱动可提供具体原因。未知码保留展示，不改变实体状态或合并规则。details 按对应错误契约解释。

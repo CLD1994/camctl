@@ -1534,10 +1534,49 @@ progress {
   }
 }
 /* 完整版本比较各自保持原有顺序；技术原文在窄屏内独立滚动。 */
-.draft-conflict-dialog { width: min(980px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
-.draft-difference-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
-.draft-difference-sides section { min-width: 0; }
-.draft-conflict-dialog pre, .draft-operation-notice pre { max-height: 320px; overflow: auto; white-space: pre; }
-.draft-operation-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
-.save-feedback { flex-wrap: wrap; }
-@media (max-width: 650px) { .draft-difference-sides { grid-template-columns: minmax(0, 1fr); } }
+.draft-conflict-dialog {
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.draft-difference-sides {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.draft-difference-sides section {
+  min-width: 0;
+}
+.draft-conflict-dialog pre,
+.draft-operation-notice pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}
+.draft-operation-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.save-feedback {
+  flex-wrap: wrap;
+}
+@media (max-width: 650px) {
+  .draft-difference-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.record-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  margin: 0.6rem 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.status-timeline ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+}

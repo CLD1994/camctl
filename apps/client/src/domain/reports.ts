@@ -420,6 +420,11 @@ function associations(index: Index, sameBoundary = true) {
         params.output_ids.includes(outputId),
         "取回项目超出指定产物列表",
       );
+    if (outputId !== undefined && Array.isArray(params.exclude_output_ids))
+      requireFact(
+        !params.exclude_output_ids.includes(outputId),
+        "取回项目包含已排除的产物",
+      );
   };
   for (const { value: output } of index.outputs.values()) {
     const originalId =
@@ -706,17 +711,97 @@ function failureLinks(
     }
   }
 }
+function validateStatusHistory(
+  entity: ReportPlan | ReportAction,
+  initial: string[],
+) {
+  const history = entity.status_history;
+  if (history === undefined) return;
+  requireFact(
+    history.length > 0 && initial.includes(history[0].status),
+    "状态历史缺少合法创建状态",
+  );
+  requireFact(
+    history.at(-1)?.status === entity.status,
+    "状态历史末项与当前状态不一致",
+  );
+  history.forEach((entry, index) => {
+    requireFact(
+      entry.changed_at === null || isTimestamp(entry.changed_at),
+      "状态变化日期不合法",
+    );
+    const previous = history[index - 1];
+    if (!previous) return;
+    requireFact(previous.status !== entry.status, "状态历史不能包含重复状态");
+    requireFact(
+      previous.status === "pending" || previous.status === "running",
+      "终态后不能再改变状态",
+    );
+    requireFact(
+      !(previous.status === "running" && entry.status === "pending"),
+      "状态历史不能回退到等待执行",
+    );
+  });
+}
+function statusHistoryPrefix(
+  before: Pick<ReportPlan | ReportAction, "status_history">,
+  after: Pick<ReportPlan | ReportAction, "status_history">,
+  same = false,
+) {
+  const old = before.status_history,
+    next = after.status_history;
+  if (!old || !next) return;
+  requireFact(
+    old.length <= next.length &&
+      (!same || old.length === next.length) &&
+      old.every((entry, index) => isDeepStrictEqual(entry, next[index])),
+    "已记录的状态历史不能改写或删减",
+  );
+}
+/** 保存报告原文的时间证据，避免中间旧版报告缺字段时丢失约束。 */
+export class StatusHistoryKnowledge {
+  private entities = new Map<
+    string,
+    {
+      watermark: number;
+      value: Pick<ReportPlan | ReportAction, "status_history">;
+    }
+  >();
+  add(report: StatusReport) {
+    const observe = (key: string, value: ReportPlan | ReportAction) => {
+      if (!value.status_history) return;
+      const old = this.entities.get(key);
+      if (old) {
+        if (old.watermark <= report.to_wm)
+          statusHistoryPrefix(old.value, value, old.watermark === report.to_wm);
+        else statusHistoryPrefix(value, old.value);
+      }
+      if (!old || old.watermark <= report.to_wm)
+        this.entities.set(key, {
+          watermark: report.to_wm,
+          value: { status_history: value.status_history },
+        });
+    };
+    for (const plan of report.plans ?? []) {
+      observe(`plan:${plan.plan_instance_id}`, plan);
+      for (const action of plan.actions ?? [])
+        observe(`action:${action.action_instance_id}`, action);
+    }
+  }
+}
 function ownFacts(report: StatusReport, sameBoundary = true) {
   requireFact(report.from_wm <= report.to_wm, "报告水位顺序不合法");
   const index = indexReport(report);
   for (const diagnostic of report.plan_file_diagnostics ?? [])
     diagnostic.errors.forEach(rejectSegmentError);
   for (const plan of report.plans ?? []) {
+    validateStatusHistory(plan, ["pending", "completed"]);
     requireFact(
       isName(plan.name) && isTimestamp(plan.created_at),
       "计划名称或真实日期不合法",
     );
     for (const action of plan.actions ?? []) {
+      validateStatusHistory(action, ["pending", "failed"]);
       requireFact(isName(action.name), "动作名称不合法");
       requireFact(
         action.error?.code !== "source_action_failed",
@@ -955,10 +1040,13 @@ function unchanged(
 function sameOwnFields(old: Index, next: Index) {
   const own = (value: object, children: string[]) =>
     Object.fromEntries(
-      Object.entries(value).filter(([key]) => !children.includes(key)),
+      Object.entries(value).filter(
+        ([key]) => key !== "status_history" && !children.includes(key),
+      ),
     );
   for (const [id, plan] of next.plans) {
     const before = old.plans.get(id);
+    if (before) statusHistoryPrefix(before, plan, true);
     if (before)
       requireFact(
         isDeepStrictEqual(own(before, ["actions"]), own(plan, ["actions"])),
@@ -968,6 +1056,7 @@ function sameOwnFields(old: Index, next: Index) {
   for (const [id, action] of next.actions) {
     const before = old.actions.get(id);
     if (before) {
+      statusHistoryPrefix(before.value, action.value, true);
       requireFact(
         action.value.type === "motor_control"
           ? exactJsonIdentity(own(before.value, ["outputs", "deliveries"])) ===
@@ -1094,6 +1183,7 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
   for (const [id, plan] of next.plans) {
     const before = old.plans.get(id);
     if (before) {
+      statusHistoryPrefix(before, plan);
       unchanged(before, plan, ["request_id", "created_at", "name"], "计划");
       if (advancing)
         requireFact(
@@ -1114,6 +1204,7 @@ function historicalIdentity(old: Index, next: Index, advancing: boolean) {
   for (const [id, action] of next.actions) {
     const before = old.actions.get(id);
     if (!before) continue;
+    statusHistoryPrefix(before.value, action.value);
     requireFact(before.parent === action.parent, "动作所属计划改变");
     if (before.value.automation?.source_action_instance_id !== undefined)
       requireFact(
@@ -1264,12 +1355,24 @@ export function mergeReport(
     (p) => p.plan_instance_id,
     (oldPlan, plan) => {
       const result = { ...plan };
+      if (
+        !result.status_history &&
+        oldPlan?.status === plan.status &&
+        oldPlan.status_history
+      )
+        result.status_history = oldPlan.status_history;
       const actions = members(
         oldPlan?.actions,
         plan.actions,
         (a) => a.action_instance_id,
         (oldAction, action) => {
           const result = { ...action };
+          if (
+            !result.status_history &&
+            oldAction?.status === action.status &&
+            oldAction.status_history
+          )
+            result.status_history = oldAction.status_history;
           const outputs = members(
             oldAction?.outputs,
             action.outputs,

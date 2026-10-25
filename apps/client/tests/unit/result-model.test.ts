@@ -48,6 +48,11 @@ const plans = [
 const videos = [
   { id: "v2", fileName: "d2.png", status: "verified" },
 ] as Video[];
+it("本次取回的产物可使用其他交付的合格副本而不改变本次交付统计", () => {
+  const products = resultProducts(obtain("d1"), plans, videos);
+  expect(products[0].localCopy?.id).toBe("v2");
+  expect(products[0].state).toBe("waiting");
+});
 it.each([
   ["pending", undefined, "尚未"],
   ["running", undefined, "开始处理"],

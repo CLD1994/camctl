@@ -2,6 +2,29 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 结果操作与主机状态时间（2026-10-25）
+
+Windows 环境使用 Node.js 24.22.1、系统 Chrome、Python 3.11.12 和 SQLite 3.54.1。客户端修改在 `implement_camctl` 集成；独立主机工作树完成后按提交合并。媒体测试明确选择 VP9 编码的 MP4，并主动请求画布帧；网页混合导入等待文件实际核验完成后再断言播放，报告覆盖水位不充当媒体核验完成条件。
+
+| 验证范围 | 实际结果 |
+| --- | --- |
+| 客户端完整单元 `vitest run tests/unit --maxWorkers=2` | 68 个文件、3260 项通过；随后新增的两个默认取回单元与报告单元一起运行，449 项通过。 |
+| 客户端非浏览器集成 `vitest run tests/integration --exclude 'tests/integration/browser-*.test.ts' --maxWorkers=1` | 22 个文件、1066 项通过，包含文件即时可读取性、删除后状态更新，以及中间报告缺字段和重启后拒绝改写状态时间。 |
+| `browser-media-download`、`browser-previews` | 两个文件、31 项通过，包含真实下载字节、LRF/OSV 播放和范围读取、所选过滤、全收到零写入及桌面和窄屏时间展示。 |
+| `browser-media`、`browser-navigation`、`browser-workflow` | 最终三个文件、31 项通过，包含其他交付副本打开大图、跨来源已移走文件仍被取回、默认操作与弹窗焦点恢复。 |
+| `browser-recovery`、`browser-segment-results` | 两个文件、9 项通过。 |
+| `browser-media` 新增的计划与动作默认取回导出 | 两项定向运行通过，核对来源范围与本地排除列表。七个相关浏览器文件累计 73 项；其他浏览器文件未在此范围重跑。 |
+| 类型检查、生产构建与公共登记检查 | 全部退出 0；构建保留主包超过 500 kB 的体积提示。协议 Schema、报告依赖、事件登记和文档链接通过。 |
+| 集成后的主机时间、报告格式升级与默认排除专项 | 分目录顺序运行，分别为 6、6、23 项通过。 |
+| 主机默认取回相关验证 | `outputs` 单元 862 项、相关集成 276 项，以及测试连接代理事务 33 项通过。 |
+| 主机时间相关验证 | 单元 2079 项通过、4 项已在基线重现的 Windows 路径用例排除；报告目录 449 项通过、2 项在基线重现的状态准备断言失败。 |
+
+两项主机报告基线失败位于 `test_generation.py`：`test_generation_writes_schema_valid_staging_file` 预期计划已完成但得到执行中，`test_failed_source_error_rebuilds_at_the_frozen_history_boundary` 预期来源失败但得到执行中。四项单元排除来自 `test_capture_preparation_init.py` 的既有 Windows 路径绑定夹具。对照使用独立 `ab088fa2` 源码快照，没有修改这些断言或生产规则。
+
+Python 在真实临时 SQLite 中生成格式 2 的连续两份报告，客户端通过正式导入入口依次接受，覆盖推进至 8，计划和动作完整的三步状态历史均保留，墙钟回退没有改变数组顺序。浏览器导出的计划与动作默认取回 JSON 均通过主机正式 Schema 校验、参数解析和产物选择函数，排除已收到的产物后只选择未收到的默认产物。独立审查核对了默认选择与修复替代、全部排除、历史知识、格式传递、旧字节重建、显式升级和零时间占位识别。服务使用原客户端数据目录部署到 `http://localhost:4310/`，在 Codex 内置浏览器核对按钮、取回/下载互斥及全收到提示。原计划报告缺少时间数组，页面明确显示“报告未提供”；没有升级用户的主机状态库或向设备递交请求。
+
+命令输出及基线证据保存于仓库临时目录 `tmp/result-operations-*.log` 和 `tmp/result-operations-evidence/`。专项输出为 `tmp/report-status-integrated.log`、`tmp/report-upgrade-integrated.log`、`tmp/default-exclusions-integrated.log`。这些结果不包括目标设备性能、实际设备控制、物理断电或新的安装包验收。
+
 ## 开发容器重建后的客户端验证（2026-10-24 UTC）
 
 使用 Node.js 24.22.1、npm 11.21.1 和原 `package-lock.json` 安装开发依赖。类型检查与生产构建退出 0；完整单元测试 67 个文件、3229 项通过，51 项报告导入集成和 19 项预览浏览器集成分别通过，均退出 0。测试使用 `--maxWorkers=2`，按单元、报告导入、浏览器的顺序运行。记录器总耗时分别为 61.447、5.510、58.663 秒；它包含测试进程启动和收尾，不等同于用例耗时。

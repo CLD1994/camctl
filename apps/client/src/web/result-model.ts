@@ -300,6 +300,7 @@ export function resultNotes(
 }
 
 export interface Product {
+  localCopy?: Video;
   id: string;
   name: string;
   output?: Output;
@@ -373,6 +374,13 @@ export function resultProducts(
   )
     owners.push({ actions: [action] });
   const files = new Map(videos.map((v) => [v.fileName, v]));
+  const copies = new Map<string, Video>();
+  for (const { actions } of owners)
+    for (const candidate of actions)
+      for (const delivery of candidate.deliveries ?? []) {
+        const copy = files.get(delivery.file_name);
+        if (copy?.status === "verified") copies.set(delivery.output_id, copy);
+      }
   for (const { owner, actions } of owners)
     for (const a of actions)
       for (const delivery of a.deliveries ?? []) {
@@ -390,6 +398,7 @@ export function resultProducts(
         }
       }
   for (const row of rows.values()) {
+    row.localCopy = copies.get(row.id);
     row.mediaType = playbackMediaType(
       row.mediaType,
       row.output?.original_name,

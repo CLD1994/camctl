@@ -49,6 +49,7 @@ const names: Record<string, string> = {
   request_id: "请求 ID",
   current_plan: "当前整个计划",
   output_ids: "产物 ID 列表",
+  exclude_output_ids: "跳过的产物 ID 列表",
   scope: "报告范围",
   after_report_id: "同步起点报告",
   position: "位置",

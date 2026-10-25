@@ -335,6 +335,22 @@ export function BuiltinFields({
                       。可通过参数 JSON 核对或修改。
                     </p>
                   )}
+                  {params && Object.hasOwn(params, "exclude_output_ids") && (
+                    <div className="notice">
+                      <p>
+                        {Array.isArray(params.exclude_output_ids)
+                          ? `跳过 ${params.exclude_output_ids.length} 个本地已有产物。`
+                          : "已有跳过产物列表，可通过参数 JSON 核对或修改。"}
+                      </p>
+                      <button
+                        onClick={() =>
+                          put("exclude_output_ids", undefined, true)
+                        }
+                      >
+                        移除跳过列表
+                      </button>
+                    </div>
+                  )}
                   {outputFilter && (
                     <label className="optional-field">
                       <input

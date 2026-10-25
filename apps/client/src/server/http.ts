@@ -95,6 +95,23 @@ export function createHttpApp(
     });
   });
   app.post(
+    "/api/media/availability",
+    tracked(async (req, res) => {
+      const ids = req.body?.output_ids;
+      if (
+        !Array.isArray(ids) ||
+        !ids.every(isCanonicalId) ||
+        new Set(ids).size !== ids.length
+      )
+        throw new AppError(
+          "invalid_output_ids",
+          "产物 ID 必须是唯一的规范 ID 数组",
+        );
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ received_output_ids: await files.receivedOutputIds(ids) });
+    }),
+  );
+  app.post(
     "/api/initialize",
     tracked(async (_req, res) => {
       const state = application.store.initialize();

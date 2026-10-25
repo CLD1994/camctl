@@ -23,6 +23,7 @@ it("电机合法字段与真实额外字段分别按完整协议验证", () => {
 
 it("内置字段识别使用公共参数定义的所有分支声明", () => {
   expect([...builtinFields.obtain_action_outputs].sort()).toEqual([
+    "exclude_output_ids",
     "filter",
     "output_ids",
     "purpose",

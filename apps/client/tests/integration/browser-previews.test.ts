@@ -217,8 +217,14 @@ it("原片预览与已收到修复成品独立显示，取回仍使用真实成�
       exact: true,
     }),
   });
-  await repaired.locator("summary").filter({ hasText: "更多操作" }).click();
-  await repaired.getByRole("button", { name: "准备取回", exact: true }).click();
+  await browserExpect(repaired.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+  await browserExpect(repaired.getByRole("button", { name: "取回", exact: true })).toHaveCount(0);
+  await repaired.getByRole("checkbox").check();
+  await capture.getByRole("button", { name: "取回所选产物", exact: true }).click();
+  await browserExpect(capture.getByRole("status")).toContainText("已全部取回");
+  expect(application.store.all<Draft>("drafts")).toHaveLength(0);
+  await originalCard.getByRole("checkbox").check();
+  await capture.getByRole("button", { name: "取回所选产物", exact: true }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "加入草稿", exact: true })
@@ -230,7 +236,7 @@ it("原片预览与已收到修复成品独立显示，取回仍使用真实成�
   expect(
     JSON.parse(application.store.all<Draft>("drafts")[0].content.text)
       .actions[0].params.output_ids,
-  ).toEqual(["11"]);
+  ).toEqual([original.output_id]);
 }, 20000);
 async function setup() {
   const directory = mkdtempSync(join(tmpdir(), "camctl-browser-"));
@@ -270,6 +276,34 @@ async function setup() {
   expect(response?.status(), "构建后的客户端首页应可访问").toBe(200);
   return { application, files, page, base };
 }
+it.each([1280, 390])("状态时间展示报告事实并兼容缺失时间，宽度 %i", async (width) => {
+  const { page, application } = await setup();
+  await page.setViewportSize({ width, height: 900 });
+  await page.getByTestId("initialize-button").click();
+  const report = mappedReport(Buffer.from("time-preview"));
+  Object.assign(report.plans![0], { status_history: [
+    { status: "pending", changed_at: "2026-01-01 00:00:00", clock_status: "trusted" },
+    { status: "completed", changed_at: null, clock_status: "trusted" },
+  ] });
+  Object.assign(report.plans![0].actions![0], { status_history: [
+    { status: "pending", changed_at: "2026-01-01 00:00:00", clock_status: "unchecked" },
+    { status: "running", changed_at: "2026-01-01 00:00:02", clock_status: "invalid" },
+    { status: "succeeded", changed_at: "2026-01-01 00:00:01", clock_status: "trusted" },
+  ] });
+  application.applyReports([reportInput(report)]);
+  await page.reload();
+  await page.getByTestId("tab-records").click();
+  await page.getByTestId("record-open-button").click();
+  await browserExpect(page.locator(".record-times")).toContainText("受理时间：2026");
+  await browserExpect(page.locator(".record-times")).toContainText("结束时间：未记录");
+  const action = page.locator(`[data-action-id="${report.plans![0].actions![0].action_instance_id}"]`);
+  await action.getByRole("button", { name: /^展开动作/ }).click();
+  await browserExpect(action.locator(".status-timeline li")).toHaveCount(3);
+  await browserExpect(action.locator(".status-timeline li").nth(0)).toContainText("未核验");
+  await browserExpect(action.locator(".status-timeline li").nth(1)).toContainText("无效");
+  await browserExpect(action.locator(".status-timeline li").nth(2)).toContainText("成功");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 it.each([1280, 390])(
   "三态开关、完整替换确认与草稿复制保留可靠意图，宽度 %i",
   async (width) => {

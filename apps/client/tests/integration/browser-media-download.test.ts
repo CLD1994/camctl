@@ -33,7 +33,7 @@ beforeAll(async () => {
         document.body.append(canvas);
         const context = canvas.getContext("2d")!;
         const stream = canvas.captureStream(10);
-        const recorder = new MediaRecorder(stream, { mimeType: "video/mp4" });
+        const recorder = new MediaRecorder(stream, { mimeType: "video/mp4;codecs=vp9" });
         const chunks: Blob[] = [];
         const done = new Promise<Blob>((resolve) => {
           recorder.ondataavailable = (event) => chunks.push(event.data);
@@ -108,9 +108,9 @@ async function setup(bytes: Buffer, fileName: string, mediaType?: string) {
 }
 
 it.each([
-  ["bin", "application/octet-stream", "下载原文件"],
-  ["png", "image/png", "下载原图片"],
-  ["mp4", "video/mp4", "下载原视频"],
+  ["bin", "application/octet-stream", "下载"],
+  ["png", "image/png", "下载"],
+  ["mp4", "video/mp4", "下载"],
 ] as const)(
   "产物卡片下载 %s 保留文件名和完整字节",
   async (extension, type, label) => {
@@ -143,7 +143,7 @@ it.each(["交付记录", "大图弹窗"])("%s 下载图片保留完整字节", a
       ? card.getByRole("button", { name: "下载此次交付", exact: true })
       : page
           .getByRole("dialog")
-          .getByRole("button", { name: "下载原图片", exact: true });
+          .getByRole("button", { name: "下载", exact: true });
   const pending = page.waitForEvent("download");
   await button.click();
   const downloaded = await pending;
@@ -186,7 +186,7 @@ it.each([
       mp4.subarray(0, 16),
     );
     const pending = page.waitForEvent("download");
-    await card.getByRole("button", { name: "下载原视频", exact: true }).click();
+    await card.getByRole("button", { name: "下载", exact: true }).click();
     const downloaded = await pending;
     expect(downloaded.suggestedFilename()).toBe(fileName);
     expect(readFileSync((await downloaded.path())!)).toEqual(mp4);
@@ -223,7 +223,7 @@ it("LRF 无法解码时仍可下载核验通过的原文件", async () => {
   await check(card.locator("video")).toHaveCount(0);
   expect(files.videos()[0].status).toBe("verified");
   const pending = page.waitForEvent("download");
-  await card.getByRole("button", { name: "下载原视频", exact: true }).click();
+  await card.getByRole("button", { name: "下载", exact: true }).click();
   const downloaded = await pending;
   expect(downloaded.suggestedFilename()).toBe("1.LRF");
   expect(readFileSync((await downloaded.path())!)).toEqual(bytes);

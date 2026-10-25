@@ -30,7 +30,7 @@ let fixtures: Awaited<ReturnType<typeof makeMediaFixture>>;
 let fixtureDirectory: string;
 const clean: Array<() => Promise<void>> = [];
 beforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, channel: process.env.CAMCTL_TEST_BROWSER_CHANNEL });
   fixtureDirectory = mkdtempSync(join(tmpdir(), "camctl-browser-media-"));
   fixtures = await makeMediaFixture(fixtureDirectory);
 }, 20000);
@@ -127,14 +127,13 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
   );
   await browserExpect(page.getByTestId("copy-request-button")).toHaveCount(0);
   await page
-    .getByRole("button", { name: "准备取回", exact: true })
+    .getByRole("button", { name: "取回", exact: true })
     .first()
     .click();
   await page.getByRole("button", { name: "加入草稿", exact: true }).click();
   await browserExpect(page.getByTestId("save-status")).toContainText("已保存");
   const draft = application.store.all<Draft>("drafts")[0];
-  expect(JSON.parse(draft.content.text).actions[0]).toEqual({
-    name: "取回产物",
+  expect(JSON.parse(draft.content.text).actions[0]).toMatchObject({
     type: "obtain_action_outputs",
     params: { source: { action_instance_id: "1" }, output_ids: ["4"] },
   });
@@ -163,12 +162,12 @@ it("报告独有详情按准确对象准备取回清理和取消，主机事实�
     await browserExpect(page.getByRole("dialog")).toHaveCount(0);
   };
   await append("准备清理源产物");
-  await append("准备取消动作");
-  await append("准备取消计划");
-  await append("准备取回计划默认产物");
-  await append("准备清理计划全部源产物");
-  await append("准备取回默认产物");
-  await append("准备清理动作全部源产物");
+  await append("取消动作");
+  await append("取消计划");
+  await append("取回计划产物");
+  await append("清理计划产物");
+  await append("取回默认产物");
+  await append("清理全部产物");
   const actions = JSON.parse(application.draft(draft.id).content.text).actions;
   expect(actions.map((a: { params: unknown }) => a.params)).toEqual([
     { source: { action_instance_id: "1" }, output_ids: ["4"] },
@@ -215,7 +214,7 @@ it("报告只有历史计划身份时仍可准备范围动作并核实追加回�
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
-  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await page.getByRole("button", { name: "取回计划产物" }).click();
   await browserExpect(page.getByRole("dialog")).toContainText("默认产物");
   await choose(page.getByLabel("目标草稿"), draft.id);
   await page.route("**/api/drafts/*/actions", async (route) => {
@@ -271,7 +270,7 @@ it.each(["camera_take_photo", "camera_timelapse", "camera_record"] as const)(
     await page.getByTestId("tab-records").click();
     await page.getByTestId("record-open-button").click();
     await page.getByRole("button", { name: "展开动作 未开始拍摄" }).click();
-    await page.getByRole("button", { name: "准备清理动作全部源产物" }).click();
+    await page.getByRole("button", { name: "清理全部产物" }).click();
     await choose(page.getByLabel("目标草稿"), draft.id);
     let once = true;
     await page.route("**/api/drafts/*/actions", async (route) => {
@@ -387,7 +386,7 @@ it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来�
     ["预览", "5"],
     ["修复成品", "6"],
   ]) {
-    for (const operation of ["准备取回", "准备清理源产物"]) {
+    for (const operation of ["取回", "准备清理源产物"]) {
       await page.getByTestId("tab-records").click();
       await page.getByTestId("record-open-button").click();
       await page.getByRole("button", { name: /^展开动作 / }).click();
@@ -405,7 +404,7 @@ it("原文件预览和修复成品的精确操作保持所选 ID，不扩大来�
         application.draft(draft.id).content.text,
       ).actions.at(-1);
       expect(action.params).toEqual(
-        operation === "准备取回"
+        operation === "取回"
           ? {
               source: { action_instance_id: capture.action_instance_id },
               output_ids: [id],
@@ -471,15 +470,16 @@ it("交付来源缺少快照时仍按同源或跨来源选择准备精确取回"
   await page.getByLabel("选择 来源甲一").check();
   await page.getByLabel("选择 来源甲二").check();
   await page
-    .getByRole("button", { name: "准备取回所选产物", exact: true })
+    .getByRole("button", { name: "取回所选产物", exact: true })
     .click();
   await append();
   await open();
   await page.getByLabel("选择 来源甲一").check();
   await page.getByLabel("选择 来源乙", { exact: true }).check();
   await browserExpect(
-    page.getByRole("button", { name: "准备取回所选产物", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "取回所选产物", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "取回所选产物", exact: true }).click();
   await page.getByRole("button", { name: /准备取回来源 92 的所选/ }).click();
   await append();
   expect(
@@ -605,6 +605,9 @@ it("网页混合导入真实报告与视频，核验后播放并按范围下载"
     .getByTestId("import-files")
     .setInputFiles([fixtures.videoPath, fixtures.reportPath]);
   await browserExpect.poll(() => application.coverage()).toBe(20);
+  await browserExpect.poll(() => application.store.all<{status:string}>("videos").map((video) => video.status), {
+    message: JSON.stringify(application.state().imports),
+  }).toEqual(["verified"]);
   await page.getByTestId("nav-plans").click();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").first().click();
@@ -650,7 +653,7 @@ it("能力版本变化后后续追加从最新观察准备重试", async () => {
   await page.reload();
   await page.getByTestId("tab-records").click();
   await page.getByTestId("record-open-button").click();
-  await page.getByRole("button", { name: "准备取回计划默认产物" }).click();
+  await page.getByRole("button", { name: "取回计划产物" }).click();
   await choose(page.getByLabel("目标草稿"), draft.id);
   let first = true;
   await page.route("**/api/drafts/*/actions", async (route) => {

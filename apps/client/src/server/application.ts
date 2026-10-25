@@ -52,6 +52,7 @@ import {
   selectSyncReport,
   validateReportAgainstHistory,
   SegmentReportKnowledge,
+  StatusHistoryKnowledge,
 } from "../domain/reports";
 import { formatProtocolTime, type UtcText } from "../domain/protocol-time";
 
@@ -755,15 +756,20 @@ export class Application {
       const current = this.snapshot();
       // 展示投影可合法省略可选引用；成功原文（含 covered）仍保留分段详情及其引用的实体身份观察。
       const segmentKnowledge = new SegmentReportKnowledge();
+      const statusKnowledge = new StatusHistoryKnowledge();
       try {
-        for (const saved of this.store.acceptedReportSources())
-          segmentKnowledge.add(parseReport(saved.file_name, saved.bytes));
+        for (const saved of this.store.acceptedReportSources()) {
+          const savedReport = parseReport(saved.file_name, saved.bytes);
+          segmentKnowledge.add(savedReport);
+          statusKnowledge.add(savedReport);
+        }
         segmentKnowledge.add(current);
+        statusKnowledge.add(current);
         segmentKnowledge.validate();
       } catch (error) {
         if (error instanceof DataError) throw error;
         throw new DataError(
-          `已接受报告的分段事实无法核实：${errorMessage(error)}`,
+          `已接受报告的历史事实无法核实：${errorMessage(error)}`,
         );
       }
       let merged: StatusReport | undefined;
@@ -777,6 +783,7 @@ export class Application {
             throw new Error("电机动作原始参数的数学值或类型改变");
         }
         segmentKnowledge.add(report);
+        statusKnowledge.add(report);
         segmentKnowledge.validate();
         validateReportAgainstHistory(current, report);
         if (decision !== "gap") merged = mergeReport(current, report);

@@ -26,6 +26,31 @@ function setup() {
   });
   return { app, files, dir };
 }
+it.each([false, true])("旧版报告缺字段和重启不能清除已有状态时间，重启 %s", (restart) => {
+  const { app, dir } = setup();
+  const first = mappedReport(Buffer.from("history"));
+  first.plans![0].actions![0].status_history = [
+    { status: "pending", changed_at: "2026-01-01 00:00:00", clock_status: "trusted" },
+    { status: "succeeded", changed_at: "2026-01-01 00:00:01", clock_status: "trusted" },
+  ];
+  app.applyReports([reportInput(first)]);
+  const second = structuredClone(first); second.report_id = "2";
+  second.from_wm = first.to_wm; second.to_wm++;
+  delete second.plans![0].actions![0].status_history;
+  app.applyReports([reportInput(second)]);
+  if (restart) app.store.close();
+  const active = restart ? new Application(dir) : app;
+  try {
+    const third = structuredClone(first); third.report_id = "3";
+    third.from_wm = second.to_wm; third.to_wm = second.to_wm + 1;
+    third.plans![0].actions![0].status_history![1].changed_at = "2026-01-01 00:00:02";
+    const input = reportInput(third);
+    active.applyReports([input]);
+    expect(active.store.get<ImportFile>("imports", input.file.id)?.status).toBe("failed");
+    expect(active.coverage()).toBe(second.to_wm);
+    expect(active.snapshot().plans![0].actions![0].status_history).toEqual(first.plans![0].actions![0].status_history);
+  } finally { if (restart) active.store.close(); }
+});
 function pendingLifecycleReport(status: "canceled" | "expired"): StatusReport {
   const r = mappedReport(Buffer.from("unused"));
   r.to_wm = 10;

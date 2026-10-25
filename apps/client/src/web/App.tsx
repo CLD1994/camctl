@@ -66,15 +66,15 @@ export function App() {
     draftTab = useRef<HTMLElement | null>(null),
     recordTab = useRef<HTMLElement | null>(null),
     plansNav = useRef<HTMLButtonElement | null>(null);
-  const captureFollowEntry = () => {
+  const captureFollowEntry = (entry?: HTMLElement) => {
     followEntry.current =
-      document.activeElement instanceof HTMLElement
+      entry ?? (document.activeElement instanceof HTMLElement
         ? document.activeElement
-        : null;
+        : null);
     followDestination.current = false;
   };
   const startFollow = (input: Followup) => {
-    captureFollowEntry();
+    captureFollowEntry(input.entry);
     setActiveFollow(undefined);
     setFollow(input);
   };

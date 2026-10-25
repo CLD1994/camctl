@@ -592,6 +592,40 @@ export class Files {
       .all<Video>("videos")
       .map((v) => ({ ...v, path: join(this.store.directory, v.path) }));
   }
+  async receivedOutputIds(outputIds: string[]): Promise<string[]> {
+    const requested = new Set(outputIds);
+    const received = new Set<string>();
+    const local = new Map(
+      this.videos().map((video) => [video.fileName, video]),
+    );
+    for (const plan of this.app.snapshot()?.plans ?? [])
+      for (const action of plan.actions ?? [])
+        for (const delivery of action.deliveries ?? []) {
+          if (
+            !requested.has(delivery.output_id) ||
+            received.has(delivery.output_id)
+          )
+            continue;
+          const video = local.get(delivery.file_name);
+          if (video?.status !== "verified") continue;
+          try {
+            await this.openVideo(video.id);
+            received.add(delivery.output_id);
+          } catch (error) {
+            if (
+              !(error instanceof AppError) ||
+              ![
+                "not_found",
+                "video_not_verified",
+                "video_mapping",
+                "video_unavailable",
+              ].includes(error.code)
+            )
+              throw error;
+          }
+        }
+    return [...received];
+  }
   private requirePlayable(video: Video): void {
     if (video.status !== "verified" || !video.verifiedAgainst)
       throw new AppError(

@@ -12,15 +12,17 @@ export async function makeMediaFixture(directory:string) {
     const page=await browser.newPage();
     const data=await page.evaluate(async()=>{
       const canvas=document.createElement('canvas');canvas.width=480;canvas.height=270;
-      const ctx=canvas.getContext('2d')!;const stream=canvas.captureStream(12);
+      const ctx=canvas.getContext('2d')!;const stream=canvas.captureStream(0);
+      const track=stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
       const recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp8'});
       const chunks:Blob[]=[];
       const done=new Promise<Blob>(resolve=>{recorder.ondataavailable=e=>chunks.push(e.data);recorder.onstop=()=>resolve(new Blob(chunks,{type:'video/webm'}));});
       recorder.start();
-      for(let frame=0;frame<18;frame++){ctx.fillStyle='#143d35';ctx.fillRect(0,0,480,270);ctx.fillStyle='#d8e7b8';ctx.font='30px sans-serif';ctx.fillText('camctl • local verification',30,110);ctx.fillStyle='#ffffff';ctx.fillRect(30+frame*15,160,40,8);await new Promise(r=>setTimeout(r,85));}
+      for(let frame=0;frame<18;frame++){ctx.fillStyle='#143d35';ctx.fillRect(0,0,480,270);ctx.fillStyle='#d8e7b8';ctx.font='30px sans-serif';ctx.fillText('camctl • local verification',30,110);ctx.fillStyle='#ffffff';ctx.fillRect(30+frame*15,160,40,8);track.requestFrame();await new Promise(r=>setTimeout(r,85));}
       recorder.stop();const blob=await done;stream.getTracks().forEach(t=>t.stop());return Array.from(new Uint8Array(await blob.arrayBuffer()));
     });
     video=Buffer.from(data);
+    if(!video.length) throw new Error('浏览器没有生成视频数据，无法验证播放与下载');
   } finally {await browser.close();}
   const checksum=createHash('sha256').update(video).digest('hex');
   const reports='../../protocol/examples/client-protocol/01-success';

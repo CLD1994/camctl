@@ -9,6 +9,7 @@ import {
   readdirSync,
   mkdirSync,
   writeFileSync,
+  unlinkSync,
 } from "node:fs";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
@@ -67,6 +68,91 @@ async function setup() {
   await page.getByTestId("initialize-button").click();
   return { app, files, page };
 }
+const receivedPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=", "base64");
+it.each(["plan", "action"] as const)("默认 %s 取回导出的请求排除已收到产物", async (scope) => {
+  const { app, files, page } = await setup();
+  const report = mappedReport(receivedPng), plan = report.plans![0], capture = plan.actions![0], delivery = plan.actions![1].deliveries![0];
+  app.applyReports([reportInput(report)]);
+  const uploaded = files.createBatch([{ fileName: delivery.file_name, size: receivedPng.length, kind: "media" }]).files[0];
+  await files.upload(uploaded.id, Readable.from([receivedPng])); await files.idle();
+  await page.reload(); await page.getByRole("tab", { name: /计划记录/ }).click();
+  await page.getByTestId("record-open-button").click();
+  if (scope === "action") await page.locator(`[data-action-id="${capture.action_instance_id}"]`).getByRole("button", { name: /^展开动作/ }).click();
+  await page.getByRole("button", { name: scope === "plan" ? "取回计划产物" : "取回默认产物", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "加入草稿", exact: true }).click();
+  await check(page.getByTestId("save-status")).toContainText("已保存");
+  await check(page.getByText("跳过 1 个本地已有产物。", { exact: true })).toBeVisible();
+  await page.getByLabel("执行时间", { exact: true }).fill("2026-10-26T10:00");
+  await page.getByTestId("export-button").click();
+  await check.poll(() => app.store.all("requests").length).toBe(1);
+  const request = app.store.all<any>("requests")[0];
+  expect(request.body.actions[0].params).toEqual({
+    source: scope === "plan" ? { plan_instance_id: plan.plan_instance_id } : { action_instance_id: capture.action_instance_id },
+    exclude_output_ids: [delivery.output_id],
+  });
+  if (process.env.CAMCTL_RESULT_OPERATIONS_OUTPUT) {
+    mkdirSync(process.env.CAMCTL_RESULT_OPERATIONS_OUTPUT, { recursive: true });
+    writeFileSync(join(process.env.CAMCTL_RESULT_OPERATIONS_OUTPUT, `default-${scope}.json`), JSON.stringify(request.body));
+  }
+});
+it("本次交付尚未接收时可通过其他合格副本打开大图", async () => {
+  const { app, files, page } = await setup();
+  const report = mappedReport(receivedPng);
+  const capture = report.plans![0].actions![0], obtain = report.plans![0].actions![1];
+  capture.outputs![0].media_type = "image/png";
+  capture.outputs![0].original_name = "共享图片.png";
+  obtain.deliveries![0].file_name = "1001.png";
+  obtain.deliveries![0].delivery_id = "1001";
+  const other = structuredClone(obtain);
+  other.action_instance_id = "8"; other.name = "再次取回";
+  other.deliveries![0].delivery_id = "1002"; other.deliveries![0].file_name = "1002.png";
+  report.plans![0].actions!.push(other);
+  app.applyReports([reportInput(report)]);
+  expect(app.coverage(), JSON.stringify(app.state().imports)).toBe(report.to_wm);
+  const uploaded = files.createBatch([{ fileName: "1001.png", size: receivedPng.length, kind: "media" }]).files[0];
+  await files.upload(uploaded.id, Readable.from([receivedPng])); await files.idle();
+  await page.reload(); await page.getByRole("tab", { name: /计划记录/ }).click();
+  await page.getByTestId("record-open-button").click();
+  const action = page.locator('[data-action-id="8"]');
+  await action.getByRole("button", { name: /^展开动作/ }).click();
+  await check(action.locator(".action-summary")).toContainText("本地已核验 0 / 1");
+  await action.getByRole("button", { name: "查看图片 共享图片.png", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "图片查看" });
+  await check.poll(() => dialog.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await check(dialog.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+});
+it("按来源取回时重新核验全部所选文件并保留已移走的副本", async () => {
+  const { app, files, page } = await setup();
+  const report = mappedReport(receivedPng), plan = report.plans![0];
+  const capture = plan.actions![0], obtain = plan.actions![1];
+  const original = capture.outputs![0];
+  capture.outputs = ["101", "102"].map((id) => ({ ...original, output_id: id, original_name: `${id}.png`, media_type: "image/png" }));
+  const second = structuredClone(capture); second.action_instance_id = "9"; second.name = "第二拍摄";
+  second.outputs = [{ ...capture.outputs[0], output_id: "201", source_action_instance_id: "9", original_name: "201.png" }];
+  plan.actions!.push(second);
+  obtain.deliveries![0].output_id = "101"; obtain.deliveries![0].file_name = "1001.png";
+  obtain.deliveries![0].delivery_id = "1001";
+  obtain.input_params = { source: { plan_instance_id: plan.plan_instance_id } };
+  obtain.deliveries!.push(
+    { ...obtain.deliveries![0], delivery_id: "1002", output_id: "102", file_name: "1002.png" },
+    { ...obtain.deliveries![0], delivery_id: "1003", output_id: "201", file_name: "1003.png", source_action_instance_id: "9" },
+  );
+  app.applyReports([reportInput(report)]);
+  expect(app.coverage(), JSON.stringify(app.state().imports)).toBe(report.to_wm);
+  const uploaded = files.createBatch([{ fileName: "1001.png", size: receivedPng.length, kind: "media" }]).files[0];
+  await files.upload(uploaded.id, Readable.from([receivedPng])); await files.idle();
+  unlinkSync(files.videos()[0].path);
+  await page.reload(); await page.getByRole("tab", { name: /计划记录/ }).click();
+  await page.getByTestId("record-open-button").click();
+  const first = page.locator(`[data-action-id="${obtain.action_instance_id}"]`);
+  await first.getByRole("button", { name: /^展开动作/ }).click();
+  await first.getByLabel("全选当前页", { exact: true }).check();
+  await first.getByRole("button", { name: new RegExp(`准备取回来源 ${capture.action_instance_id} 的所选`) }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "加入草稿", exact: true }).click();
+  await check.poll(() => app.store.all<Draft>("drafts").length).toBe(1);
+  await check.poll(() => JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions.length).toBe(1);
+  expect(JSON.parse(app.store.all<Draft>("drafts")[0].content.text).actions[0].params.output_ids).toEqual(["101", "102"]);
+});
 
 it("自动取回归并后百张图片分页，刷新保持选择与页码并验证窄屏", async () => {
   const { app, files, page } = await setup();
@@ -369,13 +455,13 @@ it("混合设备取回按每个产物的真实拍摄来源显示清理入口", a
   await check(page.getByTestId("record-open-button")).toHaveCount(1);
   await page.getByTestId("record-open-button").first().click();
   await check(
-    page.getByRole("button", { name: "准备清理计划全部源产物" }),
+    page.getByRole("button", { name: "清理计划产物" }),
   ).toBeVisible();
   const actionCleanup = async (id: string, name: string) => {
     const card = page.locator(`.result-card[data-action-id="${id}"]`);
     await card.getByRole("button", { name: `展开动作 ${name}` }).click();
     return card.getByRole("button", {
-      name: "准备清理动作全部源产物",
+      name: "清理全部产物",
       exact: true,
     });
   };

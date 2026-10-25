@@ -14,6 +14,8 @@ import { cleanupEntryVisible } from "./device-options";
 import type { Capabilities, ReportAction, ReportPlan } from "../shared/types";
 import type { Video } from "../server/models";
 import type { Followup } from "./Records";
+import { defaultObtainParams } from "./obtain";
+import { StatusTimeline, statusTimeText } from "./StatusTimes";
 
 export type ActionView = { expanded: boolean; selected: Set<string> };
 export type ActionViews = {
@@ -136,6 +138,9 @@ export function ActionResult({
         </button>
       </div>
       <div className="action-summary">
+        <p className="muted">
+          当前状态时间：{statusTimeText(action.status_history?.at(-1))}
+        </p>
         {automatic && (
           <>
             <p>{executionText(action)}</p>
@@ -210,6 +215,7 @@ export function ActionResult({
           ))}
       </div>
       <div hidden={!expanded}>
+        <StatusTimeline history={action.status_history} />
         <div className="button-row">
           <span>{executionText(action)}</span>
           {typeof action.device_id === "string" && (
@@ -235,27 +241,30 @@ export function ActionResult({
               })
             }
           >
-            准备取消动作
+            取消动作
           </button>
           {isCameraAction(action.type) && (
             <>
               <button
-                onClick={() =>
-                  follow({
-                    action: {
-                      name: `取回 ${action.name}`,
-                      type: "obtain_action_outputs",
-                      params: {
-                        source: {
-                          action_instance_id: action.action_instance_id,
-                        },
+                onClick={(event) => {
+                  const entry = event.currentTarget;
+                  run(async () =>
+                    follow({
+                      entry,
+                      action: {
+                        name: `取回 ${action.name}`,
+                        type: "obtain_action_outputs",
+                        params: await defaultObtainParams(
+                          { action_instance_id: action.action_instance_id },
+                          allPlans,
+                        ),
                       },
-                    },
-                    summary: `按 ${action.name} 已保存的默认范围取回：排除预览，并优先对应修复成品`,
-                  })
-                }
+                      summary: `按 ${action.name} 已保存的默认范围取回：排除预览，并优先对应修复成品`,
+                    }),
+                  );
+                }}
               >
-                准备取回默认产物
+                取回默认产物
               </button>
               {cleanupEntryVisible(capabilities, action.device_id) && (
                 <button
@@ -274,7 +283,7 @@ export function ActionResult({
                     })
                   }
                 >
-                  准备清理动作全部源产物
+                  清理全部产物
                 </button>
               )}
             </>

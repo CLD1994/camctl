@@ -12,7 +12,10 @@ import { Badge, Facts, Empty } from "./common";
 import { stringifyJson } from "../shared/json";
 import { resultActionRows } from "./result-model";
 import type { ActionView } from "./ActionResult";
+import { defaultObtainParams } from "./obtain";
+import { statusTimeText } from "./StatusTimes";
 export type Followup = {
+  entry?: HTMLElement;
   action: Record<string, unknown>;
   summary: string;
   sync?: boolean;
@@ -61,6 +64,21 @@ export function RecordDetail({
           {expanded ? "折叠计划" : "展开计划"}
         </button>
       </div>
+      {plan && (
+        <div className="record-times">
+          <span>受理时间：{statusTimeText(plan.status_history?.[0])}</span>
+          <span>
+            结束时间：
+            {plan.status === "completed"
+              ? statusTimeText(
+                  plan.status_history?.find(
+                    (entry) => entry.status === "completed",
+                  ),
+                )
+              : "尚未结束"}
+          </span>
+        </div>
+      )}
       <div hidden={!expanded}>
         <p className="identifier">请求 ID · {record.id}</p>
         <div className="evidence-grid">
@@ -141,20 +159,25 @@ export function RecordDetail({
               <div className="button-row">
                 <button
                   disabled={busy}
-                  onClick={() =>
-                    follow({
-                      action: {
-                        name: `取回 ${plan.name}`,
-                        type: "obtain_action_outputs",
-                        params: {
-                          source: { plan_instance_id: plan.plan_instance_id },
+                  onClick={(event) => {
+                    const entry = event.currentTarget;
+                    run(async () =>
+                      follow({
+                        entry,
+                        action: {
+                          name: `取回 ${plan.name}`,
+                          type: "obtain_action_outputs",
+                          params: await defaultObtainParams(
+                            { plan_instance_id: plan.plan_instance_id },
+                            allPlans,
+                          ),
                         },
-                      },
-                      summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
-                    })
-                  }
+                        summary: `取回计划 ${plan.name} · ${plan.plan_instance_id} 的默认产物：排除预览，优先对应修复成品`,
+                      }),
+                    );
+                  }}
                 >
-                  准备取回计划默认产物
+                  取回计划产物
                 </button>
                 <button
                   disabled={busy}
@@ -171,7 +194,7 @@ export function RecordDetail({
                     })
                   }
                 >
-                  准备清理计划全部源产物
+                  清理计划产物
                 </button>
                 <button
                   disabled={busy}
@@ -188,7 +211,7 @@ export function RecordDetail({
                     })
                   }
                 >
-                  准备取消计划
+                  取消计划
                 </button>
               </div>
             </div>
