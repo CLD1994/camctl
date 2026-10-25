@@ -8,7 +8,6 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.history.events import EventEnvelope, RowChange, RowImage
-from camctl.history import validators
 from camctl.history.validators import EventValidationError, validate_event_structure
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext
@@ -96,23 +95,6 @@ def test_photo_preparation_failure_uses_the_original_connection_reader(mocker):
     capture._action_finish_guard(event, context)
     verify.assert_called_once_with(reader, context.state_rows["actions"][8],
         {"activity_id": "11", "reason": "device_failed"})
-
-
-@pytest.mark.parametrize("action_type", [1, 8])
-def test_preparation_failure_branch_checks_original_capture_type(monkeypatch, action_type):
-    event = _failure()
-    _, _, branch = validate_event_structure(event)
-    # 业务守卫是校验器的具名扩展端口；本单元核对其前置分支条件。
-    monkeypatch.setattr(validators, "NAMED_GUARDS", {
-        name: lambda event, context: None for name in branch["guards"]})
-    context = EventContext(TransactionRange(7, 101, 101), {("actions", 8): ("action", 8)},
-        {"actions": {8: {**_photo_action(), "type": action_type}}})
-    if action_type == 1:
-        validated = validators.validate_event(event, context)
-        assert validated.branch_name == "PREPARATION_FAILED"
-    else:
-        with pytest.raises(EventValidationError):
-            validators.validate_event(event, context)
 
 
 @pytest.mark.parametrize("resolved", [False, True])

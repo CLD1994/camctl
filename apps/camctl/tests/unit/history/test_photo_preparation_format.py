@@ -3,13 +3,18 @@
 import pytest
 
 from camctl.contracts.history_values import TransactionRange
+from camctl.contracts.enums import enum_for
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.history import validators
 from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.validators import EventContext, EventValidationError
 
 
-@pytest.mark.parametrize("action_type", [1, 2, 3, 8])
-def test_preparation_failure_branch_uses_original_capture_type(monkeypatch, action_type):
+@pytest.mark.parametrize("action_type,accepted", [
+    *((value, True) for value in CAPTURE_ACTION_TYPES),
+    (int(enum_for("actions.type").MOTOR_CONTROL), False),
+])
+def test_preparation_failure_branch_uses_original_capture_type(monkeypatch, action_type, accepted):
     event = EventEnvelope(
         event_id=101, transaction_id=7, event_type=8, event_version=1,
         occurred_at=1, clock_status=2, change_seq=9, reason=5,
@@ -29,7 +34,7 @@ def test_preparation_failure_branch_uses_original_capture_type(monkeypatch, acti
     context = EventContext(TransactionRange(7, 101, 101), {("actions", 8): ("action", 8)},
         {"actions": {8: {"type": action_type, "status": 1,
                          "execution_started": 0, "cancel_requested": 0}}})
-    if action_type in (1, 2, 3):
+    if accepted:
         validated = validators.validate_event(event, context)
         assert validated.branch_name == "PREPARATION_FAILED"
     else:
