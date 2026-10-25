@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "session_id": "5377b94c-9049-4114-a1be-8c8b4905aaea",
+  "node_pid": 721547,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 1,
+    "browser_starts": 1
+  },
+  "browser_processes": [
+    {
+      "pid": 721598,
+      "pgid": 721598,
+      "starttime": "4706902",
+      "active": false
+    }
+  ],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "application-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-4/tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-4/tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-request.json",
+        "/tmp/camctl-itopt-round2-hb-after-4/tasks/004-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-application.json"
+      ],
+      "started_monotonic_ns": "47068204171154",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "638531555899539039",
+      "finished_monotonic_ns": "47069996444623",
+      "elapsed_seconds": 1.792273469,
+      "node_cpu_microseconds": {
+        "user": 1221555,
+        "system": 85167
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 2,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "47080016410268",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "finished_monotonic_ns": "47080063756305",
+      "elapsed_seconds": 0.047346037,
+      "node_cpu_microseconds": {
+        "user": 8807,
+        "system": 19454
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1619263,
+    "system": 179716
+  },
+  "node_cpu_total_microseconds": {
+    "user": 2974472,
+    "system": 287190
+  }
+}
