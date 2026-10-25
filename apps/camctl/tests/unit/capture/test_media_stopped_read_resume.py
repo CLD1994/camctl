@@ -10,7 +10,7 @@ from camctl.capture.media_flow import resume_prepared_internal_reads
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.read_session import ReadEnd
 from camctl.operations.models import AttemptTicket
-from camctl.outputs.read_attempts import save_read_result, stopped_read_result
+from camctl.outputs.read_attempts import ReadContinuation, save_read_result, stopped_read_result
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, DbReadError
 from camctl.persistence.repositories.operations import OperationRepository
@@ -53,5 +53,5 @@ async def test_default_resume_uses_original_stopped_read_after_cancel_fact_query
         assert key == original.key
         assert not continuing
     else:
-        assert continuing == {9: ticket}
+        assert continuing == {9: ReadContinuation(ticket, False, step, 123, original.key, evidence)}
         operations.finish_attempt.assert_not_called()
