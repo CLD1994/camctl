@@ -134,7 +134,7 @@ class _FreezeCommand:
             report = (read_frozen_report(connection, candidate)
                       if decision.kind is ReportDecisionKind.REUSE else None)
             return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
-                               result=ReportSelection(decision.kind, report))
+                               result=ReportSelection(decision.kind, report, opportunity.latest_change_wm))
         boundary = opportunity.boundary
         last_event = boundary.last_event_id
         from_wm, to_wm = decision.from_wm, decision.to_wm
@@ -192,7 +192,7 @@ class _FreezeCommand:
             events=(event,),
             owners={("reports", report_id): ("report", report_id)},
             state_rows={"reports": {}},
-            result=ReportSelection(ReportDecisionKind.GENERATE, report),
+            result=ReportSelection(ReportDecisionKind.GENERATE, report, opportunity.latest_change_wm),
         )
 
     def _saved_plan(self, connection, saved) -> CommandPlan:
@@ -233,7 +233,7 @@ class _FreezeCommand:
         report = FrozenReport(row["id"], boundary, original["from_wm"], original["to_wm"], original["format_version"])
         validate_frozen_report(report)
         return CommandPlan(events=(), owners={}, state_rows={}, read_only=True,
-                           result=ReportSelection(ReportDecisionKind.GENERATE, report))
+                           result=ReportSelection(ReportDecisionKind.GENERATE, report, report.to_wm))
 
 
 class ReportingRepository:

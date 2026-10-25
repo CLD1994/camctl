@@ -152,15 +152,19 @@ class ReportSelection:
 
     kind: ReportDecisionKind
     report: FrozenReport | None
+    checked_to_wm: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ReportDecisionKind):
             raise ConsistencyError("报告选择必须使用已定义的分支")
+        validate_watermark(self.checked_to_wm, "checked_to_wm")
         if self.kind is ReportDecisionKind.SKIP:
             if self.report is not None:
                 raise ConsistencyError("跳过报告时不能提供报告依据")
         elif not isinstance(self.report, FrozenReport):
             raise ConsistencyError("生成或复用必须提供实际报告依据")
+        elif self.report.to_wm > self.checked_to_wm:
+            raise ConsistencyError("报告依据不能超出本次检查的业务水位")
 
 
 def validate_frozen_report(report: FrozenReport) -> None:
