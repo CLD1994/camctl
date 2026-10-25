@@ -114,26 +114,26 @@ async def _save_owner(owner, database, operations):
 
 async def resume_preparation_saves(database, cache, *, operations=None, scheduling=None, capture=None):
     """只核原申请；不读取时钟、不取得设备资格、不重新设置。"""
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.scheduling import SchedulingRepository
+
+    operations = OperationRepository() if operations is None else operations
+    scheduling = SchedulingRepository() if scheduling is None else scheduling
+    capture = CaptureRepository() if capture is None else capture
+
     async def save_and_apply():
-        operations = OperationRepository() if operations is None else operations
         for owner in tuple(cache.owners.values()):
             await _save_owner(owner, database, operations)
         if cache.reservations:
-            from camctl.persistence.repositories.scheduling import SchedulingRepository
-            scheduling = SchedulingRepository() if scheduling is None else scheduling
             for action_id, (request, key) in tuple(cache.reservations.items()):
                 _completed(await database.write(lambda owned: scheduling.reserve_preparation(request, key, owned), key=key), "原准备占用未可靠保存")
                 del cache.reservations[action_id]
         for action_id, (kind, request, key) in tuple(cache.endings.items()):
             if kind == "release":
-                from camctl.persistence.repositories.capture import CaptureRepository
-                capture = CaptureRepository() if capture is None else capture
                 value = _completed(await database.write(lambda owned: capture.release_occupancy(request, key, owned), key=key), "原准备释放未可靠保存")
                 if value.outcome.value == "rejected":
                     raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
             else:
-                from camctl.persistence.repositories.scheduling import SchedulingRepository
-                scheduling = SchedulingRepository() if scheduling is None else scheduling
                 _completed(await database.write(lambda owned: getattr(scheduling, kind)(request, key, owned), key=key), "原准备收场未可靠保存")
             del cache.endings[action_id]
     return await settle_required(save_and_apply())
