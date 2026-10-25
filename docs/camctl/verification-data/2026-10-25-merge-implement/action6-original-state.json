@@ -1,0 +1,53 @@
+[
+  {
+    "sql": "SELECT id,status,execution_started,error_code FROM actions",
+    "rows": [
+      [
+        1,
+        1,
+        0,
+        null
+      ]
+    ]
+  },
+  {
+    "sql": "SELECT r.kind,r.status,t.status,t.result_event_id,t.error_json FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id",
+    "rows": [
+      [
+        10,
+        3,
+        2,
+        8,
+        null
+      ]
+    ]
+  },
+  {
+    "sql": "SELECT id,baseline_state,dispatch_state,sent_at,started_at FROM device_activities",
+    "rows": [
+      [
+        1,
+        2,
+        1,
+        null,
+        null
+      ]
+    ]
+  },
+  {
+    "sql": "SELECT COUNT(*) FROM baseline_read_calls",
+    "rows": [
+      [
+        0
+      ]
+    ]
+  },
+  {
+    "sql": "SELECT COUNT(*) FROM operation_runs WHERE kind=1",
+    "rows": [
+      [
+        0
+      ]
+    ]
+  }
+]

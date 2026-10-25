@@ -1,0 +1,97 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs _
+
+tmp_path = PosixPath('/tmp/camctl-merge-focused-20261025/tasks/003-root-test_action6_builtin_timelapse_roundtrip/tmp/pytest/test_installed_action6_timelap0')
+host_demo = '/tmp/camctl-host-build-f25c5a9cbd404eb69b27ad2b92b8c324/host-demo'
+osmo_package = _InstalledPackage(root=PosixPath('/tmp/camctl-merge-focused-20261025/tasks/003-root-test_action6_builtin_timelapse_rou...cused-20261025/tasks/003-root-test_action6_builtin_timelapse_roundtrip/tmp/pytest/osmo-builtin-package0/command-logs'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f8a1a50cad0>
+
+    @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 联合链")
+    def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs(
+            tmp_path, host_demo, osmo_package, monkeypatch):
+        package = osmo_package
+        deployment = Deployment(tmp_path / "action6-timelapse", devices=False)
+        extract = _run([str(package.python), "-c", (
+            "import json; from camctl.resources import resource_bytes; "
+            "print(json.dumps({name:resource_bytes('examples/camera-demo/'+name).decode() "
+            "for name in ('config.toml','action6-timelapse.json')}))")],
+            cwd=deployment.root, env=package.environment, log_dir=package.log_dir)
+        resources = json.loads(extract.stdout)
+        for name, data in resources.items():
+            assert data.encode() == (REPO / "docs/camctl/examples/camera-demo" / name).read_bytes()
+        sample = json.loads(resources["action6-timelapse.json"])
+        # 使用 wheel 样例的合法间隔、完整 300 秒目标及曝光；代表性照片输出单独选择。
+        params = {**sample["actions"][0]["params"], "outputs": "video_jpeg"}
+        assert params["interval_s"] == 1 and params["duration_s"] == 300
+        with deployment.config_path.open("a") as stream:
+            stream.write("\n" + resources["config.toml"].replace("REPLACE_ACTION6_SERIAL", "action6-test-serial"))
+        environment, camctl, clock, remote, content = _tools(package, deployment, params)
+        initial = read_clock(clock)
+        adb_log = deployment.root / "adb-calls.jsonl"
+        process_log = deployment.root / "cli-processes.jsonl"
+        clock_log = deployment.root / "clock-reads.jsonl"
+        for command in ("init", "describe"):
+            result = _run([str(camctl), command, "--config", str(deployment.config_path)],
+                cwd=deployment.root, env=environment, log_dir=package.log_dir)
+        described = json.loads(result.stdout)
+        source_env = dict(package.environment, PYTHONPATH=str(REPO / "apps/camctl/src"))
+        source = _run([str(REPO / "apps/camctl/.venv311/bin/python"), "-m", "camctl", "describe",
+            "--config", str(deployment.config_path)], cwd=deployment.root, env=source_env, log_dir=package.log_dir)
+        assert json.loads(source.stdout) == described
+        device = described["devices"][0]
+        assert device["delete_supported"] is True
+        assert {p["type"] for a in device["actions"] for p in a["parameter_types"]} == {"action6_record", "action6_timelapse"}
+        assert all(p["preview_supported"] for a in device["actions"] for p in a["parameter_types"])
+        store = deployment.root / "client-store"
+        store.mkdir()
+        (store / "device-capabilities.json").write_text(result.stdout)
+        deployment.run_client_driver = lambda *args, output: _client_driver(package, *args, output=output)
+        body = {"name": "Action6有限延时", "actions": [{"name": "capture", "type": "camera_timelapse",
+            "device_id": "action6", "scheduled_at": format_utc(initial["utc_us"]), "params": params,
+            "policy": {"max_delay_ms": 30000}}]}
+        plan, _ = deployment.export_plan_with_client(body)
+        assert json.loads(plan.read_text())["actions"][0]["params"] == params
+        demo = HostDemo(deployment, host_demo, launcher=str(camctl))
+        monkeypatch.chdir(package.root)
+        try:
+            demo.start(env=environment)
+            demo.submit(plan)
+>           starts = wait_for(lambda: query_state(deployment.state_db,
+                "SELECT a.id,a.effective_params_json,a.execution_spec_json,t.result_json,v.id,v.sent_at,v.started_at"
+                " FROM actions a JOIN operation_runs r ON r.action_id=a.id JOIN operation_attempts t ON t.run_id=r.id"
+                " JOIN device_activities v ON v.action_id=a.id WHERE r.kind=1 AND t.result_json IS NOT NULL"),
+                90, "Action6 START 没有可靠保存")
+
+/tmp/camctl-merge-focused-20261025/tasks/003-root-test_action6_builtin_timelapse_roundtrip/source/tests/integration/test_action6_builtin_timelapse_roundtrip.py:107: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs.<locals>.<lambda> at 0x7f8a1a36aac0>
+timeout_s = 90, message = 'Action6 START 没有可靠保存', failure = None
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now >= next_failure_check:
+                if reason := failure():
+                    raise AssertionError(f"{message}: {reason}")
+                next_failure_check = now + 0.05
+>           assert time.monotonic() < deadline, f"等待超时: {message}"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: 等待超时: Action6 START 没有可靠保存
+
+/tmp/camctl-merge-focused-20261025/tasks/003-root-test_action6_builtin_timelapse_roundtrip/source/tests/integration/_wsl_host_demo.py:96: AssertionError
+============================== slowest durations ===============================
+101.70s call     tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+20.46s setup    tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+0.01s teardown tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+=========================== short test summary info ============================
+FAILED tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+1 failed in 122.53s (0:02:02)

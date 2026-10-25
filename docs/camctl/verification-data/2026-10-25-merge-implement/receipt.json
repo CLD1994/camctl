@@ -1,0 +1,117 @@
+{
+  "date_utc": "2026-10-25T05:39:09.734491+00:00",
+  "purpose": "将本轮集成测试优化及证据合并回 implement_camctl，并核实合并接缝。",
+  "source_head": "100738f75217afc2a262991172dcfca755988ce7",
+  "initial_target_head": "6f28adfeb29bcc205339535f8359e98fd3174904",
+  "integrated_target_head": "9980d3e8",
+  "integration_test_code_head": "359a4b8f25f96a74c977a2c5e21d138e1f97af29",
+  "handoff_code_head": "e59ad69e2778cda5ecb5726d5b41f877baf21dc9",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "sqlite": "3.53.1",
+  "unit": {
+    "command": "PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q --tb=short",
+    "cwd": "/tmp/camctl-merge-implement-20261025",
+    "session_id": 54569,
+    "passed": 8011,
+    "skipped": 1,
+    "warnings": 2,
+    "seconds": 172.7,
+    "exit_code": 0,
+    "log": "unit.log",
+    "source_head": "359a4b8f25f96a74c977a2c5e21d138e1f97af29"
+  },
+  "additional_unit": {
+    "command": "PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_read_reuse.py::test_entering_page_scope_releases_previously_reused_decoded_values -q",
+    "passed": 1,
+    "seconds": 0.15,
+    "exit_code": 0,
+    "log": "scope-entry-unit.log"
+  },
+  "preparation": "首次直接运行单元收集时未生成资源；同步27项当前资源后，持久化单元713项和最终全量单元均通过。",
+  "focused_initial": {
+    "summary": "focused-summary.json",
+    "passed": 54,
+    "failed": 1,
+    "exit_code": 1,
+    "wall_seconds": 224.11547067799984
+  },
+  "action6_failure": {
+    "cause": "测试ADB替身拒绝当前完整directory_scan_script，准备成功后基准尚未固定，START未创建。",
+    "diagnostic": "action6-original-state.json",
+    "adb_log": "action6-original-adb.jsonl",
+    "camctl_log": "action6-original-camctl.log",
+    "repair": "与正式完整扫描脚本严格相等时接受；未知脚本继续拒绝。"
+  },
+  "action6_retry": {
+    "summary": "action6-retry-summary.json",
+    "passed": 1,
+    "exit_code": 0,
+    "wall_seconds": 71.08972286900098,
+    "source": {
+      "root": "/tmp/camctl-merge-implement-20261025",
+      "head": "e59ad69e2778cda5ecb5726d5b41f877baf21dc9",
+      "status": "",
+      "snapshot_sha256": "18aeefce1e02f3d3b65d2491b8cb78b743a6588375dd6cd23dc2ce324643a2c2"
+    }
+  },
+  "latest_unique_integration_results": {
+    "total": 55,
+    "passed": 55,
+    "failed": 0,
+    "by_scope": {
+      "camctl_persistence": 47,
+      "root_osmo": 4,
+      "root_cleanup": 3,
+      "root_action6": 1
+    }
+  },
+  "compatibility": [
+    "保留事务阶段计时及其连接包装。",
+    "原页范围优先使用三页原行缓存；当前完成与配对资格逐次核验。",
+    "进入原页范围及三个独立校验接缝清空通用读取依据。",
+    "无原页范围时保留目标分支的事务读取复用。",
+    "OSMO与Action6测试替身严格接受正式全目录扫描。",
+    "当前STOP后3秒完成等待与原生延时30秒结果余量分别核验。"
+  ],
+  "limits": [
+    "本次没有再次执行全范围集成回归或测量新的性能基线。",
+    "历史性能证据及首轮遗留业务失败保留原记录。",
+    "359a4b8f之后生产源码及公共协议未变；变化为目标文档、Action6测试替身及新增单元反例。"
+  ],
+  "artifacts_sha256": {
+    "action6-original-adb.jsonl": "0d89753a923c92157f9822074ede2a954b64acd5d5fe50d9aa30edfb64bf9d1d",
+    "action6-original-camctl.log": "396c6c84d2d716b674399e55bf5ae4793edbf17ab039c6c05c2a85802f75489a",
+    "action6-original-state.json": "1d450c31be577442235fb2af08c77c20858d93a8a4a3a07eb7c4b23547d0091e",
+    "action6-retry/cases.json": "90d524ba3d83351d63e9dae3abed1052d48c96f14a8827a7a40eb7594fae431b",
+    "action6-retry/command.json": "de28d3bc9971ca189294de8d17c5ca37027bcfa09fbef5f6d2bcbdbef54a65fd",
+    "action6-retry/inventory.json": "46a912da51f5b778459ecf6a3a89c27e34e20c42cd4ef4eaa22031fae4979874",
+    "action6-retry/output.log": "bdc0b68566a4aa680c82737218fba817051463123347ff8b64ed42c240dc3ba8",
+    "action6-retry/result.json": "1f094ed48a525a94d285f6463f4f1a1892d33c988d0bfee3bd3073f3c065fd81",
+    "action6-retry-summary.json": "8bdf129424dec4fa1ebe529c163aa0f60acb97d99e05b91d2b2cac1f1f9457e2",
+    "focused/001-camctl-persistence/cases.json": "2aac959f8051d00cb51339d6900fbbd692acbfa7559ef0145909b45dc426ebe6",
+    "focused/001-camctl-persistence/command.json": "d20f35de039b3b338cedad3cb98d8cc9b1b036df74def3360345bc5524d7e947",
+    "focused/001-camctl-persistence/inventory.json": "b5441483b7ef08aed9cd2be0ab15f14f734e6a9078dcf3122217d11f7d37dfca",
+    "focused/001-camctl-persistence/output.log": "578ac3a5db1bcb68c1835e06afd54605b8aa6b25b4ac5ff588364a00343aa2bf",
+    "focused/001-camctl-persistence/result.json": "95a4cf9e64b9cb4f81845b6e46523f567aff760aef5c81ad49626888e810dbf5",
+    "focused/002-root-test_osmo_builtin_timelapse_roundtrip/cases.json": "3ea8b5d26856ab811475c0d57d893c52ee5a5654d84062d6f60233bd33c611c0",
+    "focused/002-root-test_osmo_builtin_timelapse_roundtrip/command.json": "924dc52d1c28438e2202ef98433628d847eb9d033b873776c85a29d53f17bd69",
+    "focused/002-root-test_osmo_builtin_timelapse_roundtrip/inventory.json": "e6daa46360558630915bd719504a530697d404cfa72f8e15a991d2288edd2cf3",
+    "focused/002-root-test_osmo_builtin_timelapse_roundtrip/output.log": "6b8e9ce35dc49450f900fda511ccc5576bda16acd3d1bd9554d3f0f0223956be",
+    "focused/002-root-test_osmo_builtin_timelapse_roundtrip/result.json": "9e646bccd27f5636044b2212d09398e1f0369349fb2ada451a96dedfa1629dbf",
+    "focused/003-root-test_action6_builtin_timelapse_roundtrip/cases.json": "951ba88bcf1d0831d299185999987c96cff835322ef4932fe5c9c0aecd106b87",
+    "focused/003-root-test_action6_builtin_timelapse_roundtrip/command.json": "fd1720f35a45409513c8955a184d1d916cbdc99368a7d59eb3fbdf72b553b8f7",
+    "focused/003-root-test_action6_builtin_timelapse_roundtrip/inventory.json": "46a912da51f5b778459ecf6a3a89c27e34e20c42cd4ef4eaa22031fae4979874",
+    "focused/003-root-test_action6_builtin_timelapse_roundtrip/output.log": "67770e80d8e24607d1f9b5c84de1314bf7fc6fa4ce1d165972915fb7104c054d",
+    "focused/003-root-test_action6_builtin_timelapse_roundtrip/result.json": "88b948dd76b2aa10a1465099df6b7d91efbf05ad2a7eb09fca11dd88366b25c2",
+    "focused/004-root-test_device_file_cleanup_roundtrip/cases.json": "3ca59765e1595468ae450b551bc3ab1a3a97bd6e55bccf1e94e253b8ed7b6b97",
+    "focused/004-root-test_device_file_cleanup_roundtrip/command.json": "68c34e27e4d9a77a4dfafc966886d61b59935001cd317daf53d4b96279c133a9",
+    "focused/004-root-test_device_file_cleanup_roundtrip/inventory.json": "1fd45b041666d3cd3b1a47fb10be962a4b3984e8cf0e8c085f8bc3c46fe5f965",
+    "focused/004-root-test_device_file_cleanup_roundtrip/output.log": "62bc85b42e163e4038d9e0472685735a37434e22e263c2579dba0b70532045bb",
+    "focused/004-root-test_device_file_cleanup_roundtrip/result.json": "6599c5e7b000abb1b13264a635010291174c2f4889eed726371d1c64a4558607",
+    "focused-summary.json": "abcd418bf58508a1e084444cf6c7d80fad88bfdbda472235f170dc4a7658d8ff",
+    "persistence-unit.log": "66a35e9798883fd5fe3a4f58d41e263c8c66652c7b20a1ba2bc975d5f972e417",
+    "resource-sync.log": "5d894e97c743d9c0b779906e490b5d2b66647bd7d341ad786272ed0ece2726c7",
+    "scope-entry-unit.log": "976ea3fe6dfa65b827ec05fc16bf49cec94d3fda3b2d6ad4719708e74a38b32d",
+    "unit.log": "a18d7baf1cd1002d1e6cf0556fd4b9a811ca24bfd39f9177b06aef18320afbf7"
+  }
+}

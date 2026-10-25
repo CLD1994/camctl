@@ -1,0 +1,59 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 49.70868480500212
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 43.742614208000305
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011564220039872453
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 93.45245543500641
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0093578130035894
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.529698744998313
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003639650021796115
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 22.539420523004082
+  },
+  {
+    "nodeid": "tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010832519983523525
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 23.04967522500374
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.026592600996082183
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 23.077351077998173
+  }
+]

@@ -1,0 +1,74 @@
+{
+  "id": "camctl/persistence",
+  "scope": "camctl",
+  "path": "apps/camctl/tests/integration/persistence",
+  "targets": [
+    "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+    "apps/camctl/tests/integration/persistence/test_transactions.py",
+    "apps/camctl/tests/integration/persistence/test_commit_recovery.py"
+  ],
+  "estimated_seconds": 1057.0335576848083,
+  "status": "passed",
+  "number": 1,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/artifacts",
+  "cwd": "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/source",
+  "started_utc": "2026-10-25T05:31:01.244737+00:00",
+  "command": [
+    "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+    "apps/camctl/tests/integration/persistence/test_transactions.py",
+    "apps/camctl/tests/integration/persistence/test_commit_recovery.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-merge-focused-20261025/control:/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-merge-focused-20261025/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-merge-focused-20261025/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-merge-focused-20261025/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-merge-focused-20261025/tasks/001-camctl-persistence/source",
+      "started_utc": "2026-10-25T05:31:12.994367+00:00",
+      "pid": 893496,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T05:31:13.195463+00:00",
+      "wall_seconds": 0.20109245799540076
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 893496,
+  "pid": 893498,
+  "execution_started_utc": "2026-10-25T05:31:13.197861+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 47,
+    "outcomes": {
+      "passed": 47
+    },
+    "subchecks": {},
+    "elapsed_seconds": 7.787281160002749,
+    "utc": "2026-10-25T05:31:23.515124+00:00",
+    "pid": 893498
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T05:31:24.565471+00:00",
+  "wall_seconds": 22.23091457800183
+}

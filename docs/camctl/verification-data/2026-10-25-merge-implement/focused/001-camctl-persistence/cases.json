@@ -1,0 +1,895 @@
+[
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025366800036863424
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.5965817469987087
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013235349979368038
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.6004419620003318
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_page_record_from_another_connection_cannot_hide_changed_relations",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023394680029014125
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.20637000299757347
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000664334002067335
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2093738050025422
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[reference]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001789586000086274
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.15845806899596937
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001042041003529448
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1612896959995851
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[attempt_range]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002166898993891664
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.12497143899963703
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005628670041915029
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1277012049977202
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010448720058775507
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.1288040049985284
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006728059961460531
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.130521683000552
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[commit]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017102620040532202
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.14791005800361745
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011100340052507818
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.15073035401292145
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[rollback]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002459725998050999
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.13184701899444917
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011486290022730827
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.13545537399477325
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[unknown_commit]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0036335600016172975
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.1990538930040202
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006531800027005374
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20334063300833805
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[cancel]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001522869999462273
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.12002875200414564
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008595019971835427
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.12241112400079146
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001646821001486387
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.7771785510049085
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000560394000785891
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.7793857660071808
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::test_guards_receive_complete_proposal_without_advancing_event_state",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001598525996087119
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.031237574003171176
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006030779986758716
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.033439177997934166
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::test_complete_query_tracks_prior_events_without_using_future_rows[True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019939000048907474
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04568009200011147
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006083690022933297
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04828236100729555
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::test_complete_query_tracks_prior_events_without_using_future_rows[False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012972690019523725
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.056494263000786304
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0024215730009018444
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06021310500364052
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_committed_transaction_saves_everything_together",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030131289968267083
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05472331799683161
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009159189939964563
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.058652365987654775
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_multi_event_transaction_uses_continuous_span",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002386399995884858
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04181750700081466
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008007170035853051
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04500462400028482
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_second_transaction_allocates_after_committed_history",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012238839990459383
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03718001500237733
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004955859985784627
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03889948500000173
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestCurrentStateRecheck::test_write_uses_current_transaction_state",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008105949964374304
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.057410393994359765
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000682261998008471
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05890325098880567
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestCurrentStateRecheck::test_create_then_update_in_one_transaction_allowed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018725850022747181
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.053670496003178414
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006887060008011758
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05623178700625431
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAllocationContract::test_event_count_mismatch_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014331179991131648
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03298895499756327
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007114039981388487
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03513347699481528
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAllocationContract::test_non_adjacent_event_ids_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012505850027082488
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02712245699513005
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005817339988425374
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.028954775996680837
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAllocationContract::test_missing_allocation_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011305680018267594
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025879626999085303
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004781019961228594
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.027488296997034922
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO history_transactions]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018353510022279806
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03417092499876162
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002338424004847184
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.038344700005836785
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO history_events]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0032070429952000268
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03457951299787965
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008585270043113269
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.038645082997391
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO entity_event_links]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013294129967107438
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03550727300171275
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013457150053000078
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0381824010037235
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO report_entity_changes]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030330139998113737
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.038274642000033055
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00043684699630830437
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04174450299615273
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO entity_snapshot_progress]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001569389998621773
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03552765499625821
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007468309995601885
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03784387599444017
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_projection_stage_failure_rolls_back[INSERT INTO plans]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010851359984371811
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.036730120998981874
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004367740039015189
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.038252031001320574
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_projection_stage_failure_rolls_back[UPDATE plans SET]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008971230054157786
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03600681600073585
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035351000406080857
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03725744901021244
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_commit_failure_is_unknown",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007653570064576343
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025152381000225432
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006152650021249428
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02653300300880801
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_registry_violation_rejected_even_if_sql_would_accept",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012308559962548316
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.040098541001498234
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000358268000127282
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04168766499788035
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_unimplemented_business_guard_rejects_write",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009290820016758516
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0261413080006605
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003255419942433946
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.027395931996579748
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_write_receipt_accessor_rejects_untyped_attribute",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00024213299911934882
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006481939999503084
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004467920007300563
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0013371189997997135
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[command]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014810399952693842
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.033147107998956926
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000328909998643212
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03495705799286952
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[complete_result]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023423410020768642
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.027329857999575324
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006833180013927631
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03035551700304495
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[command]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019142070013913326
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.022607163999055047
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003908340004272759
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.024912205000873655
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[complete_result]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015356470030383207
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.019134255999233574
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032253799872705713
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02099244100099895
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013114440007484518
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.023297088999242987
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00033547299972269684
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.024944005999714136
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010946070033241995
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03979022400017129
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008865459967637435
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.041771377000259236
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[sqlite-error]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018901139992522076
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03464882700063754
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005084459990030155
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03704738699889276
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[control]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001088234996132087
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.027978576996247284
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035793699498753995
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02942474898736691
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_preserves_operation_error_and_is_not_retried",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012960219974047504
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.024291317000461277
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035686699993675575
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.025944205997802783
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_does_not_replace_earlier_control",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000844385998789221
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01830620999680832
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004304309986764565
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.019581026994273998
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_ordinary_operation_and_rollback_errors_keep_ordered_group",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013545850015361793
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025581116999092046
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042946700705215335
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02736516900768038
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_committed_operation_is_reused_by_key",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012479659999371506
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05749687299976358
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006017919949954376
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05934663099469617
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_same_key_with_different_inputs_is_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001516459000413306
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06088508800166892
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008161610021488741
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0632177080042311
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_absent_after_connection_stopped_allows_eligibility_check",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001470285998948384
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025397694000275806
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000487489000079222
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02735546899930341
+  },
+  {
+    "nodeid": "tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_original_connection_still_alive_blocks_retry",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00120024799980456
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03054008400067687
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008369589995709248
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.032577291000052355
+  }
+]

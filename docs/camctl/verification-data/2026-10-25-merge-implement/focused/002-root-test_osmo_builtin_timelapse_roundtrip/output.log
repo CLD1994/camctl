@@ -1,0 +1,12 @@
+....                                                                     [100%]
+============================== slowest durations ===============================
+93.35s call     tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]
+49.24s call     tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]
+33.76s call     tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]
+20.72s setup    tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]
+2.96s call     tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types
+1.71s setup    tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types
+0.01s teardown tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]
+
+(5 durations < 0.005s hidden.  Use -vv to show these durations.)
+4 passed in 202.02s (0:03:22)

@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 1.7110267739990377
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 2.956789119001769
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039402800030075014
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 4.668209921001107
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 20.724498825999035
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 93.35498111700144
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005575699979090132
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 114.08003751299839
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014569999984814785
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 49.241404676002276
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004301959997974336
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 49.243291872000555
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018178259997512214
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 33.755356639994716
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.013935426002717577
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 33.771109891997185
+  }
+]

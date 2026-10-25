@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 10.738592695997795
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 52.60320490299637
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0048411320021841675
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 63.34663873099635
+  }
+]

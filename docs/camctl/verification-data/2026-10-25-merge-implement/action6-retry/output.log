@@ -1,0 +1,7 @@
+.                                                                        [100%]
+============================== slowest durations ===============================
+52.60s call     tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+10.74s setup    tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+1 passed in 63.57s (0:01:03)

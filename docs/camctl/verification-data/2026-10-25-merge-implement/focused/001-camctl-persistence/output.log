@@ -1,0 +1,51 @@
+...............................................                          [100%]
+============================== slowest durations ===============================
+0.78s call     tests/integration/persistence/test_page_read_cache.py::test_three_page_strict_members_reuse_each_committed_page_within_scope
+0.60s call     tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction
+0.21s call     tests/integration/persistence/test_page_read_cache.py::test_page_record_from_another_connection_cannot_hide_changed_relations
+0.20s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[unknown_commit]
+0.16s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[reference]
+0.15s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[commit]
+0.13s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[rollback]
+0.13s call     tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits
+0.12s call     tests/integration/persistence/test_page_read_cache.py::test_reused_page_keeps_current_reference_and_attempt_range_checks[attempt_range]
+0.12s call     tests/integration/persistence/test_page_read_cache.py::test_write_transaction_releases_page_proof_before_every_end[cancel]
+0.06s call     tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_same_key_with_different_inputs_is_rejected
+0.06s call     tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_committed_operation_is_reused_by_key
+0.06s call     tests/integration/persistence/test_transactions.py::TestCurrentStateRecheck::test_write_uses_current_transaction_state
+0.06s call     tests/integration/persistence/test_transactions.py::test_complete_query_tracks_prior_events_without_using_future_rows[False]
+0.05s call     tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_committed_transaction_saves_everything_together
+0.05s call     tests/integration/persistence/test_transactions.py::TestCurrentStateRecheck::test_create_then_update_in_one_transaction_allowed
+0.05s call     tests/integration/persistence/test_transactions.py::test_complete_query_tracks_prior_events_without_using_future_rows[True]
+0.04s call     tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_multi_event_transaction_uses_continuous_span
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_registry_violation_rejected_even_if_sql_would_accept
+0.04s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[True]
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO report_entity_changes]
+0.04s call     tests/integration/persistence/test_transactions.py::TestCommittedTransaction::test_second_transaction_allocates_after_committed_history
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_projection_stage_failure_rolls_back[INSERT INTO plans]
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_projection_stage_failure_rolls_back[UPDATE plans SET]
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO entity_snapshot_progress]
+0.04s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO entity_event_links]
+0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[sqlite-error]
+0.03s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO history_events]
+0.03s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_catalog_stage_failure_rolls_back_create[INSERT INTO history_transactions]
+0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[command]
+0.03s call     tests/integration/persistence/test_transactions.py::TestAllocationContract::test_event_count_mismatch_rejected
+0.03s call     tests/integration/persistence/test_transactions.py::test_guards_receive_complete_proposal_without_advancing_event_state
+0.03s call     tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_original_connection_still_alive_blocks_retry
+0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_read_only_end_failure_is_unknown_and_not_retried[control]
+0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_rolls_back_once_and_keeps_same_object[complete_result]
+0.03s call     tests/integration/persistence/test_transactions.py::TestAllocationContract::test_non_adjacent_event_ids_rejected
+0.03s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_unimplemented_business_guard_rejects_write
+0.03s call     tests/integration/persistence/test_transactions.py::TestAllocationContract::test_missing_allocation_rejected
+0.03s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_ordinary_operation_and_rollback_errors_keep_ordered_group
+0.03s call     tests/integration/persistence/test_commit_recovery.py::TestRealVerification::test_absent_after_connection_stopped_allows_eligibility_check
+0.03s call     tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_commit_failure_is_unknown
+0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_preserves_operation_error_and_is_not_retried
+0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback[False]
+0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[command]
+0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_precommit_control_and_rollback_error_keep_control_and_secondary[complete_result]
+0.02s call     tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_rollback_control_does_not_replace_earlier_control
+
+(95 durations < 0.005s hidden.  Use -vv to show these durations.)
+47 passed in 7.70s

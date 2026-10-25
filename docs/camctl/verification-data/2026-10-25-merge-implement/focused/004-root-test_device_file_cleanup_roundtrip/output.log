@@ -1,0 +1,11 @@
+...                                                                      [100%]
+============================== slowest durations ===============================
+49.71s setup    tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]
+43.74s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P1]
+23.05s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover
+22.53s call     tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]
+0.03s teardown tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_cancel_inflight_delete_recover
+0.01s setup    tests/integration/test_device_file_cleanup_roundtrip.py::test_cleanup_query_present_or_unknown[P2]
+
+(3 durations < 0.005s hidden.  Use -vv to show these durations.)
+3 passed in 139.34s (0:02:19)

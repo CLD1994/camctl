@@ -1,0 +1,6 @@
+[
+  "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+  "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+  "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+  "tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]"
+]

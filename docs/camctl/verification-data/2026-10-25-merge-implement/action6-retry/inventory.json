@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs"
+]
