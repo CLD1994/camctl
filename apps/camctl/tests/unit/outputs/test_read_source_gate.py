@@ -304,7 +304,7 @@ async def test_prevented_result_save_preserves_original_key_until_reliable_appli
         assert runtime.pending_read_results[(5, 1)] is pending
         assert runtime.continuing_read_tickets[2].never_dispatched
         runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    await _save_read_result_and_settle(runtime, pending, facts)
+    await _save_read_result_and_settle(runtime, pending, facts, retry=True)
     assert runtime.pending_read_results == {} and runtime.continuing_read_tickets == {}
     assert all(call.args[:2] == (pending.finish, pending.key) for call in runtime.operations.finish_attempt.call_args_list)
 

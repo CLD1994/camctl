@@ -1,7 +1,7 @@
 """设备文件读取的原尝试选择；连接恢复不消耗新的读取次数。"""
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic
@@ -15,7 +15,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.outputs.database_reads import read_one
 from camctl.devices.evidence import EvidenceError
 
@@ -166,6 +166,8 @@ class PendingReadResult:
     finish: AttemptFinish
     key: OperationKey
     business: "PendingReadBusiness | None" = None
+    result_save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    settlement: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -299,25 +301,38 @@ class PendingReadBusiness:
     request: Any
     key: OperationKey
     on_completed: Callable[[Any], None] | None = None
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 async def retry_read_business(runtime):
     for identity, pending in tuple(runtime.pending_read_business.items()):
-        await save_read_business(runtime, *identity, pending.request, pending.save)
+        await _save_pending_read_business(runtime, identity, pending, retry=True)
 
 
-async def save_read_business(runtime, copy_id, operation, request, save, *, on_completed=None):
+async def save_read_business(runtime, copy_id, operation, request, save, *, on_completed=None, retry=False):
+    """共同等待原申请的保存与应用；明确恢复时才重新核实失败结果。"""
     identity = (copy_id, operation)
     pending = runtime.pending_read_business.get(identity)
     if pending is None:
         pending = PendingReadBusiness(save, request, new_operation_key(), on_completed)
         runtime.pending_read_business[identity] = pending
+    return await _save_pending_read_business(runtime, identity, pending, retry=retry)
+
+
+async def _save_pending_read_business(runtime, identity, pending, *, retry=False):
+    if retry:
+        pending.shared.retry_failed()
+
     def apply_completed(receipt):
         if pending.on_completed is not None:
             pending.on_completed(receipt.value)
         del runtime.pending_read_business[identity]
 
     async def save_and_apply():
+        held = runtime.pending_read_business.get(identity)
+        if held is not None and held is not pending:
+            raise ConsistencyError("原读取结束所属申请与已持有的申请不同")
+        runtime.pending_read_business[identity] = pending
         try:
             receipt = await runtime.database.write(
                 lambda owned: pending.save(pending.request, pending.key, owned), key=pending.key)
@@ -330,17 +345,13 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
             raise ConsistencyError(f"原读取业务结果未可靠保存（{receipt.kind.value}）: {receipt.error}")
         apply_completed(receipt)
         return receipt
-    return await settle_required(save_and_apply())
+    return await pending.shared.run(save_and_apply)
 
 
-async def save_prepared_read_business(runtime, copy_id, operation, pending):
+async def save_prepared_read_business(runtime, copy_id, operation, pending, *, retry=False):
     """完整结束结果预先确定的原业务申请，可靠结果之后才提交。"""
     identity = (copy_id, operation)
-    held = runtime.pending_read_business.get(identity)
-    if held is not None and held != pending:
-        raise ConsistencyError("原读取结束所属申请与已持有的申请不同")
-    runtime.pending_read_business[identity] = pending
-    return await save_read_business(runtime, copy_id, operation, pending.request, pending.save)
+    return await _save_pending_read_business(runtime, identity, pending, retry=retry)
 
 
 async def held_binding_read_result(runtime, copy_id, binding_result, business):
@@ -383,6 +394,8 @@ class PendingStoppedRead:
     evidence: object
     occurred_at: int
     key: OperationKey
+    result_save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    settlement: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
 
 def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
@@ -412,7 +425,8 @@ async def _prepare_stopped_read(runtime, pending):
         error=ErrorValue("read_stopped", "read"),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     prepared = PendingReadResult(AttemptFinish(ticket, validate_outcome(ticket, outcome, pending.evidence),
-        pending.occurred_at, run_finish=RunFinish(RunOutcome.CANCELED)), pending.key)
+        pending.occurred_at, run_finish=RunFinish(RunOutcome.CANCELED)), pending.key,
+        result_save=pending.result_save, settlement=pending.settlement)
     runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)] = prepared
     return prepared
 
@@ -427,22 +441,32 @@ def hold_read_result(runtime, finish, *, business=None, key=None):
     return pending
 
 
-async def save_read_result(runtime, pending):
+async def save_read_result(runtime, pending, *, retry=False):
     """可靠保存原结果；业务收场完成前仍保留原结果与操作键。"""
-    if isinstance(pending, PendingStoppedRead):
-        pending = await _prepare_stopped_read(runtime, pending)
-        if pending is None:
+    if retry:
+        pending.result_save.retry_failed()
+
+    async def save():
+        prepared = pending
+        if isinstance(pending, PendingStoppedRead):
+            prepared = await _prepare_stopped_read(runtime, pending)
+        if prepared is None:
             return None
-    outcome = await runtime.database.write(
-        lambda owned: runtime.operations.finish_attempt(pending.finish, pending.key, owned), key=pending.key)
-    if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}")
-    return pending
+        outcome = await runtime.database.write(
+            lambda owned: runtime.operations.finish_attempt(prepared.finish, prepared.key, owned), key=prepared.key)
+        if outcome.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}")
+        return prepared
+
+    return await pending.result_save.run(save)
 
 
 def forget_read_result(runtime, pending):
     ticket = pending.finish.ticket
-    del runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)]
+    identity = (ticket.run_id, ticket.attempt_id)
+    if runtime.pending_read_results.get(identity) is not pending:
+        return
+    del runtime.pending_read_results[identity]
     continuation = runtime.continuing_read_tickets.get(int(ticket.target_id))
     if continuation is not None and continuation.ticket == ticket:
         del runtime.continuing_read_tickets[int(ticket.target_id)]
@@ -551,7 +575,7 @@ async def acquire_read_attempt(runtime, intent):
                 return None, "recovery_blocked"
             request = ReadResumeRequest(ticket, intent.config, intent.occurred_at)
             outcome = await save_read_business(runtime, copy_id, "read_resume", request,
-                runtime.operations.resume_read)
+                runtime.operations.resume_read, retry=True)
             if outcome.value.disposition is ReadResumeDisposition.NOT_RUNNING:
                 return None, "run_ended"
             runtime.last_recovery_diagnostic = None
@@ -560,7 +584,7 @@ async def acquire_read_attempt(runtime, intent):
         if value.disposition is BeginDisposition.GRANTED:
             runtime.continuing_read_tickets[copy_id] = ReadContinuation(value.ticket, True)
     outcome = await save_read_business(runtime, copy_id, "read_intent", intent,
-        runtime.operations.begin_attempt, on_completed=remember)
+        runtime.operations.begin_attempt, on_completed=remember, retry=pending_begin is not None)
     if outcome.value.disposition is BeginDisposition.GRANTED:
         return outcome.value.ticket, None
     return None, outcome.value.reason
@@ -571,7 +595,7 @@ async def recover_unavailable_read(runtime, copy_id: int, binding, now: int) -> 
     for pending in tuple(runtime.pending_read_results.values()):
         ticket = pending.ticket if isinstance(pending, PendingStoppedRead) else pending.finish.ticket
         if int(ticket.target_id) == copy_id:
-            prepared = await save_read_result(runtime, pending)
+            prepared = await save_read_result(runtime, pending, retry=True)
             if prepared is None:
                 record_read_diagnostic(runtime, RecoveryBlockedReason.UNCONFIRMED_BOUNDARY, ticket)
                 return False

@@ -37,7 +37,7 @@ async def test_original_read_business_keeps_key_until_actual_result_is_applied(k
         original = runtime.pending_read_business[(2, "finish")]
         assert original.request is request
         save.side_effect = lambda actual_request, key, actual_owned: DbOutcome(DbOutcomeKind.COMPLETED, key)
-        assert (await save_read_business(runtime, 2, "finish", request, save)).value == original.key
+        assert (await save_read_business(runtime, 2, "finish", request, save, retry=True)).value == original.key
         assert runtime.pending_read_business == {}
 
 
@@ -276,6 +276,6 @@ async def test_release_unknown_keeps_original_request_and_key_until_rechecked():
         await _save_read_result_and_settle(runtime, pending, facts)
     original = runtime.pending_read_business[(2, "release_read_slot")]
     assert runtime.pending_read_results
-    await _save_read_result_and_settle(runtime, pending, facts)
+    await _save_read_result_and_settle(runtime, pending, facts, retry=True)
     assert runtime.pending_read_results == {} and runtime.pending_read_business == {}
     assert all(call.args[:2] == (original.request, original.key) for call in outputs.release_read_slot.call_args_list)

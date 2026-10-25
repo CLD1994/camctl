@@ -985,21 +985,21 @@ async def _retry_read_results(runtime: ObtainRuntime) -> None:
     for pending in tuple(runtime.pending_read_results.values()):
         if not isinstance(pending, PendingStoppedRead) and pending.finish.outcome.outcome.settlement.basis is SettlementBasis.ASSUMED:
             async def save_and_forget():
-                await save_read_result(runtime, pending)
+                await save_read_result(runtime, pending, retry=True)
                 forget_read_result(runtime, pending)
             await settle_required(save_and_forget())
             continue
-        await _save_read_result_and_settle(runtime, pending)
+        await _save_read_result_and_settle(runtime, pending, retry=True)
 
 
-async def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) -> None:
-    return await settle_required(_save_read_result_and_settle_phase(runtime, pending, facts))
+async def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None, *, retry=False) -> None:
+    return await settle_required(_save_read_result_and_settle_phase(runtime, pending, facts, retry=retry))
 
 
-async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, facts=None) -> None:
+async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, facts=None, *, retry=False) -> None:
     from camctl.outputs.read_attempts import forget_read_result, save_read_result
 
-    pending = await save_read_result(runtime, pending)
+    pending = await save_read_result(runtime, pending, retry=retry)
     if pending is None:
         return
     if pending.business is not None:
@@ -1007,7 +1007,7 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
 
         copy_id = int(pending.finish.ticket.target_id)
         forget_read_result(runtime, pending)
-        await save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business)
+        await save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business, retry=retry)
         runtime.retry_gate.cleared(f"read/{copy_id}")
         return
     if facts is None:
@@ -1051,7 +1051,7 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
 
             released = await save_read_business(runtime, facts["id"], "release_read_slot",
                 SlotRequest(copy_id=facts["id"], occurred_at=runtime.occurred_at()),
-                runtime.outputs.release_read_slot)
+                runtime.outputs.release_read_slot, retry=retry)
             if released.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
         runtime.retry_gate.cleared(f"read/{facts['id']}")

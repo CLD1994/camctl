@@ -514,7 +514,7 @@ async def run_recording_media(
     await resume_media_saves(flow.database, flow.pending_media_results, flow.file_executor, action_id=action_id)
     await retry_read_business(flow)
     for pending in tuple(flow.pending_read_results.values()):
-        await _save_internal_read_and_settle(flow, pending)
+        await _save_internal_read_and_settle(flow, pending, retry=True)
     await retry_read_ends(flow)
     original_failure = await _read_all(flow.database, "SELECT c.id FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " WHERE c.processing_id=? AND r.kind=3 AND r.status=4 LIMIT 2", (processing_id,))
@@ -761,7 +761,7 @@ async def resume_prepared_internal_reads(
         original_time = (pending.occurred_at if isinstance(pending, PendingStoppedRead)
                          else pending.finish.occurred_at)
         scope.occurred_at = lambda original=original_time: original
-        await _save_internal_read_and_settle(scope, pending)
+        await _save_internal_read_and_settle(scope, pending, retry=True)
     await retry_read_business(scope)
 
 
@@ -842,8 +842,11 @@ async def resume_binding_internal_read_ends(
         await _save_internal_read_and_settle(scope, pending)
 
 
-async def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
-    await settle_required(_save_internal_read_result(flow, pending))
+async def _save_internal_read_and_settle(flow: MediaFlow, pending, *, retry=False) -> None:
+    if retry:
+        pending.settlement.retry_failed()
+        pending.result_save.retry_failed()
+    await pending.settlement.run(lambda: _save_internal_read_result(flow, pending))
 
 
 async def _save_internal_read_result(flow, pending):
