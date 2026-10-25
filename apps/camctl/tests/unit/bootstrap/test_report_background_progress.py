@@ -403,7 +403,7 @@ async def test_report_database_exception_remains_fatal_without_report_failure(
     assert await _drive_flows(state.context) is None
     await asyncio.wait_for(asyncio.shield(state.report.unconsumed_task), timeout=1)
     scheduled_before_failure = state.device.call_count
-    assert "状态库错误" in await _drive_flows(state.context)
+    assert "状态库错误" in (await _drive_flows(state.context)).details["error"]
     record.assert_not_called()
     assert state.device.call_count == scheduled_before_failure
 
@@ -472,7 +472,7 @@ async def test_unsaved_report_failure_stops_device_scheduling(
     result = await _drive_flows(state.context)
 
     assert result is not None
-    assert "报告失败记录" in result
+    assert "报告失败记录" in result.details["error"]
     record.assert_called_once()
     assert state.device.call_count == scheduled_before_failure
     state.failure_log.assert_awaited_once()
@@ -485,7 +485,7 @@ async def test_report_probe_failure_keeps_fatal_report_boundary(mocker, failure)
     state = _ReportState(mocker)
     state.context.report_change_wm = AsyncMock(side_effect=failure)
 
-    assert await _drive_flows(state.context) == (
+    assert (await _drive_flows(state.context)).details["error"] == (
         "missing watermark" if isinstance(failure, StateDbFailure)
         else f"报告维护无法可靠观察业务水位: {failure}")
     state.connection.execute.assert_not_called()
@@ -510,7 +510,7 @@ async def test_report_database_queue_failure_stops_after_actual_failure(mocker, 
         assert state.device.call_count == scheduled
     else:
         state.device.assert_not_called()
-    assert fatal == "报告维护无法可靠读取或保存状态库事实: business queue full"
+    assert fatal.details["error"] == "报告维护无法可靠读取或保存状态库事实: business queue full"
     state.failure_log.assert_awaited_once()
 
 
@@ -610,7 +610,10 @@ async def test_report_background_result_keeps_original_error_boundary(mocker, fa
         assert caught.value is failure
     else:
         result = await _drive_flows(state.context)
-        assert result == (str(failure) if isinstance(failure, StateDbFailure) else None)
+        if isinstance(failure, StateDbFailure):
+            assert result.details["error"] == str(failure)
+        else:
+            assert result is None
     assert state.device.call_count == (2 if type(failure) is RuntimeError else 1)
     state.failure_log.assert_awaited_once()
     await state.local.settle()
@@ -640,7 +643,7 @@ async def test_report_fatal_stops_scheduling_before_failure_log_wait_finishes(mo
         await asyncio.wait_for(entered.wait(), timeout=1)
         scheduled_before_failure = state.device.call_count
         if isinstance(failure, StateDbFailure):
-            assert await _drive_flows(state.context) == str(failure)
+            assert (await _drive_flows(state.context)).details["error"] == str(failure)
         else:
             with pytest.raises(type(failure)) as caught:
                 await _drive_flows(state.context)

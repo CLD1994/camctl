@@ -22,7 +22,7 @@ async def test_completed_background_failure_stops_first_report_and_other_work(fa
 
     fatal = await _drive_flows(context)
 
-    assert str(failure) in fatal
+    assert str(failure) in fatal.details["error"]
     assert calls == []
 
 
@@ -38,5 +38,5 @@ async def test_completed_background_error_is_checked_again_between_flows():
 
     fatal = await _drive_flows(context)
 
-    assert str(failure) in fatal
+    assert str(failure) in fatal.details["error"]
     assert calls == ["report"]

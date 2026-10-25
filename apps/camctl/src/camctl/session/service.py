@@ -13,6 +13,7 @@ submit 对提交结果未知以同一请求幂等核实，不宣称受理成功�
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Protocol
@@ -32,6 +33,7 @@ from camctl.logging_runtime.copies import (
     SaveOutcome,
     _describe,
 )
+from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.persistence.models import DbOutcomeKind, DirectoryBindingError
 from camctl.persistence.runtime import OwnedConnection, RuntimeLibraryError
 from camctl.persistence.transaction import write_receipt_for
@@ -189,11 +191,17 @@ class _RequiredPhaseWaiter:
         if target is error:
             return
         notes = tuple(getattr(error, "__notes__", ()))
+        diagnostic = _diagnostic_note(label, error)
         target.add_note(f"{label}: {type(error).__name__}: {error}")
         for note in notes:
             target.add_note(f"{label}附注: {note}")
         if isinstance(error, BaseExceptionGroup):
-            _attach_ordered_error_notes(target, label, _ordered_error_sources(error))
+            _attach_ordered_error_notes(
+                target, label, _ordered_error_sources(error), diagnostic_error=error,
+                diagnostic_note=diagnostic,
+            )
+        else:
+            target.add_note(diagnostic)
 
 
 class StateDbFailure(RuntimeError):
@@ -427,7 +435,7 @@ def _exception_details(
     fallback_reason: str = "state_db_error",
     facts_override: Any = None,
 ) -> tuple[str, dict[str, Any]]:
-    """按可信锁事实生成一个无嵌套的机器错误诊断。"""
+    """保留既有分类和摘要，并附上原异常的完整机器诊断。"""
     facts = (
         facts_override
         if facts_override is not None
@@ -448,6 +456,7 @@ def _exception_details(
     details: dict[str, Any] = {
         "stage": stage,
         "message": message,
+        "exception": exception_diagnostic(error),
     }
     if facts is not None:
         details["path"] = str(facts.path)
@@ -477,6 +486,7 @@ def _transaction_error_outcome(
         include_unknown_commit=(
             include_unknown_commit and kind is DbOutcomeKind.UNKNOWN
         ),
+        diagnostic_error=error,
     )
 
 
@@ -487,6 +497,7 @@ def _ordered_sources_outcome(
     fallback_reason: str,
     transaction_status: str | None = None,
     include_unknown_commit: bool = False,
+    diagnostic_error: BaseException | None = None,
 ) -> SessionOutcome:
     """把按实际顺序筛出的错误来源汇总为扁平诊断。"""
     assert sources
@@ -511,6 +522,8 @@ def _ordered_sources_outcome(
         secondary.append({"reason": secondary_reason, "details": secondary_details})
     if secondary:
         details["secondary_errors"] = secondary
+    if diagnostic_error is not None:
+        details["exception"] = exception_diagnostic(diagnostic_error)
     return _outcome_error(reason, details)
 
 
@@ -559,10 +572,17 @@ def _remember_error(errors: list[BaseException], error: BaseException | None) ->
             errors.append(source)
 
 
+def _diagnostic_note(label: str, error: BaseException) -> str:
+    return f"{label}诊断: " + json.dumps(exception_diagnostic(error), ensure_ascii=False)
+
+
 def _attach_ordered_error_notes(
     target: BaseException,
     label: str,
     sources: list[tuple[BaseException, Any]],
+    *,
+    diagnostic_error: BaseException | None = None,
+    diagnostic_note: str | None = None,
 ) -> None:
     """按实际错误顺序附注，保留目标已有说明并跳过自身。"""
     existing_notes = set(tuple(getattr(target, "__notes__", ())))
@@ -581,6 +601,17 @@ def _attach_ordered_error_notes(
             if attached_note not in existing_notes:
                 target.add_note(attached_note)
                 existing_notes.add(attached_note)
+    diagnostic_sources = (
+        [diagnostic_error] if diagnostic_error is not None
+        else [source for source, _facts in sources]
+    )
+    for source in diagnostic_sources:
+        if source is target:
+            continue
+        note = diagnostic_note or _diagnostic_note(label, source)
+        if note not in existing_notes:
+            target.add_note(note)
+            existing_notes.add(note)
 
 
 def _merge_cleanup_errors(
@@ -622,17 +653,20 @@ def _merge_cleanup_errors(
                 original = error
                 _attach_ordered_error_notes(
                     original, "同步资源收场异常", unobserved_sources,
+                    diagnostic_error=error,
                 )
             else:
                 _attach_ordered_error_notes(
                     original,
                     "后续同步资源收场控制异常",
                     unobserved_sources,
+                    diagnostic_error=error,
                 )
             continue
         if original is not None:
             _attach_ordered_error_notes(
                 original, "同步资源收场异常", unobserved_sources,
+                diagnostic_error=error,
             )
             continue
         if len(unobserved_sources) == len(sources):
@@ -647,6 +681,7 @@ def _merge_cleanup_errors(
                 unobserved_sources,
                 stage=stage,
                 fallback_reason=fallback_reason,
+                diagnostic_error=error,
             )
         outcome = added if outcome is None else _merge_failure_outcome(outcome, added)
     return outcome, original
@@ -959,7 +994,7 @@ async def _run_session(
                 return _outcome_error("configuration_error", {"error": str(error)})
             if fatal is not None:
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
-                return _outcome_error("state_db_error", {"error": fatal})
+                return fatal
             try:
                 decision = classify_work(await _run_work_facts(context))
             except Exception as error:
@@ -1271,7 +1306,10 @@ async def _settle_local_work(
             primary = cancellation
         others = [error for error in errors if error is not primary]
         for error in others:
-            _attach_ordered_error_notes(primary, "本地实际责任收场异常", _ordered_error_sources(error))
+            _attach_ordered_error_notes(
+                primary, "本地实际责任收场异常", _ordered_error_sources(error),
+                diagnostic_error=error,
+            )
         def references_primary(error: BaseException) -> bool:
             # 原组、锁事实及其已有cause都不能形成返回主对象的环。
             pending = [error]
@@ -1298,7 +1336,10 @@ async def _settle_local_work(
     if control is not None:
         for error in errors:
             if error is not control:
-                _attach_ordered_error_notes(control, "本地实际责任收场异常", _ordered_error_sources(error))
+                _attach_ordered_error_notes(
+                    control, "本地实际责任收场异常", _ordered_error_sources(error),
+                    diagnostic_error=error,
+                )
         raise control.with_traceback(control.__traceback__)
     if len(errors) == 1:
         raise errors[0].with_traceback(errors[0].__traceback__)
@@ -1306,13 +1347,13 @@ async def _settle_local_work(
 
 
 
-async def _drive_flows(context: SessionContext) -> str | None:
+async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
     """逐个驱动已注册流程；单个失败不中断其余流程。
 
     报告流程（"report"）的失败保留责任并触发一次日志副本，设备
     等其他工作继续；报告流程因状态库错误失败同样属于报告处理失
     败，先触发日志副本再停止后续流程，会话按状态库错误收场。其
-    余流程的状态库错误立即停止后续流程。返回致命错误描述或 None。
+    余流程的状态库错误立即停止后续流程。返回含原诊断的致命结果或 None。
     """
     for name, flow in context.flows.items():
         # 后台保存错误属于原设备责任，不能套用即将调用的报告失败规则。
@@ -1323,9 +1364,14 @@ async def _drive_flows(context: SessionContext) -> str | None:
         except (ClockBecameUntrusted, DirectoryBindingError, DeviceConfigurationError):
             raise
         except StateDbFailure as error:
-            return str(error)
+            return _outcome_error("state_db_error", {
+                "error": str(error), "exception": exception_diagnostic(error),
+            })
         except Exception as error:
-            return f"后台流程异常: {error}"
+            return _outcome_error("state_db_error", {
+                "error": f"后台流程异常: {error}",
+                "exception": exception_diagnostic(error),
+            })
         try:
             if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
                 await _advance_report_flow(context, flow)
@@ -1336,9 +1382,14 @@ async def _drive_flows(context: SessionContext) -> str | None:
         except (DirectoryBindingError, DeviceConfigurationError):
             raise
         except StateDbFailure as error:
-            return str(error)
+            return _outcome_error("state_db_error", {
+                "error": str(error), "exception": exception_diagnostic(error),
+            })
         except Exception as error:
-            return f"流程 {name} 异常: {error}"
+            return _outcome_error("state_db_error", {
+                "error": f"流程 {name} 异常: {error}",
+                "exception": exception_diagnostic(error),
+            })
     return None
 
 
