@@ -44,6 +44,18 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 公共事务读取复用的验证与安装（2026-10-25）
+
+公共完整行、历史事务范围、有限核实结束决定与原生成员分类接入单次事务复用。完整类型化输入限定读取身份，`validated` 与完整成员核验分别保留资格；写入和独立守卫阶段切换继续清空依据。结束决定首次仍按原完整申请核实，原生分类首次仍完整读取两遍成员。有限原页窗口保持三份原历史行，通用缓存只增加有容量限制的事实和小型结果，不保留完整成员集合。行为契约由[事务读取复用](persistence-runtime.md#单次完整事务的读取复用)维护，方案选择和进度由[专项计划](../superpowers/plans/2026-10-25-common-transaction-read-reuse.md)记录。
+
+同一固定数据库快照、原保存申请及只读 `verify_segment_finish` 的 SQL 从上一交付的 **1416 次降至 405 次，减少 71.4%**；相同语句和参数的重复执行从 **1218 次降至 206 次**，当前共 199 种语句及参数。启用调用剖析的经过时间为 **0.944 秒至 0.583 秒**。返回结果及快照 SHA-256 一致；最初未复用版本为 38520 次 SQL／10.805 秒。有限页窗口合并后的基线为 16772 次 SQL，文件证明重新接入小值复用后继续下降。剩余读取包含不同历史事实、页窗口重读及其他资格查询，不以缓存任意 SQL 代替业务核验。该对照是单次只读诊断，包含计数和剖析开销，不是原完成写事务或目标硬件提速结论。完整比较见 `.local/verification/common-transaction-read-reuse-20261025/performance-comparison.json`。
+
+验证源码为 `1973dc05c0d517a890b92e5dcfc1ee32da9266dd`。Linux 开发容器、CPython 3.11.17、SQLite 3.53.1 下运行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，UTC 2026-10-25T05:59:52.342596+00:00 至 2026-10-25T06:01:38.017619+00:00，结果为 **8087 项通过、1 项跳过、2 条既有 asyncio 标记警告，100.71 秒，退出 0**。原四个读取函数正文语法树与合并基线一致，独立只读复核未发现实质缺陷。命令、环境、源码、退出码、日志、正文核对与复核范围保存在上述目录的 `unit.json`、`unit.log`、`original-read-body-audit.json` 及 `independent-review.json`。按用户要求未运行集成测试或相机命令。
+
+原人工环境 `/home/cld/.camctl/manual-validation-20261025` 已安装对应 wheel，SHA-256 为 `7e2fc17999554d19681a0e4fb9e05faeefb240359be13dfc68f8f9c62c898968`。316 个生产 Python 文件和 27 项权威资源与源码、wheel 和实际安装逐项一致；依赖检查与静态能力导出通过。安装前后配置、41 张业务表、元信息及实例身份相同，数据库继续使用 V5；主机和客户端能力文件相同。交付清单位于 `.local/deployments/20261025-common-transaction-read-reuse/delivery-manifest.json`，人工入口 README 已更新。
+
+camctl 按用户要求继续保持停止，安装后确认没有相应进程，日志大小及修改时间未变。报告维护的空闲完整冻结门控继续保留，会话默认每 500 毫秒的一次索引水位查询仍用于发现变化。真实录像写事务、取回结果及后续启动按[人工验证指南](../hardware/result-reading-performance-validation.md)由用户提交新计划核对。
+
 ## 结果证明复用与报告按需维护（2026-10-25）
 
 人工环境计划 6 的延时动作 21 发布一份原片和一份预览，`finish_segment_recording` 仍执行 124176 次 SQL，经过 15.107 秒，实际提交仅 2.518 毫秒。调用剖析确认，规划、规范事件生成、独立封口及业务守卫多次展开同一结果页、固定文件及内部完成／配对证明。修复在一次完整事务内复用已成功核实的读取；本连接写入后失效，作用域退出后释放，原当前资格、历史完整性及实际共同发布核验保留。边界由[持久化设计](persistence-runtime.md#单次完整事务的读取复用)定义。
