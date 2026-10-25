@@ -10,6 +10,12 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 固定文件输入的页编号类型验证（2026-10-26）
+
+固定文件输入在校验完成页编号后交付普通 `int`，可直接进入有限保存模型的 `document` 编码。`test_saved_file_inputs.py` 分别覆盖 Action6 和 OSMO 的完成文件，检查真实返回字段的精确类型，并将完整返回模型交给生产编码器；未知完成状态的回退页编号也经过同一编码检查。新增用例在修复前两项失败，修复后连同固定成员消费和收尾事实共 104 项单元通过，Python 3.11.17，退出 0，耗时 1.25 秒。
+
+本次单元隔离数据库与设备协作者，没有运行集成测试、CLI 或设备。命令、红绿日志保存在 `.local/verification/read-sharing-snapshot-runtime-20261026/completion-page-type-{red,green}.log`。既有保存副本的收尾重放从成员已固定的状态开始，不经过此次输入形成边界，其结果不能替代本项类型及编码验证。
+
 ## 开发容器重建后的运行环境
 
 环境恢复、测试提速与统一交付由[接续计划](../superpowers/plans/2026-10-25-environment-test-speed-delivery.md)跟踪。恢复后的开发解释器位于 `.local/environments/dev-python311-20261025/`，`apps/camctl/.venv311` 指向该目录。旧失效环境保存在 `.local/archives/environment-20261025/venv311`。CPython 3.11.17 实际链接 SQLite 3.53.1；`uv sync --project apps/camctl --python 3.11 --group test --frozen` 使用显式的开发环境目录，依赖检查通过。运行库检查验证 STRICT、JSON、增量 BLOB 及临时文件库 WAL/FULL，退出 0。

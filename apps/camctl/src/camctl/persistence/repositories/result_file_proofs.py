@@ -127,7 +127,7 @@ def _completion_page(connection, page, file, boundary):
         return None
     page_id = ObjectId(evidence['result_page_event_id'])
     _page_file(connection, page_id, file, boundary, run_id=page.ticket.run_id, completed=True)
-    return page_id
+    return int(page_id)
 
 
 def read_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None):
