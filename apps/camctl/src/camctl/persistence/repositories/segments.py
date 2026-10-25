@@ -182,7 +182,23 @@ def _position(row):
     return (row['directory_number'] or 0,row['segment_index'] or 0,row['identity'],row['id'])
 
 
+@dataclass(frozen=True)
+class _MemberFacts:
+    stored: StoredSegmentMember
+    file: dict
+
+
+@dataclass(frozen=True)
+class SavedSegmentCandidate:
+    candidate: SegmentOutputCandidate
+    file: dict
+
+
 def _read_member(db, row, *, setrow=None):
+    return _read_member_facts(db, row, setrow=setrow).stored
+
+
+def _read_member_facts(db, row, *, setrow=None):
     """消费保存成员的固定文件与直接关系，不重复来源创建算法。"""
     if setrow is None:
         setrow = row_facts(db, 'segment_sets', row['set_id'])
@@ -228,8 +244,8 @@ def _read_member(db, row, *, setrow=None):
             if (file['original_device_file_id'] != original['id']
                     or parse_exact_json(original['identity_key'])[2] != member.pairing_identity):
                 raise ConsistencyError('成员配对端点与固定文件关联不同')
-    return StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],row['file_event_id'],
-                               member,row['pairing_fact_id'])
+    return _MemberFacts(StoredSegmentMember(row['id'],row['file_id'],row['page_event_id'],
+        row['file_event_id'], member,row['pairing_fact_id']), file)
 
 
 def _eligible_original(member):
@@ -239,7 +255,7 @@ def _eligible_original(member):
         and member.size_bytes is not None and member.size_bytes>0)
 
 
-def _output_candidate(db,setrow,stored):
+def _output_candidate(db,setrow,stored, *, paired_members=None):
     """统一两方向资格，只使用冻结成员及其固定file_event事实。"""
     member=stored.member
     if (member.role is SegmentMemberRole.OTHER
@@ -252,7 +268,12 @@ def _output_candidate(db,setrow,stored):
         return SegmentOutputCandidate(stored.member_id,stored.file_id,OutputKind.ORIGINAL)
     if member.role is not SegmentMemberRole.PREVIEW or member.pairing_state is not PreviewPairingState.PAIRED:
         return None
-    paired=_read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity))
+    if paired_members is None:
+        paired = _read_member(db,_member_by_identity(db,setrow['id'],member.pairing_identity), setrow=setrow)
+    else:
+        paired = paired_members.get(member.pairing_identity)
+        if paired is None:
+            raise ConsistencyError('预览配对原片不是同集合真实成员')
     if stored.pairing_fact_id is not None:
         from .result_pages import result_file_family
         action = row_facts(db, 'actions', setrow['action_id'])
@@ -298,19 +319,48 @@ def segment_output_candidate(ref,member_id,owned):
         if opened: db.execute('ROLLBACK')
 
 
-def read_segment_output_candidates(ref,cursor,batch,owned):
-    """按原始成员技术游标续读；空候选页仍可能有继续位置。"""
+def _candidate_page(ref, cursor, batch, db):
+    page = _read_segment_members(ref, cursor, batch, db, with_files=True)
+    row = _set(db, ref, fixed=True)
+    paired = {fact.stored.member.identity: fact.stored for fact in page.items}
+    wanted = {fact.stored.member.pairing_identity for fact in page.items
+              if fact.stored.member.role is SegmentMemberRole.PREVIEW
+              and fact.stored.member.pairing_state is PreviewPairingState.PAIRED}
+    missing = wanted - paired.keys()
+    if missing:
+        marks = ','.join('?' for _ in missing)
+        with closing(db.execute(f'SELECT * FROM segment_members WHERE set_id=? AND identity IN ({marks})',
+                                (row['id'], *sorted(missing)))) as query:
+            columns = tuple(column[0] for column in query.description)
+            selected = tuple(dict(zip(columns, values)) for values in query.fetchmany(batch))
+        for member in selected:
+            stored = _read_member(db, member, setrow=row)
+            paired[stored.member.identity] = stored
+    values = []
+    for fact in page.items:
+        candidate = _output_candidate(db, row, fact.stored, paired_members=paired)
+        if candidate is not None:
+            values.append(SavedSegmentCandidate(candidate, fact.file))
+    return Page(tuple(values), page.next_cursor)
+
+
+def read_segment_finish_candidates(ref, cursor, batch, owned):
+    """按固定成员分页交付候选及同次读取的文件事实，空候选页保留游标。"""
+    if type(batch) is not int or not 1 <= batch <= 128:
+        raise ValueError('分段读取批次必须是1至128的整数')
     db = owned.connection
     opened = not db.in_transaction
     if opened: db.execute('BEGIN')
     try:
-        page=read_segment_members(ref,cursor,batch,owned)
-        row=_set(db,ref,fixed=True)
-        candidates=tuple(candidate for stored in page.items
-            if (candidate:=_output_candidate(db,row,stored)) is not None)
-        return Page(candidates,page.next_cursor)
+        return _candidate_page(ref, cursor, batch, db)
     finally:
         if opened: db.execute('ROLLBACK')
+
+
+def read_segment_output_candidates(ref,cursor,batch,owned):
+    """普通候选目录只交付引用，完成事务使用带固定文件的事实页。"""
+    page = read_segment_finish_candidates(ref, cursor, batch, owned)
+    return Page(tuple(item.candidate for item in page.items), page.next_cursor)
 
 
 def read_segment_members(ref,cursor,batch,owned):
@@ -328,7 +378,7 @@ def read_segment_members(ref,cursor,batch,owned):
             db.execute('ROLLBACK')
 
 
-def _read_segment_members(ref, cursor, batch, db):
+def _read_segment_members(ref, cursor, batch, db, *, with_files=False):
     row = _set(db, ref, fixed=True)
     after=(0,0,'',0)
     if cursor is not None:
@@ -343,7 +393,8 @@ def _read_segment_members(ref, cursor, batch, db):
         (row['id'],*after,batch+1))) as reader:
         columns = tuple(column[0] for column in reader.description)
         selected = tuple(dict(zip(columns, values)) for values in reader.fetchmany(batch+1))
-    records = tuple(_read_member(db, member, setrow=row) for member in selected[:batch])
+    facts = tuple(_read_member_facts(db, member, setrow=row) for member in selected[:batch])
+    records = facts if with_files else tuple(fact.stored for fact in facts)
     following = (SegmentMemberCursor(ref, _position(selected[batch-1]))
                  if len(selected) > batch else None)
     return Page(records, following)
@@ -394,6 +445,45 @@ def _relation_page(ref,cursor,batch,owned,table,cursor_type,order):
 def read_segment_gaps(ref,cursor,batch,owned):
     page=_relation_page(ref,cursor,batch,owned,'segment_gaps',SegmentGapCursor,'gap_no')
     return Page(tuple(_gap(owned.connection,row) for row in page.items),page.next_cursor)
+
+
+def read_segment_finish_scope(ref, cursor, batch, owned):
+    db = owned.connection
+    opened = not db.in_transaction
+    if opened: db.execute('BEGIN')
+    try:
+        return _read_segment_finish_scope(ref, cursor, batch, db)
+    finally:
+        if opened: db.execute('ROLLBACK')
+
+
+def _read_segment_finish_scope(ref, cursor, batch, db):
+    """完成发布按批取得范围行及同集合文件身份，不逐行反查成员。"""
+    if type(batch) is not int or not 1 <= batch <= 128:
+        raise ValueError('范围读取批次必须是1至128的整数')
+    row = _set(db, ref, fixed=True)
+    after = 0
+    if cursor is not None:
+        if not isinstance(cursor, SegmentScopeCursor) or cursor.ref != ref:
+            raise ConsistencyError('范围游标改变原集合或读取种类')
+        after, = cursor.position
+        if _one(db, 'SELECT 1 FROM segment_scope_members WHERE set_id=? AND ordinal=?',
+                (row['id'], after)) is None:
+            raise ConsistencyError('范围游标不属于原集合')
+    with closing(db.execute('SELECT s.id,s.set_id,s.ordinal,s.member_id,s.output_id,m.file_id,m.set_id'
+            ' FROM segment_scope_members s LEFT JOIN segment_members m ON m.id=s.member_id'
+            ' WHERE s.set_id=? AND s.ordinal>? ORDER BY s.ordinal LIMIT ?',
+            (row['id'], after, batch+1))) as query:
+        selected = query.fetchmany(batch+1)
+    values = []
+    for identity, set_id, ordinal, member_id, output_id, file_id, member_set in selected[:batch]:
+        if file_id is None or member_set != row['id']:
+            raise ConsistencyError('默认范围成员不属于固定集合')
+        values.append((dict(id=identity,set_id=set_id,ordinal=ordinal,
+                            member_id=member_id,output_id=output_id), file_id))
+    following = (SegmentScopeCursor(ref, (selected[batch-1][2],))
+                 if len(selected) > batch else None)
+    return Page(tuple(values), following)
 
 
 def read_segment_scope(ref,cursor,batch,owned,*,published=True):

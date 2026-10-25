@@ -1,6 +1,7 @@
 """已固定成员消费保存事实，不再次执行来源事实的创建算法。"""
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -9,10 +10,11 @@ from camctl.capture.files import file_identity_key
 from camctl.capture.segment_models import (
     FileCompletionState, OwnershipState, SegmentMemberRole,
 )
+from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.enums import enum_for
 from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.repositories import result_file_pairing as pairing, segments
+from camctl.persistence.repositories import result_file_pairing as pairing, result_file_proofs as files, segments
 from camctl.persistence.fact_reads import EventRecord
 from camctl.persistence.transaction import event_envelope, row_change
 
@@ -106,3 +108,105 @@ def test_existing_pairing_fact_still_rejects_wrong_identity_or_boundary(saved_pa
     fact.update(change)
     with pytest.raises(ConsistencyError):
         pairing.read_pairing_fact(db, 15, 29, HistoryBoundary(600, 885))
+
+
+@pytest.mark.parametrize('first_page_empty', [False, True])
+def test_finish_candidates_carry_the_file_already_read_for_each_member(monkeypatch, first_page_empty):
+    """分页规则交付明确文件输入，调用方无需再按member_id重新取文件。"""
+    db = _connection()
+    ref = SegmentResultRef(21, 4, 1)
+    setrow = dict(id=4, action_id=21, run_id=28, source_event_id=885, member_count=3)
+    rows = []
+    for identity in range(1, 4):
+        rows.append(dict(id=identity, set_id=4, file_id=29+identity, page_event_id=872,
+            file_event_id=880+identity, identity=f'/DCIM/{identity}.OSV', directory_number=1,
+            segment_index=identity, role=int(enum_for('segment_members.role').ORIGINAL),
+            ownership=int(enum_for('segment_members.ownership').OWNED),
+            completion=int(enum_for('segment_members.completion').COMPLETE),
+            pairing_identity=None, pairing_state=int(enum_for('segment_members.pairing_state').NOT_APPLICABLE),
+            pairing_fact_id=None))
+    monkeypatch.setattr(segments, '_set', create_autospec(segments._set, return_value=setrow))
+    monkeypatch.setattr(segments, 'row_facts', create_autospec(segments.row_facts,
+        side_effect=lambda connection, table, identity: rows[identity-1]))
+    monkeypatch.setattr(segments, '_one', create_autospec(segments._one,
+        side_effect=lambda connection, sql, parameters:
+        (3,) if 'COUNT(*)' in sql else (rows[parameters[1]-30]['identity'], 21, 28)))
+    def execute(sql, parameters=()):
+        cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        cursor.description = tuple((name,) for name in rows[0])
+        after_id = parameters[4]
+        cursor.fetchmany.return_value = [tuple(row.values()) for row in rows if row['id'] > after_id][:parameters[-1]]
+        return cursor
+    db.execute.side_effect = execute
+    def fixed(connection, file_id, event_id):
+        return dict(id=file_id, last_event_id=event_id, source_action_id=21,
+            identity_key=file_identity_key('camera', 'osmo', rows[file_id-30]['identity']),
+            role=int(enum_for('device_files.role').ORIGINAL),
+            size_bytes=0 if first_page_empty and file_id < 32 else 4096,
+            completion_state=int(enum_for('device_files.completion_state').COMPLETE),
+            ownership_evidence_json={'saved': True})
+    port = create_autospec(segments.read_fixed_file, side_effect=fixed)
+    monkeypatch.setattr(segments, 'read_fixed_file', port)
+    owned = type('Reader', (), {'connection': db})()
+    first = segments.read_segment_finish_candidates(ref, None, 2, owned)
+    last = segments.read_segment_finish_candidates(ref, first.next_cursor, 2, owned)
+    expected = [32] if first_page_empty else [30, 31, 32]
+    assert [item.candidate.file_id for item in first.items+last.items] == expected
+    assert [item.file['size_bytes'] for item in first.items+last.items] == [4096]*len(expected)
+    assert first.next_cursor is not None and last.next_cursor is None
+    assert port.call_count == 3
+
+
+@pytest.mark.parametrize('entry', ['fixed', 'boundary'])
+@pytest.mark.parametrize('already_open', [False, True])
+@pytest.mark.parametrize('failed', [False, True])
+def test_public_fixed_file_read_owns_one_snapshot_before_first_query(monkeypatch, entry, already_open, failed):
+    db = _connection()
+    db.in_transaction = already_open
+    statements = []
+    def execute(sql, parameters=()):
+        statements.append(sql)
+        if sql == 'BEGIN': db.in_transaction = True
+        elif sql == 'ROLLBACK': db.in_transaction = False
+    db.execute.side_effect = execute
+    error = ConsistencyError('固定事实读取失败')
+    def event(connection, event_id):
+        assert connection.in_transaction
+        if failed: raise error
+        return SimpleNamespace(transaction=TransactionRange(599, 883, 883))
+    def transaction(connection, transaction_id):
+        assert connection.in_transaction
+        return TransactionRange(599, 883, 883)
+    monkeypatch.setattr(files, 'read_event', create_autospec(files.read_event, side_effect=event))
+    monkeypatch.setattr(files, 'read_transaction', create_autospec(files.read_transaction, side_effect=transaction))
+    monkeypatch.setattr(files, '_one', create_autospec(files._one, return_value=(883,)))
+    monkeypatch.setattr(files, '_reuse_fixed_file', create_autospec(files._reuse_fixed_file,
+        return_value=dict(id=30, last_event_id=883)))
+    call = (lambda: files.read_fixed_file(db, 30, 883)) if entry == 'fixed' else (
+        lambda: files.read_file_at_boundary(db, 30, HistoryBoundary(599, 883)))
+    if failed:
+        with pytest.raises(ConsistencyError) as caught: call()
+        assert caught.value is error
+    else:
+        assert call() == dict(id=30, last_event_id=883)
+    assert db.in_transaction is already_open
+    assert statements == ([] if already_open else ['BEGIN', 'ROLLBACK'])
+
+
+@pytest.mark.parametrize('damage', [None, 'missing_member', 'foreign_member'])
+def test_finish_scope_carries_same_set_file_identity(monkeypatch, damage):
+    db = _connection()
+    ref = SegmentResultRef(21, 4, 1)
+    monkeypatch.setattr(segments, '_set', create_autospec(segments._set, return_value={'id': 4}))
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    cursor.fetchmany.return_value = [(1, 4, 1, 8, None,
+        None if damage == 'missing_member' else 30, 5 if damage == 'foreign_member' else 4)]
+    db.execute.return_value = cursor
+    owned = SimpleNamespace(connection=db)
+    if damage is not None:
+        with pytest.raises(ConsistencyError):
+            segments.read_segment_finish_scope(ref, None, 2, owned)
+    else:
+        page = segments.read_segment_finish_scope(ref, None, 2, owned)
+        assert page.items == ((dict(id=1, set_id=4, ordinal=1, member_id=8, output_id=None), 30),)
+        assert page.next_cursor is None

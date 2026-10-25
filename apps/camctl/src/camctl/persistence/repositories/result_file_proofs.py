@@ -1,5 +1,5 @@
 """读取指定历史位置的已保存文件资格，不重新执行来源创建算法。"""
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 
 from camctl.capture.result_pages import ResultPageRef
@@ -23,7 +23,22 @@ def _one(connection, sql, parameters=()):
         return cursor.fetchone()
 
 
+@contextmanager
+def _read_transaction(connection):
+    opened = not connection.in_transaction
+    if opened: connection.execute('BEGIN')
+    try:
+        yield
+    finally:
+        if opened: connection.execute('ROLLBACK')
+
+
 def read_fixed_file(connection, file_id, file_event_id):
+    with _read_transaction(connection):
+        return _read_fixed_file(connection, file_id, file_event_id)
+
+
+def _read_fixed_file(connection, file_id, file_event_id):
     """读取文件自身完整事务中的最后事实；只保留这个固定版本。"""
     ObjectId(file_id); ObjectId(file_event_id)
     record = read_event(connection, file_event_id)
@@ -33,6 +48,11 @@ def read_fixed_file(connection, file_id, file_event_id):
 
 
 def read_file_at_boundary(connection, file_id, boundary):
+    with _read_transaction(connection):
+        return _read_file_at_boundary(connection, file_id, boundary)
+
+
+def _read_file_at_boundary(connection, file_id, boundary):
     """在完整H定位文件自身最后事实，不从其他页补齐资格。"""
     ObjectId(file_id)
     if not isinstance(boundary, HistoryBoundary):
@@ -105,6 +125,11 @@ def _completion_page(connection, page, file, boundary):
 
 
 def read_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None):
+    with _read_transaction(connection):
+        return _read_result_file_input(connection, page, file_id, boundary, pairing_fact_id=pairing_fact_id)
+
+
+def _read_result_file_input(connection, page, file_id, boundary, *, pairing_fact_id=None):
     """从已保存归属、完成和配对形成有限输入，未知资格不提升。"""
     if not isinstance(page, ResultPageRef) or not isinstance(boundary, HistoryBoundary):
         raise TypeError('文件读取要求原页引用和完整历史边界')

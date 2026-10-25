@@ -317,6 +317,15 @@ def verify_result_file_pairing(request, key, reader, *, execution_finished=True)
 
 
 def read_pairing_fact(connection, fact_id, preview_file_id, boundary):
+    opened = not connection.in_transaction
+    if opened: connection.execute('BEGIN')
+    try:
+        return _read_pairing_fact(connection, fact_id, preview_file_id, boundary)
+    finally:
+        if opened: connection.execute('ROLLBACK')
+
+
+def _read_pairing_fact(connection, fact_id, preview_file_id, boundary):
     """读取已有配对及直接端点，不执行原键核实或重新分类族。"""
     from camctl.contracts.values import ObjectId
     from camctl.history.events import business_columns
