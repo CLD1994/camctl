@@ -42,6 +42,18 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 公共拍摄准备与哈苏接入（2026-10-25）
+
+验证源码为 `8d89fa1112e8474b751a62d416b2ccd9084da667`，范围为公共准备合同、哈苏独立设置与实际 START、照片调度及仓储、V5 格式与保留历史升级，以及准备返回后的取消、过期和真实错误保存。MF 的 `focus` 与 AF-S 的 `autofocus` 保留在实际 START 内，准备恢复不重放镜头操作或已存在的照片 START。
+
+Linux 开发容器使用 CPython 3.11.17、SQLite 3.53.1。完整单元命令为 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，UTC 2026-10-25 01:47:53 至 01:50:42，结果为 **7729 项通过、1 项跳过、2 条既有 asyncio 标记警告，166.02 秒，退出 0**。命令、源码、环境及退出码收据保存在 `.local/verification/shared-capture-preparation-20261025/unit.json`，完整输出为同目录 `unit.log`。独立静态评审通过；本次未运行集成测试或真实相机命令。
+
+人工验证环境已安装 `.local/deployments/20261025-shared-capture-preparation/packages/camctl-0.1.0-py3-none-any.whl`，SHA-256 为 `021d7d52c59adb84cfced5bd0ee56a00e7986760ceb1ce1362d6a85918646ee2`。安装后的 313 个生产 Python 文件和 27 项权威资源与源码、wheel 逐项一致；运行时依赖检查及静态能力导出退出 0。已安装纯对象核对确认哈苏支持独立准备，公共默认提前量为 10 秒，当前格式为 V5；这些检查不访问设备。
+
+安装前确认原环境没有待执行动作、拍摄占用、在途尝试或 CLI `run`。正式 `init --upgrade-capture-preparation` 在原目录生成一致备份，将实际库从 V4 升级为 V5，退出 0。升级前后及备份逐表核对，41 张业务表的内容全部相同，仅元信息格式由 4 改为 5；原实例、三处目录绑定、配置及产物登记保留，外键检查无错误，完整性检查为 `ok`。原 host 与客户端能力文件和安装版导出一致。部署收据、备份路径及核对文件由同目录 `delivery-manifest.json` 记录。
+
+本节的软件与安装结果不代替真实设备验收。用户继续使用原人工验证入口提交新计划；默认准备应留足 10 秒及计划传递时间，哈苏实际对焦仍须在原启动窗口内完成并派发 `capture`。
+
 ## 拍摄提前准备与基准单次扫描（2026-10-25）
 
 按照[提前准备规格](../superpowers/specs/2026-10-25-capture-preparation-design.md)，Action6 与 OSMO 的默认提前量为 10 秒。设置准备独立保存，完整基准复用单次扫描；准备期间保持 pending，到计划时间才复用原活动授予真正 START。原取消、过期、冷恢复、结果保存未确认及分段失败结论均沿同一可靠责任处理。
