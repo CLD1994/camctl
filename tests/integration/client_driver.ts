@@ -690,6 +690,7 @@ async function browserPhotoExport(
     case_name: string;
     params_text: string;
     scheduled_at: string;
+    refresh_scheduled_at?: boolean;
   };
   const params = parseClientJson(input.params_text) as any;
   const capabilitiesText = readFileSync(
@@ -901,10 +902,40 @@ async function browserPhotoExport(
     } else if ((await preview.innerText()).includes("已启用"))
       await preview.click();
     await settled();
-    const applied = await session.state();
+    let applied = await session.state();
     receipt.applied_draft_text = applied.drafts.find(
       (item: Draft) => item.id === target.id,
     ).content.text;
+    await session.page.screenshot({
+      path: `${receiptPath}.applied.png`,
+      fullPage: true,
+    });
+    if (input.refresh_scheduled_at) {
+      // 网页预设往返与截图均已完成，再为真实执行选择时间。
+      const selected = new Date();
+      const scheduledAt = selected.toISOString().slice(0, 19).replace("T", " ");
+      await session.page
+        .getByLabel("执行时间", { exact: true })
+        .fill(scheduledAt.replace(" ", "T"));
+      await settled();
+      await session.check.poll(async () => {
+        const state = await session.state();
+        const draft = state.drafts.find((item: Draft) => item.id === target.id);
+        return (parseClientJson(draft.content.text) as any).actions[0].scheduled_at;
+      }).toBe(scheduledAt);
+      applied = await session.state();
+      const expected = parseClientJson(receipt.applied_draft_text) as any;
+      expected.actions[0].scheduled_at = scheduledAt;
+      const actual = applied.drafts.find((item: Draft) => item.id === target.id).content.text;
+      if (stringifyJson(parseClientJson(actual)) !== stringifyJson(expected))
+        throw new Error("刷新执行时间改写了目标草稿的其他字段");
+      receipt.applied_draft_text = actual;
+      receipt.schedule_refresh = {
+        previous_scheduled_at: input.scheduled_at,
+        scheduled_at: scheduledAt,
+        selected_utc: selected.toISOString(),
+      };
+    }
     if (
       receipt.source_draft_text !==
         applied.drafts.find((item: Draft) => item.id === source.id).content
@@ -914,12 +945,8 @@ async function browserPhotoExport(
           applied.presets.find((item: any) => item.id === preset.id).params,
         )
     ) {
-      throw new Error("应用预设改写了原草稿或预设");
+      throw new Error("应用预设或刷新时间改写了原草稿或预设");
     }
-    await session.page.screenshot({
-      path: `${receiptPath}.applied.png`,
-      fullPage: true,
-    });
     const event = session.page.waitForEvent("download");
     await session.page.getByTestId("export-button").click();
     await (await event).saveAs(planPath);

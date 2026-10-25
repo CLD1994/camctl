@@ -71,11 +71,15 @@ def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
         '"focus":{"mode":"MF","relative_move":5}}'
     )
     input_path = tmp_path / "browser-input.json"
+    refresh_schedule = shutter == "0.000333"
+    before_browser = datetime.now(timezone.utc).replace(microsecond=0)
+    scheduled_at = (before_browser + timedelta(minutes=-2 if refresh_schedule else 5)).strftime("%Y-%m-%d %H:%M:%S")
     input_path.write_text(json.dumps({
         "device_id": "hb-host", "action_type": "camera_take_photo",
         "action_name": "capture", "case_name": f"网页精确快门-{shutter}",
         "params_text": params_text,
-        "scheduled_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
+        "scheduled_at": scheduled_at,
+        "refresh_scheduled_at": refresh_schedule,
     }, ensure_ascii=False))
     plan = tmp_path / "downloaded-plan.json"
     receipt = _client(package, "browser-photo-export", str(store), str(input_path), str(plan),
@@ -97,6 +101,19 @@ def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
     assert plan.read_text() == receipt["request_text"]
     request = json.loads(plan.read_text(), parse_float=Decimal)
     assert len(request["actions"]) == 1
+    source_action = json.loads(receipt["source_draft_text"], parse_float=Decimal)["actions"][0]
+    reopened_action = json.loads(receipt["reopened_draft_text"], parse_float=Decimal)["actions"][0]
+    applied_action = json.loads(receipt["applied_draft_text"], parse_float=Decimal)["actions"][0]
+    assert source_action == reopened_action
+    assert source_action["scheduled_at"] == scheduled_at
+    assert source_action["policy"] == {"max_delay_ms": 60000}
+    assert applied_action == {**source_action, "scheduled_at": request["actions"][0]["scheduled_at"]}
+    assert request["actions"][0] == applied_action
+    if refresh_schedule:
+        assert request["actions"][0]["scheduled_at"] != scheduled_at
+        assert datetime.strptime(request["actions"][0]["scheduled_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) >= before_browser
+    else:
+        assert request["actions"][0]["scheduled_at"] == scheduled_at
     assert str(request["request_id"]) == receipt["request_id"]
     assert receipt["capabilities_sha256"] == hashlib.sha256(description.encode()).hexdigest()
     assert receipt["server_open_count"] == 2
@@ -348,6 +365,8 @@ class PhotoWorld:
         self.package.environment["CAMCTL_HB_TEST_ROOT"] = str(root)
         self.package.environment["CAMCTL_HB_TEST_INSTALLED_PYTHON"] = str(installed.python)
         self.host = HostDemo(self.deployment, host_demo, str(self.launcher))
+        self.request_ids = {}
+        self.report_checks = {}
 
     def start(self):
         def fault_value(environment):
@@ -378,11 +397,13 @@ class PhotoWorld:
             "device_id": "hb-host", "action_type": "camera_take_photo", "action_name": "capture",
             "case_name": self.case.name, "params_text": self.case.params_text,
             "scheduled_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "refresh_scheduled_at": True,
         }))
         plan = self.root / "photo-request.json"
         self.browser = _client(self.package, "browser-photo-export", str(self.store), str(input_path), str(plan),
                                output=self.root / "photo-browser.json")
         self.photo_plan = plan
+        self._remember_request("capture", self.browser)
         return plan
 
     def export_plan(self, name: str, action: dict):
@@ -391,9 +412,23 @@ class PhotoWorld:
         target = self.root / f"{name}-request.json"
         receipt = _client(self.package, "browser-plan-export", str(self.store), str(body), str(target),
                           output=self.root / f"{name}-browser.json")
+        self._remember_request(name, receipt)
         return target, receipt
 
+    def _remember_request(self, name, receipt):
+        request_id = self.request_ids[name] = str(receipt["request_id"])
+        expected = {name: "SUCCEEDED"}
+        # 在调用方 submit 前保存日志起点；成功或故障报告由 report 声明。
+        failure = self.host.watch_failures(request_id=request_id, expected_statuses=expected)
+        self.report_checks[name] = (self.host, expected, failure)
+
     def report(self, name: str, *, status="succeeded"):
+        request_id = self.request_ids[name]
+        observed_host, expected, failure = self.report_checks[name]
+        expected[name] = status.upper()
+        if observed_host is not self.host:
+            # 恢复用例已换成新 host，不能把已主动结束的旧组当成失败。
+            failure = self.host.watch_failures(request_id=request_id, expected_statuses=expected)
         def found():
             for directory in (self.deployment.ready, self.deployment.processing):
                 for path in directory.glob("status-report-*.json"):
@@ -403,12 +438,15 @@ class PhotoWorld:
                         continue
                     report = json.loads(text, parse_float=Decimal)
                     for plan in report["plans"]:
+                        if str(plan["request_id"]) != request_id:
+                            continue
                         for action in plan["actions"]:
                             if action["name"] == name and action["status"] in ("succeeded", "failed"):
                                 assert action["status"] == status, action
                                 return path, report, action
             return None
-        return wait_for(found, 90, f"{self.case.name}/{name} 的 {status} 报告; {self.root}")
+        return wait_for(found, 90, f"{self.case.name}/{name} 请求 {request_id} 的 {status} 报告; {self.root}",
+                        failure=failure)
 
     def claim(self):
         self.host.claim()
@@ -766,6 +804,10 @@ def _stop_fault_host(world, marker):
 
 def _restart_fault_host(world):
     world.host = HostDemo(world.deployment, world.host._demo_path, str(world.launcher))
+    _, expected, _ = world.report_checks['capture']
+    failure = world.host.watch_failures(
+        request_id=world.request_ids['capture'], expected_statuses=expected)
+    world.report_checks['capture'] = (world.host, expected, failure)
     world.start()
     world.host.submit(world.photo_plan)
 
