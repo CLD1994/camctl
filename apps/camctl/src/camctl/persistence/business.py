@@ -56,6 +56,24 @@ async def settle_required(awaitable: Awaitable[T]) -> T:
     return result
 
 
+class SharedSave:
+    """同一拥有者的原保存共同等待；回执和内存应用均由原任务完成。"""
+
+    def __init__(self) -> None:
+        self._task: asyncio.Task | None = None
+
+    async def run(self, save_and_apply: Callable[[], Awaitable[T]]) -> T:
+        """完整原申请保持不变；上次交付结束后可推进下一阶段或核实。"""
+        if self._task is None:
+            self._task = asyncio.create_task(save_and_apply())
+        task = self._task
+        try:
+            return await settle_required(task)
+        finally:
+            if task.done() and self._task is task:
+                self._task = None
+
+
 def _check_value(value):
     # callback自身负责既定有限值类型；端口不反射遍历业务对象图。
     if isinstance(value, (OwnedConnection, sqlite3.Connection, sqlite3.Cursor, Iterator, AsyncIterator)) or inspect.isawaitable(value):
