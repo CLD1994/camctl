@@ -194,6 +194,35 @@ async def test_canceled_recovery_waiter_preserves_shared_actual_result_save(mock
     runtime.preparation_driver.prepare_capture.assert_awaited_once()
 
 
+@pytest.mark.parametrize("cancel_count", [1, 2])
+async def test_cancel_during_intent_save_closes_unentered_preparation_before_release(mocker, cancel_count):
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, action, _ = _world(mocker)
+    entered, release, keys = _held_save(runtime, "intent")
+    device = asyncio.create_task(advance_preparation(runtime, 1))
+    await entered.wait()
+    for _ in range(cancel_count):
+        device.cancel()
+        await asyncio.sleep(0)
+    assert not device.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await device
+    owner = runtime.preparation_cache.owners[1]
+
+    assert owner.saved and not runtime.preparation_cache.pending(1)
+    assert owner.finish.outcome.outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert len(keys) == 1
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+    runtime.operations.finish_attempt.assert_called_once()
+    action.update(status=6, cancel_requested=1)
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    assert await settle_preparation(runtime, 1)
+    runtime.capture.release_occupancy.assert_called_once()
+
+
 @pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK])
 async def test_concurrent_failed_save_keeps_original_request_for_later_recovery(mocker, kind):
     runtime, action, ticket = _world(mocker)

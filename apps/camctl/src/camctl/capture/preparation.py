@@ -295,6 +295,18 @@ async def _call_prepare(owner, runtime, request):
     (await _save_owner(owner, runtime.database, runtime.operations))
 
 
+async def _save_unentered_preparation(owner, runtime):
+    if owner.ticket is None or owner.entered or owner.actual is not None:
+        return
+    owner.actual = DeviceCallResult.from_outcome(CallOutcome(
+        status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+        error=ErrorValue("canceled", "dispatch"),
+        settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                              EvidenceValue("dispatch_prevented", 1))))
+    owner.returned_at = runtime.wall_us()
+    await _save_owner(owner, runtime.database, runtime.operations)
+
+
 async def _recover_old_preparation(runtime, action_id):
     """旧意图只恢复原责任；没有真实返回时不声称设置成功。"""
     def read(owned, parameters=(action_id, _PREPARE_KIND)):
@@ -479,7 +491,14 @@ async def advance_preparation(runtime, action_id):
             owner = PendingPreparation(action_id, activity["id"], runtime.session_key,
                                        intent, runtime.evidence, runtime.preparation_driver)
             cache.owners[action_id] = owner
-            (await _save_owner(owner, runtime.database, runtime.operations))
+            try:
+                await _save_owner(owner, runtime.database, runtime.operations)
+            except asyncio.CancelledError as interrupted:
+                try:
+                    await _save_unentered_preparation(owner, runtime)
+                except BaseException as error:
+                    raise interrupted from error
+                raise
         if owner.task is None and owner.actual is None and owner.finish is None:
             if owner.refused is not None:
                 cache.owners.pop(action_id)
@@ -489,17 +508,10 @@ async def advance_preparation(runtime, action_id):
             try:
                 await _wait_preparation_task(owner.task)
             except asyncio.CancelledError as interrupted:
-                if not owner.entered and owner.actual is None:
-                    owner.actual = DeviceCallResult.from_outcome(CallOutcome(
-                        status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
-                        error=ErrorValue("canceled", "dispatch"),
-                        settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
-                                              EvidenceValue("dispatch_prevented", 1))))
-                    owner.returned_at = runtime.wall_us()
-                    try:
-                        (await _save_owner(owner, runtime.database, runtime.operations))
-                    except BaseException as error:
-                        raise interrupted from error
+                try:
+                    await _save_unentered_preparation(owner, runtime)
+                except BaseException as error:
+                    raise interrupted from error
                 raise
         if not owner.saved:
             return BaselinePreparation(PreparationPhase.WAITING)
