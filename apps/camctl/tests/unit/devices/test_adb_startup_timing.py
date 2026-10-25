@@ -30,6 +30,7 @@ async def test_setting_and_start_command_have_separate_timings():
     assert records[-1]["stage"] == "camera_start_command"
     assert all(record["device_id"] == request.binding.device_id
                and record["activity_id"] == request.ticket.target_id
+               and record["run_id"] == request.ticket.run_id
                and record["attempt_id"] == request.ticket.attempt_id
                and record["elapsed_ms"] >= 0 for record in records)
 

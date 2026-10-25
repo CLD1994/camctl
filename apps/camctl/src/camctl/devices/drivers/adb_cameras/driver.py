@@ -249,6 +249,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                         "camera_start_command" if kind is CameraCall.START else "camera_setting",
                         device_id=request.binding.device_id,
                         activity_id=request.ticket.target_id,
+                        run_id=request.ticket.run_id,
                         attempt_id=request.ticket.attempt_id):
                     outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
                                                  raw_capture=raw_capture)
