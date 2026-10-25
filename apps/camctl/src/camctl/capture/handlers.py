@@ -2456,6 +2456,19 @@ async def _stop_call(runtime: CaptureRuntime, action,
         maximum=runtime.stop_config.max_attempts))
     if remaining is not None:
         return HandlerOutcome("stop_retry_wait", f"{remaining}s")
+    from camctl.devices.tasks import CaptureResultPolicy
+
+    segmented_recording = (
+        action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
+        and action["execution_spec_json"].get("result_policy")
+        in (
+            CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+            CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+        )
+    )
+    # 只使用 START 固定的会话锚点；STOP 返回后先持有实际结果再等待。
+    stop_state = (await _recording_port(runtime).recording_state(action["id"])) \
+        if segmented_recording else None
     intent = AttemptIntent(
         operation="stop",
         action_id=action["id"],
@@ -2489,17 +2502,8 @@ async def _stop_call(runtime: CaptureRuntime, action,
     try:
         if confirmed:
             host_stop = None
-            from camctl.devices.tasks import CaptureResultPolicy
-
-            if (
-                action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
-                and action["execution_spec_json"].get("result_policy")
-                in (
-                    CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
-                    CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
-                )
-            ):
-                state = (await _recording_port(runtime).recording_state(action["id"]))
+            if segmented_recording:
+                state = stop_state
                 elapsed = None
                 if (
                     state.anchor_from_current_session
