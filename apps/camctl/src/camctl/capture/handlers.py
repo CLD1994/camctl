@@ -407,25 +407,33 @@ async def resume_result_check_closes(
             if pending.request.action_id != identity:
                 raise ConsistencyError("原核实收尾申请与所属动作不一致")
             if isinstance(pending.request, ResultSetSave):
-                receipt = await database.write(lambda owned: repository.close_result_check_unconfirmed(pending.request, pending.key, owned), key=pending.key)
-                complete = receipt.kind is DbOutcomeKind.COMPLETED and receipt.value is not None
+                method = repository.close_result_check_unconfirmed
             elif isinstance(pending.request, ResultRunClose):
-                receipt = await database.write(lambda owned: repository.close_unconfirmed_result_run(pending.request, pending.key, owned), key=pending.key)
-                complete = receipt.kind is DbOutcomeKind.COMPLETED
+                method = repository.close_unconfirmed_result_run
             elif isinstance(pending.request, OutputSetFinalizationSave):
-                receipt = await database.write(lambda owned: repository.finalize_output_set(pending.request, pending.key, owned), key=pending.key)
-                complete = receipt.kind is DbOutcomeKind.COMPLETED
+                method = repository.finalize_output_set
             elif isinstance(pending.request, FiniteCancelEndSave):
-                receipt = await database.write(lambda owned: save_finite_cancel_end(pending.request, pending.key, owned), key=pending.key)
-                complete = receipt.kind is DbOutcomeKind.COMPLETED
+                method = save_finite_cancel_end
             else:
                 raise ConsistencyError("原核实收尾申请类型无效")
+            notification_error = None
+            try:
+                receipt = await database.write(lambda owned: method(pending.request, pending.key, owned), key=pending.key)
+            except BaseException as error:
+                receipt = db_outcome_for(error)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                notification_error = error
+            complete = (receipt.kind is DbOutcomeKind.COMPLETED
+                and (not isinstance(pending.request, ResultSetSave) or receipt.value is not None))
             if not complete:
                 raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
             if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
                 activity = await database.read(lambda owned: _activity_id_of_connection(owned.connection, identity))
                 retry_gate.cleared(f"results/{activity}")
             del pending_result_closes[identity]
+            if notification_error is not None:
+                raise notification_error
     return await settle_required(save_and_apply())
 
 

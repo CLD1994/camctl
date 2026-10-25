@@ -41,24 +41,26 @@ def test_recovered_media_input_retains_original_format():
     assert _record_media_source(_registered(entries), iter(entries), source_file_id=1) == (1, 'osv')
 
 
-def test_minimum_size_controls_publication_without_discarding_other_complete_originals():
+@pytest.mark.asyncio
+async def test_minimum_size_controls_publication_without_discarding_other_complete_originals():
     from camctl.capture.handlers import _catalog_drafts
     from camctl.capture.results import ProductRule
     from dataclasses import replace
     original = _entry('a')
     entries = (replace(original, size_bytes=0), replace(original, identity='b', size_bytes=2))
     rule = ProductRule(FileKind.VIDEO, format_id='osv', exact_count=1, min_size_bytes=1)
-    drafts = _catalog_drafts(tuple(_registered(entries)), entries, product_rules=(rule,))
+    drafts = (await _catalog_drafts(tuple(_registered(entries)), entries, product_rules=(rule,)))
     assert [draft.file.device_file_id for draft in drafts] == [2]
 
 
-def test_preview_of_zero_size_original_is_not_published():
+@pytest.mark.asyncio
+async def test_preview_of_zero_size_original_is_not_published():
     from camctl.capture.handlers import _catalog_drafts
     from camctl.capture.results import ProductRule
     from dataclasses import replace
     entries = (replace(_entry('a'), size_bytes=0), _entry('preview', 'lrf', 'a'))
     rule = ProductRule(FileKind.VIDEO, format_id='osv', min_size_bytes=1)
-    assert _catalog_drafts(tuple(_registered(entries)), entries, product_rules=(rule,)) == ()
+    assert (await _catalog_drafts(tuple(_registered(entries)), entries, product_rules=(rule,))) == ()
 
 
 def test_empty_original_is_not_used_as_repair_input():

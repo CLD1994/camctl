@@ -66,7 +66,7 @@ class GrantDouble:
     ticket: object = None
     calls: list = field(default_factory=list)
 
-    def grant(self, request) -> object:
+    async def grant(self, request) -> object:
         from camctl.capture.recording import GrantDecision
 
         self.calls.append(request)
@@ -82,10 +82,10 @@ class FinishDouble:
     saved: list = field(default_factory=list)
     prevented: list = field(default_factory=list)
 
-    def finish(self, ticket, outcome: CallOutcome) -> None:
+    async def finish(self, ticket, outcome: CallOutcome) -> None:
         self.saved.append((ticket, outcome))
 
-    def finish_prevented(self, ticket, reason: str) -> None:
+    async def finish_prevented(self, ticket, reason: str) -> None:
         self.prevented.append((ticket, reason))
 
 

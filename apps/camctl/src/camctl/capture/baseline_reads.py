@@ -10,7 +10,7 @@ from camctl.devices.directory import DirectoryRead
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 
 
 class _DirectoryStop:
@@ -48,7 +48,14 @@ async def resume_baseline_read_save(owner,*,capture,database):
         if (isinstance(owner.saves.pending.request,BaselineReadReturn)
                 and owner.task is not None and not owner.task.done()):
             return None
-        receipt=(await owner.saves.save(capture,database))
+        notification_error = None
+        try:
+            receipt = await owner.saves.save(capture, database)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            notification_error = error
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             owner.diagnostic=receipt.error
             return None
@@ -56,8 +63,12 @@ async def resume_baseline_read_save(owner,*,capture,database):
         response=owner.saves.take()
         if isinstance(request,BaselineReadIntent):
             owner.intent_view=response
+            if notification_error is not None:
+                raise notification_error
             return None
         owner.result=response
+        if notification_error is not None:
+            raise notification_error
         return response
     return await settle_required(save_and_apply())
 

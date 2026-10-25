@@ -20,7 +20,7 @@ from camctl.operations.models import AttemptTicket, EffectState
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.result_format import read_result_document
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind, StateDatabaseError
+from camctl.persistence.models import DbOutcomeKind, StateDatabaseError, db_outcome_for
 from camctl.persistence.repositories.capture import FinishCapture
 from camctl.persistence.repositories.host_capture import (
     HostPhotoComplete,
@@ -128,11 +128,17 @@ async def _prepare_files(runtime, action_id: int):
             runtime.pending_host_photo_prepares[action_id] = pending
         if not isinstance(pending.request, PrepareHostPhoto) or pending.request.action_id != action_id:
             raise ConsistencyError("主机拍摄文件准备仍持有其他原申请")
-        files = await _request_result(
-            runtime, repository, pending,
-            lambda request, key, owned: repository.prepare_host_photo(
-                request.action_id, request.occurred_at, key, owned),
-        )
+        try:
+            files = await _request_result(
+                runtime, repository, pending,
+                lambda request, key, owned: repository.prepare_host_photo(
+                    request.action_id, request.occurred_at, key, owned),
+            )
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+                runtime.pending_host_photo_prepares.pop(action_id, None)
+            raise
         runtime.pending_host_photo_prepares.pop(action_id, None)
         return files
     return await settle_required(save_and_apply())
@@ -149,7 +155,13 @@ async def _save_complete(runtime, action_id: int, request: HostPhotoComplete) ->
             raise ConsistencyError("原主机拍摄完整字节申请不可替换")
         if not isinstance(pending.request, HostPhotoComplete):
             raise ConsistencyError("主机拍摄完整字节保存仍持有准备申请")
-        await _request_result(runtime, repository, pending, repository.save_host_photo_complete)
+        try:
+            await _request_result(runtime, repository, pending, repository.save_host_photo_complete)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+                runtime.pending_host_photo_completions.pop(action_id, None)
+            raise
         runtime.pending_host_photo_completions.pop(action_id, None)
     return await settle_required(save_and_apply())
 

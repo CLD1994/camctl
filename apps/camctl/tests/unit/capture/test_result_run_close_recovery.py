@@ -3,6 +3,9 @@
 from unittest.mock import create_autospec
 
 import pytest
+from support.capture_database import capture_database
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+import sqlite3
 
 from camctl.capture.handlers import PendingResultCheckClose, resume_result_check_closes
 from camctl.capture.models import ResultRunClose, ResultSetPhase, ResultSetSave
@@ -63,22 +66,26 @@ def _assert_original_write(repository, kind, holder, owned):
     assert request.occurred_at == _DECIDED_AT
 
 
-def test_record_completed_without_value_releases_original_holder():
-    owned = object()
+@pytest.mark.asyncio
+async def test_record_completed_without_value_releases_original_holder():
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_unconfirmed_result_run.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     holder = PendingResultCheckClose(_KEY, _request("record"))
     pending = {_ACTION_ID: holder}
 
-    resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+    (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending == {}
     _assert_original_write(repository, "record", holder, owned)
 
 
 @pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK])
-def test_record_unreliable_save_preserves_same_holder_and_original_request(kind):
-    owned = object()
+@pytest.mark.asyncio
+async def test_record_unreliable_save_preserves_same_holder_and_original_request(kind):
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     receipt = DbOutcome(kind, error=ConsistencyError("原保存尚未可靠"))
     repository.close_unconfirmed_result_run.return_value = receipt
@@ -87,7 +94,7 @@ def test_record_unreliable_save_preserves_same_holder_and_original_request(kind)
     pending = {_ACTION_ID: holder}
 
     with pytest.raises(ConsistencyError):
-        resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+        (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending == {_ACTION_ID: holder}
     assert pending[_ACTION_ID] is holder
@@ -95,36 +102,42 @@ def test_record_unreliable_save_preserves_same_holder_and_original_request(kind)
 
 
 @pytest.mark.parametrize("disposition", [ResultSetDisposition.SAVED, ResultSetDisposition.ALREADY])
-def test_result_set_complete_response_releases_original_holder(disposition):
-    owned = object()
+@pytest.mark.asyncio
+async def test_result_set_complete_response_releases_original_holder(disposition):
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_result_check_unconfirmed.return_value = _set_response(disposition)
     holder = PendingResultCheckClose(_KEY, _request("set"))
     pending = {_ACTION_ID: holder}
 
-    resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+    (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending == {}
     _assert_original_write(repository, "set", holder, owned)
 
 
-def test_result_set_completed_without_required_value_keeps_holder_and_rejects():
-    owned = object()
+@pytest.mark.asyncio
+async def test_result_set_completed_without_required_value_keeps_holder_and_rejects():
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_result_check_unconfirmed.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     holder = PendingResultCheckClose(_KEY, _request("set"))
     pending = {_ACTION_ID: holder}
 
     with pytest.raises(ConsistencyError):
-        resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+        (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending[_ACTION_ID] is holder
     _assert_original_write(repository, "set", holder, owned)
 
 
 @pytest.mark.parametrize("kind", [DbOutcomeKind.UNKNOWN, DbOutcomeKind.ROLLED_BACK])
-def test_result_set_unreliable_save_preserves_same_holder(kind):
-    owned = object()
+@pytest.mark.asyncio
+async def test_result_set_unreliable_save_preserves_same_holder(kind):
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_result_check_unconfirmed.return_value = DbOutcome(
         kind, error=ConsistencyError("原集合申请尚未可靠"))
@@ -132,15 +145,17 @@ def test_result_set_unreliable_save_preserves_same_holder(kind):
     pending = {_ACTION_ID: holder}
 
     with pytest.raises(ConsistencyError):
-        resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+        (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending[_ACTION_ID] is holder
     _assert_original_write(repository, "set", holder, owned)
 
 
 @pytest.mark.parametrize("kind", ["record", "set"])
-def test_action_filter_replays_only_the_selected_original_request(kind):
-    owned = object()
+@pytest.mark.asyncio
+async def test_action_filter_replays_only_the_selected_original_request(kind):
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_unconfirmed_result_run.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     repository.close_result_check_unconfirmed.return_value = _set_response()
@@ -148,8 +163,8 @@ def test_action_filter_replays_only_the_selected_original_request(kind):
     other = PendingResultCheckClose(_OTHER_KEY, _request(kind, _OTHER_ID))
     pending = {_OTHER_ID: other, _ACTION_ID: selected}
 
-    resume_result_check_closes(
-        owned, pending_result_closes=pending, action_id=_ACTION_ID, capture=repository)
+    (await resume_result_check_closes(
+        capture_database(owned), pending_result_closes=pending, action_id=_ACTION_ID, capture=repository))
 
     assert pending == {_OTHER_ID: other}
     assert pending[_OTHER_ID] is other
@@ -157,35 +172,41 @@ def test_action_filter_replays_only_the_selected_original_request(kind):
 
 
 @pytest.mark.parametrize("kind", ["record", "set"])
-def test_original_request_identity_mismatch_rejects_before_any_write(kind):
-    owned = object()
+@pytest.mark.asyncio
+async def test_original_request_identity_mismatch_rejects_before_any_write(kind):
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     holder = PendingResultCheckClose(_KEY, _request(kind))
     pending = {_OTHER_ID: holder}
 
     with pytest.raises(ConsistencyError):
-        resume_result_check_closes(
-            owned, pending_result_closes=pending, action_id=_OTHER_ID, capture=repository)
+        (await resume_result_check_closes(
+            capture_database(owned), pending_result_closes=pending, action_id=_OTHER_ID, capture=repository))
 
     assert pending[_OTHER_ID] is holder
     assert repository.mock_calls == []
 
 
-def test_action_filter_without_matching_holder_does_not_write():
-    owned = object()
+@pytest.mark.asyncio
+async def test_action_filter_without_matching_holder_does_not_write():
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     holder = PendingResultCheckClose(_KEY, _request("record"))
     pending = {_ACTION_ID: holder}
 
-    resume_result_check_closes(
-        owned, pending_result_closes=pending, action_id=_OTHER_ID, capture=repository)
+    (await resume_result_check_closes(
+        capture_database(owned), pending_result_closes=pending, action_id=_OTHER_ID, capture=repository))
 
     assert pending[_ACTION_ID] is holder
     assert repository.mock_calls == []
 
 
-def test_shared_collection_routes_record_and_result_set_requests_independently():
-    owned = object()
+@pytest.mark.asyncio
+async def test_shared_collection_routes_record_and_result_set_requests_independently():
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     repository = _repository()
     repository.close_unconfirmed_result_run.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
     repository.close_result_check_unconfirmed.return_value = _set_response()
@@ -193,7 +214,7 @@ def test_shared_collection_routes_record_and_result_set_requests_independently()
     result_set = PendingResultCheckClose(_OTHER_KEY, _request("set", _OTHER_ID))
     pending = {_ACTION_ID: record, _OTHER_ID: result_set}
 
-    resume_result_check_closes(owned, pending_result_closes=pending, capture=repository)
+    (await resume_result_check_closes(capture_database(owned), pending_result_closes=pending, capture=repository))
 
     assert pending == {}
     repository.close_unconfirmed_result_run.assert_called_once_with(record.request, record.key, owned)
