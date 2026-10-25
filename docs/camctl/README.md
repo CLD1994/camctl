@@ -26,6 +26,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | 怎样恢复某个历史位置并重建报告？ | [历史状态查询](historical-state-query.md)：正反向路径、一致读取、分页、分批编码和性能边界 |
 | 历史快照何时生成，是否影响会话退出？ | [快照维护](history-snapshots.md)：对象范围、累计次数、候选发现、分批处理和退出 |
 | 驱动返回什么证据，文件如何分段处理？ | [设备驱动与文件执行](file-runtime.md)：结果分类、线程池、流式传输、取消和文件所有权 |
+| 拍摄前怎样准备，到计划时间怎样真正启动？ | [拍摄提前准备](../superpowers/specs/2026-10-25-capture-preparation-design.md)：提前量、原设备占用、独立设置与 START、失败及冷恢复。 |
 | Action6 与 OSMO 延时参数怎样生成候选命令？ | [延时摄影候选编码](timelapse-command-encoding.md)：完整模板、时间字节替换、历史解释及设备保障边界 |
 | 单文件与多段视频怎样选择，多段处理怎样共用？ | [视频结果模式与公共分段处理](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md)：每相机部署选择、公共集合、内容检查、固定范围、副本复用及报告；[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)与[OSMO 特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)分别提供设备规则 |
 | Hasselblad 如何设置参数并执行单张拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用及正式源部署选择；[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义格式、曝光、白平衡及对焦；公共生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |

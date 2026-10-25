@@ -114,7 +114,7 @@ level = "INFO"
 `devices.<id>.kind`|必填非空字符串，无默认值|当前相机部署使用 `"camera"`；其他种类没有相机动作目录。
 `devices.<id>.driver`|必填非空字符串，无默认值|须为已登记驱动；当前内建标识见下表。
 `devices.<id>.adb.serial`|字符串，无默认值|ADB 相机实际执行时必须有明确 serial；非空、不以 `-` 开头且不含 NUL，不按设备列表顺序选择。
-`devices.<id>.connection.prepare_lead_s`|扩展字段，无当前生效的默认值|加载器仅保留该表，未专项校验类型或范围；当前 CLI 不读取该值，不能用它改变设备准备时机。
+`devices.<id>.connection.prepare_lead_s`|秒数；声明独立准备能力的驱动提供默认值|有限非负数，接受精确小数，拒绝布尔值。0 从计划时间开始准备；正数提前准备，计划不能覆盖。当前 ADB 相机的默认值和占用规则见[拍摄提前准备](../superpowers/specs/2026-10-25-capture-preparation-design.md)。
 
 驱动标识|当前设备及部署配置|能力边界
 -|-|-
