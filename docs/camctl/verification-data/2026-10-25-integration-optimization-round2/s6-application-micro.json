@@ -1,0 +1,1283 @@
+{
+  "date_utc": "2026-10-25T02:25:41.483210+00:00",
+  "kind": "S6真实Application导出微见证",
+  "source_commit": "8164851c8d5aa2a25f7bbd59bd09a6d970b38369",
+  "runtime_scope": "真实Node/Application/Files/HTTP/Chrome与独立客户端SQLite；未执行CLI/C或拍摄",
+  "performance_comparison": false,
+  "new_builds": 0,
+  "new_installs": 0,
+  "pytest_runs": 0,
+  "prior_build": {
+    "candidate": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate",
+    "command_evidence": {
+      "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+      "size_bytes": 4339,
+      "sha256": "cd3082bb081d7a510a866dd2f548498d3fbcdcaf6069c92ff9f2a66652a1d848"
+    },
+    "preparation": {
+      "label": "hasselblad-client-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate/apps/client",
+      "started_utc": "2026-10-25T02:18:36.061978+00:00",
+      "pid": 681948,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:18:42.538993+00:00",
+      "wall_seconds": 6.477022813000076
+    }
+  },
+  "candidate": "/tmp/camctl-itopt-s6-application-micro-20261025/candidate",
+  "production_inputs_equal_main": [
+    {
+      "path": "apps/client/src/domain/generate-report-types.ts",
+      "sha256": "9b38096b8359e7f5291fe651ab06d8efaf93102a8772ac6261cfe9516520689d"
+    },
+    {
+      "path": "apps/client/src/domain/protocol-time.ts",
+      "sha256": "52cf1962a1c318e3d7314be9a2fc86245d8bd6c45bd85f5051430a8dd68ac763"
+    },
+    {
+      "path": "apps/client/src/domain/reports.ts",
+      "sha256": "744642bc7999f12b7c4ece6bd7fe982ccd1f91939db32929f5c5310c85c35407"
+    },
+    {
+      "path": "apps/client/src/domain/request-id.ts",
+      "sha256": "bfb3820c60d80a2a7792ca920a1241fc82182864bbc83115bb76ba3c5c2ef50b"
+    },
+    {
+      "path": "apps/client/src/server/application.ts",
+      "sha256": "e9a1c36597793cf62f6782ac36c92fba53408137da413a349218ad7a25017d5b"
+    },
+    {
+      "path": "apps/client/src/server/database.ts",
+      "sha256": "cdcc137db21b92efc159a1d2160f469ab23b14bcffa13ddcabe3d851bd7ff7b3"
+    },
+    {
+      "path": "apps/client/src/server/files.ts",
+      "sha256": "2fd18ee350d62a75ac6125ee85d7d8208d63c3cfb021ab0eb1c9f39ea0b7d6b7"
+    },
+    {
+      "path": "apps/client/src/server/http.ts",
+      "sha256": "efa8360e5ccab3934664607f3c3d6b65f4988b2efb97059ad4fd8fe7bcf8cea1"
+    },
+    {
+      "path": "apps/client/src/server/lifecycle.ts",
+      "sha256": "093808aec549d6b8720e28feafe150f00e711fd45c1722e4e99007df88c04849"
+    },
+    {
+      "path": "apps/client/src/server/main.ts",
+      "sha256": "c1340c3485445d6c6222f5ebea0da3319b6f9e3be4c82caaca8b9d765789061e"
+    },
+    {
+      "path": "apps/client/src/server/models.ts",
+      "sha256": "811f179c4230f2721e7d24cc6d593bcc9c08a5a8d785981cc920bc0f1f475d26"
+    },
+    {
+      "path": "apps/client/src/server/range.ts",
+      "sha256": "790317f35e9198a50960ca7ce58a00c2741c9fd63c13c26d4bc2d36eae7c1e22"
+    },
+    {
+      "path": "apps/client/src/shared/action-params.ts",
+      "sha256": "850f1258074c225dda9d97e905cffdb942e4d9350725697295ef52397f741830"
+    },
+    {
+      "path": "apps/client/src/shared/actions.ts",
+      "sha256": "cfd7af58675ffd8af25de249cd2eed2faf969ce38d10cb5bd39f2964eb1649eb"
+    },
+    {
+      "path": "apps/client/src/shared/automatic-previews.ts",
+      "sha256": "33f0d6da29a5fc47d8fef78e738fa4565767a1c8ae271c26ac238279b8e8144c"
+    },
+    {
+      "path": "apps/client/src/shared/capabilities.ts",
+      "sha256": "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156"
+    },
+    {
+      "path": "apps/client/src/shared/constant-oneof.ts",
+      "sha256": "d4da67edf07bb2bcaa2449c10ef7f9ab79bce138f7d4db07492d98559218f2a0"
+    },
+    {
+      "path": "apps/client/src/shared/draft-content.ts",
+      "sha256": "825443ee28876d7f6ed95ec552ea024f4c094fcebdf13ca612fca380e3179fce"
+    },
+    {
+      "path": "apps/client/src/shared/draft-creation.ts",
+      "sha256": "431ec2e7874af05b80524bfbe901072310c060a834375a790fb33ea00330e2e8"
+    },
+    {
+      "path": "apps/client/src/shared/draft-plan.ts",
+      "sha256": "4d9b8556ab640f1fafaa22f1b422c7a8b90bfc406a8b098f0cd6465993728c99"
+    },
+    {
+      "path": "apps/client/src/shared/draft-record.ts",
+      "sha256": "9f8ba21b19ebd55780dbbbff5e66a925535035e84a47d30b8475af99391b1d4c"
+    },
+    {
+      "path": "apps/client/src/shared/http-error.ts",
+      "sha256": "d348ef0c724988b1eed821b588eb8dc429be546235a348634f01a8765cbd5373"
+    },
+    {
+      "path": "apps/client/src/shared/json-pointer.ts",
+      "sha256": "94be064647ea7844a7a386267273f0640902c30e746e8a2615378b07d60e199c"
+    },
+    {
+      "path": "apps/client/src/shared/json.ts",
+      "sha256": "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc"
+    },
+    {
+      "path": "apps/client/src/shared/media.ts",
+      "sha256": "3fd325e68ff2f4dedcfae2183468d16b8c3cf8f811ef75b9d45d2682d3bdad15"
+    },
+    {
+      "path": "apps/client/src/shared/object-variants.ts",
+      "sha256": "98b8d394a12b0b1819044ff34c228fc3882a2f5f581d2d8d63bc806676ca26fa"
+    },
+    {
+      "path": "apps/client/src/shared/parameter-variants.ts",
+      "sha256": "2e8c6485d5c92e6d395683a9cb871b096fa9cfd638eab50c15ae7c18208bcebe"
+    },
+    {
+      "path": "apps/client/src/shared/plan.ts",
+      "sha256": "e358463eebcdba8c0581709c8712f5f4292657ce2c79797f00134f54260dc286"
+    },
+    {
+      "path": "apps/client/src/shared/protocol-validation.ts",
+      "sha256": "0e26e1808b0733db8ae403a990bbe641b9f5de88b1c119ffedd16803777b75ce"
+    },
+    {
+      "path": "apps/client/src/shared/scalar-schema.ts",
+      "sha256": "a86c505f48731934bd04e3c178460889d9c24f89959a729ceb3a30c417e9ac74"
+    },
+    {
+      "path": "apps/client/src/shared/schema-nodes.ts",
+      "sha256": "b9780fddfaed7d6ae8348bb826f453cc99fb1a18b3a6c9f46983810faf054903"
+    },
+    {
+      "path": "apps/client/src/shared/segment-report-errors.ts",
+      "sha256": "901eab5015277099a09d1f137a679de3a0a8dfcc18d65f26558a5d9577a82aa4"
+    },
+    {
+      "path": "apps/client/src/shared/status-report.generated.ts",
+      "sha256": "32eaea143fbf7b0f437e8c7290ee7253b795743dc2c5056c8ca6858a02d4ac49"
+    },
+    {
+      "path": "apps/client/src/shared/types.ts",
+      "sha256": "28610ca13d7b45dfdaae851c447bb468263fabe4250443b00508ce98c0410b8e"
+    },
+    {
+      "path": "apps/client/src/shared/validation.ts",
+      "sha256": "2d6cc41b1cee6c57a5e1187bd0b5ba45d3815624a7c439957afc31c8ad83862d"
+    },
+    {
+      "path": "apps/client/src/shared/video-size-estimate.ts",
+      "sha256": "d451d230674d8840387699206123e790ad2ab5519af63dd2ccace148f7aed581"
+    },
+    {
+      "path": "apps/client/src/web/ActionResult.tsx",
+      "sha256": "c53e7d7af0c55544a5b569899964dcd4b6b053ea5f1b84485c52de316c0e65c2"
+    },
+    {
+      "path": "apps/client/src/web/App.tsx",
+      "sha256": "66d99b5259fd8e0b3ed9808511841b583c80038b6d19b9d1cf89ff3292c5f6a1"
+    },
+    {
+      "path": "apps/client/src/web/BuiltinFields.tsx",
+      "sha256": "81c338ce737f060d34128c8620c49dea90fbbfc5d0c580420a2061bf7b5e9c58"
+    },
+    {
+      "path": "apps/client/src/web/DeviceGuide.tsx",
+      "sha256": "a95e7779d4bd19a590a5964980c51be8508d7ca868cd92e30920a495d3d06121"
+    },
+    {
+      "path": "apps/client/src/web/DraftConflictDialog.tsx",
+      "sha256": "0a82657294448f90c9934304e24544bd2069cd7f9e341b34d92dc277294f0b21"
+    },
+    {
+      "path": "apps/client/src/web/DraftOperationNotice.tsx",
+      "sha256": "de387678257c3cc375f93fa518ff9f49a92d49999540e5b891ec18079f016456"
+    },
+    {
+      "path": "apps/client/src/web/Editor.tsx",
+      "sha256": "9d58e92d71d74523cd84e72f416d8752f0930e867dafbd500ff39548a3533355"
+    },
+    {
+      "path": "apps/client/src/web/Fields.tsx",
+      "sha256": "4ab793b5f5ee140f52ec11b99478762286cd5315a8992d6e695dc6010f3d2470"
+    },
+    {
+      "path": "apps/client/src/web/JsonFieldRules.tsx",
+      "sha256": "fb0b0e7263071c256cd9acc6dfb358a363dc7f62e6ed119a47c09d4bee9e54bb"
+    },
+    {
+      "path": "apps/client/src/web/MediaResults.tsx",
+      "sha256": "1232294af0f0bf2609f7001148b9063bbbef6604f36ee473580e4e55260adb2d"
+    },
+    {
+      "path": "apps/client/src/web/ObjectBranchField.tsx",
+      "sha256": "cf62bb4acce6600175d84465d8fbccd9d89a8ac6592de744d431378f43380e3e"
+    },
+    {
+      "path": "apps/client/src/web/PreviewControl.tsx",
+      "sha256": "cd9f109a18b67e4bcc1a40a62244db102a3a70c759516e0a249db5b80e2fdf81"
+    },
+    {
+      "path": "apps/client/src/web/Records.tsx",
+      "sha256": "48568d84468f703b9d3540a2951c120dde6eed6e3e1a791b901184a142a59f0a"
+    },
+    {
+      "path": "apps/client/src/web/Select.tsx",
+      "sha256": "c33c68703f08786a3353c6e7bbdc6cd1555f97c51bbfdfa65b4e05ccbe9c42d6"
+    },
+    {
+      "path": "apps/client/src/web/Validation.tsx",
+      "sha256": "9477d504b7d2d042d76248007e776e21fa59d37f041c17199f69430f13ab2f6d"
+    },
+    {
+      "path": "apps/client/src/web/VideoSizeEstimate.tsx",
+      "sha256": "957d69e0f34c78c8ad2a1b18e77efe40c686a5c7350a1e363b1284a7e3cd91c5"
+    },
+    {
+      "path": "apps/client/src/web/action-drafts.ts",
+      "sha256": "8c2bd87e09b19cff4e85ac7a6b2a8c0fd42fe2ffdf5c8c9bdd3b940e66285091"
+    },
+    {
+      "path": "apps/client/src/web/action-ui-identity.ts",
+      "sha256": "141c9225b993c37d57f8d7a3e2dac4872151eeba5db14e11ab55478ab528ab99"
+    },
+    {
+      "path": "apps/client/src/web/api.ts",
+      "sha256": "04ed608f4b28591dee4e08f580621d631c407cebd16d82abe9a3b2a61e5ef3a3"
+    },
+    {
+      "path": "apps/client/src/web/common.tsx",
+      "sha256": "e47181ebccb4c56bab38acc6be52f8406f37f454beb06857fa41075b5a97044e"
+    },
+    {
+      "path": "apps/client/src/web/device-options.ts",
+      "sha256": "38bd5921c67de932d6d2ab8d98a1fe5984b401e2f0a26235cac902b05cbb9f76"
+    },
+    {
+      "path": "apps/client/src/web/draft-conflict-presentation.ts",
+      "sha256": "1a58a9ef4d0d272daedb864ce85d04ebbdd68b6d448d434758d147e8b8f77ba2"
+    },
+    {
+      "path": "apps/client/src/web/draft-conflicts.ts",
+      "sha256": "1b9c4534fcd6d69264c60a53db9e114e23de41f368475517eebbe82fe6d201d0"
+    },
+    {
+      "path": "apps/client/src/web/draft-copy-target.ts",
+      "sha256": "aa569531b62814028ba09e944dd0d67ab9b4ad85750dfa1862ac121f6d778bcb"
+    },
+    {
+      "path": "apps/client/src/web/draft-copy.ts",
+      "sha256": "7cabf01a74fb7d19916a47f23c1750832b55d21c21c34e907c1c9febd2b27ded"
+    },
+    {
+      "path": "apps/client/src/web/draft-session-view.ts",
+      "sha256": "8ec06c1fd5a546b648ed12df1ae29ae85bf868373b8efea6ade4237ee2c56092"
+    },
+    {
+      "path": "apps/client/src/web/editing.ts",
+      "sha256": "d76a26a588fe44300321ff68d133184e24cbc9704a0c6b8d9e420d39653ed306"
+    },
+    {
+      "path": "apps/client/src/web/env.d.ts",
+      "sha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5"
+    },
+    {
+      "path": "apps/client/src/web/feedback.ts",
+      "sha256": "3d0a820538da4f2d6802fb8bec2fd56b6a3b8e6ea1e0f9b0c3a8b2cee0610e97"
+    },
+    {
+      "path": "apps/client/src/web/followup.ts",
+      "sha256": "2c0498803fc0a23dcd6c2a3259dd17dee62c046f280cd22631f3c03904f43ba7"
+    },
+    {
+      "path": "apps/client/src/web/index.html",
+      "sha256": "62052d1876c99bb3fd833e4c5c95d8e4cc3aa8f6c5f478357b201e968958d324"
+    },
+    {
+      "path": "apps/client/src/web/main.tsx",
+      "sha256": "c60c57f0d942df977629f34b8e0664546f82ab2e2403cfe9fefc181c6fd9e039"
+    },
+    {
+      "path": "apps/client/src/web/object-branches.ts",
+      "sha256": "8ca9c8112927b8a6715b271afc52d35e958a6ef9db5653f88b92d74b79ebe656"
+    },
+    {
+      "path": "apps/client/src/web/parameter-drafts.ts",
+      "sha256": "3d063521af61c68869b827e61fe8ba841f6141acf23b0d975b47337ee1f9b7c1"
+    },
+    {
+      "path": "apps/client/src/web/parameter-options.ts",
+      "sha256": "1028b04b2ed0ce0312389d0152f5cb1e8323278cb5b424e74e35b67c781df940"
+    },
+    {
+      "path": "apps/client/src/web/result-model.ts",
+      "sha256": "6e4d51d7f5497e0fee8ef6228adab2f270d837d6d177cb09dbd7bba723e944f1"
+    },
+    {
+      "path": "apps/client/src/web/scalar-options.ts",
+      "sha256": "9fdf765be9c1a147c90bbed109d0bad27587746e03d69ec2f753a2182284dc4b"
+    },
+    {
+      "path": "apps/client/src/web/scalar-schema.ts",
+      "sha256": "a750ea1cbcf048ece6c35838db9bb85b7421993a2e17c877a03e4502bcdfd249"
+    },
+    {
+      "path": "apps/client/src/web/session.ts",
+      "sha256": "dc0161cf365f2cfe63b1771250f9953cc4a778775bd62dad8d21615f86b100de"
+    },
+    {
+      "path": "apps/client/src/web/state-observations.ts",
+      "sha256": "f2f835463d07317cd720dd0ab70b696c841eb209ccc4870263dae114da5eb56d"
+    },
+    {
+      "path": "apps/client/src/web/style.css",
+      "sha256": "89c0c5c04115470f2327e1572776b4b35857db2267bad8b698cc385373757f28"
+    },
+    {
+      "path": "apps/client/src/web/validation-presentation.ts",
+      "sha256": "94bfba4f3e4edcec5c97300f80f4923d99bf54c55283cecacb6e9c3760d9f7e9"
+    },
+    {
+      "path": "apps/client/src/web/video-estimate-state.ts",
+      "sha256": "bbcca00efa6afa8ba21f39282a07f2421a33e525ed68b3079dcc325ef5a07c43"
+    },
+    {
+      "path": "protocol/README.md",
+      "sha256": "6deae091f9bcae43857a6b88d15d233a668f0e07493660666e100be877713626"
+    },
+    {
+      "path": "protocol/errors/workflow-codes.json",
+      "sha256": "00629ad2641287d8c5dbc52ef94583890154064143567194b5bd0621987c7275"
+    },
+    {
+      "path": "protocol/examples/capabilities/demo-capture-devices.json",
+      "sha256": "45869022f11007ffc813a7ddbb4ac3660b10af3fe035d7d88ae960b6819101e8"
+    },
+    {
+      "path": "protocol/examples/capabilities/demo-device.json",
+      "sha256": "b0eef1656d6bb6d376a7ea54da2822ac8b2d5898cf81db828456a1d31558cda7"
+    },
+    {
+      "path": "protocol/examples/capabilities/empty-devices.json",
+      "sha256": "bf26ff34a2c5780a4d64769a297a4a82915df9b8f7b1096173f0fbcc20550e6e"
+    },
+    {
+      "path": "protocol/examples/client-protocol/01-success/ack-plan.json",
+      "sha256": "3ff323833cf382f77fd0b81ae20da2d3b1719184f6342741399f59a4957aeb50"
+    },
+    {
+      "path": "protocol/examples/client-protocol/01-success/plan.json",
+      "sha256": "085475af07d4d178bfd53a7526ba2ff98f508bdd34d8bc8c5f4bf046cc5c8212"
+    },
+    {
+      "path": "protocol/examples/client-protocol/01-success/status-report-1-006a1681cd1f0dff673730514d34f08c64407f7a4fe3854c31f7d0dfb868ab89.json",
+      "sha256": "006a1681cd1f0dff673730514d34f08c64407f7a4fe3854c31f7d0dfb868ab89"
+    },
+    {
+      "path": "protocol/examples/client-protocol/02-action-invalid/ack-plan.json",
+      "sha256": "0333fd28c65492491e26418d827166661f9e95c7779ffdc56d084832cb46470c"
+    },
+    {
+      "path": "protocol/examples/client-protocol/02-action-invalid/client-merged-plan.json",
+      "sha256": "40ef992dd77af46d6e77a83d2135ae9c41f6f78d6ea5210668b5eb173155b5f3"
+    },
+    {
+      "path": "protocol/examples/client-protocol/02-action-invalid/plan.json",
+      "sha256": "4173aa59481f37f006784bc06e29d3be432e6e4c66f93ee50660f27d06d9acf4"
+    },
+    {
+      "path": "protocol/examples/client-protocol/02-action-invalid/status-report-1-aaa34f00e10b1c724ef8b2bf6f14ca05be93bff0e71dfdf2ee15d76dd57ddd2a.json",
+      "sha256": "aaa34f00e10b1c724ef8b2bf6f14ca05be93bff0e71dfdf2ee15d76dd57ddd2a"
+    },
+    {
+      "path": "protocol/examples/client-protocol/02-action-invalid/status-report-2-270ad7c47c90ec91cfe61c55d1b456626455eba35d1f086b5876b50ebec7767d.json",
+      "sha256": "270ad7c47c90ec91cfe61c55d1b456626455eba35d1f086b5876b50ebec7767d"
+    },
+    {
+      "path": "protocol/examples/client-protocol/03-obtain-partial/plan.json",
+      "sha256": "27793b32f4ccd1657f1815bf0c886f1f79a59d9d6c5114197dc942f2f2c7dfa5"
+    },
+    {
+      "path": "protocol/examples/client-protocol/03-obtain-partial/retry-plan.json",
+      "sha256": "0182ceba189662d853340022550b6c61e4f091e7b80f33394a6698916b3abcae"
+    },
+    {
+      "path": "protocol/examples/client-protocol/03-obtain-partial/status-report-1-4064c5fd0d7745b9935b18b6fd0993565c1ac7e8cd6eef407e0ea2ca8f14da34.json",
+      "sha256": "4064c5fd0d7745b9935b18b6fd0993565c1ac7e8cd6eef407e0ea2ca8f14da34"
+    },
+    {
+      "path": "protocol/examples/client-protocol/04-source-no-output/plan.json",
+      "sha256": "b245075ae195a545a01cc15e31ec81170360d5ea5836e1d4890555de990713fc"
+    },
+    {
+      "path": "protocol/examples/client-protocol/04-source-no-output/status-report-1-2e4b937c17c591f488216b08dbc49931749f1e32d0d30e1fa01017166aa71852.json",
+      "sha256": "2e4b937c17c591f488216b08dbc49931749f1e32d0d30e1fa01017166aa71852"
+    },
+    {
+      "path": "protocol/examples/client-protocol/05-cancel-and-cleanup/capture-plan.json",
+      "sha256": "4baf63a9cf0d3ebaa23246330c86d73b6dd2fdf7a248542e01bc4da4715e0b78"
+    },
+    {
+      "path": "protocol/examples/client-protocol/05-cancel-and-cleanup/maintenance-plan.json",
+      "sha256": "2ce61b9f9b5645981f47a5e7a9e620653e5d4591ac0cf06ae9a661a08e93661c"
+    },
+    {
+      "path": "protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-2-09ac642ba5815628f619eae595e492f6758c179c65c1c3a45c7a9c45ad987c02.json",
+      "sha256": "09ac642ba5815628f619eae595e492f6758c179c65c1c3a45c7a9c45ad987c02"
+    },
+    {
+      "path": "protocol/examples/client-protocol/05-cancel-and-cleanup/status-report-3-e7e6561fcf93e68e3d9756608d0c61af09faa8946dd535aacdaf4ef812a88a00.json",
+      "sha256": "e7e6561fcf93e68e3d9756608d0c61af09faa8946dd535aacdaf4ef812a88a00"
+    },
+    {
+      "path": "protocol/examples/client-protocol/06-cancel-stop-failed/status-report-1-5c5fb66b2aa58c3321bb618d2034bae4254b094b292579bd1ece6ea9cc6e1115.json",
+      "sha256": "5c5fb66b2aa58c3321bb618d2034bae4254b094b292579bd1ece6ea9cc6e1115"
+    },
+    {
+      "path": "protocol/examples/client-protocol/history.md",
+      "sha256": "3389dda446bb204790029d66cb52e079d7565423e16585821a198c3b32530da2"
+    },
+    {
+      "path": "protocol/examples/deployment/config.toml",
+      "sha256": "d9e294ecd9b93854ea4c868a42a6c91bba4dfe60b9480c2464142a2015e3c994"
+    },
+    {
+      "path": "protocol/examples/deployment/report-plan.json",
+      "sha256": "087e7d2ac18ee963d7ec8fbefca99b2fc04311c559aba90b87f18d3f38db6a53"
+    },
+    {
+      "path": "protocol/examples/host-notifications/README.md",
+      "sha256": "67f7ba784b140f5a325be4508bf27769bc161337c0849b5978d7538341cef063"
+    },
+    {
+      "path": "protocol/examples/host-notifications/cases.json",
+      "sha256": "613ad8332997ab265ebbc01056dbeb9449455b8a8e4fba5d04ea98b68f53d0b0"
+    },
+    {
+      "path": "protocol/examples/host-notifications/plan.json",
+      "sha256": "fea8bbfa7437eb723ad6b06dd493c4b6bb12c7d3a8ad1b0ec55d2ca4bac6d20b"
+    },
+    {
+      "path": "protocol/examples/status-sync/README.md",
+      "sha256": "83fe2b4869436b6b2ad6e59d43143d5922feafadb42fef3bf5df3480c6b89465"
+    },
+    {
+      "path": "protocol/examples/status-sync/capture-a-plan.json",
+      "sha256": "d181c59b0ad7ac69d806f42a53d79f570110a76d561c1b58b1e6013550d42ac4"
+    },
+    {
+      "path": "protocol/examples/status-sync/capture-b-plan.json",
+      "sha256": "2d4a6c9ae4b4b2be853fb7c15b119a0522ad74af871712cbe6726c9f5b1904e0"
+    },
+    {
+      "path": "protocol/examples/status-sync/cleanup-a-plan.json",
+      "sha256": "f078310f41fc4a628f3a2a844932d15ce11ee0e2233f558a88335b8192ae5582"
+    },
+    {
+      "path": "protocol/examples/status-sync/cleanup-b-plan.json",
+      "sha256": "94536c0b2ad6acfa72fb3828f219a0b8085eb9cf6aa9a8d769488ca4347e4687"
+    },
+    {
+      "path": "protocol/examples/status-sync/history.md",
+      "sha256": "484cbeb79e8e1dbe017d65d8b375a9cfc4f846ed6313bd558e8bda87ce52c07c"
+    },
+    {
+      "path": "protocol/examples/status-sync/missing-report-plan.json",
+      "sha256": "2b25ea3742d5f9ef0f34063ee10484403158e5bda3d16ffedaf53a5e55721673"
+    },
+    {
+      "path": "protocol/examples/status-sync/missing-report.md",
+      "sha256": "58d79e54f1e9939629676756f202ff9d7a5fba69f7d643f09489219e56d91915"
+    },
+    {
+      "path": "protocol/examples/status-sync/recover-plan.json",
+      "sha256": "375e46f8524ae0eeeda1568ee5dd96c4514abe39dedd8a2b4569e3c04c8aee05"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-1-bf1e057beb01b4b6f73b7f15d0f86d27fef2d749bd59903292cf95c38da90d62.json",
+      "sha256": "bf1e057beb01b4b6f73b7f15d0f86d27fef2d749bd59903292cf95c38da90d62"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-2-40d86a3a13521411124db9c8ea7c635e44db8ba3a016331d4e36f6378f3215ef.json",
+      "sha256": "40d86a3a13521411124db9c8ea7c635e44db8ba3a016331d4e36f6378f3215ef"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-3-374d22eb3a5e4f47499cfd82d4815a4db6e5bf89a25357981939c795accb6588.json",
+      "sha256": "374d22eb3a5e4f47499cfd82d4815a4db6e5bf89a25357981939c795accb6588"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-4-32b4eec29fba24034ee721a8a8253f317187c478a3377459cef5e33e2ca112ea.json",
+      "sha256": "32b4eec29fba24034ee721a8a8253f317187c478a3377459cef5e33e2ca112ea"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-5-cb06d32fa03cc48c68715396f20e6febe0d39b04a1527442c14e6653b0513729.json",
+      "sha256": "cb06d32fa03cc48c68715396f20e6febe0d39b04a1527442c14e6653b0513729"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-6-a5623b0288af3e054a448e2ab8c69ed77aa32a112b286e1fa19a0a6eadc8fb69.json",
+      "sha256": "a5623b0288af3e054a448e2ab8c69ed77aa32a112b286e1fa19a0a6eadc8fb69"
+    },
+    {
+      "path": "protocol/examples/status-sync/status-report-7-4a6a5f6416f5bcc83d0fe9d06fe58201840c47808cdecb49ad43f376b85f0143.json",
+      "sha256": "4a6a5f6416f5bcc83d0fe9d06fe58201840c47808cdecb49ad43f376b85f0143"
+    },
+    {
+      "path": "protocol/examples/video-size-estimate/README.md",
+      "sha256": "62748dfa2c10b51dee471e5ec35ff683a349369053ce4d425732c1f8192c29a3"
+    },
+    {
+      "path": "protocol/examples/video-size-estimate/capabilities.json",
+      "sha256": "b588a1298b3c346f01ba35881de0b6e1241396eb20e5626ce8dff3750b30b60d"
+    },
+    {
+      "path": "protocol/examples/video-size-estimate/cases.json",
+      "sha256": "29e99d75afa3774cd75f05722c86f7639c7af0700e5b03a383a474fb4eef395a"
+    },
+    {
+      "path": "protocol/examples/workflows/README.md",
+      "sha256": "9349a6468e33701316f600f13df0dd7980430c457b60afb139f2c27e8f7ad40f"
+    },
+    {
+      "path": "protocol/examples/workflows/cancel-controller/status-report-1-ca21c5bbb9f88309020fe1da9e2201c24a219533989ed7755d1d79517a709f3c.json",
+      "sha256": "ca21c5bbb9f88309020fe1da9e2201c24a219533989ed7755d1d79517a709f3c"
+    },
+    {
+      "path": "protocol/examples/workflows/cancel-self/status-report-1-495e676f1828eabcf9dff12979619119bb609bc7e6ad586b2cf806b53fc2fe7d.json",
+      "sha256": "495e676f1828eabcf9dff12979619119bb609bc7e6ad586b2cf806b53fc2fe7d"
+    },
+    {
+      "path": "protocol/examples/workflows/canceled-complete-copy/status-report-1-1e0484d32c4cb0123f31b0eccf1cd13617bf913486ac2ed8931ba28149c8e020.json",
+      "sha256": "1e0484d32c4cb0123f31b0eccf1cd13617bf913486ac2ed8931ba28149c8e020"
+    },
+    {
+      "path": "protocol/examples/workflows/capabilities.json",
+      "sha256": "cf73699fb9b80306a23dead2a832e69581b894f63721b86d5f8a35222993d52c"
+    },
+    {
+      "path": "protocol/examples/workflows/device-execution/status-report-1-1fe974f8f413e09fed91be0ca749cca10bc38590e3be491340dbf64d1ba879da.json",
+      "sha256": "1fe974f8f413e09fed91be0ca749cca10bc38590e3be491340dbf64d1ba879da"
+    },
+    {
+      "path": "protocol/examples/workflows/device-execution/status-report-2-07a80c89f0f9ce374a5361087f072322e5955c44c3f599ca4545f863393c5092.json",
+      "sha256": "07a80c89f0f9ce374a5361087f072322e5955c44c3f599ca4545f863393c5092"
+    },
+    {
+      "path": "protocol/examples/workflows/duplicate-auto-plan.json",
+      "sha256": "7ae087b2d60756853a44e979fac38d2ff8410385eb836f98ec3263f793ed54fe"
+    },
+    {
+      "path": "protocol/examples/workflows/duplicate-auto/status-report-1-79f0640fd9ecb7c6bb168a2628da90b1e9d05b004f719a8311b772e872e9026d.json",
+      "sha256": "79f0640fd9ecb7c6bb168a2628da90b1e9d05b004f719a8311b772e872e9026d"
+    },
+    {
+      "path": "protocol/examples/workflows/empty-cleanup/status-report-1-4241dd4999185178eb77aaa16f09d505fbff929055d50189420637b965988b81.json",
+      "sha256": "4241dd4999185178eb77aaa16f09d505fbff929055d50189420637b965988b81"
+    },
+    {
+      "path": "protocol/examples/workflows/explicit-invalid-ids/status-report-1-84b7a70ffc2d6de03c29eec510a1a5ee889e8f844afadd3931044b5ee00e1790.json",
+      "sha256": "84b7a70ffc2d6de03c29eec510a1a5ee889e8f844afadd3931044b5ee00e1790"
+    },
+    {
+      "path": "protocol/examples/workflows/handoff-unconfirmed/status-report-1-28ace100d059cea36f1d7ca7292e36d5ead1c197e3972e968007d62aab5abd98.json",
+      "sha256": "28ace100d059cea36f1d7ca7292e36d5ead1c197e3972e968007d62aab5abd98"
+    },
+    {
+      "path": "protocol/examples/workflows/plan.json",
+      "sha256": "09ebb9a288dd000ea7d965d5d3a0fe84d23cc4721930dd0929e61839ab14d56a"
+    },
+    {
+      "path": "protocol/examples/workflows/preview-repaired/status-report-1-1ddd9af9225a8a8a1d6a9418438cd88ccf81a3a08c9de43e5fd19e63e5b4c649.json",
+      "sha256": "1ddd9af9225a8a8a1d6a9418438cd88ccf81a3a08c9de43e5fd19e63e5b4c649"
+    },
+    {
+      "path": "protocol/examples/workflows/range-selection/status-report-1-c4f487575cdda8dbfa75242182fe23d153965625385e42aa78a5b7f206cda643.json",
+      "sha256": "c4f487575cdda8dbfa75242182fe23d153965625385e42aa78a5b7f206cda643"
+    },
+    {
+      "path": "protocol/examples/workflows/reports.json",
+      "sha256": "626f8094a412d4bc135ff7b4e0fe798ad8b7a6f76ec0881299b7a7cea2eeecad"
+    },
+    {
+      "path": "protocol/examples/workflows/schema-cases.json",
+      "sha256": "c5976552181004bd7bc4b292e798a9fb4abc9a3fbd856101434c73b10a4315ab"
+    },
+    {
+      "path": "protocol/examples/workflows/waiting-source/status-report-1-c0f393c1534f4d2e05b2a3ea323df1eb1bdf9a500b53860310156c4c8cbb7d63.json",
+      "sha256": "c0f393c1534f4d2e05b2a3ea323df1eb1bdf9a500b53860310156c4c8cbb7d63"
+    },
+    {
+      "path": "protocol/host-notifications.md",
+      "sha256": "2fae28bc81d3201941bccdb059cd474e75b2b237211d5d7058c017225ca53374"
+    },
+    {
+      "path": "protocol/schemas/capabilities.schema.json",
+      "sha256": "78bea069ea44dae6e242a47499dcd8dc8ad94b657916275ad1e4e8e74bb32ba7"
+    },
+    {
+      "path": "protocol/schemas/host-notification.schema.json",
+      "sha256": "38c79723be154e70401cbe9d6239112da1df62649840b9b53df66ce358402fa2"
+    },
+    {
+      "path": "protocol/schemas/plan.schema.json",
+      "sha256": "daca58b8f87a795e60d7c984ac24e4f078d560b256a98c25b5b34f499f15b825"
+    },
+    {
+      "path": "protocol/schemas/status-report.schema.json",
+      "sha256": "3c863a9a4ebd127c04a8a48fb10147ff5b80c2702dda20336d9002e6e289136e"
+    },
+    {
+      "path": "apps/client/package.json",
+      "sha256": "fcecb76c5c330f9affb33ff9bc41bd8c957664818c6f51ee6c5b8683934dfb92"
+    },
+    {
+      "path": "apps/client/package-lock.json",
+      "sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1"
+    },
+    {
+      "path": "apps/client/vite.config.ts",
+      "sha256": "544bbe68ce378c9672808cdb7aab73db604a85223780d66de0c622cccaa426b9"
+    },
+    {
+      "path": "apps/client/tsconfig.json",
+      "sha256": "119e855e0bc75d2f2ff188b21e4f41fc27078969c47ed2036d63ad0d85504e30"
+    }
+  ],
+  "reused_build_files": [
+    {
+      "path": "apps/client/dist/web/assets/ActionResult-uaSqzfGH.js",
+      "sha256": "29a4917c7fee8f66cedf9af99e282efe5b45723174f341772fe97ba01b466d03"
+    },
+    {
+      "path": "apps/client/dist/web/assets/index-B36VT0zT.js",
+      "sha256": "4723a1ae18620931ac345c7e8d7334c5dde86f81a4bc739c15dcb088b1216923"
+    },
+    {
+      "path": "apps/client/dist/web/assets/index-YEJVsm3_.css",
+      "sha256": "d4d76658aaf7648420f5f62f9c8d12739d13277aaa484d8c28ad8945d77effd0"
+    },
+    {
+      "path": "apps/client/dist/web/index.html",
+      "sha256": "0d3242c84e14d156f2896bc5d265d8d39bbdea725b2da2fd3c8e1f5eb732f02c"
+    }
+  ],
+  "node_modules": {
+    "symlink": "/tmp/camctl-itopt-s6-application-micro-20261025/candidate/apps/client/node_modules",
+    "target": "/tmp/camctl-itopt-s5-representative-fixed/workers/0/node_modules",
+    "lock": {
+      "path": "/tmp/camctl-itopt-s6-application-micro-20261025/candidate/apps/client/package-lock.json",
+      "size_bytes": 115112,
+      "sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1"
+    }
+  },
+  "current_driver": {
+    "path": "/tmp/camctl-itopt-s6-application-micro-20261025/candidate/tests/integration/client_driver.ts",
+    "size_bytes": 49487,
+    "sha256": "89aafc14ad3e200f40c6eb48a11a39ab4f0472e7267ca3f3ce5f153b5abae21a"
+  },
+  "current_python_helper": {
+    "path": "/tmp/camctl-itopt-s6-coverage/tests/integration/_client_session.py",
+    "size_bytes": 16244,
+    "sha256": "af9ea7d89f848d246b2c1d87bff12009f7c5779f53eb87cc6c3ede26e79360c3"
+  },
+  "installed_describe": {
+    "path": "/tmp/camctl-itopt-s5-representative-fixed/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/client-store/device-capabilities.json",
+    "size_bytes": 8761,
+    "sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42"
+  },
+  "original_candidate_unchanged_after": true,
+  "result": "passed",
+  "cases_passed": 2,
+  "cases": [
+    {
+      "identity": "normal-jpeg-device-0.000333",
+      "world_root": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333",
+      "result": "passed",
+      "receipt": {
+        "export_mode": "application",
+        "capabilities_sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42",
+        "draft_id": "ea65fe21-77b3-41c9-92e0-cf6ef4dc14a0",
+        "draft_revision": 2,
+        "draft_text": "{\"name\":\"jpeg-device-0.000333-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:38\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}}]}",
+        "preview_intent": "disabled",
+        "draft_request_id": "1506563021223434516",
+        "request_draft_id": "ea65fe21-77b3-41c9-92e0-cf6ef4dc14a0",
+        "request_body_text": "{\"name\":\"jpeg-device-0.000333-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:38\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}}],\"request_id\":\"1506563021223434516\",\"created_at\":\"2026-10-25 02:25:38\"}",
+        "request_id": "1506563021223434516",
+        "request_text": "{\"name\":\"jpeg-device-0.000333-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:38\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}}],\"request_id\":\"1506563021223434516\",\"created_at\":\"2026-10-25 02:25:38\"}",
+        "created_at": "2026-10-25 02:25:38",
+        "has_ack": false,
+        "last_report_id": null,
+        "schedule_refresh": {
+          "previous_scheduled_at": "2026-10-25 02:25:36",
+          "scheduled_at": "2026-10-25 02:25:38",
+          "selected_utc": "2026-10-25T02:25:38.741Z"
+        }
+      },
+      "persisted_record_counts": {
+        "drafts": 1,
+        "requests": 1,
+        "presets": 0
+      },
+      "close": {
+        "python_status": "closed",
+        "node_status": "closed",
+        "node_exit_code": 0,
+        "owned_processes": 8,
+        "active_owned_processes": []
+      },
+      "node_metrics": {
+        "schema_version": 1,
+        "session_id": "d215d9bd-ccee-46f0-8cd0-1ce9db06109a",
+        "node_pid": 693305,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 1,
+          "browser_starts": 1
+        },
+        "browser_processes": [
+          {
+            "pid": 693339,
+            "pgid": 693339,
+            "starttime": "4639997",
+            "active": false
+          }
+        ],
+        "commands": [
+          {
+            "id": 1,
+            "operation": "application-photo-export",
+            "arguments": [
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-input.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-request.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-application.json"
+            ],
+            "started_monotonic_ns": "46399333695696",
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 0,
+              "files_starts": 0,
+              "http_server_starts": 0,
+              "browser_starts": 0
+            },
+            "request_id": "1506563021223434516",
+            "finished_monotonic_ns": "46400605056331",
+            "elapsed_seconds": 1.271360635,
+            "node_cpu_microseconds": {
+              "user": 1014338,
+              "system": 48582
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            }
+          },
+          {
+            "id": 2,
+            "operation": "close",
+            "arguments": [],
+            "started_monotonic_ns": "46400612255949",
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            },
+            "finished_monotonic_ns": "46400682252287",
+            "elapsed_seconds": 0.069996338,
+            "node_cpu_microseconds": {
+              "user": 21065,
+              "system": 649
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            }
+          }
+        ],
+        "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+        "status": "closed",
+        "node_cpu_at_ready_microseconds": {
+          "user": 1689748,
+          "system": 158413
+        },
+        "node_cpu_total_microseconds": {
+          "user": 2752742,
+          "system": 215699
+        }
+      },
+      "python_metrics": {
+        "schema_version": 1,
+        "session_id": "d215d9bd-ccee-46f0-8cd0-1ce9db06109a",
+        "nodeid": "",
+        "command_prefix": [
+          "/opt/pnpm/bin/node",
+          "--import",
+          "tsx",
+          "/tmp/camctl-itopt-s6-application-micro-20261025/candidate/tests/integration/client_driver.ts"
+        ],
+        "phase_timeout_seconds": 180.0,
+        "startup": {
+          "started_monotonic_ns": 46398085739045,
+          "finished_monotonic_ns": 46399330171163,
+          "elapsed_seconds": 1.244432118,
+          "outcome": "passed"
+        },
+        "commands": [
+          {
+            "id": 1,
+            "operation": "application-photo-export",
+            "arguments": [
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-input.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-request.json"
+            ],
+            "receipt_path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-application.json",
+            "started_monotonic_ns": 46399330704131,
+            "finished_monotonic_ns": 46400605993914,
+            "elapsed_seconds": 1.275289783,
+            "outcome": "passed"
+          }
+        ],
+        "close": {
+          "started_monotonic_ns": 46400607098520,
+          "finished_monotonic_ns": 46400716382876,
+          "elapsed_seconds": 0.109284356,
+          "outcome": "passed"
+        },
+        "node_pid": 693305,
+        "owned_processes": [
+          {
+            "pid": 693305,
+            "ppid": 693140,
+            "pgid": 693305,
+            "starttime": "4639808",
+            "state": "R"
+          },
+          {
+            "pid": 693339,
+            "ppid": 693305,
+            "pgid": 693339,
+            "starttime": "4639997",
+            "state": "S"
+          },
+          {
+            "pid": 693314,
+            "ppid": 693305,
+            "pgid": 693305,
+            "starttime": "4639821",
+            "state": "S"
+          },
+          {
+            "pid": 693341,
+            "ppid": 693339,
+            "pgid": 693339,
+            "starttime": "4640000",
+            "state": "S"
+          },
+          {
+            "pid": 693342,
+            "ppid": 693339,
+            "pgid": 693339,
+            "starttime": "4640000",
+            "state": "S"
+          },
+          {
+            "pid": 693359,
+            "ppid": 693339,
+            "pgid": 693339,
+            "starttime": "4640002",
+            "state": "S"
+          },
+          {
+            "pid": 693390,
+            "ppid": 693342,
+            "pgid": 693339,
+            "starttime": "4640009",
+            "state": "S"
+          },
+          {
+            "pid": 693357,
+            "ppid": 693341,
+            "pgid": 693339,
+            "starttime": "4640002",
+            "state": "S"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-input.json",
+          "size_bytes": 403,
+          "sha256": "f4500427140133ea23cd9c0981e63adfe2d22308b433a009470dfceaf598a3a6"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-request.json",
+          "size_bytes": 430,
+          "sha256": "97df366767dde4a448940ea044c02ceb2f11fafe6bf7897a40aad12857735a21"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/photo-application.json",
+          "size_bytes": 2035,
+          "sha256": "b07cc5dd6e2b5457aded9b8ed11de6373cdb1c91c3b55551641707201899cc8e"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/client-store/client.db",
+          "size_bytes": 32768,
+          "sha256": "9ec61b073bd2359a80e13bd67e5640395e671763582073a05c7ed6e8d6731b10"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/client-session-node.json",
+          "size_bytes": 2536,
+          "sha256": "52915dea9d35e08f51b232b864475504dc0206535113b43437e85c95ec715bd7"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/client-session-python.json",
+          "size_bytes": 2348,
+          "sha256": "bae0ea32eb6ee6f328cff2de448c81c7febcee029075e74f2bed7fafc22c44fd"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/client-session.stdout.log",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/normal-jpeg-device-0.000333/client-session.stderr.log",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "persisted_records": [
+        {
+          "namespace": "drafts",
+          "id": "ea65fe21-77b3-41c9-92e0-cf6ef4dc14a0",
+          "value_text": "{\"id\":\"ea65fe21-77b3-41c9-92e0-cf6ef4dc14a0\",\"revision\":2,\"content\":{\"text\":\"{\\\"name\\\":\\\"jpeg-device-0.000333-applied\\\",\\\"actions\\\":[{\\\"name\\\":\\\"capture\\\",\\\"type\\\":\\\"camera_take_photo\\\",\\\"device_id\\\":\\\"hb-host\\\",\\\"scheduled_at\\\":\\\"2026-10-25 02:25:38\\\",\\\"policy\\\":{\\\"max_delay_ms\\\":60000},\\\"params\\\":{\\\"type\\\":\\\"hasselblad_photo\\\",\\\"capture_format\\\":\\\"jpeg\\\",\\\"exposure\\\":{\\\"mode\\\":\\\"S\\\",\\\"iso\\\":100,\\\"shutter_s\\\":0.000333},\\\"white_balance\\\":{\\\"mode\\\":\\\"auto\\\"},\\\"focus\\\":{\\\"mode\\\":\\\"AF-S\\\"}}}]}\",\"automaticPreviews\":{\"intent\":\"disabled\",\"namespace\":\"07f9e598-6bf9-40c5-94dc-85a0b5e41e20\",\"next\":1,\"actions\":[{\"id\":\"07f9e598-6bf9-40c5-94dc-85a0b5e41e20:0\"}]}},\"createdAt\":\"2026-10-25 02:25:38\",\"updatedAt\":\"2026-10-25 02:25:38\",\"exportedRequestId\":\"1506563021223434516\"}"
+        },
+        {
+          "namespace": "requests",
+          "id": "1506563021223434516",
+          "value_text": "{\"id\":\"1506563021223434516\",\"draftId\":\"ea65fe21-77b3-41c9-92e0-cf6ef4dc14a0\",\"body\":{\"name\":\"jpeg-device-0.000333-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:38\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"S\",\"iso\":100,\"shutter_s\":0.000333},\"white_balance\":{\"mode\":\"auto\"},\"focus\":{\"mode\":\"AF-S\"}}}],\"request_id\":\"1506563021223434516\",\"created_at\":\"2026-10-25 02:25:38\"},\"exportedAt\":\"2026-10-25 02:25:38\",\"handedAt\":null,\"copyContent\":{\"text\":\"{\\\"name\\\":\\\"jpeg-device-0.000333-applied\\\",\\\"actions\\\":[{\\\"name\\\":\\\"capture\\\",\\\"type\\\":\\\"camera_take_photo\\\",\\\"device_id\\\":\\\"hb-host\\\",\\\"scheduled_at\\\":\\\"2026-10-25 02:25:38\\\",\\\"policy\\\":{\\\"max_delay_ms\\\":60000},\\\"params\\\":{\\\"type\\\":\\\"hasselblad_photo\\\",\\\"capture_format\\\":\\\"jpeg\\\",\\\"exposure\\\":{\\\"mode\\\":\\\"S\\\",\\\"iso\\\":100,\\\"shutter_s\\\":0.000333},\\\"white_balance\\\":{\\\"mode\\\":\\\"auto\\\"},\\\"focus\\\":{\\\"mode\\\":\\\"AF-S\\\"}}}]}\",\"automaticPreviews\":{\"intent\":\"disabled\",\"namespace\":\"07f9e598-6bf9-40c5-94dc-85a0b5e41e20\",\"next\":1,\"actions\":[{\"id\":\"07f9e598-6bf9-40c5-94dc-85a0b5e41e20:0\"}]}}}"
+        }
+      ]
+    },
+    {
+      "identity": "report-rebuild-jpeg-device-0.000667-MF-omitted",
+      "world_root": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted",
+      "result": "passed",
+      "receipt": {
+        "export_mode": "application",
+        "capabilities_sha256": "46d7fee949c370406a5e10186a7a5a8bdfb5182cc956e385a5d253a1eb908a42",
+        "draft_id": "bf5ca08e-946b-4c6f-8d56-aec7b8c36d54",
+        "draft_revision": 2,
+        "draft_text": "{\"name\":\"jpeg-device-0.000667-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:41\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\"}}}]}",
+        "preview_intent": "disabled",
+        "draft_request_id": "556875545187329061",
+        "request_draft_id": "bf5ca08e-946b-4c6f-8d56-aec7b8c36d54",
+        "request_body_text": "{\"name\":\"jpeg-device-0.000667-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:41\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\"}}}],\"request_id\":\"556875545187329061\",\"created_at\":\"2026-10-25 02:25:41\"}",
+        "request_id": "556875545187329061",
+        "request_text": "{\"name\":\"jpeg-device-0.000667-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:41\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\"}}}],\"request_id\":\"556875545187329061\",\"created_at\":\"2026-10-25 02:25:41\"}",
+        "created_at": "2026-10-25 02:25:41",
+        "has_ack": false,
+        "last_report_id": null,
+        "schedule_refresh": {
+          "previous_scheduled_at": "2026-10-25 02:25:38",
+          "scheduled_at": "2026-10-25 02:25:41",
+          "selected_utc": "2026-10-25T02:25:41.325Z"
+        }
+      },
+      "persisted_record_counts": {
+        "drafts": 1,
+        "requests": 1,
+        "presets": 0
+      },
+      "close": {
+        "python_status": "closed",
+        "node_status": "closed",
+        "node_exit_code": 0,
+        "owned_processes": 7,
+        "active_owned_processes": []
+      },
+      "node_metrics": {
+        "schema_version": 1,
+        "session_id": "1faabb4c-1858-4c65-ac69-7c6dbb518b7b",
+        "node_pid": 693442,
+        "counts": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 1,
+          "browser_starts": 1
+        },
+        "browser_processes": [
+          {
+            "pid": 693524,
+            "pgid": 693524,
+            "starttime": "4640247",
+            "active": false
+          }
+        ],
+        "commands": [
+          {
+            "id": 1,
+            "operation": "application-photo-export",
+            "arguments": [
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-input.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-request.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-application.json"
+            ],
+            "started_monotonic_ns": "46401773341483",
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 0,
+              "files_starts": 0,
+              "http_server_starts": 0,
+              "browser_starts": 0
+            },
+            "request_id": "556875545187329061",
+            "finished_monotonic_ns": "46403194758350",
+            "elapsed_seconds": 1.421416867,
+            "node_cpu_microseconds": {
+              "user": 1071113,
+              "system": 96818
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            }
+          },
+          {
+            "id": 2,
+            "operation": "close",
+            "arguments": [],
+            "started_monotonic_ns": "46403203042973",
+            "outcome": "passed",
+            "contexts_before": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            },
+            "finished_monotonic_ns": "46403279734321",
+            "elapsed_seconds": 0.076691348,
+            "node_cpu_microseconds": {
+              "user": 21190,
+              "system": 1111
+            },
+            "contexts_after": {
+              "node_process_starts": 1,
+              "application_starts": 1,
+              "files_starts": 1,
+              "http_server_starts": 1,
+              "browser_starts": 1
+            }
+          }
+        ],
+        "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+        "status": "closed",
+        "node_cpu_at_ready_microseconds": {
+          "user": 1435583,
+          "system": 156041
+        },
+        "node_cpu_total_microseconds": {
+          "user": 2546564,
+          "system": 260631
+        }
+      },
+      "python_metrics": {
+        "schema_version": 1,
+        "session_id": "1faabb4c-1858-4c65-ac69-7c6dbb518b7b",
+        "nodeid": "",
+        "command_prefix": [
+          "/opt/pnpm/bin/node",
+          "--import",
+          "tsx",
+          "/tmp/camctl-itopt-s6-application-micro-20261025/candidate/tests/integration/client_driver.ts"
+        ],
+        "phase_timeout_seconds": 180.0,
+        "startup": {
+          "started_monotonic_ns": 46400718634414,
+          "finished_monotonic_ns": 46401771362107,
+          "elapsed_seconds": 1.052727693,
+          "outcome": "passed"
+        },
+        "commands": [
+          {
+            "id": 1,
+            "operation": "application-photo-export",
+            "arguments": [
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-input.json",
+              "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-request.json"
+            ],
+            "receipt_path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-application.json",
+            "started_monotonic_ns": 46401771951824,
+            "finished_monotonic_ns": 46403195743724,
+            "elapsed_seconds": 1.4237919,
+            "outcome": "passed"
+          }
+        ],
+        "close": {
+          "started_monotonic_ns": 46403196523485,
+          "finished_monotonic_ns": 46403313955171,
+          "elapsed_seconds": 0.117431686,
+          "outcome": "passed"
+        },
+        "node_pid": 693442,
+        "owned_processes": [
+          {
+            "pid": 693442,
+            "ppid": 693140,
+            "pgid": 693442,
+            "starttime": "4640071",
+            "state": "R"
+          },
+          {
+            "pid": 693524,
+            "ppid": 693442,
+            "pgid": 693524,
+            "starttime": "4640247",
+            "state": "S"
+          },
+          {
+            "pid": 693526,
+            "ppid": 693524,
+            "pgid": 693524,
+            "starttime": "4640249",
+            "state": "S"
+          },
+          {
+            "pid": 693527,
+            "ppid": 693524,
+            "pgid": 693524,
+            "starttime": "4640249",
+            "state": "S"
+          },
+          {
+            "pid": 693544,
+            "ppid": 693524,
+            "pgid": 693524,
+            "starttime": "4640252",
+            "state": "S"
+          },
+          {
+            "pid": 693577,
+            "ppid": 693527,
+            "pgid": 693524,
+            "starttime": "4640258",
+            "state": "S"
+          },
+          {
+            "pid": 693542,
+            "ppid": 693526,
+            "pgid": 693524,
+            "starttime": "4640252",
+            "state": "S"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-input.json",
+          "size_bytes": 441,
+          "sha256": "52c7b56006638c8badd8a4b56baaff5fc13e138c79a5109e425b3692ddb87393"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-request.json",
+          "size_bytes": 463,
+          "sha256": "a79a07124ce806956ac13d05540652169f1544e81aed5c3aff122a360ae25022"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/photo-application.json",
+          "size_bytes": 2145,
+          "sha256": "4c1b4303c734161a37c211a8ae470cc32b4e55cd8198f53a5e07903e896a1074"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/client-store/client.db",
+          "size_bytes": 32768,
+          "sha256": "c487a71d4798a015a40c09a59bc33b958ca5038b153095eddacafbbba9151235"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/client-session-node.json",
+          "size_bytes": 2593,
+          "sha256": "0f5b633bcc1f2a9fef93dc1533e74012340f1ad51afc0afd3ea6cabf2ed1d25e"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/client-session-python.json",
+          "size_bytes": 2276,
+          "sha256": "0cdc18931e39788131e101c42bdfed082b859fc34a91a4ee12f2cd25680dcc80"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/client-session.stdout.log",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/tmp/camctl-itopt-s6-application-micro-20261025/worlds/report-rebuild-jpeg-device-0.000667-MF-omitted/client-session.stderr.log",
+          "size_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "persisted_records": [
+        {
+          "namespace": "drafts",
+          "id": "bf5ca08e-946b-4c6f-8d56-aec7b8c36d54",
+          "value_text": "{\"id\":\"bf5ca08e-946b-4c6f-8d56-aec7b8c36d54\",\"revision\":2,\"content\":{\"text\":\"{\\\"name\\\":\\\"jpeg-device-0.000667-applied\\\",\\\"actions\\\":[{\\\"name\\\":\\\"capture\\\",\\\"type\\\":\\\"camera_take_photo\\\",\\\"device_id\\\":\\\"hb-host\\\",\\\"scheduled_at\\\":\\\"2026-10-25 02:25:41\\\",\\\"policy\\\":{\\\"max_delay_ms\\\":60000},\\\"params\\\":{\\\"type\\\":\\\"hasselblad_photo\\\",\\\"capture_format\\\":\\\"jpeg\\\",\\\"exposure\\\":{\\\"mode\\\":\\\"M\\\",\\\"iso\\\":100,\\\"aperture\\\":8,\\\"shutter_s\\\":0.000667},\\\"white_balance\\\":{\\\"mode\\\":\\\"manual\\\",\\\"temperature_k\\\":5500},\\\"focus\\\":{\\\"mode\\\":\\\"MF\\\"}}}]}\",\"automaticPreviews\":{\"intent\":\"disabled\",\"namespace\":\"515b75b6-c186-4da7-a308-c1ce7b998156\",\"next\":1,\"actions\":[{\"id\":\"515b75b6-c186-4da7-a308-c1ce7b998156:0\"}]}},\"createdAt\":\"2026-10-25 02:25:41\",\"updatedAt\":\"2026-10-25 02:25:41\",\"exportedRequestId\":\"556875545187329061\"}"
+        },
+        {
+          "namespace": "requests",
+          "id": "556875545187329061",
+          "value_text": "{\"id\":\"556875545187329061\",\"draftId\":\"bf5ca08e-946b-4c6f-8d56-aec7b8c36d54\",\"body\":{\"name\":\"jpeg-device-0.000667-applied\",\"actions\":[{\"name\":\"capture\",\"type\":\"camera_take_photo\",\"device_id\":\"hb-host\",\"scheduled_at\":\"2026-10-25 02:25:41\",\"policy\":{\"max_delay_ms\":60000},\"params\":{\"type\":\"hasselblad_photo\",\"capture_format\":\"jpeg\",\"exposure\":{\"mode\":\"M\",\"iso\":100,\"aperture\":8,\"shutter_s\":0.000667},\"white_balance\":{\"mode\":\"manual\",\"temperature_k\":5500},\"focus\":{\"mode\":\"MF\"}}}],\"request_id\":\"556875545187329061\",\"created_at\":\"2026-10-25 02:25:41\"},\"exportedAt\":\"2026-10-25 02:25:41\",\"handedAt\":null,\"copyContent\":{\"text\":\"{\\\"name\\\":\\\"jpeg-device-0.000667-applied\\\",\\\"actions\\\":[{\\\"name\\\":\\\"capture\\\",\\\"type\\\":\\\"camera_take_photo\\\",\\\"device_id\\\":\\\"hb-host\\\",\\\"scheduled_at\\\":\\\"2026-10-25 02:25:41\\\",\\\"policy\\\":{\\\"max_delay_ms\\\":60000},\\\"params\\\":{\\\"type\\\":\\\"hasselblad_photo\\\",\\\"capture_format\\\":\\\"jpeg\\\",\\\"exposure\\\":{\\\"mode\\\":\\\"M\\\",\\\"iso\\\":100,\\\"aperture\\\":8,\\\"shutter_s\\\":0.000667},\\\"white_balance\\\":{\\\"mode\\\":\\\"manual\\\",\\\"temperature_k\\\":5500},\\\"focus\\\":{\\\"mode\\\":\\\"MF\\\"}}}]}\",\"automaticPreviews\":{\"intent\":\"disabled\",\"namespace\":\"515b75b6-c186-4da7-a308-c1ce7b998156\",\"next\":1,\"actions\":[{\"id\":\"515b75b6-c186-4da7-a308-c1ce7b998156:0\"}]}}}"
+        }
+      ]
+    }
+  ],
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "/tmp/camctl-itopt-s6-coverage/.local/verification/itopt/s6-implementation/application_micro.py"
+  ],
+  "workdir": "/tmp/camctl-itopt-s6-coverage",
+  "exit_code": 0,
+  "checked_contract": [
+    "实际读取保存后的draft和request，关闭服务后从SQLite独立读回完整记录并比较",
+    "独立草稿/请求身份关联、copyContent及已导出请求保持",
+    "完整params及原shutter数字词元不变，包含独立MF省略移动量输入",
+    "preview_intent=disabled，恰有一个拍摄动作，policy.max_delay_ms=60000",
+    "schedule_refresh来自实际选择时间，参数及公共字段等值",
+    "合法close完成，Node退出0，Node记录closed，浏览器active=false，按PID/PGID/starttime独立核对owned活跃进程为空"
+  ],
+  "command_log": {
+    "path": "/tmp/camctl-itopt-s6-coverage/.local/verification/itopt/s6-implementation/application-micro.log",
+    "size_bytes": 490,
+    "sha256": "5b68ae0715a7abd4e95f8d9c9ad409f76b5f39a59d9a2d829711297140cfd377"
+  },
+  "one_off_verifier": {
+    "path": "/tmp/camctl-itopt-s6-coverage/.local/verification/itopt/s6-implementation/application_micro.py",
+    "size_bytes": 11458,
+    "sha256": "eb9f906ecf8770f3d28769b17c28137389b70ab88388b36d58f23bc2f0213161"
+  },
+  "original_run_receipt": {
+    "path": "/tmp/camctl-itopt-s6-application-micro-20261025/result.json",
+    "size_bytes": 51920,
+    "sha256": "1a60ca8690206d249a821e79ce9f9549a1f692bbf6c6fa384e25c2e623d3b3a0"
+  }
+}
