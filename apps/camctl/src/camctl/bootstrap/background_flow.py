@@ -103,9 +103,17 @@ class ReportBackgroundFlow(BackgroundFlow):
         self._fatal_error: Exception | None = None
         self._interrupted_error: asyncio.CancelledError | None = None
         self._file_step_result = None
+        self._maintenance_flow = flow
+        self._probe_error: Exception | None = None
+
+        async def maintain(context):
+            error, self._probe_error = self._probe_error, None
+            if error is not None:
+                raise error
+            await flow(context)
 
         async def advance(context):
-            await _advance_report_flow(context, flow, on_fatal=self._notice_fatal)
+            await _advance_report_flow(context, maintain, on_fatal=self._notice_fatal)
 
         super().__init__(advance)
 
@@ -140,6 +148,15 @@ class ReportBackgroundFlow(BackgroundFlow):
             raise self._fatal_error
 
     async def __call__(self, context):
+        if self._task is None and not self._stopping:
+            probe = getattr(self._maintenance_flow, "should_advance", None)
+            if probe is not None:
+                try:
+                    if not probe(context):
+                        return
+                except Exception as error:
+                    # 观察错误仍经原后台报告边界交付；日志等待不扣住调度。
+                    self._probe_error = error
         await super().__call__(context)
         self.check_completed()
 

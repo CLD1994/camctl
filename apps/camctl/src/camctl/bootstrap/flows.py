@@ -851,6 +851,23 @@ def _failed_report_ids(owned: Any) -> tuple[int, ...]:
         return tuple(int(row[0]) for row in cursor.fetchall())
 
 
+@dataclass(frozen=True)
+class _ReportMaintenanceFlow:
+    advance: Callable[[Any], Any]
+    should_advance: Callable[[Any], bool]
+
+    async def __call__(self, context: Any) -> None:
+        await self.advance(context)
+
+
+@dataclass
+class _ReportMaintenanceProgress:
+    started: bool = False
+    checked_to_wm: int = 0
+    next_due_at: int | None = None
+    remaining_reports: tuple[int, ...] = ()
+
+
 def report_flow(
     *,
     state_db: Path,
@@ -887,11 +904,21 @@ def report_flow(
         return staging / REPORTS_DIRECTORY / f"report-{report_id}-{job_id}.tmp"
 
     def _record_failure(owned: Any, report_id: int, now_us: int, detail: str) -> None:
+        from camctl.devices.bindings import DeviceConfigurationError
+        from camctl.persistence.runtime import DirectoryBindingError
         from camctl.reporting.policy import record_report_failure
+        from camctl.session.clock import ClockBecameUntrusted
 
-        outcome = record_report_failure(
-            new_operation_key(), owned, report_id, {"error": detail},
-            occurred_at=now_us)
+        try:
+            outcome = record_report_failure(
+                new_operation_key(), owned, report_id, {"error": detail},
+                occurred_at=now_us)
+        except (StateDbFailure, DirectoryBindingError, DeviceConfigurationError,
+                ClockBecameUntrusted):
+            raise
+        except Exception as error:
+            # 失败事实也必须可靠保存，才能把本次责任交给后续机会。
+            raise StateDbFailure(f"报告失败记录无法可靠保存: {error}") from error
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise StateDbFailure(
                 f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
@@ -902,12 +929,14 @@ def report_flow(
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
         from camctl.contracts.public_projection import PublicProjectionError
+        from camctl.contracts.schemas import SchemaRuleError
         from camctl.contracts.values import ConsistencyError
         from camctl.history.events import HistoryEventError
+        from camctl.devices.bindings import DeviceConfigurationError
         from camctl.history.replay import ReplayError
         from camctl.host_files.handoff import HandoffDirectories
         from camctl.persistence.repositories.history import HistoryRepository
-        from camctl.persistence.runtime import DbConfig, StateDatabaseError
+        from camctl.persistence.runtime import DbConfig, DirectoryBindingError, StateDatabaseError
         from camctl.reporting.messages import ErrorKind, JobMessage, new_job_id
         from camctl.reporting.publication import (
             DeliveryOutcome,
@@ -920,10 +949,23 @@ def report_flow(
         )
         from camctl.reporting.policy import record_recovered_publication
         from camctl.reporting.supervisor import GenerationOutcomeKind
+        from camctl.session.clock import ClockBecameUntrusted
+
+        prerequisite_errors = (
+            StateDbFailure, DirectoryBindingError, DeviceConfigurationError, ClockBecameUntrusted,
+        )
+        state_errors = (
+            StateDatabaseError, sqlite3.Error, ConsistencyError,
+            PublicProjectionError, BoundaryError, HistoryEventError, ReplayError,
+            JsonParseError, SchemaRuleError,
+        )
 
         with closing(owned.connection.execute(
-                "SELECT status FROM reports WHERE id = ?", (report_id,))) as cursor:
-            status = int(cursor.fetchone()[0])
+                "SELECT status, to_wm FROM reports WHERE id = ?", (report_id,))) as cursor:
+            status, attempted_wm = cursor.fetchone()
+        from camctl.reporting.ack import validate_watermark
+        validate_watermark(attempted_wm, "attempted_to_wm")
+        progress.checked_to_wm = max(progress.checked_to_wm, attempted_wm)
         if status in (2, 3):
             # 发布中断恢复：ready 中已有本报告文件时按观察证据补记
             # 发布，不重新生成。
@@ -973,7 +1015,17 @@ def report_flow(
             event_batch_size=history.event_batch_size,
             busy_timeout_ms=database.busy_timeout_ms,
         )
-        generation = await supervisor.generate(job)
+        try:
+            generation = await supervisor.generate(job)
+        except prerequisite_errors:
+            raise
+        except state_errors as error:
+            raise StateDbFailure(f"报告 {report_id} 生成遇到状态库错误: {error}") from error
+        except Exception as error:
+            # 监督结果之外的普通生成错误也结束本次已冻结责任；
+            # 保留原错误身份交给报告边界，不因下次轮询重新派发。
+            _record_failure(owned, report_id, now_us, f"报告生成失败: {error}")
+            raise
         if generation.kind is GenerationOutcomeKind.STATE_FAILURE:
             failure = generation.failure
             raise StateDbFailure(
@@ -998,14 +1050,22 @@ def report_flow(
                 or identity.sha256 != success.sha256):
             raise StateDbFailure(
                 f"报告 {report_id} 的生成文件名与身份不符: {success.path}")
-        delivery = await deliver_staged_report(
-            report_id,
-            StagedReport(name=Path(success.path).name,
-                         size_bytes=success.size_bytes, sha256=success.sha256),
-            HandoffDirectories(staging, ready),
-            DbPublicationSession(owned),
-            local_actions=local_actions,
-        )
+        try:
+            delivery = await deliver_staged_report(
+                report_id,
+                StagedReport(name=Path(success.path).name,
+                             size_bytes=success.size_bytes, sha256=success.sha256),
+                HandoffDirectories(staging, ready),
+                DbPublicationSession(owned),
+                local_actions=local_actions,
+            )
+        except prerequisite_errors:
+            raise
+        except state_errors as error:
+            raise StateDbFailure(f"报告 {report_id} 文件交接遇到状态库错误: {error}") from error
+        except Exception as error:
+            _record_failure(owned, report_id, now_us, f"报告文件交接失败: {error}")
+            raise
         if delivery.outcome is DeliveryOutcome.PUBLISHED:
             _settle_covered_local_syncs(owned, now_us)
             return None
@@ -1023,14 +1083,29 @@ def report_flow(
         _record_failure(owned, report_id, now_us, failure_detail)
         return f"report_id={report_id}; {failure_detail}"
 
-    flow_state: dict[str, bool] = {"started": False}
+    progress = _ReportMaintenanceProgress()
+
+    def should_advance(context: Any) -> bool:
+        observer = getattr(context, "report_change_wm", None)
+        if not start_actions or observer is None:
+            return True
+        try:
+            latest = observer()
+            from camctl.reporting.ack import validate_watermark
+            validate_watermark(latest, "latest_change_wm")
+        except (sqlite3.Error, ConsistencyError) as error:
+            raise StateDbFailure(f"报告维护无法可靠观察业务水位: {error}") from error
+        return (not progress.started or bool(progress.remaining_reports)
+                or latest > progress.checked_to_wm
+                or (progress.next_due_at is not None
+                    and context.clock.utc_micros() >= progress.next_due_at))
 
     async def flow(context: Any) -> None:
         from camctl.persistence.runtime import DirectoryBindingError, StateDatabaseError
         from camctl.reporting.policy import ReportingRepository
 
-        first_round = not flow_state["started"]
-        flow_state["started"] = True
+        first_round = not progress.started
+        progress.started = True
         try:
             owned = context.open_connection()
         except DirectoryBindingError:
@@ -1043,7 +1118,14 @@ def report_flow(
             if start_actions:
                 _start_due_report_actions(owned, now_us)
             _settle_covered_local_syncs(owned, now_us)
-            pending = _in_flight_report_ids(owned)
+            if start_actions and getattr(context, "report_change_wm", None) is not None:
+                with closing(owned.connection.execute(
+                        "SELECT MIN(COALESCE(scheduled_at, ?)) FROM actions"
+                        " WHERE status = 1 AND cancel_requested = 0 AND type = 7",
+                        (now_us,))) as cursor:
+                    progress.next_due_at = cursor.fetchone()[0]
+            pending = tuple(dict.fromkeys((
+                *_in_flight_report_ids(owned), *progress.remaining_reports)))
             if not pending:
                 outcome = ReportingRepository().freeze_report(
                     new_operation_key(), owned, occurred_at=now_us)
@@ -1051,13 +1133,20 @@ def report_flow(
                     raise StateDbFailure(
                         f"报告冻结事务未完成（{outcome.kind.value}）:"
                         f" {outcome.error}")
+                if getattr(context, "report_change_wm", None) is not None:
+                    progress.checked_to_wm = max(
+                        progress.checked_to_wm, outcome.value.checked_to_wm)
                 pending = _in_flight_report_ids(owned)
             # 会话首轮重试此前失败的报告；同轮失败后不再重复，等待
             # 新的会话触发。
             if first_round and not pending:
                 pending = _failed_report_ids(owned)
             round_clean = True
-            for report_id in pending:
+            progress.remaining_reports = ()
+            for index, report_id in enumerate(pending):
+                # 当前报告的普通异常交原日志边界，尚未尝试的同水位
+                # 报告仍须在后续调度中推进；本次失败项不因该标记重试。
+                progress.remaining_reports = pending[index + 1:]
                 failure_detail = await _recover_or_generate(
                     report_id, owned, now_us)
                 if failure_detail is not None:
@@ -1083,4 +1172,4 @@ def report_flow(
             raise StateDbFailure(f"报告维护无法可靠读取或保存状态库事实: {error}") from error
         finally:
             owned.connection.close()
-    return flow
+    return _ReportMaintenanceFlow(flow, should_advance)

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import ConsistencyError
 from camctl.reporting.ack import AckReport
+from camctl.reporting.models import FrozenReport
 from camctl.reporting.policy import ReportDecisionKind, ReportOpportunity, decide_report
+from camctl.reporting.policy import _FreezeCommand
+from camctl.contracts.values import new_operation_key
 
 
 def _opportunity(ack=100, latest=300, sync_from=None, started=None):
@@ -85,3 +90,23 @@ def test_existing_report_cannot_come_from_after_current_boundary(report):
 def test_maximum_watermark_remains_exact():
     decision = decide_report(_opportunity(9007199254740990, 9007199254740991))
     assert (decision.from_wm, decision.to_wm) == (9007199254740990, 9007199254740991)
+
+
+@pytest.mark.parametrize("kind", list(ReportDecisionKind))
+def test_selection_returns_watermark_checked_inside_freeze(mocker, kind):
+    mocker.patch("camctl.reporting.policy.saved_transaction_events", return_value=None)
+    mocker.patch("camctl.reporting.policy.read_report_opportunity",
+                 return_value=_opportunity(5 if kind is ReportDecisionKind.SKIP else 0, 5))
+    covering = AckReport(1, 0, 5, 200) if kind is ReportDecisionKind.REUSE else None
+    mocker.patch("camctl.reporting.policy.read_covering_report", return_value=covering)
+    mocker.patch("camctl.reporting.policy.read_frozen_report",
+                 return_value=FrozenReport(1, HistoryBoundary(10, 200), 0, 5, 1))
+    connection = Mock()
+    connection.execute.return_value.fetchone.return_value = (None,)
+    scope = SimpleNamespace(connection=connection,
+        allocate=Mock(return_value=SimpleNamespace(first_event_id=201, txn_id=11)))
+
+    plan = _FreezeCommand(1000, new_operation_key()).plan(scope)
+
+    assert plan.result.kind is kind
+    assert plan.result.checked_to_wm == 5

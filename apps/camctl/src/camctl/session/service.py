@@ -281,6 +281,8 @@ class SessionContext:
     local_work: LocalWorkPort | None = None
     #: 非时钟致命错误收场时的录像应急停止端口；返回诊断条目。
     emergency_settlement: Callable[[], Awaitable[list[dict]]] | None = None
+    #: 正常 run 的报告轻量观察；只在会话连接存活期间绑定。
+    report_change_wm: Callable[[], int] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.poll_interval_s, (int, float)) or (
@@ -735,6 +737,7 @@ async def _run_session(
     local_errors: list[Exception] = []
     observed_errors: list[BaseException] = []
     waiter = _RequiredPhaseWaiter(context)
+    previous_report_observer = context.report_change_wm
 
     async def drive() -> SessionOutcome:
         nonlocal session_lease, admission_lease, owned
@@ -762,6 +765,7 @@ async def _run_session(
             return _outcome_error("configuration_error", {"error": str(error)})
         except Exception as error:
             return _outcome_error("state_db_error", {"error": str(error)})
+        context.report_change_wm = lambda: _read_report_change_wm(owned.connection)
         if context.on_session_open is not None:
             try:
                 context.on_session_open(owned)
@@ -1085,6 +1089,7 @@ async def _run_session(
         _remember_error(observed_errors, error)
 
     cleanup_failures: list[tuple[BaseException, str, str]] = []
+    context.report_change_wm = previous_report_observer
     if admission_lease is not None:
         try:
             admission_lease.close()
@@ -1107,6 +1112,19 @@ async def _run_session(
         raise original.with_traceback(original.__traceback__)
     assert outcome is not None
     return outcome
+
+
+def _read_report_change_wm(connection: Any) -> int:
+    """以业务序号索引观察已提交变化，不取得写事务或新建连接。"""
+    from camctl.reporting.ack import validate_watermark
+
+    with closing(connection.execute("SELECT MAX(change_seq) FROM history_events")) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise StateDbFailure("报告业务水位查询没有返回结果")
+    watermark = 0 if row[0] is None else row[0]
+    validate_watermark(watermark, "latest_change_wm")
+    return watermark
 
 
 async def _merge_emergency_stops(
