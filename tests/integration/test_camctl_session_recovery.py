@@ -428,7 +428,8 @@ def test_future_action_waits_and_past_window_expires(
             "name": "shoot-future",
             "type": "camera_take_photo",
             "device_id": "cam-1",
-            "scheduled_at": future_schedule(5),
+            # 给真实 CLI 冷启动与首轮报告留出准备时间；启动窗口仍为五秒。
+            "scheduled_at": future_schedule(15),
             "params": {"type": "single_shot"},
             "policy": {"max_delay_ms": 5000},
         }],
