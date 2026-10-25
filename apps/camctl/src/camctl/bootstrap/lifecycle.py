@@ -600,12 +600,14 @@ async def _on_report_recovered(
         await logging_owner.run_service_operation("report_recovered", operation)
 
 
-def _open_connection(state_db: Path) -> OwnedConnection:
-    return open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
+def _open_connection(state_db: Path, config: DbConfig) -> OwnedConnection:
+    return open_existing(state_db, DbOpenMode.EXISTING_RW, config)
 
 
 def _open_runtime_connection(deps: RuntimeDeps) -> OwnedConnection:
-    owned = _open_connection(deps.state_db)
+    owned = _open_connection(deps.state_db, DbConfig(
+        busy_timeout_ms=deps.config.database.busy_timeout_ms,
+        wal_autocheckpoint_pages=deps.config.database.wal_autocheckpoint_pages))
     try:
         verify_directory_binding(owned.metadata, deps.config.paths.staging,
                                  deps.config.paths.ready, deps.config.paths.processing)
