@@ -120,9 +120,9 @@ def retained_failure(request, setrow, db):
                 },
             )
         else:
-            from .segment_check_conclusions import no_result_start_failure
+            from .segment_check_conclusions import no_result_failure
 
-            current_failure = no_result_start_failure(
+            current_failure = no_result_failure(
                 db, setrow, conclusion["anchor_event_id"]
             )
     expected = current_failure or RecordingFailure(

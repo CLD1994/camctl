@@ -66,13 +66,14 @@ def _values(db,request,setrow):
         is not None
     ):
         raise ConsistencyError("已有RESULTS责任，不能采用无RESULTS结束分区")
+    preparation = _preparation_run_for_anchor(db, setrow, request.anchor_event_id)
     start = _one(
         db,
         "SELECT id FROM operation_runs WHERE action_id=? AND kind=?",
         (request.ref.action_id, int(kinds.START)),
     )
-    if start is not None:
-        failure = no_result_start_failure(db, setrow, request.anchor_event_id)
+    if preparation is not None or start is not None:
+        failure = no_result_failure(db, setrow, request.anchor_event_id)
         return dict(
             set_id=request.ref.set_id,
             reason=encode_enum(request.reason),
@@ -99,6 +100,84 @@ def _values(db,request,setrow):
     return dict(set_id=request.ref.set_id,reason=encode_enum(request.reason),
         anchor_event_id=request.anchor_event_id,prior_run_end_event_id=None,config_event_id=None,
         prior_conclusion_id=None,current_result=encode_enum(CurrentSegmentResult.NONE),current_failure_json=None)
+
+
+def _preparation_run_for_anchor(db, setrow, anchor):
+    return _one(db,
+        "SELECT r.id FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+        " WHERE r.action_id=? AND r.kind=? AND t.result_event_id=?",
+        (setrow["action_id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE), anchor))
+
+
+def no_result_failure(db, setrow, anchor):
+    """按指定实际结果辨认失败来源，旧 START 不覆盖本次设置失败。"""
+    if _preparation_run_for_anchor(db, setrow, anchor) is not None:
+        return no_result_preparation_failure(db, setrow, anchor)
+    return no_result_start_failure(db, setrow, anchor)
+
+
+def no_result_preparation_failure(db, setrow, anchor):
+    """核实原 H0 内最新设置失败及无启动效果，不建立 START 或 RESULTS。"""
+    from camctl.capture.media import RecordingFailure
+    from .capture_facts import load_start_facts
+    from .segment_result_sets import _check_boundary, _row_at
+
+    boundary = HistoryBoundary(setrow["source_txn_id"], setrow["source_event_id"])
+    current = _check_boundary(db, boundary)
+    action = _row_at(db, "actions", setrow["action_id"], setrow["action_id"], boundary, current)
+    activity = _row_at(db, "device_activities", setrow["activity_id"], setrow["action_id"], boundary, current)
+    found = _preparation_run_for_anchor(db, setrow, anchor)
+    latest = _one(db, "SELECT id FROM operation_runs WHERE activity_id=? AND kind=? ORDER BY id DESC LIMIT 1",
+        (setrow["activity_id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+    if found is None or found != latest:
+        raise ConsistencyError("准备决定不是原活动最新设置责任的实际结果")
+    run = _row_at(db, "operation_runs", found[0], setrow["action_id"], boundary, current)
+    facts = load_start_facts(db, action)
+    if (action["status"] != int(enum_for("actions.status").RUNNING)
+            or action["execution_started"] != 1 or action["cancel_requested"]
+            or activity["action_id"] != action["id"]
+            or activity["occupancy_state"] != int(enum_for("device_activities.occupancy_state").HELD)
+            or not facts.not_started or not facts.preparation_resolved
+            or facts.activity is None or facts.activity["id"] != activity["id"]
+            or run["action_id"] != action["id"] or run["activity_id"] != activity["id"]
+            or run["created_event_id"] > boundary.last_event_id
+            or run["status"] not in (int(enum_for("operation_runs.status").FAILED),
+                int(enum_for("operation_runs.status").UNCONFIRMED))
+            or run["attempts_used"] != 1 or run["error_json"] is None
+            or setrow["run_id"] is not None or setrow["member_count"] != 0
+            or setrow["source_kind"] != encode_enum(SegmentSourceKind.NO_RESULTS)):
+        raise ConsistencyError("准备失败缺少原运行中占用、可靠收场或无启动效果依据")
+    if (_one(db, "SELECT id FROM operation_runs WHERE action_id=? AND kind=? LIMIT 1",
+            (action["id"], int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS))) is not None
+            or _one(db, "SELECT id FROM outputs WHERE source_action_id=? LIMIT 1", (action["id"],)) is not None
+            or _one(db, "SELECT id FROM baseline_read_calls WHERE activity_id=? AND state=1 LIMIT 1",
+                (activity["id"],)) is not None):
+        raise ConsistencyError("准备失败不能越过已有 RESULTS、产物或未收场的基准调用")
+    if _ended_attempts(db, run, boundary) != anchor:
+        raise ConsistencyError("准备失败没有原 H0 内的实际结果事件")
+    attempt_id = _one(db, "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=1", (run["id"],))
+    attempt = None if attempt_id is None else _row_at(db, "operation_attempts", attempt_id[0],
+        action["id"], boundary, current)
+    if (attempt is None or attempt["run_id"] != run["id"]
+            or attempt["status"] not in (int(enum_for("operation_attempts.status").FAILED),
+                int(enum_for("operation_attempts.status").UNKNOWN))
+            or attempt["result_event_id"] != anchor or attempt["error_json"] is None):
+        raise ConsistencyError("准备决定没有同票真实失败或返回未知")
+    from camctl.history.decoding import decode_event_row
+    from camctl.persistence.transaction import read_transaction_range
+    from .result_pages import _COLUMNS
+
+    raw = _one(db, f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (anchor,))
+    event = None if raw is None else decode_event_row(raw)
+    if (event is None or event.event_type != load_event_registry()["events"]["ATTEMPT_RESULT"]["id"]
+            or not any(row.table == "operation_attempts" and row.row_id == attempt["id"]
+                and all(json_equal(row.after.values.get(name), attempt[name]) for name in
+                    ("status", "result_event_id", "error_json", "result_json")) for row in event.rows)):
+        raise ConsistencyError("准备失败结果事件没有保存同票的真实错误及返回")
+    transaction = read_transaction_range(db, event.transaction_id)
+    if not transaction.first_event_id <= anchor <= transaction.last_event_id <= boundary.last_event_id:
+        raise ConsistencyError("准备失败实际结果不属于原 H0 内的完整事务")
+    return RecordingFailure("capture_failed", {"activity_id": str(activity["id"]), "reason": "device_failed"})
 
 
 def no_result_start_failure(db, setrow, anchor):
@@ -465,8 +544,9 @@ def _verify_saved_prefix(db,request,saved,conclusion):
     setrow=read_result_set(request.ref,Reader)
     if request.reason is ResultCheckEndReason.NO_RESULT_WORK:
         if prefix:raise ConsistencyError('原无RESULTS基准决定不能混入其他事件')
-        if conclusion["current_failure_json"] is not None:
-            failure = no_result_start_failure(db, setrow, request.anchor_event_id)
+        if (conclusion["current_failure_json"] is not None
+                or _preparation_run_for_anchor(db, setrow, request.anchor_event_id) is not None):
+            failure = no_result_failure(db, setrow, request.anchor_event_id)
             if not json_equal(
                 conclusion["current_failure_json"],
                 {"code": failure.code, "details": failure.details},
