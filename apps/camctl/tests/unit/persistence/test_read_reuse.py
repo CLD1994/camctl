@@ -393,3 +393,15 @@ def test_independent_check_discards_prior_phase_without_leaving_transaction(conn
         assert reuse_read(connection, "proof", load) == "verified"
         assert reuse_read(connection, "proof", load) == "verified"
     assert load.call_count == 2
+
+
+def test_entering_page_scope_releases_previously_reused_decoded_values(connection):
+    from camctl.persistence.page_read_cache import page_read_scope
+
+    load = Mock(side_effect=["outside", "inside"])
+    with read_reuse_scope(connection):
+        assert reuse_read(connection, "page", load) == "outside"
+        with page_read_scope(connection, 100):
+            assert reuse_read(connection, "page", load) == "inside"
+            assert reuse_read(connection, "page", load) == "inside"
+    assert load.call_count == 2

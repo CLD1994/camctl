@@ -74,6 +74,8 @@ def _clock_fields(prefix):
 def _file_kind(script):
     from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
     tools = ShellFileTools()
+    if script == tools.directory_scan_script(REMOTE_DIRECTORY):
+        return "directory"
     paths = tuple(path for path, _ in _scenario_files()) + (
         NEW_VIDEO, NEW_PREVIEW, NEW_PHOTO,
         REMOTE_DIRECTORY + "/DJI_001/DJI_OLD.MP4")
