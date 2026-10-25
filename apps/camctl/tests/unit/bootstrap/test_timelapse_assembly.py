@@ -1,7 +1,10 @@
 """会话装配消费本次等待配置并共享未完成等待。"""
 
 from pathlib import Path
+import sqlite3
 from unittest.mock import create_autospec
+
+import pytest
 
 from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -9,6 +12,17 @@ from camctl.capture.handlers import ResultFilesPort
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.devices.ports import ControlDriver, DriverDeclaration
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
+
+pytestmark = pytest.mark.asyncio
+
+
+def _business_database():
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    owned = OwnedConnection(connection, DatabaseMetadata(
+        "camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    return inline_business_database(owned)
 
 
 def _factory():
@@ -28,8 +42,8 @@ def _factory():
         wait_config=execution_wait_config)
 
 
-def test_current_device_extra_wait_is_added_to_fixed_execution_definition():
-    runtime = _factory()(object(), "cam-1")
+async def test_current_device_extra_wait_is_added_to_fixed_execution_definition():
+    runtime = await _factory()(_business_database(), "cam-1")
     config = runtime.wait_config({"execution_spec_json": {
         "target_duration_ms": 600000, "result_wait_margin_ms": 2000,
     }})
@@ -37,9 +51,10 @@ def test_current_device_extra_wait_is_added_to_fixed_execution_definition():
         600000, 2000, 3000)
 
 
-def test_same_session_reuses_unfinished_wait_deadline_between_advances():
+async def test_same_session_reuses_unfinished_wait_deadline_between_advances():
     factory = _factory()
-    first = factory(object(), "cam-1")
+    database = _business_database()
+    first = await factory(database, "cam-1")
     first.timelapse_deadlines[7] = 123456789
-    second = factory(object(), "cam-1")
+    second = await factory(database, "cam-1")
     assert second.timelapse_deadlines == {7: 123456789}

@@ -15,7 +15,11 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import ResultDriver
 from camctl.persistence.repositories.capture import CaptureRepository
+from support.capture_database import capture_database
 from test_result_round_adapter import _BINDING, _TICKET, _REGISTRY
+
+
+pytestmark = pytest.mark.asyncio
 
 
 _SCOPE = {"directories": ["/DCIM"]}
@@ -23,7 +27,7 @@ _SCOPE = {"directories": ["/DCIM"]}
 
 def _filter(monkeypatch, baseline):
     repository = create_autospec(CaptureRepository, instance=True)
-    owned = type("Owned", (), {"connection": object()})()
+    database = capture_database()
     ref = BaselineRef(71, BaselineState.FIXED,
         10 if baseline else None, 10 if baseline else None,
         1 if baseline else 0, len(baseline))
@@ -36,7 +40,7 @@ def _filter(monkeypatch, baseline):
         "actions": {"device_id": _BINDING.device_id, "driver_id": _BINDING.driver_id}}
     monkeypatch.setattr(capture_assembly, "row_facts", lambda db, table, row_id: rows[table])
     adapter = DriverResultListing(create_autospec(ResultDriver, instance=True),
-        _BINDING, _REGISTRY, capture_repository=repository, owned=owned)
+        _BINDING, _REGISTRY, capture_repository=repository, database=database)
     context = ResultReadingContext(_TICKET, binding=_BINDING, directories=("/DCIM",))
     return adapter._result_candidates(_TICKET, _SCOPE, context), repository, context, rows
 
@@ -45,12 +49,15 @@ def _identity(index):
     return FileIdentity(_BINDING, f"/DCIM/{index:04}.mp4")
 
 
-def test_136_paths_select_only_ten_new_files_without_reloading_baseline(monkeypatch):
+async def test_136_paths_select_only_ten_new_files_without_reloading_baseline(monkeypatch):
     paths = tuple(_identity(index) for index in range(136))
     new = paths[::14]
     callback, repository, context, _ = _filter(monkeypatch, tuple(path for path in paths if path not in new))
 
-    selected = tuple(item for offset in range(0, 136, 32) for item in callback(paths[offset:offset + 32]))
+    batches = []
+    for offset in range(0, 136, 32):
+        batches.extend(await callback(paths[offset:offset + 32]))
+    selected = tuple(batches)
 
     assert selected == new and len(selected) == 10
     repository.read_baseline.assert_called_once()
@@ -58,35 +65,35 @@ def test_136_paths_select_only_ten_new_files_without_reloading_baseline(monkeypa
 
 
 @pytest.mark.parametrize("paths,baseline", [((), ()), ((1, 2), (1, 2)), ((1, 2), ())])
-def test_empty_and_entirely_old_pages_keep_exact_difference(monkeypatch, paths, baseline):
+async def test_empty_and_entirely_old_pages_keep_exact_difference(monkeypatch, paths, baseline):
     callback, _, _, _ = _filter(monkeypatch, tuple(_identity(index) for index in baseline))
-    assert callback(tuple(_identity(index) for index in paths)) == tuple(
+    assert await callback(tuple(_identity(index) for index in paths)) == tuple(
         _identity(index) for index in paths if index not in baseline)
 
 
-def test_multiple_baseline_chunks_are_read_once_as_candidates_advance(monkeypatch):
+async def test_multiple_baseline_chunks_are_read_once_as_candidates_advance(monkeypatch):
     callback, repository, _, _ = _filter(monkeypatch, (_identity(0),))
     repository.baseline_ref.return_value = BaselineRef(71, BaselineState.FIXED, 10, 20, 2, 4)
     repository.read_baseline.side_effect = [
         Page((BaselineChunk(10, 1, (_identity(0), _identity(2))),), 10),
         Page((BaselineChunk(20, 2, (_identity(4), _identity(6))),), None)]
 
-    assert callback((_identity(1), _identity(2))) == (_identity(1),)
-    assert callback((_identity(4), _identity(5), _identity(7))) == (_identity(5), _identity(7))
+    assert await callback((_identity(1), _identity(2))) == (_identity(1),)
+    assert await callback((_identity(4), _identity(5), _identity(7))) == (_identity(5), _identity(7))
     assert [call.args[1] for call in repository.read_baseline.call_args_list] == [None, 10]
 
 
-def test_empty_nonfinal_baseline_page_does_not_hide_later_old_file(monkeypatch):
+async def test_empty_nonfinal_baseline_page_does_not_hide_later_old_file(monkeypatch):
     callback, repository, _, _ = _filter(monkeypatch, (_identity(2),))
     repository.read_baseline.side_effect = [Page((), 9),
         Page((BaselineChunk(10, 1, (_identity(2),)),), None)]
 
-    assert callback((_identity(2), _identity(3))) == (_identity(3),)
+    assert await callback((_identity(2), _identity(3))) == (_identity(3),)
     assert [call.args[1] for call in repository.read_baseline.call_args_list] == [None, 9]
 
 
 @pytest.mark.parametrize("change", ["binding", "scope", "collecting", "changed_ref"])
-def test_mismatched_original_baseline_is_rejected(monkeypatch, change):
+async def test_mismatched_original_baseline_is_rejected(monkeypatch, change):
     callback, repository, _, rows = _filter(monkeypatch, (_identity(0),))
     if change == "binding":
         rows["actions"]["device_id"] = "other-camera"
@@ -95,15 +102,15 @@ def test_mismatched_original_baseline_is_rejected(monkeypatch, change):
     elif change == "collecting":
         repository.baseline_ref.return_value = replace(repository.baseline_ref.return_value, state=BaselineState.COLLECTING)
     else:
-        assert callback((_identity(0),)) == ()
+        assert await callback((_identity(0),)) == ()
         repository.baseline_ref.return_value = replace(repository.baseline_ref.return_value, entry_count=2)
 
     with pytest.raises(ConsistencyError):
-        callback((_identity(1),))
+        await callback((_identity(1),))
 
 
-def test_repeated_or_foreign_candidate_cannot_advance_original_comparison(monkeypatch):
+async def test_repeated_or_foreign_candidate_cannot_advance_original_comparison(monkeypatch):
     callback, _, _, _ = _filter(monkeypatch, (_identity(0),))
-    assert callback((_identity(1),)) == (_identity(1),)
+    assert await callback((_identity(1),)) == (_identity(1),)
     with pytest.raises(ConsistencyError):
-        callback((_identity(1),))
+        await callback((_identity(1),))

@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from pathlib import Path
+import sqlite3
 from unittest.mock import create_autospec
 
 import pytest
@@ -14,11 +15,22 @@ from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverS
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.devices.ports import CapturePreparationDriver, ControlDriver, DriverDeclaration
 from camctl.operations.attempts import AttemptConfig
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.scheduling.rules import LaunchWindow
+from support.business_database import inline_business_database
+
+pytestmark = pytest.mark.asyncio
 
 
-def _runtime(device_settings):
+def _business_database():
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    owned = OwnedConnection(connection, DatabaseMetadata(
+        "camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    return inline_business_database(owned)
+
+
+async def _runtime(device_settings):
     config = load_config({"devices": {"cam-1": {
         "kind": "camera", "driver": "driver-1", **device_settings,
     }}}, ConfigDefaults())
@@ -34,12 +46,12 @@ def _runtime(device_settings):
         devices=config.devices, drivers=DriverRegistry((entry,)),
         results=create_autospec(ResultFilesPort, instance=True), staging=Path("/staging"),
         wait_config=execution_wait_config, wall_us=lambda: 1000, media_enabled=False)
-    return factory(object(), "cam-1")
+    return await factory(_business_database(), "cam-1")
 
 
 @pytest.mark.parametrize("field", ["start_config", "stop_config", "check_config"])
-def test_omitted_capture_execution_config_uses_defined_budget(field):
-    actual = getattr(_runtime({}), field)
+async def test_omitted_capture_execution_config_uses_defined_budget(field):
+    actual = getattr(await _runtime({}), field)
     assert actual == AttemptConfig(
         max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("3"))
 
@@ -55,22 +67,22 @@ def test_omitted_capture_execution_config_uses_defined_budget(field):
         "max_attempts": 9, "call_timeout_s": "0.125", "retry_interval_s": "4.5",
     }}, AttemptConfig(9, Decimal("0.125"), Decimal("4.5"))),
 ])
-def test_current_capture_execution_config_reaches_runtime(field, settings, expected):
-    assert getattr(_runtime(settings), field) == expected
+async def test_current_capture_execution_config_reaches_runtime(field, settings, expected):
+    assert getattr(await _runtime(settings), field) == expected
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_software_recovery_enabled_reaches_the_production_runtime(enabled):
-    runtime = _runtime({"software_recovery": {"enabled": enabled, "max_checks": 7}})
+async def test_software_recovery_enabled_reaches_the_production_runtime(enabled):
+    runtime = await _runtime({"software_recovery": {"enabled": enabled, "max_checks": 7}})
     assert runtime.software_recovery_config.enabled is enabled
     assert runtime.software_recovery_config.max_checks == 7
 
 
-def test_recording_grant_saves_current_start_budget():
+async def test_recording_grant_saves_current_start_budget():
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.scheduling import GrantOutcome, GrantResult
 
-    runtime = _runtime({"recording": {
+    runtime = await _runtime({"recording": {
         "max_start_attempts": 6, "start_timeout_s": "0.375", "start_retry_interval_s": "1.5",
     }})
     runtime.scheduling = create_autospec(SchedulingRepository, instance=True)
@@ -79,7 +91,8 @@ def test_recording_grant_saves_current_start_budget():
         kind=DbOutcomeKind.COMPLETED, value=GrantResult(outcome=GrantOutcome.GRANTED, ticket=ticket))
     runtime.window_of = lambda action: LaunchWindow(1000, 2000)
 
-    actual_ticket, reason = runtime.grant({"id": 12, "device_id": "cam-1", "type": 2})
+    actual_ticket, reason = await runtime.grant(
+        {"id": 12, "device_id": "cam-1", "type": 2})
 
     assert actual_ticket is ticket
     assert reason is None
@@ -87,7 +100,7 @@ def test_recording_grant_saves_current_start_budget():
     assert request.config == AttemptConfig(6, Decimal("0.375"), Decimal("1.5"))
 
 
-def test_formal_result_adapter_shares_runtime_repository_and_owned_connection():
+async def test_formal_result_adapter_shares_runtime_repository_and_business_database():
     config = load_config({"devices": {"cam-1": {
         "kind": "camera", "driver": "driver-1",
     }}}, ConfigDefaults())
@@ -103,20 +116,22 @@ def test_formal_result_adapter_shares_runtime_repository_and_owned_connection():
         control_supported=True, stop_supported=False, query_supported=False,
         result_supported=True, read_supported=False, digest_supported=False,
         delete_supported=False), EvidenceRegistry(()), DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
-    owned = object()
-    runtime = session_capture_assembly(devices=config.devices,
+    database = _business_database()
+    factory = session_capture_assembly(devices=config.devices,
         drivers=DriverRegistry((entry,)), staging=Path("/staging"),
-        wait_config=execution_wait_config, media_enabled=False)(owned, "cam-1")
+        wait_config=execution_wait_config, media_enabled=False)
+    runtime = await factory(database, "cam-1")
 
     assert isinstance(runtime.results, DriverResultListing)
     assert runtime.results._capture_repository is runtime.capture
-    assert runtime.results._owned is owned
+    assert runtime.results._database is database
 
 
 @pytest.mark.parametrize("configured_lead,expected", [
     (None, Decimal("4.25")), (Decimal("0.125"), Decimal("0.125")),
 ])
-def test_photo_preparation_port_and_lead_use_the_driver_declaration(configured_lead, expected):
+async def test_photo_preparation_port_and_lead_use_the_driver_declaration(
+        configured_lead, expected):
     class PreparedPhotoDriver(ControlDriver, CapturePreparationDriver):
         default_prepare_lead_s = Decimal("4.25")
 
@@ -134,7 +149,7 @@ def test_photo_preparation_port_and_lead_use_the_driver_declaration(configured_l
         drivers=DriverRegistry((entry,)), staging=Path("/staging"),
         wait_config=execution_wait_config, media_enabled=False)
 
-    runtime = factory(object(), "photo")
+    runtime = await factory(_business_database(), "photo")
 
     assert runtime.capture_preparation_supported
     assert runtime.preparation_driver is driver
