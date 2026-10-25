@@ -1,0 +1,24 @@
+{
+  "observed_utc": "2026-10-25T02:13:21.185317+00:00",
+  "cgroup_interface": "v1",
+  "raw_files": {
+    "/sys/fs/cgroup/cpu/cpu.cfs_quota_us": "-1",
+    "/sys/fs/cgroup/cpu/cpu.cfs_period_us": "100000",
+    "/sys/fs/cgroup/cpuset/cpuset.cpus": "0-9",
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes": "9223372036854771712"
+  },
+  "os_cpu_count": 10,
+  "os_sched_getaffinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "scope": "一次性读取当前容器配置，不做周期采样。quota=-1和内存无限标记不代表底层主机资源保证；10个允许CPU不等于实测利用率。RUSAGE_CHILDREN累计已回收后代CPU除以wall只表示本轮平均核时间，不是CPU饱和或完整进程树利用率。"
+}
