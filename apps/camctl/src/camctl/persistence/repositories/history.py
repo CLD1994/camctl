@@ -1419,6 +1419,45 @@ class SqliteSnapshotStore:
         self._executor = executor
         self._config = config
 
+    async def discover_objects(
+        self, after_plan_id: int | None, threshold: int,
+    ) -> tuple[int, bool]:
+        """启动只记上界；后续只检查新计划及所属动作的快照资格。"""
+        if (isinstance(threshold, bool) or not isinstance(threshold, int)
+                or threshold < 1):
+            raise SnapshotMaintenanceError("发现阈值必须为正整数")
+        if after_plan_id is not None and (
+                isinstance(after_plan_id, bool) or not isinstance(after_plan_id, int)
+                or after_plan_id < 0):
+            raise SnapshotMaintenanceError("发现起点必须为非负整数或 None")
+        objects = load_enum_registry()["history_objects"]
+
+        def execute(owned):
+            with closing(owned.connection.execute("SELECT MAX(id) FROM plans")) as cursor:
+                value = cursor.fetchone()[0]
+            upper = 0 if value is None else int(value)
+            if after_plan_id is None or upper == after_plan_id:
+                return upper, False
+            with closing(owned.connection.execute(
+                "WITH new_objects(entity_type, entity_id) AS ("
+                f" SELECT {objects['plan']['id']}, id FROM plans WHERE id > ? AND id <= ?"
+                " UNION ALL"
+                f" SELECT {objects['action']['id']}, id FROM actions WHERE plan_id > ? AND plan_id <= ?"
+                ") SELECT MAX(CASE WHEN p.id IS NULL OR p.current_change_count < 1"
+                " OR p.snapshot_change_count < 0 OR p.current_change_count < p.snapshot_change_count"
+                " THEN 1 ELSE 0 END),"
+                " MAX(CASE WHEN p.pending_changes >= ? THEN 1 ELSE 0 END)"
+                " FROM new_objects AS n LEFT JOIN entity_snapshot_progress AS p"
+                " ON p.entity_type = n.entity_type AND p.entity_id = n.entity_id",
+                (after_plan_id, upper, after_plan_id, upper, threshold),
+            )) as cursor:
+                invalid, eligible = cursor.fetchone()
+            if invalid:
+                raise SnapshotMaintenanceError("新发现对象缺少有效快照维护进度")
+            return upper, bool(eligible)
+
+        return await self._run(DbJobKind.READ, execute, "新计划快照资格发现")
+
     async def snapshot_candidates(
             self, threshold: int, limit: int) -> tuple[SnapshotRef, ...]:
         def execute(owned):

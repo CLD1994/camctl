@@ -314,6 +314,7 @@ class MaintenanceOutcome(Enum):
 
     IDLE = "idle"                # 候选查询为空，等待提交或发现唤醒
     DRAINED = "drained"          # 本轮候选已读完，会话仍正常运行
+    YIELDED = "yielded"          # 达到本次批次数界，尚未检查后续候选
     DISABLED = "disabled"        # 入队前超时，本次会话维护停用
     CLOSING = "closing"          # 会话收尾，未安排新批次
 
@@ -368,14 +369,21 @@ async def _prepare_images(images):
         raise
 
 
-async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
+async def maintain_snapshots(
+        context: MaintenanceContext, *, max_batches: int | None = None,
+) -> MaintenanceResult:
     """按窄仓储端口分批推进快照维护。
 
     每批依次执行候选查询、依据读取、事务外准备与短写事务保存；
     批间让出执行机会并重新检查会话状态。候选不足一批时本轮读
     完；任何数据库操作在入队前超时则停用本次会话的维护并返回，
-    实际数据库错误按状态库错误向上传播。
+    实际数据库错误按状态库错误向上传播。max_batches 限制本次调用
+    的批次数和保留结果；达到上限时明确让出，不宣称候选已经清空。
     """
+    if max_batches is not None and (
+            isinstance(max_batches, bool) or not isinstance(max_batches, int)
+            or max_batches < 1):
+        raise SnapshotMaintenanceError("max_batches 必须为正整数或 None")
     if context.state.disabled:
         return MaintenanceResult(outcome=MaintenanceOutcome.DISABLED)
     saved: list[SavedProgress] = []
@@ -434,4 +442,8 @@ async def maintain_snapshots(context: MaintenanceContext) -> MaintenanceResult:
         if len(candidates) < context.batch_size:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.DRAINED,
+                saved=tuple(saved), batches=batches)
+        if max_batches is not None and batches >= max_batches:
+            return MaintenanceResult(
+                outcome=MaintenanceOutcome.YIELDED,
                 saved=tuple(saved), batches=batches)
