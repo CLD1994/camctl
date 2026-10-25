@@ -127,8 +127,10 @@ def no_result_preparation_failure(db, setrow, anchor):
     action = _row_at(db, "actions", setrow["action_id"], setrow["action_id"], boundary, current)
     activity = _row_at(db, "device_activities", setrow["activity_id"], setrow["action_id"], boundary, current)
     found = _preparation_run_for_anchor(db, setrow, anchor)
-    latest = _one(db, "SELECT id FROM operation_runs WHERE activity_id=? AND kind=? ORDER BY id DESC LIMIT 1",
-        (setrow["activity_id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+    latest = _one(db, "SELECT r.id FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+        " WHERE r.activity_id=? AND r.kind=? AND t.attempt_no=1 AND t.intent_event_id<=?"
+        " ORDER BY r.id DESC LIMIT 1",
+        (setrow["activity_id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE), boundary.last_event_id))
     if found is None or found != latest:
         raise ConsistencyError("准备决定不是原活动最新设置责任的实际结果")
     run = _row_at(db, "operation_runs", found[0], setrow["action_id"], boundary, current)
@@ -140,7 +142,6 @@ def no_result_preparation_failure(db, setrow, anchor):
             or not facts.not_started or not facts.preparation_resolved
             or facts.activity is None or facts.activity["id"] != activity["id"]
             or run["action_id"] != action["id"] or run["activity_id"] != activity["id"]
-            or run["created_event_id"] > boundary.last_event_id
             or run["status"] not in (int(enum_for("operation_runs.status").FAILED),
                 int(enum_for("operation_runs.status").UNCONFIRMED))
             or run["attempts_used"] != 1 or run["error_json"] is None
@@ -159,6 +160,8 @@ def no_result_preparation_failure(db, setrow, anchor):
     attempt = None if attempt_id is None else _row_at(db, "operation_attempts", attempt_id[0],
         action["id"], boundary, current)
     if (attempt is None or attempt["run_id"] != run["id"]
+            or attempt["intent_event_id"] is None
+            or not 1 <= attempt["intent_event_id"] < anchor <= boundary.last_event_id
             or attempt["status"] not in (int(enum_for("operation_attempts.status").FAILED),
                 int(enum_for("operation_attempts.status").UNKNOWN))
             or attempt["result_event_id"] != anchor or attempt["error_json"] is None):

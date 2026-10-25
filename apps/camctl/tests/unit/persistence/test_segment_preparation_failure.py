@@ -11,6 +11,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories import segment_check_conclusions as storage
 from camctl.persistence import transaction
 from camctl.history import decoding
+from camctl.history.events import business_columns
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def preparation_source(monkeypatch):
     action = dict(id=7, status=2, execution_started=1, cancel_requested=0)
     activity = dict(id=8, action_id=7, occupancy_state=1, dispatch_state=1)
     run = dict(id=10, action_id=7, activity_id=8, kind=10, status=4,
-               attempts_used=1, created_event_id=15, error_json={"code": "device_error"})
+               attempts_used=1, error_json={"code": "device_error"})
     attempt = dict(id=11, run_id=10, attempt_no=1, status=3,
                    intent_event_id=16, result_event_id=20,
                    error_json={"code": "device_error"}, result_json={"format_version": 1})
@@ -28,7 +29,7 @@ def preparation_source(monkeypatch):
                   member_count=0, source_txn_id=2, source_event_id=20)
     facts = SimpleNamespace(not_started=True, preparation_resolved=True, activity=activity)
     state = SimpleNamespace(action=action, activity=activity, run=run, attempt=attempt,
-                            setrow=setrow, facts=facts, latest=10, start=None,
+                            setrow=setrow, facts=facts, preparation_runs=[(10, 16)], start=None,
                             results=None, product=None, baseline=None)
     state.event = SimpleNamespace(event_type=storage.load_event_registry()["events"]["ATTEMPT_RESULT"]["id"],
         transaction_id=2, rows=(SimpleNamespace(table="operation_attempts", row_id=11,
@@ -40,8 +41,9 @@ def preparation_source(monkeypatch):
             return state.event
         if "JOIN operation_attempts" in sql and "result_event_id" in sql:
             return (10,) if parameters[-1] == 20 else None
-        if "ORDER BY id DESC" in sql:
-            return (state.latest,)
+        if "ORDER BY" in sql:
+            last_event = parameters[2] if len(parameters) == 3 else float("inf")
+            return (max(identity for identity, intent in state.preparation_runs if intent <= last_event),)
         if "FROM operation_attempts" in sql:
             return (11,)
         if "FROM outputs" in sql:
@@ -53,7 +55,9 @@ def preparation_source(monkeypatch):
         raise AssertionError(sql)
     monkeypatch.setattr(storage, "_one", one)
     rows = {"actions": action, "device_activities": activity,
-            "operation_runs": run, "operation_attempts": attempt}
+            "operation_runs": run, "operation_attempts": attempt, "segment_sets": setrow}
+    for table, row in rows.items():
+        assert set(row) <= {"id", *business_columns(table)}, table
     monkeypatch.setattr(storage, "row_facts", lambda db, table, identity: rows[table])
     monkeypatch.setattr(storage, "_ended_attempts", lambda db, row, boundary: 20)
     from camctl.persistence.repositories import capture_facts
@@ -92,6 +96,7 @@ def test_unconfirmed_preparation_keeps_device_failure_without_a_start(preparatio
 @pytest.mark.parametrize("target,change", [
     ("run", {"status": 3}), ("attempt", {"status": 2}),
     ("attempt", {"error_json": None}), ("attempt", {"result_event_id": 21}),
+    ("attempt", {"intent_event_id": None}), ("attempt", {"intent_event_id": 21}),
     ("activity", {"occupancy_state": 2}), ("run", {"activity_id": 9}),
 ])
 def test_preparation_anchor_rejects_unreliable_source(preparation_source, target, change):
@@ -101,7 +106,8 @@ def test_preparation_anchor_rejects_unreliable_source(preparation_source, target
 
 
 @pytest.mark.parametrize("field,value", [
-    ("latest", 14), ("product", (9,)), ("baseline", (9,)), ("results", (9,)),
+    ("preparation_runs", [(10, 16), (14, 18)]),
+    ("product", (9,)), ("baseline", (9,)), ("results", (9,)),
 ])
 def test_preparation_failure_cannot_use_stale_or_nonempty_work(preparation_source, field, value):
     setattr(preparation_source, field, value)
@@ -135,9 +141,16 @@ def test_saved_preparation_failure_rechecks_the_same_anchor(preparation_source, 
     conclusion = {"current_failure_json": {
         "code": "capture_failed", "details": {"activity_id": "8", "reason": "device_failed"}}}
     storage._verify_saved_prefix(None, _request(), ({},), conclusion)
-    preparation_source.latest = 14
+    preparation_source.preparation_runs.append((14, 18))
     with pytest.raises(ConsistencyError):
         storage._verify_saved_prefix(None, _request(), ({},), conclusion)
+
+
+def test_later_preparation_does_not_change_the_original_source(preparation_source):
+    preparation_source.preparation_runs.append((14, 21))
+    result = storage._values(None, _request(), preparation_source.setrow)
+    assert result["current_failure_json"] == {
+        "code": "capture_failed", "details": {"activity_id": "8", "reason": "device_failed"}}
 
 
 def test_saved_preparation_failure_cannot_drop_the_business_error(preparation_source, monkeypatch):

@@ -68,7 +68,7 @@ P2 只保存有限事实。P3 在终态事务重新核对全部合格产物、�
 
 `ResultCheckConclusionSave`携带原集合及完整有限申请，`conclude_result_check`按原操作键保存，返回实际`ResultCheckConclusionRef`。无 RESULTS 分区引用实际基准失败、已经结束的 START，或原活动最新设置准备的失败结果。基准失败只接受原 H0 内可靠 RETURN 错误或 UNCONFIRMED，独立核原未派发活动和不存在 START／RESULTS 责任。启动失败核原 START 的全部实际尝试、最后结果及关闭错误，保持既定启动失败含义，集合为空且范围未知。
 
-设置准备失败以 `anchor_event_id` 指定同一动作、同一活动最新 `PREPARE_CAPTURE` 的真实尝试结果，不因已有旧 START 而改用旧启动结果。原 H0 必须包含完整结果事务、`FAILED` 或 `UNCONFIRMED` 的准备流程，以及同票的实际错误和返回。动作在 H0 保持 `RUNNING + execution_started=1`，原活动持有占用，全部准备和基准调用已经收场，且全部 START 均可靠无效果、没有待核实启动责任。START 次数可以为零；已有次数和执行标记保持原值。没有 RESULTS、正式产物和集合成员时，决定保存 `capture_failed`／`device_failed` 及原 `activity_id`，后续沿同一空集合正式发布；保存核实与发布核实都重新核对同一来源。
+设置准备失败以 `anchor_event_id` 指定同一动作、同一活动在 H0 内最新 `PREPARE_CAPTURE` 的真实尝试结果，不因已有旧 START 而改用旧启动结果。准备流程通过唯一尝试的 `intent_event_id` 确认已在 H0 内建立，按流程标识确定其中最后一项。原 H0 必须包含完整结果事务、`FAILED` 或 `UNCONFIRMED` 的准备流程，以及同票的实际错误和返回。动作在 H0 保持 `RUNNING + execution_started=1`，原活动持有占用，全部准备和基准调用已经收场，且全部 START 均可靠无效果、没有待核实启动责任。START 次数可以为零；已有次数和执行标记保持原值。没有 RESULTS、正式产物和集合成员时，决定保存 `capture_failed`／`device_failed` 及原 `activity_id`，后续沿同一空集合正式发布；保存核实与发布核实都重新核对同一来源。
 
 决定保存后动作仍运行，正式产物没有变化。实际 Task 与返回交接仍由原调用拥有者负责，后续共同完成事务再核取消、窗口及适用释放。
 
