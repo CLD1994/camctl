@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from camctl.capture.handlers import (
     CaptureRuntime, DeviceControlPort, ResultFilesPort, _control_call,
-    _record_start_once, capture_handler,
+    _baseline_before_control, _record_start_once, capture_handler,
 )
 from camctl.capture.residual import pass_residual_gate
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
@@ -17,7 +17,7 @@ from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.scheduling import (
-    ExpireActionResult, ExpireOutcome, SchedulingRepository,
+    ExpireActionRequest, ExpireActionResult, ExpireOutcome, SchedulingRepository,
 )
 from camctl.scheduling.rules import LaunchWindow
 
@@ -203,6 +203,64 @@ async def test_photo_start_preserves_complete_deadline_entry_permit_and_preparat
     assert request.prepared_by == prepared and request.start_entry is permit
     assert not permit.active
     assert runtime.finish.call_args.args[0] == ticket
+
+
+async def test_legacy_baseline_failure_after_window_ends_expires_before_business_failure(mocker):
+    from camctl.capture import baseline as baseline_flow
+    from camctl.capture.baseline import PendingBaseline
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.operations.models import ErrorValue
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+    from camctl.persistence.repositories.capture_facts import StartFacts
+
+    runtime = _runtime(mocker)
+    runtime.capture_preparation_supported = False
+    error = ErrorValue("directory_read_failed", "device")
+    baseline = BaselinePreparation(PreparationPhase.FAILED, error=error)
+    action = runtime.action(2)
+    activity = {"id": 7, "occupancy_state": 1, "ownership_mode": 2}
+
+    async def read_baseline(action_id):
+        runtime.wall_us.return_value = 1101
+        runtime.pending_baselines[2] = PendingBaseline(7,
+            DeviceBinding("cam-1", "driver-1"), ("/DCIM",), error=error)
+        return baseline
+
+    runtime.prepare_baseline.side_effect = read_baseline
+    mocker.patch("camctl.capture.handlers._activity_id_of", autospec=True, return_value=7)
+    mocker.patch.object(baseline_flow, "row_facts", autospec=True, return_value=action)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+        return_value=StartFacts(activity, None, 0, True, 1))
+    runtime.capture.preparation_calls_resolved.return_value = True
+    runtime.resume_baselines.side_effect = (
+        lambda action_id: baseline_flow.resume_baseline_settlement(action_id, runtime=runtime))
+
+    def expire(request):
+        assert isinstance(request, ExpireActionRequest)
+        action["status"] = 5
+        if request.preparation_resolved:
+            activity["occupancy_state"] = 2
+
+    def release(request, key, owned):
+        assert request.preparation_error is error
+        activity["occupancy_state"] = 2
+        return DbOutcome(DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
+
+    runtime.save_capture_completion.side_effect = expire
+    runtime.capture.release_occupancy.side_effect = release
+
+    result = await _baseline_before_control(runtime, action)
+
+    assert result.phase == "not_granted" and result.detail == "window_ended"
+    request = runtime.save_capture_completion.call_args.args[0]
+    assert isinstance(request, ExpireActionRequest)
+    assert request.action_id == 2 and request.trusted_wall_now == 1101
+    assert baseline.error is error
+    assert action["status"] == 5 and runtime.pending_baselines == {}
+    runtime.capture.release_occupancy.assert_called_once()
+    runtime.prepare_baseline.assert_awaited_once()
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_called()
 
 
 @pytest.mark.parametrize("saved_attempt", [(1, 1, 100), (2, 3, 100), (3, 2, 100), (4, 1, 100)])

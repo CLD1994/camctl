@@ -131,6 +131,157 @@ async def test_photo_setting_failure_ends_preparation_without_marking_execution_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["settings", "baseline"])
+@pytest.mark.parametrize("status", [1, 2], ids=["pending", "running"])
+@pytest.mark.parametrize("interruption", ["canceled", "window_ended", "terminal"])
+async def test_returned_preparation_failure_obeys_current_action_before_business_failure(
+    mocker, phase, status, interruption,
+):
+    from camctl.operations.models import AttemptStatus, ErrorValue
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, action, _ = (_photo_world(mocker) if phase == "settings" else _world(mocker))
+    action.update(status=status, execution_started=status - 1)
+    actual_returned = False
+    setting_error = ErrorValue("setting_failed", "device")
+    baseline_error = ErrorValue("directory_read_failed", "device")
+    failed_settings = DeviceCallResult.from_outcome(CallOutcome(
+        status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT, error=setting_error,
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("returned", 1))))
+    failed_baseline = BaselinePreparation(PreparationPhase.FAILED, error=baseline_error)
+
+    def interrupt():
+        nonlocal actual_returned
+        if interruption == "canceled":
+            action["cancel_requested"] = 1
+            if status == 1:
+                action["status"] = 6
+        elif interruption == "window_ended":
+            runtime.wall_us.return_value = 11_000_001
+        else:
+            action["status"] = 3
+        actual_returned = True
+
+    async def return_settings(request):
+        interrupt()
+        return failed_settings
+
+    async def return_baseline(action_id):
+        interrupt()
+        return failed_baseline
+
+    if phase == "settings":
+        runtime.preparation_driver.prepare_capture.side_effect = return_settings
+    else:
+        runtime.prepare_baseline.side_effect = return_baseline
+
+    def cancel(current_runtime, action_id, *, unstarted):
+        assert current_runtime is runtime and action_id == 1 and unstarted
+        assert actual_returned
+        assert runtime.operations.finish_attempt.call_count == 1
+        action["status"] = 6
+
+    canceled = mocker.patch("camctl.capture.handlers._finish_canceled_capture", autospec=True,
+        side_effect=cancel)
+
+    def expire(request, key, owned):
+        action["status"] = 5
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    runtime.scheduling.expire_action.side_effect = expire
+    runtime.scheduling.fail_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+
+    def release(request, key, owned):
+        assert actual_returned
+        assert runtime.operations.finish_attempt.call_count == 1
+        return DbOutcome(DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
+
+    runtime.capture.release_occupancy.side_effect = release
+
+    result = await advance_preparation(runtime, 1)
+
+    assert result.phase is PreparationPhase.ABORTED
+    assert action["status"] == {"canceled": 6, "window_ended": 5, "terminal": 3}[interruption]
+    assert action["execution_started"] == status - 1
+    runtime.operations.finish_attempt.assert_called_once()
+    saved = runtime.operations.finish_attempt.call_args.args[0].outcome.outcome
+    if phase == "settings":
+        assert saved.error is setting_error and saved.status is AttemptStatus.FAILED
+        runtime.prepare_baseline.assert_not_called()
+    else:
+        assert failed_baseline.error is baseline_error
+        runtime.prepare_baseline.assert_awaited_once()
+    assert canceled.call_count == int(interruption == "canceled" and status == 2)
+    assert runtime.scheduling.expire_action.call_count == int(interruption == "window_ended")
+    runtime.capture.release_occupancy.assert_called_once()
+    runtime.scheduling.fail_preparation.assert_not_called()
+    runtime.save_capture_completion.assert_not_called()
+    runtime.scheduling.start_action.assert_not_called()
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", [PreparationPhase.PENDING, PreparationPhase.WAITING])
+async def test_unsettled_baseline_save_precedes_late_window_expiration(mocker, phase):
+    runtime, _, _ = _world(mocker)
+    original = BaselinePreparation(phase, database_error=RuntimeError("save_unconfirmed"))
+
+    async def unsettled_baseline(action_id):
+        runtime.wall_us.return_value = 11_000_001
+        return original
+
+    runtime.prepare_baseline.side_effect = unsettled_baseline
+
+    assert await advance_preparation(runtime, 1) is original
+
+    runtime.scheduling.expire_action.assert_not_called()
+    runtime.capture.release_occupancy.assert_not_called()
+
+
+def test_running_cancellation_preserves_original_baseline_error_until_release(mocker):
+    from camctl.capture import baseline, preparation
+    from camctl.capture.baseline import PendingBaseline
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.operations.models import ErrorValue
+    from camctl.persistence.repositories.capture import (
+        ActivityReleaseResult, FinishCanceledCapture, ReleaseOutcome,
+    )
+    from camctl.persistence.repositories.capture_facts import StartFacts
+
+    runtime, action, _ = _world(mocker)
+    action.update(status=2, execution_started=1, cancel_requested=1)
+    error = ErrorValue("directory_read_failed", "device")
+    pending = PendingBaseline(7, DeviceBinding("cam-1", "driver-1"), ("/DCIM",), error=error)
+    runtime.pending_baselines[1] = pending
+    activity = {"id": 7, "occupancy_state": 1, "dispatch_state": 1, "ownership_mode": 2}
+    preparation._activity.return_value = activity
+    mocker.patch.object(baseline, "row_facts", autospec=True, return_value=action)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+        return_value=StartFacts(activity, None, 0, True, 1))
+    runtime.capture.preparation_calls_resolved.return_value = True
+    runtime.resume_baselines.side_effect = (
+        lambda action_id: baseline.resume_baseline_settlement(action_id, runtime=runtime))
+
+    def finish(request):
+        assert isinstance(request, FinishCanceledCapture) and not request.preparation_resolved
+        action["status"] = 6
+
+    def release(request, key, owned):
+        assert request.preparation_error is error
+        activity["occupancy_state"] = 2
+        return DbOutcome(DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
+
+    runtime.save_capture_completion.side_effect = finish
+    runtime.capture.release_occupancy.side_effect = release
+
+    assert settle_preparation(runtime, 1)
+
+    assert action["status"] == 6 and runtime.pending_baselines == {}
+    runtime.capture.release_occupancy.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_new_photo_session_repeats_only_settings_under_original_activity_without_starting(mocker):
     runtime, action, _ = _photo_world(mocker)
     await advance_preparation(runtime, 1)

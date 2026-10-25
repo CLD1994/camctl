@@ -292,9 +292,6 @@ def settle_preparation(runtime, action_id):
         if pending is not None:
             if pending.read_owner is not None or pending.saves.pending is not None:
                 return False
-            from camctl.capture.baseline import close_baseline
-            close_baseline(action_id, runtime=runtime)
-    activity = _activity(runtime, action_id)
     action = runtime.action(action_id)
     if action["status"] not in (3, 4, 5, 6):
         if action["cancel_requested"]:
@@ -302,6 +299,11 @@ def settle_preparation(runtime, action_id):
             _finish_canceled_capture(runtime, action_id, unstarted=True)
         if runtime.action(action_id)["status"] not in (3, 4, 5, 6):
             return False
+    if runtime.pending_baselines.get(action_id) is not None:
+        runtime.resume_baselines(action_id)
+        if runtime.pending_baselines.get(action_id) is not None:
+            return False
+    activity = _activity(runtime, action_id)
     if activity is not None and activity["occupancy_state"] == 1 and activity["dispatch_state"] in (1, 4):
         _end(runtime, action_id, "release", ActivityReleaseSave(
             action_id, runtime.wall_us(), preparation_resolved=True))
@@ -406,6 +408,9 @@ async def advance_preparation(runtime, action_id):
                 raise
         if not owner.saved:
             return BaselinePreparation(PreparationPhase.WAITING)
+        aborted = _abort_if_required(runtime, runtime.action(action_id))
+        if aborted is not None:
+            return aborted
         if not owner.successful:
             _fail_preparation(runtime, action_id, "device_failed")
             return BaselinePreparation(PreparationPhase.FAILED)
@@ -418,12 +423,13 @@ async def advance_preparation(runtime, action_id):
     if reason is not None:
         return BaselinePreparation(PreparationPhase.WAITING)
     baseline = await runtime.prepare_baseline(action_id)
-    if baseline.phase is PreparationPhase.FAILED:
-        _fail_preparation(runtime, action_id, "baseline_read_failed", baseline.error)
-    elif baseline.phase is PreparationPhase.ABORTED:
+    if baseline.phase not in (PreparationPhase.PENDING, PreparationPhase.WAITING):
         aborted = _abort_if_required(runtime, runtime.action(action_id))
         if aborted is not None:
             return aborted
+    if baseline.phase is PreparationPhase.FAILED:
+        _fail_preparation(runtime, action_id, "baseline_read_failed", baseline.error)
+    elif baseline.phase is PreparationPhase.ABORTED:
         raise ConsistencyError("目录准备已中止，但原动作没有取消、终态或窗口结束依据")
     return baseline
 

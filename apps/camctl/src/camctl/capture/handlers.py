@@ -1885,6 +1885,12 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
     if current["cancel_requested"]:
         _finish_canceled_capture(runtime, action["id"], unstarted=True)
         return HandlerOutcome("not_granted", "canceled")
+    now = runtime.wall_us()
+    if window_phase(runtime.window_of(current), now) is WindowPhase.AFTER_WINDOW:
+        runtime.save_capture_completion(ExpireActionRequest(action["id"], now, now,
+            preparation_resolved=result.phase is not PreparationPhase.FAILED))
+        runtime.resume_baselines(action["id"])
+        return HandlerOutcome("not_granted", "window_ended")
     if result.phase is PreparationPhase.FAILED:
         activity_id = _activity_id_of(runtime, action["id"])
         from camctl.devices.tasks import CaptureResultPolicy
@@ -1916,11 +1922,6 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
             )
         runtime.resume_baselines(action["id"])
         return HandlerOutcome("call_failed", "baseline_read_failed")
-    now = runtime.wall_us()
-    if window_phase(runtime.window_of(current), now) is WindowPhase.AFTER_WINDOW:
-        runtime.save_capture_completion(ExpireActionRequest(action["id"], now, now, preparation_resolved=True))
-        runtime.resume_baselines(action["id"])
-        return HandlerOutcome("not_granted", "window_ended")
     return None
 
 
