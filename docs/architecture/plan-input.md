@@ -133,11 +133,14 @@ camctl 数据库对象在公共 JSON 中以规范十进制字符串表达身份�
 | 参数组合 | 含义与限制 |
 | --- | --- |
 | `source`，可带 `filter: "default"` 和 `purpose: "manual"` | 普通取回；两个可选字段省略时分别按这两个值解释 |
+| 普通默认取回的上述组合，再带非空、无重复的 `exclude_output_ids` | 按最终目标 ID 排除客户端已有产物；不与 `output_ids`、预览筛选或自动用途组合，完整行为见[排除已有产物](obtaining-outputs.md#排除客户端已有的产物) |
 | `source` 与 `filter: "preview"`，可带 `purpose: "manual"` | 手动预览取回，不产生自动取消联动 |
 | 动作级 `source` 与非空、无重复 `output_ids`，可带 `purpose: "manual"` | 精确选择；不与 `filter` 混用，不对组或计划引用使用 |
 | 本计划 `source.action_name`、`filter: "preview"`、`purpose: "auto_preview"` | 自动预览取回；三个字段都明确填写，不接受 `output_ids` 或跨计划来源 |
 
 自动取回的 `scheduled_at` 必须与来源拍摄表示同一时刻；关联唯一性、来源类型及预览支持按[预览契约](preview-obtaining.md)校验。普通默认范围排除预览并优先对应修复成品；筛选为预览时仍按大小比较规则决定实际文件，不把修复成品伪装为预览。
+
+`exclude_output_ids` 与精确产物列表使用同一对象 ID 类型。主机只在普通默认选集确定后应用排除，来源等待、范围未知、空范围和来源失败仍按原规则处理。全部目标已排除且没有其他失败时允许无交付成功；列表中的未知或范围外 ID 不扩大目标。原请求省略该字段时保持既有行为。
 
 清理参数恰好为 `{"output_ids":[...]}` 或 `{"source":{...}}`。前者使用非空、无重复 ID 列表；后者只支持上表的动作或计划来源，不支持组。范围清理包含该范围的全部正式产物，不提供 `filter`、`purpose` 或取回的默认替代规则。
 

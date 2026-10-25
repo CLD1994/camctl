@@ -13,8 +13,8 @@ from .test_segment_default_scope import _obtain
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["default", "preview"])
-async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_path, mode):
+@pytest.mark.parametrize("mode,exclude_photos", [("default", False), ("preview", False), ("default", True)])
+async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_path, mode, exclude_photos):
     owned, runtime, action_id, handler, _ = await _stopped_action6_record(tmp_path)
     try:
         context = _stop_context(owned, action_id)
@@ -33,7 +33,13 @@ async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_p
         _result_port(runtime, read)
         await capture_handler(handler)(action_id, runtime)
         assert runtime.action(action_id)["status"] == 3
-        _, selection = _obtain(owned, runtime, action_id, mode, 2)
+        photos = [row[0] for row in owned.connection.execute(
+            "SELECT o.id FROM outputs o JOIN device_files d ON d.id=o.device_file_id"
+            " WHERE o.source_action_id=? AND json_extract(d.identity_key,'$[2]') LIKE '%.JPG'",
+            (action_id,))]
+        assert len(photos) == 1
+        _, selection = _obtain(owned, runtime, action_id, mode, 2,
+                                exclude_output_ids=photos if exclude_photos else None)
         saved = fix_segment_selection(FixSegmentSelection(selection, runtime.wall_us()),
                                       new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
@@ -42,9 +48,9 @@ async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_p
             " JOIN outputs o ON o.id=i.output_id JOIN device_files d ON d.id=o.device_file_id"
             " WHERE i.selection_id=? ORDER BY i.id", (selection,),
         ).fetchall()
-        assert len(selected) == 3
+        assert len(selected) == (2 if exclude_photos else 3)
         assert all(status == 2 for _, _, status in selected)
-        assert sum(name.endswith(".JPG") and kind == 1 for name, kind, _ in selected) == 1
+        assert sum(name.endswith(".JPG") and kind == 1 for name, kind, _ in selected) == (0 if exclude_photos else 1)
         suffix = ".MP4" if mode == "default" else ".LRF"
         kind = 1 if mode == "default" else 3
         assert sum(name.endswith(suffix) and actual_kind == kind

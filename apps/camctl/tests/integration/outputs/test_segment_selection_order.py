@@ -42,6 +42,7 @@ def test_scope_order_and_unavailable_member_do_not_select_outside_scope(monkeypa
                     "source": {"id": 1, "execution_spec_json": {
                         "result_policy": "osmo360ii_record_segments_v1"}},
                     "mode": SelectionMode.DEFAULT,
+                    "excluded": frozenset(),
                     "setrow": {"id": 1},
                     "batch": 2,
                     "saved": None,

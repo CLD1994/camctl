@@ -156,10 +156,30 @@
             },
             "purpose": {
               "const": "manual"
+            },
+            "exclude_output_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "status-report.schema.json#/$defs/entity_id"
+              },
+              "minItems": 1,
+              "uniqueItems": true
             }
           },
           "required": [
             "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "required": ["exclude_output_ids"]
+              },
+              "then": {
+                "properties": {
+                  "filter": {"const": "default"}
+                }
+              }
+            }
           ],
           "additionalProperties": false
         },

@@ -293,6 +293,18 @@ def test_empty_selection_is_fixed() -> None:
     assert pending.items == ()
 
 
+@pytest.mark.parametrize("completed,failed,error", [(False, False, None), (True, False, 1), (True, True, 5)])
+def test_default_exclusions_preserve_source_wait_and_errors(completed, failed, error):
+    snapshot = select_outputs(
+        SourceResolution(ResolutionState.FIXED, member_action_ids=(11,), source_plan_id=1),
+        _facts((), source_completed=completed, source_failed=failed),
+        SelectionMode.DEFAULT, excluded_output_ids=frozenset({101}),
+    )
+    assert snapshot.is_fixed is completed
+    assert snapshot.source_error_code == error
+    assert snapshot.items == ()
+
+
 @pytest.mark.parametrize("mode", [SelectionMode.DEFAULT, SelectionMode.PREVIEW])
 def test_failed_source_with_complete_empty_catalog_uses_source_error(mode) -> None:
     selection = select_outputs(
