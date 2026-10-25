@@ -369,9 +369,10 @@ async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     )
                        for variant, artifact in zip(
                            (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    activity_id = str(await _activity_id(runtime, action_id))
     entries = tuple(ObservedFile(
         identity=identity.file_identity, locator=identity.locator(),
-        evidence={"activity_id": str((await _activity_id(runtime, action_id))),
+        evidence={"activity_id": activity_id,
                   "artifact": asdict(artifact)},
         complete=True, size_bytes=artifact.size_bytes, kind=FileKind.PHOTO,
         original_name=artifact.original_name, media_type=artifact.media_type,

@@ -2725,12 +2725,12 @@ async def _catalog_drafts(
             and (rule.format_id is None or entry.format_id == rule.format_id))
 
     file_ids, complete_originals = {}, set()
-    async for (_, file_id), entry in (await registered_observations(registered, entries)):
+    async for (_, file_id), entry in registered_observations(registered, entries):
         file_ids[entry.identity] = file_id
         if entry.complete and entry.paired_identity is None and eligible(entry):
             complete_originals.add(entry.identity)
     drafts = []
-    async for (_, file_id), entry in (await registered_observations(registered, entries)):
+    async for (_, file_id), entry in registered_observations(registered, entries):
         if not entry.complete or not eligible(entry):
             continue
         if entry.paired_identity is None:
@@ -2812,7 +2812,7 @@ async def _finish_capture(
         product_rules=_product_requirements((await runtime.action(action_id)), required).rules))
     if repair_file_id is not None:
         original_file_ids = [
-            file_id async for (_, file_id), entry in (await registered_observations(registered, entries))
+            file_id async for (_, file_id), entry in registered_observations(registered, entries)
             if entry.complete and entry.paired_identity is None]
         if original_file_ids:
             drafts = drafts + (OutputDraft(
@@ -3636,7 +3636,7 @@ async def _local_recording_listing(runtime: CaptureRuntime, action):
 
     if not await any_result(entry.complete and entry.kind is FileKind.VIDEO and entry.paired_identity is None
                and file_identity_key(action["device_id"], action["driver_id"], entry.identity) == identity
-               async for entry in (await iter_result_entries(listing.entries))):
+               async for entry in iter_result_entries(listing.entries)):
         return None
     return listing
 

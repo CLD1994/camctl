@@ -391,7 +391,7 @@ async def result_entry_count(entries):
 async def assess_registered_files(registered, requirements, *, set_finalized):
     from camctl.capture.results import CaptureFileAssessment
     state = CaptureFileAssessment(requirements, set_finalized=set_finalized)
-    async for file, _ in (await iter_result_entries(registered)):
+    async for file, _ in iter_result_entries(registered):
         state.add(file)
     return state.finish()
 
