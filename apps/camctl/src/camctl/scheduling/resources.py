@@ -61,6 +61,26 @@ def current_start_holder(connection: Any, device_id: str) -> StartHolder | None:
     )
 
 
+@dataclass(frozen=True)
+class PreparationHolder:
+    action_id: int
+    activity_id: int
+
+
+def current_preparation_holder(connection, device_id):
+    """准备开始后沿原活动保留机会，直到原占用可靠释放。"""
+    with closing(connection.execute(
+        "SELECT a.id,d.id FROM device_activities d JOIN actions a ON a.id=d.action_id"
+        " WHERE a.device_id=? AND d.occupancy_state=1 AND d.dispatch_state IN (1,4)"
+        " AND (a.execution_started=0 OR EXISTS(SELECT 1 FROM operation_runs r"
+        f" WHERE r.activity_id=d.id AND r.kind={int(enum_for('operation_runs.kind').PREPARE_CAPTURE)})) ORDER BY d.id LIMIT 2", (device_id,),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) > 1:
+        raise ConsistencyError("同一设备存在多个准备占用持有者")
+    return None if not rows else PreparationHolder(*rows[0])
+
+
 def baseline_start_reason(activity, action) -> str | None:
     """基准拍摄的意图前提；只读取首次固定的执行定义与可靠活动事实。"""
     ownership = enum_for("device_activities.ownership_mode")
@@ -97,11 +117,14 @@ def capture_scope_blocked(connection, device_id, action_id, ownership_mode, outp
     requested = roots(output_scope)
     with closing(connection.execute(
         "SELECT d.action_id,d.activity_state,d.dispatch_state,d.ownership_mode,d.output_scope_json"
+        f" ,(a.execution_started=0 OR EXISTS(SELECT 1 FROM operation_runs r WHERE r.activity_id=d.id AND r.kind={int(enum_for('operation_runs.kind').PREPARE_CAPTURE)}))"
         " FROM device_activities d JOIN actions a ON a.id=d.action_id"
         " WHERE a.device_id=? AND d.occupancy_state=1 AND d.action_id<>?",
         (device_id, action_id),
     )) as cursor:
-        for other_id, state, dispatch, mode, scope in cursor:
+        for other_id, state, dispatch, mode, scope, prepared in cursor:
+            if prepared:
+                return True
             if ownership_mode != 2 and mode != 2:
                 # 原任务归属流程由自己的执行前检查核实物理资格。
                 continue

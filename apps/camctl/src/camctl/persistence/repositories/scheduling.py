@@ -53,7 +53,7 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change as _update,
 )
-from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked, current_start_holder
+from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked, current_start_holder, current_preparation_holder
 from camctl.scheduling.rules import (
     ExpirationReason,
     LaunchWindow,
@@ -174,6 +174,46 @@ class StartActionResult:
     reason: str | None = None
 
 
+def _new_activity_values(action, capabilities):
+    """准备和执行入口共用的唯一活动初始映像。"""
+    return {
+        "action_id": action["id"],
+        "task_key": uuid.uuid4().hex,
+        "task_locator_json": None,
+        "state_query_supported": capabilities.state_query_supported,
+        "stop_supported": capabilities.stop_supported,
+        "safe_repeat_stop": capabilities.safe_repeat_stop,
+        "start_return_meaning": capabilities.start_return_meaning,
+        "completion_mode": capabilities.completion_mode,
+        "ownership_mode": capabilities.ownership_mode,
+        "output_scope_json": capabilities.output_scope_json,
+        "baseline_state": int(
+            enum_for("device_activities.baseline_state").COLLECTING
+            if capabilities.ownership_mode == enum_for("device_activities.ownership_mode").BASELINE_COMPARISON
+            else enum_for("device_activities.baseline_state").NOT_REQUIRED),
+        "baseline_first_event_id": None,
+        "baseline_last_event_id": None,
+        "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),
+        "activity_state": 1,
+        "occupancy_state": 1,
+        "sent_at": None,
+        "started_at": None,
+        "result_wait_margin_ms": None,
+        "extra_wait_ms_used": None,
+        "expected_check_at": None,
+        "wait_completed_event_id": None,
+        "capture_json": None,
+        "control_elapsed_ns": None,
+        # 照片与延时的采集判定从 UNDETERMINED 开始；录像不适用该列。
+        "completion_basis": None if action["type"] == 2 else 1,
+        "completion_evidence_json": None,
+        "result_set_state": 1,
+        "result_check_json": None,
+        "output_set_finalized_event_id": None,
+        "last_error_json": None,
+    }
+
+
 class StartActionCommand:
     """拍摄动作取得处理资格的完整事务命令。
 
@@ -219,9 +259,8 @@ class StartActionCommand:
         if action["execution_started"] != 0:
             raise TransactionError(
                 f"开始事务要求未开始的动作: {request.action_id}")
-        if activity_id is not None:
-            raise TransactionError(
-                f"设备活动先于动作开始登记: {request.action_id}")
+        prepared_activity = (None if activity_id is None else
+                             row_facts(connection, "device_activities", activity_id))
         if action["cancel_requested"]:
             return self._rejected("canceled")
         literal = _CAMERA_TYPE_NAMES.get(action["type"])
@@ -247,7 +286,19 @@ class StartActionCommand:
 
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
-        if capabilities.ownership_mode == 2:
+        preparation_holder = current_preparation_holder(connection, action["device_id"])
+        if preparation_holder is not None and preparation_holder.action_id != action["id"]:
+            return self._rejected("device_busy")
+        if prepared_activity is not None:
+            _verify_prepared_activity(prepared_activity, action, capabilities)
+            reason = baseline_start_reason(prepared_activity, action)
+            if reason is not None:
+                return self._rejected(reason)
+            from .capture_facts import preparation_calls_resolved
+            if not preparation_calls_resolved(connection, activity_id):
+                return self._rejected("preparation_unresolved")
+            self._state["device_activities"] = {activity_id: prepared_activity}
+        if capabilities.ownership_mode == 2 and preparation_holder is None:
             mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
             with closing(connection.execute(
                 "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
@@ -270,7 +321,7 @@ class StartActionCommand:
             raise ConsistencyError(f"计划不存在: {action['plan_id']}")
         self._state.setdefault("plans", {})[plan["id"]] = plan
         owner = ("action", request.action_id)
-        allocation = scope.allocate(3 if plan["status"] == 1 else 2)
+        allocation = scope.allocate(1 + int(plan["status"] == 1) + int(prepared_activity is None))
 
         action_row = _update(
             "actions", request.action_id,
@@ -290,50 +341,17 @@ class StartActionCommand:
             allocation.first_event_id, allocation.txn_id,
             _ACTION_STARTED_EVENT, 1, tuple(started_rows), request.occurred_at)
 
-        activity_id = _next_id(connection, "device_activities")
-        activity_values = {
-            "action_id": request.action_id,
-            "task_key": uuid.uuid4().hex,
-            "task_locator_json": None,
-            "state_query_supported": capabilities.state_query_supported,
-            "stop_supported": capabilities.stop_supported,
-            "safe_repeat_stop": capabilities.safe_repeat_stop,
-            "start_return_meaning": capabilities.start_return_meaning,
-            "completion_mode": capabilities.completion_mode,
-            "ownership_mode": capabilities.ownership_mode,
-            "output_scope_json": capabilities.output_scope_json,
-            "baseline_state": int(
-                enum_for("device_activities.baseline_state").COLLECTING
-                if capabilities.ownership_mode == enum_for("device_activities.ownership_mode").BASELINE_COMPARISON
-                else enum_for("device_activities.baseline_state").NOT_REQUIRED),
-            "baseline_first_event_id": None,
-            "baseline_last_event_id": None,
-            "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),
-            "activity_state": 1,
-            "occupancy_state": 1,
-            "sent_at": None,
-            "started_at": None,
-            "result_wait_margin_ms": None,
-            "extra_wait_ms_used": None,
-            "expected_check_at": None,
-            "wait_completed_event_id": None,
-            "capture_json": None,
-            "control_elapsed_ns": None,
-            # 照片与延时的采集判定从 UNDETERMINED 开始；录像不适用该列。
-            "completion_basis": None if action["type"] == 2 else 1,
-            "completion_evidence_json": None,
-            "result_set_state": 1,
-            "result_check_json": None,
-            "output_set_finalized_event_id": None,
-            "last_error_json": None,
-        }
-        activity_row = _row("device_activities", activity_id, activity_values)
-        self._owners[("device_activities", activity_id)] = owner
-        self._state["device_activities"] = {
-            activity_id: dict(activity_values, id=activity_id)}
-        create = _envelope(
-            allocation.last_event_id, allocation.txn_id,
-            _ACTIVITY_CREATE_EVENT, 1, (activity_row,), request.occurred_at)
+        create = None
+        if prepared_activity is None:
+            activity_id = _next_id(connection, "device_activities")
+            activity_values = _new_activity_values(action, capabilities)
+            activity_row = _row("device_activities", activity_id, activity_values)
+            self._owners[("device_activities", activity_id)] = owner
+            self._state["device_activities"] = {
+                activity_id: dict(activity_values, id=activity_id)}
+            create = _envelope(
+                allocation.last_event_id, allocation.txn_id,
+                _ACTIVITY_CREATE_EVENT, 1, (activity_row,), request.occurred_at)
         events = [started]
         if plan["status"] == 1:
             self._owners[("plans", plan["id"])] = ("plan", plan["id"])
@@ -343,7 +361,8 @@ class StartActionCommand:
                 (_update("plans", plan["id"],
                  {"status": 1}, {"status": 2}),),
                 request.occurred_at))
-        events.append(create)
+        if create is not None:
+            events.append(create)
         return CommandPlan(
             events=tuple(events), owners=self._owners,
             state_rows=self._state,
@@ -401,6 +420,18 @@ class StartActionCommand:
     def _reuse(self, scope, saved: list[dict]) -> CommandPlan:
         """同键重送：核实原事务组成后恢复首次响应。"""
         request = self._request
+        kinds = [(event["type"], event["reason"]) for event in saved]
+        if kinds in ([(5, 1)], [(5, 1), (9, 1)]):
+            if any(event["occurred_at"] != request.occurred_at for event in saved):
+                raise TransactionError("开始重送的事实时刻与原事务不同")
+            row = saved[0]["body"]["rows"][0]
+            if row["table"] != "actions" or row["id"] != request.action_id:
+                raise TransactionError("原开始事务不属于该动作")
+            action = row_facts(scope.connection, "actions", request.action_id)
+            identity = self._existing_activity_id(scope.connection, request.action_id)
+            if action is None or action["execution_started"] != 1 or identity is None:
+                raise TransactionError("原开始事实及准备活动不可核实")
+            return self._already(identity)
         if (len(saved) not in (2, 3)
                 or saved[0]["type"] != _ACTION_STARTED_EVENT
                 or saved[0]["reason"] != 1
@@ -839,7 +870,10 @@ class GrantStartCommand:
         if holder is not None and holder.action_id != request.action_id:
             return self._rejected("device_busy")
 
-        if not self._is_first_candidate(connection, request):
+        preparation_holder = current_preparation_holder(connection, request.device_id)
+        if preparation_holder is not None and preparation_holder.action_id != request.action_id:
+            return self._rejected("device_busy")
+        if preparation_holder is None and not self._is_first_candidate(connection, request):
             return self._rejected("not_first_candidate")
 
         with closing(connection.execute(
@@ -1143,6 +1177,16 @@ class GrantStartCommand:
 class SchedulingRepository:
     """调度开始、观察、过期与授予事务的 SQLite 仓储。"""
 
+    def reserve_preparation(self, request, key, owned):
+        from camctl.persistence.runtime import require_capture_preparation_format
+        require_capture_preparation_format(owned.metadata.format_version)
+        return _preparation_outcome(commit_operation(ReservePreparationCommand(request, key), key, owned))
+
+    def fail_preparation(self, request, key, owned):
+        from camctl.persistence.runtime import require_capture_preparation_format
+        require_capture_preparation_format(owned.metadata.format_version)
+        return _preparation_outcome(commit_operation(FailPreparationCommand(request, key), key, owned))
+
     def start_action(
         self, request: StartActionRequest, key: OperationKey,
         owned: OwnedConnection,
@@ -1187,3 +1231,239 @@ class SchedulingRepository:
         if receipt.kind == "rolled_back":
             return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
         return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)
+
+
+class ReservePreparationOutcome(Enum):
+    RESERVED = "reserved"
+    ALREADY = "already"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class ReservePreparationRequest:
+    action_id: int
+    trusted_wall_now: int
+    occurred_at: int
+    prepare_lead_s: Decimal
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        UtcMicros(self.trusted_wall_now)
+        UtcMicros(self.occurred_at)
+        lead = self.prepare_lead_s
+        if isinstance(lead, bool) or not isinstance(lead, (int, Decimal)):
+            raise TypeError("准备提前量必须是有限非负秒数")
+        lead = Decimal(lead)
+        if not lead.is_finite() or lead < 0:
+            raise ValueError("准备提前量必须是有限非负秒数")
+        object.__setattr__(self, "prepare_lead_s", lead)
+
+
+@dataclass(frozen=True)
+class ReservePreparationResult:
+    outcome: ReservePreparationOutcome
+    activity_id: int | None = None
+    reason: str | None = None
+
+
+class ReservePreparationCommand:
+    """只登记准备活动；不登记业务开始或设备调用。"""
+
+    def __init__(self, request, key):
+        self.request, self.key = request, key
+
+    def plan(self, scope):
+        request, connection = self.request, scope.connection
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError("准备占用缺少原动作")
+        state = {"actions": {action["id"]: action}}
+        def result(outcome, activity_id=None, reason=None):
+            return CommandPlan((), {}, state, ReservePreparationResult(outcome, activity_id, reason), read_only=True)
+        saved = saved_transaction_events(connection, self.key)
+        if saved is not None:
+            if (len(saved) != 1 or (saved[0]["type"], saved[0]["reason"]) != (13, 1)
+                    or saved[0]["occurred_at"] != request.occurred_at
+                    or not json_equal(saved[0]["body"]["evidence"].get("preparation_request"), self._evidence())):
+                raise TransactionError("准备占用原键与完整申请不符")
+            rows = saved[0]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "device_activities"
+                    or rows[0]["after"]["values"].get("action_id") != action["id"]):
+                raise TransactionError("准备占用原事务缺少原活动")
+            activity = row_facts(connection, "device_activities", rows[0]["id"])
+            if activity is None or activity["action_id"] != action["id"]:
+                raise TransactionError("准备占用原活动不可核实")
+            return result(ReservePreparationOutcome.ALREADY, activity["id"])
+        if action["status"] in _ACTION_TERMINAL:
+            return result(ReservePreparationOutcome.REJECTED, reason="terminal")
+        if action["cancel_requested"]:
+            return result(ReservePreparationOutcome.REJECTED, reason="canceled")
+        if action["status"] != 1 or action["execution_started"] != 0:
+            return result(ReservePreparationOutcome.REJECTED, reason="not_pending")
+        if action["type"] not in (2, 3):
+            raise TransactionError("只有录像和延时动作使用独立设置准备")
+        lower = Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
+        if Decimal(request.trusted_wall_now) < lower:
+            return result(ReservePreparationOutcome.REJECTED, reason="too_early")
+        if request.trusted_wall_now > action["scheduled_at"] + action["max_delay_ms"] * 1000:
+            return result(ReservePreparationOutcome.REJECTED, reason="window_ended")
+        capabilities = activity_capabilities(_CAMERA_TYPE_NAMES[action["type"]],
+            StartActionCommand._decoded_spec(action["execution_spec_json"]))
+        existing = StartActionCommand._existing_activity_id(connection, action["id"])
+        if existing is not None:
+            activity = row_facts(connection, "device_activities", existing)
+            _verify_prepared_activity(activity, action, capabilities)
+            return result(ReservePreparationOutcome.ALREADY, existing)
+        # 已持有活动和读取机会均由原拥有者先完成，准备不打断原工作。
+        with closing(connection.execute(
+                "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
+                " WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (action["device_id"],))) as cursor:
+            if cursor.fetchone() is not None:
+                return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
+        with closing(connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
+                                        (action["device_id"],))) as cursor:
+            if cursor.fetchone() is not None:
+                return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
+        mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
+        with closing(connection.execute(
+                "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
+                " WHERE device_id=? AND type IN (2,3) AND status=1 AND execution_started=0"
+                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
+                (action["device_id"],))) as cursor:
+            for scheduled, plan_id, index, delay in cursor:
+                if (scheduled, plan_id, index) >= mine:
+                    break
+                if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
+                        <= request.trusted_wall_now <= scheduled + delay * 1000):
+                    return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
+        allocation = scope.allocate(1)
+        identity = _next_id(connection, "device_activities")
+        values = _new_activity_values(action, capabilities)
+        event = _envelope(allocation.first_event_id, allocation.txn_id, 13, 1,
+            (_row("device_activities", identity, values),), request.occurred_at,
+            evidence={"preparation_request": self._evidence()})
+        return CommandPlan((event,), {("device_activities", identity): ("action", action["id"])},
+            state, ReservePreparationResult(ReservePreparationOutcome.RESERVED, identity))
+
+    def _evidence(self):
+        return {"action_id": self.request.action_id,
+            "trusted_wall_now": self.request.trusted_wall_now,
+            "prepare_lead_s": self.request.prepare_lead_s,
+            "occurred_at": self.request.occurred_at}
+
+
+def _verify_prepared_activity(activity, action, capabilities):
+    if (activity is None or activity["action_id"] != action["id"]
+            or activity["occupancy_state"] != 1 or activity["dispatch_state"] != 1
+            or activity["activity_state"] != 1 or activity["started_at"] is not None):
+        raise ConsistencyError("原准备活动不再满足未派发占用条件")
+    for column in ("state_query_supported", "stop_supported", "safe_repeat_stop", "start_return_meaning",
+                   "completion_mode", "ownership_mode", "output_scope_json"):
+        if not json_equal(activity[column], getattr(capabilities, column)):
+            raise ConsistencyError("原准备活动与首次固定执行定义不符")
+
+
+class FailPreparationOutcome(Enum):
+    FAILED = "failed"
+    ALREADY = "already"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class FailPreparationRequest:
+    action_id: int
+    occurred_at: int
+    reason: str
+
+    def __post_init__(self):
+        ObjectId(self.action_id)
+        UtcMicros(self.occurred_at)
+        if self.reason not in ("device_failed", "baseline_read_failed"):
+            raise ValueError("准备失败原因必须是设备设置失败或基准读取失败")
+
+
+@dataclass(frozen=True)
+class FailPreparationResult:
+    outcome: FailPreparationOutcome
+    reason: str | None = None
+
+
+class FailPreparationCommand:
+    """原设置和基准调用收场后，保存尚未执行的准备失败。"""
+
+    def __init__(self, request, key):
+        self.request, self.key = request, key
+
+    def plan(self, scope):
+        from .capture_facts import preparation_calls_resolved
+        from camctl.contracts.workflow_errors import action_error_id
+        request, connection = self.request, scope.connection
+        evidence = {"action_id": request.action_id, "reason": request.reason, "occurred_at": request.occurred_at}
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError("准备失败缺少原动作")
+        state, owners = {"actions": {action["id"]: action}}, {}
+        def reject(reason):
+            return CommandPlan((), owners, state, FailPreparationResult(FailPreparationOutcome.REJECTED, reason), read_only=True)
+        saved = saved_transaction_events(connection, self.key)
+        if saved is not None:
+            if (not saved or (saved[0]["type"], saved[0]["reason"]) != (8, 5)
+                    or not json_equal(saved[0]["body"]["evidence"].get("preparation_failure_request"), evidence)
+                    or action["status"] != 4 or action["execution_started"] != 0
+                    or action["error_code"] != action_error_id("capture_failed")
+                    or not json_equal(action["error_details_json"], {
+                        "activity_id": str(StartActionCommand._existing_activity_id(connection, action["id"])),
+                        "reason": request.reason})):
+                raise TransactionError("准备失败原键与完整申请或保存结果不符")
+            return CommandPlan((), owners, state, FailPreparationResult(FailPreparationOutcome.ALREADY), read_only=True)
+        if action["status"] in _ACTION_TERMINAL:
+            return CommandPlan((), owners, state, FailPreparationResult(FailPreparationOutcome.ALREADY), read_only=True)
+        if action["cancel_requested"]:
+            return reject("canceled")
+        if action["type"] not in (2, 3) or action["status"] != 1 or action["execution_started"] != 0:
+            return reject("not_pending")
+        facts = load_start_facts(connection, action)
+        if not facts.not_started or facts.activity is None:
+            return reject("start_unresolved")
+        if not preparation_calls_resolved(connection, facts.activity["id"]):
+            return reject("preparation_unresolved")
+        with closing(connection.execute("SELECT 1 FROM baseline_read_calls WHERE activity_id=? AND state=1 LIMIT 1",
+                                        (facts.activity["id"],))) as cursor:
+            if cursor.fetchone() is not None:
+                return reject("preparation_unresolved")
+        from .preparation import verify_failure_source
+        try:
+            verify_failure_source(connection, action, facts, request.reason)
+        except ConsistencyError:
+            return reject("failure_unconfirmed")
+        include_start_facts(facts, state, owners)
+        owners[("actions", action["id"])] = ("action", action["id"])
+        templates = [_envelope(0, 0, 8, 5, (_update("actions", action["id"],
+            {"status": 1, "error_code": action["error_code"], "error_details_json": action["error_details_json"]},
+            {"status": 4, "error_code": action_error_id("capture_failed"),
+             "error_details_json": {"activity_id": str(facts.activity["id"]), "reason": request.reason}}),), request.occurred_at,
+             evidence={"preparation_resolved": True, "preparation_failure_request": evidence})]
+        templates.extend(unstarted_events(facts, request.occurred_at, run_status=None, preparation_resolved=True))
+        siblings = _sibling_actions(connection, action)
+        state["actions"].update(siblings)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError("准备失败缺少原计划")
+        state["plans"] = {plan["id"]: plan}
+        if plan["status"] in (1, 2) and all(row["id"] == action["id"] or row["status"] in _ACTION_TERMINAL
+                                            for row in siblings.values()):
+            owners[("plans", plan["id"])] = ("plan", plan["id"])
+            templates.append(_envelope(0, 0, 9, 2, (_update("plans", plan["id"],
+                {"status": plan["status"]}, {"status": 3}),), request.occurred_at))
+        allocation = scope.allocate(len(templates))
+        events = tuple(replace(event, event_id=allocation.first_event_id + index, transaction_id=allocation.txn_id)
+                       for index, event in enumerate(templates))
+        return CommandPlan(events, owners, state, FailPreparationResult(FailPreparationOutcome.FAILED))
+
+
+def _preparation_outcome(receipt):
+    if receipt.kind == "completed":
+        return DbOutcome(kind=DbOutcomeKind.COMPLETED, value=receipt.result)
+    if receipt.kind == "rolled_back":
+        return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK, error=receipt.error)
+    return DbOutcome(kind=DbOutcomeKind.UNKNOWN, error=receipt.error)

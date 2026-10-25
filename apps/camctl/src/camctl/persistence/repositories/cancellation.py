@@ -597,6 +597,10 @@ class _ApplyCancelTargetCommand:
             if target["status"] == 1 or target["type"] == 8:
                 before["status"], after["status"] = target["status"], _ACTION_CANCELED
                 outcome_event = _ITEM_SUCCEEDED, CancelOutcomeChoice.CANCELED.value
+                if target["type"] in (1, 2, 3) and start.activity is not None and (
+                        start.activity["occupancy_state"] == 1 or not start.preparation_resolved):
+                    # 目标先终态以阻止新业务；取消成员等待原准备调用及占用释放。
+                    outcome_event = None
                 plan_row = self._pre_start_plan_row(connection, target)
             action_rows = (_update("actions", target_id, before, after),)
             effect_after = CancellationEffect.APPLIED.value
@@ -956,6 +960,10 @@ class _RecordCancelResultCommand:
         if (target["type"] == 7 and command.outcome is not None
                 and target["status"] not in _ACTION_TERMINAL):
             raise ConsistencyError("报告取消成功结果要求目标已终态")
+        if target["type"] in (1, 2, 3) and target["execution_started"] == 0 and command.outcome is not None:
+            start = load_start_facts(connection, target)
+            if not start.preparation_resolved or (start.activity is not None and start.activity["occupancy_state"] == 1):
+                raise ConsistencyError("准备取消尚未完成原调用和占用释放")
         before = {"status": item["status"], "outcome": None,
                   "error_code": None, "error_details_json": None}
         if command.outcome is not None:

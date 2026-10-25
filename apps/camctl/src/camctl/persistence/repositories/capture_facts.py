@@ -6,7 +6,7 @@
 """
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
@@ -29,6 +29,7 @@ class StartFacts:
     attempts_used: int
     not_started: bool
     dispatch_state: int | None
+    preparation_resolved: bool = True
 
 
 def load_start_facts(connection, action: Mapping[str, Any], *, result_events=()) -> StartFacts:
@@ -108,8 +109,10 @@ def load_start_facts(connection, action: Mapping[str, Any], *, result_events=())
         )) as cursor:
             ids = [row[0] for row in cursor.fetchall()]
         attempts = [after("operation_attempts", row_facts(connection, "operation_attempts", identity)) for identity in ids]
-    return start_facts_from_summary(action, activity, run,
+    facts = start_facts_from_summary(action, activity, run,
         (count, used, unresolved, dispatched), pending_confirmation, attempts)
+    return replace(facts, preparation_resolved=(activity is None or
+                   preparation_calls_resolved(connection, activity["id"], result_events=result_events)))
 
 
 def start_facts_from_summary(action, activity, run, statistics, pending_confirmation, entry_attempts=()):
@@ -178,9 +181,15 @@ def start_facts_from_rows(action, activities, runs, attempts_by_run, *, activity
         or attempt["result_event_id"] is None for attempt in attempts)
     dispatched = sum(attempt["result_json"] is not None
         and attempt["result_json"]["settlement"]["basis"] != "not_dispatched" for attempt in attempts)
-    return start_facts_from_summary(action, activities[0] if activities else None, run,
+    facts = start_facts_from_summary(action, activities[0] if activities else None, run,
         (len(attempts), max((a["attempt_no"] for a in attempts), default=0), unresolved, dispatched),
         pending_confirmation, attempts)
+    preparation_resolved = all(
+        candidate["status"] not in (int(_RUN.PENDING), int(_RUN.ACTIVE))
+        and all(attempt["status"] != int(_ATTEMPT.RUNNING) and attempt["result_event_id"] is not None
+                for attempt in attempts_by_run[candidate["id"]])
+        for candidate in runs if candidate["kind"] == int(_KIND.PREPARE_CAPTURE))
+    return replace(facts, preparation_resolved=preparation_resolved)
 
 
 def _verify_start_scope_run(run, state):
@@ -199,7 +208,7 @@ def _verify_start_scope_run(run, state):
         kind = OperationKind[_KIND(run["kind"]).name]
         purpose = None if run["query_purpose"] is None else QueryPurpose[_PURPOSE(run["query_purpose"]).name]
         expected = operation_responsibility_key(kind, run["action_id"], AttemptTarget(
-            activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"]), purpose)
+            activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"]), purpose, session_key=run.get("session_key"))
     except (KeyError, ValueError) as error:
         raise ConsistencyError("原操作固定身份组合无效") from error
     if run["responsibility_key"] != expected:
@@ -236,9 +245,9 @@ def output_scope_resolved(facts: Mapping[str, Any], recovery=None) -> bool:
 
 
 def occupancy_release_allowed(facts: Mapping[str, Any], *, unstarted: bool = False,
-                              preparation_resolved: bool = False) -> bool:
+                              preparation_resolved: bool = False, preparation_calls_resolved: bool = True) -> bool:
     """释放依据与输出范围限制都满足，且占用尚未释放。"""
-    return (facts["occupancy_state"] == 1 and release_basis_holds(facts)
+    return (preparation_calls_resolved and facts["occupancy_state"] == 1 and release_basis_holds(facts)
             and (facts["ownership_mode"] != 2 or (unstarted and preparation_resolved)
                  or output_scope_resolved(facts)))
 
@@ -275,7 +284,8 @@ def unstarted_events(facts: StartFacts, occurred_at: int, *,
             events.append(finish)
     if activity is not None and release and occupancy_release_allowed(
             {**activity, "dispatch_state": facts.dispatch_state}, unstarted=True,
-            preparation_resolved=preparation_resolved or activity["baseline_state"] == 3):
+            preparation_resolved=(preparation_resolved or activity["baseline_state"] == 3),
+            preparation_calls_resolved=facts.preparation_resolved):
         events.append(event_envelope(0, 0, 13, 3, (update_change(
             "device_activities", activity["id"],
             {"occupancy_state": 1}, {"occupancy_state": 2}),), occurred_at,
@@ -302,7 +312,8 @@ def verify_unstarted_final(connection, action, saved=(), *, released=True,
     preparation_resolved = (preparation_error is not None or any(
         event["body"]["evidence"].get("preparation_resolved") is True for event in saved))
     if released and facts.activity is not None and occupancy_release_allowed(facts.activity, unstarted=True,
-            preparation_resolved=preparation_resolved or facts.activity["baseline_state"] == 3):
+            preparation_resolved=(preparation_resolved or facts.activity["baseline_state"] == 3),
+            preparation_calls_resolved=facts.preparation_resolved):
         raise ConsistencyError("本地终止缺少适用的占用释放")
     for event in saved:
         kind = event["type"], event["reason"]
@@ -324,3 +335,63 @@ def verify_unstarted_final(connection, action, saved=(), *, released=True,
             raise ConsistencyError("本地终止的伴随事实与原责任不符")
         if any(original[column] != value for column, value in row["after"]["values"].items()):
             raise ConsistencyError("本地终止的伴随结果与保存事实不符")
+
+
+def preparation_calls_resolved(connection, activity_id: int, *, result_events=()) -> bool:
+    """从原连接核对全部设置责任和尝试，保留读取错误。"""
+    if result_events:
+        return _preparation_resolved_after_events(connection, activity_id, result_events)
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_runs r WHERE r.activity_id=? AND r.kind=?"
+        " AND (r.status IN (?,?) OR EXISTS(SELECT 1 FROM operation_attempts t"
+        " WHERE t.run_id=r.id AND (t.status=? OR t.result_event_id IS NULL))) LIMIT 1",
+        (activity_id, int(_KIND.PREPARE_CAPTURE), int(_RUN.PENDING), int(_RUN.ACTIVE),
+         int(_ATTEMPT.RUNNING)),
+    )) as cursor:
+        return cursor.fetchone() is None
+
+
+def _preparation_resolved_after_events(connection, activity_id, events):
+    """只叠加已验证前序事件；未验证的未来提案不提供释放依据。"""
+    projected = {}
+    for event in events:
+        for row in event.rows:
+            if row.table not in ("operation_runs", "operation_attempts"):
+                continue
+            identity = (row.table, row.row_id)
+            if identity not in projected:
+                original = row_facts(connection, *identity)
+                projected[identity] = {} if original is None else original
+            projected[identity] = {**projected[identity], **row.after.values, "id": row.row_id}
+    run_ids = {identity for (table, identity) in projected if table == "operation_runs"}
+    run_ids.update(row["run_id"] for (table, _), row in projected.items() if table == "operation_attempts")
+    relevant = {}
+    for identity in run_ids:
+        run = projected.get(("operation_runs", identity)) or row_facts(connection, "operation_runs", identity)
+        if run is None:
+            raise ConsistencyError("原设置尝试缺少所属流程")
+        if run["kind"] == int(_KIND.PREPARE_CAPTURE) and run["activity_id"] == activity_id:
+            relevant[identity] = run
+    exclusion = "" if not relevant else " AND r.id NOT IN (" + ",".join("?" for _ in relevant) + ")"
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_runs r WHERE r.activity_id=? AND r.kind=?" + exclusion
+        + " AND (r.status IN (?,?) OR EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id=r.id"
+          " AND (t.status=? OR t.result_event_id IS NULL))) LIMIT 1",
+        (activity_id, int(_KIND.PREPARE_CAPTURE), *relevant, int(_RUN.PENDING), int(_RUN.ACTIVE), int(_ATTEMPT.RUNNING)),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            return False
+    for identity, run in relevant.items():
+        if run["status"] in (int(_RUN.PENDING), int(_RUN.ACTIVE)):
+            return False
+        attempts = {row_id: row for (table, row_id), row in projected.items()
+                    if table == "operation_attempts" and row["run_id"] == identity}
+        if any(row["status"] == int(_ATTEMPT.RUNNING) or row.get("result_event_id") is None for row in attempts.values()):
+            return False
+        excluded = "" if not attempts else " AND id NOT IN (" + ",".join("?" for _ in attempts) + ")"
+        with closing(connection.execute("SELECT 1 FROM operation_attempts WHERE run_id=?" + excluded
+                + " AND (status=? OR result_event_id IS NULL) LIMIT 1",
+                (identity, *attempts, int(_ATTEMPT.RUNNING)))) as cursor:
+            if cursor.fetchone() is not None:
+                return False
+    return True

@@ -22,7 +22,7 @@ def _failure(*, reason="device_failed", before_status=1, error_code=13):
                 "status": before_status, "error_code": None, "error_details_json": None,
             }),
             after=RowImage(exists=True, values={
-                "status": 4, "error_code": error_code, "error_details_json": {"reason": reason},
+                "status": 4, "error_code": error_code, "error_details_json": {"activity_id": "11", "reason": reason},
             }),
         ),),
     )

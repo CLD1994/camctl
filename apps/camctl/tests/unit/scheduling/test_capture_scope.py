@@ -19,6 +19,6 @@ from camctl.scheduling.resources import capture_scope_blocked
 def test_scope_guard_distinguishes_unstarted_task_from_held_baseline(mocker, state, dispatch, mode, directories, expected):
     connection = mocker.create_autospec(sqlite3.Connection, instance=True)
     cursor = mocker.create_autospec(sqlite3.Cursor, instance=True)
-    cursor.__iter__.return_value = iter([(99, state, dispatch, mode, {"directories": list(directories)})])
+    cursor.__iter__.return_value = iter([(99, state, dispatch, mode, {"directories": list(directories)}, False)])
     connection.execute.return_value = cursor
     assert capture_scope_blocked(connection, "cam-1", 1, 2, {"directories": ["/same"]}) is expected

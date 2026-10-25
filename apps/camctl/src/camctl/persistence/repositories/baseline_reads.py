@@ -81,7 +81,8 @@ def _check_intent(connection, request, transaction_id=None):
         tuple(_directories(activity)), None, 128, request.timeout_s).directories
     if (request.action_id != action['id'] or request.binding != DeviceBinding(action['device_id'], action['driver_id'])
             or request.directories != expected_directories
-            or action['status'] != enum_for('actions.status').RUNNING or action['execution_started'] != 1
+            or (action['status'], action['execution_started']) not in ((1, 0), (2, 1))
+            or action['cancel_requested'] != 0
             or activity['baseline_state'] != BaselineState.COLLECTING
             or activity['dispatch_state'] != enum_for('device_activities.dispatch_state').NOT_DISPATCHED
             or activity['occupancy_state'] != enum_for('device_activities.occupancy_state').HELD):
@@ -585,7 +586,8 @@ def _unconfirmed_event(call_id,occurred_at,event_id,transaction_id):
 def _unconfirmed_qualification(connection,view):
     from .capture_facts import load_start_facts
     activity,action,stats=_pending_prefix(view,connection)
-    if action['execution_started'] != 1 or action['status'] != enum_for('actions.status').RUNNING:
+    if not ((action['status'], action['execution_started']) in ((1, 0), (2, 1))
+            or action['status'] in (3, 4, 5, 6)):
         raise ConsistencyError('基准返回未知只在原执行动作的准备阶段保存')
     if not load_start_facts(connection,action).not_started:
         raise ConsistencyError('基准返回未知不能替代可能派发的启动责任')

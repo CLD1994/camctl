@@ -712,6 +712,26 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
 
 def _action_finish_guard(event, context) -> None:
     """动作终态组合与产物同事务校验。"""
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 5:
+        from .preparation import PreparationReads
+        from camctl.contracts.workflow_errors import validate_error_details, action_error_id
+        if type(context.preparation_reads) is not PreparationReads:
+            raise EventValidationError("准备失败缺少原连接的真实失败核对")
+        for row in event.rows:
+            if row.table != "actions":
+                continue
+            action = _guard_facts(context, "actions", row.row_id)
+            details = row.after.values.get("error_details_json")
+            if (action.get("status") != 1 or action.get("execution_started") != 0
+                    or action.get("type") not in (2, 3) or action.get("cancel_requested") != 0
+                    or action.get("execution_spec_json") is None
+                    or row.after.values.get("error_code") != action_error_id("capture_failed")):
+                raise EventValidationError("准备失败要求尚未开始的合法拍摄动作")
+            try:
+                validate_error_details("capture_failed", details)
+                context.preparation_reads.verify_failure(action, details)
+            except (ValueError, TypeError) as error:
+                raise EventValidationError(str(error)) from error
     for row in event.rows:
         if row.table == "actions" and row.before.exists:
             after = row.after.values
@@ -2310,6 +2330,10 @@ class _RepairSuccessCommand(_MediaProcessingCommand):
 class CaptureRepository:
     """采集完成终态事务的 SQLite 仓储。"""
 
+    def preparation_calls_resolved(self, activity_id, owned):
+        from .capture_facts import preparation_calls_resolved
+        return preparation_calls_resolved(owned.connection, activity_id)
+
     def append_baseline(self, request: BaselineChunkSave, key: OperationKey,
                         owned: OwnedConnection) -> DbOutcome[BaselineChunkResult]:
         from .baseline import AppendBaselineCommand
@@ -3341,6 +3365,8 @@ class _ActivityReleaseCommand:
             params += tuple(concluded)
         with closing(connection.execute(query + " LIMIT 1", params)) as cursor:
             unresolved = cursor.fetchone() is not None
+        from .capture_facts import preparation_calls_resolved
+        unresolved = unresolved or not preparation_calls_resolved(connection, activity_id, result_events=activity_result_events)
         action = row_facts(connection, "actions", command.action_id)
         if action is None:
             raise ConsistencyError("占用释放缺少所属动作")
@@ -7064,6 +7090,15 @@ def _activity_guard(event, context) -> None:
             continue
         _validate_activity_result(row, context)
         if not row.before.exists:
+            action = context.state_rows.get("actions", {}).get(row.after.values.get("action_id"), {})
+            if action.get("execution_started") == 0:
+                from .preparation import PreparationReads
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("pending活动创建缺少内核绑定的原申请核对")
+                try:
+                    context.preparation_reads.verify_create(event, context, row)
+                except (ValueError, TypeError, KeyError) as error:
+                    raise EventValidationError(str(error)) from error
             continue
         before_state = row.before.values.get("activity_state")
         after_state = row.after.values.get("activity_state")
@@ -7201,6 +7236,12 @@ def _release_guard(event, context) -> None:
             .get(row.row_id, {})
         )
         facts.update(row.after.values)
+        if context.preparation_reads is not None:
+            from .preparation import PreparationReads
+            if type(context.preparation_reads) is not PreparationReads:
+                raise EventValidationError("准备释放缺少内核绑定的原连接核对")
+            if not context.preparation_reads.calls_resolved(row.row_id):
+                raise EventValidationError("设置准备调用或原结果尚未收场，不能释放占用")
         if not release_basis_holds(facts):
             raise EventValidationError(
                 "占用释放缺少活动结束、未派发或完成依据")

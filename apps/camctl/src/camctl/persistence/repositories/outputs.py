@@ -2551,6 +2551,9 @@ class _SlotChangeCommand:
             and self._is_source_fallback_retry(scope.connection, copy, run))
         if run["retry_wait_required"] == 1 and not retrying_source_fallback:
             return self._decision(SlotOutcome.WAIT, "retry_wait")
+        from camctl.scheduling.resources import current_preparation_holder
+        if current_preparation_holder(scope.connection, device_id) is not None:
+            return self._decision(SlotOutcome.WAIT, "preparation_held")
         if holder is not None:
             return self._decision(SlotOutcome.WAIT, "device_busy")
         eligible, reason = self._first_candidate(

@@ -112,6 +112,7 @@ _ACTIVITY_KINDS = (
     OperationKind.START,
     OperationKind.STOP,
     OperationKind.CHECK_CAPTURE_RESULTS,
+    OperationKind.PREPARE_CAPTURE,
 )
 
 
@@ -379,14 +380,20 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
         purpose = QueryPurpose[_QUERY_PURPOSE(purpose_code).name] if purpose_code is not None else None
         target = AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"],
                                cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"])
-        expected = operation_responsibility_key(kind, run["action_id"], target, purpose)
+        expected = operation_responsibility_key(kind, run["action_id"], target, purpose,
+                                                session_key=run["session_key"])
         delivery_id, session_key = run["delivery_id"], run["session_key"]
     except (KeyError, ValueError) as error:
         raise ConsistencyError("普通流程的固定身份字段无效或缺失") from error
     if run.get("responsibility_key") != expected:
         raise ConsistencyError("流程责任键与固定身份不符")
-    if session_key is not None or (kind is not OperationKind.READ_FILE and delivery_id is not None):
+    if ((kind is not OperationKind.PREPARE_CAPTURE and session_key is not None)
+            or (kind is not OperationKind.READ_FILE and delivery_id is not None)):
         raise ConsistencyError("普通流程的会话或不适用交付引用必须为空")
+    if kind is OperationKind.PREPARE_CAPTURE and "max_attempts_used" in run and (
+            run.get("max_attempts_used") != 1 or run.get("timeout_s_json") is None
+            or run.get("retry_interval_s_json") is not None or run.get("attempts_used", 0) > 1):
+        raise ConsistencyError("设置准备流程必须保存单次有超时且无重试的实际配置")
     action_id = run["action_id"]
     if target.activity_id is not None:
         activity = _fixed_reference(state, "device_activities", target.activity_id)
@@ -446,7 +453,7 @@ def _intent_identity(intent: AttemptIntent) -> dict[str, Any]:
             "responsibility_key": responsibility_key(intent), "activity_id": intent.target.activity_id,
             "copy_id": intent.target.copy_id, "cleanup_item_id": intent.target.cleanup_item_id,
             "obtain_item_id": intent.target.obtain_item_id,
-            "delivery_id": None, "session_key": None}
+            "delivery_id": None, "session_key": intent.session_key}
 
 
 def _verify_run_intent(run: Mapping[str, Any], intent: AttemptIntent) -> None:
@@ -462,7 +469,9 @@ def _find_responsibility(connection, intent: AttemptIntent) -> int | None:
     """按规范键和实际责任共同定位；错误键不能刷新原责任。"""
     kind = intent.kind
     values = _intent_identity(intent)
-    if kind in (OperationKind.START, OperationKind.STOP):
+    if kind is OperationKind.PREPARE_CAPTURE:
+        columns = ("activity_id", "session_key")
+    elif kind in (OperationKind.START, OperationKind.STOP):
         columns = ("action_id",)
     elif kind is OperationKind.READ_FILE:
         columns = ("copy_id",)
@@ -555,6 +564,17 @@ class BeginAttemptCommand:
             return self._rejected("device_recovery")
         _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
                                "retry_interval_s_json": intent.config.retry_interval_s}, self._state)
+        if intent.kind is OperationKind.PREPARE_CAPTURE:
+            activity = self._state["device_activities"][intent.target.activity_id]
+            from .preparation import preparation_action_eligible
+            if not preparation_action_eligible(connection, action, activity):
+                return self._rejected("not_pending")
+            if (activity["occupancy_state"] != 1 or activity["dispatch_state"] not in (1, 4)
+                    or activity["activity_state"] != 1):
+                return self._rejected("preparation_not_held")
+            from .capture_facts import preparation_calls_resolved
+            if not preparation_calls_resolved(connection, activity["id"]):
+                return self._rejected("preparation_unresolved")
         if intent.kind is OperationKind.START:
             activity = self._state["device_activities"][intent.target.activity_id]
             if capture_scope_blocked(connection, action["device_id"], action["id"],
@@ -671,7 +691,7 @@ class BeginAttemptCommand:
                     "copy_id": intent.target.copy_id,
                     "cleanup_item_id": intent.target.cleanup_item_id,
                     "obtain_item_id": intent.target.obtain_item_id,
-                    "session_key": None,
+                    "session_key": intent.session_key,
                     "status": int(_RUN_STATUS.ACTIVE),
                     "attempts_used": 1,
                     "max_attempts_used": intent.config.max_attempts,
@@ -1499,6 +1519,9 @@ class OperationRepository:
     def begin_attempt(
         self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[BeginAttemptResult]:
+        if intent.kind is OperationKind.PREPARE_CAPTURE:
+            from camctl.persistence.runtime import require_capture_preparation_format
+            require_capture_preparation_format(owned.metadata.format_version)
         receipt = commit_operation(BeginAttemptCommand(intent, key), key, owned)
         return _outcome_of(receipt)
 
@@ -1687,6 +1710,19 @@ def _attempt_intent_guard(event, context) -> None:
                 _verify_complete_obtain_result(previous[0])
             except ConsistencyError as error:
                 raise EventValidationError(str(error)) from error
+    if kind == int(_RUN_KIND.PREPARE_CAPTURE):
+        activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
+        action = _guard_facts(context, "actions", run_after.get("action_id"))
+        pending = action.get("status") == 1 and action.get("execution_started") == 0
+        retry = (context.preparation_reads is not None
+                 and context.preparation_reads.can_prepare(action, activity))
+        if (not (pending or retry) or action.get("cancel_requested") != 0
+                or activity.get("occupancy_state") != 1 or activity.get("dispatch_state") not in (1, 4)
+                or activity.get("activity_state") != 1 or attempt_no != 1
+                or run_after.get("max_attempts_used") != 1
+                or run_after.get("timeout_s_json") is None
+                or run_after.get("retry_interval_s_json") is not None):
+            _fail("设置准备意图要求原pending动作的占用及单次配置")
     if kind == int(_RUN_KIND.START):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
         action = _guard_facts(context, "actions", run_after.get("action_id"))
@@ -1750,6 +1786,13 @@ def _attempt_result_guard(event, context) -> None:
         observations = result.get("observations")
         if not isinstance(observations, list):
             _fail("结果正文必须保存观察数组")
+        run = _guard_facts(context, "operation_runs", after.get("run_id"))
+        if run.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and status == int(_ATTEMPT_STATUS.SUCCEEDED):
+            expected = {"type": "capture_preparation_completed", "version": 1,
+                        "data": {"activity_id": str(run["activity_id"])}}
+            if (after.get("effect_state") != int(_EFFECT_STATE.CONFIRMED)
+                    or observations.count(expected) != 1):
+                _fail("设置准备成功必须保存原组合完成观察")
         effect = after.get("effect_state")
         if settlement["basis"] == "not_dispatched" and effect != int(
             _EFFECT_STATE.NO_EFFECT
@@ -1813,6 +1856,14 @@ def _operation_finish_guard(event, context) -> None:
             _fail("该结束结果不携带流程错误")
         if after.get("retry_wait_required") != 0:
             _fail("结束流程必须清除重试等待责任")
+        if after.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and status == int(_RUN_STATUS.SUCCEEDED):
+            completed = [attempt for attempt in context.state_rows.get("operation_attempts", {}).values()
+                         if attempt.get("run_id") == row.row_id
+                         and attempt.get("status") == int(_ATTEMPT_STATUS.SUCCEEDED)
+                         and attempt.get("effect_state") == int(_EFFECT_STATE.CONFIRMED)
+                         and attempt.get("result_event_id") is not None]
+            if len(completed) != 1:
+                _fail("设置准备成功流程缺少唯一已保存的成功组合尝试")
 
 
 def _retry_guard(event, context) -> None:

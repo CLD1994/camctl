@@ -83,3 +83,18 @@ class TestDecideDeviceWorkParallel:
             grantable_reads=(41,), held_reads=(40,),
             capture_read_parallel=True))
         assert work == DeviceWork("cam-1", (), (), (), (40,), True)
+
+    def test_preparation_blocks_new_reads_even_when_capture_can_overlap(self):
+        work = decide_device_work(DeviceFacts(
+            device_id="cam-1", due_captures=(), held_captures=(12,),
+            grantable_reads=(41,), held_reads=(), capture_read_parallel=True,
+            preparation_held=True))
+        assert work.grant_reads == ()
+
+    def test_preparation_keeps_original_reader_settlement_separate(self):
+        work = decide_device_work(DeviceFacts(
+            device_id="cam-1", due_captures=(12,), held_captures=(12,),
+            grantable_reads=(41,), held_reads=(40,), capture_read_parallel=True,
+            preparation_held=True))
+        assert work.grant_reads == () and work.resume_reads == ()
+        assert work.yield_reads == (40,)

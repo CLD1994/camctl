@@ -34,6 +34,7 @@ def _world(mocker, *, scanning=True):
              DirectoryRead(None, None, Page(entries[128:], None), call_performed=False)]
     (scan if scanning else directory).read_directory.side_effect = reads
     repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
+    repository.preparation_calls_resolved.return_value = True
     state = SimpleNamespace(chunks=0, entries=0)
     repository.baseline_ref.side_effect = lambda *_: BaselineRef(1, BaselineState.COLLECTING,
         11 if state.chunks else None, 10 + state.chunks if state.chunks else None,

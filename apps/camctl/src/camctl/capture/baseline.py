@@ -192,6 +192,8 @@ def release_preparation(action_id, *, runtime):
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
         return None
+    if not runtime.capture.preparation_calls_resolved(pending.activity_id, runtime.owned):
+        return BaselinePreparation(PreparationPhase.WAITING)
     if pending.in_call or pending.saves.pending is not None or pending.read_owner is not None:
         raise ConsistencyError("准备调用或原页保存仍未完成，不能形成释放申请")
     if pending.release is None:
