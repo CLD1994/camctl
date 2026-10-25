@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import settle_required
 
 
@@ -75,18 +75,8 @@ async def _save_cleanup_request(runtime, method: str, request, *, action=False):
         del runtime.pending_saves[identity]
         return DbOutcome(DbOutcomeKind.COMPLETED,
                          CleanupSaveNotApplicable(pending.request, pending.key))
-    try:
-        result = await runtime.database.write(
-            lambda owned: getattr(runtime.outputs, method)(pending.request, pending.key, owned),
-            key=pending.key, description=f"清理保存:{method}")
-    except BaseException:
-        # 普通抛错不是已确认完成或回滚的回执，不据此替换申请。
-        pending.last_kind = None
-        raise
-    if not isinstance(result, DbOutcome):
-        pending.last_kind = None
-        raise ConsistencyError("清理保存未返回合法数据库结果")
-    if result.kind is DbOutcomeKind.COMPLETED:
+
+    def apply_completed(result):
         pending.last_kind = None
         from camctl.outputs.cleanup_flow import (
             CleanupItemSaved, CleanupStartResult, CleanupTargetsSaved, CleanupActionFinished)
@@ -99,6 +89,25 @@ async def _save_cleanup_request(runtime, method: str, request, *, action=False):
                 or (isinstance(result.value, CleanupItemSaved) and result.value.item_id != target_id)):
             raise ConsistencyError("原清理申请的可靠保存回执与阶段或目标不对应")
         del runtime.pending_saves[identity]
+
+    try:
+        result = await runtime.database.write(
+            lambda owned: getattr(runtime.outputs, method)(pending.request, pending.key, owned),
+            key=pending.key, description=f"清理保存:{method}")
+    except BaseException as error:
+        pending.last_kind = None
+        actual = db_outcome_for(error)
+        if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+            try:
+                apply_completed(actual)
+            except BaseException as application_error:
+                raise error from application_error
+        raise
+    if not isinstance(result, DbOutcome):
+        pending.last_kind = None
+        raise ConsistencyError("清理保存未返回合法数据库结果")
+    if result.kind is DbOutcomeKind.COMPLETED:
+        apply_completed(result)
     else:
         pending.last_kind = result.kind
     return result

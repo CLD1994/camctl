@@ -20,6 +20,7 @@ from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Awaitable, Callable
 
 from camctl.persistence.business import BusinessDatabase, settle_required
+from camctl.persistence.models import db_outcome_for
 
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
@@ -885,19 +886,31 @@ async def _settle_companion_runs(
                 status=status, error=error, occurred_at=runtime.occurred_at()),
             new_operation_key())
         runtime.pending_companions[item_id] = pending
-    settled = await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(pending.request, pending.key, owned), key=pending.key)
+    def apply_completed(settled):
+        from camctl.operations.attempts import StaleRunFinishResult
+        if not isinstance(settled.value, StaleRunFinishResult):
+            raise ConsistencyError("原伴随流程结束没有可靠回执")
+        runtime.retry_gate.cleared(f"delete/{item_id}")
+        runtime.retry_gate.cleared(f"exists/{item_id}")
+        runtime.consumed_queries.pop(item_id, None)
+        del runtime.pending_companions[item_id]
+
+    try:
+        settled = await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(pending.request, pending.key, owned), key=pending.key)
+    except BaseException as error:
+        actual = db_outcome_for(error)
+        if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+            try:
+                apply_completed(actual)
+            except BaseException as application_error:
+                raise error from application_error
+        raise
     from camctl.persistence.models import DbOutcome
     if not isinstance(settled, DbOutcome):
         raise ConsistencyError("伴随流程保存没有合法数据库回执")
     if settled.kind is not DbOutcomeKind.COMPLETED:
         return str(settled.error)
-    from camctl.operations.attempts import StaleRunFinishResult
-    if not isinstance(settled.value, StaleRunFinishResult):
-        raise ConsistencyError("原伴随流程结束没有可靠回执")
-    runtime.retry_gate.cleared(f"delete/{item_id}")
-    runtime.retry_gate.cleared(f"exists/{item_id}")
-    runtime.consumed_queries.pop(item_id, None)
-    del runtime.pending_companions[item_id]
+    apply_completed(settled)
     return None
 
 
@@ -1225,11 +1238,7 @@ async def _begin_cleanup_intent(runtime, request, consumer):
             del runtime.pending_intents[item_id]
             return DbOutcome(DbOutcomeKind.COMPLETED,
                 BeginAttemptResult(BeginDisposition.REJECTED, reason=reason))
-    result = await runtime.database.write(lambda owned: runtime.outputs.begin_cleanup_attempt(pending.request, pending.key, owned), key=pending.key)
-    if not isinstance(result, DbOutcome):
-        raise ConsistencyError("清理意图保存没有可靠数据库回执")
-    pending.last_kind = result.kind
-    if result.kind is DbOutcomeKind.COMPLETED:
+    def apply_completed(result):
         if not isinstance(result.value, BeginAttemptResult):
             raise ConsistencyError("清理意图回执类型不对应")
         ticket = result.value.ticket
@@ -1244,6 +1253,23 @@ async def _begin_cleanup_intent(runtime, request, consumer):
                     or ticket.responsibility_key != f"{prefix}/{item_id}"):
                 raise ConsistencyError("清理意图票据与原申请不对应")
             pending.ticket = ticket
+        pending.last_kind = result.kind
+
+    try:
+        result = await runtime.database.write(lambda owned: runtime.outputs.begin_cleanup_attempt(pending.request, pending.key, owned), key=pending.key)
+    except BaseException as error:
+        actual = db_outcome_for(error)
+        if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+            try:
+                apply_completed(actual)
+            except BaseException as application_error:
+                raise error from application_error
+        raise
+    if not isinstance(result, DbOutcome):
+        raise ConsistencyError("清理意图保存没有可靠数据库回执")
+    pending.last_kind = result.kind
+    if result.kind is DbOutcomeKind.COMPLETED:
+        apply_completed(result)
     return result
 
 
@@ -1339,20 +1365,32 @@ async def _save_delete_return(runtime, pending):
             pending.validation_diagnostic = CleanupValidationDiagnostic(type(error).__name__, str(error))
             raise OutcomeValidationError(pending.validation_diagnostic.message) from None
     if not pending.saved:
-        saved = await runtime.database.write(lambda owned: runtime.outputs.finish_cleanup_attempt(pending.finish, pending.key, owned), key=pending.key)
+        async def apply_completed(saved):
+            value = saved.value
+            if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
+                raise ConsistencyError("原删除结束回执与原返回不对应")
+            if value.disposition is FinishDisposition.ALREADY_ENDED:
+                await _recover_already_ended(runtime, pending, value)
+            elif (value.disposition is not FinishDisposition.SAVED
+                  or value.attempt_status is not pending.finish.outcome.outcome.status):
+                raise ConsistencyError("原删除结束回执与原返回不对应")
+            pending.saved = True
+
+        try:
+            saved = await runtime.database.write(lambda owned: runtime.outputs.finish_cleanup_attempt(pending.finish, pending.key, owned), key=pending.key)
+        except BaseException as error:
+            actual = db_outcome_for(error)
+            if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+                try:
+                    await apply_completed(actual)
+                except BaseException as application_error:
+                    raise error from application_error
+            raise
         if not isinstance(saved, DbOutcome):
             raise ConsistencyError("删除结束未返回合法数据库回执")
         if saved.kind is not DbOutcomeKind.COMPLETED:
             return CleanupStep("finish_rejected", str(saved.error))
-        value = saved.value
-        if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
-            raise ConsistencyError("原删除结束回执与原返回不对应")
-        if value.disposition is FinishDisposition.ALREADY_ENDED:
-            await _recover_already_ended(runtime, pending, value)
-        elif (value.disposition is not FinishDisposition.SAVED
-              or value.attempt_status is not pending.finish.outcome.outcome.status):
-            raise ConsistencyError("原删除结束回执与原返回不对应")
-        pending.saved = True
+        await apply_completed(saved)
     return None
 
 
@@ -1896,24 +1934,37 @@ async def _save_query_return(runtime, pending):
                     pending.validation_diagnostic.message) from None
             pending.phase = CleanupQueryPhase.PREPARED
         if pending.phase is not CleanupQueryPhase.SAVED:
-            saved = await runtime.database.write(lambda owned: runtime.operations.finish_attempt(pending.finish, pending.key, owned), key=pending.key)
+            async def apply_completed(saved):
+                value = saved.value
+                if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
+                    raise ConsistencyError("查询结果未返回可靠数据库回执")
+                if value.disposition is FinishDisposition.ALREADY_ENDED:
+                    await _recover_already_ended(runtime, pending, value)
+                elif (value.disposition is not FinishDisposition.SAVED
+                      or value.attempt_status is not pending.finish.outcome.outcome.status):
+                    raise ConsistencyError("原查询结束回执与原返回不对应")
+                pending.phase = CleanupQueryPhase.SAVED
+                runtime.pending_intents.pop(item_id, None)
+
+            try:
+                saved = await runtime.database.write(lambda owned: runtime.operations.finish_attempt(pending.finish, pending.key, owned), key=pending.key)
+            except BaseException as error:
+                actual = db_outcome_for(error)
+                if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+                    try:
+                        await apply_completed(actual)
+                    except BaseException as application_error:
+                        raise error from application_error
+                raise
             if not isinstance(saved, DbOutcome):
                 raise ConsistencyError("查询结果保存未返回合法数据库结果")
-            value = saved.value
             if saved.kind is not DbOutcomeKind.COMPLETED:
                 error = ConsistencyError(
                     f"原查询结果未可靠保存（{saved.kind.value}）: {saved.error}")
                 if isinstance(saved.error, BaseException):
                     raise error from saved.error
                 raise error
-            if not isinstance(value, FinishAttemptResult) or not isinstance(value.run_status, RunStatus):
-                raise ConsistencyError("查询结果未返回可靠数据库回执")
-            if value.disposition is FinishDisposition.ALREADY_ENDED:
-                await _recover_already_ended(runtime, pending, value)
-            elif (value.disposition is not FinishDisposition.SAVED
-                  or value.attempt_status is not pending.finish.outcome.outcome.status):
-                raise ConsistencyError("原查询结束回执与原返回不对应")
-            pending.phase = CleanupQueryPhase.SAVED
+            await apply_completed(saved)
     except BaseException as error:
         _raise_supervision_with_error(
             pending, error, "查询原实际结果尚未可靠保存")
@@ -2052,13 +2103,25 @@ async def _consume_saved_query(runtime: CleanupRuntime, pending: PendingCleanupQ
         save = runtime.outputs.cancel_cleanup_item
         rejected_phase = "cancel_rejected"
     if not member.saved:
-        saved = await runtime.database.write(lambda owned: save(member.request, member.key, owned), key=member.key)
+        def apply_completed(saved):
+            if (not isinstance(saved.value, CleanupItemSaved)
+                    or saved.value.item_id != item_id):
+                raise ConsistencyError("原查询的成员结果保存回执不对应")
+            member.saved = True
+
+        try:
+            saved = await runtime.database.write(lambda owned: save(member.request, member.key, owned), key=member.key)
+        except BaseException as error:
+            actual = db_outcome_for(error)
+            if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+                try:
+                    apply_completed(actual)
+                except BaseException as application_error:
+                    raise error from application_error
+            raise
         if saved.kind is not DbOutcomeKind.COMPLETED:
             return CleanupStep(rejected_phase, str(saved.error))
-        if (not isinstance(saved.value, CleanupItemSaved)
-                or saved.value.item_id != item_id):
-            raise ConsistencyError("原查询的成员结果保存回执不对应")
-        member.saved = True
+        apply_completed(saved)
     # ALREADY 也可能表示另一合法事务已经终态化成员。原预想结果
     # 不覆盖该事实；伴随流程始终沿实际已提交成员结果收场。
     actual_member = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT status,error_code FROM cleanup_items WHERE id=?', (item_id,)).fetchone())
