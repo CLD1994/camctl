@@ -14,6 +14,8 @@ import sqlite3
 import sys
 from typing import Any, TypeVar
 
+from camctl.persistence.fact_reads import typed_read_key, _retained_size
+
 
 MAX_READ_REUSE_ENTRIES = 128
 MAX_READ_REUSE_BYTES = 2 * 1024 * 1024
@@ -34,18 +36,6 @@ class _ReadReuseState:
 
 _active_scope: ContextVar[_ReadReuseState | None] = ContextVar("read_reuse_scope", default=None)
 _T = TypeVar("_T")
-
-
-def typed_read_key(value: Any) -> Any:
-    """保留读取输入及数据类字段的实际类型，不合并布尔值与整数。"""
-    if is_dataclass(value) and not isinstance(value, type):
-        return type(value), tuple(
-            (member.name, typed_read_key(getattr(value, member.name)))
-            for member in fields(value)
-        )
-    if isinstance(value, tuple):
-        return type(value), tuple(typed_read_key(item) for item in value)
-    return type(value), value
 
 
 @contextmanager
@@ -118,26 +108,3 @@ def reuse_read(connection: sqlite3.Connection, key: Any, loader: Callable[[], _T
     state.entries[key] = stored, retained_bytes
     state.retained_bytes += retained_bytes
     return result
-
-
-def _retained_size(value: Any, seen: set[int]) -> int:
-    """估算键和值占用；容器与数据类中的同一对象只计一次。"""
-    identity = id(value)
-    if identity in seen:
-        return 0
-    seen.add(identity)
-    size = sys.getsizeof(value)
-    if isinstance(value, dict):
-        return size + sum(
-            _retained_size(key, seen) + _retained_size(item, seen)
-            for key, item in value.items()
-        )
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return size + sum(_retained_size(item, seen) for item in value)
-    if is_dataclass(value) and not isinstance(value, type):
-        if hasattr(value, "__dict__"):
-            size += sys.getsizeof(vars(value))
-        return size + sum(
-            _retained_size(getattr(value, member.name), seen) for member in fields(value)
-        )
-    return size

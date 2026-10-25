@@ -48,8 +48,6 @@ def facts(monkeypatch):
     event = EventEnvelope(2, 1, 1, 1, 0, 1, None, 1, {'nested': [1]}, ())
     monkeypatch.setattr(module, 'decode_event_row', create_autospec(
         module.decode_event_row, return_value=event))
-    monkeypatch.setattr(module, 'load_event_registry', create_autospec(
-        module.load_event_registry, return_value={'events': {'RESULT_PAGE': {'id': 99}}}))
     return module
 
 
@@ -108,10 +106,10 @@ def test_fixed_file_is_separate_from_mutable_rows_and_returns_owned_values(datab
     connection, _ = database
     source = create_autospec(transaction.row_facts, return_value={'id': 9, 'last_event_id': 2, 'nested': [1]})
     with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
-        first = facts.reuse_fixed_file(connection, 9, 2, HistoryBoundary(1, 3), lambda: source(connection, 'device_files', 9))
+        first = facts._reuse_fixed_file(connection, 9, 2, HistoryBoundary(1, 3), lambda: source(connection, 'device_files', 9))
         first['nested'].append(9)
         connection.total_changes += 1
-        second = facts.reuse_fixed_file(connection, 9, 2, HistoryBoundary(1, 3), lambda: source(connection, 'device_files', 9))
+        second = facts._reuse_fixed_file(connection, 9, 2, HistoryBoundary(1, 3), lambda: source(connection, 'device_files', 9))
         assert second['nested'] == [1]
     source.assert_called_once()
 

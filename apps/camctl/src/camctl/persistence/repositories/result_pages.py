@@ -260,7 +260,7 @@ def _decode(event):
         raise ConsistencyError("结果页原历史不可解释") from error
 
 
-def _family_fields(identity, *, result_policy=None):
+def result_file_family(identity, *, result_policy=None):
     """按冻结结果策略保留原路径主干，并标记配对原片和预览。"""
     directory, separator, name = identity.rpartition("/")
     if separator and not directory:
@@ -297,7 +297,7 @@ def _family_fields(identity, *, result_policy=None):
 
 def _relation_values(*, created_event_id, action_id, run_id, attempt_id,
                      page_event_id, file_id, identity, result_policy=None):
-    directory, stem, role = _family_fields(identity, result_policy=result_policy)
+    directory, stem, role = result_file_family(identity, result_policy=result_policy)
     return {
         "created_event_id": created_event_id,
         "action_id": action_id,
@@ -437,7 +437,7 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
         identity, file_id = pair
         expected_rows.append((
             index.event_id, action_id, run_id, attempt_id, append_id,
-            file_id, identity, *_family_fields(
+            file_id, identity, *result_file_family(
                 identity, result_policy=action["execution_spec_json"].get("result_policy")
             )))
     relation_shape = [row[1:] for row in relations]
@@ -490,6 +490,14 @@ def _load_at_record(connection, event_id):
 
 def _at(connection, event_id):
     saved, raw, _, _ = _at_record(connection, event_id)
+    return saved, raw
+
+
+def read_saved_page(connection, event_id):
+    """普通消费原页事实；新页形成及原键重算使用独立完整核验口。"""
+    from camctl.persistence.fact_reads import read_event
+    record = read_event(connection, event_id)
+    saved, raw = _decode(record.event)
     return saved, raw
 
 

@@ -3,18 +3,17 @@ from collections import OrderedDict
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
+import sys
 
 from camctl.contracts.history_values import HistoryBoundary, INITIAL_BOUNDARY, TransactionRange
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.history.decoding import decode_event_row
-from camctl.history.events import EventEnvelope, load_event_registry
-from camctl.persistence.read_reuse import _retained_size, typed_read_key
+from camctl.history.events import EventEnvelope
 
 
 MAX_FACT_ENTRIES = 128
 MAX_FACT_BYTES = 2 * 1024 * 1024
-MAX_RESULT_PAGE_EVENTS = 3
 EVENT_COLUMNS = 'id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json'
 
 
@@ -109,12 +108,12 @@ def opened_operation_fact_scope(connection, opened):
 def _cached(state, key):
     if state is None or key not in state.entries:
         return None
-    value, _, _ = state.entries[key]
+    value, _ = state.entries[key]
     state.entries.move_to_end(key)
     return deepcopy(value)
 
 
-def _remember(state, key, value, *, page=False):
+def _remember(state, key, value):
     if state is None or not state.active or not state.connection.in_transaction:
         return
     stored = deepcopy(value)
@@ -125,15 +124,10 @@ def _remember(state, key, value, *, page=False):
     previous = state.entries.pop(key, None)
     if previous is not None:
         state.retained_bytes -= previous[1]
-    if page:
-        pages = [identity for identity, (_, _, is_page) in state.entries.items() if is_page]
-        if len(pages) >= MAX_RESULT_PAGE_EVENTS:
-            _, removed, _ = state.entries.pop(pages[0])
-            state.retained_bytes -= removed
     while state.entries and (len(state.entries) >= MAX_FACT_ENTRIES or state.retained_bytes+size > MAX_FACT_BYTES):
-        _, (_, removed, _) = state.entries.popitem(last=False)
+        _, (_, removed) = state.entries.popitem(last=False)
         state.retained_bytes -= removed
-    state.entries[key] = stored, size, page
+    state.entries[key] = stored, size
     state.retained_bytes += size
 
 
@@ -164,8 +158,7 @@ def _record(connection, row, requested_id=None):
         raise ConsistencyError('历史事件不属于其完整事务')
     record = EventRecord(tuple(row), event, transaction)
     state = _facts(connection)
-    page_type = load_event_registry()['events']['RESULT_PAGE']['id']
-    _remember(state, ('event', typed_read_key(event.event_id)), record, page=event.event_type == page_type)
+    _remember(state, ('event', typed_read_key(event.event_id)), record)
     return record
 
 
@@ -214,7 +207,7 @@ def iter_transaction_events(connection, transaction, *, batch_size=128):
         after = end
 
 
-def reuse_fixed_file(connection, file_id, file_event_id, boundary, loader):
+def _reuse_fixed_file(connection, file_id, file_event_id, boundary, loader):
     """复用完整固定边界的文件原值，不接收提案或来源通过结论。"""
     ObjectId(file_id)
     ObjectId(file_event_id)
@@ -233,3 +226,39 @@ def reuse_fixed_file(connection, file_id, file_event_id, boundary, loader):
         raise ConsistencyError('固定文件事实改变原文件或历史位置')
     _remember(state, key, value)
     return value
+
+
+def typed_read_key(value):
+    """保留读取输入及数据类字段的实际类型，不合并布尔值与整数。"""
+    if is_dataclass(value) and not isinstance(value, type):
+        return type(value), tuple(
+            (member.name, typed_read_key(getattr(value, member.name)))
+            for member in fields(value)
+        )
+    if isinstance(value, tuple):
+        return type(value), tuple(typed_read_key(item) for item in value)
+    return type(value), value
+
+
+
+def _retained_size(value, seen):
+    """估算键和值占用；容器与数据类中的同一对象只计一次。"""
+    identity = id(value)
+    if identity in seen:
+        return 0
+    seen.add(identity)
+    size = sys.getsizeof(value)
+    if isinstance(value, dict):
+        return size + sum(
+            _retained_size(key, seen) + _retained_size(item, seen)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return size + sum(_retained_size(item, seen) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        if hasattr(value, "__dict__"):
+            size += sys.getsizeof(vars(value))
+        return size + sum(
+            _retained_size(getattr(value, member.name), seen) for member in fields(value)
+        )
+    return size
