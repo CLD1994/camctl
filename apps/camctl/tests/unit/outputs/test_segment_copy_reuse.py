@@ -1,4 +1,6 @@
 from dataclasses import dataclass, replace
+import sqlite3
+from unittest.mock import create_autospec
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,6 +8,8 @@ import pytest
 
 from camctl.contracts.enums import enum_for
 from camctl.outputs.read_attempts import run_owned_read
+from camctl.persistence.runtime import OwnedConnection, DatabaseMetadata
+from support.business_database import inline_business_database
 from camctl.outputs.segment_copy_reuse import (
     check_copy_is_locally_usable,
     copy_is_reusable,
@@ -110,15 +114,14 @@ async def test_unavailable_file_lease_falls_back_from_local_copy():
 
 @pytest.mark.asyncio
 async def test_local_read_pins_both_check_source_and_delivery_target():
-    class Cursor:
-        def fetchone(self):
-            return 41, 52
-
-    class Connection:
-        def execute(self, query, parameters):
-            assert "source_intermediate_file_id" in query
-            assert parameters == (7,)
-            return Cursor()
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    cursor.fetchone.return_value = (41, 52)
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    def execute(query, parameters):
+        assert "source_intermediate_file_id" in query
+        assert parameters == (7,)
+        return cursor
+    connection.execute.side_effect = execute
 
     class Executor:
         task = None
@@ -130,7 +133,8 @@ async def test_local_read_pins_both_check_source_and_delivery_target():
     executor = Executor()
     runtime = SimpleNamespace(
         file_executor=executor,
-        owned=SimpleNamespace(connection=Connection()))
+        database=inline_business_database(OwnedConnection(connection,
+            DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))))
 
     async def body():
         return "read finished"

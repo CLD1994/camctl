@@ -7,6 +7,7 @@ from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.contracts.enums import enum_for
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+from camctl.outputs.database_reads import read_all
 
 _INSPECTION_STATE = enum_for("segment_inspections.state")
 _INSPECTION_PENDING = int(_INSPECTION_STATE.PENDING)
@@ -272,17 +273,22 @@ class ReadDiscoveryOwner:
             self._stamp = stamp
             self._deadline = None
 
-    def begin_round(self, connection, now_us):
-        with closing(connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
-            tail = cursor.fetchone()[0]
-        database = database_identity(connection)
-        self.observe((database, tail), now_us)
-        with closing(connection.execute(
-            "SELECT MIN(scheduled_at) FROM actions WHERE status IN (1,2)"
-            " AND cancel_requested=0 AND scheduled_at>?", (now_us,),
-        )) as cursor:
-            self._deadline = cursor.fetchone()[0]
-        return database
+    async def begin_round(self, database, now_us):
+        def read(owned):
+            connection = owned.connection
+            with closing(connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
+                tail = cursor.fetchone()[0]
+            identity = database_identity(connection)
+            with closing(connection.execute(
+                "SELECT MIN(scheduled_at) FROM actions WHERE status IN (1,2)"
+                " AND cancel_requested=0 AND scheduled_at>?", (now_us,),
+            )) as cursor:
+                deadline = cursor.fetchone()[0]
+            return identity, tail, deadline
+        identity, tail, deadline = await database.read(read)
+        self.observe((identity, tail), now_us)
+        self._deadline = deadline
+        return identity
 
     def scope(self, kind, database, now_us):
         if kind not in self._KINDS:
@@ -305,35 +311,36 @@ class ReadDiscoveryOwner:
                 raise ValueError("继续位置必须严格推进")
             self._positions[scope.kind] = page.next_cursor
 
-    def rows(self, connection, kind, now_us, query, parameters=(), *, identity="id"):
+    async def rows(self, database, kind, now_us, query, parameters=(), *, identity="id"):
         """对内部查询作稳定 ID 续读；query 含 SELECT/FROM/WHERE，不含排序。"""
-        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
-        scope = self.scope(kind, database, now_us)
+        database_id = self._stamp[0] if self._stamp is not None else await self.begin_round(database, now_us)
+        scope = self.scope(kind, database_id, now_us)
         saved = self._positions.get(kind)
         after = saved.after[0] if saved is not None else 0
         parameters = parameters(scope.now_us) if callable(parameters) else parameters
-        with closing(connection.execute(
+        rows = await read_all(database,
             query + f" AND {identity}>? ORDER BY {identity} LIMIT ?",
             (*parameters, after, self.batch_size),
-        )) as cursor:
-            rows = tuple(cursor.fetchall())
+        )
         next_cursor = (ReadDiscoveryCursor(scope, (rows[-1][0],))
                        if len(rows) == self.batch_size else None)
         page = Page(items=rows, next_cursor=next_cursor)
         self.accept(scope, page)
         return page
 
-    def reads(self, connection, kind, now_us):
-        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
-        scope = self.scope(kind, database, now_us)
-        page = read_candidates(connection, scope, self._positions.get(kind), limit=self.batch_size)
+    async def reads(self, database, kind, now_us):
+        database_id = self._stamp[0] if self._stamp is not None else await self.begin_round(database, now_us)
+        scope = self.scope(kind, database_id, now_us)
+        cursor = self._positions.get(kind)
+        limit = self.batch_size
+        page = await database.read(lambda owned: read_candidates(owned.connection, scope, cursor, limit=limit))
         self.accept(scope, page)
         return page
 
-    def captures(self, connection, now_us, preparation_leads=None):
+    async def captures(self, database, now_us, preparation_leads=None):
         """拍摄入口按完整业务顺序续页，避免较晚动作先取得启动资格。"""
-        database = self._stamp[0] if self._stamp is not None else self.begin_round(connection, now_us)
-        scope = self.scope("capture", database, now_us)
+        database_id = self._stamp[0] if self._stamp is not None else await self.begin_round(database, now_us)
+        scope = self.scope("capture", database_id, now_us)
         saved = self._positions.get("capture")
         order = "scheduled_at,plan_id,input_index,id"
         eligibility = "(status IN (1,2) AND cancel_requested=0 AND scheduled_at<=?) OR (status=2 AND cancel_requested=1)"
@@ -349,7 +356,7 @@ class ReadDiscoveryOwner:
                 eligibility += (f" OR (type IN ({capture_types}) AND status=1 AND cancel_requested=0"
                     f" AND device_id=? AND scheduled_at<=? AND {photo_start})")
                 parameters += device_id, horizon
-            at = next_preparation_at(connection, scope.now_us, preparation_leads)
+            at = await database.read(lambda owned: next_preparation_at(owned.connection, scope.now_us, preparation_leads))
             if at is not None:
                 self._deadline = at if self._deadline is None else min(at, self._deadline)
         eligibility += (" OR EXISTS (SELECT 1 FROM device_activities d WHERE d.action_id=a.id AND "
@@ -361,9 +368,7 @@ class ReadDiscoveryOwner:
         if saved is not None:
             query += f" AND ({order})>(?,?,?,?)"
             parameters += saved.after
-        with closing(connection.execute(query + f" ORDER BY {order} LIMIT ?",
-                                        (*parameters, self.batch_size))) as cursor:
-            rows = tuple(cursor.fetchall())
+        rows = await read_all(database, query + f" ORDER BY {order} LIMIT ?", (*parameters, self.batch_size))
         next_cursor = (ReadDiscoveryCursor(scope, (rows[-1][2], rows[-1][3], rows[-1][4], rows[-1][0]))
                        if len(rows) == self.batch_size else None)
         page = Page(items=rows, next_cursor=next_cursor)

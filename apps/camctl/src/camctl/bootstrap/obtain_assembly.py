@@ -80,7 +80,7 @@ def session_obtain_assembly(
     pending_segment_queries: dict = {}
     discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
-    def factory(owned: Any) -> ObtainRuntime:
+    def factory(database: Any) -> ObtainRuntime:
         read_ports: dict[str, DeviceReadAssembly] = {}
         for device_id, declaration in devices.items():
             if not isinstance(declaration, Mapping):
@@ -107,7 +107,7 @@ def session_obtain_assembly(
                 evidence=entry.evidence,
                 digest_supported=digest_supported,
                 digest_for=(
-                    _digest_reader_factory(owned, entry.driver, binding, entry.evidence)
+                    _digest_reader_factory(database, entry.driver, binding, entry.evidence)
                     if digest_supported
                     else None
                 ),
@@ -143,7 +143,7 @@ def session_obtain_assembly(
                 ),
             )
         return ObtainRuntime(
-            owned=owned,
+            database=database,
             devices=read_ports,
             directories=directories,
             segment_size=segment_size,
@@ -180,16 +180,12 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
     """构造推进取回执行的流程端口；每轮驱动一次。"""
 
     async def flow(context: Any) -> None:
-        owned = context.open_connection()
-        try:
-            runtime = factory(owned)
-            await advance_obtain(runtime)
-            if runtime.discovery.pending:
-                from camctl.scheduling.notifications import WakeReason
-                notifier = getattr(context, "wake", None)
-                if notifier is not None:
-                    notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
-        finally:
-            owned.connection.close()
+        runtime = factory(context.database)
+        await advance_obtain(runtime)
+        if runtime.discovery.pending:
+            from camctl.scheduling.notifications import WakeReason
+            notifier = getattr(context, "wake", None)
+            if notifier is not None:
+                notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
 
     return flow

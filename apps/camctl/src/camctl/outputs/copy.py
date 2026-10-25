@@ -42,7 +42,7 @@ from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.persistence.runtime import OwnedConnection
+    from camctl.persistence.business import BusinessDatabase
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _VERIFICATION = enum_for("file_copies.verification_state")
@@ -414,10 +414,10 @@ class ReliableSegment:
 
 @dataclass(frozen=True)
 class CopyContext:
-    """续传准备的协作者：仓储、连接、目录绑定与事实时刻。"""
+    """续传准备的协作者：仓储、数据库端口、目录绑定与事实时刻。"""
 
     repository: "OutputsRepository"
-    owned: "OwnedConnection"
+    database: "BusinessDatabase"
     roots: BoundDirectories
     occurred_at: int
     reset_key: OperationKey | None = None
@@ -470,7 +470,7 @@ class SegmentContext:
     """一段拷贝的协作者、本次段大小与停止通知。"""
 
     repository: "OutputsRepository"
-    owned: "OwnedConnection"
+    database: "BusinessDatabase"
     roots: BoundDirectories
     occurred_at: int
     segment_size: int
@@ -511,7 +511,9 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
     if isinstance(context.segment_size, bool) or not isinstance(context.segment_size, int) \
             or context.segment_size <= 0:
         raise ValueError(f"本次段大小必须是正整数: {context.segment_size!r}")
-    facts = context.repository.load_copy_state(copy_id, context.owned)
+    facts = await context.database.read(
+        lambda owned: context.repository.load_copy_state(copy_id, owned),
+        description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_segment",
         lambda control: _copy_next_segment(copy_id, context, facts, control))
 
@@ -554,14 +556,14 @@ async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
     if not result.synced:
         raise CopySegmentError("segment_sync_failed", "段尾同步未确认")
     key = context.key if context.key is not None else new_operation_key()
-    outcome = context.repository.save_segment(
-        ReliableSegment(
-            copy_id=copy_id, copy_round=facts.round,
-            committed_before=plan.start, segment_end=plan.end,
-            synced=True, occurred_at=context.occurred_at,
-        ),
-        key, context.owned,
+    request = ReliableSegment(
+        copy_id=copy_id, copy_round=facts.round,
+        committed_before=plan.start, segment_end=plan.end,
+        synced=True, occurred_at=context.occurred_at,
     )
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_segment(request, key, owned),
+        key=key, description="拷贝段进度保存")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise CopySegmentError(
             "segment_save_unknown" if outcome.kind is DbOutcomeKind.UNKNOWN
@@ -599,7 +601,9 @@ async def prepare_copy(copy_id: int, context: CopyContext) -> CopyStep:
     文件的实际状态由下一次准备重新观察。不重新分配交付或重拷
     轮次，不保存读取意图。
     """
-    facts = context.repository.load_copy_state(copy_id, context.owned)
+    facts = await context.database.read(
+        lambda owned: context.repository.load_copy_state(copy_id, owned),
+        description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_prepare",
         lambda _control: _prepare_copy(copy_id, context, facts))
 
@@ -622,10 +626,10 @@ async def _prepare_copy(copy_id, context, facts) -> CopyStep:
     reset: TargetResetOutcome | None = None
     if decision.outcome is ResumeOutcome.RESET_TARGET:
         key = context.reset_key if context.reset_key is not None else new_operation_key()
-        outcome = context.repository.reset_copy_target(
-            TargetResetRequest(copy_id=copy_id, occurred_at=context.occurred_at),
-            key, context.owned,
-        )
+        request = TargetResetRequest(copy_id=copy_id, occurred_at=context.occurred_at)
+        outcome = await context.database.write(
+            lambda owned: context.repository.reset_copy_target(request, key, owned),
+            key=key, description="拷贝目标重置保存")
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise CopyPreparationError(
                 "reset_save_failed", str(outcome.error),
@@ -925,7 +929,7 @@ class CompletionContext:
     """完整性收尾的协作者、源摘要端口与本次事实时刻。"""
 
     repository: "OutputsRepository"
-    owned: "OwnedConnection"
+    database: "BusinessDatabase"
     roots: BoundDirectories
     occurred_at: int
     digest: SourceDigestReader | None = None
@@ -997,7 +1001,9 @@ async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionS
     拷贝，随后由调用方重置目标并重新分段。准备完成与解除取回源
     依赖共同保存；提交结果未知时不冒充已解除。
     """
-    facts = context.repository.load_copy_state(copy_id, context.owned)
+    facts = await context.database.read(
+        lambda owned: context.repository.load_copy_state(copy_id, owned),
+        description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_complete",
         lambda _control: _complete_copy(copy_id, context, facts))
 
@@ -1072,14 +1078,14 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
         save_state = int(_VERIFICATION.MATCHED)
         source_value, error_json = source_sha256, None
     key = context.key if context.key is not None else new_operation_key()
-    outcome = context.repository.save_verification(
-        VerificationSave(
-            copy_id=copy_id, state=save_state, source_sha256=source_value,
-            target_sha256=hashed.digest, error_json=error_json,
-            occurred_at=context.occurred_at,
-        ),
-        key, context.owned,
+    request = VerificationSave(
+        copy_id=copy_id, state=save_state, source_sha256=source_value,
+        target_sha256=hashed.digest, error_json=error_json,
+        occurred_at=context.occurred_at,
     )
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_verification(request, key, owned),
+        key=key, description="拷贝校验结果保存")
     if outcome.kind is DbOutcomeKind.COMPLETED \
             and outcome.value.disposition is VerificationDisposition.SKIPPED:
         raise CopyCompletionError(
@@ -1098,14 +1104,14 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
     if source_sha256 is None or not target_sha256:
         raise ConsistencyError("重拷登记缺少判定所依据的摘要")
     key = context.key if context.key is not None else new_operation_key()
-    outcome = context.repository.register_recopy(
-        RecopyRegistration(
-            copy_id=copy_id, source_sha256=source_sha256,
-            target_sha256=target_sha256, max_recopies=context.max_recopies,
-            occurred_at=context.occurred_at,
-        ),
-        key, context.owned,
+    request = RecopyRegistration(
+        copy_id=copy_id, source_sha256=source_sha256,
+        target_sha256=target_sha256, max_recopies=context.max_recopies,
+        occurred_at=context.occurred_at,
     )
+    outcome = await context.database.write(
+        lambda owned: context.repository.register_recopy(request, key, owned),
+        key=key, description="拷贝重拷登记")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "recopy_register_failed", "recopy_register_unknown")
     result = outcome.value
@@ -1118,15 +1124,17 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
 
 async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep:
     """保存准备完成事实；与解除取回源依赖共同提交。"""
-    facts = context.repository.load_copy_state(copy_id, context.owned)
+    facts = await context.database.read(
+        lambda owned: context.repository.load_copy_state(copy_id, owned),
+        description="拷贝状态读取")
     key = context.key if context.key is not None else new_operation_key()
-    outcome = context.repository.save_prepared(
-        PreparedRequest(
-            copy_id=copy_id, target_sha256=target_sha256,
-            size_bytes=facts.source_size, occurred_at=context.occurred_at,
-        ),
-        key, context.owned,
+    request = PreparedRequest(
+        copy_id=copy_id, target_sha256=target_sha256,
+        size_bytes=facts.source_size, occurred_at=context.occurred_at,
     )
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_prepared(request, key, owned),
+        key=key, description="拷贝准备完成保存")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "prepared_save_failed", "prepared_save_unknown")
     result = outcome.value
