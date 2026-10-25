@@ -14,6 +14,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.events import business_columns
 from camctl.history.reads import SegmentReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.page_read_cache import opened_read_page_scope
 from camctl.persistence.transaction import (
     CommandPlan,event_envelope,next_row_id,read_transaction_range,row_change,row_facts,
@@ -185,6 +186,12 @@ def _run_files(db,run_id,boundary):
 
 
 def _retained_input(db,file_id,page_event_id,boundary):
+    key = (__name__, "retained-input", typed_read_key(file_id),
+           typed_read_key(page_event_id), typed_read_key(boundary))
+    return reuse_read(db, key, lambda: _load_retained_input(db, file_id, page_event_id, boundary))
+
+
+def _load_retained_input(db, file_id, page_event_id, boundary):
     from .result_file_proofs import _file_at,load_strict_result_file_input
     saved,_=_at(db,page_event_id)
     file=_file_at(db,file_id,boundary)

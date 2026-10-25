@@ -20,6 +20,7 @@ from camctl.operations.models import AttemptTicket
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.history.reads import CaptureResultReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.transaction import (
     CommandPlan, TransactionError, event_envelope, read_transaction_range,
     row_facts, update_change,
@@ -68,6 +69,12 @@ def _request_from_event(event):
 
 def _proof(connection, request, *, current_boundary=None):
     """独立核原页、完整 INDEX 及原 F 前差集，不采用调用方行切片。"""
+    key = (__name__, "ownership-proof", typed_read_key(request), typed_read_key(current_boundary))
+    return reuse_read(connection, key, lambda: _load_proof(
+        connection, request, current_boundary=current_boundary))
+
+
+def _load_proof(connection, request, *, current_boundary=None):
     ref = request.page
     saved, raw, event, transaction = pages._at_record(connection, ref.event_id)
     if saved.ref != ref:

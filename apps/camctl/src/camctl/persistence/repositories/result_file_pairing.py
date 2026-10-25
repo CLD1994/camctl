@@ -12,6 +12,7 @@ from camctl.history.events import load_event_registry
 from camctl.history.reads import CaptureResultReadScope
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.persistence.event_reads import SqlEventReads
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.transaction import (
     CommandPlan, TransactionError, event_envelope, next_row_id, read_transaction_range,
     row_change, row_facts, update_change,
@@ -312,6 +313,13 @@ def verify_result_file_pairing(request, key, reader, *, execution_finished=True)
 
 def verify_pairing_fact(connection, fact_id, preview_file_id, boundary, *, current_boundary=None):
     """只核已有原事实及原操作键，绝不执行新的配对保存。"""
+    key = (__name__, "pairing-fact", typed_read_key(fact_id), typed_read_key(preview_file_id),
+           typed_read_key(boundary), typed_read_key(current_boundary))
+    return reuse_read(connection, key, lambda: _load_verified_pairing_fact(
+        connection, fact_id, preview_file_id, boundary, current_boundary=current_boundary))
+
+
+def _load_verified_pairing_fact(connection, fact_id, preview_file_id, boundary, *, current_boundary=None):
     fact = row_facts(connection, 'device_file_pairing_facts', fact_id)
     if (fact is None or fact['preview_file_id'] != preview_file_id
             or fact['created_event_id'] > boundary.last_event_id

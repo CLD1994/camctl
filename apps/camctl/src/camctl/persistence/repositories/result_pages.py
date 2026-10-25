@@ -27,7 +27,7 @@ from camctl.persistence.transaction import (CommandPlan, TransactionError,
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.page_read_cache import (cached_page_record, page_read_scope_active,
     prepare_page_record, remember_page_record)
-from camctl.persistence.read_reuse import reuse_read
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -167,6 +167,11 @@ def _difference(scope, activity, action, page, previous):
 
 
 def _load(connection, ticket):
+    key = (__name__, "ticket", typed_read_key(ticket))
+    return reuse_read(connection, key, lambda: _load_ticket(connection, ticket))
+
+
+def _load_ticket(connection, ticket):
     ObjectId(ticket.run_id)
     ObjectId(ticket.attempt_id)
     run = row_facts(connection, "operation_runs", ticket.run_id)
