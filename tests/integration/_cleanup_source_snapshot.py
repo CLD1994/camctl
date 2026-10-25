@@ -72,6 +72,8 @@ def _root_users(root):
 
     for process in Path("/proc").glob("[0-9]*"):
         try:
+            if process.stat().st_uid != os.geteuid():
+                continue
             reasons = []
             cwd = os.readlink(process / "cwd")
             if belongs(cwd):
@@ -92,6 +94,23 @@ def _root_users(root):
         if reasons:
             found.append({"pid": int(process.name), "uses": reasons})
     return found
+
+
+def _actor_modes(world):
+    actors = {"python": world.package.python, "camctl": world.package.cli,
+              "host": Path(world.demo_path), "shell": Path("/bin/sh"),
+              "clock_cli": world.clock_cli, "adb": world.tools / "adb"}
+    for name in ("ffmpeg", "ffprobe", "node"):
+        environment = world.package.env if name == "node" else world.env
+        executable = shutil.which(name, path=environment["PATH"])
+        assert executable is not None, name
+        actors[name] = Path(executable)
+    result = {}
+    for name, path in actors.items():
+        mode = stat.S_IMODE(path.resolve().stat().st_mode)
+        assert mode & (stat.S_ISUID | stat.S_ISGID) == 0, path
+        result[name] = {"path": str(path), "mode": mode}
+    return result
 
 
 class CompletedOsmoSource:
@@ -160,6 +179,9 @@ class CompletedOsmoSource:
                          and call["started_ns"] > stop["returned_ns"])
         self.proof = {
             "producer_runs": 1, "producer_seconds": self.producer_seconds,
+            "process_scan": {"euid": os.geteuid(),
+                             "scope": "同euid进程的cwd、命令参数及FD；同用户权限错误显式失败",
+                             "actor_modes": _actor_modes(self.template)},
             "root": str(self.root), "params": deepcopy(self.template.params),
             "clock": json.loads(self.template.clock.read_text()),
             "stop_to_directory_ns": directory["started_ns"] - stop["returned_ns"],
