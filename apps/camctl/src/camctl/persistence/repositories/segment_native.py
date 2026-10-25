@@ -3,11 +3,19 @@
 from types import SimpleNamespace
 from camctl.capture.segment_storage import SegmentResultRef
 from camctl.contracts.enums import enum_for
+from camctl.persistence.read_reuse import reuse_read, typed_read_key
 from camctl.persistence.transaction import row_facts
 
 
 def native_classification(db, setrow):
     """两遍读取同一冻结成员，空尾分类由可靠顺序和最后非零原片证明。"""
+    key = (__name__, "native_classification", typed_read_key(tuple(
+        setrow[field] for field in ("action_id", "id", "version", "run_id", "source_kind", "activity_id")
+    )))
+    return reuse_read(db, key, lambda: _load_native_classification(db, setrow))
+
+
+def _load_native_classification(db, setrow):
     from .segments import read_segment_members
     from .segment_result_sets import _one
     from camctl.capture.native_segments import classify_native_members
