@@ -14,10 +14,11 @@ import asyncio
 import hashlib
 import os
 import re
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, Protocol, Sequence
+from typing import Callable, NamedTuple, Protocol, Sequence
 
 from camctl.contracts.values import ObjectId, new_operation_key
 from camctl.host_files.handoff import (
@@ -271,30 +272,31 @@ class DbPublicationSession:
     入口的幂等分支承担。
     """
 
-    def __init__(self, owned: OwnedConnection) -> None:
+    def __init__(self, owned: OwnedConnection, *, occurred_at: Callable[[], int] | None = None) -> None:
         self._owned = owned
+        self._occurred_at = occurred_at if occurred_at is not None else lambda: time.time_ns() // 1000
 
     def prepare(self, report_id: int, contents: ReportBytes) -> DbOutcome:
         return policy.record_report_bytes(
-            new_operation_key(), self._owned, report_id, contents)
+            new_operation_key(), self._owned, report_id, contents, occurred_at=self._occurred_at())
 
     def record_intent(self, report_id: int) -> DbOutcome:
         return policy.record_report_publish_intent(
-            new_operation_key(), self._owned, report_id)
+            new_operation_key(), self._owned, report_id, occurred_at=self._occurred_at())
 
     def save_publication(self, report_id: int,
                          file_result: PublishResult) -> DbOutcome:
         return policy.publish_report(
-            new_operation_key(), self._owned, report_id, file_result)
+            new_operation_key(), self._owned, report_id, file_result, occurred_at=self._occurred_at())
 
     def record_failure(self, report_id: int, error: dict) -> DbOutcome:
         return policy.record_report_failure(
-            new_operation_key(), self._owned, report_id, error)
+            new_operation_key(), self._owned, report_id, error, occurred_at=self._occurred_at())
 
     def settle_local(self, action_id: int, report_id: int) -> DbOutcome:
         return policy.record_local_report(
             new_operation_key(), self._owned, action_id=action_id,
-            local_report_id=report_id, occurred_at=0)
+            local_report_id=report_id, occurred_at=self._occurred_at())
 
 
 def _report_staging_directory(staging_root: Path) -> Path:

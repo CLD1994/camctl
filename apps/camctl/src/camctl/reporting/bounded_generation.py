@@ -175,9 +175,14 @@ def _action_facts(repo, handle, boundary):
     return facts
 
 
-def _project(entity, identity, facts):
+def _project(entity, identity, facts, *, repo=None, boundary=None, spec=None):
+    histories = {}
+    if spec is not None and spec.format_version >= 2 and entity in ("plan", "action"):
+        table = "plans" if entity == "plan" else "actions"
+        histories[(entity, identity)] = repo.status_history(entity, identity, boundary, facts[table][identity]["status"], event_batch_size=spec.event_batch_size)
     return project_public(
-        ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED)
+        ProjectionInput(entity, identity, facts, deferred_fields=_DEFERRED,
+                        format_version=1 if spec is None else spec.format_version, status_histories=histories)
     )
 
 
@@ -643,12 +648,12 @@ def _result_rows(repo, handle, boundary, kind):
         yield row.row_id, (row, _project(projection, row.row_id, facts))
 
 
-def _write_action(repo, selection, stream, plan, binding, identity, boundary):
+def _write_action(repo, selection, stream, plan, binding, identity, boundary, spec):
     from camctl.reporting.generation import _merge_output, _merge_delivery
 
     with ExitStack() as stack:
         handle = stack.enter_context(repo.open_segment_history(identity, boundary))
-        finite = _project("action", identity, _action_facts(repo, handle, boundary))
+        finite = _project("action", identity, _action_facts(repo, handle, boundary), repo=repo, boundary=boundary, spec=spec)
         expansion = _SegmentExpansion(
             repo, boundary, binding, finite.get("error"), stack
         )
@@ -824,7 +829,7 @@ def report_tokens(repo, spec, boundary, stream):
             count, last = 0, None
             for identity in chain((first,), identities):
                 finite = _project(
-                    entity, identity, _primary_facts(repo, entity, identity, boundary)
+                    entity, identity, _primary_facts(repo, entity, identity, boundary), repo=repo, boundary=boundary, spec=spec
                 )
                 if entity == "plan":
                     node = gate.item_plan(path).begin(
@@ -854,6 +859,7 @@ def report_tokens(repo, spec, boundary, stream):
                                 node.child_binding(action_path, action_id),
                                 action_id,
                                 boundary,
+                                spec,
                             )
                             node.accept_item(action_path, receipt, position=action_id)
                             n, position = n + 1, action_id

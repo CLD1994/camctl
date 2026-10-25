@@ -48,8 +48,12 @@ class GenerationSpec:
     staging_path: Path
     entity_batch_size: int = 32
     event_batch_size: int = 256
+    format_version: int = 1
 
     def __post_init__(self) -> None:
+        from camctl.reporting.models import REPORT_FORMAT_VERSIONS
+        if type(self.format_version) is not int or self.format_version not in REPORT_FORMAT_VERSIONS:
+            raise ValueError("报告格式版本不受支持")
         if not isinstance(self.report_id, int) or isinstance(self.report_id, bool) \
                 or self.report_id < 1:
             raise ValueError(f"报告身份必须是正整数: {self.report_id!r}")
@@ -80,6 +84,8 @@ class _ReportReader(Protocol):
 
     def related_entity_ids(self, table: str, column: str, value: int) -> list[int]: ...
 
+    def status_history(self, entity: str, identity: int, boundary, current_status: int, *, event_batch_size: int) -> list[dict]: ...
+
 
 def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSpec) -> "HistoryBoundary":
     """核验生成输入与状态库中登记的冻结依据一致，返回完整 H。"""
@@ -92,6 +98,8 @@ def verify_frozen_registration(repository: HistoryRepository, spec: GenerationSp
             f"报告 {spec.report_id} 的冻结依据与生成输入不符:"
             f" 库内 from={registered.from_wm} to={registered.to_wm}"
             f" frozen={registered.boundary.last_event_id}")
+    if registered.format_version != spec.format_version:
+        raise ConsistencyError("报告格式版本与冻结登记不一致")
     return registered.boundary
 
 
@@ -135,8 +143,17 @@ def generate_report_file(
             yield from stream.open()
             for subtree in scope.plans:
                 facts = _plan_facts(repo, subtree, boundary)
+                histories = {}
+                if spec.format_version >= 2:
+                    objects = [("plan", "plans", subtree.plan_id),
+                               *(("action", "actions", identity) for identity in scope.action_ids_of(subtree.plan_id))]
+                    for entity, table, identity in objects:
+                        histories[(entity, identity)] = repo.status_history(
+                            entity, identity, boundary, facts[table][identity]["status"],
+                            event_batch_size=spec.event_batch_size)
                 fragment = project_public(ProjectionInput(
-                    "plan", subtree.plan_id, facts, dict(subtree.selection)))
+                    "plan", subtree.plan_id, facts, dict(subtree.selection),
+                    format_version=spec.format_version, status_histories=histories))
                 yield from stream.section("plans", fragment)
             for diagnostic_id in scope.diagnostics:
                 facts = _diagnostic_facts(repo, diagnostic_id, boundary)

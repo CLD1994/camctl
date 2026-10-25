@@ -53,7 +53,7 @@ class TestValidateFrozenReport:
 
     def test_unsupported_format_version_rejected(self) -> None:
         with pytest.raises(ValueError, match="格式"):
-            validate_frozen_report(_report(format_version=2))
+            validate_frozen_report(_report(format_version=3))
 
     def test_scope_with_unknown_entity_type_rejected(self) -> None:
         with pytest.raises(ValueError, match="对象类型"):

@@ -652,6 +652,13 @@
         "ISOLATED": 7,
         "ABANDONED": 8
       }
+    },
+    "reports.format_version": {
+      "contract": "reports-runtime.md#报告字段",
+      "members": {
+        "V1": 1,
+        "V2": 2
+      }
     }
   },
   "history_objects": {
@@ -905,10 +912,6 @@
     "entity_snapshots.format_version": {
       "value": 1,
       "contract": "history-formats.md#正向逆向与快照格式"
-    },
-    "reports.format_version": {
-      "value": 1,
-      "contract": "reports-runtime.md#报告字段"
     },
     "database_metadata.id": {
       "value": 1,

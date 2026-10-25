@@ -101,6 +101,7 @@ def test_selection_returns_watermark_checked_inside_freeze(mocker, kind):
     mocker.patch("camctl.reporting.policy.read_covering_report", return_value=covering)
     mocker.patch("camctl.reporting.policy.read_frozen_report",
                  return_value=FrozenReport(1, HistoryBoundary(10, 200), 0, 5, 1))
+    mocker.patch("camctl.persistence.runtime.report_format_versions", return_value=frozenset({1, 2}))
     connection = Mock()
     connection.execute.return_value.fetchone.return_value = (None,)
     scope = SimpleNamespace(connection=connection,

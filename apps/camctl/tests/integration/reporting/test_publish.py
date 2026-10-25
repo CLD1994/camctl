@@ -394,6 +394,10 @@ def test_unknown_management_commit_reuses_original_key_without_duplicate_fact(co
 
     class LostCommitResponse:
         @property
+        def total_changes(self):
+            return connection.total_changes
+
+        @property
         def in_transaction(self):
             return connection.in_transaction
 

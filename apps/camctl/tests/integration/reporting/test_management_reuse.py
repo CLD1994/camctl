@@ -153,6 +153,10 @@ def test_original_management_restore_failure_preserves_exception_and_database(co
             return connection.execute(sql, parameters)
 
         @property
+        def total_changes(self):
+            return connection.total_changes
+
+        @property
         def in_transaction(self):
             return connection.in_transaction
 
@@ -173,6 +177,10 @@ def test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key(connec
     key = new_operation_key()
 
     class LostReceipt:
+        @property
+        def total_changes(self):
+            return connection.total_changes
+
         @property
         def in_transaction(self):
             return connection.in_transaction

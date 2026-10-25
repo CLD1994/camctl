@@ -308,6 +308,10 @@ async def test_concurrent_input_and_ack_are_read_at_one_complete_boundary(enviro
 
         class OrderedConnection:
             @property
+            def total_changes(self):
+                return connection.total_changes
+
+            @property
             def in_transaction(self):
                 return connection.in_transaction
 
@@ -432,6 +436,10 @@ async def test_unknown_freeze_commit_is_resolved_by_original_operation_key(envir
     key = new_operation_key()
 
     class LostCommitResponse:
+        @property
+        def total_changes(self):
+            return connection.total_changes
+
         @property
         def in_transaction(self):
             return connection.in_transaction

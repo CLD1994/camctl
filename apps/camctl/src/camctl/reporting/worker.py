@@ -203,6 +203,7 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
                 staging_path=temporary,
                 entity_batch_size=job.entity_batch_size,
                 event_batch_size=job.event_batch_size,
+                format_version=job.format_version,
             ),
         )
         from camctl.reporting.publication import report_file_name

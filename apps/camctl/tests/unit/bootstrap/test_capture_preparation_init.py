@@ -27,7 +27,8 @@ def test_two_upgrade_options_are_mutually_exclusive():
         cli.parse_command(["init", "--upgrade-software-recovery", "--upgrade-capture-preparation"])
 
 
-def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch):
+@pytest.mark.parametrize("option", ["--upgrade-capture-preparation", "--upgrade-report-format"])
+def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch, option):
     config, state_db = object(), Path("/state/state.db")
     adapter = create_autospec(application.ConfigAdapter, instance=True, spec_set=True)
     adapter.load.return_value = config
@@ -39,9 +40,10 @@ def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch
     ))
     monkeypatch.setattr(initialization, "initialize_state", initialize)
     out, err = StringIO(), StringIO()
-    assert cli._run_init(cli.parse_command(["init", "--upgrade-capture-preparation"]), out, err) == 0
+    assert cli._run_init(cli.parse_command(["init", option]), out, err) == 0
     initialize.assert_called_once_with(config, state_db,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=option == "--upgrade-capture-preparation",
+        upgrade_report_format=option == "--upgrade-report-format")
     assert out.getvalue() == "" and err.getvalue() == ""
 
 
@@ -67,7 +69,7 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
 
     def under_lease(*args, **kwargs):
         lease.close.assert_not_called()
-        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True}
+        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True, "upgrade_report_format": False}
         return initialization.InitResult(initialization.InitOutcome.VERIFIED_EXISTING, "验证通过")
 
     monkeypatch.setattr(initialization, "_initialize_under_lease",
@@ -158,4 +160,12 @@ def test_initial_publish_race_preserves_the_capture_upgrade_request(monkeypatch)
     result = initialization._create_new(state_db, roots, binding, upgrade_capture_preparation=True)
     assert result.outcome is initialization.InitOutcome.VERIFIED_EXISTING
     verify.assert_called_once_with(state_db, roots, binding,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=True, upgrade_report_format=False)
+
+
+@pytest.mark.parametrize("other", ["--upgrade-capture-preparation", "--upgrade-software-recovery"])
+def test_report_format_upgrade_option_is_mutually_exclusive(other):
+    assert cli.parse_command(["init", "--upgrade-report-format"]).upgrade_report_format
+    assert not cli.parse_command(["init"]).upgrade_report_format
+    with pytest.raises(cli.CommandLineError):
+        cli.parse_command(["init", "--upgrade-report-format", other])

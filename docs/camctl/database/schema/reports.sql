@@ -14,7 +14,7 @@ CREATE TABLE reports (
     frozen_event_id INTEGER NOT NULL CHECK (frozen_event_id >= 0),
     from_wm INTEGER NOT NULL CHECK (from_wm >= 0),
     to_wm INTEGER NOT NULL CHECK (to_wm >= from_wm),
-    format_version INTEGER NOT NULL CHECK (format_version = 1),
+    format_version INTEGER NOT NULL CHECK (format_version IN (1,2)),
     status INTEGER NOT NULL CHECK (status IN (1,2,3,4,5)),
     size_bytes INTEGER CHECK (size_bytes IS NULL OR size_bytes >= 0),
     sha256 TEXT CHECK (sha256 IS NULL OR (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*')),

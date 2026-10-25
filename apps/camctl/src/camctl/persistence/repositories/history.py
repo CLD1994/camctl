@@ -81,6 +81,7 @@ class _FrozenRegistration:
     from_wm: int
     to_wm: int
     boundary: HistoryBoundary
+    format_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -302,7 +303,8 @@ class HistoryRepository:
                 row = cursor.fetchone()
             if row is None:
                 raise ConsistencyError(f"报告 {report_id} 未登记")
-            if int(row[3]) != 1:
+            from camctl.reporting.models import REPORT_FORMAT_VERSIONS
+            if row[3] not in REPORT_FORMAT_VERSIONS:
                 raise ConsistencyError(f"报告 {report_id} 的格式版本不受支持")
             frozen_event_id = int(row[2])
             with closing(connection.execute(
@@ -318,7 +320,7 @@ class HistoryRepository:
                     f"报告 {report_id} 的冻结位置不是完整已提交边界")
             return _FrozenRegistration(
                 from_wm=int(row[0]), to_wm=int(row[1]),
-                boundary=HistoryBoundary(transaction.txn_id, frozen_event_id))
+                boundary=HistoryBoundary(transaction.txn_id, frozen_event_id), format_version=int(row[3]))
         finally:
             connection.close()
 
@@ -432,6 +434,76 @@ class HistoryRepository:
         except BaseException:
             handle.close()
             raise
+
+    def status_history(self, entity, identity, boundary, current_status, *, event_batch_size=128):
+        """沿对象目录分页读创建至 H；页间释放连接，只保留有限状态转换。"""
+        from camctl.history.queries import status_transitions
+        if entity not in ("plan", "action"):
+            raise ConsistencyError("状态时间只适用于计划和动作")
+        with self._read_connection() as connection:
+            seed = self._object_seed(connection, entity, identity, boundary,
+                event_batch_size=event_batch_size, include_snapshot=False, primary_only=True)
+        placeholders = set()
+        def events():
+            count, previous = 1, 0
+            while count <= seed.floor[1]:
+                page = self._object_event_page(seed.ref, INITIAL_BOUNDARY, boundary, previous, count,
+                    forward=True, batch_size=event_batch_size, remaining=seed.floor[1]-count+1)
+                for event in page:
+                    if event.occurred_at == 0:
+                        placeholders.update(self._local_report_placeholder_events(event))
+                    yield event
+                count += len(page)
+                previous = page[-1].event_id
+        return status_transitions(events(), seed.primary_table, identity, current_status,
+                                  placeholder_events=placeholders)
+
+    def _local_report_placeholder_events(self, candidate):
+        """只识别旧本地报告完成事务的精确形状，其他零值保留为真实 epoch。"""
+        registry = load_event_registry()["events"]
+        finish, complete, local = (registry[name] for name in
+                                  ("ACTION_FINISHED", "PLAN_STATUS_CHANGED", "SYNC_CHANGED"))
+        if (candidate.event_type, candidate.reason) not in (
+            (finish["id"], finish["branches"]["SUCCEED"]["reason"]),
+            (complete["id"], complete["branches"]["COMPLETE"]["reason"])):
+            return ()
+        with self._read_connection() as connection:
+            transaction = _transaction_range(connection, candidate.transaction_id)
+            if transaction.last_event_id - transaction.first_event_id not in (1, 2):
+                return ()
+            with closing(connection.execute(
+                "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
+                " FROM history_events WHERE transaction_id=? ORDER BY id", (candidate.transaction_id,))) as cursor:
+                events = tuple(decode_event_row(row) for row in cursor.fetchall())
+            if len(events) not in (2, 3) or any(event.occurred_at != 0 or len(event.rows) != 1 for event in events):
+                return ()
+            if [(event.event_type, event.reason) for event in events] != [
+                (local["id"], local["branches"]["LOCAL"]["reason"]),
+                (finish["id"], finish["branches"]["SUCCEED"]["reason"]),
+                *([(complete["id"], complete["branches"]["COMPLETE"]["reason"])] if len(events) == 3 else [])]:
+                return ()
+            sync, action = (event.rows[0] for event in events[:2])
+            if (sync.table != "state_syncs" or action.table != "actions"
+                    or not all(row.before.exists and row.after.exists for row in (sync, action))
+                    or dict(sync.before.values) != {"local_report_id": None}
+                    or set(sync.after.values) != {"local_report_id"}
+                    or sync.after.values["local_report_id"] is None
+                    or dict(action.before.values) != {"status": 2}
+                    or dict(action.after.values) != {"status": 3}):
+                return ()
+            stored_sync = _table_row(connection, "state_syncs", sync.row_id)
+            stored_action = _table_row(connection, "actions", action.row_id)
+            if (stored_sync["action_id"] != action.row_id
+                    or stored_action["type"] != int(enum_for("actions.type").REPORT_STATUS)):
+                return ()
+            if len(events) == 3:
+                plan = events[2].rows[0]
+                if (plan.table != "plans" or plan.row_id != stored_action["plan_id"]
+                        or not plan.before.exists or not plan.after.exists
+                        or dict(plan.before.values) not in ({"status": 1}, {"status": 2})
+                        or dict(plan.after.values) != {"status": 3}):
+                    return ()
+            return tuple(event.event_id for event in events[1:])
 
     def restore_primary_at_h(self, entity, entity_id, boundary, *, event_batch_size=128):
         """仅恢复对象主行；子表增长不会进入有限主行消费者。"""

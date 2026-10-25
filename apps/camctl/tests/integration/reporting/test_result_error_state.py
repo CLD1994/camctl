@@ -27,6 +27,7 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
     """只改变同 H 关联行的返回值；分页选择和历史恢复均委托真实仓储。"""
     actual = HistoryRepository(spec.db_path)
     reader = create_autospec(HistoryRepository, instance=True, spec_set=True)
+    reader.status_history.side_effect = actual.status_history
     reader.frozen_registration.side_effect = actual.frozen_registration
     reader.open_report_selection.side_effect = actual.open_report_selection
     reader.restore_primary_at_h.side_effect = actual.restore_primary_at_h
@@ -64,6 +65,7 @@ def _job(owned, spec):
     return JobMessage(
         job_id=new_job_id(), report_id=spec.report_id,
         from_wm=spec.from_wm, to_wm=spec.to_wm, frozen_event_id=spec.frozen_event_id,
+        format_version=spec.format_version,
         instance_id=metadata.instance_id, db_path=str(spec.db_path),
         staging_path=str(spec.staging_path),
         staging_root=str(canonical_to_path(metadata.staging_path)),

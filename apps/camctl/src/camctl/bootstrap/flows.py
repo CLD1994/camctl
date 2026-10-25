@@ -924,7 +924,7 @@ def report_flow(
                 f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
 
     async def _recover_or_generate(
-            report_id: int, owned: Any, now_us: int) -> str | None:
+            report_id: int, owned: Any, now_us: int, clock) -> str | None:
         """推进一份报告；失败时返回已确认的实际失败摘要。"""
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
@@ -1007,6 +1007,7 @@ def report_flow(
             from_wm=registration.from_wm,
             to_wm=registration.to_wm,
             frozen_event_id=registration.boundary.last_event_id,
+            format_version=registration.format_version,
             instance_id=owned.metadata.instance_id,
             db_path=str(state_db),
             staging_path=str(_temporary_staging_path(report_id, job_id)),
@@ -1056,7 +1057,7 @@ def report_flow(
                 StagedReport(name=Path(success.path).name,
                              size_bytes=success.size_bytes, sha256=success.sha256),
                 HandoffDirectories(staging, ready),
-                DbPublicationSession(owned),
+                DbPublicationSession(owned, occurred_at=clock),
                 local_actions=local_actions,
             )
         except prerequisite_errors:
@@ -1148,7 +1149,7 @@ def report_flow(
                 # 报告仍须在后续调度中推进；本次失败项不因该标记重试。
                 progress.remaining_reports = pending[index + 1:]
                 failure_detail = await _recover_or_generate(
-                    report_id, owned, now_us)
+                    report_id, owned, now_us, context.clock.utc_micros)
                 if failure_detail is not None:
                     round_clean = False
                     if on_failure is not None:

@@ -129,8 +129,12 @@ class JobMessage:
     entity_batch_size: int
     event_batch_size: int
     busy_timeout_ms: int
+    format_version: int = 1
 
     def __post_init__(self) -> None:
+        from camctl.reporting.models import REPORT_FORMAT_VERSIONS
+        if type(self.format_version) is not int or self.format_version not in REPORT_FORMAT_VERSIONS:
+            raise MessageProtocolError("报告格式版本不受支持")
         _require_pattern(self.job_id, "job_id", _JOB_ID_PATTERN)
         _require_int(self.report_id, "report_id", minimum=1)
         _require_int(self.from_wm, "from_wm", minimum=0)
@@ -277,7 +281,7 @@ def decode_message(data: bytes) -> ControlMessage:
         _require_fields(fields, {
             "job_id", "report_id", "from_wm", "to_wm", "frozen_event_id",
             "instance_id", "db_path", "staging_path", "staging_root", "ready_root", "processing_root",
-            "entity_batch_size", "event_batch_size", "busy_timeout_ms"})
+            "entity_batch_size", "event_batch_size", "busy_timeout_ms", "format_version"})
         return JobMessage(
             job_id=payload["job_id"], report_id=payload["report_id"],
             from_wm=payload["from_wm"], to_wm=payload["to_wm"],
@@ -288,7 +292,7 @@ def decode_message(data: bytes) -> ControlMessage:
             processing_root=payload["processing_root"],
             entity_batch_size=payload["entity_batch_size"],
             event_batch_size=payload["event_batch_size"],
-            busy_timeout_ms=payload["busy_timeout_ms"])
+            busy_timeout_ms=payload["busy_timeout_ms"], format_version=payload["format_version"])
     # MessageKind.RESULT：成功与失败的字段集互斥。
     status = payload.get("status")
     if status == "success":
