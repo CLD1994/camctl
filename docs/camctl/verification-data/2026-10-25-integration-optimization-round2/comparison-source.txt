@@ -1,0 +1,81 @@
+import csv,hashlib,json,shutil
+from collections import Counter,defaultdict
+from pathlib import Path
+base=Path('/tmp/camctl-itopt-runner/docs/camctl/verification-data/2026-10-25-integration-optimization-round2')
+run_names=['hb-before-4','hb-after-4','hb-after-6','hb-after-8','cleanup-before-4','cleanup-after-4']
+runs={};case_maps={};input_paths=set();photo_proofs=[]
+def read(path):
+ input_paths.add(path);return json.loads(path.read_text())
+def phase_sum(cases):
+ values=defaultdict(float)
+ for c in cases:
+  for name,p in c['phases'].items():values[name]+=p['duration_seconds']
+ return {**values,'total':sum(values.values())}
+for name in run_names:
+ directory=base/name;m=read(directory/'manifest.json');cases=read(directory/'cases.json');resource=read(directory/'resource.json');case_maps[name]={c['nodeid']:c for c in cases}
+ assert len(case_maps[name])==len(cases)==m['primary_count']==m['complete_primary_count']
+ run={'source':m['source'],'jobs':m['jobs'],'root_shards':m['root_shards'],'tasks':m['task_count'],'task_outcomes':m['task_outcomes'],'exit_code':m['exit_code'],'primary_count':len(cases),'primary_outcomes':m['primary_outcomes'],'all_progress_finished':m['all_progress_finished'],'timing':m['timing'],'resource':{'collector_monotonic_wall_seconds':resource['collector_monotonic_wall_seconds'],'children_user_seconds':resource['children_delta']['ru_utime'],'children_system_seconds':resource['children_delta']['ru_stime'],'raw_inblock':resource['children_delta']['ru_inblock'],'raw_oublock':resource['children_delta']['ru_oublock'],'largest_child_maxrss_kib':resource['children_peak_maxrss_kib'],'collector_self_cpu_seconds':resource['collector_self_delta'],'scan_wall_seconds':resource['browser_observation']['scan_wall_seconds'],'argv_classified_unique_pid_start_ticks':resource['browser_observation']['observed_browser_roots_count']},'manifest':f'{name}/manifest.json'}
+ if name.startswith('cleanup'):
+  run['osmo_producers']=m['osmo_producers'];read(directory/'producer-proof.json')
+  if (directory/'consumers.json').exists():read(directory/'consumers.json')
+ else:
+  command_file=directory/'client-commands.jsonl';input_paths.add(command_file);commands=[json.loads(x) for x in command_file.read_text().splitlines()]
+  run['client_command_records']={'count':len(commands),'by_operation':dict(Counter(c['operation'] for c in commands)),'exit_codes':dict(Counter(str(c['record']['exit_code']) for c in commands)),'scope':'已保存真实Node命令record；超时可能没有record，不据失败档record数声称所有启动尝试。'}
+  attempts=[]
+  if (directory/'worlds.json').exists():
+   worlds=read(directory/'worlds.json');run['world_sessions']=m['world_sessions'];run['world_integrity']=m['integrity']
+   for w in worlds:
+    py=read(directory/w['archive']/'client-session-python.json')
+    for command in py['commands']:
+     if command['operation'] not in ['browser-photo-export','application-photo-export']:continue
+     exports=w['photo_exports'];archive=directory/exports[0]['receipt'] if exports else None
+     attempts.append({'nodeid':w['nodeid'],'canonical_root':w['canonical_root'],'operation':command['operation'],'recorded_outcome':command['outcome'],'source_receipt':command['receipt_path'],'existing_archive_receipt':archive})
+  if name=='hb-before-4':
+   for c in commands:
+    if c['operation']=='browser-photo-export':attempts.append({'nodeid':None,'canonical_root':str(Path(c['record']['argv'][-1]).parent.resolve()),'operation':c['operation'],'recorded_exit_code':c['record']['exit_code'],'source_receipt':c['record']['argv'][-1]})
+  else:
+   rawroot=Path(m['run_root'])
+   for inp in sorted({p.resolve() for p in rawroot.glob('tasks/*/tmp/pytest/**/browser-input.json')}):
+    attempts.append({'nodeid':None,'canonical_root':str(inp.parent),'operation':'browser-photo-export','source_receipt':str(inp.parent/'browser-receipt.json')})
+  seen=set();local=[]
+  for index,a in enumerate(attempts,1):
+   key=(a['nodeid'],a['canonical_root']);assert key not in seen;seen.add(key)
+   archived=a.pop('existing_archive_receipt',None);source=archived or Path(a['source_receipt']);a.update(run=name,receipt_present=source.is_file())
+   if source.is_file():
+    receipt=json.loads(source.read_text());mode='application' if a['operation']=='application-photo-export' else 'browser'
+    assert receipt['request_id'] and receipt['request_text'] and receipt['capabilities_sha256']
+    if 'export_mode' in receipt:assert receipt['export_mode']==mode
+    if archived is None:
+     archived=base/'photo-receipts'/name/f'{index:03d}.json';archived.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,archived)
+    a.update(export_mode=mode,receipt=str(archived.relative_to(base)),sha256=hashlib.sha256(archived.read_bytes()).hexdigest(),request_id=receipt['request_id'],capabilities_sha256=receipt['capabilities_sha256'],has_preset_ui_fields=any(k.startswith('preset_') or 'reopened' in k for k in receipt))
+    input_paths.add(archived)
+   local.append(a);photo_proofs.append(a)
+  run['photo_exports']={'attempts_with_real_input_or_session_command':len(local),'receipts':dict(Counter(a['export_mode'] for a in local if a['receipt_present'])),'missing_receipts':sum(not a['receipt_present'] for a in local),'proof':'photo-export-proofs.json'}
+ runs[name]=run
+assert set(case_maps['hb-before-4'])==set(case_maps['hb-after-4'])==set(case_maps['hb-after-6'])==set(case_maps['hb-after-8'])
+assert set(case_maps['cleanup-before-4'])==set(case_maps['cleanup-after-4'])
+cohort={node for node,c in case_maps['hb-before-4'].items() if c['outcome']=='passed' and 'call' in c['phases'] and 'teardown' in c['phases']};assert len(cohort)==28
+cohorts={}
+for name in ['hb-before-4','hb-after-4','hb-after-6','hb-after-8']:
+ selected=[case_maps[name][node] for node in sorted(cohort)];cohorts[name]={'count':len(selected),'outcomes':dict(Counter(c['outcome'] for c in selected)),'phase_seconds':phase_sum(selected),'all_passed':all(c['outcome']=='passed' for c in selected)}
+all_ids=set(case_maps['hb-before-4'])|set(case_maps['cleanup-before-4']);assert len(all_ids)==40
+columns=['scope','nodeid']+[f'{stage}_{field}' for stage in ['before','after4','after6','after8'] for field in ['outcome','setup_seconds','call_seconds','teardown_seconds','total_seconds']]
+with (base/'case-times.csv').open('w',newline='') as h:
+ writer=csv.DictWriter(h,fieldnames=columns);writer.writeheader()
+ for node in sorted(all_ids):
+  scope='hb' if node in case_maps['hb-before-4'] else 'cleanup';row={'scope':scope,'nodeid':node}
+  for stage,name in [('before',f'{scope}-before-4'),('after4',f'{scope}-after-4'),('after6','hb-after-6'),('after8','hb-after-8')]:
+   if scope=='cleanup' and stage in ['after6','after8']:continue
+   c=case_maps[name][node];row[f'{stage}_outcome']=c['outcome'];row[f'{stage}_total_seconds']=c['duration_seconds']
+   for p in ['setup','call','teardown']:row[f'{stage}_{p}_seconds']=c['phases'].get(p,{}).get('duration_seconds','')
+  writer.writerow(row)
+(base/'photo-export-proofs.json').write_text(json.dumps(photo_proofs,ensure_ascii=False,indent=2)+'\n')
+shutil.copy2('/tmp/camctl-itopt-round2-comparison.py',base/'comparison-source.txt')
+read(base/'environment.json')
+for path in [base/'case-times.csv',base/'photo-export-proofs.json',base/'comparison-source.txt']:input_paths.add(path)
+comparison={'purpose':'相同冻结最终源码的顺序资源与完成性比较；原始失败保持，派生数据不覆盖原回执。','runs':runs,'hb_before_complete_pass_cohort':{'definition':'集合仅从hb-before-4/cases.json中完整passed实例派生；各档按同一nodeid集合求阶段和，不另维护完整清单。','runs':cohorts,'before_vs_after4_phase_reduction_percent':(1-cohorts['hb-after-4']['phase_seconds']['total']/cohorts['hb-before-4']['phase_seconds']['total'])*100,'scope':'仅同28完整通过身份的累计阶段单次对照；不是整轮wall、CPU或各单项优化的独立百分比。6/8该集合存在失败，不计算它们的等价通过提速。'},'cleanup_complete11_comparison':{'same_primary_nodeids':True,'before_producer_runs':runs['cleanup-before-4']['osmo_producers']['actual_runs'],'after_producer_runs':runs['cleanup-after-4']['osmo_producers']['actual_runs'],'after_consumer_count':runs['cleanup-after-4']['osmo_producers']['consumer_count'],'runner_wall_reduction_percent':(1-runs['cleanup-after-4']['timing']['runner_wall_seconds']/runs['cleanup-before-4']['timing']['runner_wall_seconds'])*100,'phase_sum_reduction_percent':(1-runs['cleanup-after-4']['timing']['pytest_phase_sum_seconds']/runs['cleanup-before-4']['timing']['pytest_phase_sum_seconds'])*100},'recommended_jobs':4,'recommendation_scope':'本次同最终源码4/6/8各一次，只有4路29/29通过，且wall最短；保留默认4，不据失败档推荐更高并发，也不声称稳定最优硬件档。','integrity':{'case_times_unique_nodeids':40,'hb_same29_nodeids':True,'cleanup_same11_nodeids':True,'all_after_same_source_snapshot':len({runs[n]['source']['snapshot_sha256'] for n in ['hb-after-4','hb-after-6','hb-after-8','cleanup-after-4']})==1,'all_run_progress_finished':all(r['all_progress_finished'] for r in runs.values()),'all_results_complete':True},'interpretation':['HB before的正常jpeg-device-0.000333在浏览器输入阶段失败，未执行capture；本轮before28pass1fail，after4全29pass。总wall只作事实列示，不将非等量完成的整轮差称等价吞吐收益。','S5生命周期与S6网页前缀分区一起进入最终源；只报告组合实测及真实计数，不分拆声称各自性能百分比。','每档默认root-shards随jobs一起变；client build、安装session和准备成本与并发影响未分离。更慢或失败不能笼统解释为CPU/磁盘饱和。','task墙钟、pytest阶段和CPU分别保存。阶段包含共享fixture及真实等待；清理准备从call移入setup，逐行setup/call差不能直接解释为操作收益。case-times.csv的cleanup after6/8留空表示未运行。','CPU是RUSAGE_CHILDREN回收传播的user/sys累计值；raw inblock/oublock是内核操作计数，不是字节/吞吐量。ru_maxrss为最大单进程峰值KiB，不是并发树内存；元数据git在before快照前执行，差值排除它，raw lifetime maxrss仍保留此前值。','argv采样仅是满足过滤条件的唯一PID/start_ticks观察，可能漏采/误分类（包括未核验fork/exec过渡），不是browser launch/session精确数或下界；优化计数以显式world recorder为权威。','world启动计数仅18 PhotoWorld，独立one-shot另列；失败档subprocess超时可能无command record，不能将record数当所有启动次数。8路16world正常closed、2world按Python timeout清理且survivors[]，Node末次ready/failed记录不改写为closed。','uv/node依赖输入相同、每轮私有pycache新建，但未重置操作系统页缓存；构建准备时长波动不能全部归因于测试改动。','每轮仅一次，无额外重负载benchmark并行；实际观察开销为采集器self CPU及scan wall，归档/静态读取仍可能有小量同期负载，不作目标硬件或稳定比例结论。'],'derived_inputs':[{'path':str(p.relative_to(base)),'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'bytes':p.stat().st_size} for p in sorted(input_paths)]}
+(base/'comparison.json').write_text(json.dumps(comparison,ensure_ascii=False,indent=2)+'\n')
+assert comparison['integrity']['all_after_same_source_snapshot']
+for row in comparison['derived_inputs']:assert hashlib.sha256((base/row['path']).read_bytes()).hexdigest()==row['sha256']
+with (base/'case-times.csv').open() as h:table=list(csv.DictReader(h));assert len(table)==len({r['nodeid'] for r in table})==40
+print(json.dumps({'hb28_phase_reduction_percent':comparison['hb_before_complete_pass_cohort']['before_vs_after4_phase_reduction_percent'],'cleanup':comparison['cleanup_complete11_comparison'],'photo_receipts':{n:runs[n]['photo_exports'] for n in run_names if n.startswith('hb')},'case_rows':len(table),'inputs':len(comparison['derived_inputs']),'recommendation':comparison['recommended_jobs']},ensure_ascii=False))
