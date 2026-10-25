@@ -1,0 +1,12 @@
+....                                                                     [100%]
+============================== slowest durations ===============================
+209.21s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]
+78.99s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]
+77.79s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]
+50.42s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]
+23.07s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]
+3.04s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]
+0.01s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]
+
+(5 durations < 0.005s hidden.  Use -vv to show these durations.)
+4 passed in 443.00s (0:07:22)

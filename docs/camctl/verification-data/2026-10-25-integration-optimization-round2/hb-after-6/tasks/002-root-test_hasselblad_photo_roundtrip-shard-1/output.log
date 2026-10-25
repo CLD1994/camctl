@@ -1,0 +1,153 @@
+.F...                                                                    [100%]
+=================================== FAILURES ===================================
+___ test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333] ___
+
+tmp_path = PosixPath('/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7fe0cb2b3450>
+shutter = '0.000333'
+
+    @pytest.mark.parametrize("shutter", ("0.000667", "0.000333", "0.00025"))
+    def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
+        tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str,
+    ):
+        package = installed_camctl
+        store = tmp_path / "client-store"
+        store.mkdir()
+        description = package.cli("describe", "--config", str(package.config_path)).stdout
+        (store / "device-capabilities.json").write_text(description)
+        params_text = (
+            '{"type":"hasselblad_photo","capture_format":"jpeg",'
+            '"exposure":{"mode":"M","iso":100,"aperture":8,"shutter_s":' + shutter + '},'
+            '"white_balance":{"mode":"manual","temperature_k":5500},'
+            '"focus":{"mode":"MF","relative_move":5}}'
+        )
+        input_path = tmp_path / "browser-input.json"
+        refresh_schedule = shutter == "0.000333"
+        before_browser = datetime.now(timezone.utc).replace(microsecond=0)
+        scheduled_at = (before_browser + timedelta(minutes=-2 if refresh_schedule else 5)).strftime("%Y-%m-%d %H:%M:%S")
+        input_path.write_text(json.dumps({
+            "device_id": "hb-host", "action_type": "camera_take_photo",
+            "action_name": "capture", "case_name": f"网页精确快门-{shutter}",
+            "params_text": params_text,
+            "scheduled_at": scheduled_at,
+            "refresh_scheduled_at": refresh_schedule,
+        }, ensure_ascii=False))
+        plan = tmp_path / "downloaded-plan.json"
+>       receipt = _client(package, "browser-photo-export", str(store), str(input_path), str(plan),
+                          output=tmp_path / "browser-receipt.json")
+
+tests/integration/test_hasselblad_photo_roundtrip.py:88: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_hasselblad_photo_roundtrip.py:41: in _client
+    completed = package.run([
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7fe0cb2b3450>
+command = ['node', '--import', 'tsx', PosixPath('/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundt...6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1/client-store', ...]
+cwd = PosixPath('/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/apps/client')
+timeout = 180
+
+    def run(self, command, *, cwd: Path | None = None, timeout: int = 180):
+        argv = [str(part) for part in command]
+        working_directory = cwd or self.root
+        started = datetime.now(timezone.utc).isoformat()
+        completed = subprocess.run(
+            argv,
+            cwd=working_directory,
+            env=self.environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        log_directory = self.root / "commands"
+        log_directory.mkdir(exist_ok=True)
+        log_path = log_directory / f"{len(list(log_directory.glob('*.json'))) + 1:03}.json"
+        log_path.write_text(json.dumps({
+            "argv": argv,
+            "cwd": str(working_directory),
+            "python": sys.version,
+            "node": subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip(),
+            "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip(),
+            "started_utc": started,
+            "finished_utc": datetime.now(timezone.utc).isoformat(),
+            "exit_code": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+>       assert completed.returncode == 0, (
+            f"安装版命令失败，详情见 {log_path}: {argv!r}\n"
+            f"{completed.stdout}\n{completed.stderr}"
+        )
+E       AssertionError: 安装版命令失败，详情见 /tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/hasselblad-photo-installed0/commands/011.json: ['node', '--import', 'tsx', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/tests/integration/client_driver.ts', 'browser-photo-export', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1/client-store', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1/browser-input.json', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1/downloaded-plan.json', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_brow1/browser-receipt.json']
+E         
+E         ExpectError: expect(locator).toHaveText(expected) failed
+E         
+E         Locator:  getByTestId('save-status')
+E         Expected: "已保存"
+E         Received: "保存中…"
+E         Timeout:  5000ms
+E         
+E         Call log:
+E           - Expect "toHaveText" getByTestId('save-status') with timeout 5000ms
+E           - waiting for getByTestId('save-status')
+E             2 × locator resolved to <span role="status" data-testid="save-status">未保存，等待保存…</span>
+E               - unexpected value "未保存，等待保存…"
+E             - locator resolved to <span role="status" data-testid="save-status">保存中…</span>
+E             - unexpected value "保存中…"
+E         
+E             at captureRawStack (/tmp/camctl-itopt-round2-hb-after-6/workers/1/node_modules/playwright-core/lib/coreBundle.js:8588:17)
+E             at callMatcherAsStep (/tmp/camctl-itopt-round2-hb-after-6/workers/1/node_modules/playwright/lib/matchers/expect.js:13310:57)
+E             at Object.toHaveText (/tmp/camctl-itopt-round2-hb-after-6/workers/1/node_modules/playwright/lib/matchers/expect.js:13302:23)
+E             at settled (/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/tests/integration/client_driver.ts:905:60)
+E             at browserPhotoExport (/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/tests/integration/client_driver.ts:1019:17)
+E             at async main (/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/tests/integration/client_driver.ts:1279:7) {
+E           matcherResult: {
+E             name: 'toHaveText',
+E             expected: '已保存',
+E             message: 'expect(locator).toHaveText(expected) failed\n' +
+E               '\n' +
+E               "Locator:  getByTestId('save-status')\n" +
+E               'Expected: "已保存"\n' +
+E               'Received: "保存中…"\n' +
+E               'Timeout:  5000ms\n' +
+E               '\n' +
+E               'Call log:\n' +
+E               `  - Expect "toHaveText" getByTestId('save-status') with timeout 5000ms\n` +
+E               "  - waiting for getByTestId('save-status')\n" +
+E               '    2 × locator resolved to <span role="status" data-testid="save-status">未保存，等待保存…</span>\n' +
+E               '      - unexpected value "未保存，等待保存…"\n' +
+E               '    - locator resolved to <span role="status" data-testid="save-status">保存中…</span>\n' +
+E               '    - unexpected value "保存中…"\n',
+E             pass: false,
+E             actual: '保存中…',
+E             log: [
+E               `  - Expect "toHaveText" getByTestId('save-status') with timeout 5000ms`,
+E               "  - waiting for getByTestId('save-status')",
+E               '    2 × locator resolved to <span role="status" data-testid="save-status">未保存，等待保存…</span>',
+E               '      - unexpected value "未保存，等待保存…"',
+E               '    - locator resolved to <span role="status" data-testid="save-status">保存中…</span>',
+E               '    - unexpected value "保存中…"'
+E             ],
+E             timeout: 5000,
+E             ariaSnapshot: '- status: 保存中…'
+E           }
+E         }
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['node', '--import', 'tsx', '/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_...\n      \'    - unexpected value "保存中…"\'\n    ],\n    timeout: 5000,\n    ariaSnapshot: \'- status: 保存中…\'\n  }\n}\n').returncode
+
+tests/integration/test_hasselblad_photo_parameters.py:149: AssertionError
+============================== slowest durations ===============================
+217.88s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]
+89.63s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+78.48s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]
+51.98s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]
+21.84s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]
+12.83s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays
+3.06s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]
+0.01s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]
+
+(7 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]
+1 failed, 4 passed in 476.33s (0:07:56)

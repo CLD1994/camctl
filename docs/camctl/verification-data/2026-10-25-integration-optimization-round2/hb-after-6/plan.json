@@ -1,0 +1,115 @@
+[
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-2",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.00025]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]"
+    ],
+    "estimated_seconds": 230.5493198510012,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 2,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-1",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[jpeg-host-0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays"
+    ],
+    "estimated_seconds": 219.9771203790151,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 1,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-4",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[False]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_saved_start_recovers_without_replay[raw-device-0.000333]"
+    ],
+    "estimated_seconds": 214.7477687160026,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 4,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-5",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_files_upload_preserves_arrival_order[True]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]"
+    ],
+    "estimated_seconds": 214.44758910999735,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 5,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-6",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]"
+    ],
+    "estimated_seconds": 210.2160603869961,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 6,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip/shard-3",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes"
+    ],
+    "estimated_seconds": 209.20778779200535,
+    "historical_failure_observed": false,
+    "parent_id": "root/test_hasselblad_photo_roundtrip",
+    "shard": 3,
+    "shards": 6,
+    "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+    "collected_nodes": 29
+  }
+]

@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "session_id": "9a281231-0627-44d1-a4e0-8af927180fe6",
+  "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/client-candidate/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 180.0,
+  "startup": {
+    "started_monotonic_ns": 47632056255297,
+    "finished_monotonic_ns": 47633255021898,
+    "elapsed_seconds": 1.198766601,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "application-photo-export",
+      "arguments": [
+        "/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-input.json",
+        "/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-request.json"
+      ],
+      "receipt_path": "/tmp/camctl-itopt-round2-hb-after-6/tasks/002-root-test_hasselblad_photo_roundtrip-shard-1/tmp/pytest/test_installed_hasselblad_miss0/photo-application.json",
+      "started_monotonic_ns": 47633255839845,
+      "finished_monotonic_ns": 47634936771206,
+      "elapsed_seconds": 1.680931361,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 47643644611291,
+    "finished_monotonic_ns": 47643747120556,
+    "elapsed_seconds": 0.102509265,
+    "outcome": "passed"
+  },
+  "node_pid": 751683,
+  "owned_processes": [
+    {
+      "pid": 751683,
+      "ppid": 724290,
+      "pgid": 751683,
+      "starttime": "4763205",
+      "state": "S"
+    },
+    {
+      "pid": 751756,
+      "ppid": 751683,
+      "pgid": 751756,
+      "starttime": "4763411",
+      "state": "S"
+    },
+    {
+      "pid": 751758,
+      "ppid": 751756,
+      "pgid": 751756,
+      "starttime": "4763413",
+      "state": "S"
+    },
+    {
+      "pid": 751759,
+      "ppid": 751756,
+      "pgid": 751756,
+      "starttime": "4763413",
+      "state": "S"
+    },
+    {
+      "pid": 751776,
+      "ppid": 751756,
+      "pgid": 751756,
+      "starttime": "4763416",
+      "state": "S"
+    },
+    {
+      "pid": 751808,
+      "ppid": 751759,
+      "pgid": 751756,
+      "starttime": "4763426",
+      "state": "S"
+    },
+    {
+      "pid": 751774,
+      "ppid": 751758,
+      "pgid": 751756,
+      "starttime": "4763415",
+      "state": "S"
+    }
+  ]
+}

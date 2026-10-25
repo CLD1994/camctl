@@ -1,0 +1,108 @@
+{
+  "id": "root/test_hasselblad_photo_roundtrip/shard-3",
+  "scope": "root",
+  "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+  "targets": [
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes"
+  ],
+  "estimated_seconds": 209.20778779200535,
+  "historical_failure_observed": false,
+  "parent_id": "root/test_hasselblad_photo_roundtrip",
+  "shard": 3,
+  "shards": 6,
+  "collection": "/tmp/camctl-itopt-round2-hb-after-6/collection/root-test_hasselblad_photo_roundtrip/artifacts",
+  "collected_nodes": 29,
+  "status": "passed",
+  "number": 6,
+  "worker": 5,
+  "artifacts": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/artifacts",
+  "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/source",
+  "started_utc": "2026-10-25T02:37:40.714748+00:00",
+  "command": [
+    "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-round2-hb-after-6/control:/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-round2-hb-after-6/workers/5/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-round2-hb-after-6/workers/5/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-round2-hb-after-6/workers/5/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/tmp",
+    "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/source",
+      "started_utc": "2026-10-25T02:37:56.778888+00:00",
+      "pid": 723349,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:37:56.925846+00:00",
+      "wall_seconds": 0.14692077400104608
+    },
+    {
+      "label": "hasselblad-client-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate/apps/client",
+      "started_utc": "2026-10-25T02:38:02.669424+00:00",
+      "pid": 723466,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T02:38:28.651392+00:00",
+      "wall_seconds": 25.558678000998043
+    }
+  ],
+  "preparation": "hasselblad-client-build",
+  "preparation_pid": 723466,
+  "client_candidate": "/tmp/camctl-itopt-round2-hb-after-6/tasks/006-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate",
+  "pid": 724286,
+  "execution_started_utc": "2026-10-25T02:38:28.654302+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 9,
+    "outcomes": {
+      "passed": 9
+    },
+    "subchecks": {},
+    "elapsed_seconds": 379.85681608100276,
+    "utc": "2026-10-25T02:44:53.323413+00:00",
+    "pid": 724286
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T02:44:53.683270+00:00",
+  "wall_seconds": 429.10746956500225
+}
