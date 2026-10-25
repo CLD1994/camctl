@@ -11,7 +11,7 @@ from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, C
                                   video_result_mode_for_declaration)
 from .action6_formats import product_rules_for_output
 from .commands import ACTION_APERTURE, ACTION_BITRATE, ACTION6_SESSION_SETUP, CameraModel
-from .contracts import CameraCall, CameraContract
+from .contracts import CAPTURE_PREPARATION_COMPLETED, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
 from .action6_results import list_action6_results
@@ -122,7 +122,7 @@ def action6_record_contract():
     tools = ShellFileTools()
     calls = frozenset({"calls"})
     evidence = EvidenceRegistry((*returned.values(), *foreground.values(), *ACTION6_RECORD_OBSERVATIONS,
-        *ACTION6_TIMELAPSE_OBSERVATIONS, *FILE_COMMAND_EVIDENCE,
+        *ACTION6_TIMELAPSE_OBSERVATIONS, *FILE_COMMAND_EVIDENCE, CAPTURE_PREPARATION_COMPLETED,
         EvidenceContract("adb_foreground_recovery", 1, "delete", frozenset()),
         EvidenceContract("dispatch_prevented", 1, "control", frozenset()),
         EvidenceContract("control_returned", 2, "control", calls),

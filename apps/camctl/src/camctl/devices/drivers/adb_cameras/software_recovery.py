@@ -70,6 +70,7 @@ class SoftwareRecoveryDriver:
 
     async def recovery_reboot(self, binding, *, timeout_s):
         serial = self.recovery_serial(binding)
+        self._clear_prepared_capture(binding)
         raw = await self._recovery_raw(binding, ("adb", "-s", serial, "reboot"), timeout_s)
         return raw_document(raw)
 
@@ -78,6 +79,7 @@ class SoftwareRecoveryDriver:
         began = self.monotonic_ns()
         records = []
         # 新启动代次不得使用旧会话设置缓存；这里只执行准备，绝不 START。
+        self._clear_prepared_capture(binding)
         self._configured_settings = {key for key in self._configured_settings if key[0] != binding}
         request = ControlRequest("start_recording", binding, params,
             ticket=SimpleNamespace(operation="control", target_id=str(activity_id)), timeout_s=timeout_s)

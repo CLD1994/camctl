@@ -8,7 +8,7 @@ from typing import Awaitable, Callable, Mapping, Any
 
 from camctl.devices.adb_transport import DeviceCommand
 from camctl.devices.drivers.registry import DriverStatus
-from camctl.devices.evidence import EvidenceError, EvidenceRegistry
+from camctl.devices.evidence import EvidenceContract, EvidenceError, EvidenceRegistry
 from camctl.devices.ports import ControlRequest, DriverDeclaration, DeviceCallResult
 from camctl.devices.tasks import (CaptureStorage, CaptureTask, CaptureTaskFactory,
                                   CompletionMode, EndControl, StartReturn)
@@ -31,6 +31,11 @@ class CameraCall(StrEnum):
 CommandFactory = Callable[[ControlRequest, str, tuple[str, ...] | None, int | None], DeviceCommand]
 
 
+CAPTURE_PREPARATION_COMPLETED = EvidenceContract(
+    "capture_preparation_completed", 1, "control", frozenset({"activity_id"}),
+    identity_field="activity_id")
+
+
 @dataclass(frozen=True)
 class CameraContract:
     driver_id: CameraModel
@@ -49,6 +54,7 @@ class CameraContract:
     session_once_commands: frozenset[Command] = frozenset()
     non_blocking_setting_commands: frozenset[tuple[str, Command]] = frozenset()
     setting_call_history_operations: frozenset[str] = frozenset()
+    default_prepare_lead_s: Decimal = Decimal("10")
 
     @staticmethod
     def source_storage_resolver(_declaration: Mapping[str, object]) -> CaptureStorage:
@@ -56,6 +62,10 @@ class CameraContract:
         return CaptureStorage.DEVICE
 
     def __post_init__(self):
+        if (not isinstance(self.default_prepare_lead_s, Decimal)
+                or not self.default_prepare_lead_s.is_finite()
+                or self.default_prepare_lead_s < 0):
+            raise ValueError("相机默认准备提前量必须是有限非负秒数")
         if not set(self.session_setup_commands) <= self.session_once_commands:
             raise ValueError("会话首次准备命令必须同时声明为会话内固定设置")
         if (not isinstance(self.non_blocking_setting_commands, frozenset)
@@ -111,6 +121,11 @@ class CameraContract:
         return DriverDeclaration(
             control_supported=(all(callable(self.commands.get(kind)) for kind in (CameraCall.SETTING, CameraCall.START))
                                and self._has_evidence("dispatch_prevented", 1, "control")),
+            capture_preparation_supported=(callable(self.commands.get(CameraCall.SETTING))
+                and self._has_evidence("dispatch_prevented", 1, "control")
+                and self._has_evidence_shape(CAPTURE_PREPARATION_COMPLETED.type,
+                    CAPTURE_PREPARATION_COMPLETED.version, "control",
+                    CAPTURE_PREPARATION_COMPLETED.fields, "activity_id")),
             stop_supported=callable(self.commands.get(CameraCall.STOP)),
             query_supported=callable(self.commands.get(CameraCall.QUERY)),
             file_query_supported=file_query_supported,

@@ -11,7 +11,7 @@ from camctl.devices.tasks import (CancelCompletionPolicy, CaptureResultPolicy, C
                                   video_result_mode_for_declaration)
 from .action6_record import _digest_timeout
 from .commands import CameraModel, OSMO_RECORD_FORMAT, OSMO_SESSION_SETUP
-from .contracts import CameraCall, CameraContract
+from .contracts import CAPTURE_PREPARATION_COMPLETED, CameraCall, CameraContract
 from .filesystem import ShellFileTools
 from .file_commands import FILE_COMMAND_EVIDENCE, file_command_factory
 from .osmo360ii_responses import OSMO360II_OBSERVATIONS, Osmo360IIDjiInterpreter, Osmo360IISimulationInterpreter
@@ -111,7 +111,7 @@ def osmo360ii_contract():
                     frozenset({"terminate_grace_s"})) for operation in ("control", "stop", "result", "read")}
     tools = ShellFileTools()
     evidence = EvidenceRegistry((*returned.values(), *foreground.values(), *OSMO360II_OBSERVATIONS,
-        *FILE_COMMAND_EVIDENCE,
+        *FILE_COMMAND_EVIDENCE, CAPTURE_PREPARATION_COMPLETED,
         EvidenceContract("adb_foreground_recovery", 1, "delete", frozenset()),
         EvidenceContract("dispatch_prevented", 1, "control", frozenset()), RESULT_PAGE_CONTRACT,
         EvidenceContract("result_returned", 1, "result", frozenset({"file_completion",

@@ -2,7 +2,8 @@
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import replace
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from decimal import Decimal
 import shlex
 from types import SimpleNamespace
@@ -14,14 +15,14 @@ from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
 from camctl.logging_runtime.performance import measure_performance
-from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
+from camctl.operations.models import (AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue,
     EvidenceValue, Settlement, SettlementBasis)
 from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.operations.result_format import error_document, result_document
 from camctl.operations.validation import validate_outcome
 from camctl.operations.owned_calls import current_call_scope
 from .commands import settings_from_effective_params, start_for, stop_for
-from .contracts import CameraCall
+from .contracts import CAPTURE_PREPARATION_COMPLETED, CameraCall
 from .filesystem import AdbFilesystem
 from .transport import shell_argv
 from .software_recovery import SoftwareRecoveryDriver
@@ -45,6 +46,28 @@ class _RawOutcomeCapture:
         return raw
 
 
+@dataclass(frozen=True)
+class _PreparedCapture:
+    binding: DeviceBinding
+    serial: str
+    operation: str
+    params: Mapping
+    ticket: AttemptTicket
+
+
+def _same_parameters(original, current):
+    """逐值核对完整 JSON 参数，布尔值不与数值混同。"""
+    if isinstance(original, Mapping) and isinstance(current, Mapping):
+        return (original.keys() == current.keys()
+                and all(_same_parameters(value, current[key]) for key, value in original.items()))
+    if isinstance(original, list) and isinstance(current, list):
+        return (len(original) == len(current)
+                and all(_same_parameters(left, right) for left, right in zip(original, current)))
+    if isinstance(original, bool) or isinstance(current, bool):
+        return type(original) is type(current) and original == current
+    return original == current
+
+
 class AdbCameraDriver(SoftwareRecoveryDriver):
     def __init__(self, contract, devices, transport, *, terminate_grace_s, monotonic_ns):
         self.contract = contract
@@ -55,11 +78,39 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         self.monotonic_ns = monotonic_ns
         self._configured_settings = set()
         self._recovery_devices = set()
+        self._prepared_captures: dict[str, _PreparedCapture] = {}
+
+    @property
+    def default_prepare_lead_s(self):
+        return self.contract.default_prepare_lead_s
 
     def begin_session(self):
         """新执行会话只清空内存记录，相机设置仍在拍摄准备时按需执行。"""
         self._configured_settings.clear()
         self._recovery_devices.clear()
+        self._prepared_captures.clear()
+
+    def _clear_prepared_capture(self, binding):
+        self._prepared_captures.pop(binding.device_id, None)
+
+    def _prepared_capture_matches(self, request, serial):
+        ready = self._prepared_captures.get(request.binding.device_id)
+        return (ready is not None and request.ticket is not None
+                and request.prepared_by is not None
+                and request.ticket.operation == "control"
+                and ready.binding == request.binding and ready.serial == serial
+                and ready.ticket == request.prepared_by
+                and ready.ticket.target_id == request.ticket.target_id
+                and ready.operation == request.operation
+                and _same_parameters(ready.params, request.params))
+
+    def prepared_capture_matches(self, request):
+        """只检查本会话内存与本地绑定，不查询或设置设备。"""
+        try:
+            serial = self._serial(request.binding)
+        except (DeviceConfigurationError, RuntimeError):
+            return False
+        return self._prepared_capture_matches(request, serial)
 
     def _serial(self, binding):
         self._check_recovery_access(binding)
@@ -152,20 +203,41 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         return DeviceCallResult.from_outcome(outcome)
 
     async def control(self, request):
+        return await self._capture_control(request, prepare_only=False)
+
+    async def prepare_capture(self, request):
+        """执行原设置组合；成功只保存内存凭据，不派发 START。"""
+        return await self._capture_control(request, prepare_only=True)
+
+    async def _capture_control(self, request, *, prepare_only):
         serial = self._request(request, "control")
-        if not self.declaration.control_supported:
+        if prepare_only and not self.declaration.capture_preparation_supported:
+            raise CapabilityNotDeclaredError("驱动未声明独立拍摄准备契约")
+        if not prepare_only and not self.declaration.control_supported:
             raise CapabilityNotDeclaredError("驱动未声明完整控制契约")
         if not callable(request.dispatch_check):
             raise ValueError("多步相机启动需要框架的派发资格检查")
         action_type = {"start_recording": "camera_record", "start_timelapse": "camera_timelapse"}.get(request.operation)
         if action_type is None:
             raise ValueError("没有该相机启动操作")
+        prepared = not prepare_only and request.prepared_by is not None
+        if prepared and not self._prepared_capture_matches(request, serial):
+            raise ValueError("实际启动缺少与原设备、活动、参数及准备尝试匹配的会话凭据")
+        if prepare_only and request.prepared_by is not None:
+            raise ValueError("独立设置准备不能携带已有准备凭据")
         began_ns = self.monotonic_ns()
-        settings = settings_from_effective_params(self.contract.driver_id, action_type, request.params)
-        commands = (*((CameraCall.SETTING, command)
-                      for command in (*self.contract.session_setup_commands, *settings)),
-                    (CameraCall.START, start_for(self.contract.driver_id, action_type)))
+        params = deepcopy(dict(request.params)) if prepare_only else None
+        if prepared:
+            commands = ((CameraCall.START, start_for(self.contract.driver_id, action_type)),)
+        else:
+            settings = settings_from_effective_params(self.contract.driver_id, action_type, request.params)
+            self._clear_prepared_capture(request.binding)
+            commands = tuple((CameraCall.SETTING, command)
+                for command in (*self.contract.session_setup_commands, *settings))
+            if not prepare_only:
+                commands += ((CameraCall.START, start_for(self.contract.driver_id, action_type)),)
         previous = None
+        preparation_basis = None
         attached_calls = []
         for kind, command in commands:
             session_key = (request.binding, serial, command)
@@ -220,6 +292,8 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 return self._with_attached_calls(request, failed, attached_calls)
             if once:
                 self._configured_settings.add(session_key)
+            if prepare_only:
+                preparation_basis = outcome
             scope = current_call_scope()
             if scope is not None and scope.interrupted is not None:
                 # 当前设置实际已返回，但原等待取消后不派发下一设置或 START。
@@ -228,7 +302,22 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                     observations=() if attached_calls else outcome.observations,
                     call_info=None if attached_calls else outcome.call_info)
                 return self._with_attached_calls(request, failed, attached_calls)
-        raise AssertionError("相机启动组合没有实际启动步骤")
+        if not prepare_only or previous is None or preparation_basis is None:
+            raise AssertionError("相机调用组合缺少实际设置或启动步骤")
+        reason = request.dispatch_check()
+        if reason is not None:
+            return self._prevented(request, reason, previous, attached_calls)
+        if request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000) <= 0:
+            return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
+        # 组合完成由全部必需设置的可靠结果承载。非阻断调用的原失败
+        # 保留在附属历史中，不把它的未派发依据改写为成功调用。
+        completed = replace(preparation_basis, observations=(DeviceObservation(
+            CAPTURE_PREPARATION_COMPLETED.type, CAPTURE_PREPARATION_COMPLETED.version,
+            {"activity_id": request.ticket.target_id}),))
+        result = self._with_attached_calls(request, completed, attached_calls)
+        self._prepared_captures[request.binding.device_id] = _PreparedCapture(
+            request.binding, serial, request.operation, params, request.ticket)
+        return result
 
     async def stop(self, request):
         serial = self._request(request, "stop")

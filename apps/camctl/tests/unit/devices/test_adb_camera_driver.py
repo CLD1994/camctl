@@ -13,7 +13,9 @@ from camctl.devices.drivers.adb_cameras import commands as camera_commands
 from camctl.devices.drivers.adb_cameras import timelapse_parameters
 from camctl.devices.drivers.adb_cameras.commands import CameraModel, settings_for, start_for
 from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
-from camctl.devices.drivers.adb_cameras.contracts import CameraCall, CameraContract
+from camctl.devices.drivers.adb_cameras.contracts import (
+    CAPTURE_PREPARATION_COMPLETED, CameraCall, CameraContract,
+)
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.drivers.adb_cameras.filesystem import ShellFileTools
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
@@ -28,7 +30,8 @@ ASSUMED = EvidenceContract("adb_foreground_recovery", 1, "control", frozenset({"
 SETTING = EvidenceContract("setting_applied", 1, "control", frozenset({"activity_id"}), identity_field="activity_id")
 STARTED = EvidenceContract("start_confirmed", 1, "control", frozenset({"activity_id"}), identity_field="activity_id")
 PREVENTED = EvidenceContract("dispatch_prevented", 1, "control", frozenset())
-EVIDENCE = EvidenceRegistry((RETURNED, ASSUMED, SETTING, STARTED, PREVENTED))
+EVIDENCE = EvidenceRegistry((RETURNED, ASSUMED, SETTING, STARTED, PREVENTED,
+                             CAPTURE_PREPARATION_COMPLETED))
 
 
 ACTION6_AUTO_TIMELAPSE_SCRIPTS = (

@@ -57,6 +57,10 @@ class DriverEntry:
             raise ValueError("declaration 必须是 DriverDeclaration")
         if not isinstance(self.status, DriverStatus):
             raise ValueError("status 必须是 DriverStatus")
+        if self.declaration.capture_preparation_supported:
+            if (not callable(getattr(self.driver, "prepare_capture", None))
+                    or not callable(getattr(self.driver, "prepared_capture_matches", None))):
+                raise ValueError("拍摄准备能力已声明，但驱动缺少准备或凭据核对端口")
         if self.declaration.file_query_supported:
             if not callable(getattr(self.driver, "query_file", None)):
                 raise ValueError("文件查询能力已声明，但驱动未提供 query_file 端口")
@@ -92,6 +96,7 @@ class DriverRegistry:
 #: 普通操作及目录准备端口对应的声明；目录准备不建立普通尝试。
 _DECLARATION_MEMBERS: Mapping[str, str] = {
     "control": "control_supported",
+    "prepare_capture": "capture_preparation_supported",
     "stop": "stop_supported",
     "query": "query_supported",
     "file_query": "file_query_supported",

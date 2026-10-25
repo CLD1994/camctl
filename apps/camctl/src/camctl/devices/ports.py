@@ -35,6 +35,7 @@ __all__ = [
     "ControlRequest",
     "DeviceCallResult",
     "ControlDriver",
+    "CapturePreparationDriver",
     "StopDriver",
     "StateQueryDriver",
     "FileQueryDriver",
@@ -75,6 +76,8 @@ class DriverDeclaration:
     file_query_supported: bool = False
     #: 提供按固件验证门槛使能的操作系统重启及准备端口。
     os_reboot_recovery_supported: bool = False
+    #: 在独立控制尝试中只设置参数，不发送实际 START。
+    capture_preparation_supported: bool = False
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
@@ -112,6 +115,8 @@ class ControlRequest:
     result_candidates: Callable[[tuple[FileIdentity, ...]], tuple[FileIdentity, ...]] | None = None
     #: 当前扫描拥有者提供的目录读取入口，不保存在驱动全局状态。
     result_directory_reader: ResultDirectoryReader | None = None
+    #: 当前会话同一活动已完成设置的原准备尝试；仅用于实际 START。
+    prepared_by: AttemptTicket | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +161,20 @@ class ControlDriver(Protocol):
     declaration: DriverDeclaration
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
+        ...
+
+
+@runtime_checkable
+class CapturePreparationDriver(Protocol):
+    """独立设置准备及当前会话凭据核对端口。"""
+
+    declaration: DriverDeclaration
+    default_prepare_lead_s: Decimal
+
+    async def prepare_capture(self, request: ControlRequest) -> DeviceCallResult:
+        ...
+
+    def prepared_capture_matches(self, request: ControlRequest) -> bool:
         ...
 
 
