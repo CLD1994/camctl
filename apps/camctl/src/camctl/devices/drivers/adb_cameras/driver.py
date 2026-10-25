@@ -8,6 +8,7 @@ from decimal import Decimal
 import shlex
 from types import SimpleNamespace
 
+from camctl.contracts.json_values import json_equal
 from camctl.devices.adb_transport import invoke, ManagedTransport
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, BindingStatus, check_binding
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
@@ -55,19 +56,6 @@ class _PreparedCapture:
     ticket: AttemptTicket
 
 
-def _same_parameters(original, current):
-    """逐值核对完整 JSON 参数，布尔值不与数值混同。"""
-    if isinstance(original, Mapping) and isinstance(current, Mapping):
-        return (original.keys() == current.keys()
-                and all(_same_parameters(value, current[key]) for key, value in original.items()))
-    if isinstance(original, list) and isinstance(current, list):
-        return (len(original) == len(current)
-                and all(_same_parameters(left, right) for left, right in zip(original, current)))
-    if isinstance(original, bool) or isinstance(current, bool):
-        return type(original) is type(current) and original == current
-    return original == current
-
-
 class AdbCameraDriver(SoftwareRecoveryDriver):
     def __init__(self, contract, devices, transport, *, terminate_grace_s, monotonic_ns):
         self.contract = contract
@@ -102,7 +90,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 and ready.ticket == request.prepared_by
                 and ready.ticket.target_id == request.ticket.target_id
                 and ready.operation == request.operation
-                and _same_parameters(ready.params, request.params))
+                and json_equal(ready.params, request.params))
 
     def prepared_capture_matches(self, request):
         """只检查本会话内存与本地绑定，不查询或设置设备。"""
