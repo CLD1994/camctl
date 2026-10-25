@@ -42,6 +42,16 @@ outputs 的六个慢目标在当前环境共 336.659 秒。剖析显示主要时
 
 客户端默认访问 `http://localhost:4310`。主机入口读取同目录 `config.toml`；`environment.sh` 保存原手工部署使用的 Windows ADB 服务默认连接，调用方的环境变量可以覆盖它。host 交互终端使用计划文件的容器绝对路径执行 `submit`，使用 `claim` 领取完整文件，具体步骤保存在交付目录的 README 中。Windows 客户端使用该目录 `client/` 下的 ZIP，按包内说明安装并运行 `start.ps1`；当前运行检查在 Linux x86_64 完成。真实相机在线状态、重新拍摄、Windows 运行与目标 ARM64 验收分别保留证据边界。
 
+## 软件恢复启用配置与诊断修复的合并验证（2026-10-25）
+
+软件恢复配置使用 `devices.<id>.software_recovery.enabled`，默认关闭；驱动维护已验证的精确固件及原拍摄范围。当前记录覆盖 OSMO 360 II 构建 38390 的普通分段录像，真实固件仍在原恢复检查中读取并精确核对。原冻结责任继续使用原指纹、期限和预算。准备占用的报告事实修复同时包含在该版本中，实际行为由[配置简化设计](../superpowers/specs/2026-10-25-software-recovery-enablement-design.md)及下节诊断记录说明。
+
+完整验证源码为 `7f41a3c2d8cee27fe6593eae3766abb23130eb45`，Linux 开发容器、CPython 3.11.17、SQLite 3.53.1。命令为 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit -q`，UTC 2026-10-25 02:20:13 至 02:22:25，结果为 **7757 项通过、1 项跳过、2 条既有 asyncio 标记警告，129.93 秒，退出 0**。完整命令、源码、环境和退出码保存在 `.local/verification/recovery-enable-config-20261025/unit.json`，同目录 `unit.log` 保留全部输出。独立静态评审通过；直接使用旧接口的集成夹具已机械迁移，未导入或运行集成测试。
+
+人工环境已安装对应 wheel，SHA-256 为 `8581af414ae1b26aa57d28cd821c0b45e19ec9183ef3ca6a9b1f056a7cf810e2`。313 个生产 Python 文件和 27 项权威资源与源码、安装包逐项一致，依赖检查和实际配置下的静态能力导出退出 0。配置仅将 OSMO 软件恢复段的旧启用字段迁移为 `enabled = true`，原配置保留备份，其他值逐项一致；安装版配置加载与支持记录纯对象核对通过，不调用相机。
+
+安装前没有拍摄占用、在途尝试或 CLI `run`，保留 4 个待执行动作。安装前后 41 张业务表、元信息及原实例和目录绑定全部相同，数据库继续使用 V5。主机与客户端能力文件与安装版导出一致。安装、配置迁移及状态核对收据由 `.local/deployments/20261025-recovery-enable-config/delivery-manifest.json` 记录；没有运行真实拍摄或重启命令，人工验证继续由用户执行。
+
 ## 准备占用的报告事实切片修复（2026-10-25）
 
 人工验证的 host 诊断记录显示，计划 4 的 `run` 在准备占用保存阶段以 `state_db_error` 退出，原因为报告关联解析缺少 `device_activities` 事实。新准备活动的生产者只提供动作行，报告目标派生则在应用事件新行前读取事务前切片；缺少来源表声明使事务回滚。该计划没有保存准备活动或新设备调用，录像与延时动作均未派发 START。
