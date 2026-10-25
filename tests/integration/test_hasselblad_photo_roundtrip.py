@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
@@ -16,12 +17,14 @@ from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
+import sys
 
 import pytest
 
 from test_hasselblad_photo_parameters import InstalledCamctl, installed_camctl
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl_fixtures import Deployment
+from _client_session import ClientSession
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -367,6 +370,7 @@ class PhotoWorld:
         self.host = HostDemo(self.deployment, host_demo, str(self.launcher))
         self.request_ids = {}
         self.report_checks = {}
+        self.client_session = None
 
     def start(self):
         def fault_value(environment):
@@ -383,10 +387,37 @@ class PhotoWorld:
         self.host.start(env=self.package.environment)
 
     def close(self):
-        self.host.stop()
-        with sqlite3.connect(f"file:{self.deployment.state_db}?mode=ro", uri=True) as source:
-            with sqlite3.connect(self.root / "evidence-state.db") as target:
-                source.backup(target)
+        primary = sys.exception()
+        errors = []
+        try:
+            self.host.stop()
+        except BaseException as error:
+            errors.append(error)
+        if self.client_session is not None:
+            try:
+                self.client_session.close()
+            except BaseException as error:
+                errors.append(error)
+        try:
+            with closing(sqlite3.connect(f"file:{self.deployment.state_db}?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(self.root / "evidence-state.db")) as target:
+                    source.backup(target)
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("Hasselblad world操作或收场失败", ([primary] if primary else []) + errors)
+
+    def client(self, command: str, *arguments: str, output: Path):
+        if self.client_session is None:
+            client_root = Path(os.environ["CAMCTL_HB_TEST_CLIENT_ROOT"]).resolve()
+            assert client_root != REPO and REPO not in client_root.parents
+            driver = client_root / "tests/integration/client_driver.ts"
+            shutil.copy2(REPO / "tests/integration/client_driver.ts", driver)
+            self.client_session = ClientSession(
+                ["node", "--import", "tsx", str(driver)],
+                cwd=client_root / "apps/client", env=self.package.environment, root=self.root,
+            )
+        return self.client_session.call(command, *arguments, output=output)
 
     def argv(self):
         return [json.loads(line) for line in self.argv_log.read_text().splitlines()]
@@ -400,8 +431,8 @@ class PhotoWorld:
             "refresh_scheduled_at": True,
         }))
         plan = self.root / "photo-request.json"
-        self.browser = _client(self.package, "browser-photo-export", str(self.store), str(input_path), str(plan),
-                               output=self.root / "photo-browser.json")
+        self.browser = self.client("browser-photo-export", str(input_path), str(plan),
+                                   output=self.root / "photo-browser.json")
         self.photo_plan = plan
         self._remember_request("capture", self.browser)
         return plan
@@ -410,8 +441,8 @@ class PhotoWorld:
         body = self.root / f"{name}-body.json"
         body.write_text(json.dumps({"name": name, "actions": [{"name": name, **action}]}))
         target = self.root / f"{name}-request.json"
-        receipt = _client(self.package, "browser-plan-export", str(self.store), str(body), str(target),
-                          output=self.root / f"{name}-browser.json")
+        receipt = self.client("browser-plan-export", str(body), str(target),
+                              output=self.root / f"{name}-browser.json")
         self._remember_request(name, receipt)
         return target, receipt
 
@@ -466,8 +497,7 @@ class PhotoWorld:
         manifest.write_text(json.dumps([{
             "path": str(path), "kind": "report" if path.name.startswith("status-report-") else "media",
         } for path in paths]))
-        return _client(self.package, "upload-files", str(self.store), str(manifest),
-                       output=self.root / f"{label}-receipt.json")
+        return self.client("upload-files", str(manifest), output=self.root / f"{label}-receipt.json")
 
     def observe_history(self, label, previous=None):
         extension = ".3fr" if self.case.capture_format == "raw" else ".jpg"

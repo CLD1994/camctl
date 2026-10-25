@@ -11,6 +11,7 @@
 //   client_driver.ts browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径>
 //   client_driver.ts browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径>
 //   client_driver.ts upload-files <存储目录> <文件清单路径> <凭据路径>
+//   client_driver.ts session <存储目录> <127.0.0.1> <端口> <会话身份> <计时路径>
 //
 // 导出走客户端的 createDraft/exportDraft/downloadRequest 真实路径：
 // 按能力校验计划正文、分配随机整数请求身份；下载正文在客户端已保
@@ -26,15 +27,18 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { randomUUID, createHash } from "node:crypto";
+import { createConnection } from "node:net";
+import { createInterface } from "node:readline";
 import { Application } from "../../apps/client/src/server/application";
 import { parseReport } from "../../apps/client/src/domain/reports";
 import {
@@ -65,8 +69,15 @@ const [command, ...rest] = process.argv.slice(2);
 function openApp(storeDir: string) {
   mkdirSync(storeDir, { recursive: true });
   const app = new Application(storeDir);
-  app.store.initialize();
-  return app;
+  try {
+    app.store.initialize();
+    return app;
+  } catch (error) {
+    try { app.store.close(); } catch (closing) {
+      throw new AggregateError([error, closing], "客户端初始化与收场均失败");
+    }
+    throw error;
+  }
 }
 
 function initializeClient(storeDir: string, receiptPath: string) {
@@ -538,6 +549,7 @@ async function uploadFiles(
   storeDir: string,
   manifestPath: string,
   receiptPath: string,
+  existing?: BrowserStore,
 ) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Array<{
     path: string;
@@ -553,10 +565,10 @@ async function uploadFiles(
     )
   )
     throw new Error("上传清单必须明确列出 report/media 文件");
-  const app = openApp(storeDir),
-    files = new Files(app);
+  const app = existing?.app ?? openApp(storeDir),
+    files = existing?.files ?? new Files(app);
   try {
-    await files.recover();
+    if (!existing) await files.recover();
     await files.idle();
     for (const item of manifest) {
       const info = await stat(item.path);
@@ -581,12 +593,54 @@ async function uploadFiles(
     );
   } finally {
     await files.idle();
-    app.store.close();
+    if (!existing) app.store.close();
+  }
+}
+
+function errorRecord(error: unknown): Record<string, any> {
+  if (!(error instanceof Error)) return { message: String(error) };
+  return { message: error.message, stack: error.stack,
+    ...(error instanceof AggregateError ? { causes: error.errors.map(errorRecord) } : {}) };
+}
+
+class SessionRecorder {
+  readonly data: Record<string, any>;
+
+  constructor(readonly id: string, readonly path: string) {
+    this.data = {
+      schema_version: 1,
+      session_id: id,
+      node_pid: process.pid,
+      counts: { node_process_starts: 1, application_starts: 0, files_starts: 0,
+        http_server_starts: 0, browser_starts: 0 },
+      browser_processes: [],
+      commands: [],
+      node_cpu_scope: "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+    };
+    this.save();
+  }
+
+  save() {
+    writeFileSync(`${this.path}.next`, JSON.stringify(this.data, null, 2) + "\n");
+    renameSync(`${this.path}.next`, this.path);
+  }
+
+  opened(kind: "application_starts" | "files_starts" | "http_server_starts" | "browser_starts") {
+    this.data.counts[kind]++;
+    this.save();
+  }
+
+  browserProcess(pid: number) {
+    const fields = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1)!.trim().split(/\s+/);
+    const identity = { pid, pgid: Number(fields[2]), starttime: fields[19], active: true };
+    this.data.browser_processes.push(identity);
+    this.save();
+    return identity;
   }
 }
 
 /** 服务与浏览器均真实重建；持久目录由调用方独占。 */
-async function openBrowserStore(storeDir: string) {
+async function openBrowserStore(storeDir: string, recorder?: SessionRecorder) {
   const requireClient = createRequire(
     new URL("../../apps/client/package.json", import.meta.url),
   );
@@ -594,25 +648,63 @@ async function openBrowserStore(storeDir: string) {
   const app = openApp(storeDir),
     files = new Files(app),
     requests = new RequestLifecycle();
-  await files.recover();
-  const server = createHttpApp(app, files, requests).listen(0, "127.0.0.1");
+  recorder?.opened("application_starts");
+  recorder?.opened("files_starts");
+  let server: Server | undefined;
   const stop = createStop(
     () =>
       new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
+        server ? server.close((error) => (error ? reject(error) : resolve())) : resolve(),
       ),
     requests,
     () => files.idle(),
     () => app.store.close(),
   );
-  await new Promise<void>((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
-  });
-  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   let browser;
+  let browserServer;
+  let browserIdentity: ReturnType<SessionRecorder["browserProcess"]> | undefined;
+  let completion: Promise<void> | undefined;
+  const close = () => {
+    if (!completion) completion = (async () => {
+      const errors: unknown[] = [];
+      for (const operation of [
+        () => files.idle(),
+        () => browser?.close(),
+        () => browserServer?.close(),
+        () => stop(),
+      ]) {
+        try { await operation(); } catch (error) { errors.push(error); }
+      }
+      try { recorder?.save(); } catch (error) { errors.push(error); }
+      if (errors.length) throw new AggregateError(errors, "客户端上下文收场失败");
+    })();
+    return completion;
+  };
   try {
-    browser = await chromium.launch({ headless: true });
+    await files.recover();
+    server = createHttpApp(app, files, requests).listen(0, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      server!.once("listening", resolve);
+      server!.once("error", reject);
+    });
+    recorder?.opened("http_server_starts");
+    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    if (recorder) {
+      browserServer = await chromium.launchServer({ headless: true });
+      const child = browserServer.process();
+      browserIdentity = recorder.browserProcess(child.pid!);
+      child.once("exit", () => {
+        browserIdentity!.active = false;
+        try { recorder.save(); } catch (error) {
+          recorder.data.recording_error = errorRecord(error);
+          console.error(error);
+        }
+      });
+      browser = await chromium.connect(browserServer.wsEndpoint());
+    } else {
+      browser = await chromium.launch({ headless: true });
+    }
+    recorder?.opened("browser_starts");
     const context = await browser.newContext({
       acceptDownloads: true,
       timezoneId: "UTC",
@@ -623,22 +715,52 @@ async function openBrowserStore(storeDir: string) {
     if (response?.status() !== 200) throw new Error("当前构建的首页不可访问");
     return {
       app,
+      files,
       page,
       check,
+      origin,
       async state() {
         const response = await fetch(`${origin}/api/state`);
         if (!response.ok) throw new Error(`状态 HTTP ${response.status}`);
         return parseClientJson(await response.text()) as any;
       },
-      async close() {
-        await browser.close();
-        await stop();
-      },
+      close,
     };
   } catch (error) {
-    await browser?.close();
-    await stop();
+    try { await close(); } catch (closing) {
+      throw new AggregateError([error, closing], "客户端启动与收场均失败");
+    }
     throw error;
+  }
+}
+
+type BrowserStore = Awaited<ReturnType<typeof openBrowserStore>>;
+
+class WorldClient {
+  current?: BrowserStore;
+
+  constructor(readonly storeDir: string, readonly recorder: SessionRecorder) {}
+
+  async browser() {
+    if (!this.current) this.current = await openBrowserStore(this.storeDir, this.recorder);
+    return this.current;
+  }
+
+  async reopen() {
+    await this.close();
+    return this.browser();
+  }
+
+  async close() {
+    const previous = this.current;
+    this.current = undefined;
+    if (previous) {
+      const errors: unknown[] = [];
+      try { await previous.close(); } catch (error) { errors.push(error); }
+      if (previous.files.workerError) errors.push(new Error(`客户端文件worker失败：${previous.files.workerError}`));
+      if (this.recorder.data.recording_error) errors.push(new Error(JSON.stringify(this.recorder.data.recording_error)));
+      if (errors.length) throw new AggregateError(errors, "客户端会话收场失败");
+    }
   }
 }
 
@@ -647,10 +769,12 @@ async function browserPlanExport(
   inputPath: string,
   planPath: string,
   receiptPath: string,
+  owner?: WorldClient,
 ) {
-  const session = await openBrowserStore(storeDir);
+  const session = owner ? await owner.browser() : await openBrowserStore(storeDir);
   try {
     const { page, check } = session;
+    if (owner) await page.goto(session.origin);
     await page.getByTestId("new-draft-button").click();
     await page.getByTestId("draft-json-toggle").click();
     page.once("dialog", (dialog: any) => dialog.accept());
@@ -673,7 +797,7 @@ async function browserPlanExport(
       }),
     );
   } finally {
-    await session.close();
+    if (!owner) await session.close();
   }
 }
 
@@ -682,6 +806,7 @@ async function browserPhotoExport(
   inputPath: string,
   planPath: string,
   receiptPath: string,
+  owner?: WorldClient,
 ) {
   const input = JSON.parse(readFileSync(inputPath, "utf8")) as {
     device_id: string;
@@ -708,7 +833,7 @@ async function browserPhotoExport(
   const schema = parameter.schema as any;
   const { choose } =
     await import("../../apps/client/tests/integration/select-support");
-  let session = await openBrowserStore(storeDir);
+  let session = owner ? await owner.browser() : await openBrowserStore(storeDir);
   const receipt: Record<string, any> = {
     capabilities_sha256: createHash("sha256")
       .update(capabilitiesText)
@@ -865,8 +990,11 @@ async function browserPhotoExport(
       path: `${receiptPath}.source.png`,
       fullPage: true,
     });
-    await session.close();
-    session = await openBrowserStore(storeDir);
+    if (owner) session = await owner.reopen();
+    else {
+      await session.close();
+      session = await openBrowserStore(storeDir);
+    }
     receipt.server_open_count++;
     await session.page
       .getByTestId("draft-open-button")
@@ -962,12 +1090,123 @@ async function browserPhotoExport(
       });
     throw error;
   } finally {
-    await session.close();
+    if (!owner) await session.close();
   }
 }
 
+/** Python 独占连接按序递交文件路径；业务 JSON 仍由原入口读写。 */
+async function worldClientSession(
+  storeDir: string, host: string, portText: string, sessionId: string, metricsPath: string,
+) {
+  const port = Number(portText);
+  if (host !== "127.0.0.1" || !Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error("客户端会话必须连接独占的loopback端口");
+  const recorder = new SessionRecorder(sessionId, metricsPath);
+  const owner = new WorldClient(storeDir, recorder);
+  const socket = createConnection({ host, port });
+  let primary: unknown;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    recorder.data.status = "ready";
+    recorder.data.node_cpu_at_ready_microseconds = process.cpuUsage();
+    recorder.save();
+    socket.write(JSON.stringify({ kind: "ready", session_id: sessionId, pid: process.pid }) + "\n");
+    const lines = createInterface({ input: socket, crlfDelay: Infinity });
+    let nextId = 1;
+    let closed = false;
+    for await (const line of lines) {
+      const message = JSON.parse(line) as {
+        id: number; session_id: string; operation: string; arguments: string[];
+      };
+      if (message.session_id !== sessionId || message.id !== nextId++ ||
+          !Array.isArray(message.arguments) || message.arguments.some((value) => typeof value !== "string"))
+        throw new Error("客户端会话命令身份或路径无效");
+      const started = process.hrtime.bigint();
+      const cpu = process.cpuUsage();
+      const record: Record<string, any> = {
+        id: message.id, operation: message.operation, arguments: message.arguments,
+        started_monotonic_ns: started.toString(), outcome: "running",
+        contexts_before: { ...recorder.data.counts },
+      };
+      recorder.data.commands.push(record);
+      recorder.save();
+      const finish = (outcome: string) => {
+        const ended = process.hrtime.bigint();
+        record.finished_monotonic_ns = ended.toString();
+        record.elapsed_seconds = Number(ended - started) / 1e9;
+        record.node_cpu_microseconds = process.cpuUsage(cpu);
+        record.contexts_after = { ...recorder.data.counts };
+        record.outcome = outcome;
+        recorder.save();
+      };
+      try {
+        const args = message.arguments;
+        if (message.operation === "close" && args.length === 0) {
+          await owner.close();
+          recorder.data.status = "closed";
+          finish("passed");
+          socket.write(JSON.stringify({ kind: "result", session_id: sessionId, id: message.id, ok: true }) + "\n");
+          closed = true;
+          break;
+        }
+        if (message.operation === "browser-photo-export" && args.length === 3)
+          await browserPhotoExport(storeDir, args[0], args[1], args[2], owner);
+        else if (message.operation === "browser-plan-export" && args.length === 3)
+          await browserPlanExport(storeDir, args[0], args[1], args[2], owner);
+        else if (message.operation === "upload-files" && args.length === 2)
+          await uploadFiles(storeDir, args[0], args[1], await owner.browser());
+        else throw new Error(`未知客户端会话操作或路径数量：${message.operation}`);
+        const receiptPath = args.at(-1)!;
+        const receipt = parseJson(readFileSync(receiptPath, "utf8")) as any;
+        if (receipt.request_id !== undefined) record.request_id = String(receipt.request_id);
+        finish("passed");
+        socket.write(JSON.stringify({
+          kind: "result", session_id: sessionId, id: message.id, ok: true, receipt_path: receiptPath,
+        }) + "\n");
+      } catch (error) {
+        let failure = error;
+        try { await owner.close(); } catch (closing) {
+          failure = new AggregateError([failure, closing], "客户端命令与收场均失败");
+        }
+        record.error = errorRecord(failure);
+        recorder.data.status = "failed";
+        try { finish("failed"); } catch (logging) {
+          failure = new AggregateError([failure, logging], "客户端失败及计时保存失败");
+          record.error = errorRecord(failure);
+        }
+        console.error(failure);
+        socket.write(JSON.stringify({
+          kind: "result", session_id: sessionId, id: message.id, ok: false, error: record.error,
+        }) + "\n");
+        throw failure;
+      }
+    }
+    if (!closed) throw new Error("客户端会话在close命令前断开");
+  } catch (error) {
+    primary = error;
+  } finally {
+    try { await owner.close(); } catch (closing) {
+      primary = primary ? new AggregateError([primary, closing], "客户端命令与收场均失败") : closing;
+    }
+    recorder.data.status = primary ? "failed" : "closed";
+    recorder.data.node_cpu_total_microseconds = process.cpuUsage();
+    try { recorder.save(); } catch (logging) {
+      primary = primary ? new AggregateError([primary, logging], "客户端失败及最终计时保存失败") : logging;
+    }
+    socket.end();
+  }
+  if (primary) throw primary;
+}
+
 async function main() {
-  if (command === "initialize") {
+  if (command === "session") {
+    const [storeDir, host, port, sessionId, metricsPath] = rest;
+    if (!storeDir || !host || !port || !sessionId || !metricsPath) badUsage();
+    await worldClientSession(storeDir, host, port, sessionId, metricsPath);
+  } else if (command === "initialize") {
     const [storeDir, receiptPath] = rest;
     if (!storeDir || !receiptPath) badUsage();
     initializeClient(storeDir, receiptPath);
@@ -1022,7 +1261,7 @@ void main().catch((error) => {
 
 function badUsage(): never {
   console.error(
-    "用法: client_driver.ts initialize <存储目录> <凭据路径> | export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
+    "用法: client_driver.ts session <存储目录> <127.0.0.1> <端口> <会话身份> <计时路径> | initialize <存储目录> <凭据路径> | export <存储目录> <正文路径> <计划路径> <凭据路径> | import <报告目录> <存储目录> <凭据路径> | import-media <存储目录> <已领取文件路径> <凭据路径> | estimate <存储目录> <动作路径> <凭据路径> | validate-parameters <存储目录> <参数用例路径> <凭据路径> | reload-estimate <存储目录> <动作路径> <替换说明路径> <凭据路径> | capability-state <存储目录> <凭据路径> | browser-photo-export <存储目录> <输入路径> <计划路径> <凭据路径> | browser-plan-export <存储目录> <正文路径> <计划路径> <凭据路径> | upload-files <存储目录> <清单路径> <凭据路径>",
   );
   process.exit(2);
 }
