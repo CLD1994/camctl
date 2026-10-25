@@ -178,13 +178,15 @@ def read_event(connection, event_id):
     return _record(connection, row, event_id)
 
 
-def iter_transaction_events(connection, transaction, *, batch_size=128):
+def iter_transaction_events(connection, transaction, *, after_event_id=None, batch_size=128):
     """按完整组顺序交付有限批次，不保留整个事件数组。"""
     if type(batch_size) is not int or not 1 <= batch_size <= 128:
         raise ValueError('历史事件批次必须是1至128的整数')
     if read_transaction(connection, transaction.txn_id) != transaction:
         raise ConsistencyError('历史组读取改变原完整边界')
-    after = transaction.first_event_id-1
+    after = transaction.first_event_id-1 if after_event_id is None else after_event_id
+    if type(after) is not int or not transaction.first_event_id-1 <= after <= transaction.last_event_id:
+        raise ConsistencyError('历史事件游标不属于完整原组')
     while after < transaction.last_event_id:
         end = min(after+batch_size, transaction.last_event_id)
         state = _facts(connection)

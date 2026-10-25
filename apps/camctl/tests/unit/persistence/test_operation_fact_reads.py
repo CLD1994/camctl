@@ -9,7 +9,6 @@ from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import EventEnvelope
 from camctl.persistence import transaction
-from camctl.persistence.read_reuse import read_reuse_scope, clear_read_reuse
 
 
 @pytest.fixture
@@ -51,19 +50,18 @@ def facts(monkeypatch):
     return module
 
 
-def test_current_rows_are_direct_even_inside_legacy_reuse_scope(database):
+def test_current_rows_are_direct_inside_operation_scope(database, facts):
     connection, state = database
-    with read_reuse_scope(connection):
+    with facts.operation_fact_scope(connection, HistoryBoundary(0, 0)):
         assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
         assert transaction.row_facts(connection, 'sample', 1)['value'] == 1
     assert connection.execute.call_count == 2
 
 
-def test_committed_event_survives_stage_clear_and_later_writes(database, facts):
+def test_committed_event_survives_independent_judgments_and_later_writes(database, facts):
     connection, state = database
     with facts.operation_fact_scope(connection, HistoryBoundary(1, 3)):
         first = facts.read_event(connection, 2)
-        clear_read_reuse(connection)
         connection.total_changes += 9
         second = facts.read_event(connection, 2)
         assert second.event == first.event

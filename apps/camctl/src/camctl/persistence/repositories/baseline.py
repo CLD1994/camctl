@@ -14,10 +14,10 @@ from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
-from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.reads import BaselineRangeRead
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
+from camctl.persistence.fact_reads import read_event
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (CommandPlan, TransactionError, event_envelope,
     read_transaction_range, row_facts, saved_transaction_events, update_change)
@@ -94,15 +94,7 @@ def _decode_chunk(event):
 
 
 def _event_at(connection, event_id):
-    with closing(connection.execute(f"SELECT {_EVENT_COLUMNS} FROM history_events WHERE id=?", (event_id,))) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError("基准引用的事件不存在")
-    event = decode_event_row(row)
-    transaction = read_transaction_range(connection, event.transaction_id)
-    if not transaction.first_event_id <= event.event_id <= transaction.last_event_id:
-        raise ConsistencyError("基准事件不属于原事务范围")
-    return event
+    return read_event(connection, event_id).event
 
 
 def _chunk_at(connection, event_id, activity_id):
@@ -126,28 +118,26 @@ def _tail_read(connection, activity):
 
 
 def _iter_chunks(connection, activity_id, first, last, *, previous=None, limit=None):
-    parameters = [first, last, _TYPE, activity_id]
-    conditions = ["id>=?", "id<=?", "event_type=?", "json_extract(body_json,'$.evidence.activity_id')=?",
-                  "json_extract(body_json,'$.reason')=?"]
-    parameters.append(_APPEND)
-    if previous is not None:
-        conditions.append("id>?")
-        parameters.append(previous)
-    suffix = ""
-    if limit is not None:
-        suffix = " LIMIT ?"
-        parameters.append(limit)
-    with closing(connection.execute(f"SELECT {_EVENT_COLUMNS} FROM history_events WHERE "
-                                   + " AND ".join(conditions) + " ORDER BY id" + suffix, parameters)) as cursor:
-        for stored in cursor:
-            event = decode_event_row(stored)
-            transaction = read_transaction_range(connection, event.transaction_id)
-            if not transaction.first_event_id <= event.event_id <= transaction.last_event_id:
-                raise ConsistencyError("基准事件不属于原事务")
-            identity, chunk = _decode_chunk(event)
+    after = first-1 if previous is None else previous
+    remaining = limit
+    while remaining is None or remaining > 0:
+        size = 128 if remaining is None else min(128, remaining)
+        with closing(connection.execute(
+                "SELECT id FROM history_events WHERE id>=? AND id<=? AND id>? AND event_type=?"
+                " AND json_extract(body_json,'$.evidence.activity_id')=?"
+                " AND json_extract(body_json,'$.reason')=? ORDER BY id LIMIT ?",
+                (first, last, after, _TYPE, activity_id, _APPEND, size))) as cursor:
+            identities = cursor.fetchall()
+        for (event_id,) in identities:
+            identity, chunk = _decode_chunk(read_event(connection, event_id).event)
             if identity != activity_id:
                 raise ConsistencyError("基准条目不属于本活动")
             yield chunk
+        if len(identities) < size:
+            return
+        after = identities[-1][0]
+        if remaining is not None:
+            remaining -= len(identities)
 
 
 def _complete_read(connection, activity, action):
@@ -174,8 +164,7 @@ def _fixed_counts(connection, activity):
     # 沿动作历史目录读取最后固定事实，避免每一页重新扫描整个基准。
     from camctl.contracts.enums import load_registry
     owner_type = load_registry()["history_objects"]["action"]["id"]
-    columns = ",".join("h." + name for name in _EVENT_COLUMNS.split(","))
-    with closing(connection.execute(f"SELECT {columns} FROM history_events h INDEXED BY history_events_type"
+    with closing(connection.execute("SELECT h.id FROM history_events h INDEXED BY history_events_type"
         " CROSS JOIN entity_event_links l ON l.event_id=h.id"
         " WHERE l.entity_type=? AND l.entity_id=? AND h.event_type=?"
         " AND json_extract(h.body_json,'$.evidence.activity_id')=?"
@@ -184,7 +173,7 @@ def _fixed_counts(connection, activity):
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError("固定基准缺少可靠固定历史")
-    event = decode_event_row(row)
+    event = read_event(connection, row[0]).event
     validate_event_structure(event)
     evidence = event.evidence
     if set(evidence) != {"activity_id", "chunk_count", "entry_count"}:

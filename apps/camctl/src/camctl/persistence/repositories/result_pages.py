@@ -17,7 +17,6 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
 from camctl.devices.evidence import RESULT_LISTED_TYPE, RESULT_LISTED_VERSION
 from camctl.devices.file_identity import FileIdentity
-from camctl.history.decoding import decode_event_row
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.operations.models import AttemptTicket
@@ -25,9 +24,7 @@ from camctl.persistence.transaction import (CommandPlan, TransactionError,
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.page_read_cache import (cached_page_record, page_read_scope_active,
-    prepare_page_record, remember_page_record)
-from camctl.persistence.read_reuse import reuse_read, typed_read_key
+from camctl.persistence.fact_reads import read_event, iter_transaction_events
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -167,8 +164,7 @@ def _difference(scope, activity, action, page, previous):
 
 
 def _load(connection, ticket):
-    key = (__name__, "ticket", typed_read_key(ticket))
-    return reuse_read(connection, key, lambda: _load_ticket(connection, ticket))
+    return _load_ticket(connection, ticket)
 
 
 def _load_ticket(connection, ticket):
@@ -330,10 +326,9 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
     if action is None:
         raise ConsistencyError("结果页动作不存在")
     append_id = event.event_id
-    with closing(connection.execute(
-            f"SELECT {_COLUMNS} FROM history_events WHERE transaction_id=? ORDER BY id LIMIT 131",
-            (transaction.txn_id,))) as cursor:
-        transaction_events = [decode_event_row(row) for row in cursor]
+    if transaction.last_event_id - transaction.first_event_id + 1 > 130:
+        raise ConsistencyError("结果页所在原事务超过页组容量")
+    transaction_events = [record.event for record in iter_transaction_events(connection, transaction)]
     if (len(transaction_events) != transaction.last_event_id - transaction.first_event_id + 1
             or len(transaction_events) > 130
             or any(item.event_id != transaction.first_event_id + index
@@ -405,12 +400,8 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
         append_rows = cursor.fetchmany(2)
     if len(append_rows) != 1 or append_rows[0][0] != append_id:
         raise ConsistencyError("原事务没有唯一RESULT_PAGE.APPEND")
-    with closing(connection.execute(
-            "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json"
-            " FROM history_events WHERE transaction_id=? AND event_type=?"
-            " AND json_extract(body_json,'$.reason')=? ORDER BY id",
-            (transaction.txn_id, _TYPE, _INDEX_FILES))) as cursor:
-        index_rows = [decode_event_row(row) for row in cursor]
+    index_rows = [item for item in transaction_events
+                  if item.event_type == _TYPE and item.reason == _INDEX_FILES]
     with closing(connection.execute(
             "SELECT id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,"
             "family_directory,family_stem,family_role FROM result_page_files"
@@ -456,36 +447,15 @@ def _verify_page_relations(connection, saved, raw, event, transaction):
 
 
 def _at_record(connection, event_id):
-    if page_read_scope_active(connection):
-        return _load_at_record(connection, event_id)
-    return reuse_read(connection, (__name__, "page", type(event_id), event_id),
-                      lambda: _load_at_record(connection, event_id))
-
-
-def _load_at_record(connection, event_id):
-    cached = cached_page_record(connection, event_id)
-    if cached is not None:
-        row, txn = cached
-        event = decode_event_row(row)
-        saved, raw = _decode(event)
-        return saved, raw, event, txn
-    prepare_page_record(connection, event_id)
-    with closing(connection.execute(f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (event_id,))) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError("原结果页历史缺失")
-    event = decode_event_row(row)
-    txn = read_transaction_range(connection, event.transaction_id)
-    if not txn.first_event_id <= event.event_id <= txn.last_event_id:
-        raise ConsistencyError("结果页不属于原事务范围")
+    """形成页与原键核实使用的完整页关系核验，不供普通消费复用判定。"""
+    record = read_event(connection, event_id)
+    event, txn = record.event, record.transaction
     saved, raw = _decode(event)
     try:
         _verify_page_relations(connection, saved, raw, event, txn)
     except EventValidationError as error:
         raise ConsistencyError("结果页关系事件不可解释") from error
-    record = saved, raw, event, txn
-    remember_page_record(connection, event_id, txn.last_event_id, (tuple(row), txn))
-    return record
+    return saved, raw, event, txn
 
 
 def _at(connection, event_id):
@@ -495,7 +465,6 @@ def _at(connection, event_id):
 
 def read_saved_page(connection, event_id):
     """普通消费原页事实；新页形成及原键重算使用独立完整核验口。"""
-    from camctl.persistence.fact_reads import read_event
     record = read_event(connection, event_id)
     saved, raw = _decode(record.event)
     return saved, raw
@@ -515,14 +484,9 @@ def committed_page_proof(connection, saved, raw, event, transaction):
     intent_id = attempt['intent_event_id']
     if intent_id is None or intent_id >= transaction.first_event_id:
         raise ConsistencyError('原提交页缺少更早的真实尝试意图')
-    with closing(connection.execute(f'SELECT {_COLUMNS} FROM history_events WHERE id=?',
-                                    (intent_id,))) as cursor:
-        stored = cursor.fetchone()
-    if stored is None:
-        raise ConsistencyError('原提交页意图历史缺失')
-    intent = decode_event_row(stored)
+    intent_record = read_event(connection, intent_id)
+    intent, intent_transaction = intent_record.event, intent_record.transaction
     name, _, _ = validate_event_structure(intent)
-    intent_transaction = read_transaction_range(connection, intent.transaction_id)
     changes = [row for row in intent.rows if row.table == 'operation_attempts'
                and row.row_id == attempt['id'] and not row.before.exists]
     if (name != 'ATTEMPT_STARTED' or len(changes) != 1
@@ -601,7 +565,7 @@ def read_pages(ticket, cursor, batch, owned):
         verified[cursor] = (previous, previous_raw, previous_event, previous_txn)
         if previous.ref.ticket != ticket:
             raise ConsistencyError("结果页游标属于其他尝试")
-    with closing(owned.connection.execute(f"SELECT {_COLUMNS} FROM history_events WHERE id>=? AND id<=?"
+    with closing(owned.connection.execute("SELECT id FROM history_events WHERE id>=? AND id<=?"
             " AND id>? AND event_type=? AND json_extract(body_json,'$.reason')=?"
             " AND json_extract(body_json,'$.evidence.attempt_id')=?"
             " ORDER BY id LIMIT ?", (first, last, cursor or 0, _TYPE, _APPEND, attempt["id"], batch + 1))) as reader:
@@ -610,10 +574,8 @@ def read_pages(ticket, cursor, batch, owned):
             event_id = row[0]
             saved_record = verified.get(event_id)
             if saved_record is None:
-                event = decode_event_row(row)
-                txn = read_transaction_range(owned.connection, event.transaction_id)
-                if not txn.first_event_id <= event.event_id <= txn.last_event_id:
-                    raise ConsistencyError("结果页不属于完整原事务")
+                record = read_event(owned.connection, event_id)
+                event, txn = record.event, record.transaction
                 page, raw = _decode(event)
                 try:
                     _verify_page_relations(owned.connection, page, raw, event, txn)
@@ -700,7 +662,7 @@ def read_file_input(last_ref, identity, owned, *, allow_missing=False):
 def _first_complete_event(connection, facts):
     """原首次完成事件固定 proof 与大小，不采用发现条目的元信息。"""
     with closing(connection.execute(
-            f"SELECT {','.join('e.' + column for column in _COLUMNS.split(','))}"
+            "SELECT e.id"
             " FROM entity_event_links l JOIN history_events e ON e.id=l.event_id,"
             " json_each(e.body_json,'$.rows') r"
             " WHERE l.entity_type=? AND l.entity_id=? AND l.event_id<=?"
@@ -714,9 +676,9 @@ def _first_complete_event(connection, facts):
     if row is None:
         raise ConsistencyError('完整来源文件缺少首次可靠完成事件')
     try:
-        event = decode_event_row(row)
+        record = read_event(connection, row[0])
+        event, transaction = record.event, record.transaction
         name, branch, _ = validate_event_structure(event)
-        transaction = read_transaction_range(connection, event.transaction_id)
         changes = [value for value in event.rows if value.table == 'device_files' and value.row_id == facts['id']]
         if (name != 'DEVICE_FILE_OBSERVED' or branch != 'COMPLETE' or len(changes) != 1
                 or not transaction.first_event_id <= event.event_id <= transaction.last_event_id):
@@ -1427,12 +1389,8 @@ def _replay_page_context(connection, event, original, transaction, *, current_bo
         raise ConsistencyError("原结果页F前恢复超过128个文件身份")
     scope = ResultPageWriteScope(action["id"], activity["id"], run["id"],
         attempt["id"], original[0].ref.page_no)
-    prefix = []
-    with closing(connection.execute(
-            f"SELECT {_COLUMNS} FROM history_events WHERE transaction_id=? AND id<?"
-            " ORDER BY id LIMIT 129", (transaction.txn_id, event.event_id))) as cursor:
-        for stored in cursor:
-            prefix.append(decode_event_row(stored))
+    prefix = [record.event for record in iter_transaction_events(connection, transaction)
+              if record.event.event_id < event.event_id]
     if len(prefix) > 128 or any(item.event_id < transaction.first_event_id
             or item.event_id >= event.event_id for item in prefix):
         raise ConsistencyError("原结果页CREATE前缀超出有限页容量")
@@ -1468,9 +1426,8 @@ class _ReplayPageReads:
         if self._baseline_ref is not None:
             return self._baseline_ref
         owner_type = load_enum_registry()["history_objects"]["action"]["id"]
-        history_columns = ",".join("h." + name for name in _COLUMNS.split(","))
         with closing(self.connection.execute(
-                f"SELECT {history_columns} FROM history_events h INDEXED BY history_events_type"
+                "SELECT h.id FROM history_events h INDEXED BY history_events_type"
                 " CROSS JOIN entity_event_links l ON l.event_id=h.id"
                 " WHERE l.entity_type=? AND l.entity_id=? AND h.id<=? AND h.event_type=?"
                 " AND json_extract(h.body_json,'$.evidence.activity_id')=?"
@@ -1481,8 +1438,8 @@ class _ReplayPageReads:
             stored = cursor.fetchone()
         if stored is None:
             raise ConsistencyError("原结果页F前固定基准缺少原FIX事件")
-        event = decode_event_row(stored)
-        transaction = read_transaction_range(self.connection, event.transaction_id)
+        record = read_event(self.connection, stored[0])
+        event, transaction = record.event, record.transaction
         if (event.event_id > self.boundary.last_event_id
                 or not transaction.first_event_id <= event.event_id <= transaction.last_event_id):
             raise ConsistencyError("原结果页FIX事件越过F前完整边界")
@@ -1582,12 +1539,7 @@ class _ReplayPageReads:
         if (expected_index is None or index_ids != [index_id]
                 or transaction.last_event_id != index_id or len(relations) != len(file_ids)):
             raise ConsistencyError("原键非空结果页缺少唯一末位INDEX或完整关系")
-        with closing(self.connection.execute(
-                f"SELECT {_COLUMNS} FROM history_events WHERE id=?", (index_id,))) as cursor:
-            stored = cursor.fetchone()
-        if stored is None:
-            raise ConsistencyError("原键INDEX_FILES历史缺失")
-        index = decode_event_row(stored)
+        index = read_event(self.connection, index_id).event
         expected_rows = tuple(expected_index.rows)
         expected_relation_values = [dict(row.after.values) for row in expected_rows]
         actual_relation_values = [dict(zip((

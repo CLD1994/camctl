@@ -39,7 +39,7 @@ def database():
         elif "COUNT(*)" in statement:
             cursor.fetchone.return_value = data["summary"]
         elif "FROM history_events" in statement:
-            cursor.__iter__.return_value = iter(data["rows"])
+            cursor.fetchall.return_value = list(data["rows"])
         else:
             raise AssertionError(f"未声明的 SQL 读取: {statement}")
         return cursor
@@ -112,7 +112,7 @@ def test_member_stream_must_match_verified_range(database, registration, rows):
 
 @pytest.mark.parametrize("sql_prefix", [
     "SELECT id FROM history_transactions", "SELECT id, first_event_id",
-    "SELECT last_event_id", "SELECT COUNT(*)", "SELECT id, transaction_id",
+    "SELECT last_event_id", "SELECT COUNT(*)", "SELECT id,transaction_id",
 ])
 def test_sql_query_error_is_preserved_and_acquired_cursors_close(database, registration, sql_prefix):
     connection, data = database
@@ -149,19 +149,15 @@ def test_key_fetch_error_closes_acquired_cursor(database):
     data["cursors"][0].close.assert_called_once_with()
 
 
-def test_event_iteration_error_does_not_return_prefix(database, registration):
+def test_event_batch_fetch_error_does_not_return_prefix(database, registration):
     connection, data = database
     execute = connection.execute.side_effect
     failure = sqlite3.OperationalError("后续事件读取失败")
 
-    def rows_then_error(rows):
-        yield rows[0]
-        raise failure
-
     def fail_iteration(statement, parameters=()):
         cursor = execute(statement, parameters)
         if "FROM history_events" in statement and "COUNT(*)" not in statement:
-            cursor.__iter__.return_value = rows_then_error(data["rows"])
+            cursor.fetchall.side_effect = failure
         return cursor
 
     connection.execute.side_effect = fail_iteration
