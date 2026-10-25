@@ -28,7 +28,6 @@ from camctl.history.changes import (
     derive_changes,
     event_report_targets,
 )
-from camctl.history.decoding import decode_event_row
 from camctl.history.events import (
     SCHEMA_RESOURCES,
     EventEnvelope,

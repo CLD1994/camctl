@@ -18,6 +18,9 @@ from camctl.history.events import load_event_registry
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
 from camctl.operations.models import AttemptTicket
 from camctl.persistence.event_reads import SqlEventReads
+from camctl.persistence.fact_reads import (
+    read_event, read_operation_transaction, opened_operation_fact_scope,
+)
 from camctl.history.reads import CaptureResultReadScope
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -45,7 +48,7 @@ def request_document(request):
         'file_id': request.file_id}
 
 
-def _request_from_event(event):
+def ownership_request_from_event(event):
     if set(event.evidence) != {'ownership_from_result_page_request'}:
         raise ConsistencyError('原页归属事件缺少唯一完整申请')
     raw = event.evidence['ownership_from_result_page_request']
@@ -145,7 +148,7 @@ def _unknown(file):
         and all(file[name] is None for name in _PAIRS))
 
 
-def _guard_boundary(connection, event, transaction):
+def ownership_guard_boundary(connection, event, transaction):
     """区分有限入口完整 C 与 Bounded 尚未写入的单事件 header。"""
     if (event.transaction_id != transaction.txn_id
             or event.event_id != transaction.first_event_id
@@ -186,8 +189,8 @@ def _ownership_from_result_page_guard(event, context):
     if type(reads) is not SqlEventReads or not isinstance(reads.scope, CaptureResultReadScope):
         raise EventValidationError('原页归属缺少原事务的实际 SQL 读取端口')
     try:
-        request = _request_from_event(event)
-        boundary = _guard_boundary(reads.connection, event, context.transaction)
+        request = ownership_request_from_event(event)
+        boundary = ownership_guard_boundary(reads.connection, event, context.transaction)
         if request.page.event_id >= event.event_id:
             raise ConsistencyError('归属必须引用更早的可靠原页')
         source, role, file = _proof(reads.connection, request, current_boundary=boundary)
@@ -215,7 +218,7 @@ class _FileOwnershipFromResultPageCommand:
 
     def plan(self, scope):
         connection, request = scope.connection, self.request
-        if _saved_range(connection, self.key) is not None:
+        if read_operation_transaction(connection, self.key) is not None:
             result = _verify(request, self.key, connection)
             return CommandPlan((), {}, {}, result=result, read_only=True)
         source, role, file = _proof(connection, request)
@@ -239,28 +242,18 @@ class _FileOwnershipFromResultPageCommand:
             capture_result_read_scope=pages.capture_result_scope(source, request.page.ticket, request.page.event_id))
 
 
-def _saved_range(connection, key):
-    with closing(connection.execute('SELECT id FROM history_transactions WHERE operation_key=?',
-                                   (str(key),))) as cursor:
-        found = cursor.fetchone()
-    return None if found is None else read_transaction_range(connection, found[0])
-
-
 def _verify(request, key, connection):
-    transaction = _saved_range(connection, key)
+    transaction = read_operation_transaction(connection, key)
     if transaction is None:
         return None
     if transaction.first_event_id != transaction.last_event_id:
         raise TransactionError('原操作键不属于独立单事件归属事务')
     event_id = transaction.first_event_id
-    with closing(connection.execute(f'SELECT {pages._COLUMNS} FROM history_events WHERE id=?',
-                                   (event_id,))) as cursor:
-        stored = cursor.fetchone()
-    event = pages.decode_event_row(stored)
+    event = read_event(connection, event_id).event
     validate_event_structure(event)
     if (event.event_type, event.reason, event.transaction_id) != (_EVENT['id'], _REASON, transaction.txn_id):
         raise TransactionError('原操作键属于其他完整事务')
-    original = _request_from_event(event)
+    original = ownership_request_from_event(event)
     if (request.occurred_at != original.occurred_at
             or not json_equal(request_document(request), request_document(original))):
         raise TransactionError('原键归属的完整申请或事实时刻不同')
@@ -284,7 +277,8 @@ def verify_ownership_from_result_page(request, key, reader, *, execution_finishe
     if opened:
         connection.execute('BEGIN')
     try:
-        return _verify(request, key, connection)
+        with opened_operation_fact_scope(connection, opened):
+            return _verify(request, key, connection)
     finally:
         if opened:
             connection.execute('ROLLBACK')

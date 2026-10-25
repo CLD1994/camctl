@@ -17,7 +17,7 @@ from camctl.devices.file_identity import FileIdentity
 from camctl.history.events import load_event_registry
 from camctl.history.reads import BaselineRangeRead
 from camctl.history.validators import EventValidationError, register_guard, validate_event_structure
-from camctl.persistence.fact_reads import read_event
+from camctl.persistence.fact_reads import read_event, read_events
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (CommandPlan, TransactionError, event_envelope,
     read_transaction_range, row_facts, saved_transaction_events, update_change)
@@ -128,8 +128,8 @@ def _iter_chunks(connection, activity_id, first, last, *, previous=None, limit=N
                 " AND json_extract(body_json,'$.reason')=? ORDER BY id LIMIT ?",
                 (first, last, after, _TYPE, activity_id, _APPEND, size))) as cursor:
             identities = cursor.fetchall()
-        for (event_id,) in identities:
-            identity, chunk = _decode_chunk(read_event(connection, event_id).event)
+        for record in read_events(connection, tuple(row[0] for row in identities)):
+            identity, chunk = _decode_chunk(record.event)
             if identity != activity_id:
                 raise ConsistencyError("基准条目不属于本活动")
             yield chunk

@@ -24,7 +24,7 @@ from camctl.persistence.transaction import (CommandPlan, TransactionError,
     event_envelope, next_row_id, read_transaction_range, row_change, row_facts,
     saved_transaction_events, update_change)
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.persistence.fact_reads import read_event, iter_transaction_events
+from camctl.persistence.fact_reads import read_event, read_events, iter_transaction_events
 from camctl.history.reads import ResultPageWriteScope
 from .baseline import read_reference, read_chunks, _chunk_at, _check_entries, _directories
 
@@ -569,12 +569,13 @@ def read_pages(ticket, cursor, batch, owned):
             " AND id>? AND event_type=? AND json_extract(body_json,'$.reason')=?"
             " AND json_extract(body_json,'$.evidence.attempt_id')=?"
             " ORDER BY id LIMIT ?", (first, last, cursor or 0, _TYPE, _APPEND, attempt["id"], batch + 1))) as reader:
-        pages = []
-        for row in reader:
-            event_id = row[0]
+        identities = tuple(row[0] for row in reader)
+    pages = []
+    for offset in range(0, len(identities), 128):
+        for record in read_events(owned.connection, identities[offset:offset+128]):
+            event_id = record.event.event_id
             saved_record = verified.get(event_id)
             if saved_record is None:
-                record = read_event(owned.connection, event_id)
                 event, txn = record.event, record.transaction
                 page, raw = _decode(event)
                 try:
@@ -1389,8 +1390,10 @@ def _replay_page_context(connection, event, original, transaction, *, current_bo
         raise ConsistencyError("原结果页F前恢复超过128个文件身份")
     scope = ResultPageWriteScope(action["id"], activity["id"], run["id"],
         attempt["id"], original[0].ref.page_no)
-    prefix = [record.event for record in iter_transaction_events(connection, transaction)
-              if record.event.event_id < event.event_id]
+    if event.event_id - transaction.first_event_id > 128:
+        raise ConsistencyError("原结果页CREATE前缀超出有限页容量")
+    prefix = [record.event for record in iter_transaction_events(
+        connection, transaction, end_event_id=event.event_id-1)]
     if len(prefix) > 128 or any(item.event_id < transaction.first_event_id
             or item.event_id >= event.event_id for item in prefix):
         raise ConsistencyError("原结果页CREATE前缀超出有限页容量")

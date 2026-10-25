@@ -149,6 +149,14 @@ def read_transaction(connection, transaction_id):
     return value
 
 
+def read_operation_transaction(connection, operation_key):
+    """按实际原键定位完整已提交组；缺键是当前查询，不保留空结果。"""
+    with closing(connection.execute(
+            'SELECT id FROM history_transactions WHERE operation_key=?', (str(operation_key),))) as cursor:
+        found = cursor.fetchone()
+    return None if found is None else read_transaction(connection, found[0])
+
+
 def _record(connection, row, requested_id=None):
     event = decode_event_row(row)
     if requested_id is not None and event.event_id != requested_id:
@@ -178,7 +186,38 @@ def read_event(connection, event_id):
     return _record(connection, row, event_id)
 
 
-def iter_transaction_events(connection, transaction, *, after_event_id=None, batch_size=128):
+def read_events(connection, event_ids):
+    """以身份读取至多128个原事件；批量缺失项只发一条正文查询。"""
+    identities = tuple(event_ids)
+    if len(identities) > 128:
+        raise ValueError('历史事件批量读取不能超过128项')
+    state = _facts(connection)
+    records, missing = {}, []
+    for identity in identities:
+        ObjectId(identity)
+        if state is not None and identity > state.boundary.last_event_id:
+            raise ConsistencyError('历史事件越过操作开始时的完整C0')
+        if identity in records or identity in missing:
+            continue
+        record = _cached(state, ('event', typed_read_key(identity)))
+        if record is None:
+            missing.append(identity)
+        else:
+            records[identity] = record
+    if missing:
+        placeholders = ','.join('?' for _ in missing)
+        with closing(connection.execute(
+                f'SELECT {EVENT_COLUMNS} FROM history_events WHERE id IN ({placeholders}) ORDER BY id',
+                tuple(missing))) as cursor:
+            rows = cursor.fetchall()
+        if len(rows) != len(missing) or {row[0] for row in rows} != set(missing):
+            raise ConsistencyError('历史事件批次缺少引用成员或身份不符')
+        for row in rows:
+            records[row[0]] = _record(connection, row, row[0])
+    return tuple(deepcopy(records[identity]) for identity in identities)
+
+
+def iter_transaction_events(connection, transaction, *, after_event_id=None, end_event_id=None, batch_size=128):
     """按完整组顺序交付有限批次，不保留整个事件数组。"""
     if type(batch_size) is not int or not 1 <= batch_size <= 128:
         raise ValueError('历史事件批次必须是1至128的整数')
@@ -187,8 +226,11 @@ def iter_transaction_events(connection, transaction, *, after_event_id=None, bat
     after = transaction.first_event_id-1 if after_event_id is None else after_event_id
     if type(after) is not int or not transaction.first_event_id-1 <= after <= transaction.last_event_id:
         raise ConsistencyError('历史事件游标不属于完整原组')
-    while after < transaction.last_event_id:
-        end = min(after+batch_size, transaction.last_event_id)
+    stop = transaction.last_event_id if end_event_id is None else end_event_id
+    if type(stop) is not int or not after <= stop <= transaction.last_event_id:
+        raise ConsistencyError('历史事件末位不属于完整原组')
+    while after < stop:
+        end = min(after+batch_size, stop)
         state = _facts(connection)
         keys = [('event', typed_read_key(identity)) for identity in range(after+1, end+1)]
         if state is not None and all(key in state.entries for key in keys):
@@ -240,7 +282,6 @@ def typed_read_key(value):
     if isinstance(value, tuple):
         return type(value), tuple(typed_read_key(item) for item in value)
     return type(value), value
-
 
 
 def _retained_size(value, seen):
