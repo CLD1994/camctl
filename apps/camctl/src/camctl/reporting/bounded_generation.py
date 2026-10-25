@@ -21,6 +21,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import _public_json_registry
 from camctl.contracts.segment_values import SegmentKey, decode_text_enum
 from camctl.history.queries import ReportScopeRequest
+from camctl.reporting.failure_index import FailureDeliveryIndex
 from camctl.reporting.stream_validation import (
     CompletionRequirement,
     DeferredField,
@@ -55,6 +56,33 @@ _DEFERRED = {
     "cancel_result": frozenset({"items"}),
     "cancel_item": frozenset({"withdrawals"}),
 }
+
+
+@dataclass(frozen=True)
+class _ReportReads:
+    """一次生成的恢复端口，统一向所有消费者传递生效事件批次。"""
+
+    repository: object
+    event_batch_size: int
+
+    def restore_primary_at_h(self, entity, identity, boundary):
+        return self.repository.restore_primary_at_h(
+            entity, identity, boundary, event_batch_size=self.event_batch_size)
+
+    def restore_entity(self, entity, identity, boundary):
+        return self.repository.restore_entity(
+            entity, identity, boundary, event_batch_size=self.event_batch_size)
+
+    def related_primary_rows_at_h(self, entity, column, value, boundary):
+        return self.repository.related_primary_rows_at_h(
+            entity, column, value, boundary, event_batch_size=self.event_batch_size)
+
+    def open_segment_history(self, identity, boundary):
+        return self.repository.open_segment_history(
+            identity, boundary, event_batch_size=self.event_batch_size)
+
+    def open_report_selection(self, request):
+        return self.repository.open_report_selection(request)
 
 
 def _segment_fields():
@@ -188,6 +216,7 @@ class _SegmentExpansion:
     binding: object
     error: dict | None
     stack: object
+    source_handle: object | None = None
     consumed: bool = False
 
     def __post_init__(self):
@@ -202,9 +231,14 @@ class _SegmentExpansion:
         self.header = validate_segment_error_header(
             self.error["code"], self.error["details"]
         )
-        self.handle = self.stack.enter_context(
-            self.repo.open_segment_history(self.header.source_action_id, self.boundary)
-        )
+        if (self.source_handle is not None
+                and self.source_handle.action_id == self.header.source_action_id
+                and self.source_handle.boundary == self.boundary):
+            self.handle = self.source_handle
+        else:
+            self.handle = self.stack.enter_context(
+                self.repo.open_segment_history(self.header.source_action_id, self.boundary)
+            )
         self.ref = self.handle.active_result_ref()
         source = self.handle.primary()
         if source["type"] not in (2, 3):
@@ -573,8 +607,43 @@ def _expansion_arrays(expansion, stream, gate):
     return arrays
 
 
-def _failure_rows(repo, handle, boundary):
+def _prepare_failure_index(repo, handle, boundary, index):
+    """每个 H 处交付只恢复一次；全部关系通过后才交付失败数组。"""
+    for item in handle.related_rows("obtain_items"):
+        selection = handle.row("obtain_source_selections", item.values["selection_id"])
+        if selection is None:
+            raise ConsistencyError("取回项缺少同 H 的来源选择")
+        dependency_id = selection["dependency_id"]
+        dependency = handle.row("action_dependencies", dependency_id)
+        if dependency is None or dependency["action_id"] != handle.action_id:
+            raise ConsistencyError("取回项的来源依赖不属于同 H 动作")
+        delivery_id = item.values["delivery_id"]
+        if delivery_id is not None:
+            output_id = item.values["output_id"]
+            if output_id is None:
+                raise ConsistencyError("已关联交付的取回项缺少产物")
+            index.add_reference(delivery_id, dependency_id, output_id,
+                                dependency["depends_on_action_id"])
+    for identity, delivery in repo.related_primary_rows_at_h(
+        "delivery", "action_id", handle.action_id, boundary
+    ):
+        if delivery["action_id"] != handle.action_id:
+            raise ConsistencyError("交付不属于同 H 的取回动作")
+        dependency_id, source_id = index.bind_delivery(identity, delivery["output_id"])
+        output_id = delivery["output_id"]
+        output = repo.restore_primary_at_h("output", output_id, boundary)
+        if output is None or output["source_action_id"] != source_id:
+            raise ConsistencyError("交付产物不属于同 H 的来源依赖")
+        fragment = _project("delivery_failure", identity, {
+            "deliveries": {identity: delivery}, "outputs": {output_id: output}})
+        if fragment is not OMIT:
+            index.add_failure(dependency_id, identity, fragment)
+    index.finish()
+
+
+def _failure_rows(repo, handle, boundary, index):
     """按依赖、分支、真实身份续读，匹配权威 failure_union 顺序。"""
+    _prepare_failure_index(repo, handle, boundary, index)
     for dependency in handle.related_rows("action_dependencies"):
         selections = tuple(
             islice(
@@ -601,27 +670,16 @@ def _failure_rows(repo, handle, boundary):
             fragment = _project("item_failure", item.row_id, facts)
             if fragment is not OMIT:
                 yield f"{dependency.row_id}:1:{item.row_id}", fragment
-        # delivery 身份按主键续读，不采用 item 返回顺序推断。
-        for identity, delivery in repo.related_primary_rows_at_h(
-            "delivery", "action_id", handle.action_id, boundary
-        ):
-            items = tuple(
-                islice(handle.related_rows("obtain_items", "delivery_id", identity), 2)
-            )
-            if not items or items[0].values["selection_id"] != selection.row_id:
-                continue
-            if len(items) != 1:
-                raise ConsistencyError("取回交付的条目身份不唯一")
-            facts = {"deliveries": {identity: delivery}}
-            _merge(
-                facts,
-                "outputs",
-                delivery["output_id"],
-                repo.restore_primary_at_h("output", delivery["output_id"], boundary),
-            )
-            fragment = _project("delivery_failure", identity, facts)
-            if fragment is not OMIT:
-                yield f"{dependency.row_id}:2:{identity}", fragment
+        # delivery 身份按磁盘索引续读，不采用 item 返回顺序推断。
+        for identity, fragment in index.failures(dependency.row_id):
+            yield f"{dependency.row_id}:2:{identity}", fragment
+
+
+@dataclass(frozen=True)
+class _ResultRow:
+    row: object
+    fragment: object
+    target: dict | None = None
 
 
 def _result_rows(repo, handle, boundary, kind):
@@ -632,15 +690,17 @@ def _result_rows(repo, handle, boundary, kind):
     )
     for row in handle.related_rows(table):
         facts = {table: {row.row_id: row.values}}
+        target_values = None
         if kind == "cancel_task":
             target = row.values["target_action_id"]
+            target_values = repo.restore_primary_at_h("action", target, boundary)
             _merge(
                 facts,
                 "actions",
                 target,
-                repo.restore_primary_at_h("action", target, boundary),
+                target_values,
             )
-        yield row.row_id, (row, _project(projection, row.row_id, facts))
+        yield row.row_id, _ResultRow(row, _project(projection, row.row_id, facts), target_values)
 
 
 def _write_action(repo, selection, stream, plan, binding, identity, boundary):
@@ -650,7 +710,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
         handle = stack.enter_context(repo.open_segment_history(identity, boundary))
         finite = _project("action", identity, _action_facts(repo, handle, boundary))
         expansion = _SegmentExpansion(
-            repo, boundary, binding, finite.get("error"), stack
+            repo, boundary, binding, finite.get("error"), stack, source_handle=handle
         )
         coverage = _CoverageExpansion(
             repo,
@@ -680,6 +740,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                             gate.child_binding(path, position),
                             value.get("error"),
                             nested,
+                            source_handle=handle,
                         )
                         sub = child.begin(expansion.binding, value)
                         yield from stream.open_object()
@@ -693,14 +754,15 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                         return sub.close_node()
 
                 arrays[path] = (
-                    _failure_rows(repo, handle, boundary),
+                    _failure_rows(repo, handle, boundary,
+                                  stack.enter_context(FailureDeliveryIndex())),
                     emit_failure,
                     None,
                 )
             elif finite["type"] in ("delete_action_outputs", "cancel_task"):
 
                 def emit_result(position, value, path=path):
-                    row, fragment = value
+                    row, fragment = value.row, value.fragment
                     pointer = (
                         "/cancel_item"
                         if finite["type"] == "cancel_task"
@@ -713,9 +775,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
                     nested = {}
                     if pointer == "/cancel_item":
                         withdrawals = ("withdrawals",)
-                        target = repo.restore_primary_at_h(
-                            "action", row.values["target_action_id"], boundary
-                        )
+                        target = value.target
                         if target["type"] == 3:
 
                             def members():
@@ -785,6 +845,7 @@ def _write_action(repo, selection, stream, plan, binding, identity, boundary):
 
 def report_tokens(repo, spec, boundary, stream):
     """完整供给 root/plan/action 的同 H 节点及全部结束证明。"""
+    repo = _ReportReads(repo, spec.event_batch_size)
     plan = _report_plan()
     with repo.open_report_selection(
         ReportScopeRequest(

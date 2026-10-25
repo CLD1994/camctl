@@ -31,6 +31,12 @@ def _limit(value):
     return value
 
 
+def _event_limit(value):
+    if type(value) is not int or value < 1:
+        raise ValueError('事件批量必须是正整数')
+    return value
+
+
 @dataclass(frozen=True)
 class _OwnerBranch:
     tables: tuple
@@ -112,7 +118,9 @@ class RowCursor:
 
 class SegmentHistoryHandle:
     """恢复全部通过后才返回的查询句柄；close释放可重建磁盘文件。"""
-    def __init__(self, repository, seed, batch_size):
+    def __init__(self, repository, seed, batch_size, *, event_batch_size=256):
+        self.batch_size = _limit(batch_size)
+        self.event_batch_size = _event_limit(event_batch_size)
         self.repository = repository
         self.boundary = seed.target
         self.action_id = seed.ref[1]
@@ -134,7 +142,6 @@ class SegmentHistoryHandle:
             self.close()
             raise
         self.seed = seed
-        self.batch_size = _limit(batch_size)
         self.ready = False
         self.stats = {'projection_rows': 0, 'events': 0, 'candidate_pages': 0}
 
@@ -408,14 +415,14 @@ class SegmentHistoryHandle:
         with self.repository._read_connection() as connection:
             maximum=self.repository._boundary(connection)
             head=self.repository._object_seed(connection,'action',self.action_id,maximum,
-                event_batch_size=self.batch_size,include_snapshot=False,primary_only=True)
+                event_batch_size=self.event_batch_size,include_snapshot=False,primary_only=True)
         return maximum,head.head
 
     def _events(self, lower, upper, first, end, forward):
         previous = lower.last_event_id if forward else upper.last_event_id+1
         count = first
         while (count <= end if forward else count >= end):
-            events = self.repository._object_event_page(self.seed.ref,lower,upper,previous,count,forward=forward,batch_size=self.batch_size,remaining=abs(end-count)+1)
+            events = self.repository._object_event_page(self.seed.ref,lower,upper,previous,count,forward=forward,batch_size=self.event_batch_size,remaining=abs(end-count)+1)
             for event in events:
                 self.stats['events'] += 1
                 yield event

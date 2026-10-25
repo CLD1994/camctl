@@ -461,16 +461,17 @@ class HistoryRepository:
 
     def open_segment_history(
             self, action_id: int, boundary: HistoryBoundary, *,
-            strategy: str = "auto", batch_size: int = 128,
+            strategy: str = "auto", batch_size: int = 128, event_batch_size: int = 256,
     ) -> SegmentHistoryHandle:
         """完整恢复后返回有界动作句柄；调用者必须关闭句柄。"""
-        from camctl.history.bounded import SegmentHistoryHandle, _limit
+        from camctl.history.bounded import SegmentHistoryHandle, _limit, _event_limit
         _limit(batch_size)
+        _event_limit(event_batch_size)
         if strategy not in ("auto","initial","current","snapshot"):
             raise ValueError("未知历史恢复路径")
         with self._read_connection() as connection:
             seed = self._object_seed(connection, "action", action_id, boundary,
-                                     event_batch_size=batch_size, primary_only=True,
+                                     event_batch_size=event_batch_size, primary_only=True,
                                      include_snapshot=strategy != "initial",
                                      allow_current_snapshot=strategy == "snapshot")
         if strategy == "auto":
@@ -479,7 +480,7 @@ class HistoryRepository:
                         (choice.boundary == boundary or
                          seed.floor[1]-choice.position[1] < seed.head[1]-seed.floor[1])
                         else "current")
-        handle = SegmentHistoryHandle(self, seed, batch_size)
+        handle = SegmentHistoryHandle(self, seed, batch_size, event_batch_size=event_batch_size)
         try:
             return handle.restore(strategy)
         except (ReplayError,EventValidationError,ValueError,TypeError,KeyError) as error:
@@ -498,7 +499,7 @@ class HistoryRepository:
         return rows.get((table,entity_id))
 
     def related_primary_rows_at_h(
-        self, entity, column, value, boundary, *, batch_size=128
+        self, entity, column, value, boundary, *, batch_size=128, event_batch_size=128
     ):
         """按不可变关系读取 H 处独立实体，每页释放业务库连接。"""
         definition = load_enum_registry()["history_objects"][entity]
@@ -507,6 +508,8 @@ class HistoryRepository:
             raise ConsistencyError("历史关联读取只接受登记的不可变列")
         if type(batch_size) is not int or not 1 <= batch_size <= 128:
             raise ValueError("历史关联批次必须为1至128")
+        if type(event_batch_size) is not int or event_batch_size < 1:
+            raise ValueError("事件批量必须是正整数")
         after = 0
         while True:
             with self._read_connection() as connection:
@@ -528,7 +531,8 @@ class HistoryRepository:
             if not identities:
                 return
             for identity in identities:
-                row = self.restore_primary_at_h(entity, identity, boundary)
+                row = self.restore_primary_at_h(
+                    entity, identity, boundary, event_batch_size=event_batch_size)
                 if row is None:
                     raise ConsistencyError("H 处关联实体缺少主行")
                 yield identity, row
