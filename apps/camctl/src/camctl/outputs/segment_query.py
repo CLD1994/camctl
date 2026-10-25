@@ -7,6 +7,7 @@ from camctl.capture.files import FilePresenceSave
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.devices.bindings import DeviceBinding, binding_failure_details
+from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import ControlRequest
 from camctl.operations.attempts import (
     AttemptFinish,
@@ -102,12 +103,25 @@ def _target(connection, item_id):
     return item, dependency, output, file, binding
 
 
-async def _read_facts(runtime, pending):
+async def _read_facts(runtime, pending, *, ticket=None):
+    item_id = pending.item_id
+    intent = pending.intent
+
     def read(owned):
         connection = owned.connection
-        item, dependency, output, file, binding = _target(connection, pending.item_id)
+        item, dependency, output, file, binding = _target(connection, item_id)
         owner = row_facts(connection, "actions", dependency["action_id"])
-        last = _latest(connection, pending.item_id)
+        last = _latest(connection, item_id)
+        if ticket is not None and (
+            ticket.operation != "query"
+            or ticket.target_id != str(item_id)
+            or ticket.responsibility_key != f"obtain-exists/{item_id}"
+            or intent is None
+            or intent.action_id != owner["id"]
+            or last is None
+            or (ticket.run_id, ticket.attempt_id) != (last[0], last[5])
+        ):
+            raise ConsistencyError("原 QUERY 未派发票据与当前取回责任不符")
         present = None
         if (item["status"] == 1 and owner["status"] == 2 and not owner["cancel_requested"]
                 and output["availability"] not in (2, 3, 4)
@@ -116,6 +130,34 @@ async def _read_facts(runtime, pending):
         return item, dependency, output, file, binding, owner, last, present
 
     return await runtime.database.read(read, description="显式分段查询目标事实读取")
+
+
+async def _prepare_dispatch(runtime, pending):
+    """按原票据复核派发资格；本地未派发结果沿原尝试可靠保存。"""
+    facts = await _read_facts(runtime, pending, ticket=pending.ticket)
+    item, _dependency, _output, _file, _binding, owner, last, _present = facts
+    if last[6] != 1:
+        return None
+    if (item["status"] == 1 and owner["status"] == 2
+            and not owner["cancel_requested"] and last[1] in (1, 2)):
+        return facts
+    outcome = CallOutcome(
+        status=AttemptStatus.FAILED,
+        effect=EffectState.NO_EFFECT,
+        error=ErrorValue("canceled_before_dispatch" if owner["cancel_requested"]
+                         else "query_no_longer_required", "source_read"),
+        settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+            EvidenceValue("dispatch_prevented", 1, {})),
+    )
+    evidence = EvidenceRegistry((
+        EvidenceContract("dispatch_prevented", 1, "query", frozenset()),
+    ))
+    pending.finish = AttemptFinish(
+        pending.ticket, validate_outcome(pending.ticket, outcome, evidence),
+        runtime.occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED))
+    pending.finish_key = new_operation_key()
+    await _save_result(runtime, pending)
+    return None
 
 
 async def _save(runtime, pending, save, request):
@@ -326,7 +368,9 @@ async def _advance_one(runtime, pending):
         await _save(runtime, pending, *pending.business[:2])
     facts = await _read_facts(runtime, pending)
     item, dependency, output, file, binding, owner, last, _present = facts
-    if item["status"] != 1 or owner["status"] != 2 or owner["cancel_requested"]:
+    local_unsent = pending.intent is not None and not pending.dispatched
+    if ((item["status"] != 1 or owner["status"] != 2 or owner["cancel_requested"])
+            and not (local_unsent and last is not None and last[6] == 1)):
         return True
     owns_unsent = False
     if last is not None:
@@ -341,6 +385,10 @@ async def _advance_one(runtime, pending):
                                and pending.ticket.attempt_id == last[5])
                 if not owns_unsent:
                     raise ConsistencyError("原 QUERY 本地未派发票据与持久化尝试不符")
+                facts = await _prepare_dispatch(runtime, pending)
+                if facts is None:
+                    return True
+                item, dependency, output, file, binding, owner, last, _present = facts
             else:
                 if not await _recover(runtime, pending, last, binding):
                     return False
@@ -411,6 +459,10 @@ async def _advance_one(runtime, pending):
                 {"output_id": str(output["id"])},
             )
             return True
+        facts = await _prepare_dispatch(runtime, pending)
+        if facts is None:
+            return True
+        item, dependency, output, file, binding, owner, last, _present = facts
     if pending.dispatched:
         return False
     pending.dispatched = True
