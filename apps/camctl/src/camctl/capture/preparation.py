@@ -26,7 +26,7 @@ from camctl.operations.models import (
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import row_facts
 
@@ -77,14 +77,28 @@ def _completed(receipt, message):
 
 async def _save_owner(owner, database, operations):
     async def save_and_apply():
+        notification_errors = []
+
+        async def save(callback, *, key):
+            try:
+                return await database.write(callback, key=key)
+            except BaseException as error:
+                receipt = db_outcome_for(error)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                notification_errors.append(error)
+                return receipt
+
         if owner.refused is not None:
             return
         if owner.ticket is None:
-            result = _completed(await database.write(lambda owned: operations.begin_attempt(owner.intent, owner.intent_key, owned), key=owner.intent_key),
+            result = _completed(await save(lambda owned: operations.begin_attempt(owner.intent, owner.intent_key, owned), key=owner.intent_key),
                                 "设置准备意图未可靠保存")
             if result.ticket is None:
                 owner.refused = result.reason
                 owner.saved = True
+                if notification_errors:
+                    raise notification_errors[0]
                 return
             owner.ticket = result.ticket
         if owner.actual is not None and owner.finish is None:
@@ -106,9 +120,11 @@ async def _save_owner(owner, database, operations):
                              actual.outcome.error or ErrorValue("device_error", "device")))
             owner.finish = AttemptFinish(owner.ticket, validated, owner.returned_at, run_finish=end)
         if owner.finish is not None and not owner.saved:
-            _completed(await database.write(lambda owned: operations.finish_attempt(owner.finish, owner.result_key, owned), key=owner.result_key),
+            _completed(await save(lambda owned: operations.finish_attempt(owner.finish, owner.result_key, owned), key=owner.result_key),
                        "设置准备结果未可靠保存")
             owner.saved = True
+        if notification_errors:
+            raise notification_errors[0]
     return await settle_required(save_and_apply())
 
 
@@ -122,20 +138,34 @@ async def resume_preparation_saves(database, cache, *, operations=None, scheduli
     capture = CaptureRepository() if capture is None else capture
 
     async def save_and_apply():
+        notification_errors = []
+
+        async def save(callback, *, key):
+            try:
+                return await database.write(callback, key=key)
+            except BaseException as error:
+                receipt = db_outcome_for(error)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                notification_errors.append(error)
+                return receipt
+
         for owner in tuple(cache.owners.values()):
             await _save_owner(owner, database, operations)
         if cache.reservations:
             for action_id, (request, key) in tuple(cache.reservations.items()):
-                _completed(await database.write(lambda owned: scheduling.reserve_preparation(request, key, owned), key=key), "原准备占用未可靠保存")
+                _completed(await save(lambda owned: scheduling.reserve_preparation(request, key, owned), key=key), "原准备占用未可靠保存")
                 del cache.reservations[action_id]
         for action_id, (kind, request, key) in tuple(cache.endings.items()):
             if kind == "release":
-                value = _completed(await database.write(lambda owned: capture.release_occupancy(request, key, owned), key=key), "原准备释放未可靠保存")
+                value = _completed(await save(lambda owned: capture.release_occupancy(request, key, owned), key=key), "原准备释放未可靠保存")
                 if value.outcome.value == "rejected":
                     raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
             else:
-                _completed(await database.write(lambda owned: getattr(scheduling, kind)(request, key, owned), key=key), "原准备收场未可靠保存")
+                _completed(await save(lambda owned: getattr(scheduling, kind)(request, key, owned), key=key), "原准备收场未可靠保存")
             del cache.endings[action_id]
+        if notification_errors:
+            raise notification_errors[0]
     return await settle_required(save_and_apply())
 
 
@@ -260,13 +290,13 @@ async def _fail_preparation(runtime, action_id, reason, error=None):
             )
             (await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id))
             if reason == "baseline_read_failed":
-                finish_segmented_baseline_failure(runtime, action_id)
+                (await finish_segmented_baseline_failure(runtime, action_id))
             else:
                 if (await runtime.last_attempt(f"start/{action_id}")) is not None:
                     (await _save(runtime, action_id, runtime.operations, "finish_stale_runs",
                         StaleRunFinish((f"start/{action_id}",), RunOutcome.FAILED, now,
                                        ErrorValue("capture_failed", "execution", details))))
-                finish_segmented_preparation_failure(runtime, action_id)
+                (await finish_segmented_preparation_failure(runtime, action_id))
         elif (await runtime.last_attempt(f"start/{action_id}")) is None:
             (await runtime.save_capture_completion(finish))
         else:
@@ -352,7 +382,7 @@ async def advance_preparation(runtime, action_id):
         return BaselinePreparation(PreparationPhase.READY)
     if action["status"] == 2 and action["execution_spec_json"].get("result_policy") is not None:
         from camctl.capture.segment_completion import resume_segmented_preparation_failure
-        if resume_segmented_preparation_failure(runtime, action):
+        if (await resume_segmented_preparation_failure(runtime, action)):
             (await settle_preparation(runtime, action_id))
             return BaselinePreparation(PreparationPhase.ABORTED)
     if (await _start_precedes_preparation(runtime, action)):

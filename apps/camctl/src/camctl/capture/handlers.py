@@ -431,6 +431,15 @@ async def resume_result_check_closes(
 
 async def _write_capture_completion(database, pending: PendingCaptureCompletion, repository: CaptureRepository, scheduling=None):
     """按申请类型入队原成员；STOP 与动作分别沿各自原键保存。"""
+    async def save(callback, *, key, description):
+        try:
+            return await database.write(callback, key=key, description=description)
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            return replace(receipt, handoff_error=error)
+
     request = pending.request
     if isinstance(request, ExpireActionRequest):
         method = (SchedulingRepository() if scheduling is None else scheduling).expire_action
@@ -438,14 +447,16 @@ async def _write_capture_completion(database, pending: PendingCaptureCompletion,
     elif isinstance(request, StartCloseRequest):
         method, inputs = repository.close_start, (request.finish, request.action_finish, pending.key)
     elif isinstance(request, StopCloseRequest):
-        receipt = await database.write(
+        receipt = await save(
             lambda owned: OperationRepository().finish_stale_runs(request.finish, pending.key, owned),
             key=pending.key, description="保存原停止收尾")
         if receipt.kind is not DbOutcomeKind.COMPLETED or request.action_finish is None:
             return receipt
-        return await database.write(
+        action_receipt = await save(
             lambda owned: repository.finish_capture(request.action_finish, request.action_key, owned),
             key=request.action_key, description="保存停止后的原动作结果")
+        return (replace(action_receipt, handoff_error=receipt.handoff_error)
+                if receipt.handoff_error is not None and action_receipt.handoff_error is None else action_receipt)
     else:
         methods = {FinishRecordingResults: repository.finish_recording_results,
                    FinishCanceledCapture: repository.finish_canceled_capture,
@@ -455,7 +466,7 @@ async def _write_capture_completion(database, pending: PendingCaptureCompletion,
         if method is None:
             raise ConsistencyError("原拍摄完整申请类型无效")
         inputs = (request, pending.key)
-    return await database.write(lambda owned: method(*inputs, owned),
+    return await save(lambda owned: method(*inputs, owned),
         key=pending.key, description="保存原拍摄收场")
 
 
@@ -473,12 +484,14 @@ async def resume_capture_completions(
                 continue
             if pending.action_id != identity:
                 raise ConsistencyError("原拍摄完整申请与所属动作不一致")
+            notification_error = None
             canceled = isinstance(pending.request, FinishCanceledCapture)
             start_close = isinstance(pending.request, StartCloseRequest)
             stop_close = isinstance(pending.request, StopCloseRequest)
             stop_only = stop_close and pending.request.action_finish is None
             if pending.input_reads is None:
                 receipt = await _write_capture_completion(database, pending, repository, scheduling)
+                notification_error = receipt.handoff_error
                 if receipt.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(
                         f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
@@ -486,6 +499,8 @@ async def resume_capture_completions(
                     if receipt.value is None or receipt.value.outcome is not ExpireOutcome.EXPIRED:
                         raise ConsistencyError("原准备后过期申请未取得可靠过期结果")
                     del pending_capture_completions[identity]
+                    if notification_error is not None:
+                        raise notification_error
                     continue
                 if not start_close and not stop_only:
                     if receipt.value is None:
@@ -495,6 +510,8 @@ async def resume_capture_completions(
                             for responsibility in pending.request.finish.responsibility_keys:
                                 retry_gate.cleared(responsibility)
                         del pending_capture_completions[identity]
+                        if notification_error is not None:
+                            raise notification_error
                         continue
                 if (start_close or stop_close) and retry_gate is not None:
                     for responsibility in pending.request.finish.responsibility_keys:
@@ -521,12 +538,20 @@ async def resume_capture_completions(
                     pending = replace(pending, input_reads=input_reads)
                     pending_capture_completions[identity] = pending
             if pending.input_reads is not None:
-                result = await database.write(lambda owned: OperationRepository().finish_stale_runs(
-                    pending.input_reads.request, pending.input_reads.key, owned), key=pending.input_reads.key)
+                try:
+                    result = await database.write(lambda owned: OperationRepository().finish_stale_runs(
+                        pending.input_reads.request, pending.input_reads.key, owned), key=pending.input_reads.key)
+                except BaseException as error:
+                    result = db_outcome_for(error)
+                    if result is None or result.kind is not DbOutcomeKind.COMPLETED:
+                        raise
+                    notification_error = notification_error or error
                 if result.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(
                         f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}")
             del pending_capture_completions[identity]
+            if notification_error is not None:
+                raise notification_error
     return await settle_required(save_and_apply())
 
 
@@ -1960,7 +1985,7 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
                 finish_segmented_baseline_failure,
             )
 
-            finish_segmented_baseline_failure(runtime, action["id"])
+            (await finish_segmented_baseline_failure(runtime, action["id"]))
         else:
             (await runtime.save_capture_completion(
                 FinishCapture(
@@ -2355,13 +2380,13 @@ async def _settle_stop_exhausted(runtime: CaptureRuntime, action) -> None:
         (anchor,) = (await runtime.database.read(lambda owned, inputs=("SELECT e.id FROM history_events e JOIN json_each(e.body_json,'$.rows') r "
             "WHERE json_extract(r.value,'$.table')='operation_runs' AND json_extract(r.value,'$.id')=? "
             "AND json_extract(r.value,'$.after.values.status')=? ORDER BY e.id DESC LIMIT 1", ((await _stop_run_id(runtime, action["id"])), int(_RUN_STATUS.UNCONFIRMED))): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
-        finish_segmented_external_failure(
+        (await finish_segmented_external_failure(
             runtime,
             action["id"],
             ResultCheckEndReason.STOP_UNCONFIRMED_CLOSED,
             failure,
             anchor,
-        )
+        ))
     else:
         (await _close_stop_exhausted(runtime, action, finish_action=True))
 
@@ -2656,9 +2681,9 @@ async def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
         from camctl.capture.action6_recovery import finalize_pending_action6_inspections
 
-        if not finalize_pending_action6_inspections(
+        if not (await finalize_pending_action6_inspections(
             runtime, action_id, reason="source_canceled"
-        ):
+        )):
             return
     if (
         policy == CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value
@@ -2670,7 +2695,7 @@ async def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
     ) and (await runtime.action(action_id))["execution_started"]:
         from camctl.capture.segment_completion import finish_segmented_cancellation
 
-        finish_segmented_cancellation(runtime, action_id)
+        (await finish_segmented_cancellation(runtime, action_id))
         if unstarted:
             (await runtime.resume_baselines(action_id))
         return
@@ -3098,9 +3123,9 @@ async def _handle_binding_failure(
         if action["cancel_requested"]:
             (await _finish_canceled_capture(runtime, action["id"]))
         else:
-            finish_segmented_external_failure(
+            (await finish_segmented_external_failure(
                 runtime, action["id"], ResultCheckEndReason.BINDING_UNAVAILABLE, failure
-            )
+            ))
         return True
 
     request = (await _binding_failure_request(runtime, action, details))

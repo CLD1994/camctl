@@ -196,5 +196,5 @@ class _Finishes:
     def __init__(self) -> None:
         self.saved: list = []
 
-    def finish(self, ticket, outcome) -> None:
+    async def finish(self, ticket, outcome) -> None:
         self.saved.append((ticket, outcome))
