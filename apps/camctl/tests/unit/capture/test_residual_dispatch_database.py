@@ -18,6 +18,35 @@ from camctl.scheduling.rules import LaunchWindow
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("winddown", [False, True])
+async def test_binding_failure_waiting_for_running_call_does_not_report_progress(mocker, winddown):
+    from camctl.capture.residual import pass_residual_gate, _advance_winddown
+
+    candidate = ResidualCandidate(7, 20, 1, 1)
+    trigger = {"id": 21, "device_id": "camera", "status": 2, "cancel_requested": 0}
+    database = create_autospec(BusinessDatabase, instance=True)
+    runtime = SimpleNamespace(database=database, wall_us=lambda: 150,
+        window_of=lambda _: LaunchWindow(100, 200),
+        action=AsyncMock(return_value=trigger), capture=object())
+    details = {"reason": "original_binding_unavailable"}
+    if winddown:
+        database.read.side_effect = [(21, 7, 2, 1), (3, 3), ("followup/21/7",), (1,)]
+        mocker.patch("camctl.capture.residual._original_binding_failure", autospec=True, return_value=details)
+    else:
+        database.read.side_effect = [(candidate,), (30, 21, 2), ("followup/21/7",), (1,)]
+        mocker.patch("camctl.capture.residual._original_binding_failure", autospec=True,
+                     side_effect=[None, details])
+        mocker.patch("camctl.capture.software_recovery.pass_software_recovery_gate", autospec=True,
+                     return_value=None)
+    notices = []
+    if winddown:
+        await _advance_winddown(runtime, candidate, (30, 21, 2), on_progress=lambda: notices.append(True))
+    else:
+        assert await pass_residual_gate(runtime, trigger, on_progress=lambda: notices.append(True)) is False
+    assert notices == []
+    database.write.assert_not_awaited()
+
+
 @pytest.mark.parametrize("stage", ["intent", "facts"])
 @pytest.mark.parametrize("change", ["canceled", "terminal", "expired"])
 @pytest.mark.parametrize("already_dispatched", [False, True])

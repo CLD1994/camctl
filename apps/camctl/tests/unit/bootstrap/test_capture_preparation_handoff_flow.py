@@ -83,14 +83,15 @@ class _Connection:
             return _Cursor(rows)
         if sql.startswith("SELECT a.status,a.effect_state,e.occurred_at FROM operation_attempts"):
             return _Cursor(())
-        if sql.startswith("SELECT id, device_id, scheduled_at, max_delay_ms FROM actions"):
+        if sql.startswith("SELECT id, device_id, scheduled_at, max_delay_ms, first_window_observed_at FROM actions"):
             now = parameters[0]
             if "device_id=?" in sql:
                 device_id, identities = parameters[1], parameters[2:-1]
             else:
                 device_id, identities = None, parameters[1:-1]
             rows = tuple(
-                (action["id"], action["device_id"], action["scheduled_at"], action["max_delay_ms"])
+                (action["id"], action["device_id"], action["scheduled_at"], action["max_delay_ms"],
+                 action["first_window_observed_at"])
                 for action in world.actions.values()
                 if action["id"] in identities
                 and (device_id is None or action["device_id"] == device_id)
@@ -187,6 +188,11 @@ class _World:
         self.runtime.prepare_lead_s = Decimal(10)
         self.runtime.start_config = AttemptConfig(3, Decimal("0.5"), Decimal(3))
         self.runtime.pending_baselines = {}
+        self.runtime.pending_result_closes = {}
+        self.runtime.pending_capture_completions = {}
+        self.runtime.pending_file_observations = {}
+        self.runtime.pending_start_results = {}
+        self.runtime.pending_segment_writes = {}
         self.runtime.pending_read_business = {}
         self.runtime.pending_read_results = {}
         self.runtime.pending_read_ends = {}

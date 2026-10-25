@@ -37,7 +37,7 @@ from camctl.operations.attempts import (
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.scheduling import ExpireActionRequest
+from camctl.persistence.repositories.scheduling import ExpireActionRequest, ExpireOutcome
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
 from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
@@ -249,7 +249,7 @@ async def _finish_original_binding_failure(
     return True
 
 
-async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
+async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any], *, on_progress=None) -> bool:
     """首次控制前检查当前条件：True 继续争取启动，False 不派发。
 
     无残留候选或已有可靠空闲判定与成功收场时放行；确认已知残留则
@@ -272,6 +272,8 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise RuntimeError(
                 f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+        if on_progress is not None and outcome.value.outcome is ExpireOutcome.EXPIRED:
+            on_progress()
         return False
     if phase is WindowPhase.BEFORE_START:
         return False
@@ -279,7 +281,7 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
         # 普通动作先取得本地执行身份，再由其绑定失败事务结束。
         return True
     from camctl.capture.software_recovery import pass_software_recovery_gate
-    recovery = await pass_software_recovery_gate(runtime, trigger)
+    recovery = await pass_software_recovery_gate(runtime, trigger, on_progress=on_progress)
     if recovery is not None:
         if recovery:
             return True
@@ -298,6 +300,8 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     if flow is None and (await runtime.database.read(lambda owned, inputs=(candidate.activity_id,), options=dict(): _succeeded_winddown(owned.connection, inputs[0], **options), description="读取拍摄直接事实")):
         # 成功流程已存在而活动未收口：补齐收场后放行（中断恢复）。
         (await _conclude_activity(runtime, candidate.action_id))
+        if on_progress is not None:
+            on_progress()
         return not (await runtime.database.read(lambda owned, inputs=(trigger["device_id"],), options=dict(): residual_candidates(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if flow is None and (await runtime.database.read(lambda owned, inputs=(trigger["id"],), options=dict(): _trigger_idle_confirmed(owned.connection, inputs[0], **options), description="读取拍摄直接事实")):
         return True
@@ -306,19 +310,21 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
         if trigger["status"] == 1:
             # ACTION_STARTED 是执行失败的前提，此处只放行本地开始。
             return True
-        (await _finish_original_binding_failure(runtime, candidate, details, trigger["id"]))
+        changed = await _finish_original_binding_failure(runtime, candidate, details, trigger["id"])
+        if changed and on_progress is not None:
+            on_progress()
         return False
     if flow is not None:
-        await _advance_winddown(runtime, candidate, flow)
+        await _advance_winddown(runtime, candidate, flow, on_progress=on_progress)
         return False
     if details is not None:
         return False
-    return await _preflight_check(runtime, trigger, candidate)
+    return await _preflight_check(runtime, trigger, candidate, on_progress=on_progress)
 
 
 @owned_tool_call
 async def _preflight_check(
-    runtime: Any, trigger: Mapping[str, Any], candidate: ResidualCandidate
+    runtime: Any, trigger: Mapping[str, Any], candidate: ResidualCandidate, *, on_progress=None,
 ) -> bool:
     """执行一次执行前检查并按观察分区；可靠空闲时返回 True。"""
 
@@ -335,13 +341,15 @@ async def _preflight_check(
         return False
     ticket = (await _begin_query_attempt(
         runtime, responsibility, trigger["id"], _NO_TARGET,
-        QueryPurpose.BEFORE_EXECUTION))
+        QueryPurpose.BEFORE_EXECUTION, on_progress=on_progress))
     if ticket is None:
         return False
     response = await runtime.state_query.query_state(ControlRequest(
         operation="query", binding=_binding(trigger),
         params=trigger["effective_params_json"], ticket=ticket,
         timeout_s=runtime.query_config.timeout_s))
+    if on_progress is not None:
+        on_progress()
     outcome, _ = _operation_outcome(
         response, "activity_status", evidence_type="query_returned")
     observed = _observed_activity(response)
@@ -353,7 +361,7 @@ async def _preflight_check(
         # 确认目标残留仍在录制：检查责任结束，建立收场流程并首停。
         (await runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED))
         if candidate.stop_capable:
-            await _stop_residual(runtime, trigger["id"], candidate)
+            await _stop_residual(runtime, trigger["id"], candidate, on_progress=on_progress)
         return False
     # 其他有效活动占用或调用错误：责任未满足，按间隔再次检查。
     (await runtime.finish(ticket, outcome, retry_wait=True))
@@ -362,7 +370,7 @@ async def _preflight_check(
 
 async def _begin_query_attempt(
     runtime: Any, responsibility: str, action_id: int, target: AttemptTarget,
-    purpose: QueryPurpose,
+    purpose: QueryPurpose, *, on_progress=None,
 ):
     """提交查询意图并返回票据；预算耗尽或等待未到返回 None。"""
 
@@ -392,13 +400,17 @@ async def _begin_query_attempt(
             finished = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
             if finished.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"查询预算耗尽的结果未保存: {finished.error}")
+            if on_progress is not None:
+                on_progress()
         return None
+    if on_progress is not None:
+        on_progress()
     return outcome.value.ticket
 
 
 async def _advance_winddown(
     runtime: Any, candidate: ResidualCandidate,
-    flow: tuple[int, int, int],
+    flow: tuple[int, int, int], *, on_progress=None,
 ) -> None:
     """把未收口的收场流程推进一个可执行步骤。
 
@@ -431,31 +443,35 @@ async def _advance_winddown(
         result = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if result.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"未派发残留收场的结束事实未保存: {result.error}")
+        if on_progress is not None:
+            on_progress()
         return
     attempt = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _last_attempt(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
         return
     details = (await _original_binding_failure(runtime, (await runtime.action(candidate.action_id))))
     if details is not None:
-        (await _finish_original_binding_failure(runtime, candidate, details))
+        changed = await _finish_original_binding_failure(runtime, candidate, details)
+        if changed and on_progress is not None:
+            on_progress()
         return
     unconfirmed = (
         attempt is not None
         and int(attempt[0]) == int(_ATTEMPT_STATUS.SUCCEEDED)
         and int(attempt[1]) == int(_EFFECT_STATE.UNKNOWN))
     if unconfirmed and await _confirm_by_query(
-            runtime, trigger_id, candidate):
+            runtime, trigger_id, candidate, on_progress=on_progress):
         return
     if (await runtime.retry_wait_remaining(
             responsibility,
             runtime.residual_config.retry_interval_s)) is not None:
         return
-    await _stop_residual(runtime, trigger_id, candidate)
+    await _stop_residual(runtime, trigger_id, candidate, on_progress=on_progress)
 
 
 @owned_tool_call
 async def _stop_residual(
-    runtime: Any, trigger_id: int, candidate: ResidualCandidate,
+    runtime: Any, trigger_id: int, candidate: ResidualCandidate, *, on_progress=None,
 ) -> None:
     """按收场预算发送一次停止调用并保存尝试结果。
 
@@ -496,7 +512,11 @@ async def _stop_residual(
     if begin.value.disposition is not BeginDisposition.GRANTED:
         if begin.value.reason == "budget_exhausted":
             (await _finish_winddown_exhausted(runtime, responsibility, candidate))
+            if on_progress is not None:
+                on_progress()
         return
+    if on_progress is not None:
+        on_progress()
     ticket = begin.value.ticket
     def read_dispatch_facts(owned):
         return (row_facts(owned.connection, "actions", candidate.action_id),
@@ -560,7 +580,7 @@ def _stop_error(candidate: ResidualCandidate, run_id: int):
 
 @owned_tool_call
 async def _confirm_by_query(
-    runtime: Any, trigger_id: int, candidate: ResidualCandidate,
+    runtime: Any, trigger_id: int, candidate: ResidualCandidate, *, on_progress=None,
 ) -> bool:
     """残留收场确认查询；本轮已由查询处理时返回 True。
 
@@ -593,7 +613,7 @@ async def _confirm_by_query(
     ticket = (await _begin_query_attempt(
         runtime, responsibility, trigger_id,
         AttemptTarget(activity_id=candidate.activity_id),
-        QueryPurpose.RESIDUAL_STOP_CONFIRMATION))
+        QueryPurpose.RESIDUAL_STOP_CONFIRMATION, on_progress=on_progress))
     if ticket is None:
         return False
     owner = (await runtime.action(candidate.action_id))
@@ -601,6 +621,8 @@ async def _confirm_by_query(
         operation="query", binding=_binding(owner),
         params=owner["effective_params_json"], ticket=ticket,
         timeout_s=runtime.query_config.timeout_s))
+    if on_progress is not None:
+        on_progress()
     outcome, _ = _operation_outcome(
         response, "activity_status", evidence_type="query_returned")
     observed = _observed_activity(response)

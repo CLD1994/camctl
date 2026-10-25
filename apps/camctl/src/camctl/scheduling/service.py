@@ -39,7 +39,7 @@ class ReadyCheck(Protocol):
 class ActionHandler(Protocol):
     """一个动作类型的推进处理器。"""
 
-    async def __call__(self, action_id: int, context: Any) -> None: ...
+    async def __call__(self, action_id: int, context: Any) -> object | None: ...
 
 
 def collect_ready(descriptors: Iterable[ActionDescriptor]) -> list[int]:

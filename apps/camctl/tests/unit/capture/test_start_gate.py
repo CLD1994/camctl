@@ -33,6 +33,11 @@ def _runtime(mocker, *, now=100, action_type="camera_record"):
     runtime.pending_read_ends = {}
     runtime.pending_baselines = {}
     runtime.pending_result_scans = {}
+    runtime.pending_result_closes = {}
+    runtime.pending_capture_completions = {}
+    runtime.pending_file_observations = {}
+    runtime.pending_start_results = {}
+    runtime.pending_segment_writes = {}
     runtime.capture = mocker.create_autospec(CaptureRepository, instance=True)
     runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
     runtime.wall_us = mocker.Mock(return_value=now)

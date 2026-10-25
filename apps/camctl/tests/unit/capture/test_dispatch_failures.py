@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.capture import dispatch
-from camctl.capture.handlers import CaptureRuntime
+from camctl.capture.handlers import CaptureRuntime, HandlerOutcome
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import DeviceConfigurationError
 from camctl.scheduling.service import ActionDescriptor
@@ -62,3 +62,17 @@ async def test_dispatch_ordinary_action_failure_preserves_remaining_actions(monk
     assert outcomes[0] == (1, failure)
     assert outcomes[1][0] == 2
     assert outcomes[1][1].phase == "dispatched"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_preserves_the_handlers_explicit_waiting_fact(monkeypatch):
+    runtime = create_autospec(CaptureRuntime, instance=True, spec_set=True)
+    outcome = HandlerOutcome("waiting", wakeup_required=False)
+
+    async def handler(action_id, context):
+        return outcome
+
+    monkeypatch.setattr(dispatch, "capture_handler", lambda action_type: handler)
+    results = await dispatch.dispatch_ready(runtime, [ActionDescriptor(1, "camera_record", True)])
+    assert results == [(1, outcome)]
+    assert results[0][1] is outcome

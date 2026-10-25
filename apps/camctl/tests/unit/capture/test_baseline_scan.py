@@ -77,6 +77,7 @@ async def test_136_paths_use_one_scan_and_close_after_fixed_save(mocker):
     result = await prepare_baseline(2, 1, runtime=runtime)
 
     assert result.phase is PreparationPhase.READY
+    assert result.wakeup_required is True
     assert (state.chunks, state.entries) == (2, 136)
     directory.directory_scan.assert_called_once()
     directory.read_directory.assert_not_awaited()
@@ -103,6 +104,44 @@ async def test_task_scoped_photo_is_ready_without_scanning_or_creating_baseline_
     directory.directory_scan.assert_not_called()
     directory.read_directory.assert_not_awaited()
     scan.read_directory.assert_not_awaited()
+
+
+@pytest.mark.parametrize("segmented", [False, True])
+async def test_reading_existing_fixed_baseline_does_not_request_another_round(mocker, segmented):
+    from camctl.capture.segment_baseline import prepare_segment_baseline
+
+    runtime, directory, scan, _ = (_segmented_world(mocker) if segmented else _world(mocker))
+    runtime.capture.baseline_ref.side_effect = None
+    runtime.capture.baseline_ref.return_value = BaselineRef(1, BaselineState.FIXED, 11, 12, 2, 136)
+    for _ in range(6):
+        result = (await prepare_segment_baseline(2, 1, runtime) if segmented
+                  else await prepare_baseline(2, 1, runtime=runtime))
+        assert result.phase is PreparationPhase.READY
+        assert result.wakeup_required is False
+    directory.directory_scan.assert_not_called()
+    scan.read_directory.assert_not_awaited()
+    runtime.capture.fix_baseline.assert_not_called()
+
+
+async def test_segment_baseline_without_directory_waits_after_delivering_one_actual_page(mocker):
+    from camctl.capture.segment_baseline import prepare_segment_baseline
+
+    runtime, directory, scan, _ = _segmented_world(mocker)
+    pages = iter(scan.read_directory.side_effect)
+
+    async def read(request, *, stop):
+        runtime.baseline_directory = None
+        return next(pages)
+
+    scan.read_directory.side_effect = read
+    first = await prepare_segment_baseline(2, 1, runtime)
+    assert first.phase is PreparationPhase.WAITING
+    assert first.wakeup_required is True
+    for _ in range(6):
+        waiting = await prepare_segment_baseline(2, 1, runtime)
+        assert waiting.phase is PreparationPhase.WAITING
+        assert waiting.wakeup_required is False
+    assert scan.read_directory.await_count == 1
 
 
 def _segmented_world(mocker, *, scanning=True):
@@ -157,6 +196,7 @@ async def test_segment_baseline_uses_same_scan_with_original_page_intents(mocker
     result = await prepare_segment_baseline(2, 1, runtime)
 
     assert result.phase is PreparationPhase.READY
+    assert result.wakeup_required is True
     assert (state.chunks, state.entries) == (2, 136)
     assert runtime.capture.save_baseline_read_intent.call_count == 2
     assert runtime.capture.save_baseline_read_return.call_count == 2
@@ -169,6 +209,29 @@ async def test_segment_baseline_uses_same_scan_with_original_page_intents(mocker
     directory.directory_scan.assert_called_once()
     directory.read_directory.assert_not_awaited()
     scan.close.assert_called_once()
+
+
+async def test_segment_saved_intent_progress_survives_later_directory_wait(mocker):
+    from camctl.capture.baseline_models import BaselineReadIntent
+    from camctl.capture.baseline_reads import PendingBaselineRead
+    from camctl.capture.segment_baseline import prepare_segment_baseline
+    from camctl.contracts.values import new_operation_key
+
+    runtime, directory, scan, _ = _segmented_world(mocker)
+    runtime.baseline_directory = None
+    intent = BaselineReadIntent(2, 1, BINDING, ROOTS, None, Decimal("2"),
+        runtime.capture.baseline_ref(1, runtime.owned), 1, new_operation_key(), new_operation_key(), NOW)
+    owner = PendingBaselineRead(intent)
+    owner.saves.begin(intent, key=intent.call_key)
+    runtime.pending_baselines[2] = PendingBaseline(1, BINDING, ROOTS, read_owner=owner)
+    first = await prepare_segment_baseline(2, 1, runtime)
+    assert first.phase is PreparationPhase.WAITING
+    assert first.wakeup_required is True
+    again = await prepare_segment_baseline(2, 1, runtime)
+    assert again.phase is PreparationPhase.WAITING
+    assert again.wakeup_required is False
+    runtime.capture.save_baseline_read_intent.assert_called_once()
+    scan.read_directory.assert_not_awaited()
 
 
 @pytest.mark.asyncio

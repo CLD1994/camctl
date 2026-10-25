@@ -36,6 +36,7 @@ class PendingBaselineRead:
     #: 只授予本会话新建的原意图；冷恢复意图不能据此重做目录调用。
     locally_created: bool=True
     aborted_before_call: bool=False
+    wakeup_pending: bool=False
 
 
 async def resume_baseline_read_save(owner,*,capture,database):
@@ -66,6 +67,7 @@ async def _resume_baseline_read_save(owner, *, capture, database):
             raise _PendingReadSave()
         request=pending.request
         response=owner.saves.take()
+        owner.wakeup_pending=True
         if isinstance(request,BaselineReadIntent):
             owner.intent_view=response
             if notification_error is not None:
@@ -109,6 +111,7 @@ async def _read_and_freeze(owner,directory,wall_us,baseline=None):
     actual=(await directory.read_directory(request,stop=_DirectoryStop()) if baseline is None
             else await baseline.read_directory(request,directory=directory,stop=_DirectoryStop()))
     owner.actual_return=actual
+    owner.wakeup_pending=True
     if not isinstance(actual,DirectoryRead):
         raise ConsistencyError('目录调用没有交回真实页或实际错误')
     owner.clock_attempted=True

@@ -254,6 +254,7 @@ class HandlerOutcome:
 
     phase: str
     detail: str | None = None
+    wakeup_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -1029,6 +1030,7 @@ class CaptureRuntime(_FileObservationSaves):
         result = (await resume_baseline_settlement(action_id, runtime=self))
         if result is not None and result.phase is PreparationPhase.PENDING:
             raise ConsistencyError(f"原基准保存未可靠完成: {result.database_error}")
+        return result
 
     def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic | SoftwareRecoveryDiagnostic) -> None:
         if diagnostic == self.last_recovery_diagnostic:
@@ -3564,7 +3566,13 @@ async def _resume_internal_read_results(runtime):
     await retry_read_ends(scope)
 
 
-async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
+async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOutcome | None:
+    pending_at_entry = any((
+        context.pending_result_closes, context.pending_capture_completions,
+        context.pending_baselines, context.pending_file_observations,
+        context.pending_start_results, context.pending_segment_writes,
+        context.pending_read_business, context.pending_read_results, context.pending_read_ends,
+    ))
     (await context.resume_result_check_closes(action_id))
     (await context.resume_capture_completions(action_id))
     (await context.resume_baselines(action_id))
@@ -3634,6 +3642,9 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> None:
     if decision.phase not in (RecordingPhase.CONTROL_COMPLETE,
                               RecordingPhase.VERIFY_FILE_COMPLETE):
         # 等计时；在途停止由尝试收场后重入推进。
+        if decision.phase is RecordingPhase.WAIT_RECORD:
+            return HandlerOutcome("waiting", wakeup_required=(
+                pending_at_entry or open_start[0] == int(_ATTEMPT_STATUS.RUNNING)))
         return
     (await _conclude_activity(context, action_id))
     if canceled:

@@ -1,5 +1,5 @@
 """启动前完整目录基准的有界收集与原保存责任恢复。"""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import asyncio
 
@@ -36,6 +36,7 @@ class BaselinePreparation:
     phase: PreparationPhase
     error: ErrorValue | None = None
     database_error: object | None = None
+    wakeup_required: bool = True
 
 
 @dataclass
@@ -60,6 +61,7 @@ class PendingBaseline:
     directory_scan: DirectoryScan | None = None
     completed: bool = False
     closed: bool = False
+    wakeup_pending: bool = False
 
     async def read_directory(self, request, *, directory, stop):
         if self.closed or self.completed:
@@ -73,7 +75,9 @@ class PendingBaseline:
         if self.directory_scan is None and callable(factory):
             self.directory_scan = factory(request)
         reader = directory if self.directory_scan is None else self.directory_scan
-        return await reader.read_directory(request, stop=stop)
+        result = await reader.read_directory(request, stop=stop)
+        self.wakeup_pending = True
+        return result
 
     def close(self):
         """真实调用结束后释放清单；失败时保留原清单供再次关闭。"""
@@ -83,6 +87,8 @@ class PendingBaseline:
         if self.directory_scan is not None:
             self.directory_scan.close()
             self.directory_scan = None
+        if not self.closed:
+            self.wakeup_pending = True
         self.closed = True
 
 
@@ -144,7 +150,20 @@ async def recover_terminal_baselines(*, runtime, limit=None):
 
 async def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
     """恢复原完整申请，不依赖当前驱动、绑定或动作是否已有终态。"""
-    return await settle_required(_resume_baseline_save(action_id, runtime=runtime))
+    pending = runtime.pending_baselines.get(action_id)
+    result = await settle_required(_resume_baseline_save(action_id, runtime=runtime))
+    return _with_wakeup(result, pending)
+
+
+def _with_wakeup(result, *owners):
+    if result is None:
+        return None
+    changed = False
+    for owner in owners:
+        if owner is not None and owner.wakeup_pending:
+            owner.wakeup_pending = False
+            changed = True
+    return replace(result, wakeup_required=True) if changed and not result.wakeup_required else result
 
 
 async def _resume_baseline_save(action_id, *, runtime):
@@ -156,13 +175,13 @@ async def _resume_baseline_save(action_id, *, runtime):
         return BaselinePreparation(PreparationPhase.READY)
     if pending.in_call:
         # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     if pending.read_owner is not None:
         from camctl.capture.segment_baseline import consume_read
 
         if not (await consume_read(pending, runtime)):
             if pending.read_owner.saves.pending is None:
-                return BaselinePreparation(PreparationPhase.WAITING)
+                return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
             return BaselinePreparation(
                 PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
             )
@@ -189,10 +208,11 @@ async def _resume_baseline_save(action_id, *, runtime):
             if receipt.value.outcome is ReleaseOutcome.REJECTED:
                 raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
             pending.completed = True
+            pending.wakeup_pending = True
             close_baseline(action_id, runtime=runtime)
             if notification_error is not None:
                 raise notification_error
-            return BaselinePreparation(PreparationPhase.READY)
+            return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
         original = held.request
         try:
             receipt = await pending.saves.resume_save(runtime.capture, runtime.database)
@@ -204,12 +224,13 @@ async def _resume_baseline_save(action_id, *, runtime):
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             raise _PendingSave(receipt.error)
         pending.saves.take()
+        pending.wakeup_pending = True
         if isinstance(original, BaselineFixSave):
             pending.completed = True
             close_baseline(action_id, runtime=runtime)
             if notification_error is not None:
                 raise notification_error
-            return BaselinePreparation(PreparationPhase.READY)
+            return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
         pending.chunks = original.chunk_no
         pending.entries += len(original.entries)
         pending.cursor = pending.next_cursor
@@ -235,7 +256,7 @@ async def release_preparation(action_id, *, runtime):
     if pending is None:
         return None
     if not (await runtime.database.read(lambda owned, inputs=(pending.activity_id,), options=dict(): runtime.capture.preparation_calls_resolved(*inputs, owned, **options), description="读取已保存拍摄事实")):
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     if pending.in_call or pending.saves.pending is not None or pending.read_owner is not None:
         raise ConsistencyError("准备调用或原页保存仍未完成，不能形成释放申请")
     if pending.release is None:
@@ -268,6 +289,12 @@ async def resume_baseline_settlement(action_id, *, runtime):
 
 
 async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> BaselinePreparation:
+    pending = runtime.pending_baselines.get(action_id)
+    result = await _prepare_baseline(action_id, activity_id, runtime=runtime)
+    return _with_wakeup(result, pending, runtime.pending_baselines.get(action_id))
+
+
+async def _prepare_baseline(action_id: int, activity_id: int, *, runtime) -> BaselinePreparation:
     resumed = (await resume_baseline_save(action_id, runtime=runtime))
     if resumed is not None:
         return resumed
@@ -277,11 +304,11 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
         raise ConsistencyError("基准准备缺少原动作及活动身份")
     ownership = enum_for("device_activities.ownership_mode")
     if activity["ownership_mode"] != int(ownership.BASELINE_COMPARISON):
-        return BaselinePreparation(PreparationPhase.READY)
+        return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
     ref = (await runtime.database.read(lambda owned, inputs=(activity_id,), options=dict(): runtime.capture.baseline_ref(*inputs, owned, **options), description="读取已保存拍摄事实"))
     if ref.state is BaselineState.FIXED:
         close_baseline(action_id, runtime=runtime)
-        return BaselinePreparation(PreparationPhase.READY)
+        return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
     dispatch = enum_for("device_activities.dispatch_state")
     if activity["dispatch_state"] != int(dispatch.NOT_DISPATCHED):
         raise ConsistencyError("已派发或可能派发的活动不能重新收集基准")
@@ -298,11 +325,11 @@ async def prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Base
     if pending.activity_id != activity_id:
         raise ConsistencyError("基准准备拥有者不得更换原活动")
     if pending.in_call:
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     if pending.error is not None:
         return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)
     if runtime.baseline_directory is None:
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     while True:
         check_call_interruption()
         from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase

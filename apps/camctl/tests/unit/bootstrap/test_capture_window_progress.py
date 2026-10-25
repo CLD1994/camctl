@@ -10,7 +10,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.flows import CaptureFlow
-from camctl.capture.handlers import CaptureRuntime
+from camctl.capture.handlers import CaptureRuntime, HandlerOutcome
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.pages import Page
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -190,7 +190,7 @@ async def test_saved_observation_does_not_hide_new_candidate_or_actual_task_comp
         entered.set()
         await release.wait()
         first.status = 3
-        return []
+        return [(first.identity, HandlerOutcome("terminal"))]
 
     mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True,
                  side_effect=finish_actual_work)
@@ -217,6 +217,117 @@ async def test_saved_observation_does_not_hide_new_candidate_or_actual_task_comp
     finally:
         release.set()
         await state.flow.settle()
+
+
+@pytest.mark.parametrize("wakeup_required", [False, True])
+async def test_preparation_completion_uses_explicit_recheck_fact(mocker, wakeup_required):
+    from camctl.capture.baseline import BaselinePreparation, PreparationPhase
+
+    state = _CaptureState(mocker, (_Action(1, 0, 1000, first_observed_at=0),))
+    state.context.wake = WorkNotifier()
+    state.runtime.capture_preparation_supported = True
+    release = asyncio.Event()
+
+    async def prepare(runtime, action_id):
+        await release.wait()
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=wakeup_required)
+
+    mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True, side_effect=prepare)
+    mocker.patch("camctl.capture.preparation.discard_terminal_preparation", autospec=True, return_value=False)
+    mocker.patch("camctl.capture.residual._original_binding_failure", autospec=True, return_value=None)
+    mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    try:
+        for _ in range(6):
+            release.clear()
+            await state.flow(state.context)
+            release.set()
+            await state.flow.settle()
+        assert state.context.wake.snapshot().version == (6 if wakeup_required else 0)
+        state.repository.start_action.assert_not_called()
+        state.repository.observe_window.assert_not_called()
+    finally:
+        release.set()
+        await state.flow.settle()
+
+
+async def test_capture_failure_notifies_before_the_retained_error_is_consumed(mocker):
+    state = _CaptureState(mocker, (_Action(1, 0, 1000, first_observed_at=0),))
+    state.context.wake = WorkNotifier()
+    entered, release = asyncio.Event(), asyncio.Event()
+    error = RuntimeError("设备流程实际错误")
+
+    async def fail(database, device_id):
+        entered.set()
+        await release.wait()
+        raise error
+
+    state.factory.side_effect = fail
+    await state.flow(state.context)
+    await entered.wait()
+    token = state.context.wake.snapshot()
+    release.set()
+    task = state.flow._devices["cam-1"].unconsumed_task
+    await asyncio.shield(task)
+    await asyncio.sleep(0)
+    assert state.context.wake.snapshot().version > token.version
+    assert state.flow._devices["cam-1"].unconsumed_task is task
+    with pytest.raises(RuntimeError) as caught:
+        await state.flow.settle()
+    assert caught.value is error
+
+
+async def test_capture_existing_fixed_baseline_before_schedule_does_not_self_wake(mocker):
+    from camctl.capture.baseline import prepare_baseline
+    from camctl.capture.baseline_models import BaselineRef, BaselineState
+    from camctl.persistence.repositories.capture import CaptureRepository
+
+    action = _Action(1, 10_000_000, 1000)
+    state = _CaptureState(mocker, (action,))
+    state.context.wake = WorkNotifier()
+    state.runtime.capture_preparation_supported = True
+    state.runtime.pending_baselines = {}
+    state.runtime.database = state.database
+    state.runtime.capture = create_autospec(CaptureRepository, instance=True, spec_set=True)
+    state.flow._preparation_leads = {"cam-1": Decimal(10)}
+    state.discovery.captures.side_effect = None
+    state.discovery.captures.return_value = Page(((1, "cam-1", action.scheduled_at, 1, 1),), None)
+    mocker.patch("camctl.outputs.read_discovery.next_preparation_at", autospec=True, return_value=None)
+    mocker.patch("camctl.capture.residual._original_binding_failure", autospec=True, return_value=None)
+    mocker.patch("camctl.capture.residual.pass_residual_gate", autospec=True, return_value=True)
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True, return_value=[])
+    mocker.patch("camctl.capture.baseline.row_facts", autospec=True,
+        side_effect=lambda connection, table, identity: (
+            {"id": 1} if table == "actions" else {"id": 7, "action_id": 1, "ownership_mode": 2}))
+    state.runtime.capture.baseline_ref.return_value = BaselineRef(7, BaselineState.FIXED, 11, 12, 2, 136)
+
+    async def prepare(runtime, action_id):
+        return await prepare_baseline(action_id, 7, runtime=runtime)
+
+    mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True, side_effect=prepare)
+    for _ in range(6):
+        await state.flow(state.context)
+        await state.flow.settle()
+    assert state.context.wake.snapshot().version == 0
+    state.repository.start_action.assert_not_called()
+    state.runtime.capture.fix_baseline.assert_not_called()
+    state.context.wake.mark_changed(WakeReason.NEW_WORK)
+    state.now = action.scheduled_at
+    await state.flow(state.context)
+    await state.flow.settle()
+    assert action.status == 2
+    state.repository.start_action.assert_called_once()
+
+
+async def test_capture_dispatch_waiting_does_not_self_wake_for_present_candidates(mocker):
+    state = _CaptureState(mocker, (_Action(1, 0, 1000, status=2),))
+    state.context.wake = WorkNotifier()
+    mocker.patch("camctl.bootstrap.flows.dispatch_ready", autospec=True,
+                 return_value=[(1, HandlerOutcome("waiting", wakeup_required=False))])
+    for _ in range(6):
+        await state.flow(state.context)
+        await state.flow.settle()
+    assert state.context.wake.snapshot().version == 0
 
 
 async def test_busy_device_observes_and_expires_pending_action_before_original_work_ends(mocker):
@@ -351,7 +462,7 @@ async def test_actual_start_rechecks_current_time_after_device_gate_wait(mocker)
     state.now = 1500
     entered, release = asyncio.Event(), asyncio.Event()
 
-    async def gate(runtime, trigger):
+    async def gate(runtime, trigger, *, on_progress=None):
         entered.set()
         await release.wait()
         return True

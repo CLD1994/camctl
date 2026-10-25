@@ -79,8 +79,9 @@ async def dispatch_ready(
             continue
         try:
             handler = capture_handler(descriptor.action_type)
-            await handler(descriptor.action_id, runtime)
-            results.append((descriptor.action_id, HandlerOutcome("dispatched")))
+            outcome = await handler(descriptor.action_id, runtime)
+            results.append((descriptor.action_id, outcome if isinstance(outcome, HandlerOutcome)
+                            else HandlerOutcome("dispatched")))
         except BaseException as error:
             results.append((descriptor.action_id, error))
             if isinstance(error, (DatabaseAccessError, ConsistencyError, DeviceConfigurationError, asyncio.CancelledError)):

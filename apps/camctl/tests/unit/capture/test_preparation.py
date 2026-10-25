@@ -109,6 +109,82 @@ def _photo_world(mocker):
     return runtime, action, ticket
 
 
+async def test_existing_ready_preparation_has_no_new_completion_notice(mocker):
+    runtime, _, _ = _world(mocker)
+    runtime.prepare_baseline.return_value = BaselinePreparation(
+        PreparationPhase.READY, wakeup_required=False)
+
+    first = await advance_preparation(runtime, 1)
+    second = await advance_preparation(runtime, 1)
+
+    assert first.wakeup_required is True
+    assert second.phase is PreparationPhase.READY
+    assert second.wakeup_required is False
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_device_busy_reservation_does_not_report_completion_progress(mocker):
+    from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
+    from camctl.capture import preparation
+
+    runtime, _, _ = _world(mocker)
+    preparation._activity.return_value = None
+    runtime.scheduling.reserve_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ReservePreparationResult(ReservePreparationOutcome.REJECTED, reason="device_busy"))
+
+    for _ in range(3):
+        result = await advance_preparation(runtime, 1)
+        assert result.phase is PreparationPhase.WAITING
+        assert result.wakeup_required is False
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+
+async def test_actual_preparation_then_waiting_keeps_completion_progress(mocker):
+    runtime, _, _ = _world(mocker)
+    runtime.prepare_baseline.return_value = BaselinePreparation(
+        PreparationPhase.WAITING, wakeup_required=False)
+
+    result = await advance_preparation(runtime, 1)
+
+    assert result.phase is PreparationPhase.WAITING
+    assert result.wakeup_required is True
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_recover_preparation_keeps_real_baseline_resume_progress_once(mocker):
+    from camctl.capture.baseline import PendingBaseline
+    from camctl.capture.preparation import recover_preparation
+    from camctl.devices.bindings import DeviceBinding
+
+    runtime, action, _ = _world(mocker)
+    action["status"] = 3
+    pending = PendingBaseline(7, DeviceBinding("cam-1", "driver-1"), ("/DCIM",), completed=True)
+    runtime.pending_baselines[1] = pending
+    from camctl.capture import preparation
+    preparation._activity.return_value = {"id": 7, "occupancy_state": 2, "dispatch_state": 1}
+    async def resume(identity):
+        return await CaptureRuntime.resume_baselines(runtime, identity)
+
+    runtime.resume_baselines.side_effect = resume
+    notices = []
+    assert await recover_preparation(runtime, 1, on_progress=lambda: notices.append(True))
+    assert notices == [True]
+    assert pending.closed
+    assert await recover_preparation(runtime, 1, on_progress=lambda: notices.append(True))
+    assert notices == [True]
+
+
+async def test_terminal_preparation_discards_delivered_progress_after_one_result(mocker):
+    from camctl.capture.preparation import discard_terminal_preparation
+
+    runtime, action, _ = _world(mocker)
+    action["status"] = 3
+    runtime.preparation_cache.changed_actions.add(1)
+    assert await discard_terminal_preparation(runtime, 1) is True
+    assert runtime.preparation_cache.changed_actions == set()
+    assert await discard_terminal_preparation(runtime, 1) is False
+
+
 def _held_save(runtime, phase):
     """在真实数据库端口的等待边界暂停；不运行执行器或访问数据库。"""
     original = runtime.database

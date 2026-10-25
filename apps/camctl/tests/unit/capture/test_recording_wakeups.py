@@ -1,6 +1,8 @@
 """截止提示只安排重查，不能刷新计时或反复提前唤醒。"""
 
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 from camctl.capture.wakeups import RecordingWakeups
 
@@ -51,3 +53,33 @@ def test_devices_keep_independent_deadlines_and_shutdown_clears_hints():
     assert wakeups.next_at(100, 0) == 111
     wakeups.clear()
     assert wakeups.next_at(100, 0) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_pending", [False, True])
+async def test_recording_wait_only_skips_completion_notice_without_original_saves(mocker, has_pending):
+    from camctl.capture.handlers import _record_handler
+    from camctl.capture.recording import RecordingState
+
+    action = {"id": 1, "status": 2, "cancel_requested": 0, "execution_spec_json": {}}
+    context = SimpleNamespace(
+        resume_result_check_closes=AsyncMock(), resume_capture_completions=AsyncMock(),
+        resume_baselines=AsyncMock(), resume_file_observations=AsyncMock(), resume_start_results=AsyncMock(),
+        action=AsyncMock(return_value=action), last_attempt=AsyncMock(return_value=(3, 3)),
+        on_recording_deadline=Mock(),
+        recording_state=SimpleNamespace(recording_state=AsyncMock(return_value=RecordingState(
+            action_terminal=False, started_confirmed=True, anchor_from_current_session=True,
+            stop_target_ns=100, monotonic_now_ns=50, stop_confirmed=False,
+            file_complete_guaranteed=False, stop_attempts_used=0, stop_max_attempts=3, stop_in_flight=False))),
+        pending_result_closes={}, pending_capture_completions={}, pending_baselines={},
+        pending_file_observations={}, pending_start_results={}, pending_segment_writes={},
+        pending_read_business={}, pending_read_results={}, pending_read_ends={})
+    if has_pending:
+        context.pending_start_results[(1, 1)] = object()
+    mocker.patch("camctl.capture.handlers._handle_binding_failure", autospec=True, return_value=False)
+    mocker.patch("camctl.capture.handlers._advance_record_start", autospec=True, return_value=False)
+
+    result = await _record_handler(1, context)
+
+    assert result.wakeup_required is has_pending
+    context.on_recording_deadline.assert_called_once_with(1, 100)

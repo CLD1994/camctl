@@ -23,6 +23,9 @@ async def consume_read(pending, runtime):
     result = (await resume_baseline_read_save(
         owner, capture=runtime.capture, database=runtime.database
     ))
+    if owner.wakeup_pending:
+        owner.wakeup_pending = False
+        pending.wakeup_pending = True
     if result is None:
         if (owner.aborted_before_call and owner.intent_view is None
                 and owner.saves.pending is None):
@@ -51,6 +54,14 @@ async def consume_read(pending, runtime):
 
 
 async def prepare_segment_baseline(action_id, activity_id, runtime):
+    from camctl.capture.baseline import _with_wakeup
+
+    pending = runtime.pending_baselines.get(action_id)
+    result = await _prepare_segment_baseline(action_id, activity_id, runtime)
+    return _with_wakeup(result, pending, runtime.pending_baselines.get(action_id))
+
+
+async def _prepare_segment_baseline(action_id, activity_id, runtime):
     from camctl.capture.baseline import (
         PendingBaseline,
         BaselinePreparation,
@@ -67,10 +78,10 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
         action = (await runtime.database.read(lambda owned: row_facts(owned.connection, "actions", action_id)))
         activity = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))
         if activity["ownership_mode"] != 2:
-            return BaselinePreparation(PreparationPhase.READY)
+            return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
         ref = (await runtime.database.read(lambda owned, inputs=(activity_id,), options=dict(): runtime.capture.baseline_ref(*inputs, owned, **options), description="读取已保存拍摄事实"))
         if ref.state.name == "FIXED":
-            return BaselinePreparation(PreparationPhase.READY)
+            return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
         pending = PendingBaseline(
             activity_id,
             DeviceBinding(action["device_id"], action["driver_id"]),
@@ -111,6 +122,7 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
         if not (resumed.phase is PreparationPhase.WAITING and owner is not None
                 and owner.locally_created and owner.task is None and not pending.in_call):
             return resumed
+        pending.wakeup_pending |= resumed.wakeup_required
     if pending.aborted:
         return BaselinePreparation(PreparationPhase.ABORTED)
     if pending.error is not None:
@@ -151,7 +163,7 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
             )
             return (await resume_baseline_save(action_id, runtime=runtime))
         if runtime.baseline_directory is None:
-            return BaselinePreparation(PreparationPhase.WAITING)
+            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
         owner = pending.read_owner
         if owner is None:
             intent = BaselineReadIntent(

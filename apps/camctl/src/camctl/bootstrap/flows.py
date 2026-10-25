@@ -37,9 +37,11 @@ from camctl.persistence.repositories.scheduling import (
     ObserveWindowRequest,
     SchedulingRepository,
     StartActionRequest,
+    StartOutcome,
+    ExpireOutcome,
 )
 from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
-from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork, FlowWakeup
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 from camctl.scheduling.notifications import WakeReason
 
@@ -241,7 +243,7 @@ class CaptureFlow:
             if owner is None:
                 async def advance(context, device_id=device_id):
                     candidates = self._device_candidates[device_id]
-                    await self._advance_device(context, device_id, candidates)
+                    return await self._advance_device(context, device_id, candidates)
                 owner = BackgroundFlow(advance)
                 self._devices[device_id] = owner
             await owner(context)
@@ -251,10 +253,11 @@ class CaptureFlow:
                 if self._notification_tasks.get(device_id) is not task:
                     self._notification_tasks[device_id] = task
                     def completed(actual, device_id=device_id, owner=owner):
-                        if (not self._stopping
-                                and self._notification_tasks.get(device_id) is actual
+                        if (self._notification_tasks.get(device_id) is actual
                                 and owner.unconsumed_task is actual and actual.done()):
-                            context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+                            if (owner.completion_has_error(actual)
+                                    or not self._stopping and owner.completion_requires_wakeup(actual)):
+                                context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
                     task.add_done_callback(completed)
 
     async def _observe_windows(self, context, database, action_ids):
@@ -281,6 +284,12 @@ class CaptureFlow:
 
     async def _advance_device(self, context, device_id, action_ids):
         database = context.database
+        wakeup_required = False
+
+        def progressed():
+            nonlocal wakeup_required
+            wakeup_required = True
+
         try:
             scheduling = SchedulingRepository()
             runtime = await self._factory(database, device_id)
@@ -302,7 +311,7 @@ class CaptureFlow:
                 from camctl.capture.preparation import recover_preparation
                 for action_id in action_ids:
                     if (await runtime.action(action_id))["status"] in (3, 4, 5, 6):
-                        await recover_preparation(runtime, action_id)
+                        await recover_preparation(runtime, action_id, on_progress=progressed)
             if runtime is not None and runtime.capture_preparation_supported is True:
                 from camctl.capture.preparation import advance_preparation
                 from camctl.capture.baseline import PreparationPhase
@@ -314,6 +323,7 @@ class CaptureFlow:
                     if await _original_binding_failure(runtime, await runtime.action(action_id)) is not None:
                         continue
                     prepared = await advance_preparation(runtime, action_id)
+                    wakeup_required |= prepared.wakeup_required
                     if prepared.phase is PreparationPhase.READY:
                         preparation_ready.add(action_id)
             now = context.clock.utc_micros()
@@ -328,14 +338,17 @@ class CaptureFlow:
                         ExpireActionRequest(action_id, current, current))
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
                         raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+                    wakeup_required |= outcome.value.outcome is ExpireOutcome.EXPIRED
                     continue
                 if runtime is not None:
                     from camctl.capture.residual import pass_residual_gate, _original_binding_failure
-                    if not await pass_residual_gate(runtime, await runtime.action(action_id)):
+                    if not await pass_residual_gate(runtime, await runtime.action(action_id),
+                                                    on_progress=progressed):
                         continue
                     if (preparation_ready is not None and action_id not in preparation_ready
                             and await _original_binding_failure(runtime, await runtime.action(action_id)) is None):
                         prepared = await advance_preparation(runtime, action_id)
+                        wakeup_required |= prepared.wakeup_required
                         if prepared.phase is not PreparationPhase.READY:
                             continue
                 if self._stopping:
@@ -346,18 +359,21 @@ class CaptureFlow:
                     StartActionRequest(action_id, current, current))
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+                wakeup_required |= outcome.value.outcome is StartOutcome.STARTED
             if runtime is None or self._stopping:
-                return
+                return FlowWakeup.RECHECK if wakeup_required else FlowWakeup.IDLE
             now = context.clock.utc_micros()
             group = await database.read(lambda owned: ready_capture_actions(owned.connection, now, device_id=device_id,
                 action_ids=action_ids, limit=self._discovery.batch_size))
             for action_id, outcome in await dispatch_ready(runtime, group):
                 if isinstance(outcome, BaseException):
                     raise outcome
+                wakeup_required |= outcome.wakeup_required
             if runtime.capture_preparation_supported is True:
                 from camctl.capture.preparation import discard_terminal_preparation
                 for action_id in action_ids:
-                    await discard_terminal_preparation(runtime, action_id)
+                    wakeup_required |= await discard_terminal_preparation(runtime, action_id)
+            return FlowWakeup.RECHECK if wakeup_required else FlowWakeup.IDLE
         except Exception as error:
             self._stopping = True
             try:

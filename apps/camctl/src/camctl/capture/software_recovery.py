@@ -138,8 +138,19 @@ class RecoveryStop:
 
 
 @owned_tool_call
-async def advance_recovery(runtime, activity_id, trigger=None):
+async def advance_recovery(runtime, activity_id, trigger=None, *, on_progress=None):
     """一次推进一个阶段；保存未知时停止，不用第二次命令猜测原结果。"""
+    async def save(activity, state, *, evidence=None, ended=False):
+        result = await _save(runtime, activity, state, evidence=evidence, ended=ended)
+        if on_progress is not None:
+            on_progress()
+        return result
+
+    async def isolate(activity, reason, details=None):
+        await _isolate(runtime, activity, reason, details)
+        if on_progress is not None:
+            on_progress()
+
     activity = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))
     owner = (await runtime.action(activity["action_id"]))
     config = runtime.software_recovery_config
@@ -187,18 +198,18 @@ async def advance_recovery(runtime, activity_id, trigger=None):
             "baseline_last": activity["baseline_last_event_id"],
             "cursor": None, "scope_finalized": False, "prepared": False, "reported_serial": None,
             "scope_pages": 0, "scope_members": 0, "scope_first_event_id": None, "scope_last_event_id": None}
-        activity = (await _save(runtime, activity, state))
+        activity = (await save(activity, state))
     phase = RecoveryPhase(state["phase"])
     if (phase is RecoveryPhase.ABANDONED and state["reboots"] == 0 and trigger is not None
             and _eligible(runtime, trigger) and runtime.wall_us() < state["deadline_at"]):
         state = {**state, "trigger_id": trigger["id"], "phase": RecoveryPhase.CHECKING.value,
                  "next_check_at": runtime.wall_us()}
-        activity = (await _save(runtime, activity, state))
+        activity = (await save(activity, state))
         phase = RecoveryPhase.CHECKING
     if phase in (RecoveryPhase.ISOLATED, RecoveryPhase.ABANDONED):
         return False
     if driver is None:
-        (await _isolate(runtime, activity, "recovery_driver_unavailable"))
+        (await isolate(activity, "recovery_driver_unavailable"))
         return False
     driver.hold_recovery(state["device_id"])
     binding = DeviceBinding(state["device_id"], state["driver_id"])
@@ -208,11 +219,11 @@ async def advance_recovery(runtime, activity_id, trigger=None):
         from camctl.devices.bindings import DeviceConfigurationError
         if not isinstance(error, DeviceConfigurationError):
             raise
-        (await _isolate(runtime, activity, "binding_unavailable"))
+        (await isolate(activity, "binding_unavailable"))
         return False
     if (owner["device_id"] != state["device_id"] or owner["driver_id"] != state["driver_id"]
             or actual_serial != state["serial"]):
-        (await _isolate(runtime, activity, "binding_changed"))
+        (await isolate(activity, "binding_changed"))
         return False
     if phase is RecoveryPhase.READY:
         from camctl.capture.models import ActivityReleaseSave
@@ -223,21 +234,23 @@ async def advance_recovery(runtime, activity_id, trigger=None):
             raise ConsistencyError("恢复后的占用释放尚未可靠保存")
         released = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))["occupancy_state"] == 2
         if released:
+            if on_progress is not None:
+                on_progress()
             driver.release_recovery(state["device_id"])
         return released
     if runtime.wall_us() >= state["deadline_at"]:
-        (await _isolate(runtime, activity, "deadline_exhausted"))
+        (await isolate(activity, "deadline_exhausted"))
         return False
     if runtime.wall_us() < state["next_check_at"]:
         return False
     trigger = (await runtime.action(state["trigger_id"]))
     if phase in (RecoveryPhase.CHECKING, RecoveryPhase.INTENT) and state["reboots"] == 0 and not _eligible(runtime, trigger):
         state = {**state, "phase": RecoveryPhase.ABANDONED.value, "reason": "trigger_ended"}
-        (await _save(runtime, activity, state))
+        (await save(activity, state))
         return False
     blocker = await runtime.database.read(lambda owned: recovery_blocker(owned.connection, activity, state["trigger_id"]))
     if blocker:
-        (await _isolate(runtime, activity, blocker))
+        (await isolate(activity, blocker))
         return False
     timeout = min(Decimal(state["timeout_s"]), Decimal(state["deadline_at"] - runtime.wall_us()) / 1000000)
     state = dict(state)
@@ -245,15 +258,15 @@ async def advance_recovery(runtime, activity_id, trigger=None):
     check_call_interruption()
     if phase in (RecoveryPhase.CHECKING, RecoveryPhase.INTENT, RecoveryPhase.CONFIRMING):
         if state["checks"] >= state["max_checks"]:
-            (await _isolate(runtime, activity, "checks_exhausted"))
+            (await isolate(activity, "checks_exhausted"))
             return False
         state["checks"] += 1
         # 核实预算也在实际调用之前可靠保存。
-        activity = (await _save(runtime, activity, state))
+        activity = (await save(activity, state))
         actual = await driver.recovery_identity(binding, timeout_s=timeout)
         state["last_identity"] = actual
         state["last_identity_check"] = state["checks"]
-        activity = (await _save(runtime, activity, state, evidence={"identity_call": actual}))
+        activity = (await save(activity, state, evidence={"identity_call": actual}))
         observed = actual["identity"]
         if observed is None:
             return False
@@ -263,62 +276,62 @@ async def advance_recovery(runtime, activity_id, trigger=None):
             if fingerprint != state["fingerprint"]:
                 runtime.record_recovery_diagnostic(SoftwareRecoveryDiagnostic(
                     state["device_id"], activity_id, fingerprint))
-            (await _isolate(runtime, activity, "identity_mismatch"))
+            (await isolate(activity, "identity_mismatch"))
             return False
         if phase is RecoveryPhase.CHECKING:
             if not _eligible(runtime, (await runtime.action(state["trigger_id"]))):
                 return False
             if state["reboots"] >= state["max_reboots"]:
-                (await _isolate(runtime, activity, "reboot_budget_exhausted"))
+                (await isolate(activity, "reboot_budget_exhausted"))
                 return False
             state.update(boot_before=boot, reported_serial=serial, phase=RecoveryPhase.INTENT.value,
                          reboots=state["reboots"] + 1)
-            activity = (await _save(runtime, activity, state))
+            activity = (await save(activity, state))
             # 意图之后任何中断都按可能已派发恢复；从不恢复补发。
             if not _eligible(runtime, (await runtime.action(state["trigger_id"]))):
                 state.update(phase=RecoveryPhase.ABANDONED.value, reason="trigger_ended_before_dispatch")
-                (await _save(runtime, activity, state))
+                (await save(activity, state))
                 return False
             check_call_interruption()
             remaining = min(Decimal(state["timeout_s"]), Decimal(state["deadline_at"] - runtime.wall_us()) / 1000000)
             if remaining <= 0:
-                (await _isolate(runtime, activity, "deadline_exhausted_before_dispatch"))
+                (await isolate(activity, "deadline_exhausted_before_dispatch"))
                 return False
             raw = await driver.recovery_reboot(binding, timeout_s=remaining)
             state.update(phase=RecoveryPhase.CONFIRMING.value)
-            (await _save(runtime, activity, state, evidence={"call": raw}))
+            (await save(activity, state, evidence={"call": raw}))
             return False
         if boot == state["boot_before"]:
             return False
         state.update(boot_after=boot, phase=RecoveryPhase.PREPARING.value)
-        (await _save(runtime, activity, state, evidence={"identity": list(observed)}, ended=True))
+        (await save(activity, state, evidence={"identity": list(observed)}, ended=True))
         return False
     if phase is RecoveryPhase.PREPARING:
         if state["checks"] >= state["max_checks"]:
-            (await _isolate(runtime, activity, "checks_exhausted"))
+            (await isolate(activity, "checks_exhausted"))
             return False
         state["checks"] += 1
-        activity = (await _save(runtime, activity, state))
+        activity = (await save(activity, state))
         prepared = await driver.recovery_prepare(binding, owner["effective_params_json"],
             activity_id=activity_id, directories=tuple(activity["output_scope_json"].get("directories", ())), timeout_s=timeout)
         state["last_preparation"] = prepared
         if not prepared["ready"]:
-            (await _save(runtime, activity, state, evidence={"preparation": prepared}))
+            (await save(activity, state, evidence={"preparation": prepared}))
             return False
         state.update(prepared=True, phase=RecoveryPhase.SCANNING.value)
-        (await _save(runtime, activity, state, evidence={"preparation": prepared}))
+        (await save(activity, state, evidence={"preparation": prepared}))
         return False
     if phase is RecoveryPhase.SCANNING:
         if (activity["ownership_mode"] != 2 or activity["baseline_state"] != 3
                 or activity["baseline_first_event_id"] != state["baseline_first"]
                 or activity["baseline_last_event_id"] != state["baseline_last"]):
-            (await _isolate(runtime, activity, "baseline_unconfirmed"))
+            (await isolate(activity, "baseline_unconfirmed"))
             return False
         if state["pages"] >= state["max_pages"]:
-            (await _isolate(runtime, activity, "pages_exhausted"))
+            (await isolate(activity, "pages_exhausted"))
             return False
         state["pages"] += 1
-        activity = (await _save(runtime, activity, state))
+        activity = (await save(activity, state))
         request = DirectoryRequest(binding, tuple(activity["output_scope_json"]["directories"]),
             None if state["cursor"] is None else DirectoryCursor.from_json(state["cursor"]), 128, timeout)
         page = await driver.recovery_directory(request)
@@ -326,11 +339,11 @@ async def advance_recovery(runtime, activity_id, trigger=None):
             state["last_directory_error"] = {"code": page.error.code, "stage": page.error.stage,
                                              "details": dict(page.error.details)}
             state["last_directory_return"] = state["pages"]
-            (await _save(runtime, activity, state, evidence={"directory_error": state["last_directory_error"]}))
+            (await save(activity, state, evidence={"directory_error": state["last_directory_error"]}))
             return False
         if any(identity.binding != binding or not any(identity.path.startswith(root + "/") for root in request.directories)
                for identity in page.page.items):
-            (await _isolate(runtime, activity, "scope_identity_mismatch"))
+            (await isolate(activity, "scope_identity_mismatch"))
             return False
         state["cursor"] = None if page.page.next_cursor is None else page.page.next_cursor.as_json()
         if state["cursor"] is None:
@@ -339,16 +352,16 @@ async def advance_recovery(runtime, activity_id, trigger=None):
         try:
             await runtime.database.read(lambda owned: classify_scope_entries(owned.connection, activity, [identity.as_json() for identity in page.page.items], state["max_pages"]))
         except ConsistencyError as error:
-            (await _isolate(runtime, activity, "baseline_scope_unconfirmed", error))
+            (await isolate(activity, "baseline_scope_unconfirmed", error))
             return False
-        (await _save(runtime, activity, state, evidence={"directory": {
+        (await save(activity, state, evidence={"directory": {
             "cursor": None if request.cursor is None else request.cursor.as_json(),
             "next_cursor": state["cursor"], "entries": [identity.as_json() for identity in page.page.items]}}))
         return False
     return False
 
 
-async def pass_software_recovery_gate(runtime, trigger):
+async def pass_software_recovery_gate(runtime, trigger, *, on_progress=None):
     candidates = (await runtime.database.read(lambda owned, inputs=(trigger["device_id"],), options=dict(): held_candidates(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if not candidates:
         return None
@@ -365,7 +378,7 @@ async def pass_software_recovery_gate(runtime, trigger):
             prior = (await runtime.database.read(lambda owned, inputs=("SELECT status FROM operation_runs WHERE kind=8 AND activity_id=? ORDER BY id DESC LIMIT 1", (activity["id"],)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
             if prior is None or prior[0] in (1, 2, 3):
                 return None
-    return await advance_recovery(runtime, candidates[0][0], trigger)
+    return await advance_recovery(runtime, candidates[0][0], trigger, on_progress=on_progress)
 
 
 def recovery_locked(connection, device_id):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
@@ -55,6 +55,7 @@ class PendingPreparation:
     intent_save: SharedSave = field(default_factory=SharedSave)
     result_save: SharedSave = field(default_factory=SharedSave)
     canceled_before_dispatch_at: int | None = None
+    wakeup_pending: bool = False
 
 
 @dataclass
@@ -65,6 +66,17 @@ class RuntimePreparationCache:
     reservations: dict[int, tuple[Any, Any]] = field(default_factory=dict)
     endings: dict[int, tuple[str, Any, Any]] = field(default_factory=dict)
     request_saves: dict[OperationKey, SharedSave] = field(default_factory=dict)
+    changed_actions: set[int] = field(default_factory=set)
+
+    def take_wakeup(self, action_id):
+        """合并本动作尚未交给调度的实际返回和首次保存应用。"""
+        owner = self.owners.get(action_id)
+        changed = action_id in self.changed_actions
+        self.changed_actions.discard(action_id)
+        if owner is not None and owner.wakeup_pending:
+            owner.wakeup_pending = False
+            changed = True
+        return changed
 
     def pending(self, action_id):
         owner = self.owners.get(action_id)
@@ -107,6 +119,7 @@ async def _save_owner(owner, database, operations, *, retry=False):
                     raise notification_errors[0]
                 return
             owner.ticket = result.ticket
+            owner.wakeup_pending = True
         if saving_intent:
             if notification_errors:
                 raise notification_errors[0]
@@ -136,6 +149,7 @@ async def _save_owner(owner, database, operations, *, retry=False):
             _completed(await save(lambda owned: operations.finish_attempt(owner.finish, owner.result_key, owned), key=owner.result_key),
                        "设置准备结果未可靠保存")
             owner.saved = True
+            owner.wakeup_pending = True
         if notification_errors:
             raise notification_errors[0]
     if (owner.ticket is not None and owner.actual is None and owner.finish is None
@@ -176,6 +190,8 @@ async def _save_cached_request(database, cache, action_id, *, scheduling, captur
         if kind == "release" and value.outcome.value == "rejected":
             raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
         del requests[action_id]
+        if ending or getattr(getattr(value, "outcome", None), "value", None) != "rejected":
+            cache.changed_actions.add(action_id)
         if notification_error is not None:
             raise notification_error
         return value
@@ -305,6 +321,7 @@ async def _call_prepare(owner, runtime, request):
     owner.actual = await runtime.preparation_driver.prepare_capture(request)
     if not isinstance(owner.actual, DeviceCallResult):
         raise ConsistencyError("设置准备没有交回实际控制结果")
+    owner.wakeup_pending = True
     owner.returned_at = runtime.wall_us()
     (await _save_owner(owner, runtime.database, runtime.operations))
 
@@ -414,7 +431,7 @@ async def settle_preparation(runtime, action_id):
     if pending is not None:
         if pending.in_call:
             return False
-        (await runtime.resume_baselines(action_id))
+        await _resume_baseline_progress(runtime, action_id)
         pending = runtime.pending_baselines.get(action_id)
         if pending is not None:
             if pending.read_owner is not None or pending.saves.pending is not None:
@@ -424,21 +441,42 @@ async def settle_preparation(runtime, action_id):
         if action["cancel_requested"]:
             from camctl.capture.handlers import _finish_canceled_capture
             (await _finish_canceled_capture(runtime, action_id, unstarted=True))
+            cache.changed_actions.add(action_id)
         if (await runtime.action(action_id))["status"] not in (3, 4, 5, 6):
             return False
     if runtime.pending_baselines.get(action_id) is not None:
-        (await runtime.resume_baselines(action_id))
+        await _resume_baseline_progress(runtime, action_id)
         if runtime.pending_baselines.get(action_id) is not None:
             return False
     activity = (await _activity(runtime, action_id))
     if activity is not None and activity["occupancy_state"] == 1 and activity["dispatch_state"] in (1, 4):
         (await _end(runtime, action_id, "release", ActivityReleaseSave(
             action_id, runtime.wall_us(), preparation_resolved=True)))
-    cache.owners.pop(action_id, None)
+    owner = cache.owners.pop(action_id, None)
+    if owner is not None and owner.wakeup_pending:
+        cache.changed_actions.add(action_id)
     return True
 
 
-async def recover_preparation(runtime, action_id):
+async def _resume_baseline_progress(runtime, action_id):
+    pending = runtime.pending_baselines.get(action_id)
+    resumed = await runtime.resume_baselines(action_id)
+    changed = resumed is not None and resumed.wakeup_required
+    if pending is not None and pending.wakeup_pending:
+        pending.wakeup_pending = False
+        changed = True
+    if changed:
+        runtime.preparation_cache.changed_actions.add(action_id)
+
+
+async def recover_preparation(runtime, action_id, *, on_progress=None):
+    result = await _recover_preparation(runtime, action_id)
+    if on_progress is not None and runtime.preparation_cache.take_wakeup(action_id):
+        on_progress()
+    return result
+
+
+async def _recover_preparation(runtime, action_id):
     """受限会话只核原保存和旧调用；未终态准备继续保留原活动。"""
     cache = runtime.preparation_cache
     (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
@@ -455,39 +493,45 @@ async def _abort_if_required(runtime, action):
     action_id = action["id"]
     if action["status"] in (3, 4, 5, 6) or action["cancel_requested"]:
         (await settle_preparation(runtime, action_id))
-        return BaselinePreparation(PreparationPhase.ABORTED)
+        return BaselinePreparation(PreparationPhase.ABORTED, wakeup_required=False)
     now = runtime.wall_us()
     if now > action["scheduled_at"] + action["max_delay_ms"] * 1000:
         from camctl.persistence.repositories.scheduling import ExpireActionRequest
         (await _end(runtime, action_id, "expire_action", ExpireActionRequest(action_id, now, now)))
         (await settle_preparation(runtime, action_id))
-        return BaselinePreparation(PreparationPhase.ABORTED)
+        return BaselinePreparation(PreparationPhase.ABORTED, wakeup_required=False)
     return None
 
 
 async def advance_preparation(runtime, action_id):
+    result = await _advance_preparation(runtime, action_id)
+    changed = runtime.preparation_cache.take_wakeup(action_id)
+    return replace(result, wakeup_required=True) if changed and not result.wakeup_required else result
+
+
+async def _advance_preparation(runtime, action_id):
     """推进一次完整准备；READY 后交回调度器等待计划时间。"""
     cache = runtime.preparation_cache
     (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,
                              scheduling=runtime.scheduling, capture=runtime.capture))
     action = (await runtime.action(action_id))
     if action["type"] not in CAPTURE_ACTION_TYPES:
-        return BaselinePreparation(PreparationPhase.READY)
+        return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
     if action["status"] == 2 and action["execution_spec_json"].get("result_policy") is not None:
         from camctl.capture.segment_completion import resume_segmented_preparation_failure
         if (await resume_segmented_preparation_failure(runtime, action)):
             (await settle_preparation(runtime, action_id))
             return BaselinePreparation(PreparationPhase.ABORTED)
     if (await _start_precedes_preparation(runtime, action)):
-        return BaselinePreparation(PreparationPhase.READY)
+        return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
     if not (await _recover_old_preparation(runtime, action_id)):
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     aborted = (await _abort_if_required(runtime, action))
     if aborted is not None:
         return aborted
     now = runtime.wall_us()
     if now < action["scheduled_at"] - runtime.prepare_lead_s * 1_000_000:
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     activity = (await _activity(runtime, action_id))
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest
@@ -497,7 +541,7 @@ async def advance_preparation(runtime, action_id):
         value = await _save_cached_request(runtime.database, cache, action_id,
             scheduling=runtime.scheduling, capture=runtime.capture)
         if value.outcome.value == "rejected":
-            return BaselinePreparation(PreparationPhase.WAITING)
+            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
         activity = (await _activity(runtime, action_id))
     if activity is None:
         raise ConsistencyError("准备占用已可靠取得但原活动缺失")
@@ -524,7 +568,7 @@ async def advance_preparation(runtime, action_id):
         if owner.task is None and owner.actual is None and owner.finish is None:
             if owner.refused is not None:
                 cache.owners.pop(action_id)
-                return BaselinePreparation(PreparationPhase.WAITING)
+                return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
             owner.task = asyncio.create_task(_call_prepare(owner, runtime,
                 _request(runtime, action, ticket=owner.ticket)))
             try:
@@ -536,7 +580,7 @@ async def advance_preparation(runtime, action_id):
                     raise interrupted from error
                 raise
         if not owner.saved:
-            return BaselinePreparation(PreparationPhase.WAITING)
+            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
         aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
         if aborted is not None:
             return aborted
@@ -548,9 +592,9 @@ async def advance_preparation(runtime, action_id):
     reason = (await preparation_dispatch_reason(runtime, action_id))
     if reason in ("terminal", "canceled", "window_ended"):
         aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
-        return aborted if aborted is not None else BaselinePreparation(PreparationPhase.WAITING)
+        return aborted if aborted is not None else BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     if reason is not None:
-        return BaselinePreparation(PreparationPhase.WAITING)
+        return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
     baseline = await runtime.prepare_baseline(action_id)
     if baseline.phase not in (PreparationPhase.PENDING, PreparationPhase.WAITING):
         aborted = (await _abort_if_required(runtime, (await runtime.action(action_id))))
@@ -566,7 +610,10 @@ async def advance_preparation(runtime, action_id):
 async def discard_terminal_preparation(runtime, action_id):
     cache = runtime.preparation_cache
     if cache is not None and (await runtime.action(action_id))["status"] in (3, 4, 5, 6) and not cache.pending(action_id):
+        changed = cache.take_wakeup(action_id)
         cache.owners.pop(action_id, None)
+        return changed
+    return False
 
 
 async def _wait_preparation_task(task):

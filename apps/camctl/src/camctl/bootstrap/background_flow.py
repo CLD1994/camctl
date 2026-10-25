@@ -35,12 +35,18 @@ class BackgroundFlow:
         return self._task
 
     @staticmethod
-    def completion_requires_wakeup(task):
-        """只观察完成提示；原错误和结果仍由拥有者消费。"""
+    def completion_has_error(task):
         if task.cancelled() or task.exception() is not None:
             return True
+        return task.result().error is not None
+
+    @staticmethod
+    def completion_requires_wakeup(task):
+        """只观察完成提示；原错误和结果仍由拥有者消费。"""
+        if BackgroundFlow.completion_has_error(task):
+            return True
         result = task.result()
-        return result.error is not None or result.wakeup_required
+        return result.wakeup_required
 
     def _consume(self):
         task, self._task = self._task, None

@@ -170,4 +170,26 @@ async def test_entry_gate_preserves_existing_responsibility_when_disabled(sessio
     advance = create_autospec(recovery.advance_recovery, return_value=False)
     monkeypatch.setattr(recovery, "advance_recovery", advance)
     assert await recovery.pass_software_recovery_gate(runtime, trigger) is False
-    advance.assert_awaited_once_with(runtime, 11, trigger)
+    advance.assert_awaited_once_with(runtime, 11, trigger, on_progress=None)
+
+
+@pytest.mark.asyncio
+async def test_recovery_wait_before_saved_deadline_does_not_report_progress(session):
+    runtime, _, trigger, current, _, _, _ = session
+    await recovery.advance_recovery(runtime, 11, trigger)
+    assert current[0]["next_check_at"] > runtime.wall_us()
+    notices = []
+
+    await recovery.advance_recovery(runtime, 11, trigger, on_progress=lambda: notices.append(True))
+
+    assert notices == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_actual_save_reports_progress(session):
+    runtime, _, trigger, _, saved, _, _ = session
+    notices = []
+
+    await recovery.advance_recovery(runtime, 11, trigger, on_progress=lambda: notices.append(True))
+
+    assert saved and notices
