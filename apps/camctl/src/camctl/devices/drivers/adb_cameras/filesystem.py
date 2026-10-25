@@ -19,8 +19,9 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.logging_runtime.performance import measure_performance
+from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.models import AttemptTicket, ErrorValue
-from camctl.operations.process import RawToolOutcome, ToolSpec, ToolStartError
+from camctl.operations.process import OUTPUT_LIMIT_BYTES, RawToolOutcome, ToolSpec, ToolStartError
 from .transport import shell_argv
 
 if TYPE_CHECKING:
@@ -507,11 +508,16 @@ class _ReadStop:
         await self.event.wait()
 
 
+class AdbReadError(DiagnosticError, OSError):
+    """ADB 读取保留原异常链及受管调用事实，仍兼容源端 OSError。"""
+
+
 class _AdbSourceStream:
     """一个读取尝试持有一个受管进程，文件字节经两块有界队列交付。"""
 
     def __init__(self, filesystem, path, offset, size):
         self.fs, self.path, self.offset = filesystem, path, offset
+        self.expected_size = size
         self.remaining = size - offset
         self.skip = offset % 65536
         self.queue = queue.Queue(maxsize=2)
@@ -521,6 +527,30 @@ class _AdbSourceStream:
         self.closed = False
         self.loop = asyncio.get_running_loop()
         self.future = None
+        self._outcome = None
+
+    def _failure(self, reason, message):
+        raw = self._outcome
+        details = {
+            "reason": reason,
+            "path": self.path,
+            "offset": self.offset,
+            "expected_size": self.expected_size,
+            "remaining": self.remaining,
+            "transport_error": None if raw is None else raw.error,
+            "output_failure": None if raw is None else raw.output_failure,
+            "local_exit_code": None if raw is None or raw.exit is None else raw.exit.exit_code,
+            "local_signal": None if raw is None or raw.exit is None else raw.exit.signal,
+            "used_grace_s": None if raw is None or raw.used_grace_s is None else str(raw.used_grace_s),
+            "signal_failures": [] if raw is None else [
+                {"stage": failure.stage.value, "message": failure.message}
+                for failure in raw.signal_failures],
+            "stderr_hex": None if raw is None or raw.stderr is None else raw.stderr.hex(),
+            "output_complete": None if raw is None else (
+                raw.output is not None and raw.stderr is not None and raw.output_failure is None),
+            "output_limit_bytes": OUTPUT_LIMIT_BYTES,
+        }
+        return AdbReadError(message, diagnostic_details=details)
 
     def start(self):
         self.future = asyncio.run_coroutine_threadsafe(self._run(), self.loop)
@@ -546,7 +576,7 @@ class _AdbSourceStream:
 
     def read(self, limit):
         if self.closed:
-            raise OSError("源读取会话已经关闭")
+            raise self._failure("read_after_close", "源读取会话已经关闭")
         if self.cancelled.is_set():
             return b""
         if not self.buffer:
@@ -554,8 +584,11 @@ class _AdbSourceStream:
                 self.buffer = self.queue.get_nowait()
             except queue.Empty:
                 if self.future.done():
-                    raw = self.future.result()
-                    raise OSError(f"源读取在固定长度前结束: {_error(raw, 'read', 'unexpected_end').details}")
+                    try:
+                        self._outcome = self.future.result()
+                    except Exception as failure:
+                        raise self._failure("read_call_failed", "源读取调用未交付结果") from failure
+                    raise self._failure("unexpected_end", "源读取在固定长度前结束")
                 return b""
         data, self.buffer = self.buffer[:limit], self.buffer[limit:]
         return data
@@ -567,11 +600,14 @@ class _AdbSourceStream:
     def close(self):
         if self.closed:
             return
-        if self.remaining or self.buffer or not self.queue.empty():
-            self.cancel()
-        raw = self.future.result()
+        try:
+            if self.remaining or self.buffer or not self.queue.empty():
+                self.cancel()
+            raw = self._outcome = self.future.result()
+        except Exception as failure:
+            raise self._failure("close_call_failed", "源读取实际收场未交付结果") from failure
         self.closed = True
         if (raw.exit is None or raw.output_failure is not None
                 or (raw.error is not None and not (self.cancelled.is_set() and raw.error == "cancelled"))
                 or (not self.cancelled.is_set() and raw.exit.exit_code != 0)):
-            raise OSError(f"源读取实际收场失败: {_error(raw, 'read', 'call_failed').details}")
+            raise self._failure("call_failed", "源读取实际收场失败")
