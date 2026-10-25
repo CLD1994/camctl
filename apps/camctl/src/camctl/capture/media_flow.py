@@ -78,7 +78,7 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.outputs.read_attempts import (
-    PendingReadResult, acquire_read_attempt, forget_read_result, hold_read_result,
+    PendingReadResult, PendingStoppedRead, acquire_read_attempt, forget_read_result, hold_read_result,
     retry_read_business, run_owned_read, save_read_result,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
@@ -218,12 +218,12 @@ class MediaSaveStage(Enum):
 
 @dataclass(frozen=True)
 class PendingMediaRequest:
-    """已取得但未可靠确认保存的完整原申请和本地文件责任。"""
+    """已取得的原申请；action_id 为空时只表示拥有者尚待数据库解析。"""
 
     stage: MediaSaveStage
     command: CheckResultSave | RepairDecisionSave | RepairResultSave | RepairStart | RepairSuccess
     key: OperationKey
-    action_id: int
+    action_id: int | None
     file_ids: tuple[int, ...]
     save_error: BaseException | None = None
 
@@ -291,18 +291,15 @@ class CaptureProcessingSaves:
         identity = (stage, command.processing_id)
         held = self.pending.get(identity)
         if held is None:
-            owner = await _read_one(self.database,
-                "SELECT action_id FROM recording_processing WHERE id=?", (command.processing_id,))
-            if owner is None:
-                raise ConsistencyError("原媒体申请的处理拥有者不存在")
             files = self.file_ids
-            if isinstance(command, RepairSuccess):
+            if isinstance(command, (RepairSuccess, RepairResultSave)) and command.output_file_id is not None:
                 files = tuple(dict.fromkeys((*files, command.output_file_id)))
-            held = PendingMediaRequest(stage, deepcopy(command), new_operation_key(), owner[0], files)
+            held = PendingMediaRequest(stage, deepcopy(command), new_operation_key(), None, files)
             self.pending[identity] = held
         elif (type(command) is not type(held.command)
                 or not json_equal(_media_request_values(command), _media_request_values(held.command))):
             raise ConsistencyError("尚未保存的原媒体申请不能由后续申请替换")
+        held = await self._resolve_owner(held)
         try:
             outcome = await self.database.write(
                 lambda owned: getattr(self.repository, stage.value)(held.command, held.key, owned),
@@ -315,6 +312,20 @@ class CaptureProcessingSaves:
         receipt = self._commit(outcome)
         self._apply_receipt(identity, held, receipt)
         return receipt
+
+    async def _resolve_owner(self, held):
+        if held.action_id is None:
+            try:
+                owner = await _read_one(self.database,
+                    "SELECT action_id FROM recording_processing WHERE id=?", (held.command.processing_id,))
+                if owner is None:
+                    raise ConsistencyError("原媒体申请的处理拥有者不存在")
+            except BaseException as error:
+                self.pending[(held.stage, held.command.processing_id)] = replace(held, save_error=error)
+                raise
+            held = replace(held, action_id=owner[0])
+            self.pending[(held.stage, held.command.processing_id)] = held
+        return held
 
     def _apply_receipt(self, identity, held, receipt):
         if receipt.disposition is SaveDisposition.SAVED:
@@ -330,6 +341,7 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
     saves = CaptureProcessingSaves(database, pending)
     owner = executor if executor is not None else FileTaskExecutor(Supervisor())
     for held in tuple(pending.values()):
+        held = await saves._resolve_owner(held)
         if action_id is not None and held.action_id != action_id:
             continue
 
@@ -712,7 +724,7 @@ async def resume_prepared_internal_reads(
 ) -> None:
     """默认入口只核实原完整 READ 申请，不取得新设备或媒体执行资格。"""
     prepared = tuple(pending for pending in pending_read_results.values()
-                     if isinstance(pending, PendingReadResult))
+                     if isinstance(pending, (PendingReadResult, PendingStoppedRead)))
     if not prepared and not pending_read_business:
         return
     scope = SimpleNamespace(
@@ -721,7 +733,9 @@ async def resume_prepared_internal_reads(
         pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
     for pending in prepared:
         # 完整输入首次确定的原时刻承担其独立收场，重送不读取当前墙钟。
-        scope.occurred_at = lambda original=pending.finish.occurred_at: original
+        original_time = (pending.occurred_at if isinstance(pending, PendingStoppedRead)
+                         else pending.finish.occurred_at)
+        scope.occurred_at = lambda original=original_time: original
         await _save_internal_read_and_settle(scope, pending)
     await retry_read_business(scope)
 
