@@ -35,6 +35,7 @@ from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.persistence.transaction import row_facts
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.transaction_timing import db_operation_context
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,8 @@ def resume_segment_writes(owned, pending_writes, action_id=None):
             continue
         pending = pending_writes[identity]
         with measure_performance("segment_save", action_id=identity,
-                                 method=pending.method, resumed=True):
+                                 method=pending.method, resumed=True), db_operation_context(
+                                     action_id=identity, method=pending.method, resumed=True):
             receipt = getattr(pending.repository, pending.method)(
                 *pending.args, pending.key, owned
             )
@@ -70,7 +72,8 @@ def _save(runtime, action_id, repository, method, *args):
     pending = PendingSegmentWrite(repository, method, args, new_operation_key())
     runtime.pending_segment_writes[action_id] = pending
     with measure_performance("segment_save", action_id=action_id,
-                             method=method, resumed=False):
+                             method=method, resumed=False), db_operation_context(
+                                 action_id=action_id, method=method, resumed=False):
         receipt = getattr(repository, method)(*args, pending.key, runtime.owned)
     if receipt.kind is not DbOutcomeKind.COMPLETED:
         if receipt.kind is DbOutcomeKind.ROLLED_BACK:
