@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.contracts.enums import enum_for
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 
 _INSPECTION_STATE = enum_for("segment_inspections.state")
 _INSPECTION_PENDING = int(_INSPECTION_STATE.PENDING)
@@ -337,20 +338,25 @@ class ReadDiscoveryOwner:
         order = "scheduled_at,plan_id,input_index,id"
         eligibility = "(status IN (1,2) AND cancel_requested=0 AND scheduled_at<=?) OR (status=2 AND cancel_requested=1)"
         parameters = (scope.now_us,)
+        capture_types = ",".join(str(value) for value in CAPTURE_ACTION_TYPES)
+        from camctl.capture.preparation_discovery import (
+            photo_preparation_start_where, preparation_responsibility_where,
+        )
+        photo_start = photo_preparation_start_where()
         if preparation_leads:
             for device_id, lead_s in preparation_leads.items():
                 horizon = min(MAX_OBJECT_ID, scope.now_us + int(lead_s * 1_000_000))
-                eligibility += " OR (type IN (2,3) AND status=1 AND cancel_requested=0 AND device_id=? AND scheduled_at<=?)"
+                eligibility += (f" OR (type IN ({capture_types}) AND status=1 AND cancel_requested=0"
+                    f" AND device_id=? AND scheduled_at<=? AND {photo_start})")
                 parameters += device_id, horizon
             at = next_preparation_at(connection, scope.now_us, preparation_leads)
             if at is not None:
                 self._deadline = at if self._deadline is None else min(at, self._deadline)
-        from camctl.capture.preparation_discovery import preparation_responsibility_where
         eligibility += (" OR EXISTS (SELECT 1 FROM device_activities d WHERE d.action_id=a.id AND "
                         + preparation_responsibility_where(include_pending=True) + ")")
         query = (
             "SELECT id,device_id,scheduled_at,plan_id,input_index FROM actions a"
-            " WHERE type IN (1,2,3) AND (" + eligibility + ")"
+            f" WHERE type IN ({capture_types}) AND (" + eligibility + ")"
         )
         if saved is not None:
             query += f" AND ({order})>(?,?,?,?)"
@@ -368,12 +374,16 @@ class ReadDiscoveryOwner:
 def next_preparation_at(connection, now_us, preparation_leads):
     """取尚未进入提前区间的最早时刻，不为已阻塞候选制造空转截止。"""
     result = None
+    from camctl.capture.preparation_discovery import photo_preparation_start_where
+    capture_types = ",".join(str(value) for value in CAPTURE_ACTION_TYPES)
+    photo_start = photo_preparation_start_where()
     for device_id, lead_s in preparation_leads.items():
         lead_us = int(lead_s * 1_000_000)
         horizon = min(MAX_OBJECT_ID, now_us + lead_us)
         with closing(connection.execute(
-            "SELECT MIN(scheduled_at) FROM actions WHERE type IN (2,3)"
-            " AND status=1 AND cancel_requested=0 AND device_id=? AND scheduled_at>?",
+            f"SELECT MIN(scheduled_at) FROM actions a WHERE type IN ({capture_types})"
+            " AND status=1 AND cancel_requested=0 AND device_id=? AND scheduled_at>?"
+            f" AND {photo_start}",
             (device_id, horizon),
         )) as cursor:
             at = cursor.fetchone()[0]

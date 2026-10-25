@@ -11,6 +11,7 @@ from camctl.capture.handlers import (
 from camctl.capture.residual import pass_residual_gate
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
 from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -150,6 +151,58 @@ async def test_passing_first_gate_uses_existing_grant_conditions(mocker):
     assert result.detail == "device_busy"
     gate.assert_awaited_once()
     runtime.driver.control.assert_not_awaited()
+
+
+async def test_photo_without_current_preparation_proof_does_not_grant_a_start(mocker):
+    runtime = _runtime(mocker, action_type="camera_take_photo")
+    action = runtime.action(2)
+    action.update(driver_id="hasselblad_cfv100c", execution_spec_json={
+        "output_storage": "host", "start_call_timeout_s": Decimal(180)})
+    runtime.capture_preparation_supported = True
+    mocker.patch("camctl.capture.preparation.prepared_by", autospec=True, return_value=None)
+
+    with pytest.raises(ConsistencyError, match="准备凭据"):
+        await _control_call(runtime, action, "take_photo", "photo_taken")
+
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_awaited()
+
+
+async def test_photo_start_preserves_complete_deadline_entry_permit_and_preparation_proof(mocker):
+    from camctl.devices.ports import DeviceCallResult
+    from camctl.devices.start_entry import StartEntryCoordinator
+    from camctl.operations.models import (
+        AttemptTicket, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
+    )
+
+    runtime = _runtime(mocker, action_type="camera_take_photo")
+    action = runtime.action(2)
+    action.update(driver_id="hasselblad_cfv100c", execution_spec_json={
+        "output_storage": "host", "start_call_timeout_s": Decimal(180)})
+    runtime.capture_preparation_supported = True
+    prepared = AttemptTicket(1, "control", "7", "prepare/7/" + "a" * 32, 8)
+    ticket = AttemptTicket(1, "control", "7", "start/2", 9)
+    runtime.start_entries = StartEntryCoordinator()
+    permit = runtime.start_entries.prepare("db", 2)
+    permit.bind("db", ticket)
+    runtime.owned.metadata.instance_id = "db"
+    runtime.grant.return_value = (ticket, None)
+    mocker.patch("camctl.capture.preparation.prepared_by", autospec=True, return_value=prepared)
+
+    async def capture(request):
+        permit.enter(request.ticket)
+        return DeviceCallResult.from_outcome(CallOutcome(effect=EffectState.CONFIRMED,
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("returned", 1))))
+
+    runtime.driver.control.side_effect = capture
+
+    assert (await _control_call(runtime, action, "take_photo", "photo_taken")).phase == "confirmed"
+
+    request = runtime.driver.control.call_args.args[0]
+    assert request.timeout_s == Decimal(180)
+    assert request.prepared_by == prepared and request.start_entry is permit
+    assert not permit.active
+    assert runtime.finish.call_args.args[0] == ticket
 
 
 @pytest.mark.parametrize("saved_attempt", [(1, 1, 100), (2, 3, 100), (3, 2, 100), (4, 1, 100)])

@@ -130,6 +130,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, ne
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
 from camctl.devices.capture_timing import CaptureTiming, WaitClockReference
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.tasks import CompletionMode, VideoResultMode
 from camctl.devices.capture_completion import is_stop_context
 from camctl.persistence.repositories.result_sources import ResultSourceKind
@@ -1602,7 +1603,8 @@ def _capture_dispatch_check(runtime, action_id):
 
 
 def _prepared_start_ticket(runtime, action):
-    if getattr(runtime, "capture_preparation_supported", False) is not True or action["type"] not in (2, 3):
+    if (getattr(runtime, "capture_preparation_supported", False) is not True
+            or action["type"] not in CAPTURE_ACTION_TYPES):
         return None
     from camctl.capture.preparation import prepared_by
     ticket = prepared_by(runtime, action)
@@ -1645,6 +1647,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         prepared = await _baseline_before_control(runtime, action)
         if prepared is not None:
             return prepared
+    prepared_ticket = _prepared_start_ticket(runtime, action)
     ticket, reason = runtime.grant(action)
     if ticket is None:
         return HandlerOutcome("not_granted", reason)
@@ -1665,7 +1668,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
             ticket=ticket, timeout_s=_start_call_timeout(action),
             dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
             start_entry=permit,
-            prepared_by=_prepared_start_ticket(runtime, action),
+            prepared_by=prepared_ticket,
         ))
     finally:
         if permit is not None:
@@ -1861,11 +1864,12 @@ def _prepare_held_start_result(runtime, pending):
 
 @owned_tool_call
 async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOutcome | None:
-    """两个拍摄入口共用准备；准备结束后重新检查取消与原窗口。"""
+    """拍摄入口共用准备；准备结束后重新检查取消与原窗口。"""
     from camctl.capture.baseline import PreparationPhase
     from camctl.scheduling.rules import WindowPhase, window_phase
 
-    if getattr(runtime, "capture_preparation_supported", False) is True and action["type"] in (2, 3):
+    if (getattr(runtime, "capture_preparation_supported", False) is True
+            and action["type"] in CAPTURE_ACTION_TYPES):
         from camctl.capture.preparation import advance_preparation
         result = await advance_preparation(runtime, action["id"])
     else:

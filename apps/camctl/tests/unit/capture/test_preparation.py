@@ -13,6 +13,7 @@ from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.preparation import (
     RuntimePreparationCache, advance_preparation, prepared_by, resume_preparation_saves,
     _recover_old_preparation, settle_preparation,
+    preparation_dispatch_reason,
 )
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -77,6 +78,97 @@ def _world(mocker, *, recover=True):
     return runtime, action, ticket
 
 
+def _photo_world(mocker):
+    runtime, action, ticket = _world(mocker)
+    runtime.capture_preparation_supported = True
+    action.update(type=1, driver_id="hasselblad_cfv100c",
+        effective_params_json={"type": "hasselblad_photo", "format": "raw"},
+        execution_spec_json={"output_storage": "host", "start_call_timeout_s": Decimal(180)})
+    return runtime, action, ticket
+
+
+@pytest.mark.asyncio
+async def test_photo_prepares_settings_with_control_budget_before_start_without_creating_start(mocker):
+    from camctl.capture.handlers import _prepared_start_ticket
+
+    runtime, action, ticket = _photo_world(mocker)
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    request = runtime.preparation_driver.prepare_capture.call_args.args[0]
+    assert request.operation == "take_photo"
+    assert request.timeout_s == Decimal("0.5")
+    assert request.start_entry is None
+    assert _prepared_start_ticket(runtime, action) == ticket
+    assert action["status"] == 1 and action["execution_started"] == 0
+    runtime.scheduling.start_action.assert_not_called()
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_photo_setting_failure_ends_preparation_without_marking_execution_started(mocker):
+    from camctl.operations.models import AttemptStatus, ErrorValue
+    from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
+
+    runtime, action, _ = _photo_world(mocker)
+    runtime.preparation_driver.prepare_capture.return_value = DeviceCallResult.from_outcome(CallOutcome(
+        status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+        error=ErrorValue("setting_failed", "device"),
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("returned", 1))))
+
+    def fail(request, key, owned):
+        action["status"] = 4
+        return DbOutcome(DbOutcomeKind.COMPLETED)
+
+    runtime.scheduling.fail_preparation.side_effect = fail
+    runtime.capture.release_occupancy.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ActivityReleaseResult(ReleaseOutcome.RELEASED))
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.FAILED
+    assert action["status"] == 4 and action["execution_started"] == 0
+    assert runtime.scheduling.fail_preparation.call_args.args[0].reason == "device_failed"
+    runtime.prepare_baseline.assert_not_called()
+    runtime.grant.assert_not_called()
+    runtime.driver.control.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_new_photo_session_repeats_only_settings_under_original_activity_without_starting(mocker):
+    runtime, action, _ = _photo_world(mocker)
+    await advance_preparation(runtime, 1)
+    runtime.session_key = "b" * 32
+    ticket = AttemptTicket(1, "control", "7", f"prepare/7/{runtime.session_key}", 12)
+    runtime.operations.begin_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        BeginAttemptResult(BeginDisposition.GRANTED, ticket))
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+
+    assert runtime.preparation_driver.prepare_capture.await_count == 2
+    assert prepared_by(runtime, action) == ticket
+    assert runtime.operations.begin_attempt.call_args.args[0].target.activity_id == 7
+    assert action["status"] == 1 and action["execution_started"] == 0
+    runtime.scheduling.start_action.assert_not_called()
+    runtime.driver.control.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_facts", [
+    (1, 3, False), (3, 2, True), (2, 1, False),
+])
+async def test_photo_existing_start_always_keeps_original_start_chain(mocker, start_facts):
+    from camctl.persistence.repositories.capture_facts import StartFacts
+
+    runtime, action, _ = _photo_world(mocker)
+    action.update(status=2, execution_started=1)
+    status, effect, not_started = start_facts
+    runtime.last_attempt.return_value = (status, effect, 0)
+    mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
+        return_value=StartFacts(None, {"status": 2}, 1, not_started, 4))
+    assert preparation_dispatch_reason(runtime, 1) == "already_dispatched"
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    runtime.preparation_driver.prepare_capture.assert_not_called()
+    runtime.prepare_baseline.assert_not_called()
+    runtime.operations.begin_attempt.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_preparation_ends_before_scheduled_time_without_starting_action(mocker):
     runtime, action, ticket = _world(mocker)
@@ -94,8 +186,9 @@ async def test_preparation_ends_before_scheduled_time_without_starting_action(mo
 
 
 @pytest.mark.asyncio
-async def test_unknown_result_save_keeps_original_request_and_never_repeats_settings(mocker):
-    runtime, action, ticket = _world(mocker)
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_unknown_result_save_keeps_original_request_and_never_repeats_settings(mocker, world):
+    runtime, action, ticket = world(mocker)
     runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("unknown"))
     with pytest.raises(ConsistencyError, match="原完整申请"):
         await advance_preparation(runtime, 1)
@@ -113,8 +206,9 @@ async def test_unknown_result_save_keeps_original_request_and_never_repeats_sett
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("save_fails", [False, True])
-async def test_second_cancellation_waits_for_actual_result_save_before_connection_close(mocker, save_fails):
-    runtime, _, _ = _world(mocker)
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_second_cancellation_waits_for_actual_result_save_before_connection_close(mocker, save_fails, world):
+    runtime, _, _ = world(mocker)
     entered, interrupted, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
     result = runtime.preparation_driver.prepare_capture.return_value
 
@@ -156,16 +250,18 @@ async def test_second_cancellation_waits_for_actual_result_save_before_connectio
 
 
 @pytest.mark.asyncio
-async def test_saved_preparation_without_current_driver_match_is_never_start_proof(mocker):
-    runtime, action, _ = _world(mocker)
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_saved_preparation_without_current_driver_match_is_never_start_proof(mocker, world):
+    runtime, action, _ = world(mocker)
     await advance_preparation(runtime, 1)
     runtime.preparation_driver.prepared_capture_matches.return_value = False
     assert prepared_by(runtime, action) is None
 
 
 @pytest.mark.asyncio
-async def test_local_proof_check_receives_original_activity_ticket(mocker):
-    runtime, action, ticket = _world(mocker)
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_local_proof_check_receives_original_activity_ticket(mocker, world):
+    runtime, action, ticket = world(mocker)
     runtime.preparation_driver.prepared_capture_matches.side_effect = (
         lambda request: request.ticket == ticket and request.prepared_by == ticket)
     assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
@@ -222,10 +318,11 @@ async def test_reliable_no_effect_start_can_prepare_without_resetting_execution(
 
 
 @pytest.mark.asyncio
-async def test_terminal_preparation_releases_only_after_actual_settings_finish(mocker):
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_terminal_preparation_releases_only_after_actual_settings_finish(mocker, world):
     from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
 
-    runtime, action, _ = _world(mocker)
+    runtime, action, _ = world(mocker)
     entered, release = asyncio.Event(), asyncio.Event()
     actual = runtime.preparation_driver.prepare_capture.return_value
 
@@ -260,10 +357,11 @@ async def test_aborted_baseline_without_changed_qualification_stops_with_diagnos
 
 
 @pytest.mark.asyncio
-async def test_cancel_before_actual_task_enters_saves_reliable_not_dispatched(mocker):
+@pytest.mark.parametrize("world", [_world, _photo_world], ids=["recording", "photo"])
+async def test_cancel_before_actual_task_enters_saves_reliable_not_dispatched(mocker, world):
     from camctl.capture.preparation import _wait_preparation_task
 
-    runtime, _, _ = _world(mocker)
+    runtime, _, _ = world(mocker)
 
     async def cancel_before_entry(task):
         task.cancel()

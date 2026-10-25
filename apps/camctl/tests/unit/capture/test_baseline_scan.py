@@ -9,6 +9,7 @@ import pytest
 from camctl.capture.baseline import PendingBaseline, PreparationPhase, prepare_baseline
 from camctl.capture.baseline_models import BaselineChunkResult, BaselineRef, BaselineState
 from camctl.contracts.pages import Page
+from camctl.contracts.enums import enum_for
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryReader
 from camctl.devices.drivers.adb_cameras.directory_scan import AdbDirectoryScan
@@ -75,6 +76,26 @@ async def test_136_paths_use_one_scan_and_close_after_fixed_save(mocker):
     assert scan.read_directory.await_count == 2
     scan.close.assert_called_once()
     assert runtime.pending_baselines == {}
+
+
+@pytest.mark.asyncio
+async def test_task_scoped_photo_is_ready_without_scanning_or_creating_baseline_responsibility(mocker):
+    from camctl.capture import baseline
+
+    runtime, directory, scan, _ = _world(mocker)
+    action = {"id": 2, "type": int(enum_for("actions.type").CAMERA_TAKE_PHOTO)}
+    activity = {"id": 1, "action_id": 2,
+        "ownership_mode": int(enum_for("device_activities.ownership_mode").TASK_SCOPE)}
+    baseline.row_facts.side_effect = (
+        lambda connection, table, identity: action if table == "actions" else activity)
+
+    assert (await prepare_baseline(2, 1, runtime=runtime)).phase is PreparationPhase.READY
+
+    assert runtime.pending_baselines == {}
+    runtime.capture.baseline_ref.assert_not_called()
+    directory.directory_scan.assert_not_called()
+    directory.read_directory.assert_not_awaited()
+    scan.read_directory.assert_not_awaited()
 
 
 def _segmented_world(mocker, *, scanning=True):

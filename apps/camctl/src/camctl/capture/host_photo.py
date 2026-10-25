@@ -416,6 +416,7 @@ def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_at: int
 async def advance_host_photo(runtime, action_id: int) -> None:
     """消费原 START 结果、归档双文件并按固定模式登记正式产物。"""
     from camctl.capture.handlers import (
+        _baseline_before_control,
         _control_call,
         _conclude_activity,
         _finish_canceled_capture,
@@ -449,6 +450,10 @@ async def advance_host_photo(runtime, action_id: int) -> None:
             if receipt.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"主机单张过期事务未完成: {receipt.error}")
             return
+        if getattr(runtime, "capture_preparation_supported", False) is True:
+            prepared = await _baseline_before_control(runtime, action)
+            if prepared is not None:
+                return
         files = _prepare_files(runtime, action_id)
         step = await _control_call(
             runtime,

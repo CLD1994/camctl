@@ -1,13 +1,18 @@
 """发现页的责任与继续位置不依赖候选详情缓存。"""
 
 from dataclasses import replace
+from decimal import Decimal
+import sqlite3
+from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.contracts.pages import Page
 from camctl.outputs.read_discovery import (
     ReadDiscoveryCursor, ReadDiscoveryOwner, ReadDiscoveryScope, check_cursor,
+    next_preparation_at,
 )
+from camctl.outputs import read_discovery
 
 
 def test_empty_page_with_cursor_continues():
@@ -49,3 +54,35 @@ def test_new_eligibility_invalidates_old_frontier():
     assert not owner.pending
     with pytest.raises(ValueError):
         owner.accept(scope, Page((), None))
+
+
+def test_future_capture_query_uses_shared_types_and_original_photo_start_rule(mocker):
+    mocker.patch.object(read_discovery, "CAPTURE_ACTION_TYPES", (77,))
+    mocker.patch("camctl.capture.preparation_discovery.photo_preparation_start_where",
+        autospec=True, return_value="photo_start_allowed")
+    mocker.patch.object(read_discovery, "next_preparation_at", autospec=True, return_value=None)
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    connection.execute.return_value.fetchall.return_value = []
+    owner = ReadDiscoveryOwner(10)
+    owner._stamp = ("db", 1)
+
+    assert owner.captures(connection, 1_000_000, {"photo": Decimal("2.5")}).items == ()
+
+    query, parameters = connection.execute.call_args.args
+    assert query.count("type IN (77)") == 2
+    assert "scheduled_at<=? AND photo_start_allowed" in query
+    assert parameters == (1_000_000, "photo", 3_500_000, 10)
+
+
+def test_future_preparation_deadline_uses_shared_types_and_original_photo_start_rule(mocker):
+    mocker.patch.object(read_discovery, "CAPTURE_ACTION_TYPES", (77,))
+    mocker.patch("camctl.capture.preparation_discovery.photo_preparation_start_where",
+        autospec=True, return_value="photo_start_allowed")
+    connection = create_autospec(sqlite3.Connection, instance=True)
+    connection.execute.return_value.fetchone.return_value = (10_000_500,)
+
+    assert next_preparation_at(connection, 1_000_000, {"photo": Decimal("2.5")}) == 7_500_500
+
+    query, parameters = connection.execute.call_args.args
+    assert "type IN (77)" in query and query.endswith(" AND photo_start_allowed")
+    assert parameters == ("photo", 3_500_000)

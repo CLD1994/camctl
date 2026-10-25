@@ -12,6 +12,7 @@ from camctl.capture.models import ActivityReleaseSave
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.devices.bindings import DeviceBinding
+from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES, capture_operation
 from camctl.devices.ports import CapturePreparationDriver, ControlRequest, DeviceCallResult
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.operations.attempts import (
@@ -161,6 +162,8 @@ def _activity(runtime, action_id):
 def _start_precedes_preparation(runtime, action):
     if runtime.last_attempt(f"start/{action['id']}") is None:
         return False
+    if action["type"] == int(enum_for("actions.type").CAMERA_TAKE_PHOTO):
+        return True
     from camctl.persistence.repositories.capture_facts import load_start_facts
     facts = load_start_facts(runtime.owned.connection, action)
     return (not facts.not_started or facts.run is not None and facts.run["status"] not in (1, 2)
@@ -169,7 +172,7 @@ def _start_precedes_preparation(runtime, action):
 
 def _request(runtime, action, *, ticket=None, prepared_by=None):
     return ControlRequest(
-        "start_recording" if action["type"] == 2 else "start_timelapse",
+        capture_operation(action["type"]),
         DeviceBinding(action["device_id"], action["driver_id"]), action["effective_params_json"],
         ticket=ticket, timeout_s=runtime.start_config.timeout_s, prepared_by=prepared_by,
         dispatch_check=lambda: preparation_dispatch_reason(runtime, action["id"]),
@@ -339,7 +342,7 @@ async def advance_preparation(runtime, action_id):
     resume_preparation_saves(runtime.owned, cache, operations=runtime.operations,
                              scheduling=runtime.scheduling, capture=runtime.capture)
     action = runtime.action(action_id)
-    if action["type"] not in (2, 3):
+    if action["type"] not in CAPTURE_ACTION_TYPES:
         return BaselinePreparation(PreparationPhase.READY)
     if action["status"] == 2 and action["execution_spec_json"].get("result_policy") is not None:
         from camctl.capture.segment_completion import resume_segmented_preparation_failure

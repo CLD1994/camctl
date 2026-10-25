@@ -12,7 +12,7 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.handlers import ResultFilesPort
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceRegistry
-from camctl.devices.ports import ControlDriver, DriverDeclaration
+from camctl.devices.ports import CapturePreparationDriver, ControlDriver, DriverDeclaration
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.scheduling.rules import LaunchWindow
@@ -104,3 +104,32 @@ def test_formal_result_adapter_shares_runtime_repository_and_owned_connection():
     assert isinstance(runtime.results, DriverResultListing)
     assert runtime.results._capture_repository is runtime.capture
     assert runtime.results._owned is owned
+
+
+@pytest.mark.parametrize("configured_lead,expected", [
+    (None, Decimal("4.25")), (Decimal("0.125"), Decimal("0.125")),
+])
+def test_photo_preparation_port_and_lead_use_the_driver_declaration(configured_lead, expected):
+    class PreparedPhotoDriver(ControlDriver, CapturePreparationDriver):
+        default_prepare_lead_s = Decimal("4.25")
+
+    driver = create_autospec(PreparedPhotoDriver, instance=True)
+    driver.default_prepare_lead_s = PreparedPhotoDriver.default_prepare_lead_s
+    declaration = {"driver": "photo-driver"}
+    if configured_lead is not None:
+        declaration["connection"] = {"prepare_lead_s": configured_lead}
+    entry = DriverEntry("photo-driver", driver, DriverDeclaration(
+        control_supported=True, stop_supported=False, query_supported=False,
+        result_supported=False, read_supported=False, digest_supported=False,
+        delete_supported=False, capture_preparation_supported=True), EvidenceRegistry(()),
+        DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    factory = session_capture_assembly(devices={"photo": declaration},
+        drivers=DriverRegistry((entry,)), staging=Path("/staging"),
+        wait_config=execution_wait_config, media_enabled=False)
+
+    runtime = factory(object(), "photo")
+
+    assert runtime.capture_preparation_supported
+    assert runtime.preparation_driver is driver
+    assert runtime.prepare_lead_s == expected
+    assert factory.preparation_leads == {"photo": expected}
