@@ -136,7 +136,8 @@ async def test_local_read_pins_both_check_source_and_delivery_target():
         database=inline_business_database(OwnedConnection(connection,
             DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))))
 
-    async def body():
+    async def body(control):
+        assert control is None
         return "read finished"
 
     assert await run_owned_read(runtime, 7, body) == "read finished"

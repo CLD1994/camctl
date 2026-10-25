@@ -19,7 +19,8 @@ from camctl.devices.read_session import SourceFile
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
 
 
 @pytest.mark.asyncio
@@ -33,7 +34,7 @@ async def test_source_fact_wait_cancel_keeps_undispatched_marker():
     async def read(callback, **kwargs):
         entered.set()
         await release.wait()
-        return SourceFile("original", {"path": "original"}, 20)
+        return SourceFile("original", {"path": "original"}, 20), None
 
     database.read.side_effect = read
     sessions = DriverReadSessions(database, driver, AttemptTicket(1, "read", "9", "read", 28))
@@ -48,15 +49,33 @@ async def test_source_fact_wait_cancel_keeps_undispatched_marker():
 
 @pytest.mark.asyncio
 async def test_actual_source_dispatch_releases_marker_after_fact_read():
-    database = create_autospec(BusinessDatabase, instance=True)
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+    ticket = AttemptTicket(1, "read", "9", "read/9", 28)
+
+    def execute(query, parameters):
+        if "FROM device_files" in query:
+            assert parameters == (30,)
+            cursor.fetchone.return_value = ("original", '{"path":"original"}', 20, 3)
+        else:
+            assert "JOIN file_copies" in query
+            assert parameters == (1, 28, 9, "read/9")
+            cursor.fetchone.return_value = (2, 0, 1, 1, 1, None, 30, None, "camera")
+        return cursor
+
+    connection.execute.side_effect = execute
+    database = inline_business_database(OwnedConnection(connection,
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing")))
     driver = create_autospec(ReadDriver, instance=True)
-    database.read.return_value = SourceFile("original", {"path": "original"}, 20)
     marker = {9: object()}
     source = create_autospec(RecordingSource, instance=True)
     driver.open_read.side_effect = lambda *args, **kwargs: source if not marker else None
-    sessions = DriverReadSessions(database, driver, AttemptTicket(1, "read", "9", "read", 28))
+    sessions = DriverReadSessions(database, driver, ticket)
     assert await sessions.open_session(30, 0, on_start=lambda: marker.pop(9)) is source
     assert not marker
+    driver.open_read.assert_awaited_once_with(
+        SourceFile("original", {"path": "original"}, 20), 0, ticket,
+        idle_timeout_s=Decimal("10"))
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.contracts.values import ConsistencyError
-from camctl.outputs.read_attempts import save_read_business
+from camctl.outputs.read_attempts import ReadContinuation, save_read_business
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository, FinishObtain
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
@@ -107,7 +107,7 @@ async def test_read_intent_applies_granted_ticket_before_cancel_and_reuses_unkno
     if cancel:
         with pytest.raises(asyncio.CancelledError):
             await acquire_read_attempt(runtime, intent)
-        assert runtime.continuing_read_tickets == {2: ticket}
+        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True)}
         assert runtime.pending_read_business == {}
     else:
         with pytest.raises(ConsistencyError):
@@ -117,7 +117,8 @@ async def test_read_intent_applies_granted_ticket_before_cancel_and_reuses_unkno
             DbOutcomeKind.COMPLETED, BeginAttemptResult(BeginDisposition.GRANTED, ticket))
         assert await acquire_read_attempt(runtime, intent) == (ticket, None)
         assert repository.begin_attempt.call_args.args[:2] == (intent, pending.key)
-        assert runtime.pending_read_business == {} and runtime.continuing_read_tickets == {2: ticket}
+        assert runtime.pending_read_business == {}
+        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True)}
 
 
 @pytest.mark.asyncio
@@ -152,7 +153,7 @@ async def test_read_intent_applies_actual_completed_ticket_before_write_error(er
     assert raised.value is error
     assert db_outcome_for(error) is actual
     if kind is DbOutcomeKind.COMPLETED:
-        assert runtime.continuing_read_tickets == {2: ticket}
+        assert runtime.continuing_read_tickets == {2: ReadContinuation(ticket, True)}
         assert runtime.pending_read_business == {}
     else:
         original = runtime.pending_read_business[(2, "read_intent")]
@@ -201,6 +202,7 @@ async def test_local_source_fact_wait_keeps_unsent_ticket_and_read_end(monkeypat
     from pathlib import Path
     from camctl.outputs.obtain_flow import LocalReadSessions
     from camctl.outputs.handoff import DeliveryDirectories
+    from camctl.operations.models import AttemptTicket
     owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
         DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     database = inline_business_database(owned)
@@ -212,7 +214,9 @@ async def test_local_source_fact_wait_keeps_unsent_ticket_and_read_end(monkeypat
     held = {2: object()}
     reader = create_autospec(__import__("camctl.host_files.io", fromlist=["LocalSourceReader"]).LocalSourceReader)
     monkeypatch.setattr("camctl.outputs.obtain_flow.LocalSourceReader", reader)
-    sessions = LocalReadSessions(database, DeliveryDirectories(Path("/staging"), Path("/ready"), Path("/processing")))
+    sessions = LocalReadSessions(database, DeliveryDirectories(
+        Path("/staging"), Path("/ready"), Path("/processing"))).for_attempt(
+            AttemptTicket(1, "read", "2", "read/2", 5))
     task = asyncio.create_task(sessions.open_session(7, 0, on_start=lambda: held.pop(2)))
     await entered.wait()
     task.cancel()
