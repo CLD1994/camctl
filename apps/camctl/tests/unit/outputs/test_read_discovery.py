@@ -13,6 +13,30 @@ from camctl.outputs.read_discovery import (
     next_preparation_at,
 )
 from camctl.outputs import read_discovery
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
+
+
+@pytest.mark.asyncio
+async def test_round_database_reads_finish_before_loop_frontier_changes():
+    owner = ReadDiscoveryOwner(1)
+    owner.observe(("db", 5), 123)
+    scope = owner.scope("reads", "db", 123)
+    owner.accept(scope, Page((), ReadDiscoveryCursor(scope, (8,))))
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    def execute(sql, parameters=()):
+        assert owner.pending
+        assert owner._stamp == ("db", 5)
+        cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        cursor.fetchone.return_value = (6,) if "MAX(id)" in sql else (200,)
+        cursor.fetchall.return_value = [(0, "main", "db")]
+        return cursor
+    owned.connection.execute.side_effect = execute
+    assert await owner.begin_round(inline_business_database(owned), 124) == "db"
+    assert not owner.pending
+    assert owner._stamp == ("db", 6)
+    assert owner._deadline == 200
 
 
 def test_empty_page_with_cursor_continues():
@@ -56,7 +80,8 @@ def test_new_eligibility_invalidates_old_frontier():
         owner.accept(scope, Page((), None))
 
 
-def test_future_capture_query_uses_shared_types_and_original_photo_start_rule(mocker):
+@pytest.mark.asyncio
+async def test_future_capture_query_uses_shared_types_and_original_photo_start_rule(mocker):
     mocker.patch.object(read_discovery, "CAPTURE_ACTION_TYPES", (77,))
     mocker.patch("camctl.capture.preparation_discovery.photo_preparation_start_where",
         autospec=True, return_value="photo_start_allowed")
@@ -66,7 +91,8 @@ def test_future_capture_query_uses_shared_types_and_original_photo_start_rule(mo
     owner = ReadDiscoveryOwner(10)
     owner._stamp = ("db", 1)
 
-    assert owner.captures(connection, 1_000_000, {"photo": Decimal("2.5")}).items == ()
+    owned = OwnedConnection(connection, DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    assert (await owner.captures(inline_business_database(owned), 1_000_000, {"photo": Decimal("2.5")})).items == ()
 
     query, parameters = connection.execute.call_args.args
     assert query.count("type IN (77)") == 2

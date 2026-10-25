@@ -333,15 +333,15 @@ class MediaTools(Protocol):
 class ProcessingSaves(Protocol):
     """录像处理事务端口；每次调用独立提交并返回实际结果。"""
 
-    def save_check_result(self, command: CheckResultSave) -> SaveReceipt: ...
+    async def save_check_result(self, command: CheckResultSave) -> SaveReceipt: ...
 
-    def save_repair_decision(self, command: RepairDecisionSave) -> SaveReceipt: ...
+    async def save_repair_decision(self, command: RepairDecisionSave) -> SaveReceipt: ...
 
-    def save_repair_result(self, command: RepairResultSave) -> SaveReceipt: ...
+    async def save_repair_result(self, command: RepairResultSave) -> SaveReceipt: ...
 
-    def start_repair_output(self, command: RepairStart) -> SaveReceipt: ...
+    async def start_repair_output(self, command: RepairStart) -> SaveReceipt: ...
 
-    def complete_repair_output(self, command: RepairSuccess) -> SaveReceipt: ...
+    async def complete_repair_output(self, command: RepairSuccess) -> SaveReceipt: ...
 
 
 # ---- 检查执行编排 ----
@@ -440,9 +440,9 @@ async def _execute_check(context: CheckContext) -> CheckStep:
         return CheckStep(CheckExecutionPhase.NOT_REQUIRED)
     if status.check_state != int(_CHECK_STATE.NOT_PERFORMED):
         if status.check_state != int(_CHECK_STATE.RUNNING):
-            return _resume_finished_check(context)
+            return await _resume_finished_check(context)
     else:
-        started = context.saves.save_check_result(CheckResultSave(
+        started = await context.saves.save_check_result(CheckResultSave(
             status.processing_id, MediaObservation(CheckPhase.RUNNING),
             context.occurred_at))
         if started.disposition is SaveDisposition.REJECTED:
@@ -472,7 +472,7 @@ async def _execute_check(context: CheckContext) -> CheckStep:
                 error=_error_from_message("probe", str(error)))
     else:
         observation = check_observation_from_probe(probe)
-    saved = context.saves.save_check_result(CheckResultSave(
+    saved = await context.saves.save_check_result(CheckResultSave(
         status.processing_id, observation, context.occurred_at, source_probe=probe))
     if saved.disposition is SaveDisposition.REJECTED:
         return CheckStep(CheckExecutionPhase.RESULT_REJECTED, media=observation,
@@ -480,10 +480,10 @@ async def _execute_check(context: CheckContext) -> CheckStep:
     if saved.disposition is SaveDisposition.UNKNOWN:
         return CheckStep(CheckExecutionPhase.RESULT_UNKNOWN, media=observation,
                          error=saved.error)
-    return _fix_repair_decision(context, observation)
+    return await _fix_repair_decision(context, observation)
 
 
-def _resume_finished_check(context: CheckContext) -> CheckStep:
+async def _resume_finished_check(context: CheckContext) -> CheckStep:
     """检查已终态的恢复入口：只有完成且决定未固定时补固定决定。"""
     status = context.processing
     if (status.check_state == int(_CHECK_STATE.COMPLETED)
@@ -491,14 +491,14 @@ def _resume_finished_check(context: CheckContext) -> CheckStep:
             and status.repair_state == int(_REPAIR_STATE.UNDETERMINED)):
         observation = MediaObservation(
             CheckPhase.COMPLETED, duration_s=status.check_duration_s, issues=status.check_issues)
-        step = _fix_repair_decision(context, observation)
+        step = await _fix_repair_decision(context, observation)
         if step.phase is CheckExecutionPhase.CHECK_COMPLETED:
             return replace(step, phase=CheckExecutionPhase.FINISHED_DECISION_SAVED)
         return step
     return CheckStep(CheckExecutionPhase.ALREADY_FINISHED)
 
 
-def _fix_repair_decision(context: CheckContext,
+async def _fix_repair_decision(context: CheckContext,
                          observation: MediaObservation) -> CheckStep:
     """检查完成后固定修复决定；决定保存失败保留已取得的观察。"""
     status = context.processing
@@ -507,7 +507,7 @@ def _fix_repair_decision(context: CheckContext,
         status.processing_id, context.occurred_at)
     if decision is None:
         return CheckStep(CheckExecutionPhase.CHECK_TERMINAL, media=observation)
-    saved = context.saves.save_repair_decision(decision)
+    saved = await context.saves.save_repair_decision(decision)
     if saved.disposition is SaveDisposition.REJECTED:
         return CheckStep(CheckExecutionPhase.DECISION_REJECTED, media=observation,
                          repair_decision=decision, error=saved.error)
@@ -590,17 +590,17 @@ async def _prepare_osv_repair(context: RepairContext) -> RepairStep:
             return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
                 error=RuntimeError(result.error or "input probe task did not run"))
         context = replace(context, processing=replace(context.processing, source_probe=result.value))
-    output = _repair_output(context)
+    output = await _repair_output(context)
     if isinstance(output, RepairStep):
         return output
     return RepairStep(RepairExecutionPhase.PREPARED, output_file=output)
 
 
-def _repair_output(context: RepairContext) -> RepairOutputFile | RepairStep:
+async def _repair_output(context: RepairContext) -> RepairOutputFile | RepairStep:
     """只取得原输出登记；不申请双文件资格或启动媒体工具。"""
     status = context.processing
     if status.repair_state == int(_REPAIR_STATE.PENDING):
-        started = context.saves.start_repair_output(RepairStart(
+        started = await context.saves.start_repair_output(RepairStart(
             status.processing_id, "mp4" if _osv_input(context.input_file) else context.extension,
             context.occurred_at, source_probe=status.source_probe))
         if started.disposition is SaveDisposition.REJECTED:
@@ -630,7 +630,7 @@ def _repair_output(context: RepairContext) -> RepairOutputFile | RepairStep:
 
 
 async def _start_repair(context: RepairContext) -> RepairStep:
-    output = _repair_output(context)
+    output = await _repair_output(context)
     if isinstance(output, RepairStep):
         return output
     output_ref = FileRef(output.file_id, FilePurpose.REPAIR_OUTPUT,
@@ -651,14 +651,14 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
                 raise ValueError("source_probe_missing: 恢复缺少原输入探测事实")
             issues = osv_input_issues(status.source_probe, status.target_duration_ms)
             if issues:
-                return _save_repair_failure(context, output, error=ProcessingError(
+                return await _save_repair_failure(context, output, error=ProcessingError(
                     "source_media_invalid", "repair", {"issues": [issue.as_json() for issue in issues]}))
             media_error = osv_media_error(status.source_probe, trim_s)
             if media_error is not None:
                 raise ValueError(media_error)
             selected = osv_streams(status.source_probe)
         except ValueError as error:
-            return _save_repair_failure(context, output,
+            return await _save_repair_failure(context, output,
                 error=_error_from_message("repair", str(error)))
         result = await context.tools.repair(context.input_file, output_ref,
             trim_s=trim_s, stream_indices=tuple(s.index for s in selected), output_format="mp4")
@@ -675,18 +675,18 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
             if not probed.ran or probed.value is None
             else osv_output_error(status.source_probe, probed.value, trim_s))
         if error is not None:
-            return _save_repair_failure(context, output,
+            return await _save_repair_failure(context, output,
                 error=_error_from_message("repair", error))
     if artifact.complete:
-        return _complete_repair(context, output, output_ref, artifact,
+        return await _complete_repair(context, output, output_ref, artifact,
             output_probe=probed.value if _osv_input(context.input_file) else None)
-    return _save_repair_failure(context, output, artifact)
+    return await _save_repair_failure(context, output, artifact)
 
 
-def _complete_repair(context: RepairContext, output: RepairOutputFile,
+async def _complete_repair(context: RepairContext, output: RepairOutputFile,
                      output_ref: FileRef, artifact: MediaArtifact,
                      *, output_probe: MediaProbe | None = None) -> RepairStep:
-    completed = context.saves.complete_repair_output(RepairSuccess(
+    completed = await context.saves.complete_repair_output(RepairSuccess(
         context.processing.processing_id, output_ref.file_id,
         artifact.size_bytes, artifact.digest, context.occurred_at, output_probe=output_probe))
     if completed.disposition is SaveDisposition.REJECTED:
@@ -698,10 +698,10 @@ def _complete_repair(context: RepairContext, output: RepairOutputFile,
     return RepairStep(RepairExecutionPhase.SUCCEEDED, output_file=output)
 
 
-def _save_repair_failure(context: RepairContext, output: RepairOutputFile,
+async def _save_repair_failure(context: RepairContext, output: RepairOutputFile,
                          artifact: MediaArtifact | None = None,
                          *, error: ProcessingError | None = None) -> RepairStep:
-    saved = context.saves.save_repair_result(RepairResultSave(
+    saved = await context.saves.save_repair_result(RepairResultSave(
         context.processing.processing_id, RepairOutcome.FAILED,
         context.occurred_at, error=error if error is not None else repair_error_from_artifact(artifact)))
     if saved.disposition is SaveDisposition.REJECTED:
@@ -869,7 +869,7 @@ class DiscardStep:
 class DiscardSaves(Protocol):
     """取消收场进度端口；每次调用独立提交。"""
 
-    def save_discard_progress(
+    async def save_discard_progress(
         self, command: DiscardProgressSave) -> SaveReceipt: ...
 
 
@@ -908,7 +908,7 @@ async def execute_discard(context: DiscardContext) -> DiscardStep:
     """
     state = context.discard_state
     if state == int(_DISCARD_STATE.PENDING):
-        started = context.saves.save_discard_progress(DiscardProgressSave(
+        started = await context.saves.save_discard_progress(DiscardProgressSave(
             context.processing_id, DiscardPhase.RUNNING, context.occurred_at))
         if started.disposition is SaveDisposition.REJECTED:
             return DiscardStep(DiscardExecutionPhase.START_REJECTED,
@@ -949,7 +949,7 @@ async def execute_discard(context: DiscardContext) -> DiscardStep:
     else:
         command = DiscardProgressSave(
             context.processing_id, DiscardPhase.COMPLETED, context.occurred_at)
-    saved = context.saves.save_discard_progress(command)
+    saved = await context.saves.save_discard_progress(command)
     if saved.disposition is SaveDisposition.REJECTED:
         return DiscardStep(DiscardExecutionPhase.RESULT_REJECTED,
                            cleaned=cleaned, failed=failed, error=saved.error)

@@ -16,13 +16,13 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.models import ErrorValue
 
 
-def consume_read(pending, runtime):
+async def consume_read(pending, runtime):
     owner = pending.read_owner
     if owner is None:
         return True
-    result = resume_baseline_read_save(
-        owner, capture=runtime.capture, owned=runtime.owned
-    )
+    result = (await resume_baseline_read_save(
+        owner, capture=runtime.capture, database=runtime.database
+    ))
     if result is None:
         if (owner.aborted_before_call and owner.intent_view is None
                 and owner.saves.pending is None):
@@ -62,14 +62,13 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
     from camctl.devices.bindings import DeviceBinding
     from camctl.scheduling.rules import LaunchWindow, WindowPhase, window_phase
 
-    db = runtime.owned.connection
     pending = runtime.pending_baselines.get(action_id)
     if pending is None:
-        action = row_facts(db, "actions", action_id)
-        activity = row_facts(db, "device_activities", activity_id)
+        action = (await runtime.database.read(lambda owned: row_facts(owned.connection, "actions", action_id)))
+        activity = (await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", activity_id)))
         if activity["ownership_mode"] != 2:
             return BaselinePreparation(PreparationPhase.READY)
-        ref = runtime.capture.baseline_ref(activity_id, runtime.owned)
+        ref = (await runtime.database.read(lambda owned, inputs=(activity_id,), options=dict(): runtime.capture.baseline_ref(*inputs, owned, **options), description="读取已保存拍摄事实"))
         if ref.state.name == "FIXED":
             return BaselinePreparation(PreparationPhase.READY)
         pending = PendingBaseline(
@@ -78,14 +77,12 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
             tuple(activity["output_scope_json"]["directories"]),
         )
         runtime.pending_baselines[action_id] = pending
-        found = db.execute(
+        found = (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT id FROM baseline_read_calls WHERE activity_id=? ORDER BY read_no DESC LIMIT 1",
             (activity_id,),
-        ).fetchone()
+        ).fetchone()))
         if found is not None:
-            view = runtime.capture.read_baseline_call(
-                found[0], _boundary(db), runtime.owned
-            )
+            view = (await runtime.database.read(lambda owned, inputs=(found[0], (await runtime.database.read(lambda owned: _boundary(owned.connection)))), options=dict(): runtime.capture.read_baseline_call(*inputs, owned, **options), description="读取已保存拍摄事实"))
             pending.read_owner = PendingBaselineRead(
                 view.request,
                 intent_view=view,
@@ -93,23 +90,22 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                 locally_created=False,
             )
             if view.state is BaselineReadState.INTENDED:
-                resume_baseline_read_call(
+                (await resume_baseline_read_call(
                     pending.read_owner,
                     BaselineReadRecoveryContext(
-                        runtime.owned.metadata.instance_id,
+                        runtime.database.metadata.instance_id,
                         view,
                         {activity_id: pending.read_owner},
                         runtime.recovery_boundary,
                         runtime.recovery_max_event_id,
                     ),
                     capture=runtime.capture,
-                    owned=runtime.owned,
-                    reader=runtime.owned,
+                    database=runtime.database,
                     wall_us=runtime.wall_us,
-                )
+                ))
     if pending.activity_id != activity_id:
         raise ConsistencyError("基准准备拥有者不得更换原活动")
-    resumed = resume_baseline_save(action_id, runtime=runtime)
+    resumed = (await resume_baseline_save(action_id, runtime=runtime))
     if resumed is not None:
         owner = pending.read_owner
         if not (resumed.phase is PreparationPhase.WAITING and owner is not None
@@ -120,9 +116,14 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
     if pending.error is not None:
         return BaselinePreparation(PreparationPhase.FAILED, error=pending.error)
 
-    def can_read():
-        current = runtime.action(action_id)
-        activity = row_facts(db, "device_activities", activity_id)
+    async def can_read():
+        def read(owned):
+            current = row_facts(owned.connection, "actions", action_id)
+            if current is None:
+                raise LookupError(f"动作不存在: {action_id}")
+            return current, row_facts(owned.connection, "device_activities", activity_id)
+        current, activity = await runtime.database.read(
+            read, description="读取分段基准派发资格")
         return (
             not current["cancel_requested"]
             and (current["status"], current["execution_started"]) in ((1, 0), (2, 1))
@@ -139,16 +140,16 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
         )
 
     while True:
-        if not can_read() and pending.read_owner is None:
+        if not await can_read() and pending.read_owner is None:
             return BaselinePreparation(PreparationPhase.ABORTED)
-        ref = runtime.capture.baseline_ref(activity_id, runtime.owned)
+        ref = (await runtime.database.read(lambda owned, inputs=(activity_id,), options=dict(): runtime.capture.baseline_ref(*inputs, owned, **options), description="读取已保存拍摄事实"))
         if pending.exhausted:
             pending.saves.begin(
                 BaselineFixSave(
                     activity_id, ref.chunk_count, ref.entry_count, runtime.wall_us()
                 )
             )
-            return resume_baseline_save(action_id, runtime=runtime)
+            return (await resume_baseline_save(action_id, runtime=runtime))
         if runtime.baseline_directory is None:
             return BaselinePreparation(PreparationPhase.WAITING)
         owner = pending.read_owner
@@ -174,14 +175,14 @@ async def prepare_segment_baseline(action_id, activity_id, runtime):
                 owner,
                 directory=runtime.baseline_directory,
                 capture=runtime.capture,
-                owned=runtime.owned,
+                database=runtime.database,
                 wall_us=runtime.wall_us,
                 can_read=can_read,
                 baseline=pending,
             )
         finally:
             pending.in_call = owner.task is not None and not owner.task.done()
-        resumed = resume_baseline_save(action_id, runtime=runtime)
+        resumed = (await resume_baseline_save(action_id, runtime=runtime))
         if resumed is not None:
             return resumed
         if pending.aborted:

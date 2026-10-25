@@ -10,6 +10,7 @@ CaptureProcessingSaves 适配处理事务。run_recording_media 串联输入
 from __future__ import annotations
 
 from contextlib import closing
+from collections.abc import Awaitable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -58,11 +59,13 @@ from camctl.outputs.copy import (
     CompletionContext,
     CopyContext,
     SegmentContext,
+    SourceDigestReader,
     complete_copy,
     copy_next_segment,
     prepare_copy,
 )
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
+from camctl.outputs.database_reads import read_one as _read_one, read_all as _read_all
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import RetryWaitGate
 from camctl.operations.attempts import (
@@ -75,11 +78,12 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.outputs.read_attempts import (
-    PendingReadResult, acquire_read_attempt, forget_read_result, hold_read_result,
+    PendingReadResult, PendingStoppedRead, acquire_read_attempt, forget_read_result, hold_read_result,
     retry_read_business, run_owned_read, save_read_result,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
-from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind, db_outcome_for
+from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -126,22 +130,38 @@ class DriverReadSessions:
     大小的文件不可读。读取尝试票据由装配层按实际尝试提供。
     """
 
-    def __init__(self, owned: OwnedConnection, driver: ReadDriver,
-                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S) -> None:
-        self._owned = owned
+    def __init__(self, database: BusinessDatabase, driver: ReadDriver,
+                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S, control=None) -> None:
+        self._database = database
         self._driver = driver
         self._ticket = ticket
+        self._control = control
         self.idle_timeout_s = idle_timeout_s
 
-    def for_attempt(self, ticket, *, idle_timeout_s: Decimal):
+    def for_attempt(self, ticket, *, idle_timeout_s: Decimal, control=None):
         """为已可靠保存的原尝试构造本次读取会话入口。"""
-        return DriverReadSessions(self._owned, self._driver, ticket,
-                                  idle_timeout_s=idle_timeout_s)
+        return DriverReadSessions(self._database, self._driver, ticket,
+                                  idle_timeout_s=idle_timeout_s, control=control)
 
-    async def open_session(self, source_device_file_id: int, offset: int):
-        source = load_confirmed_source(self._owned, source_device_file_id)
+    async def open_session(self, source_device_file_id: int, offset: int, *, on_start=None):
+        from camctl.outputs.read_attempts import read_dispatch_qualification, read_dispatch_gate
+
         if self._ticket is None:
             raise ConsistencyError("设备读取会话缺少已保存的尝试票据")
+        def read(owned):
+            return (load_confirmed_source(owned, source_device_file_id),
+                read_dispatch_qualification(owned, self._ticket, source_device_file_id, device_source=True))
+        try:
+            source, qualification = await self._database.read(read, description="媒体读取源事实")
+        except Exception as error:
+            from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+            raise ReadPreparationError("设备读取源事实未取得，原尝试尚未调用",
+                settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+        prevented = read_dispatch_gate(qualification, self._control)
+        if prevented is not None:
+            return prevented
+        if on_start is not None:
+            on_start()
         return await self._driver.open_read(source, offset, self._ticket,
                                            idle_timeout_s=self.idle_timeout_s)
 
@@ -149,12 +169,12 @@ class DriverReadSessions:
 class RecordingInputCopies:
     """内部输入拷贝端口适配：资格、状态、续传、分段与完整性事务。"""
 
-    def __init__(self, owned: OwnedConnection, roots: BoundDirectories,
+    def __init__(self, database: BusinessDatabase, roots: BoundDirectories,
                  occurred_at: Callable[[], int], *,
                  max_recopies: int = 1,
                  file_executor: FileTaskExecutor | None = None,
                  read_discovery_batch_size: int | None = None) -> None:
-        self.owned = owned
+        self.database = database
         self.roots = roots
         self.occurred_at = occurred_at
         self.max_recopies = max_recopies
@@ -169,27 +189,31 @@ class RecordingInputCopies:
             return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
-    def qualify(self, candidate: FileCandidate) -> SaveReceipt:
-        return self._receipt(self.repository.grant_file(
-            candidate, new_operation_key(), self.owned))
+    async def qualify(self, candidate: FileCandidate) -> SaveReceipt:
+        key = new_operation_key()
+        return self._receipt(await self.database.write(
+            lambda owned: self.repository.grant_file(candidate, key, owned),
+            key=key, description="内部输入资格"))
 
-    def copy_state(self, copy_id: int):
-        return self.repository.load_copy_state(copy_id, self.owned)
+    async def copy_state(self, copy_id: int):
+        return await self.database.read(
+            lambda owned: self.repository.load_copy_state(copy_id, owned),
+            description="内部输入副本状态")
 
     async def prepare(self, copy_id: int):
         return await prepare_copy(copy_id, CopyContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at(), executor=self.file_executor))
 
     async def transfer(self, copy_id: int, session, segment_size: int):
         return await copy_next_segment(copy_id, SegmentContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at(), segment_size=segment_size,
             session=session, executor=self.file_executor))
 
     async def complete(self, copy_id: int, digest):
         return await complete_copy(copy_id, CompletionContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at(), digest=digest,
             max_recopies=self.max_recopies, executor=self.file_executor))
 
@@ -206,12 +230,12 @@ class MediaSaveStage(Enum):
 
 @dataclass(frozen=True)
 class PendingMediaRequest:
-    """已取得但未可靠确认保存的完整原申请和本地文件责任。"""
+    """已取得的原申请；action_id 为空时只表示拥有者尚待数据库解析。"""
 
     stage: MediaSaveStage
     command: CheckResultSave | RepairDecisionSave | RepairResultSave | RepairStart | RepairSuccess
     key: OperationKey
-    action_id: int
+    action_id: int | None
     file_ids: tuple[int, ...]
     save_error: BaseException | None = None
 
@@ -243,8 +267,8 @@ def _media_request_values(command):
 class CaptureProcessingSaves:
     """媒体申请在首次写入前持有原输入与原键，确认保存才解除。"""
 
-    def __init__(self, owned: OwnedConnection, pending=None, *, file_ids=()) -> None:
-        self.owned = owned
+    def __init__(self, database: BusinessDatabase, pending=None, *, file_ids=()) -> None:
+        self.database = database
         self.repository = CaptureRepository()
         self.pending = {} if pending is None else pending
         self.file_ids = file_ids
@@ -257,59 +281,84 @@ class CaptureProcessingSaves:
             return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
-    def save_check_result(self, command):
-        return self._save(MediaSaveStage.CHECK, command)
+    async def save_check_result(self, command):
+        return await self._save(MediaSaveStage.CHECK, command)
 
-    def save_repair_decision(self, command):
-        return self._save(MediaSaveStage.DECISION, command)
+    async def save_repair_decision(self, command):
+        return await self._save(MediaSaveStage.DECISION, command)
 
-    def save_repair_result(self, command):
-        return self._save(MediaSaveStage.REPAIR, command)
+    async def save_repair_result(self, command):
+        return await self._save(MediaSaveStage.REPAIR, command)
 
-    def start_repair_output(self, command):
-        receipt = self._save(MediaSaveStage.START, command)
-        if receipt.disposition is SaveDisposition.SAVED and isinstance(receipt.value, RepairOutputFile):
-            self.file_ids = tuple(dict.fromkeys((*self.file_ids, receipt.value.file_id)))
-        return receipt
+    async def start_repair_output(self, command):
+        return await self._save(MediaSaveStage.START, command)
 
-    def complete_repair_output(self, command):
-        return self._save(MediaSaveStage.COMPLETE, command)
+    async def complete_repair_output(self, command):
+        return await self._save(MediaSaveStage.COMPLETE, command)
 
-    def _save(self, stage, command):
+    async def _save(self, stage, command):
+        return await settle_required(self._save_held(stage, command))
+
+    async def _save_held(self, stage, command):
         identity = (stage, command.processing_id)
         held = self.pending.get(identity)
         if held is None:
-            with closing(self.owned.connection.execute(
-                "SELECT action_id FROM recording_processing WHERE id=?", (command.processing_id,))) as cursor:
-                owner = cursor.fetchone()
-            if owner is None:
-                raise ConsistencyError("原媒体申请的处理拥有者不存在")
             files = self.file_ids
-            if isinstance(command, RepairSuccess):
+            if isinstance(command, (RepairSuccess, RepairResultSave)) and command.output_file_id is not None:
                 files = tuple(dict.fromkeys((*files, command.output_file_id)))
-            held = PendingMediaRequest(stage, deepcopy(command), new_operation_key(), owner[0], files)
+            held = PendingMediaRequest(stage, deepcopy(command), new_operation_key(), None, files)
             self.pending[identity] = held
         elif (type(command) is not type(held.command)
                 or not json_equal(_media_request_values(command), _media_request_values(held.command))):
             raise ConsistencyError("尚未保存的原媒体申请不能由后续申请替换")
-        receipt = self._commit(getattr(self.repository, stage.value)(held.command, held.key, self.owned))
-        if receipt.disposition is SaveDisposition.SAVED:
-            del self.pending[identity]
-        else:
-            self.pending[identity] = replace(held, save_error=receipt.error)
+        held = await self._resolve_owner(held)
+        try:
+            outcome = await self.database.write(
+                lambda owned: getattr(self.repository, stage.value)(held.command, held.key, owned),
+                key=held.key, description="原媒体申请保存")
+        except BaseException as error:
+            outcome = db_outcome_for(error)
+            if outcome is not None:
+                self._apply_receipt(identity, held, self._commit(outcome))
+            raise
+        receipt = self._commit(outcome)
+        self._apply_receipt(identity, held, receipt)
         return receipt
 
+    async def _resolve_owner(self, held):
+        if held.action_id is None:
+            try:
+                owner = await _read_one(self.database,
+                    "SELECT action_id FROM recording_processing WHERE id=?", (held.command.processing_id,))
+                if owner is None:
+                    raise ConsistencyError("原媒体申请的处理拥有者不存在")
+            except BaseException as error:
+                self.pending[(held.stage, held.command.processing_id)] = replace(held, save_error=error)
+                raise
+            held = replace(held, action_id=owner[0])
+            self.pending[(held.stage, held.command.processing_id)] = held
+        return held
 
-async def resume_media_saves(owned, pending, executor=None, *, action_id=None):
+    def _apply_receipt(self, identity, held, receipt):
+        if receipt.disposition is SaveDisposition.SAVED:
+            del self.pending[identity]
+            if held.stage is MediaSaveStage.START and isinstance(receipt.value, RepairOutputFile):
+                self.file_ids = tuple(dict.fromkeys((*self.file_ids, receipt.value.file_id)))
+        else:
+            self.pending[identity] = replace(held, save_error=receipt.error)
+
+
+async def resume_media_saves(database, pending, executor=None, *, action_id=None):
     """只核实已经取得的原申请；不启动工具、读取或重算决定。"""
-    saves = CaptureProcessingSaves(owned, pending)
+    saves = CaptureProcessingSaves(database, pending)
     owner = executor if executor is not None else FileTaskExecutor(Supervisor())
     for held in tuple(pending.values()):
+        held = await saves._resolve_owner(held)
         if action_id is not None and held.action_id != action_id:
             continue
 
         async def save_original(_control=None):
-            receipt = saves._save(held.stage, held.command)
+            receipt = await saves._save(held.stage, held.command)
             if receipt.disposition is not SaveDisposition.SAVED:
                 raise ConsistencyError(f"原媒体结果未可靠保存: {receipt.error}") from receipt.error
             return receipt
@@ -389,7 +438,7 @@ class MediaFlow:
     上等待再次读取；retry_gate 由装配层会话共享。
     """
 
-    owned: OwnedConnection
+    database: BusinessDatabase
     roots: BoundDirectories
     sessions: DriverReadSessions
     tools: MediaTools
@@ -397,7 +446,7 @@ class MediaFlow:
     occurred_at: Callable[[], int]
     digest_supported: bool
     digest: Any = None
-    digest_for: Callable[[int], Any] | None = None
+    digest_for: Callable[[int], Awaitable[SourceDigestReader | None]] | None = None
     repair_extension: str | None = None
     retry_interval_s: Decimal = Decimal("3")
     monotonic_ns: Callable[[], int] = _default_monotonic_ns
@@ -424,35 +473,28 @@ class MediaFlow:
     read_discovery_batch_size: int | None = None
 
     def saves(self, *, file_ids=()) -> CaptureProcessingSaves:
-        return CaptureProcessingSaves(self.owned, self.pending_media_results, file_ids=file_ids)
+        return CaptureProcessingSaves(self.database, self.pending_media_results, file_ids=file_ids)
 
     def copies(self) -> RecordingInputCopies:
         return RecordingInputCopies(
-            self.owned, self.roots, self.occurred_at, max_recopies=self.max_recopies,
+            self.database, self.roots, self.occurred_at, max_recopies=self.max_recopies,
             file_executor=self.file_executor, read_discovery_batch_size=self.read_discovery_batch_size)
 
 
-def _ensure_checksum_support(
+async def _ensure_checksum_support(
     flow: MediaFlow, source_device_file_id: int) -> None:
     """按绑定声明固定来源文件的摘要能力；已决定的能力不重复声明。"""
-    with closing(flow.owned.connection.execute(
-        "SELECT checksum_support FROM device_files WHERE id = ?",
-        (source_device_file_id,),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await _read_one(flow.database,
+        "SELECT checksum_support FROM device_files WHERE id = ?", (source_device_file_id,))
     if row is None:
         raise ConsistencyError(f"设备文件不存在: {source_device_file_id}")
     if row[0] != 1:
         return
-    support = 2 if flow.digest_supported else 3
-    outcome = CaptureRepository().save_file_checksum(
-        FileChecksumSave(
-            file_id=source_device_file_id,
-            support=support,
-            occurred_at=flow.occurred_at()),
-        new_operation_key(), flow.owned)
-    if outcome.kind is not _DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"摘要能力声明未完成: {outcome.error}")
+    request = FileChecksumSave(file_id=source_device_file_id,
+        support=2 if flow.digest_supported else 3, occurred_at=flow.occurred_at())
+    from camctl.outputs.read_attempts import save_read_business
+    await save_read_business(flow, source_device_file_id, "source_checksum_support",
+        request, CaptureRepository().save_file_checksum)
 
 
 async def run_recording_media(
@@ -469,28 +511,28 @@ async def run_recording_media(
     """
     from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
 
-    await resume_media_saves(flow.owned, flow.pending_media_results, flow.file_executor, action_id=action_id)
-    retry_read_business(flow)
+    await resume_media_saves(flow.database, flow.pending_media_results, flow.file_executor, action_id=action_id)
+    await retry_read_business(flow)
     for pending in tuple(flow.pending_read_results.values()):
-        _save_internal_read_and_settle(flow, pending)
+        await _save_internal_read_and_settle(flow, pending)
     await retry_read_ends(flow)
-    original_failure = flow.owned.connection.execute(
-        "SELECT c.id FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
-        " WHERE c.processing_id=? AND r.kind=3 AND r.status=4 LIMIT 2", (processing_id,)).fetchall()
+    original_failure = await _read_all(flow.database, "SELECT c.id FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
+        " WHERE c.processing_id=? AND r.kind=3 AND r.status=4 LIMIT 2", (processing_id,))
     if len(original_failure) > 1:
         raise ConsistencyError("同一内部处理有多个终态失败读取")
     if original_failure:
         copy_id = original_failure[0][0]
-        _fail_internal_read_input(flow, copy_id=copy_id)
+        await _fail_internal_read_input(flow, copy_id=copy_id)
         return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="run_ended")
-    _ensure_checksum_support(flow, source_device_file_id)
-    status = load_processing_status(flow.owned, processing_id)
-    digest = (flow.digest_for(source_device_file_id)
+    await _ensure_checksum_support(flow, source_device_file_id)
+    status = await flow.database.read(
+        lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
+    digest = (await flow.digest_for(source_device_file_id)
               if flow.digest_for is not None else flow.digest)
     copies = flow.copies()
     config = OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
                              flow.retry_interval_s)
-    qualified = copies.qualify(FileCandidate(
+    qualified = await copies.qualify(FileCandidate(
         action_id, None, processing_id, None, source_device_file_id,
         target_extension, None, None, config, flow.occurred_at()))
     if qualified.disposition is not SaveDisposition.SAVED:
@@ -501,31 +543,30 @@ async def run_recording_media(
         return InputStep(InputPhase.REJECTED_FINAL if qualification.outcome is QualificationOutcome.REJECTED_FINAL
                          else InputPhase.WAITING, reason=qualification.reason)
     copy_id = qualification.copy_id
-    state = copies.copy_state(copy_id)
+    state = await copies.copy_state(copy_id)
     ticket = None
     wait_key = f"read/{copy_id}"
     if state.verification_state not in (3, 5) or state.target_sha256 is None:
-        run = flow.owned.connection.execute(
-            "SELECT attempts_used,retry_wait_required FROM operation_runs WHERE copy_id=?", (copy_id,)).fetchone()
+        run = await _read_one(flow.database, "SELECT attempts_used,retry_wait_required FROM operation_runs WHERE copy_id=?", (copy_id,))
         if run is None:
             raise ConsistencyError("内部输入缺少原读取流程")
         if flow.retry_gate.remaining(wait_key, attempts_used=run[0], retry_wait_required=run[1] == 1,
                 max_attempts_used=flow.max_read_attempts, interval_s=flow.retry_interval_s,
                 now_ns=flow.monotonic_ns()) is not None:
             return InputStep(InputPhase.RETRY_WAITING, copy_id=copy_id)
-        slot = copies.repository.grant_read_slot(SlotRequest(copy_id, flow.occurred_at()),
-                                                  new_operation_key(), flow.owned)
-        if slot.kind is not _DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"内部读取机会未可靠保存: {slot.error}")
+        request = SlotRequest(copy_id, flow.occurred_at())
+        from camctl.outputs.read_attempts import save_read_business
+        slot = await save_read_business(flow, copy_id, "grant_read_slot", request,
+            copies.repository.grant_read_slot)
         if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id)
-        ticket, reason = acquire_read_attempt(flow, AttemptIntent(
+        ticket, reason = await acquire_read_attempt(flow, AttemptIntent(
             "read", action_id, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
             AttemptConfig(flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s),
             flow.occurred_at(), copy_round=state.round))
         if ticket is None:
             if reason == "budget_exhausted":
-                _fail_internal_read_input(flow, copy_id=copy_id)
+                await _fail_internal_read_input(flow, copy_id=copy_id)
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=reason)
     from camctl.outputs.read_attempts import hold_read_end
 
@@ -548,16 +589,18 @@ async def run_recording_media(
             lambda end, complete: hold_read_end(flow, ticket, end, complete,
                 resume=lambda current, held: _resume_local_internal_end(current, held, flow, context),
                 evidence=flow.evidence)),
-        on_read_start=lambda: flow.pending_read_ends.pop(copy_id, None),
+        on_read_start=lambda: _read_dispatched(flow, copy_id),
     )
 
-    async def read_and_save():
-        step = await obtain_recording_input(context)
+    async def read_and_save(control):
+        current = replace(context, sessions=(sessions if ticket is None else
+            sessions.for_attempt(ticket, idle_timeout_s=flow.read_idle_timeout_s, control=control)))
+        step = await obtain_recording_input(current)
         if ticket is not None:
-            _finish_internal_read(flow, ticket, step)
+            await _finish_internal_read(flow, ticket, step)
         return step
 
-    input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save()
+    input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
     if input_step.phase is InputPhase.SEGMENT_FAILED and input_step.source_failed:
         # 读取通信失败：登记锚点，间隔内不再次读取。
         flow.retry_gate.established(wait_key, flow.monotonic_ns())
@@ -582,7 +625,8 @@ async def run_recording_media(
         return check
     # 检查完成或检查不适用：修复决定待执行才继续（计时判定的异常
     # 多录不经检查直接修复），无需修复时到此为止。
-    status = load_processing_status(flow.owned, processing_id)
+    status = await flow.database.read(
+        lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
     if status.repair_state not in (3, 4):
         return check
     repair_files = (input_step.input_file.file_id,)
@@ -608,45 +652,65 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     from camctl.capture.input_copy import _complete_input
     from camctl.outputs.read_attempts import run_owned_read
 
-    flow = replace(original_flow, owned=current.owned)
+    flow = replace(original_flow, database=current.database)
     copies = flow.copies()
     context = replace(original_context, copies=copies, digest=None, read_end=held.end)
     copy_id = int(held.ticket.target_id)
 
-    async def complete_and_save():
-        step = replace(await _complete_input(context, copy_id, copies.copy_state(copy_id)),
+    async def complete_and_save(_control):
+        step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
-        _finish_internal_read(flow, held.ticket, step)
+        await _finish_internal_read(flow, held.ticket, step)
 
     await run_owned_read(flow, copy_id, complete_and_save)
 
 
-def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
+def _read_dispatched(flow, copy_id):
+    flow.pending_read_ends.pop(copy_id, None)
+    from camctl.outputs.read_attempts import ReadContinuation
+    previous = flow.continuing_read_tickets.get(copy_id)
+    if previous is not None:
+        flow.continuing_read_tickets[copy_id] = ReadContinuation(previous.ticket, False)
+
+
+async def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
                           max_attempts: int | None = None) -> None:
     """连接已经关闭后保存读取结果；重拷继续原尝试。"""
+    await settle_required(_finish_internal_read_result(flow, ticket, step, max_attempts=max_attempts))
+
+
+async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
     from camctl.outputs.read_attempts import require_preparation_settled
+
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(flow, ticket, step.dispatch_prevented, flow.evidence)
+        if pending is not None:
+            await _save_internal_read_and_settle(flow, pending)
+        return
 
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
-        flow.continuing_read_tickets[step.copy_id] = ticket
+        from camctl.outputs.read_attempts import ReadContinuation
+        flow.continuing_read_tickets[step.copy_id] = ReadContinuation(ticket, False, step, flow.occurred_at(), evidence=flow.evidence)
         return
     from camctl.outputs.read_attempts import stopped_read_result
 
     stopped = stopped_read_result(flow, ticket, step, flow.evidence, flow.occurred_at())
     if stopped is not None:
-        _save_internal_read_and_settle(flow, stopped)
+        await _save_internal_read_and_settle(flow, stopped)
         return
     from camctl.outputs.read_attempts import canceled_complete_read_result
 
-    completed_cancel = canceled_complete_read_result(flow, ticket, flow.evidence)
+    completed_cancel = await canceled_complete_read_result(flow, ticket, flow.evidence)
     if completed_cancel is not None:
-        _save_internal_read_and_settle(flow, completed_cancel)
+        await _save_internal_read_and_settle(flow, completed_cancel)
         return
     from camctl.outputs.read_attempts import source_verification_run_finish
 
     verification_failed = step.phase is InputPhase.VERIFICATION_FAILED
-    verification_finish = (source_verification_run_finish(
+    verification_finish = (await source_verification_run_finish(
         flow, ticket, step)
         if verification_failed else None)
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
@@ -675,32 +739,34 @@ def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
     pending = hold_read_result(flow, AttemptFinish(
         ticket, validate_outcome(ticket, outcome, flow.evidence), flow.occurred_at(),
         retry_wait=not succeeded and not exhausted, run_finish=run_finish))
-    _save_internal_read_and_settle(flow, pending)
+    await _save_internal_read_and_settle(flow, pending)
 
 
-def resume_prepared_internal_reads(
-    owned: OwnedConnection, *, pending_read_results: dict,
+async def resume_prepared_internal_reads(
+    database: BusinessDatabase, *, pending_read_results: dict,
     pending_read_business: dict, pending_read_ends: dict,
     continuing_read_tickets: dict,
 ) -> None:
     """默认入口只核实原完整 READ 申请，不取得新设备或媒体执行资格。"""
     prepared = tuple(pending for pending in pending_read_results.values()
-                     if isinstance(pending, PendingReadResult))
+                     if isinstance(pending, (PendingReadResult, PendingStoppedRead)))
     if not prepared and not pending_read_business:
         return
     scope = SimpleNamespace(
-        owned=owned, operations=OperationRepository(),
+        database=database, operations=OperationRepository(),
         pending_read_results=pending_read_results, pending_read_business=pending_read_business,
         pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
     for pending in prepared:
         # 完整输入首次确定的原时刻承担其独立收场，重送不读取当前墙钟。
-        scope.occurred_at = lambda original=pending.finish.occurred_at: original
-        _save_internal_read_and_settle(scope, pending)
-    retry_read_business(scope)
+        original_time = (pending.occurred_at if isinstance(pending, PendingStoppedRead)
+                         else pending.finish.occurred_at)
+        scope.occurred_at = lambda original=original_time: original
+        await _save_internal_read_and_settle(scope, pending)
+    await retry_read_business(scope)
 
 
-def resume_binding_internal_read_ends(
-    owned: OwnedConnection, *, pending_read_results: dict,
+async def resume_binding_internal_read_ends(
+    database: BusinessDatabase, *, pending_read_results: dict,
     pending_read_business: dict, pending_read_ends: dict,
     continuing_read_tickets: dict, binding_check: Callable, occurred_at: Callable,
 ) -> None:
@@ -720,17 +786,16 @@ def resume_binding_internal_read_ends(
     run_kind = enum_for("operation_runs.kind")
     query_purpose = enum_for("operation_runs.query_purpose")
     scope = SimpleNamespace(
-        owned=owned, operations=OperationRepository(),
+        database=database, operations=OperationRepository(),
         pending_read_results=pending_read_results, pending_read_business=pending_read_business,
         pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
     for copy_id, held in tuple(pending_read_ends.items()):
-        row = owned.connection.execute(
-            "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,"
+        row = await _read_one(database, "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,"
             "r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c"
             " JOIN recording_processing p ON p.id=c.processing_id"
             " JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id"
             " JOIN device_files f ON f.id=c.source_device_file_id"
-            " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,)).fetchone()
+            " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,))
         if row is None:
             raise ConsistencyError("原内部读取结束缺少处理、源观察者与动作归属")
         (action_id, device_id, driver_id, status, canceled, run_id, read_status,
@@ -742,22 +807,22 @@ def resume_binding_internal_read_ends(
                 or delivery_id is not None or source_action_id != action_id
                 or (observer_device_id, observer_driver_id) != (device_id, driver_id)):
             raise ConsistencyError("原内部读取结束与拍摄处理责任不符")
-        facts = OutputsRepository().load_copy_state(copy_id, owned)
+        facts = await database.read(
+            lambda owned: OutputsRepository().load_copy_state(copy_id, owned),
+            description="原内部读取的完整副本事实")
         if (facts.committed_bytes != facts.source_size
                 or facts.source_support is not SourceChecksumSupport.SUPPORTED
                 or facts.source_sha256 is not None):
             continue
-        unfinished = owned.connection.execute(
-            "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
-            " WHERE r.action_id=? AND r.id!=? AND (t.status=1 OR t.result_json IS NULL) LIMIT 1",
-            (action_id, run_id)).fetchone()
+        unfinished = await _read_one(database, "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+            " WHERE r.action_id=? AND r.id!=? AND (t.status=1 OR t.result_json IS NULL) LIMIT 1", (action_id, run_id))
         if unfinished is not None:
             continue
         binding = binding_check(DeviceBinding(device_id, driver_id))
         details = binding_failure_details(binding)
         if details is None:
             continue
-        responsibilities = tuple(row[0] for row in owned.connection.execute(
+        responsibilities = tuple(row[0] for row in await _read_all(database,
             "SELECT responsibility_key FROM operation_runs WHERE action_id=? AND id!=?"
             " AND kind IN (?,?,?,?,?) AND status IN (?,?)"
             " AND (kind!=? OR query_purpose!=?) ORDER BY id",
@@ -771,38 +836,38 @@ def resume_binding_internal_read_ends(
         request = FinishBindingFailure(action_id, formed_at,
             RecordingFailure("device_binding_unavailable", details), responsibility_keys=responsibilities)
         business = PendingReadBusiness(CaptureRepository().finish_binding_failure, request, new_operation_key())
-        pending = held_binding_read_result(scope, copy_id, binding, business)
+        pending = await held_binding_read_result(scope, copy_id, binding, business)
         if pending is None:
             raise ConsistencyError("已分类的必要摘要绑定失败缺少原完整读取结果")
-        _save_internal_read_and_settle(scope, pending)
+        await _save_internal_read_and_settle(scope, pending)
 
 
-def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
-    pending = save_read_result(flow, pending)
+async def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
+    await settle_required(_save_internal_read_result(flow, pending))
+
+
+async def _save_internal_read_result(flow, pending):
+    pending = await save_read_result(flow, pending)
     if pending is None:
         return
     if pending.business is not None:
         from camctl.outputs.read_attempts import save_prepared_read_business
 
         forget_read_result(flow, pending)
-        save_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
+        await save_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
         return
     ticket = pending.finish.ticket
     succeeded = pending.finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
     exhausted = (pending.finish.run_finish is not None
                  and pending.finish.run_finish.status is RunOutcome.FAILED)
-    row = flow.owned.connection.execute(
-        "SELECT processing_id,inspection_id FROM file_copies WHERE id=?",
-        (int(ticket.target_id),)).fetchone()
+    row = await _read_one(flow.database, "SELECT processing_id,inspection_id FROM file_copies WHERE id=?", (int(ticket.target_id),))
     if row is None:
         raise ConsistencyError("已结束读取尝试缺少对应拷贝")
     if exhausted:
         if row[0] is not None:
-            _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
+            await _fail_internal_read_input(flow, copy_id=int(ticket.target_id))
     if row[1] is not None:
-        run_status = flow.owned.connection.execute(
-            "SELECT status FROM operation_runs WHERE copy_id=?", (int(ticket.target_id),),
-        ).fetchone()
+        run_status = await _read_one(flow.database, "SELECT status FROM operation_runs WHERE copy_id=?", (int(ticket.target_id),))
         if run_status is None:
             raise ConsistencyError("检查读取缺少原流程状态")
         from camctl.contracts.enums import enum_for
@@ -813,12 +878,12 @@ def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
             )
 
             copy_id = int(ticket.target_id)
-            if not settle_inspection_read_failure(flow, copy_id, pending.finish.occurred_at):
+            if not await settle_inspection_read_failure(flow, copy_id, pending.finish.occurred_at):
                 return
             # 读取尝试先可靠保存，检查结果再可靠保存；只有这两项都完成后
             # 才可解除检查读取机会。结果未知时保留同一 AttemptFinish 与结果键。
             forget_read_result(flow, pending)
-            settle_terminal_inspection_read_slot(flow, copy_id, pending.finish.occurred_at)
+            await settle_terminal_inspection_read_slot(flow, copy_id, pending.finish.occurred_at)
             return
     if succeeded and not exhausted:
         from camctl.outputs.read_attempts import save_read_business
@@ -826,34 +891,32 @@ def _save_internal_read_and_settle(flow: MediaFlow, pending) -> None:
         # 原尝试已经可靠保存；后续独立释放由原完整申请和键承担。
         # 不继续持有 Finish，以免该释放重送后再次生成另一申请。
         forget_read_result(flow, pending)
-        save_read_business(flow, int(ticket.target_id), "release_read_slot",
+        await save_read_business(flow, int(ticket.target_id), "release_read_slot",
             SlotRequest(int(ticket.target_id), pending.finish.occurred_at), OutputsRepository().release_read_slot)
         return
     forget_read_result(flow, pending)
 
 
-def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
+async def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
     """原读取可靠耗尽后结束所需检查或修复，再释放原读取机会。"""
     from camctl.capture.processing import (
         CheckPhase, CheckResultSave, MediaObservation, ProcessingError, RepairBasis,
         RepairDecisionChoice, RepairDecisionSave, RepairOutcome, RepairReason, RepairResultSave,
     )
 
-    row = flow.owned.connection.execute(
-        "SELECT c.processing_id,r.attempts_used,r.max_attempts_used,r.status FROM file_copies c"
-        " JOIN operation_runs r ON r.copy_id=c.id WHERE c.id=?", (copy_id,)).fetchone()
+    row = await _read_one(flow.database, "SELECT c.processing_id,r.attempts_used,r.max_attempts_used,r.status FROM file_copies c"
+        " JOIN operation_runs r ON r.copy_id=c.id WHERE c.id=?", (copy_id,))
     if row is None or row[0] is None or row[3] != 4:
         raise ConsistencyError("内部输入失败必须对应已可靠失败的原读取流程")
     processing_id, used, maximum, _status = row
-    unfinished = flow.owned.connection.execute(
-        "SELECT 1 FROM operation_attempts WHERE run_id=(SELECT id FROM operation_runs WHERE copy_id=?)"
-        " AND (status=1 OR result_json IS NULL) LIMIT 1", (copy_id,)).fetchone()
+    unfinished = await _read_one(flow.database, "SELECT 1 FROM operation_attempts WHERE run_id=(SELECT id FROM operation_runs WHERE copy_id=?)"
+        " AND (status=1 OR result_json IS NULL) LIMIT 1", (copy_id,))
     if unfinished is not None:
         raise ConsistencyError("原内部读取尚有未结束调用，不能收场检查或释放保护")
-    error_raw = flow.owned.connection.execute(
-        "SELECT error_json FROM operation_runs WHERE copy_id=?", (copy_id,)).fetchone()[0]
+    error_raw = (await _read_one(flow.database, "SELECT error_json FROM operation_runs WHERE copy_id=?", (copy_id,)))[0]
     original_error = parse_exact_json(error_raw)
-    status = load_processing_status(flow.owned, processing_id)
+    status = await flow.database.read(
+        lambda owned: load_processing_status(owned, processing_id), description="录像处理状态")
     if original_error["code"] == "checksum_mismatch":
         failure = ProcessingError("checksum_mismatch", "source_read", original_error["details"])
     elif original_error["code"] == "read_attempts_exhausted":
@@ -879,8 +942,7 @@ def _fail_internal_read_input(flow: MediaFlow, *, copy_id: int) -> None:
     from camctl.outputs.read_attempts import save_read_business
 
     for save, request in requests:
-        save_read_business(flow, copy_id, save.__name__, request, save)
-    if flow.owned.connection.execute(
-            "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_id,)).fetchone()[0] is not None:
-        save_read_business(flow, copy_id, "release_read_slot", SlotRequest(copy_id, flow.occurred_at()),
+        await save_read_business(flow, copy_id, save.__name__, request, save)
+    if (await _read_one(flow.database, "SELECT slot_device_id FROM file_copies WHERE id=?", (copy_id,)))[0] is not None:
+        await save_read_business(flow, copy_id, "release_read_slot", SlotRequest(copy_id, flow.occurred_at()),
                            OutputsRepository().release_read_slot)

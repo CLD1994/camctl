@@ -297,7 +297,7 @@ async def list_declared_results(driver, request, batch, profile):
         page["entries"] = page_entries
         candidates = (tuple(identity for identity, _ in raw_files)
             if request.result_candidates is None else
-            request.result_candidates(tuple(identity for identity, _ in raw_files)))
+            await request.result_candidates(tuple(identity for identity, _ in raw_files)))
         candidate_set = set(candidates)
         if (len(candidate_set) != len(candidates)
                 or candidates != tuple(identity for identity, _ in raw_files if identity in candidate_set)):

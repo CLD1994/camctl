@@ -8,6 +8,9 @@ run 至多一次；读数不可信进入有限收场模式；受理阶段读数�
 from __future__ import annotations
 
 import pytest
+import sqlite3
+from unittest.mock import create_autospec
+from camctl.persistence.runtime import OwnedConnection, DatabaseMetadata
 
 from camctl.session.clock import (
     ClockCheckInput,
@@ -16,6 +19,7 @@ from camctl.session.clock import (
     check_clock,
     enter_execution,
 )
+from support.business_database import inline_business_database
 
 _MIN = 1_735_689_600_000_000  # 2025-01-01 00:00:00 UTC
 
@@ -70,20 +74,29 @@ class TestEnterExecution:
         class Repository:
             def __init__(self) -> None:
                 self.calls = 0
+                self.keys = []
+                self.owned_values = []
 
             def update_lower_bound(self, check, key, owned):
                 self.calls += 1
+                self.keys.append(key)
+                self.owned_values.append(owned)
                 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
                 kind = DbOutcomeKind.COMPLETED if completed else DbOutcomeKind.UNKNOWN
                 return DbOutcome(kind=kind)
 
         repository = Repository()
+        owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True), DatabaseMetadata("camctl", "a" * 32, 1, "/staging", "/ready", "/processing"))
         return type(
             "Context",
             (),
-            {"repository": repository, "operation_key": "0" * 32, "owned": None},
-        )(), repository
+            {
+                "repository": repository,
+                "operation_key": "0" * 32,
+                "database": inline_business_database(owned),
+            },
+        )(), repository, owned
 
     @pytest.mark.asyncio
     async def test_untrusted_reading_enters_restricted_mode(self) -> None:
@@ -94,16 +107,18 @@ class TestEnterExecution:
     @pytest.mark.asyncio
     async def test_trusted_first_check_saves_bound_and_enters_normal(self) -> None:
         check = check_clock(_input(None), FixedClock([_MIN + 10]))
-        context, repository = self._context()
+        context, repository, owned = self._context()
         mode = await enter_execution(check, context)
         assert mode is ExecutionMode.NORMAL
         assert repository.calls == 1
+        assert repository.keys == [context.operation_key]
+        assert repository.owned_values == [owned]
 
     @pytest.mark.asyncio
     async def test_no_change_needed_skips_write(self) -> None:
         bound = _MIN + 5000
         check = check_clock(_input(bound), FixedClock([bound]))
-        context, repository = self._context()
+        context, repository, _owned = self._context()
         mode = await enter_execution(check, context)
         assert mode is ExecutionMode.NORMAL
         assert repository.calls == 0

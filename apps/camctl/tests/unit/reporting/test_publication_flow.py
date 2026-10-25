@@ -221,7 +221,7 @@ def test_republish_unreliable_when_covering_exists_and_observation_fails():
 # ---- 发布编排 --------------------------------------------------------
 
 
-class FakeSession:
+class FakeSession(publication.PublicationSession):
     """记录调用并按方法返回可编程结果的状态库替身。"""
 
     def __init__(self) -> None:
@@ -236,19 +236,19 @@ class FakeSession:
             return handler(*args)
         return handler
 
-    def prepare(self, report_id, contents):
+    async def prepare(self, report_id, contents):
         return self._respond("prepare", report_id, contents)
 
-    def record_intent(self, report_id):
+    async def record_intent(self, report_id):
         return self._respond("record_intent", report_id)
 
-    def save_publication(self, report_id, file_result):
+    async def save_publication(self, report_id, file_result):
         return self._respond("save_publication", report_id, file_result)
 
-    def record_failure(self, report_id, error):
+    async def record_failure(self, report_id, error):
         return self._respond("record_failure", report_id, error)
 
-    def settle_local(self, action_id, report_id):
+    async def settle_local(self, action_id, report_id):
         return self._respond("settle_local", action_id, report_id)
 
 

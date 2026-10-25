@@ -6,6 +6,11 @@ from unittest.mock import create_autospec
 
 import pytest
 
+pytestmark = pytest.mark.asyncio
+from support.capture_database import capture_database
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from unittest.mock import AsyncMock
+
 from camctl.capture.baseline import PendingBaseline, PreparationPhase, prepare_baseline
 from camctl.capture.baseline_models import BaselineChunkResult, BaselineRef, BaselineState
 from camctl.contracts.pages import Page
@@ -56,7 +61,9 @@ def _world(mocker, *, scanning=True):
     mocker.patch("camctl.capture.baseline.row_facts", side_effect=lambda db, table, identity: action if table == "actions" else activity)
     runtime = SimpleNamespace(owned=object(), capture=repository, pending_baselines={},
                               baseline_directory=directory, baseline_timeout_s=Decimal("2"), wall_us=lambda: NOW)
-    runtime.owned = SimpleNamespace(connection=object())
+    runtime.owned = OwnedConnection(create_autospec(__import__("sqlite3").Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    runtime.database = capture_database(runtime.owned)
     return runtime, directory, scan, state
 
 
@@ -107,7 +114,8 @@ def _segmented_world(mocker, *, scanning=True):
     runtime, directory, scan, state = _world(mocker, scanning=scanning)
     db = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     db.execute.return_value.fetchone.return_value = None
-    runtime.owned.connection = db
+    runtime.owned = OwnedConnection(db, runtime.owned.metadata)
+    runtime.database = capture_database(runtime.owned)
     rows = mocker.patch("camctl.persistence.transaction.row_facts")
     # 两个生产入口从同一原动作及活动事实读取。
     action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
@@ -115,7 +123,7 @@ def _segmented_world(mocker, *, scanning=True):
     activity = {"id": 1, "action_id": 2, "ownership_mode": 2,
                 "dispatch_state": 1, "occupancy_state": 1, "output_scope_json": {"directories": list(ROOTS)}}
     rows.side_effect = lambda db, table, identity: action if table == "actions" else activity
-    runtime.action = lambda _: action
+    runtime.action = AsyncMock(return_value=action)
     views = {}
 
     def intent(request, key, owned):
@@ -170,7 +178,7 @@ async def test_runtime_pending_segment_baseline_uses_real_preparation_route(mock
     import sqlite3
 
     runtime, directory, scan, state = _segmented_world(mocker)
-    action = runtime.action(2)
+    action = await runtime.action(2)
     action.update(status=1, execution_started=0,
         execution_spec_json={"result_policy": CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value})
     def execute(sql, parameters=()):
@@ -256,14 +264,14 @@ async def test_read_error_keeps_scan_until_terminal_completion_is_settled(mocker
     mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts",
                  return_value=SimpleNamespace(not_started=False))
 
-    resume_baseline_settlement(2, runtime=runtime)
+    await resume_baseline_settlement(2, runtime=runtime)
 
     scan.close.assert_called_once()
     assert runtime.pending_baselines == {}
 
 
 @pytest.mark.parametrize("status", [3, 4, 5, 6])
-def test_terminal_settlement_retries_close_without_repeating_released_save(mocker, status):
+async def test_terminal_settlement_retries_close_without_repeating_released_save(mocker, status):
     from camctl.capture.baseline import resume_baseline_settlement
     from camctl.persistence.repositories.capture import ActivityReleaseResult, ReleaseOutcome
 
@@ -277,10 +285,10 @@ def test_terminal_settlement_retries_close_without_repeating_released_save(mocke
         DbOutcomeKind.COMPLETED, ActivityReleaseResult(ReleaseOutcome.RELEASED))
     scan.close.side_effect = [OSError("close failed"), None]
     with pytest.raises(OSError):
-        resume_baseline_settlement(2, runtime=runtime)
+        await resume_baseline_settlement(2, runtime=runtime)
     assert runtime.pending_baselines[2] is pending
 
-    assert resume_baseline_settlement(2, runtime=runtime).phase is PreparationPhase.READY
+    assert (await resume_baseline_settlement(2, runtime=runtime)).phase is PreparationPhase.READY
     runtime.capture.release_occupancy.assert_called_once()
     assert scan.close.call_count == 2
     assert runtime.pending_baselines == {}
@@ -421,7 +429,7 @@ async def test_control_preparation_settles_cancel_or_expiry_after_actual_page(
     from camctl.scheduling.rules import LaunchWindow
 
     runtime, directory, scan, state = (_segmented_world(mocker) if segmented else _world(mocker))
-    action = runtime.action(2) if segmented else None
+    action = await runtime.action(2) if segmented else None
     if not segmented:
         action = {"id": 2, "device_id": BINDING.device_id, "driver_id": BINDING.driver_id,
                   "scheduled_at": NOW, "max_delay_ms": 3000, "status": 2, "execution_started": 1, "cancel_requested": 0}
@@ -433,7 +441,7 @@ async def test_control_preparation_settles_cancel_or_expiry_after_actual_page(
                                      if segmented else {})
     action["execution_started"] = 0
     action["status"] = 1
-    runtime.action = lambda _: action
+    runtime.action = AsyncMock(return_value=action)
     current_time = [NOW]
     runtime.wall_us = lambda: current_time[0]
     runtime.window_of = lambda _: LaunchWindow(NOW, NOW + 3_000_000)
@@ -451,14 +459,17 @@ async def test_control_preparation_settles_cancel_or_expiry_after_actual_page(
         return (await prepare_segment_baseline(2, 1, runtime) if segmented
                 else await prepare_baseline(2, 1, runtime=runtime))
 
-    def complete(request):
+    async def complete(request):
         scan.close.assert_not_called()
         action["status"] = 6 if canceled else 5
 
     scan.read_directory.side_effect = read
     runtime.prepare_baseline = prepare
     runtime.save_capture_completion = complete
-    runtime.resume_baselines = lambda identity: resume_baseline_settlement(identity, runtime=runtime)
+    async def resume(identity):
+        return await resume_baseline_settlement(identity, runtime=runtime)
+
+    runtime.resume_baselines = resume
     mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts",
                  return_value=SimpleNamespace(not_started=False))
     if segmented:
@@ -469,7 +480,7 @@ async def test_control_preparation_settles_cancel_or_expiry_after_actual_page(
             await _baseline_before_control(runtime, action)
         assert action["status"] == (6 if canceled else 5)
         assert 2 in runtime.pending_baselines
-        runtime.resume_baselines(2)
+        await runtime.resume_baselines(2)
     else:
         result = await _baseline_before_control(runtime, action)
         assert result.phase == "not_granted"

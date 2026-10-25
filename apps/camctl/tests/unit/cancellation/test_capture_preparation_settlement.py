@@ -1,7 +1,6 @@
 """取消成员等待准备的实际调用、原保存和占用释放。"""
 
 import sqlite3
-from types import SimpleNamespace
 from unittest.mock import Mock, create_autospec
 
 import pytest
@@ -10,6 +9,8 @@ from camctl.cancellation.settlement import TargetSettlement
 from camctl.persistence.repositories.capture_facts import StartFacts
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
 
 
 @pytest.mark.asyncio
@@ -23,8 +24,10 @@ async def test_terminal_capture_waits_for_original_preparation(mocker, pending, 
     mocker.patch("camctl.cancellation.settlement.row_facts", autospec=True, return_value=action)
     mocker.patch("camctl.cancellation.settlement.load_start_facts", autospec=True,
         return_value=StartFacts({"id": 7, "occupancy_state": 1 if held else 2}, None, 0, True, 1))
+    owned = OwnedConnection(connection, DatabaseMetadata(
+        "camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
     settlement = TargetSettlement(
-        owned=SimpleNamespace(connection=connection),
+        database=inline_business_database(owned),
         outputs=create_autospec(OutputsRepository, instance=True),
         cancellations=create_autospec(CancellationRepository, instance=True),
         withdrawal_positions=Mock(spec=lambda identity: "ready"), occurred_at=lambda: 10,

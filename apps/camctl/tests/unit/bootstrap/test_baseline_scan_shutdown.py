@@ -24,6 +24,7 @@ from camctl.devices.directory import DirectoryRead, DirectoryScan
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.session.outcome import SessionOutcome
+from support.capture_database import capture_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -194,7 +195,7 @@ async def test_baseline_close_keeps_unknown_original_save_and_returned_page(mock
     capture = create_autospec(CaptureRepository, instance=True, spec_set=True)
     save = capture.save_baseline_read_return if read_save else capture.fix_baseline
     save.return_value = DbOutcome(DbOutcomeKind.UNKNOWN)
-    assert saves.save(capture, object()).kind is DbOutcomeKind.UNKNOWN
+    assert (await saves.save(capture, capture_database())).kind is DbOutcomeKind.UNKNOWN
 
     assert (await lifecycle.execute_command(deps, None, flows={})).succeeded
 

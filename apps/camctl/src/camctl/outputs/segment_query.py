@@ -1,5 +1,6 @@
 """分段来源显式未知项的唯一 QUERY v2 与原结果接手。"""
 
+from contextlib import closing
 from dataclasses import dataclass
 
 from camctl.capture.files import FilePresenceSave
@@ -34,6 +35,7 @@ from camctl.operations.recovery import (
     RecoveryDiagnostic,
 )
 from camctl.operations.validation import validate_outcome
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.segment_queries import (
@@ -60,14 +62,14 @@ class PendingSegmentQuery:
 
 
 def _latest(connection, item_id):
-    found = connection.execute(
+    with closing(connection.execute(
         "SELECT r.id,r.status,r.attempts_used,r.retry_wait_required,t.id,t.attempt_no,"
         "t.status,t.result_event_id,t.intent_event_id FROM operation_runs r"
         " JOIN operation_attempts t ON t.run_id=r.id WHERE r.responsibility_key=?"
         " ORDER BY t.attempt_no DESC LIMIT 1",
         (f"obtain-exists/{item_id}",),
-    ).fetchone()
-    return found
+    )) as cursor:
+        return cursor.fetchone()
 
 
 def _target(connection, item_id):
@@ -100,26 +102,48 @@ def _target(connection, item_id):
     return item, dependency, output, file, binding
 
 
-def _save(runtime, pending, save, request):
+async def _read_facts(runtime, pending):
+    def read(owned):
+        connection = owned.connection
+        item, dependency, output, file, binding = _target(connection, pending.item_id)
+        owner = row_facts(connection, "actions", dependency["action_id"])
+        last = _latest(connection, pending.item_id)
+        present = None
+        if (item["status"] == 1 and owner["status"] == 2 and not owner["cancel_requested"]
+                and output["availability"] not in (2, 3, 4)
+                and last is not None and last[6] != 1):
+            present, _, _, _, _ = _query_presence(connection, pending.item_id, last[7])
+        return item, dependency, output, file, binding, owner, last, present
+
+    return await runtime.database.read(read, description="显式分段查询目标事实读取")
+
+
+async def _save(runtime, pending, save, request):
     if pending.business is None:
         pending.business = (save, request, new_operation_key())
     original, request, key = pending.business
-    if runtime.owned.connection.in_transaction:
-        runtime.owned.connection.rollback()
-    receipt = original(request, key, runtime.owned)
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-            pending.business = None
-        raise ConsistencyError(f"原显式查询业务保存尚未可靠完成: {receipt.error}")
-    pending.business = None
+
+    async def save_and_apply():
+        receipt = await runtime.database.write(
+            lambda owned: original(request, key, owned), key=key,
+            description="显式分段查询业务保存")
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            if receipt.kind is DbOutcomeKind.ROLLED_BACK:
+                pending.business = None
+            raise ConsistencyError(f"原显式查询业务保存尚未可靠完成: {receipt.error}")
+        pending.business = None
+
+    await settle_required(save_and_apply())
 
 
-def _failed(runtime, pending, code, details):
-    last = _latest(runtime.owned.connection, pending.item_id)
+async def _failed(runtime, pending, code, details):
+    last = await runtime.database.read(
+        lambda owned: _latest(owned.connection, pending.item_id),
+        description="显式分段查询最近尝试读取")
     if last is not None and last[1] in (1, 2):
         if last[6] == 1:
             raise ConsistencyError("原 QUERY 调用尚未结束，不能终结显式取回项")
-        _save(
+        await _save(
             runtime,
             pending,
             runtime.operations.finish_stale_runs,
@@ -130,7 +154,7 @@ def _failed(runtime, pending, code, details):
                 ErrorValue(code, "source_read", details),
             ),
         )
-    _save(
+    await _save(
         runtime,
         pending,
         settle_queried_item,
@@ -143,31 +167,48 @@ def _failed(runtime, pending, code, details):
     )
 
 
-def _save_result(runtime, pending):
+async def _save_result(runtime, pending):
     if pending.finish is None:
         return
-    if runtime.owned.connection.in_transaction:
-        runtime.owned.connection.rollback()
-    receipt = runtime.operations.finish_attempt(
-        pending.finish, pending.finish_key, runtime.owned
-    )
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"QUERY v2 原实际结果尚未可靠保存: {receipt.error}")
-    pending.finish = None
-    pending.intent = None
-    pending.intent_key = None
-    pending.ticket = None
-    pending.dispatched = False
+    request, key = pending.finish, pending.finish_key
+
+    async def save_and_apply():
+        receipt = await runtime.database.write(
+            lambda owned: runtime.operations.finish_attempt(request, key, owned),
+            key=key, description="QUERY v2原实际结果保存")
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"QUERY v2 原实际结果尚未可靠保存: {receipt.error}")
+        pending.finish = None
+        pending.finish_key = None
+        pending.intent = None
+        pending.intent_key = None
+        pending.ticket = None
+        pending.dispatched = False
+
+    await settle_required(save_and_apply())
 
 
-def _consume(runtime, pending, last):
-    item, dependency, output, file, binding = _target(
-        runtime.owned.connection, pending.item_id
-    )
-    owner = row_facts(runtime.owned.connection, "actions", dependency["action_id"])
+async def _begin(runtime, pending):
+    request, key = pending.intent, pending.intent_key
+
+    async def save_and_apply():
+        receipt = await runtime.database.write(
+            lambda owned: runtime.operations.begin_attempt(request, key, owned),
+            key=key, description="QUERY v2原意图保存")
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(f"QUERY v2 原意图尚未可靠保存: {receipt.error}")
+        if receipt.value.disposition is BeginDisposition.GRANTED:
+            pending.ticket = receipt.value.ticket
+        return receipt.value
+
+    return await settle_required(save_and_apply())
+
+
+async def _consume(runtime, pending, facts):
+    item, dependency, output, file, binding, owner, last, present = facts
     if item["status"] != 1 or owner["status"] != 2 or owner["cancel_requested"]:
         if last[1] in (1, 2):
-            _save(
+            await _save(
                 runtime,
                 pending,
                 runtime.operations.finish_stale_runs,
@@ -182,19 +223,16 @@ def _consume(runtime, pending, last):
         output["availability"]
     )
     if unavailable is not None:
-        _failed(
+        await _failed(
             runtime,
             pending,
             "output_unavailable",
             {"output_id": str(output["id"]), "availability": unavailable},
         )
         return True
-    present, _, _, _, _ = _query_presence(
-        runtime.owned.connection, pending.item_id, last[7]
-    )
     if present is None:
         if last[1] not in (1, 2):
-            _failed(
+            await _failed(
                 runtime,
                 pending,
                 "source_file_unconfirmed",
@@ -203,14 +241,14 @@ def _consume(runtime, pending, last):
             return True
         return False
     if file["presence_state"] != (2 if present else 3):
-        _save(
+        await _save(
             runtime,
             pending,
             CaptureRepository().save_file_presence,
             FilePresenceSave(file["id"], 2 if present else 3, runtime.occurred_at()),
         )
     if output["availability"] == 5:
-        _save(
+        await _save(
             runtime,
             pending,
             observe_queried_output,
@@ -218,7 +256,7 @@ def _consume(runtime, pending, last):
                 pending.item_id, last[7], present, runtime.occurred_at()
             ),
         )
-    _save(
+    await _save(
         runtime,
         pending,
         settle_queried_item,
@@ -229,7 +267,7 @@ def _consume(runtime, pending, last):
     return True
 
 
-def _recover(runtime, pending, last, binding):
+async def _recover(runtime, pending, last, binding):
     reason = None
     if runtime.recovery_boundary not in (
         RecoveryBoundary.HOST_LOCAL_SETTLED,
@@ -277,31 +315,41 @@ def _recover(runtime, pending, last, binding):
         recovery_max_event_id=runtime.recovery_max_event_id,
     )
     pending.finish_key = new_operation_key()
-    _save_result(runtime, pending)
+    await _save_result(runtime, pending)
     return True
 
 
 @owned_tool_call
 async def _advance_one(runtime, pending):
-    _save_result(runtime, pending)
+    await _save_result(runtime, pending)
     if pending.business is not None:
-        _save(runtime, pending, *pending.business[:2])
-    item, dependency, output, file, binding = _target(
-        runtime.owned.connection, pending.item_id
-    )
-    owner = row_facts(runtime.owned.connection, "actions", dependency["action_id"])
+        await _save(runtime, pending, *pending.business[:2])
+    facts = await _read_facts(runtime, pending)
+    item, dependency, output, file, binding, owner, last, _present = facts
     if item["status"] != 1 or owner["status"] != 2 or owner["cancel_requested"]:
         return True
-    last = _latest(runtime.owned.connection, pending.item_id)
+    owns_unsent = False
     if last is not None:
         if last[6] == 1:
-            if not _recover(runtime, pending, last, binding):
-                return False
-            last = _latest(runtime.owned.connection, pending.item_id)
-        if _consume(runtime, pending, last):
+            if pending.intent is not None and not pending.dispatched:
+                # 同一流程仍保留原意图，能证明尚未进入实际调用。
+                if pending.ticket is None:
+                    begun = await _begin(runtime, pending)
+                    if begun.disposition is not BeginDisposition.GRANTED:
+                        raise ConsistencyError("原 QUERY 未派发意图无法核实其本地票据")
+                owns_unsent = (pending.ticket.run_id == last[0]
+                               and pending.ticket.attempt_id == last[5])
+                if not owns_unsent:
+                    raise ConsistencyError("原 QUERY 本地未派发票据与持久化尝试不符")
+            else:
+                if not await _recover(runtime, pending, last, binding):
+                    return False
+                facts = await _read_facts(runtime, pending)
+                item, dependency, output, file, binding, owner, last, _present = facts
+        if not owns_unsent and await _consume(runtime, pending, facts):
             return True
     if file is None:
-        _failed(
+        await _failed(
             runtime,
             pending,
             "source_file_unconfirmed",
@@ -315,7 +363,7 @@ async def _advance_one(runtime, pending):
         None if binding_result is None else binding_failure_details(binding_result)
     )
     if details is not None:
-        _failed(runtime, pending, "device_binding_unavailable", details)
+        await _failed(runtime, pending, "device_binding_unavailable", details)
         return True
     assembly = runtime.devices.get(binding.device_id)
     if (
@@ -323,7 +371,7 @@ async def _advance_one(runtime, pending):
         or assembly.query_driver is None
         or assembly.query_config is None
     ):
-        _failed(
+        await _failed(
             runtime,
             pending,
             "source_file_unconfirmed",
@@ -331,7 +379,7 @@ async def _advance_one(runtime, pending):
         )
         return True
     config = assembly.query_config
-    if last is not None:
+    if last is not None and not owns_unsent:
         remaining = runtime.retry_gate.remaining(
             f"obtain-exists/{pending.item_id}",
             attempts_used=last[2],
@@ -353,20 +401,16 @@ async def _advance_one(runtime, pending):
             runtime.occurred_at(),
         )
         pending.intent_key = new_operation_key()
-    receipt = runtime.operations.begin_attempt(
-        pending.intent, pending.intent_key, runtime.owned
-    )
-    if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"QUERY v2 原意图尚未可靠保存: {receipt.error}")
-    if receipt.value.disposition is not BeginDisposition.GRANTED:
-        _failed(
-            runtime,
-            pending,
-            "source_file_unconfirmed",
-            {"output_id": str(output["id"])},
-        )
-        return True
-    pending.ticket = receipt.value.ticket
+    if not owns_unsent:
+        begun = await _begin(runtime, pending)
+        if begun.disposition is not BeginDisposition.GRANTED:
+            await _failed(
+                runtime,
+                pending,
+                "source_file_unconfirmed",
+                {"output_id": str(output["id"])},
+            )
+            return True
     if pending.dispatched:
         return False
     pending.dispatched = True
@@ -414,13 +458,12 @@ async def _advance_one(runtime, pending):
         run_finish=end,
     )
     pending.finish_key = new_operation_key()
-    _save_result(runtime, pending)
+    await _save_result(runtime, pending)
     pending.intent = None
     pending.ticket = None
     pending.dispatched = False
-    return _consume(
-        runtime, pending, _latest(runtime.owned.connection, pending.item_id)
-    )
+    facts = await _read_facts(runtime, pending)
+    return await _consume(runtime, pending, facts)
 
 
 async def advance_segment_queries(runtime, now):
@@ -428,8 +471,8 @@ async def advance_segment_queries(runtime, now):
     for identity, pending in tuple(runtime.pending_segment_queries.items()):
         if await _advance_one(runtime, pending):
             del runtime.pending_segment_queries[identity]
-    page = runtime.discovery.rows(
-        runtime.owned.connection,
+    page = await runtime.discovery.rows(
+        runtime.database,
         "segment_queries",
         now,
         "SELECT i.id,d.depends_on_action_id FROM obtain_items i"
@@ -438,11 +481,15 @@ async def advance_segment_queries(runtime, now):
         " WHERE i.status=1 AND i.basis=5 AND a.status=2 AND a.cancel_requested=0",
         identity="i.id",
     )
-    for identity, source in page.items:
-        if identity in runtime.pending_segment_queries or not is_segmented_source(
-            runtime.owned.connection, source
-        ):
-            continue
+    candidates = tuple((identity, source) for identity, source in page.items
+                       if identity not in runtime.pending_segment_queries)
+    if not candidates:
+        return
+    segmented = await runtime.database.read(
+        lambda owned: tuple(identity for identity, source in candidates
+                            if is_segmented_source(owned.connection, source)),
+        description="显式分段查询来源资格读取")
+    for identity in segmented:
         pending = PendingSegmentQuery(identity)
         runtime.pending_segment_queries[identity] = pending
         if await _advance_one(runtime, pending):

@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, create_autospec
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -18,8 +18,11 @@ from camctl.persistence.repositories.scheduling import (
     ExpireActionResult, ExpireOutcome, ObserveOutcome, ObserveWindowResult,
     SchedulingRepository, StartActionResult, StartOutcome,
 )
-from camctl.persistence.runtime import OwnedConnection
+from camctl.persistence.runtime import (
+    CURRENT_FORMAT_VERSION, DatabaseMetadata, OwnedConnection,
+)
 from camctl.outputs.read_discovery import ReadDiscoveryOwner
+from support.business_database import inline_business_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,9 +48,12 @@ class _CaptureState:
         self.clock.utc_micros.side_effect = lambda: self.now
         self.connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
         self.connection.execute.side_effect = self._execute
-        self.owned = OwnedConnection(self.connection, None)
+        self.owned = OwnedConnection(self.connection, DatabaseMetadata(
+            "camctl", "a" * 32, CURRENT_FORMAT_VERSION,
+            "/staging", "/ready", "/processing"))
+        self.database = inline_business_database(self.owned)
         self.context = SimpleNamespace(
-            open_connection=Mock(return_value=self.owned), clock=self.clock, wake=None)
+            database=self.database, clock=self.clock, wake=None)
         self.discovery = create_autospec(ReadDiscoveryOwner(100), spec_set=True)
         self.discovery.batch_size = 100
         self.discovery.pending = False
@@ -59,11 +65,15 @@ class _CaptureState:
         mocker.patch("camctl.bootstrap.flows.SchedulingRepository", return_value=self.repository)
         self.runtime = create_autospec(CaptureRuntime, instance=True)
         self.runtime.binding_check = None
-        self.factory = Mock(return_value=self.runtime)
+
+        async def capture_factory(database, device_id):
+            return self.runtime
+        self.factory = create_autospec(capture_factory, return_value=self.runtime)
         self.flow = CaptureFlow(self.factory)
         self.flow._discovery = self.discovery
 
-    def _discover(self, connection, now):
+    async def _discover(self, database, now, preparation_leads=None):
+        assert database is self.database
         return Page(tuple((action.identity, "cam-1", action.scheduled_at, 1, action.identity)
                           for action in self.actions.values()
                           if action.status in (1, 2) and action.scheduled_at <= now), None)
@@ -178,9 +188,14 @@ async def test_preparation_task_returns_pending_and_start_waits_until_scheduled_
     state = _CaptureState(mocker, (action,))
     state.runtime.capture_preparation_supported = True
     state.flow._preparation_leads = {"cam-1": lead}
-    state.discovery.captures.side_effect = lambda connection, now, leads: Page(tuple(
-        (item.identity, "cam-1", item.scheduled_at, 1, item.identity)
-        for item in state.actions.values() if item.scheduled_at <= now + int(lead * 1_000_000)), None)
+
+    async def discover(database, now, leads):
+        assert database is state.database
+        return Page(tuple(
+            (item.identity, "cam-1", item.scheduled_at, 1, item.identity)
+            for item in state.actions.values()
+            if item.scheduled_at <= now + int(lead * 1_000_000)), None)
+    state.discovery.captures.side_effect = discover
     mocker.patch("camctl.outputs.read_discovery.next_preparation_at", autospec=True, return_value=None)
     prepare = mocker.patch("camctl.capture.preparation.advance_preparation", autospec=True,
         return_value=BaselinePreparation(PreparationPhase.READY))

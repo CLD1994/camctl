@@ -152,7 +152,7 @@ class ReportBackgroundFlow(BackgroundFlow):
             probe = getattr(self._maintenance_flow, "should_advance", None)
             if probe is not None:
                 try:
-                    if not probe(context):
+                    if not await probe(context):
                         return
                 except Exception as error:
                     # 观察错误仍经原后台报告边界交付；日志等待不扣住调度。

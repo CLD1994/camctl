@@ -57,6 +57,8 @@ async def test_full_history_survives_incremental_window_and_local_completion(env
     from camctl.reporting import policy
     from camctl.reporting.models import ReportBytes, SyncMode
     from camctl.reporting.publication import DbPublicationSession
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from camctl.host_files.handoff import PublishResult, PublishStage
     from camctl.host_files.io import DirectorySyncStage
     from .test_freeze import _plan_body
@@ -75,7 +77,13 @@ async def test_full_history_survives_incremental_window_and_local_completion(env
         PublishResult(PublishStage.MOVED, DirectorySyncStage.SYNCED, True, None), occurred_at=6_000_000))
     completed(AcceptanceRepository().process_input(
         ProcessInput(ParsedInput("ack.json", {"request_id":"1", "last_report_id":str(first.report_id)}), Catalog(), CommandMode.RUN, 7_000_000), new_operation_key(), owned))
-    completed(DbPublicationSession(owned, occurred_at=lambda: 9_500_000).settle_local(1, first.report_id))
+    database = await BusinessDatabase.open(lambda: open_existing(
+        path / "state.db", DbOpenMode.EXISTING_RW, DbConfig()))
+    try:
+        completed(await DbPublicationSession(
+            database, occurred_at=lambda: 9_500_000).settle_local(1, first.report_id))
+    finally:
+        await database.close()
     final = freeze(owned)
     assert final.from_wm == first.to_wm and final.from_wm > 0
     payload = generate(path, final, event_batch_size=1)

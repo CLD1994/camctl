@@ -22,7 +22,7 @@ from test_result_history_performance import (
 @pytest.mark.asyncio
 async def test_same_scan_survives_pause_and_adapter_replacement_then_closes_once():
     history = []
-    repository, driver, adapter, owned = _world(history)
+    repository, driver, adapter, database, owned = _world(history)
     context = ResultReadingContext(_TICKET)
     filesystem = create_autospec(AdbFilesystem, instance=True, spec_set=True)
     scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
@@ -46,7 +46,7 @@ async def test_same_scan_survives_pause_and_adapter_replacement_then_closes_once
     assert context.directory_scan is scan
     history.append(_saved(1, next_cursor=_cursor("a")))
     replacement = DriverResultListing(driver, _BINDING, _EVIDENCE,
-        capture_repository=repository, owned=owned)
+        capture_repository=repository, database=database)
 
     await replacement.list_page(_TICKET, cursor=_cursor("a"), timeout_s=Decimal("2"),
         output_scope=_SCOPE, reading_context=context)
@@ -60,7 +60,7 @@ async def test_same_scan_survives_pause_and_adapter_replacement_then_closes_once
 
 @pytest.mark.asyncio
 async def test_saved_pages_without_original_cache_cannot_reopen_directory():
-    _, driver, adapter, _ = _world([_saved(1, next_cursor=_cursor("a"))])
+    _, driver, adapter, _, _ = _world([_saved(1, next_cursor=_cursor("a"))])
     filesystem = create_autospec(AdbFilesystem, instance=True, spec_set=True)
     context = ResultReadingContext(_TICKET)
 
@@ -81,7 +81,7 @@ async def test_saved_pages_without_original_cache_cannot_reopen_directory():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [ValueError("invalid response"), asyncio.CancelledError()])
 async def test_actual_driver_error_closes_existing_directory_cache(error):
-    _, driver, adapter, _ = _world([])
+    _, driver, adapter, _, _ = _world([])
     context = ResultReadingContext(_TICKET)
     scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
     context.directory_scan = scan
@@ -97,7 +97,7 @@ async def test_actual_driver_error_closes_existing_directory_cache(error):
 
 @pytest.mark.asyncio
 async def test_close_error_preserves_driver_failure_and_explicit_close_can_retry():
-    _, driver, adapter, _ = _world([])
+    _, driver, adapter, _, _ = _world([])
     context = ResultReadingContext(_TICKET)
     scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
     context.directory_scan = scan

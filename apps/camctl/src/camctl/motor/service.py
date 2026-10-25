@@ -11,6 +11,7 @@ from camctl.motor.models import (
 )
 from camctl.motor.notification import WriteKind, encode_motor_notification
 from camctl.motor.rules import MotorDecision, MotorFacts, decide_motor, owns_send_permit
+from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ObserveWindowRequest
 from camctl.scheduling.rules import LaunchWindow, expiration_reason
@@ -20,14 +21,13 @@ from camctl.session.service import StateDbFailure
 
 @dataclass
 class MotorRuntime:
-    owned: Any
+    database: BusinessDatabase
     repository: Any
     writer: Any
     clock: Any
     clock_policy: Callable
     #: 当前会话仍能证明未进入 write 的许可；进入 write 前即移除。
     permits: dict[int, SendPermit]
-    open_connection: Callable | None = None
 
 
 def _completed(result, step: str):
@@ -36,30 +36,55 @@ def _completed(result, step: str):
     return result.value
 
 
-def _save(runtime: MotorRuntime, method: str, request, step: str):
+async def _save(runtime: MotorRuntime, method: str, request, step: str, *, apply=None):
     key = new_operation_key()
-    result = getattr(runtime.repository, method)(request, key, runtime.owned)
-    if result.kind is DbOutcomeKind.UNKNOWN:
-        if runtime.open_connection is None:
-            raise StateDbFailure(f"电机{step}结果未知且没有重新核实连接")
-        old, runtime.owned = runtime.owned, None
-        try:
-            old.connection.close()
-            runtime.owned = runtime.open_connection()
-            if (runtime.owned.connection is old.connection
-                    or runtime.owned.metadata.instance_id != old.metadata.instance_id):
-                raise ConsistencyError("重新核实连接不属于原状态库")
-            result = runtime.repository.verify_operation(request, key, runtime.owned)
-        except Exception as error:
-            raise StateDbFailure(f"电机{step}的原操作核实失败: {error}") from error
-    return _completed(result, step)
+
+    async def save_and_apply():
+        result = await runtime.database.write(
+            lambda owned: getattr(runtime.repository, method)(request, key, owned),
+            key=key, description=f"电机{step}")
+        if result.kind is DbOutcomeKind.UNKNOWN:
+            # 执行层已停用旧连接；下次回调在所属线程取得同库新连接。
+            try:
+                result = await runtime.database.read(
+                    lambda owned: runtime.repository.verify_operation(request, key, owned),
+                    description=f"电机{step}原操作核实")
+            except Exception as error:
+                raise StateDbFailure(f"电机{step}的原操作核实失败: {error}") from error
+        value = _completed(result, step)
+        if apply is not None:
+            apply(value)
+        return value
+
+    return await settle_required(save_and_apply())
 
 
-def _trusted_now(runtime: MotorRuntime) -> int:
-    checked = check_clock(runtime.clock_policy(runtime.owned.connection), runtime.clock)
+def _trusted_now(runtime: MotorRuntime, clock_input) -> int:
+    checked = check_clock(clock_input, runtime.clock)
     if not checked.trusted:
         raise ClockBecameUntrusted("电机发送前的墙钟检查未通过")
     return checked.reading_micros
+
+
+async def _read_send_basis(runtime: MotorRuntime, action_id: int):
+    owns_permit = action_id in runtime.permits
+
+    def read(owned):
+        facts = runtime.repository.read_facts(action_id, owned)
+        if (facts.action["status"] in (3, 4, 5, 6)
+                or (facts.notification is not None and not owns_permit)):
+            return facts, None
+        return facts, runtime.clock_policy(owned.connection)
+
+    return await runtime.database.read(
+        read, description="电机发送资格读取")
+
+
+def _grant_permit(runtime: MotorRuntime, action_id: int, prepared) -> None:
+    if prepared.outcome is PrepareOutcome.GRANTED:
+        if prepared.permit is None:
+            raise ConsistencyError("电机意图授予结果缺少本地许可")
+        runtime.permits[action_id] = prepared.permit
 
 
 def _decision(facts, runtime: MotorRuntime, now: int) -> MotorDecision:
@@ -77,25 +102,25 @@ def _decision(facts, runtime: MotorRuntime, now: int) -> MotorDecision:
         runtime.writer.available, window))
 
 
-def _finish(runtime: MotorRuntime, request: FinishSendRequest) -> None:
-    _save(runtime, "finish_send", request, "结果事务")
-    runtime.permits.pop(request.action_id, None)
+async def _finish(runtime: MotorRuntime, request: FinishSendRequest) -> None:
+    await _save(runtime, "finish_send", request, "结果事务",
+                apply=lambda _value: runtime.permits.pop(request.action_id, None))
 
 
-def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
-    """推进一个可靠动作；许可保存到实际 write 之间没有协程让出点。
+async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
+    """推进一个可靠动作；最终资格交付到实际发送之间没有协程让出点。
 
     只有当前流程首次取得许可才可能写管道。提交未知时用新连接核实
     原操作；意图核实不产生许可，结果核实不再次执行 write。无法
     可靠核实则停止会话，后续依据持久化终态或未知意图恢复。
     """
-    facts = runtime.repository.read_facts(action_id, runtime.owned)
+    facts, clock_input = await _read_send_basis(runtime, action_id)
     if facts.action["status"] in (3, 4, 5, 6):
         runtime.permits.pop(action_id, None)
         return MotorDecision.KEEP_TERMINAL
     if facts.notification is not None and action_id not in runtime.permits:
         # 恢复未知不依据当前窗口或取消事实补造未发送结论。
-        _finish(runtime, FinishSendRequest(action_id, runtime.clock.utc_micros(),
+        await _finish(runtime, FinishSendRequest(action_id, runtime.clock.utc_micros(),
                                           MotorFinalKind.UNCONFIRMED))
         return MotorDecision.RECOVER_UNKNOWN
 
@@ -103,22 +128,23 @@ def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
     if isinstance(fields, str):
         fields = parse_exact_json(fields)
     message = encode_motor_notification(ObjectId(action_id), fields["params"]["position"])
-    now = _trusted_now(runtime)
+    now = _trusted_now(runtime, clock_input)
     decision = _decision(facts, runtime, now)
     if decision in (MotorDecision.PREPARE, MotorDecision.CHANNEL_UNAVAILABLE):
-        _save(runtime, "observe_window",
+        await _save(runtime, "observe_window",
               ObserveWindowRequest(action_id, now, now), "窗口观察事务")
     if decision is MotorDecision.PREPARE:
-        prepared = _save(runtime, "prepare_send",
-                         PrepareSendRequest(action_id, now, now), "意图事务")
+        prepared = await _save(runtime, "prepare_send",
+                         PrepareSendRequest(action_id, now, now), "意图事务",
+                         apply=lambda value: _grant_permit(runtime, action_id, value))
         if prepared.outcome is not PrepareOutcome.GRANTED:
             # 新事实由下一轮读取；ALREADY 永远不转换为本次发送许可。
             return MotorDecision.WAIT
-        if prepared.permit is None:
-            raise ConsistencyError("电机意图授予结果缺少本地许可")
-        runtime.permits[action_id] = prepared.permit
-        facts = runtime.repository.read_facts(action_id, runtime.owned)
-        now = _trusted_now(runtime)
+        facts, clock_input = await _read_send_basis(runtime, action_id)
+        if facts.action["status"] in (3, 4, 5, 6):
+            runtime.permits.pop(action_id, None)
+            return MotorDecision.KEEP_TERMINAL
+        now = _trusted_now(runtime, clock_input)
         decision = _decision(facts, runtime, now)
 
     if decision is MotorDecision.KEEP_TERMINAL:
@@ -128,12 +154,12 @@ def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
     if decision is MotorDecision.WAIT:
         return decision
     if decision is MotorDecision.EXPIRE:
-        _finish(runtime, FinishSendRequest(action_id, now,
+        await _finish(runtime, FinishSendRequest(action_id, now,
             MotorFinalKind.EXPIRED, permit=permit,
             expiration_reason=expiration_reason(facts.action["first_window_observed_at"])))
     elif decision is MotorDecision.CHANNEL_UNAVAILABLE:
         unavailable = runtime.writer.unavailability
-        _finish(runtime, FinishSendRequest(action_id, now,
+        await _finish(runtime, FinishSendRequest(action_id, now,
             MotorFinalKind.CHANNEL_UNAVAILABLE, permit=permit,
             reason=unavailable.reason, errno=unavailable.errno))
     elif decision is MotorDecision.SEND:
@@ -149,7 +175,7 @@ def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
                     else MotorFinalKind.FAILED)
             request = FinishSendRequest(action_id, now, kind, permit=permit,
                 written_bytes=result.written_bytes, errno=result.errno, reason=result.reason)
-        _finish(runtime, request)
+        await _finish(runtime, request)
     else:
         raise ConsistencyError(f"电机流程出现不可解释决定: {decision}")
     return decision

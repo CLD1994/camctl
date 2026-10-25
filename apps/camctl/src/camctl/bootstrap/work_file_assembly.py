@@ -31,7 +31,7 @@ _TERMINAL_DELIVERIES = frozenset(int(_DELIVERY_STATUS[name]) for name in (
 
 
 class WorkFileRuntime:
-    """保存会话的固定范围与处理记录，后台责任自己关闭独立连接。"""
+    """保存会话的固定范围与处理记录，后台责任使用共同数据库端口。"""
 
     def __init__(self, *, staging: Path, limits: WorkFileLimits, pending_media_results=None,
                  download_cleanup=None):
@@ -54,145 +54,148 @@ class WorkFileRuntime:
         self._first_files: set[int] = set()
         self.download_cleanup = download_cleanup
 
-    async def resume_media_results(self, owned) -> None:
+    async def resume_media_results(self, database) -> None:
         """筛选业务前核实会话已取得的媒体申请，不开始设备或工具操作。"""
         from camctl.capture.media_flow import resume_media_saves
 
-        await self._cleanup_downloads(owned)
+        await self._cleanup_downloads(database)
         try:
-            await resume_media_saves(owned, self.pending_media_results, self.executor)
+            await resume_media_saves(database, self.pending_media_results, self.executor)
         except (ConsistencyError, sqlite3.Error) as error:
             raise StateDbFailure(f"原媒体申请未可靠保存: {error}") from error
 
-    async def _cleanup_downloads(self, owned):
+    async def _cleanup_downloads(self, database):
         if self.download_cleanup is not None:
             try:
-                await self.download_cleanup.run(owned)
+                await self.download_cleanup.run(database)
             except (OSError, ValueError, sqlite3.Error) as error:
                 raise StateDbFailure(f"原 READ 下载遗留未可靠回收: {error}") from error
 
-    async def first_cleanup(self, file_ids: tuple[int, ...], *, owned, occurred_at: int):
+    async def first_cleanup(self, file_ids: tuple[int, ...], *, database, occurred_at: int):
         """采用本次必要文件的首次结果，不使用历史扫描范围或额度。"""
         from camctl.cancellation.ports import SettlementOutcome
 
         work = WorkFileContext(
-            repository=self.repository, owned=owned, staging=self.staging,
+            repository=self.repository, database=database, staging=self.staging,
             occurred_at=occurred_at, limits=self.limits, processed=self.processed,
             executor=self.executor, history=self.history, pending_results=self.pending_results)
         failed = False
         for file_id in file_ids:
-            facts = self.repository.load_work_file_state(file_id, owned)
+            facts = await database.read(
+                lambda owned: self.repository.load_work_file_state(file_id, owned),
+                description="中间文件首次清理状态读取")
             if (file_id in self.executor.unfinished_files()
                     or classify_work_file(facts).action is WorkFileAction.KEEP_IN_USE):
                 self._first_files.add(file_id)
                 return SettlementOutcome(complete=False)
             try:
                 result = await clean_one_work_file(file_id, work)
+                assert result is not None  # 首次必要清理没有维护停止条件。
             except Exception as error:
                 raise StateDbFailure(f"取消中间文件的首次结果未可靠保存: {error}") from error
             failed = failed or result.outcome is WorkFileSingleOutcome.FAILED
             self._first_files.discard(file_id)
         return SettlementOutcome(complete=True, failed=failed)
 
-    def initialize(self, owned) -> None:
+    async def initialize(self, database) -> None:
         """会话锁内固定范围；本方法不开始文件操作。"""
-        cursor = self.repository.load_cleanup_cursor(owned)
-        start = cursor if cursor is not None else 0
+        def read_range(owned):
+            after = self.repository.load_cleanup_cursor(owned)
+            ceiling = self.repository.max_cleanup_candidate_id(owned)
+            with closing(owned.connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
+                horizon = int(cursor.fetchone()[0] or 0)
+            return after, ceiling, horizon
+
+        after, ceiling, horizon = await database.read(read_range, description="中间文件初始范围读取")
+        start = after if after is not None else 0
         self.history.scan = CleanupScan(
-            start_after=start, after_id=start,
-            ceiling=self.repository.max_cleanup_candidate_id(owned),
-            remaining=self.limits.limit_per_run,
-            batch_size=self.limits.batch_size)
-        with closing(owned.connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
-            self._discovery_after = int(cursor.fetchone()[0] or 0)
+            start_after=start, after_id=start, ceiling=ceiling,
+            remaining=self.limits.limit_per_run, batch_size=self.limits.batch_size)
+        self._discovery_after = horizon
         if self.download_cleanup is not None:
-            self.download_cleanup.initialize(owned, horizon=self._discovery_after)
+            await self.download_cleanup.initialize(database, horizon=horizon)
 
     async def flow(self, context: Any) -> None:
         """后台推进已固定的历史责任，立即让出设备调度。"""
-        # 正常关闭重查可能发现新工作；继续原会话时恢复新增责任，
-        # 历史范围和已经消耗的额度仍由原 history 保存。
         self._stopping = False
-        if self.download_cleanup is not None:
-            owned = context.open_connection()
-            try:
-                await self._cleanup_downloads(owned)
-            finally:
-                owned.connection.close()
+        await self._cleanup_downloads(context.database)
         if self._task is not None:
             if not self._task.done():
                 return
-            # 实际任务完成不等于监督登记已经消费；重用身份之前
-            # 必须沿原拥有者完成交付，不能丢弃旧登记。
+            # 实际任务完成后消费原监督登记，再接纳下一轮。
             await self.supervisor.drain_required()
             self._raise_task_failure()
-        owned = context.open_connection()
-        try:
-            self._discover(owned)
-            scan = self.history.scan
-            if scan is None:
-                raise StateDbFailure("中间文件维护尚未固定本次范围")
-            if scan.next_query() is None:
-                self.history.finished = True
-            first_ready = False
-            for file_id in tuple(self._first_files):
-                if file_id in self.processed:
-                    self._first_files.discard(file_id)
-                    continue
-                facts = self.repository.load_work_file_state(file_id, owned)
-                if (file_id not in self.executor.unfinished_files()
-                        and classify_work_file(facts).action is not WorkFileAction.KEEP_IN_USE):
-                    first_ready = True
-            if self.history.finished and not first_ready and not self.pending_results:
-                return
-        finally:
-            owned.connection.close()
+        await self._discover(context.database)
+        scan = self.history.scan
+        if scan is None:
+            raise StateDbFailure("中间文件维护尚未固定本次范围")
+        if scan.next_query() is None:
+            self.history.finished = True
+        first_ready = False
+        for file_id in tuple(self._first_files):
+            if file_id in self.processed:
+                self._first_files.discard(file_id)
+                continue
+            facts = await context.database.read(
+                lambda owned: self.repository.load_work_file_state(file_id, owned),
+                description="中间文件首次责任状态读取")
+            if (file_id not in self.executor.unfinished_files()
+                    and classify_work_file(facts).action is not WorkFileAction.KEEP_IN_USE):
+                first_ready = True
+        if self.history.finished and not first_ready and not self.pending_results:
+            return
         self._task = asyncio.create_task(self._maintain(context))
         self.supervisor.handoff(self._token, OwnedTask(
             identity="work-file/history", stage="work_file_cleanup",
             business="本次中间文件维护", resources=("state_db",), pending=self._task))
 
     async def _maintain(self, context: Any) -> None:
-        owned = context.open_connection()
-        try:
-            work = WorkFileContext(
-                repository=self.repository, owned=owned, staging=self.staging,
-                occurred_at=context.clock.utc_micros(), limits=self.limits,
-                processed=self.processed, executor=self.executor, history=self.history,
-                pending_results=self.pending_results,
-                stop_requested=lambda: self._stopping)
-            self._discover(owned)
-            for file_id in tuple(sorted(self._first_files)):
-                if self._stopping:
-                    break
-                if file_id in self.processed:
-                    self._first_files.discard(file_id)
-                    continue
-                facts = self.repository.load_work_file_state(file_id, owned)
-                # 本次必要责任尚被使用时保留身份，不把一次提前观察
-                # 当作已取得的首次清理结果。
-                if (file_id in self.executor.unfinished_files()
-                        or classify_work_file(facts).action is WorkFileAction.KEEP_IN_USE):
-                    continue
-                await clean_one_work_file(file_id, work)
+        work = WorkFileContext(
+            repository=self.repository, database=context.database, staging=self.staging,
+            occurred_at=context.clock.utc_micros(), limits=self.limits,
+            processed=self.processed, executor=self.executor, history=self.history,
+            pending_results=self.pending_results, stop_requested=lambda: self._stopping)
+        await self._discover(context.database)
+        for file_id in tuple(sorted(self._first_files)):
+            if self._stopping:
+                break
+            if file_id in self.processed:
                 self._first_files.discard(file_id)
-            if not self._stopping:
-                await clean_work_files(work)
-        finally:
-            owned.connection.close()
+                continue
+            facts = await context.database.read(
+                lambda owned: self.repository.load_work_file_state(file_id, owned),
+                description="中间文件首次责任状态读取")
+            if self._stopping:
+                break
+            if (file_id in self.executor.unfinished_files()
+                    or classify_work_file(facts).action is WorkFileAction.KEEP_IN_USE):
+                continue
+            if await clean_one_work_file(file_id, work) is None:
+                break
+            self._first_files.discard(file_id)
+        if not self._stopping:
+            await clean_work_files(work)
 
-    def _discover(self, owned) -> None:
-        """有界读取本次业务变化，只由用途或终态变化产生首次责任。"""
-        with closing(owned.connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
-            ceiling = int(cursor.fetchone()[0] or 0)
+    async def _discover(self, database) -> None:
+        """有界读取本次业务变化，只由主协程登记首次责任与继续位置。"""
+        def read_ceiling(owned):
+            with closing(owned.connection.execute("SELECT MAX(id) FROM history_events")) as cursor:
+                return int(cursor.fetchone()[0] or 0)
+
+        ceiling = await database.read(read_ceiling, description="中间文件发现历史上界读取")
         while self._discovery_after < ceiling:
-            with closing(owned.connection.execute(
-                "SELECT id, transaction_id, event_type, event_version, occurred_at,"
-                " clock_status, change_seq, body_json FROM history_events"
-                " WHERE id > ? AND id <= ? ORDER BY id LIMIT 128",
-                (self._discovery_after, ceiling),
-            )) as cursor:
-                batch = cursor.fetchall()
+            after_id = self._discovery_after
+
+            def read_page(owned):
+                with closing(owned.connection.execute(
+                    "SELECT id, transaction_id, event_type, event_version, occurred_at,"
+                    " clock_status, change_seq, body_json FROM history_events"
+                    " WHERE id > ? AND id <= ? ORDER BY id LIMIT 128",
+                    (after_id, ceiling),
+                )) as cursor:
+                    return cursor.fetchall()
+
+            batch = await database.read(read_page, description="中间文件变化页读取")
             if not batch:
                 raise StateDbFailure("本次中间文件责任的可靠历史范围缺失")
             for stored in batch:
@@ -206,33 +209,37 @@ class WorkFileRuntime:
                                 and before.get("retention_state") != int(_RETENTION.RELEASABLE)):
                             self._first_files.add(row.row_id)
                         elif not row.before.exists:
-                            self._add_owned_files(owned, "id", row.row_id)
+                            await self._add_owned_files(database, "id", row.row_id)
                     elif row.table == "actions" and after.get("status") in _TERMINAL_ACTIONS:
                         if before.get("status") != after["status"]:
-                            self._add_owned_files(owned, "owner_action_id", row.row_id)
+                            await self._add_owned_files(database, "owner_action_id", row.row_id)
                     elif row.table == "deliveries" and after.get("status") in _TERMINAL_DELIVERIES:
                         if before.get("status") != after["status"]:
-                            self._add_owned_files(owned, "owner_delivery_id", row.row_id)
+                            await self._add_owned_files(database, "owner_delivery_id", row.row_id)
                 self._discovery_after = event.event_id
 
-    def _add_owned_files(self, owned, column: str, identity: int) -> None:
-        """沿变更对象关联分批读取文件，不以对象末事件推断用途。"""
+    async def _add_owned_files(self, database, column: str, identity: int) -> None:
+        """沿变更对象关联分批读取文件，在主协程登记首次责任。"""
         after = 0
         while True:
-            with closing(owned.connection.execute(
-                f"SELECT id FROM intermediate_files WHERE {column} = ?"
-                " AND retention_state IN (?, ?) AND id > ? ORDER BY id LIMIT ?",
-                (identity, int(_RETENTION.REQUIRED), int(_RETENTION.RELEASABLE),
-                 after, self.limits.batch_size),
-            )) as cursor:
-                batch = cursor.fetchall()
+            def read_page(owned):
+                with closing(owned.connection.execute(
+                    f"SELECT id FROM intermediate_files WHERE {column} = ?"
+                    " AND retention_state IN (?, ?) AND id > ? ORDER BY id LIMIT ?",
+                    (identity, int(_RETENTION.REQUIRED), int(_RETENTION.RELEASABLE),
+                     after, self.limits.batch_size),
+                )) as cursor:
+                    identities = cursor.fetchall()
+                return tuple((int(file_id), self.repository.load_work_file_state(file_id, owned).owner_finished)
+                             for (file_id,) in identities)
+
+            batch = await database.read(read_page, description="中间文件归属页读取")
             if not batch:
                 break
-            for (file_id,) in batch:
-                facts = self.repository.load_work_file_state(file_id, owned)
-                if facts.owner_finished:
-                    self._first_files.add(int(file_id))
-                after = int(file_id)
+            for file_id, owner_finished in batch:
+                if owner_finished:
+                    self._first_files.add(file_id)
+                after = file_id
 
     def _raise_task_failure(self) -> None:
         if self._task is None or not self._task.done():

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -30,11 +31,13 @@ from camctl.cancellation.rules import (
     CancelEligibility,
     decide_cancel_eligibility,
     decide_origin_cancel,
-    load_eligibility_facts,
+    current_eligibility_facts,
+    load_eligibility_inputs,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.persistence.transaction import TransactionError
+from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.transaction import TransactionError
 
 __all__ = [
     "ApplyCancel",
@@ -57,12 +60,12 @@ class ApplyCancel:
 class CancellationRuntime:
     """取消生效编排的端口集合。"""
 
-    owned: Any
+    database: BusinessDatabase
     repository: Any
     settlement: TargetSettlementPort
     occurred_at: Callable[[], int]
     motor_permits: dict = field(default_factory=dict)
-    open_connection: Callable | None = None
+    start_entries: Any = None
     pending_origin_settlements: dict = field(default_factory=dict)
 
 
@@ -82,36 +85,57 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
     败只保存该明细，不影响其他目标的适用处理。已在处理的项重入时
     沿用原状态继续收场，不重复施加取消。
     """
-    repository = runtime.repository
-    owned = runtime.owned
-    connection = owned.connection
+    database = runtime.database
     progress: list[CancelItemProgress] = []
     for item_id in command.item_ids:
         occurred = runtime.occurred_at()
-        row = connection.execute(
-            "SELECT target_action_id, status, cancellation_effect"
-            " FROM cancel_items WHERE id = ?", (item_id,)).fetchone()
+        row = await database.read(
+            lambda owned: _fetchone(
+                owned.connection,
+                "SELECT target_action_id, status, cancellation_effect"
+                " FROM cancel_items WHERE id = ?", (item_id,)),
+            description="读取取消成员进度",
+        )
         if row is None:
             raise ConsistencyError(f"取消成员不存在: {item_id}")
         target_id, status, effect = row
         if status == 1:
-            eligibility = decide_cancel_eligibility(
-                load_eligibility_facts(connection, target_id, motor_permits=runtime.motor_permits,
-                    start_entries=getattr(repository, "start_entries", None),
-                    database_id=owned.metadata.instance_id))
+            motor_permit = (None if runtime.motor_permits is None else
+                            runtime.motor_permits.get(target_id))
+            loaded = await database.read(
+                lambda owned: load_eligibility_inputs(
+                    owned.connection, target_id, motor_permit=motor_permit),
+                description="读取取消资格事实",
+            )
+            start_entry = (None if runtime.start_entries is None else
+                           runtime.start_entries.get(
+                               database.metadata.instance_id, target_id))
+            eligibility_facts = current_eligibility_facts(
+                loaded, None if start_entry is None else start_entry.phase)
+            eligibility = decide_cancel_eligibility(eligibility_facts)
             if eligibility is CancelEligibility.REJECT_UNSUPPORTED:
-                _save_target(runtime,target_id,RecordCancelResult(
+                await _save_target(runtime, target_id, RecordCancelResult(
                     item_id,occurred,code='task_cancel_unsupported',
-                    details={'action_instance_id':str(target_id)}))
+                    details={'action_instance_id':str(target_id)}),
+                    action_type=loaded.action["type"])
             elif eligibility is CancelEligibility.UNVERIFIED:
                 raise ConsistencyError(
                     f"目标取消事实不可靠，先核实再施加取消: {target_id}")
             else:
-                _save_target(runtime,target_id,ApplyCancelTarget(
-                    item_id,_MODE_BY_ELIGIBILITY[eligibility],occurred))
-        row = connection.execute(
-            "SELECT status, target_action_id FROM cancel_items"
-            " WHERE id = ?", (item_id,)).fetchone()
+                await _save_target(
+                    runtime, target_id,
+                    ApplyCancelTarget(
+                        item_id,_MODE_BY_ELIGIBILITY[eligibility],occurred),
+                    motor_permit=motor_permit,
+                    action_type=loaded.action["type"],
+                )
+        row = await database.read(
+            lambda owned: _fetchone(
+                owned.connection,
+                "SELECT status, target_action_id FROM cancel_items"
+                " WHERE id = ?", (item_id,)),
+            description="读取取消成员收场状态",
+        )
         if row[0] == 2:
             # 成员处理中（取消已生效或终态目标的剩余收场）经结算
             # 端口按目标类型推进。端口自行判断剩余工作（拍摄的停
@@ -121,14 +145,18 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
             # 达成，其他终态保持原结果。
             outcome = await runtime.settlement.settle(target_id)
             if outcome.complete:
-                target_status = connection.execute(
-                    "SELECT status FROM actions WHERE id = ?",
-                    (target_id,)).fetchone()
+                target_status = await database.read(
+                    lambda owned: _fetchone(
+                        owned.connection,
+                        "SELECT status FROM actions WHERE id = ?",
+                        (target_id,)),
+                    description="读取取消目标终态",
+                )
                 if target_status is None:
                     raise ConsistencyError(
                         f"取消目标动作不存在: {target_id}")
                 if outcome.failed:
-                    _save_target(runtime,target_id,RecordCancelResult(
+                    await _save_target(runtime, target_id, RecordCancelResult(
                         item_id,runtime.occurred_at(),code='target_cleanup_failed',
                         details={'action_instance_id':str(target_id)}))
                 else:
@@ -136,12 +164,16 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                         CancelOutcomeChoice.CANCELED
                         if target_status[0] == 6
                         else CancelOutcomeChoice.ALREADY_TERMINAL)
-                    _save_target(runtime,target_id,RecordCancelResult(
+                    await _save_target(runtime, target_id, RecordCancelResult(
                         item_id,runtime.occurred_at(),outcome=basis))
-        final = connection.execute(
-            "SELECT status, cancellation_effect, outcome, error_code,"
-            " error_details_json, target_action_id FROM cancel_items"
-            " WHERE id = ?", (item_id,)).fetchone()
+        final = await database.read(
+            lambda owned: _fetchone(
+                owned.connection,
+                "SELECT status, cancellation_effect, outcome, error_code,"
+                " error_details_json, target_action_id FROM cancel_items"
+                " WHERE id = ?", (item_id,)),
+            description="读取取消成员结果",
+        )
         progress.append(CancelItemProgress(
             item_id=item_id, target_action_id=final[5], status=final[0],
             outcome=final[2], error_code=final[3],
@@ -149,45 +181,63 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
     return CancelProgress(items=tuple(progress))
 
 
-def _save_target(runtime, target_id, request):
+async def _save_target(runtime, target_id, request, *, motor_permit=None, action_type=None):
     """保留本次原输入与原键；电机取消结果未知时核实后结束会话。"""
-    owned = runtime.owned
-    kind = owned.connection.execute(
-        "SELECT type FROM actions WHERE id=?", (target_id,)
-    ).fetchone()
-    if kind is None:
-        raise ConsistencyError(f"取消目标动作不存在: {target_id}")
+    database = runtime.database
+    if action_type is None:
+        row = await database.read(
+            lambda owned: _fetchone(
+                owned.connection, "SELECT type FROM actions WHERE id=?", (target_id,)),
+            description="读取取消目标类型",
+        )
+        if row is None:
+            raise ConsistencyError(f"取消目标动作不存在: {target_id}")
+        action_type = row[0]
     method = (
         "apply_cancel_target"
         if isinstance(request, ApplyCancelTarget)
         else "record_cancel_result"
     )
     key = new_operation_key()
-    outcome = getattr(runtime.repository, method)(request, key, owned)
-    if outcome.kind is not DbOutcomeKind.UNKNOWN or kind[0] != 8:
+
+    async def persist_and_classify():
+        repository_method = getattr(runtime.repository, method)
+        if isinstance(request, ApplyCancelTarget):
+            outcome = await database.write(
+                lambda owned: repository_method(
+                    request, key, owned, motor_permit=motor_permit),
+                key=key,
+                description="保存取消生效",
+            )
+        else:
+            outcome = await database.write(
+                lambda owned: repository_method(request, key, owned),
+                key=key,
+                description="保存取消结果",
+            )
+        if outcome.kind is DbOutcomeKind.UNKNOWN and action_type == 8:
+            try:
+                def verify(owned):
+                    if owned.metadata.instance_id != database.metadata.instance_id:
+                        raise ConsistencyError(
+                            "电机取消原操作核实连接与原状态库不符")
+                    return runtime.repository.verify_motor_operation(
+                        request, key, owned)
+
+                proof = await database.read(
+                    verify,
+                    description="核实电机取消原操作",
+                )
+            except Exception as error:
+                raise ConsistencyError(
+                    f"电机取消原操作核实失败: {error}") from error
+            raise ConsistencyError(
+                "电机取消提交未知已核实原操作后停止本会话: "
+                f"{proof.kind.value}; {proof.error}"
+            )
         _completed(outcome)
-        return
-    fresh = None
-    proof = None
-    try:
-        owned.connection.close()
-        if runtime.open_connection is None:
-            raise ConsistencyError("电机取消提交未知，缺少新连接核实端口")
-        fresh = runtime.open_connection()
-        if (
-            fresh.connection is owned.connection
-            or fresh.metadata.instance_id != owned.metadata.instance_id
-        ):
-            raise ConsistencyError("电机取消原操作核实连接与原状态库不符")
-        proof = runtime.repository.verify_motor_operation(request, key, fresh)
-    except Exception as error:
-        raise ConsistencyError(f"电机取消原操作核实失败: {error}") from error
-    finally:
-        if fresh is not None and fresh.connection is not owned.connection:
-            fresh.connection.close()
-    raise ConsistencyError(
-        f"电机取消提交未知已核实原操作后停止本会话: {proof.kind.value}; {proof.error}"
-    )
+
+    await settle_required(persist_and_classify())
 
 
 def _completed(outcome) -> None:
@@ -212,10 +262,8 @@ async def settle_origin_cancel(
     """
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
-    repository = runtime.repository
-    owned = runtime.owned
-    connection = owned.connection
-    database_id = owned.metadata.instance_id
+    database = runtime.database
+    database_id = database.metadata.instance_id
     pending = runtime.pending_origin_settlements
     if any(identity[0] != database_id for identity in pending):
         raise ConsistencyError("原取消收场申请属于另一状态库")
@@ -225,13 +273,17 @@ async def settle_origin_cancel(
         request, _ = pending[identity]
         if request.action_id != command.origin_action_id:
             raise ConsistencyError("原取消收场申请与原动作不符")
-        resumed = _save_origin_settlement(runtime, request)
+        resumed = await _save_origin_settlement(runtime, request)
         if resumed.kind is not DbOutcomeKind.COMPLETED or isinstance(request, FinishCancelAction):
             return resumed
         stop_completed = True
-    row = connection.execute(
-        "SELECT status, cancel_requested, target_selection_state FROM actions WHERE id = ?",
-        (command.origin_action_id,)).fetchone()
+    row = await database.read(
+        lambda owned: _fetchone(
+            owned.connection,
+            "SELECT status, cancel_requested, target_selection_state"
+            " FROM actions WHERE id = ?", (command.origin_action_id,)),
+        description="读取取消发起者收场事实",
+    )
     if row is None:
         raise ConsistencyError(f"取消动作不存在: {command.origin_action_id}")
     decision = decide_origin_cancel(CancelOriginFacts(
@@ -252,17 +304,18 @@ async def settle_origin_cancel(
     if row[2] not in (1, 2) or (stop_completed and row[2] != 2):
         raise ConsistencyError("运行中取消动作的目标选择状态矛盾")
     if row[2] == 2 and not stop_completed:
-        stopped = _save_origin_settlement(runtime,
+        stopped = await _save_origin_settlement(runtime,
             StopWaitCancelItems(command.origin_action_id, runtime.occurred_at()))
         if stopped.kind is not DbOutcomeKind.COMPLETED:
             return stopped
-    return _save_origin_settlement(runtime,
+    return await _save_origin_settlement(runtime,
         FinishCancelAction(command.origin_action_id, runtime.occurred_at()))
 
 
-def _save_origin_settlement(runtime, request):
+async def _save_origin_settlement(runtime, request):
     """写前持有原阶段申请；未知及异常保留，完成后才回收。"""
-    identity = runtime.owned.metadata.instance_id, request.action_id
+    database = runtime.database
+    identity = database.metadata.instance_id, request.action_id
     pending = runtime.pending_origin_settlements
     if identity not in pending:
         pending[identity] = request, new_operation_key()
@@ -275,7 +328,20 @@ def _save_origin_settlement(runtime, request):
         method = runtime.repository.finish_origin_canceled
     else:
         raise ConsistencyError("原取消收场阶段不可解释")
-    result = method(original, key, runtime.owned)
-    if result.kind is DbOutcomeKind.COMPLETED:
-        pending.pop(identity)
-    return result
+
+    async def save_and_apply():
+        result = await database.write(
+            lambda owned: method(original, key, owned),
+            key=key,
+            description="保存取消发起者收场",
+        )
+        if result.kind is DbOutcomeKind.COMPLETED:
+            pending.pop(identity)
+        return result
+
+    return await settle_required(save_and_apply())
+
+
+def _fetchone(connection, sql: str, parameters: tuple):
+    with closing(connection.execute(sql, parameters)) as cursor:
+        return cursor.fetchone()

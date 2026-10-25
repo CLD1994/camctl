@@ -19,12 +19,15 @@ import re
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from camctl.outputs.read_attempts import ReadDispatchPrevented
 
 from camctl.capture.files import FileChecksumSave
 from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic
 from camctl.capture.input_copy import (
-    InputPhase, InputStep, RecordingCopies, RecordingSource)
+    InputPhase, InputStep, RecordingCopies)
 from camctl.capture.media_flow import DriverReadSessions, RecordingInputCopies
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
@@ -38,7 +41,7 @@ from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget,
-    BeginDisposition, OperationKind, RunFinish, RunOutcome, RetryWaitGate)
+    OperationKind, RunFinish, RunOutcome, RetryWaitGate)
 from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis)
@@ -52,13 +55,15 @@ from camctl.outputs.read_discovery import ReadDiscoveryOwner
 from camctl.outputs.handoff import (
     DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery)
 from camctl.outputs.qualification import (
-    FileCandidate, OperationConfig, QualificationOutcome)
+    FileCandidate, OperationConfig)
 from camctl.outputs.read_attempts import acquire_read_attempt, recover_unavailable_read
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.sources import (
     ResolutionState, SelectionSnapshot, SourceResolution, SourceSpec,
     read_source_spec, select_outputs)
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.business import settle_required
+from camctl.outputs.database_reads import read_one
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import (
@@ -130,7 +135,7 @@ class DeviceReadAssembly:
 class ObtainRuntime:
     """一次取回推进轮次的协作者集合。"""
 
-    owned: Any
+    database: Any
     devices: Mapping[str, DeviceReadAssembly]
     directories: DeliveryDirectories
     segment_size: int
@@ -159,44 +164,47 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     """推进一个轮次的取回执行链；各步按已保存事实幂等。"""
     from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
 
-    retry_read_business(runtime)
-    _retry_read_results(runtime)
+    await retry_read_business(runtime)
+    await _retry_read_results(runtime)
     await retry_read_ends(runtime)
     now = runtime.occurred_at()
-    runtime.discovery.begin_round(runtime.owned.connection, now)
-    _settle_failed_reads(runtime)
-    _start_due(runtime, now)
-    for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "actions", now,
+    await runtime.discovery.begin_round(runtime.database, now)
+    await _settle_failed_reads(runtime)
+    await _start_due(runtime, now)
+    for (action_id,) in (await runtime.discovery.rows(runtime.database, "actions", now,
             "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4"
-            " AND source_resolution_state=1").items:
-        action = _action_facts(runtime.owned.connection, action_id)
-        _resolve_sources(runtime, action, now)
-    _fix_pending_selections(runtime, now)
+            " AND source_resolution_state=1")).items:
+        action = await runtime.database.read(lambda owned: _action_facts(owned.connection, action_id))
+        await _resolve_sources(runtime, action, now)
+    await _fix_pending_selections(runtime, now)
     from camctl.outputs.segment_query import advance_segment_queries
 
     await advance_segment_queries(runtime, now)
     await _qualify_selected_items(runtime, now)
     publish_remaining = runtime.discovery.batch_size
-    for (action_id,) in runtime.discovery.rows(runtime.owned.connection, "finish", now,
-            "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4").items:
+    for (action_id,) in (await runtime.discovery.rows(runtime.database, "finish", now,
+            "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4")).items:
         publish_remaining -= await _publish_and_finish(runtime, action_id, now, publish_limit=publish_remaining)
     await _advance_reads(runtime, now)
     await _advance_local_reads(runtime, now)
 
 
+async def _save_repository(runtime, save, request, key):
+    return await runtime.database.write(
+        lambda owned: save(request, key, owned), key=key)
+
+
 # ---- 动作生命周期 ----
 
 
-def _start_due(runtime: ObtainRuntime, now: int) -> None:
+async def _start_due(runtime: ObtainRuntime, now: int) -> None:
     """开始到时的待执行取回动作；未到时与已取消动作不进入。"""
-    page = runtime.discovery.rows(runtime.owned.connection, "start", now,
+    page = (await runtime.discovery.rows(runtime.database, "start", now,
         "SELECT id FROM actions WHERE status=1 AND cancel_requested=0 AND type=4"
-        " AND scheduled_at<=?", lambda fixed: (fixed,))
+        " AND scheduled_at<=?", lambda fixed: (fixed,)))
     due = (row[0] for row in page.items)
     for action_id in due:
-        outcome = runtime.outputs.start_obtain_action(
-            StartObtainAction(action_id=action_id, occurred_at=now),
-            new_operation_key(), runtime.owned)
+        outcome = await _save_repository(runtime, runtime.outputs.start_obtain_action, StartObtainAction(action_id=action_id, occurred_at=now), new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(
                 f"取回开始事务未完成（{outcome.kind.value}）:"
@@ -220,14 +228,12 @@ def _action_facts(connection, action_id: int) -> dict:
     return dict(zip(columns, row))
 
 
-def _resolve_sources(
+async def _resolve_sources(
         runtime: ObtainRuntime, action: Mapping, now: int) -> bool:
     """执行期来源解析；失败保存动作终态后返回假。"""
-    outcome = runtime.outputs.resolve_sources(
-        ResolveSources(
+    outcome = await _save_repository(runtime, runtime.outputs.resolve_sources, ResolveSources(
             action_id=action["id"], spec=_source_spec(action),
-            occurred_at=now),
-        new_operation_key(), runtime.owned)
+            occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
             f"来源解析事务未完成（{outcome.kind.value}）:"
@@ -240,94 +246,84 @@ def _source_spec(action: Mapping) -> SourceSpec:
     return read_source_spec(action["input_fields_json"])
 
 
-def _fix_pending_selections(
+async def _fix_pending_selections(
         runtime: ObtainRuntime, now: int) -> None:
     """对每个待固定的选择计算快照并保存；来源未完成保持等待。"""
     from camctl.outputs.definitions import read_excluded_output_ids, read_selection_request
 
-    connection = runtime.owned.connection
     from camctl.persistence.repositories.segment_selections import (
         FixSegmentSelection,
         fix_segment_selection,
         is_segmented_source,
     )
 
+    async def save_selection(identity, request, key):
+        async def save_and_apply():
+            receipt = await _save_repository(runtime, fix_segment_selection, request, key)
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                if receipt.kind is DbOutcomeKind.ROLLED_BACK:
+                    del runtime.pending_segment_selections[identity]
+                raise ConsistencyError(f"原分段选择尚未可靠固定: {receipt.error}")
+            del runtime.pending_segment_selections[identity]
+        await settle_required(save_and_apply())
+
     for identity, (request, key) in tuple(runtime.pending_segment_selections.items()):
-        if connection.in_transaction:
-            connection.rollback()
-        receipt = fix_segment_selection(request, key, runtime.owned)
-        if receipt.kind is not DbOutcomeKind.COMPLETED:
-            if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-                del runtime.pending_segment_selections[identity]
-            raise ConsistencyError(f"原分段选择尚未核实: {receipt.error}")
-        del runtime.pending_segment_selections[identity]
-    page = runtime.discovery.rows(connection, "selections", now,
+        await save_selection(identity, request, key)
+    page = await runtime.discovery.rows(runtime.database, "selections", now,
         "SELECT s.id,d.depends_on_action_id,d.action_id FROM obtain_source_selections s"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
         " JOIN actions a ON a.id=d.action_id"
         " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
         " AND s.status=?", (int(_SELECTION_STATUS.PENDING),), identity="s.id")
     for selection_id, member_id, action_id in page.items:
-        if is_segmented_source(connection, int(member_id)):
-            request, key = (
-                FixSegmentSelection(int(selection_id), now),
-                new_operation_key(),
-            )
+        def inputs(owned):
+            connection = owned.connection
+            if is_segmented_source(connection, int(member_id)):
+                return None
+            action = _action_facts(connection, action_id)
+            mode, requested = read_selection_request(
+                parse_exact_json(action["execution_spec_json"]),
+                parse_exact_json(action["input_fields_json"]))
+            facts = load_selection_facts(connection, int(member_id),
+                requested_output_ids=requested)
+            return action, mode, requested, facts
+        inputs_value = await runtime.database.read(inputs)
+        if inputs_value is None:
+            request, key = FixSegmentSelection(int(selection_id), now), new_operation_key()
             runtime.pending_segment_selections[int(selection_id)] = (request, key)
-            receipt = fix_segment_selection(request, key, runtime.owned)
-            if receipt.kind is not DbOutcomeKind.COMPLETED:
-                if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-                    del runtime.pending_segment_selections[int(selection_id)]
-                raise ConsistencyError(f"分段选择尚未可靠固定: {receipt.error}")
-            del runtime.pending_segment_selections[int(selection_id)]
+            await save_selection(int(selection_id), request, key)
             continue
-        action = _action_facts(connection, action_id)
+        action, mode, requested, facts = inputs_value
         input_fields = parse_exact_json(action["input_fields_json"])
-        mode, requested = read_selection_request(
-            parse_exact_json(action["execution_spec_json"]),
-            input_fields)
-        facts = load_selection_facts(
-            connection, int(member_id),
-            requested_output_ids=requested)
         snapshot = select_outputs(
-            SourceResolution(
-                state=ResolutionState.FIXED,
+            SourceResolution(state=ResolutionState.FIXED,
                 member_action_ids=(int(member_id),),
                 source_plan_id=action["resolved_source_plan_id"]),
             facts, mode, requested,
             excluded_output_ids=read_excluded_output_ids(input_fields))
         if not isinstance(snapshot, SelectionSnapshot) or not snapshot.is_fixed:
-            # 来源尚未终态或产物处理未完成：本来源等待，其余来源同轮继续。
             continue
-        outcome = runtime.outputs.fix_selection(
-            FixSelection(
-                selection_id=int(selection_id), snapshot=snapshot,
-                occurred_at=now),
-            new_operation_key(), runtime.owned)
+        outcome = await _save_repository(runtime, runtime.outputs.fix_selection,
+            FixSelection(int(selection_id), snapshot, now), new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(
-                f"选择固定事务未完成（{outcome.kind.value}）:"
-                f" {outcome.error}")
+            raise ConsistencyError(f"选择固定事务未完成（{outcome.kind.value}）: {outcome.error}")
 
 
 async def _qualify_selected_items(
         runtime: ObtainRuntime, now: int) -> None:
     """为没有交付的已选中条目申请读取资格建档；等待不阻塞其他条目。"""
-    connection = runtime.owned.connection
-    page = runtime.discovery.rows(connection, "items", now,
+    page = (await runtime.discovery.rows(runtime.database, "items", now,
         "SELECT i.id,i.output_id,d.action_id,i.selection_id FROM obtain_items i"
         " JOIN obtain_source_selections s ON s.id=i.selection_id"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
         " JOIN actions a ON a.id=d.action_id"
         " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
-        " AND i.status=? AND i.delivery_id IS NULL", (int(_ITEM_STATUS.SELECTED),), identity="i.id")
+        " AND i.status=? AND i.delivery_id IS NULL", (int(_ITEM_STATUS.SELECTED),), identity="i.id"))
     for item_id, output_id, action_id, selection_id in page.items:
-        action = _action_facts(connection, action_id)
+        action = await runtime.database.read(lambda owned: _action_facts(owned.connection, action_id))
         candidate = await _delivery_candidate(
             runtime, action, int(item_id), int(output_id), int(selection_id), now)
-        outcome = runtime.outputs.grant_file(
-            candidate,
-            new_operation_key(), runtime.owned)
+        outcome = await _save_repository(runtime, runtime.outputs.grant_file, candidate, new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(
                 f"读取资格事务未完成（{outcome.kind.value}）:"
@@ -339,41 +335,33 @@ async def _delivery_candidate(
         output_id: int, selection_id: int, now: int,
 ) -> FileCandidate:
     """从产物事实构造交付建档候选；来源与可读名称由产物行推导。"""
-    connection = runtime.owned.connection
-    with closing(connection.execute(
-        "SELECT source_action_id, device_file_id, intermediate_file_id, original_name"
-        " FROM outputs WHERE id = ?", (output_id,),
-    )) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError(f"取回条目的产物缺失: {output_id}")
-    source_action_id, device_file_id, intermediate_file_id, original_name = row
-    with closing(connection.execute(
-        "SELECT a.name, p.name FROM actions a"
-        " JOIN plans p ON p.id = a.plan_id WHERE a.id = ?",
-        (source_action_id,),
-    )) as cursor:
-        names = cursor.fetchone()
-    if names is None:
-        raise ConsistencyError(f"产物来源动作缺失: {source_action_id}")
-    source_action_name, plan_name = names
-    if device_file_id is not None:
-        from camctl.persistence.repositories.segment_selections import (
-            is_segmented_source,
-        )
-        from camctl.outputs.segment_copy_reuse import (
-            check_copy_is_locally_usable,
-            read_bound_check_copy,
-        )
-
+    def inputs(owned):
+        connection = owned.connection
+        with closing(connection.execute(
+            "SELECT o.source_action_id,o.device_file_id,o.intermediate_file_id,"
+            "o.original_name,a.name,p.name FROM outputs o"
+            " JOIN actions a ON a.id=o.source_action_id"
+            " JOIN plans p ON p.id=a.plan_id WHERE o.id=?", (output_id,))) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            raise ConsistencyError(f"取回条目的产物或来源动作缺失: {output_id}")
+        source_action_id, device_file_id = row[:2]
         bound = None
-        if is_segmented_source(connection, int(source_action_id)):
-            bound = read_bound_check_copy(
-                source_action_id=int(source_action_id),
-                source_device_file_id=int(device_file_id),
-                obtain_action_id=int(action["id"]),
-                selection_id=selection_id,
-                owned=runtime.owned)
+        if device_file_id is not None:
+            from camctl.persistence.repositories.segment_selections import is_segmented_source
+            from camctl.outputs.segment_copy_reuse import read_bound_check_copy
+            if is_segmented_source(connection, int(source_action_id)):
+                bound = read_bound_check_copy(
+                    source_action_id=int(source_action_id),
+                    source_device_file_id=int(device_file_id),
+                    obtain_action_id=int(action["id"]), selection_id=selection_id, owned=owned)
+        return row, bound
+    row, bound = await runtime.database.read(inputs)
+    (source_action_id, device_file_id, intermediate_file_id, original_name,
+     source_action_name, plan_name) = row
+
+    if device_file_id is not None:
+        from camctl.outputs.segment_copy_reuse import check_copy_is_locally_usable
         if (bound is not None and runtime.file_executor is not None
                 and await check_copy_is_locally_usable(
                     bound.copy, runtime.directories.staging,
@@ -388,31 +376,27 @@ async def _delivery_candidate(
                 target_extension="part", delivery_extension=extension,
                 delivery_display_name=(
                     f"{stem}-{plan_name}-{source_action_name}.{extension}"),
-                config=_inspection_copy_read_config(runtime, int(device_file_id)),
+                config=await _inspection_copy_read_config(runtime, int(device_file_id)),
                 occurred_at=now,
                 reuse_inspection_id=bound.inspection.inspection_id)
-        return _device_source_candidate(
+        return await _device_source_candidate(
             runtime, action, item_id, output_id, device_file_id, now,
             plan_name, source_action_name)
     if intermediate_file_id is None:
         raise ConsistencyError(f"产物缺少读取来源: {output_id}")
-    return _host_source_candidate(
+    return await _host_source_candidate(
         runtime, action, item_id, output_id, intermediate_file_id, now,
         plan_name, source_action_name)
 
 
-def _device_source_candidate(
+async def _device_source_candidate(
         runtime: ObtainRuntime, action: Mapping, item_id: int,
         output_id: int, device_file_id: int, now: int,
         plan_name: str, source_action_name: str,
 ) -> FileCandidate:
-    connection = runtime.owned.connection
-    with closing(connection.execute(
-        "SELECT f.original_name, a.device_id, a.driver_id FROM device_files f"
-        " JOIN actions a ON a.id = f.observer_action_id WHERE f.id = ?",
-        (device_file_id,),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await read_one(runtime.database,
+        "SELECT f.original_name,a.device_id,a.driver_id FROM device_files f"
+        " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?", (device_file_id,))
     if row is None:
         raise ConsistencyError(f"产物源文件缺失: {device_file_id}")
     original_name, device_id, driver_id = row
@@ -440,15 +424,11 @@ def _device_source_candidate(
         occurred_at=now, binding_result=binding_result)
 
 
-def _inspection_copy_read_config(
+async def _inspection_copy_read_config(
         runtime: ObtainRuntime, device_file_id: int) -> OperationConfig | None:
     """把可用原设备装配配置冻结到检查副本的正式取回流程。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT a.device_id FROM device_files f"
-        " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?",
-        (device_file_id,),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await read_one(runtime.database, "SELECT a.device_id FROM device_files f"
+        " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?", (device_file_id,))
     if row is None:
         raise ConsistencyError(f"检查副本的原设备文件缺失: {device_file_id}")
     assembly = runtime.devices.get(row[0])
@@ -462,18 +442,14 @@ def _inspection_copy_read_config(
         retry_interval_s=assembly.retry_interval_s)
 
 
-def _host_source_candidate(
+async def _host_source_candidate(
         runtime: ObtainRuntime, action: Mapping, item_id: int,
         output_id: int, intermediate_file_id: int, now: int,
         plan_name: str, source_action_name: str,
 ) -> FileCandidate:
     """主机源产物建档：不采用设备配置，不占用相机读取机会。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT f.relative_path, o.original_name, o.kind FROM intermediate_files f"
-        " JOIN outputs o ON o.intermediate_file_id = f.id WHERE f.id = ? AND o.id = ?",
-        (intermediate_file_id, output_id),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await read_one(runtime.database, "SELECT f.relative_path, o.original_name, o.kind FROM intermediate_files f"
+        " JOIN outputs o ON o.intermediate_file_id = f.id WHERE f.id = ? AND o.id = ?", (intermediate_file_id, output_id))
     if row is None:
         raise ConsistencyError(f"中间文件缺失: {intermediate_file_id}")
     extension = _extension_of(row[0])
@@ -512,19 +488,20 @@ async def _publish_and_finish(
     """汇总确定后发布成功交付并保存动作终态；未确定保持等待。"""
     from camctl.outputs.obtain_summary import decide_obtain_finish
 
-    connection = runtime.owned.connection
-    decision = decide_obtain_finish(load_obtain_facts(connection, action_id))
+    def inputs(owned):
+        facts = load_obtain_facts(owned.connection, action_id)
+        deliveries = (_prepared_deliveries(owned.connection, action_id, limit=publish_limit)
+                      if publish_limit else ())
+        return facts, deliveries
+    facts, deliveries = await runtime.database.read(inputs)
+    decision = decide_obtain_finish(facts)
     if not decision.may_publish:
         return 0
-    deliveries = (_prepared_deliveries(connection, action_id, limit=publish_limit)
-                  if publish_limit else ())
     for delivery_id in deliveries:
         await _publish_delivery(runtime, int(delivery_id), now)
-    if _prepared_deliveries(connection, action_id, limit=1):
+    if await runtime.database.read(lambda owned: _prepared_deliveries(owned.connection, action_id, limit=1)):
         return len(deliveries)
-    outcome = runtime.outputs.finish_obtain(
-        FinishObtain(action_id=action_id, occurred_at=now),
-        new_operation_key(), runtime.owned)
+    outcome = await _save_repository(runtime, runtime.outputs.finish_obtain, FinishObtain(action_id=action_id, occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
             f"取回完成事务未完成（{outcome.kind.value}）:"
@@ -549,7 +526,7 @@ async def _publish_delivery(
         runtime: ObtainRuntime, delivery_id: int, now: int) -> None:
     """发布一份准备完成的交付；终局失败按已保存事实保留。"""
     result = await publish_delivery(delivery_id, DeliveryContext(
-        repository=runtime.outputs, owned=runtime.owned,
+        repository=runtime.outputs, database=runtime.database,
         directories=runtime.directories, occurred_at=now, executor=runtime.file_executor))
     if result.phase not in (
             DeliveryPhase.PUBLISHED, DeliveryPhase.FAILED_FINAL,
@@ -570,8 +547,7 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     进内完成。驱动声明拍摄与读取并行的设备上，到时拍摄的同轮派
     发不阻塞读取推进。
     """
-    connection = runtime.owned.connection
-    page = runtime.discovery.reads(connection, "reads", now)
+    page = (await runtime.discovery.reads(runtime.database, "reads", now))
     if runtime.binding_check is not None:
         candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
@@ -581,15 +557,15 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
 
                 business = PendingReadBusiness(runtime.outputs.fail_read_binding,
                     FailReadBinding(copy_id, source_id, result, now), new_operation_key())
-                pending = held_binding_read_result(runtime, copy_id, result, business)
+                pending = await held_binding_read_result(runtime, copy_id, result, business)
                 if pending is not None:
-                    _save_read_result_and_settle(runtime, pending)
+                    await _save_read_result_and_settle(runtime, pending)
                     continue
-                if not recover_unavailable_read(runtime, copy_id, DeviceBinding(device_id, driver_id), now):
+                if not await recover_unavailable_read(runtime, copy_id, DeviceBinding(device_id, driver_id), now):
                     continue
                 from camctl.outputs.read_attempts import save_read_business
 
-                failed = save_read_business(runtime, copy_id, "read_binding_failure", FailReadBinding(
+                failed = await save_read_business(runtime, copy_id, "read_binding_failure", FailReadBinding(
                     copy_id, source_id, result, now), runtime.outputs.fail_read_binding)
                 if failed.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}")
@@ -597,8 +573,9 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
-    for work in plan_device_work(
-            connection, now, capture_read_parallel=parallel, candidates=page.items):
+    work_items = await runtime.database.read(lambda owned: plan_device_work(
+        owned.connection, now, capture_read_parallel=parallel, candidates=page.items))
+    for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
             continue
@@ -622,36 +599,33 @@ async def _advance_read(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         copy_id: int, now: int) -> None:
     """在读取机会与尝试预算内推进一份交付拷贝到准备完成。"""
-    connection = runtime.owned.connection
-    facts = _read_facts(connection, copy_id)
-    if facts is None:
+    def inputs(owned):
+        facts = _read_facts(owned.connection, copy_id)
+        if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
+            return facts, None
+        with closing(owned.connection.execute(
+            "SELECT a.device_id,a.driver_id FROM device_files f"
+            " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?",
+            (facts["source_device_file_id"],))) as cursor:
+            return facts, cursor.fetchone()
+    facts, saved_binding = await runtime.database.read(inputs)
+    if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
         return
-    if facts["verification_state"] in _VERIFICATION_DONE:
-        # 已完成校验的副本只余发布；读取责任不再占用设备。
-        return
-    with closing(connection.execute(
-        "SELECT a.device_id,a.driver_id FROM device_files f"
-        " JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?",
-        (facts["source_device_file_id"],),
-    )) as cursor:
-        saved_binding = cursor.fetchone()
     if saved_binding is None:
         raise ConsistencyError(f"读取源文件的原绑定缺失: {facts['source_device_file_id']}")
     if assembly.binding != DeviceBinding(*saved_binding):
         # 本次设备标识相同仍可能更换驱动；实际意图和调用只采用原绑定。
         return
-    if _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
+    if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
         return
-    slot = runtime.outputs.grant_read_slot(
-        SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()),
-        new_operation_key(), runtime.owned)
+    slot = await _save_repository(runtime, runtime.outputs.grant_read_slot, SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()), new_operation_key())
     if slot.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
             f"读取机会事务未完成（{slot.kind.value}）: {slot.error}")
     if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
         return
-    ticket = _begin_read_attempt(runtime, assembly, facts, now)
+    ticket = await _begin_read_attempt(runtime, assembly, facts, now)
     if ticket is None:
         return
     await _run_read(runtime, assembly, facts, ticket, now)
@@ -684,17 +658,13 @@ def _read_facts(connection, copy_id: int, *, include_terminal: bool = False) -> 
     return facts
 
 
-def _read_wait_remaining(
+async def _read_wait_remaining(
         runtime: ObtainRuntime, copy_id: int, interval_s: Decimal, maximum: int | None = None,
 ) -> Decimal | None:
     """读取责任的重试等待剩余秒数；可开始下一次尝试时为空。"""
     responsibility = f"read/{copy_id}"
-    with closing(runtime.owned.connection.execute(
-        "SELECT attempts_used, retry_wait_required, max_attempts_used"
-        " FROM operation_runs WHERE responsibility_key = ?",
-        (responsibility,),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await read_one(runtime.database, "SELECT attempts_used, retry_wait_required, max_attempts_used"
+        " FROM operation_runs WHERE responsibility_key = ?", (responsibility,))
     if row is None:
         return None
     return runtime.retry_gate.remaining(
@@ -706,7 +676,7 @@ def _read_wait_remaining(
         now_ns=runtime.monotonic_ns())
 
 
-def _begin_read_attempt(
+async def _begin_read_attempt(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         facts: Mapping, now: int):
     """提交读取意图；预算耗尽把交付结束为终局失败并交还机会。"""
@@ -722,35 +692,35 @@ def _begin_read_attempt(
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now,
         copy_round=facts["round"])
-    ticket, reason = acquire_read_attempt(runtime, intent)
+    ticket, reason = await acquire_read_attempt(runtime, intent)
     if ticket is not None:
         return ticket
     if reason == "budget_exhausted":
-        _fail_read_delivery(runtime, facts, now)
+        await _fail_read_delivery(runtime, facts, now)
     return None
 
 
-def _fail_read_delivery(
+async def _fail_read_delivery(
         runtime: ObtainRuntime, facts: Mapping, now: int, *,
         checksum_mismatch=False, source_verification_failed=False) -> None:
     """交付读取终局失败后释放读取机会及原源文件保护。"""
     from camctl.outputs.read_attempts import save_read_business
 
-    save_read_business(runtime, facts["id"], "fail_delivery",
+    await save_read_business(runtime, facts["id"], "fail_delivery",
         FailReadDelivery(delivery_id=facts["delivery_id"], occurred_at=now,
                          checksum_mismatch=checksum_mismatch,
                          source_verification_failed=source_verification_failed),
         runtime.outputs.fail_read_delivery)
 
 
-def _settle_failed_reads(runtime: ObtainRuntime) -> None:
+async def _settle_failed_reads(runtime: ObtainRuntime) -> None:
     """新会话只消费原终态依据，不用本次上限重开已失败读取。"""
     now = runtime.occurred_at()
-    page = runtime.discovery.rows(runtime.owned.connection, "failed", now,
+    page = (await runtime.discovery.rows(runtime.database, "failed", now,
         "SELECT c.id,r.error_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " JOIN deliveries d ON d.id=c.delivery_id JOIN actions a ON a.id=d.action_id"
         " WHERE r.kind=3 AND r.status=4 AND d.status IN (1,2)"
-        " AND a.status=2 AND a.cancel_requested=0", identity="c.id")
+        " AND a.status=2 AND a.cancel_requested=0", identity="c.id"))
     rows = page.items
     for copy_id, error_json in rows:
         if error_json is None:
@@ -760,10 +730,10 @@ def _settle_failed_reads(runtime: ObtainRuntime) -> None:
                 "read_attempts_exhausted", "checksum_mismatch",
                 "source_file_unconfirmed"):
             raise ConsistencyError("原失败读取的所属错误不属于已登记读取终局失败")
-        facts = _read_facts(runtime.owned.connection, copy_id)
+        facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id))
         if facts is None:
             raise ConsistencyError("原失败读取的未终态交付不可解释")
-        _fail_read_delivery(
+        await _fail_read_delivery(
             runtime, facts, runtime.occurred_at(),
             checksum_mismatch=error["code"] == "checksum_mismatch",
             source_verification_failed=error["code"] == "source_file_unconfirmed")
@@ -775,49 +745,49 @@ async def _run_read(
     """一次读取尝试：摘要能力固定、会话拷贝与完整性收尾。"""
     from camctl.outputs.read_attempts import run_owned_read
 
-    async def body():
-        await _run_read_and_save(runtime, assembly, facts, ticket, now)
+    async def body(control):
+        await _run_read_and_save(runtime, assembly, facts, ticket, now, control=control)
 
     await run_owned_read(runtime, facts["id"], body)
 
 
-async def _run_read_and_save(runtime, assembly, facts, ticket, now):
+async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=None):
     from camctl.outputs.read_attempts import hold_read_end
 
     device_file_id = facts["source_device_file_id"]
-    _ensure_checksum_support(runtime, assembly, device_file_id, now)
+    await _ensure_checksum_support(runtime, assembly, device_file_id, now)
     digest = (
-        assembly.digest_for(device_file_id)
+        await assembly.digest_for(device_file_id)
         if assembly.digest_supported and assembly.digest_for is not None
         else None)
     step = await _copy_delivery(
         runtime,
-        DriverReadSessions(runtime.owned, assembly.driver, ticket=ticket,
-                           idle_timeout_s=assembly.read_idle_timeout_s),
+        DriverReadSessions(runtime.database, assembly.driver, ticket=ticket,
+                           idle_timeout_s=assembly.read_idle_timeout_s, control=control),
         facts, digest, max_recopies=assembly.max_recopies,
         read_end=(runtime.pending_read_ends[facts["id"]].end if facts["id"] in runtime.pending_read_ends else None),
         on_read_end=lambda end, complete: hold_read_end(runtime, ticket, end, complete,
             resume=lambda current, held: _resume_local_delivery_end(current, held, runtime, assembly), evidence=assembly.evidence),
         on_read_start=lambda: runtime.pending_read_ends.pop(facts["id"], None))
-    _finish_read_attempt(runtime, assembly, facts, ticket, step)
+    await _finish_read_attempt(runtime, assembly, facts, ticket, step)
 
 
 async def _resume_local_delivery_end(current, held, original_runtime, assembly):
     """只核实原完整副本；原会话的设备结果不再调用源端口。"""
     from camctl.outputs.read_attempts import run_owned_read
 
-    runtime = replace(original_runtime, owned=current.owned)
+    runtime = replace(original_runtime, database=current.database)
     copy_id = int(held.ticket.target_id)
-    facts = _read_facts(runtime.owned.connection, copy_id, include_terminal=True)
+    facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
     if facts is None:
         raise ConsistencyError("原本地副本校验缺少所属交付")
 
-    async def complete_and_save():
-        copies = RecordingInputCopies(runtime.owned, BoundDirectories(staging=runtime.directories.staging),
+    async def complete_and_save(_control):
+        copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
             runtime.occurred_at, max_recopies=assembly.max_recopies, file_executor=runtime.file_executor)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
                        stop_requested=True, content_complete=True)
-        _finish_read_attempt(runtime, assembly, facts, held.ticket, step)
+        await _finish_read_attempt(runtime, assembly, facts, held.ticket, step)
 
     await run_owned_read(runtime, copy_id, complete_and_save)
 
@@ -828,9 +798,9 @@ async def _copy_delivery(
 ) -> InputStep:
     """复用资格、续传、分段与完整性事务推进交付拷贝。"""
     copies: RecordingCopies = RecordingInputCopies(
-        runtime.owned, BoundDirectories(staging=runtime.directories.staging),
+        runtime.database, BoundDirectories(staging=runtime.directories.staging),
         runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor)
-    state = copies.copy_state(facts["id"])
+    state = await copies.copy_state(facts["id"])
     if (state.verification_state in _VERIFICATION_DONE
             and state.target_sha256 is not None):
         return InputStep(InputPhase.INPUT_READY, copy_id=facts["id"])
@@ -842,12 +812,21 @@ async def _copy_delivery(
     if prepared.decision.outcome is ResumeOutcome.VERIFY and (read_end is not None or on_read_end is None):
         return replace(await _complete_copy(copies, facts["id"], digest), read_end=read_end,
                        stop_requested=read_end is not None, content_complete=read_end is not None)
-    try:
+    def read_started():
         if on_read_start is not None:
             on_read_start()
+        from camctl.outputs.read_attempts import ReadContinuation
+        original = runtime.continuing_read_tickets.get(facts["id"])
+        if original is not None:
+            runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(original.ticket, False)
+    try:
         session = await sessions.open_session(
             _source_file_id(facts), state.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
-            else prepared.decision.offset)
+            else prepared.decision.offset, on_start=read_started)
+        from camctl.outputs.read_attempts import ReadDispatchPrevented
+        if isinstance(session, ReadDispatchPrevented):
+            return InputStep(InputPhase.READ_NOT_STARTED, copy_id=facts["id"],
+                reason=session.reason, dispatch_prevented=session)
     except Exception as error:
         from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
 
@@ -914,35 +893,50 @@ async def _complete_copy(
     return InputStep(InputPhase.RECOPY_PENDING, copy_id=copy_id)
 
 
-def _finish_read_attempt(
+async def _finish_read_attempt(
+        runtime: ObtainRuntime, assembly: DeviceReadAssembly,
+        facts: Mapping, ticket, step: InputStep) -> None:
+    """保存尝试结果；预算耗尽按流程失败终局交付并交还机会。"""
+    return await settle_required(_finish_read_attempt_phase(runtime, assembly, facts, ticket, step))
+
+
+async def _finish_read_attempt_phase(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         facts: Mapping, ticket, step: InputStep) -> None:
     """保存尝试结果；预算耗尽按流程失败终局交付并交还机会。"""
     from camctl.outputs.read_attempts import require_preparation_settled
 
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(runtime, ticket, step.dispatch_prevented, assembly.evidence)
+        if pending is not None:
+            await _save_read_result_and_settle(runtime, pending, facts)
+        return
+
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
-        # 新轮次已经提交且本连接已关闭；读取尝试和原次数继续承担责任。
-        runtime.continuing_read_tickets[facts["id"]] = ticket
+        # 新轮次已经提交且文件任务已结束；读取尝试和原次数继续承担责任。
+        from camctl.outputs.read_attempts import ReadContinuation
+        runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=assembly.evidence)
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
     from camctl.outputs.read_attempts import stopped_read_result
 
     stopped = stopped_read_result(runtime, ticket, step, assembly.evidence, runtime.occurred_at())
     if stopped is not None:
-        _save_read_result_and_settle(runtime, stopped, facts)
+        await _save_read_result_and_settle(runtime, stopped, facts)
         return
     from camctl.outputs.read_attempts import canceled_complete_read_result
 
-    completed_cancel = canceled_complete_read_result(runtime, ticket, assembly.evidence)
+    completed_cancel = await canceled_complete_read_result(runtime, ticket, assembly.evidence)
     if completed_cancel is not None:
-        _save_read_result_and_settle(runtime, completed_cancel, facts)
+        await _save_read_result_and_settle(runtime, completed_cancel, facts)
         return
     from camctl.outputs.read_attempts import source_verification_run_finish
 
     verification_failed = step.phase is InputPhase.VERIFICATION_FAILED
-    verification_finish = (source_verification_run_finish(
+    verification_finish = (await source_verification_run_finish(
         runtime, ticket, step, output_id=facts["output_id"])
         if verification_failed else None)
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
@@ -982,24 +976,30 @@ def _finish_read_attempt(
             occurred_at=runtime.occurred_at(),
             retry_wait=(not succeeded) and not exhausted,
             run_finish=run_finish))
-    _save_read_result_and_settle(runtime, pending, facts)
+    await _save_read_result_and_settle(runtime, pending, facts)
 
 
-def _retry_read_results(runtime: ObtainRuntime) -> None:
+async def _retry_read_results(runtime: ObtainRuntime) -> None:
     from camctl.outputs.read_attempts import PendingStoppedRead, forget_read_result, save_read_result
 
     for pending in tuple(runtime.pending_read_results.values()):
         if not isinstance(pending, PendingStoppedRead) and pending.finish.outcome.outcome.settlement.basis is SettlementBasis.ASSUMED:
-            save_read_result(runtime, pending)
-            forget_read_result(runtime, pending)
+            async def save_and_forget():
+                await save_read_result(runtime, pending)
+                forget_read_result(runtime, pending)
+            await settle_required(save_and_forget())
             continue
-        _save_read_result_and_settle(runtime, pending)
+        await _save_read_result_and_settle(runtime, pending)
 
 
-def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) -> None:
+async def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) -> None:
+    return await settle_required(_save_read_result_and_settle_phase(runtime, pending, facts))
+
+
+async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, facts=None) -> None:
     from camctl.outputs.read_attempts import forget_read_result, save_read_result
 
-    pending = save_read_result(runtime, pending)
+    pending = await save_read_result(runtime, pending)
     if pending is None:
         return
     if pending.business is not None:
@@ -1007,19 +1007,19 @@ def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) ->
 
         copy_id = int(pending.finish.ticket.target_id)
         forget_read_result(runtime, pending)
-        save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business)
+        await save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business)
         runtime.retry_gate.cleared(f"read/{copy_id}")
         return
     if facts is None:
-        facts = _read_facts(runtime.owned.connection, int(pending.finish.ticket.target_id), include_terminal=True)
+        facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, int(pending.finish.ticket.target_id), include_terminal=True))
     if facts is None:
         raise ConsistencyError("原读取结果的所属交付已终态，尚未核实业务收场")
     finish = pending.finish
     if facts["delivery_status"] == int(_DELIVERY_STATUS.FAILED):
-        stored = runtime.owned.connection.execute(
+        stored = await read_one(runtime.database,
             "SELECT d.error_json,i.source_dependency,c.slot_device_id FROM deliveries d"
             " JOIN obtain_items i ON i.delivery_id=d.id JOIN file_copies c ON c.delivery_id=d.id"
-            " WHERE d.id=? AND c.id=?", (facts["delivery_id"], facts["id"])).fetchone()
+            " WHERE d.id=? AND c.id=?", (facts["delivery_id"], facts["id"]))
         if (finish.run_finish is None or finish.run_finish.status is not RunOutcome.FAILED
                 or stored is None or stored[0] is None
                 or parse_exact_json(stored[0])["code"] != finish.run_finish.error.code
@@ -1036,28 +1036,29 @@ def _save_read_result_and_settle(runtime: ObtainRuntime, pending, facts=None) ->
     if exhausted:
         code = finish.run_finish.error.code
         if code == "checksum_mismatch":
-            _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True)
+            await _fail_read_delivery(runtime, facts, runtime.occurred_at(), checksum_mismatch=True)
             forget_read_result(runtime, pending)
             return
         if code == "source_file_unconfirmed":
-            _fail_read_delivery(
+            await _fail_read_delivery(
                 runtime, facts, runtime.occurred_at(),
                 source_verification_failed=True)
             forget_read_result(runtime, pending)
             return
     if succeeded:
         if facts["source_device_file_id"] is not None:
-            released = runtime.outputs.release_read_slot(
-                SlotRequest(copy_id=facts["id"],
-                            occurred_at=runtime.occurred_at()),
-                new_operation_key(), runtime.owned)
+            from camctl.outputs.read_attempts import save_read_business
+
+            released = await save_read_business(runtime, facts["id"], "release_read_slot",
+                SlotRequest(copy_id=facts["id"], occurred_at=runtime.occurred_at()),
+                runtime.outputs.release_read_slot)
             if released.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         forget_read_result(runtime, pending)
         return
     if exhausted:
-        _fail_read_delivery(runtime, facts, runtime.occurred_at())
+        await _fail_read_delivery(runtime, facts, runtime.occurred_at())
         forget_read_result(runtime, pending)
         return
     runtime.retry_gate.established(
@@ -1075,18 +1076,6 @@ def _run_finish(succeeded: bool, exhausted: bool) -> RunFinish | None:
             error=ErrorValue(code="read_attempts_exhausted",
                              stage="source_read"))
     return None
-
-
-def _attempts_exhausted(runtime: ObtainRuntime, copy_id: int) -> bool:
-    """读取流程的累计尝试是否已达到预算上限。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT attempts_used, max_attempts_used FROM operation_runs"
-        " WHERE responsibility_key = ?", (f"read/{copy_id}",),
-    )) as cursor:
-        row = cursor.fetchone()
-    if row is None:
-        raise ConsistencyError(f"读取流程缺失: read/{copy_id}")
-    return int(row[0]) >= int(row[1])
 
 
 # ---- 主机源读取推进（不占相机机会） ----
@@ -1108,21 +1097,43 @@ class LocalReadSessions:
     根下的登记相对路径（derived/ 等），读取身份是登记事实。
     """
 
-    def __init__(self, owned: Any, directories: DeliveryDirectories) -> None:
-        self._owned = owned
+    def __init__(self, database: Any, directories: DeliveryDirectories, *, ticket=None, control=None) -> None:
+        self._database = database
         self._directories = directories
+        self._ticket = ticket
+        self._control = control
+
+    def for_attempt(self, ticket, *, control=None):
+        return LocalReadSessions(self._database, self._directories, ticket=ticket, control=control)
 
     async def open_session(self, source_intermediate_file_id: int,
-                           offset: int) -> "_LocalReadSession":
-        with closing(self._owned.connection.execute(
-            "SELECT relative_path FROM intermediate_files WHERE id = ?",
-            (source_intermediate_file_id,),
-        )) as cursor:
-            row = cursor.fetchone()
-        if row is None:
-            raise ConsistencyError(
-                f"中间文件缺失: {source_intermediate_file_id}")
+                           offset: int, *, on_start=None) -> "_LocalReadSession | ReadDispatchPrevented":
+        from camctl.outputs.read_attempts import read_dispatch_qualification, read_dispatch_gate
+
+        if self._ticket is None:
+            raise ConsistencyError("主机读取会话缺少已保存的尝试票据")
+        def read(owned):
+            with closing(owned.connection.execute(
+                "SELECT relative_path FROM intermediate_files WHERE id = ?",
+                (source_intermediate_file_id,))) as cursor:
+                row = cursor.fetchone()
+            qualification = read_dispatch_qualification(owned, self._ticket,
+                source_intermediate_file_id, device_source=False)
+            return row, qualification
+        try:
+            row, qualification = await self._database.read(read)
+            if row is None:
+                raise ConsistencyError(f"中间文件缺失: {source_intermediate_file_id}")
+        except Exception as error:
+            from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+            raise ReadPreparationError("主机读取源事实未取得，原尝试尚未调用",
+                settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+        prevented = read_dispatch_gate(qualification, self._control)
+        if prevented is not None:
+            return prevented
         path = self._directories.staging / str(row[0])
+        if on_start is not None:
+            on_start()
         return _LocalReadSession(LocalSourceReader(path, offset))
 
 
@@ -1154,10 +1165,9 @@ class _LocalReadSession:
 
 async def _advance_local_reads(runtime: ObtainRuntime, now: int) -> None:
     """推进全部主机源交付拷贝：不依赖设备装配，逐份独立推进。"""
-    connection = runtime.owned.connection
-    page = runtime.discovery.reads(connection, "local", now)
+    page = (await runtime.discovery.reads(runtime.database, "local", now))
     copy_ids = (candidate.copy_id for candidate in page.items)
-    sessions = LocalReadSessions(runtime.owned, runtime.directories)
+    sessions = LocalReadSessions(runtime.database, runtime.directories)
     for copy_id in copy_ids:
         await _advance_local_read(runtime, sessions, copy_id, now)
 
@@ -1166,35 +1176,32 @@ async def _advance_local_read(
         runtime: ObtainRuntime, sessions: LocalReadSessions,
         copy_id: int, now: int) -> None:
     """在原 READ_FILE 流程预算内推进一份主机源交付拷贝。"""
-    connection = runtime.owned.connection
-    facts = _read_facts(connection, copy_id)
-    if facts is None:
+    def inputs(owned):
+        facts = _read_facts(owned.connection, copy_id)
+        if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
+            return facts, False, None
+        return (facts, _is_inspection_copy_source(owned.connection, facts),
+                _stored_read_attempt_config(owned.connection, copy_id))
+    facts, is_inspection_source, config = await runtime.database.read(inputs)
+    if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
         return
-    if facts["verification_state"] in _VERIFICATION_DONE:
-        # 已完成校验的副本只余发布；读取责任已完成。
-        return
-
-    is_inspection_source = _is_inspection_copy_source(connection, facts)
-    if is_inspection_source and _retry_failed_local_source_fallback(runtime, facts):
+    if is_inspection_source and await _retry_failed_local_source_fallback(runtime, facts):
         return
     if is_inspection_source and runtime.file_executor is None:
-        # 检查副本的正式取回必须把源与目标交给统一文件任务持有；
-        # 缺少执行器时等装配恢复，不在无 pin 下开始实际读取。
         return
 
-    config = _stored_read_attempt_config(connection, copy_id)
-    if _read_wait_remaining(runtime, copy_id, config.retry_interval_s) is not None:
+    if await _read_wait_remaining(runtime, copy_id, config.retry_interval_s) is not None:
         return
 
-    async def body():
-        current = _read_facts(connection, copy_id)
+    async def body(control):
+        current = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id))
         if current is None:
             return
-        ticket = _begin_local_attempt(runtime, current, now, config)
+        ticket = await _begin_local_attempt(runtime, current, now, config)
         if ticket is None:
             return
-        step = await _copy_delivery(runtime, sessions, current, None)
-        _finish_local_attempt(runtime, current, ticket, step)
+        step = await _copy_delivery(runtime, sessions.for_attempt(ticket, control=control), current, None)
+        await _finish_local_attempt(runtime, current, ticket, step, config)
 
     from camctl.outputs.read_attempts import run_owned_read
 
@@ -1271,15 +1278,13 @@ def _failed_inspection_read_request(connection, facts: Mapping):
         occurred_at=int(occurred_at))
 
 
-def _retry_failed_local_source_fallback(
+async def _retry_failed_local_source_fallback(
         runtime: ObtainRuntime, facts: Mapping) -> bool:
     """用稳定事务键重开已落库的失败换源申请。"""
-    request = _failed_inspection_read_request(
-        runtime.owned.connection, facts)
+    request = await runtime.database.read(lambda owned: _failed_inspection_read_request(owned.connection, facts))
     if request is None:
         return False
-    outcome = runtime.outputs.fallback_read_source(
-        request, read_source_fallback_key(request.copy_id), runtime.owned)
+    outcome = await _save_repository(runtime, runtime.outputs.fallback_read_source, request, read_source_fallback_key(request.copy_id))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
             f"原读取源切换事务未可靠确认（{outcome.kind.value}）: {outcome.error}")
@@ -1289,7 +1294,7 @@ def _retry_failed_local_source_fallback(
     return outcome.value.disposition is ReadSourceFallbackDisposition.SWITCHED
 
 
-def _begin_local_attempt(
+async def _begin_local_attempt(
         runtime: ObtainRuntime, facts: Mapping, now: int,
         config: AttemptConfig,
 ):
@@ -1303,40 +1308,43 @@ def _begin_local_attempt(
         config=config,
         occurred_at=now,
         copy_round=facts["round"])
-    ticket, reason = acquire_read_attempt(runtime, intent)
+    ticket, reason = await acquire_read_attempt(runtime, intent)
     if ticket is not None:
         return ticket
     if reason == "budget_exhausted":
-        _fail_local_delivery(runtime, facts, now)
+        await _fail_read_delivery(runtime, facts, now)
     return None
 
 
-def _fail_local_delivery(runtime: ObtainRuntime, facts: Mapping, now: int) -> None:
-    """本地读取预算耗尽：交付终局失败；主机源没有相机机会可交还。"""
-    failure = runtime.outputs.fail_read_delivery(
-        FailReadDelivery(delivery_id=facts["delivery_id"], occurred_at=now),
-        new_operation_key(), runtime.owned)
-    if failure.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"读取耗尽失败事务未完成（{failure.kind.value}）:"
-            f" {failure.error}")
+async def _finish_local_attempt(
+        runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep, config: AttemptConfig) -> None:
+    """先保存本地读取结果，再按同一 READ_FILE 预算续接或换源。"""
+    return await settle_required(_finish_local_attempt_phase(runtime, facts, ticket, step, config))
 
 
-def _finish_local_attempt(
-        runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep) -> None:
+async def _finish_local_attempt_phase(
+        runtime: ObtainRuntime, facts: Mapping, ticket, step: InputStep, config: AttemptConfig) -> None:
     """先保存本地读取结果，再按同一 READ_FILE 预算续接或换源。"""
     from camctl.outputs.read_attempts import require_preparation_settled
+
+    if step.phase is InputPhase.READ_NOT_STARTED:
+        from camctl.outputs.read_attempts import prepare_prevented_read_result
+        pending = await prepare_prevented_read_result(runtime, ticket, step.dispatch_prevented, _LOCAL_READ_EVIDENCE)
+        if pending is not None:
+            await _save_read_result_and_settle(runtime, pending, facts)
+        return
 
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已登记且本地文件任务已收场；原 READ_FILE attempt 继续负责。
-        runtime.continuing_read_tickets[facts["id"]] = ticket
+        from camctl.outputs.read_attempts import ReadContinuation
+        runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=_LOCAL_READ_EVIDENCE)
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
-    exhausted = _attempts_exhausted(runtime, facts["id"])
+    exhausted = ticket.attempt_id >= config.max_attempts
     fallback_after_source_failure = step.source_failed and not exhausted
     outcome = CallOutcome(
         status=(AttemptStatus.SUCCEEDED if succeeded
@@ -1366,36 +1374,29 @@ def _finish_local_attempt(
                     "max_recopies": step.error.max_recopies,
                     "recopies_used": step.error.recopies_used}))
                 if checksum_failed else _run_finish(succeeded, exhausted))))
-    _save_read_result_and_settle(runtime, pending, facts)
+    await _save_read_result_and_settle(runtime, pending, facts)
     if succeeded:
         runtime.retry_gate.cleared(f"read/{facts['id']}")
         return
     if exhausted:
-        _fail_local_delivery(runtime, facts, runtime.occurred_at())
         return
-    if fallback_after_source_failure and _is_inspection_copy_source(
-            runtime.owned.connection, facts):
-        _retry_failed_local_source_fallback(runtime, facts)
+    if fallback_after_source_failure and await runtime.database.read(
+            lambda owned: _is_inspection_copy_source(owned.connection, facts)):
+        await _retry_failed_local_source_fallback(runtime, facts)
 
 
-def _ensure_checksum_support(
+async def _ensure_checksum_support(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         device_file_id: int, now: int) -> None:
     """按绑定声明一次固定来源文件的摘要能力；已决定不重复声明。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT checksum_support FROM device_files WHERE id = ?",
-        (device_file_id,),
-    )) as cursor:
-        row = cursor.fetchone()
+    row = await read_one(runtime.database, "SELECT checksum_support FROM device_files WHERE id = ?", (device_file_id,))
     if row is None:
         raise ConsistencyError(f"设备文件不存在: {device_file_id}")
     if row[0] != 1:
         return
-    outcome = CaptureRepository().save_file_checksum(
-        FileChecksumSave(
+    outcome = await _save_repository(runtime, CaptureRepository().save_file_checksum, FileChecksumSave(
             file_id=device_file_id,
             support=2 if assembly.digest_supported else 3,
-            occurred_at=now),
-        new_operation_key(), runtime.owned)
+            occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(f"摘要能力声明未完成: {outcome.error}")

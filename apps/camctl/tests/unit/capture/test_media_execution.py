@@ -272,19 +272,19 @@ class _Saves:
         receipt = self.script.get(name, _saved())
         return receipt(command) if callable(receipt) else receipt
 
-    def save_check_result(self, command):
+    async def save_check_result(self, command):
         return self._dispatch("save_check_result", command)
 
-    def save_repair_decision(self, command):
+    async def save_repair_decision(self, command):
         return self._dispatch("save_repair_decision", command)
 
-    def save_repair_result(self, command):
+    async def save_repair_result(self, command):
         return self._dispatch("save_repair_result", command)
 
-    def start_repair_output(self, command):
+    async def start_repair_output(self, command):
         return self._dispatch("start_repair_output", command)
 
-    def complete_repair_output(self, command):
+    async def complete_repair_output(self, command):
         return self._dispatch("complete_repair_output", command)
 
     def names(self) -> list[str]:

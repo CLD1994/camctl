@@ -20,10 +20,9 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
     from camctl.capture import handlers as common
     from camctl.persistence.repositories.segment_listing import ordered_listing_members
 
-    resume_segment_writes(runtime.owned, runtime.pending_segment_writes, action_id)
-    db = runtime.owned.connection
+    await resume_segment_writes(runtime.database, runtime.pending_segment_writes, action_id)
     repository = SegmentRepository()
-    ref = repository.read_prepared_result_ref(action_id, runtime.owned)
+    ref = await runtime.database.read(lambda owned: repository.read_prepared_result_ref(action_id, owned))
     listing = None
     if ref is None:
         listing = await common._listing_round(runtime, action_id)
@@ -33,16 +32,16 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
         ):
             return
         if listing.phase is common.ListingPhase.EXHAUSTED:
-            listing = common._saved_result_listing(runtime, action_id)
-        register_segment_observations(runtime, action_id, listing)
-        if runtime.action(action_id)["cancel_requested"] and not canceled:
-            common._finish_listing_result(runtime, listing, retry_wait=True)
+            listing = await common._saved_result_listing(runtime, action_id)
+        await register_segment_observations(runtime, action_id, listing)
+        if (await runtime.action(action_id))["cancel_requested"] and not canceled:
+            await common._finish_listing_result(runtime, listing, retry_wait=True)
             return
-        used = row_facts(db, "operation_runs", listing.ticket.run_id)["attempts_used"]
-        prepared = repository.prepare_result_set(
-            action_id, runtime.wall_us(), runtime.owned
-        )
-        with ordered_listing_members(runtime.owned, listing) as members:
+        used = (await runtime.database.read(lambda owned: row_facts(owned.connection, "operation_runs", listing.ticket.run_id)))["attempts_used"]
+        prepared = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
+            action_id, occurred_at, owned
+        ))
+        async with ordered_listing_members(runtime.database, listing) as members:
             classified = classify_native_members(
                 members,
                 complete=prepared.source_kind is SegmentSourceKind.COMPLETE_SCAN,
@@ -60,29 +59,29 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
                 and listing.outcome.error is not None
             )
         ):
-            common._finish_listing_result(runtime, listing, retry_wait=True)
+            await common._finish_listing_result(runtime, listing, retry_wait=True)
             return
-        common._finish_listing_result(runtime, listing, finalize_output_set=True)
-        ref = _save(
+        await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        ref = await _save(
             runtime,
             action_id,
             repository,
             "create_result_set",
-            repository.prepare_result_set(action_id, runtime.wall_us(), runtime.owned),
+            (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(action_id, occurred_at, owned))),
         )
-    _prepare_members(runtime, repository, ref)
-    row = repository.read_result_set(ref, runtime.owned)
+    await _prepare_members(runtime, repository, ref)
+    row = await runtime.database.read(lambda owned: repository.read_result_set(ref, owned))
     if (
-        db.execute(
+        (await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT 1 FROM segment_check_conclusions WHERE set_id=?", (ref.set_id,)
-        ).fetchone()
+        ).fetchone()))
         is None
     ):
-        (anchor,) = db.execute(
+        (anchor,) = await runtime.database.read(lambda owned: owned.connection.execute(
             "SELECT result_event_id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
             (row["run_id"],),
-        ).fetchone()
-        _save(
+        ).fetchone())
+        await _save(
             runtime,
             action_id,
             repository,
@@ -100,19 +99,19 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
                 runtime.wall_us(),
             ),
         )
-    classified = read_saved_native_classification(db, row)
+    classified = await runtime.database.read(lambda owned: read_saved_native_classification(owned.connection, row))
     if classified.current_result is CurrentSegmentResult.SUFFICIENT:
-        listing = common._saved_result_listing(runtime, action_id)
-        common._finish_listing_result(runtime, listing, finalize_output_set=True)
-        activity = row_facts(db, "device_activities", row["activity_id"])
+        listing = await common._saved_result_listing(runtime, action_id)
+        await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        activity = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", row["activity_id"]))
         if canceled and activity["activity_state"] != 3:
             from camctl.persistence.repositories import finite_cancel
 
             if (
-                common._result_source(runtime, listing.ticket).kind
+                (await common._result_source(runtime, listing.ticket)).kind
                 is common.ResultSourceKind.NATURAL
             ):
-                _save(
+                await _save(
                     runtime,
                     action_id,
                     finite_cancel,
@@ -121,24 +120,24 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
                         action_id, listing.entries.last_ref, runtime.wall_us()
                     ),
                 )
-                activity = row_facts(db, "device_activities", row["activity_id"])
+                activity = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_activities", row["activity_id"]))
         if not canceled and activity["result_set_state"] not in (3, 4):
-            first = next(listing.entries.pages()).ref
+            first = (await anext(listing.entries.pages())).ref
             observation = {
                 "first_page_event_id": first.event_id,
                 "last_page_event_id": listing.entries.last_ref.event_id,
                 "file_count": row["member_count"],
             }
-            completion = runtime.capture.read_result_completion(
-                action_id, runtime.owned
-            )
+            completion = await runtime.database.read(lambda owned: runtime.capture.read_result_completion(
+                action_id, owned
+            ))
             if completion is None:
                 completion = {
                     "method": common._TIME_AND_OUTPUTS_METHOD,
                     "wait_completed_event_id": activity["wait_completed_event_id"],
                     "observation": observation,
                 }
-            _save(
+            await _save(
                 runtime,
                 action_id,
                 runtime.capture,
@@ -153,9 +152,9 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
                     completion,
                 ),
             )
-        release_segment_occupancy(runtime, action_id)
+        await release_segment_occupancy(runtime, action_id)
     if row["state"] == 2:
-        _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
+        await _save(runtime, action_id, repository, "decide_result", ref, runtime.wall_us())
     failure = (
         None
         if canceled or classified.current_result is CurrentSegmentResult.SUFFICIENT
@@ -172,7 +171,7 @@ async def advance_native_result(runtime, action_id, *, canceled=False):
             "capture_result_unconfirmed",
             {"activity_id": str(row["activity_id"]), "reason": "outputs_unknown"},
         )
-    _save(
+    await _save(
         runtime,
         action_id,
         runtime.capture,

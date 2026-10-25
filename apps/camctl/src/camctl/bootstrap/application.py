@@ -184,6 +184,6 @@ def query_work_facts(connection) -> "WorkFacts":
             "SELECT 1 FROM intermediate_files"
             " WHERE retention_state = 2 AND cleanup_state <> 4 LIMIT 1"),
         waiting_acknowledgement=covered > acknowledged,
-        # 快照维护（H6）尚未接入生产数据路径；接入后按维护进度查询。
+        # 派生快照积压不形成需要驱动的业务责任。
         snapshot_backlog=False,
     )

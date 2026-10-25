@@ -1092,11 +1092,10 @@ def _prepare_native(db, request, setrow):
             raise ConsistencyError("Action6 原生结果缺少实际 RESULTS 结束票或有限等待")
         from camctl.capture.action6_completion import (
             action6_decision_failure,
-            classify_action6_segment_set,
         )
         from camctl.capture.segment_storage import SegmentResultRef
         from .segment_result_sets import read_current_segment_ref
-        from .segments import SegmentRepository
+        from .segment_current import classify_action6_current_set
         from camctl.capture.segment_models import SegmentDecision, SegmentDecisionStatus
         from camctl.capture.segment_storage import assessment_from_document
         from types import SimpleNamespace
@@ -1115,9 +1114,7 @@ def _prepare_native(db, request, setrow):
         )
         decision = stored if isinstance(stored, SegmentDecision) else None
         if decision is None:
-            decision = classify_action6_segment_set(
-                action, ref, SegmentRepository(), reader
-            ).decision
+            decision = classify_action6_current_set(db, action, ref, setrow).decision
         status = decision.status
         current_result = (
             CurrentSegmentResult.SUFFICIENT

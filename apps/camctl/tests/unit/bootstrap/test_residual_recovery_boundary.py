@@ -1,4 +1,4 @@
-"""公开残留流程的保存前缀：顺序、异常分类和独立连接关闭。"""
+"""公开残留流程的保存前缀：顺序、异常分类和共享数据库归属。"""
 
 import asyncio
 import sqlite3
@@ -14,6 +14,7 @@ from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.session.service import (
     AcceptanceRepositoryPort, SessionContext, SessionPaths, SessionRepositoryPort, StateDbFailure,
 )
+from support.business_database import inline_business_database
 
 
 pytestmark = pytest.mark.asyncio
@@ -35,6 +36,7 @@ def _world(*, expected_prefix, failed_stage=None, failure=None):
     owned = OwnedConnection(connection, DatabaseMetadata(
         application_id="camctl", instance_id="a" * 32, format_version=1,
         staging_path="/staging", ready_path="/ready", processing_path="/processing"))
+    database = inline_business_database(owned)
 
     def query(sql, parameters=()):
         assert events == expected_prefix, "残留流程必须完成保存前缀，再查询旧尝试或业务候选"
@@ -42,24 +44,28 @@ def _world(*, expected_prefix, failed_stage=None, failure=None):
         raise _BeforeBusinessQuery
 
     connection.execute.side_effect = query
-    opener = create_autospec(lambda: owned, return_value=owned)
+
+    async def open_database():
+        return database
+    opener = create_autospec(open_database, return_value=database)
     context = SessionContext(mode=CommandMode.RUN, catalog=None,
         clock=create_autospec(ClockPort, instance=True, spec_set=True),
-        open_connection=opener,
+        open_database=opener,
         acceptance_repository=create_autospec(AcceptanceRepositoryPort, instance=True, spec_set=True),
         session_repository=create_autospec(SessionRepositoryPort, instance=True, spec_set=True),
         paths=SessionPaths("session.lock", "admission.lock"),
         clock_policy=lambda _owned: None, acquire_session=lambda: None,
         acquire_admission=lambda: None, facts_query=lambda _owned: None)
+    context.database = database
 
-    def read(current):
-        assert current is owned
+    async def read(current):
+        assert current is database
         events.append("read")
         if failed_stage == "read":
             raise failure
 
-    def files(current):
-        assert current is owned
+    async def files(current):
+        assert current is database
         events.append("files")
         if failed_stage == "files":
             raise failure
@@ -68,14 +74,16 @@ def _world(*, expected_prefix, failed_stage=None, failure=None):
         events.append("media-complete")
 
     async def media(current):
-        assert current is owned
+        assert current is database
         events.append("media-start")
         if failed_stage == "media":
             raise failure
         await media_complete()
 
-    factory = create_autospec(lambda current, device_id: None,
-        side_effect=AssertionError("保存前缀及业务候选查询之前不能构造拍摄 runtime"))
+
+    async def capture_factory(database, device_id):
+        return None
+    factory = create_autospec(capture_factory)
     callbacks = {"resume_read_results": read, "resume_file_observations": files,
                  "resume_media_results": media}
     return context, owned, events, factory, callbacks
@@ -86,16 +94,17 @@ async def test_residual_recovery_completes_read_files_and_awaited_media_before_q
     with pytest.raises(_BeforeBusinessQuery):
         await residual_flow(factory, **callbacks)(context)
     assert events == [*_COMPLETE_PREFIX, "query"]
-    context.open_connection.assert_called_once_with()
+    context.open_database.assert_not_awaited()
     owned.connection.execute.assert_called_once()
     factory.assert_not_called()
-    owned.connection.close.assert_called_once_with()
+    owned.connection.close.assert_not_called()
 
 
 @pytest.mark.parametrize("stage", ["read", "files", "media"])
 @pytest.mark.parametrize("error_type", [sqlite3.OperationalError, ConsistencyError],
                          ids=["sqlite-error", "consistency-error"])
-async def test_residual_recovery_state_failure_stops_later_work_and_closes_connection(stage, error_type):
+async def test_residual_recovery_state_failure_stops_later_work_without_closing_database(
+        stage, error_type):
     failure = error_type("原事实保存未取得可靠结果")
     context, owned, events, factory, callbacks = _world(
         expected_prefix=_COMPLETE_PREFIX, failed_stage=stage, failure=failure)
@@ -105,7 +114,7 @@ async def test_residual_recovery_state_failure_stops_later_work_and_closes_conne
     assert events == _BEFORE_FAILURE[stage]
     owned.connection.execute.assert_not_called()
     factory.assert_not_called()
-    owned.connection.close.assert_called_once_with()
+    owned.connection.close.assert_not_called()
 
 
 @pytest.mark.parametrize("stage,error_type", [
@@ -123,7 +132,7 @@ async def test_residual_recovery_preserves_original_exception_class_and_identity
     assert events == _BEFORE_FAILURE[stage]
     owned.connection.execute.assert_not_called()
     factory.assert_not_called()
-    owned.connection.close.assert_called_once_with()
+    owned.connection.close.assert_not_called()
 
 
 async def test_residual_flow_without_recovery_callbacks_keeps_optional_public_api():
@@ -132,4 +141,4 @@ async def test_residual_flow_without_recovery_callbacks_keeps_optional_public_ap
         await residual_flow(factory)(context)
     assert events == ["query"]
     factory.assert_not_called()
-    owned.connection.close.assert_called_once_with()
+    owned.connection.close.assert_not_called()

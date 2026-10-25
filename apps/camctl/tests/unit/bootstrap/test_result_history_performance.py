@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from decimal import Decimal
+import sqlite3
 from unittest.mock import call, create_autospec
 
 import pytest
@@ -27,6 +28,8 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from support.business_database import inline_business_database
 
 
 _BINDING = DeviceBinding("cam-1", "dji-action6")
@@ -96,7 +99,9 @@ def _chain():
 def _world(history):
     repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
     driver = create_autospec(ResultDriver, instance=True, spec_set=True)
-    owned = object()
+    owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True, spec_set=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    database = inline_business_database(owned)
 
     def read_pages(ticket, cursor, batch, connection):
         assert ticket == _TICKET and connection is owned
@@ -111,8 +116,8 @@ def _world(history):
 
     repository.read_result_pages.side_effect = read_pages
     adapter = DriverResultListing(driver, _BINDING, _EVIDENCE,
-                                  capture_repository=repository, owned=owned)
-    return repository, driver, adapter, owned
+                                  capture_repository=repository, database=database)
+    return repository, driver, adapter, database, owned
 
 
 def _reply(driver, *, cursor=None, next_cursor=None):
@@ -130,7 +135,7 @@ async def _list_page(adapter, context, cursor):
 @pytest.mark.asyncio
 async def test_first_recovery_verifies_every_saved_page_before_dispatch():
     history = _chain()
-    repository, driver, adapter, owned = _world(history)
+    repository, driver, adapter, database, owned = _world(history)
     context = ResultReadingContext(_TICKET)
     actual = _reply(driver, cursor=_cursor("c"), next_cursor=_cursor("d"))
 
@@ -149,7 +154,7 @@ async def test_first_recovery_verifies_every_saved_page_before_dispatch():
 @pytest.mark.asyncio
 async def test_same_owner_reads_only_each_of_three_new_reliable_pages():
     history = []
-    repository, driver, adapter, owned = _world(history)
+    repository, driver, adapter, database, owned = _world(history)
     context = ResultReadingContext(_TICKET)
     _reply(driver, next_cursor=_cursor("a"))
     await _list_page(adapter, context, None)
@@ -173,7 +178,7 @@ async def test_same_owner_reads_only_each_of_three_new_reliable_pages():
 async def test_another_adapter_rebuilds_full_history_with_the_same_context():
     saved = _chain()
     history = saved[:2]
-    repository, driver, adapter, owned = _world(history)
+    repository, driver, adapter, database, owned = _world(history)
     context = ResultReadingContext(_TICKET)
     _reply(driver, cursor=_cursor("b"), next_cursor=_cursor("c"))
     await _list_page(adapter, context, _cursor("b"))
@@ -181,7 +186,7 @@ async def test_another_adapter_rebuilds_full_history_with_the_same_context():
     history.append(saved[2])
     repository.read_result_pages.reset_mock()
     replacement = DriverResultListing(
-        driver, _BINDING, _EVIDENCE, capture_repository=repository, owned=owned)
+        driver, _BINDING, _EVIDENCE, capture_repository=repository, database=database)
     _reply(driver, cursor=_cursor("c"), next_cursor=_cursor("d"))
 
     await _list_page(replacement, context, _cursor("c"))
@@ -198,7 +203,7 @@ async def test_another_adapter_rebuilds_full_history_with_the_same_context():
 
 @pytest.mark.asyncio
 async def test_unsaved_first_page_cannot_dispatch_the_first_page_again():
-    repository, driver, adapter, _ = _world([])
+    repository, driver, adapter, _, _ = _world([])
     context = ResultReadingContext(_TICKET)
     _reply(driver, next_cursor=_cursor("a"))
     await _list_page(adapter, context, None)
@@ -215,7 +220,7 @@ async def test_unsaved_first_page_cannot_dispatch_the_first_page_again():
 @pytest.mark.parametrize("saved_count", [0, 1])
 async def test_unconfirmed_current_page_cannot_dispatch_a_continuation(saved_count):
     history = _chain()[:saved_count]
-    _, driver, adapter, _ = _world(history)
+    _, driver, adapter, _, _ = _world(history)
     context = ResultReadingContext(_TICKET)
     current_cursor = None if not history else _cursor("a")
     following_cursor = _cursor("a" if not history else "b")
@@ -234,12 +239,12 @@ async def test_unconfirmed_current_page_cannot_dispatch_a_continuation(saved_cou
 @pytest.mark.asyncio
 async def test_replacement_owner_cannot_reread_the_unconfirmed_current_page():
     history = _chain()[:1]
-    repository, driver, adapter, owned = _world(history)
+    repository, driver, adapter, database, owned = _world(history)
     context = ResultReadingContext(_TICKET)
     _reply(driver, cursor=_cursor("a"), next_cursor=_cursor("b"))
     await _list_page(adapter, context, _cursor("a"))
     replacement = DriverResultListing(driver, _BINDING, _EVIDENCE,
-        capture_repository=repository, owned=owned)
+        capture_repository=repository, database=database)
 
     with pytest.raises(ConsistencyError):
         await _list_page(replacement, context, _cursor("a"))
@@ -274,7 +279,7 @@ def _invalid_tail(case, valid):
 async def test_invalid_reliable_tail_stops_dispatch_and_keeps_verified_prefix(case, incremental):
     first, second, _ = _chain()
     history = [first]
-    _, driver, adapter, _ = _world(history)
+    _, driver, adapter, _, _ = _world(history)
     context = ResultReadingContext(_TICKET)
     if incremental:
         _reply(driver, cursor=_cursor("a"), next_cursor=_cursor("b"))
@@ -293,7 +298,7 @@ async def test_invalid_reliable_tail_stops_dispatch_and_keeps_verified_prefix(ca
 async def test_multiple_new_reliable_pages_stop_incremental_dispatch():
     saved = _chain()
     history = saved[:1]
-    _, driver, adapter, _ = _world(history)
+    _, driver, adapter, _, _ = _world(history)
     context = ResultReadingContext(_TICKET)
     _reply(driver, cursor=_cursor("a"), next_cursor=_cursor("b"))
     await _list_page(adapter, context, _cursor("a"))
@@ -316,15 +321,15 @@ async def test_prior_entries_repeat_only_the_reliable_file_id_members():
             _entry("c.jpg", format_id="jpeg"), _entry("d.mp4")),
             file_ids=(("/DCIM/c.jpg", 42),)),
     ]
-    _, driver, adapter, _ = _world(history)
+    _, driver, adapter, _, _ = _world(history)
     context = ResultReadingContext(_TICKET)
     observed = []
     actual = _outcome(cursor=_cursor("d"), next_cursor=_cursor("e"))
 
     async def read(request, batch):
         assert request.prior_result_entries is not None
-        observed.append(tuple(request.prior_result_entries()))
-        observed.append(tuple(request.prior_result_entries()))
+        observed.append(tuple([entry async for entry in request.prior_result_entries()]))
+        observed.append(tuple([entry async for entry in request.prior_result_entries()]))
         return DeviceCallResult.from_outcome(actual)
 
     driver.list_results.side_effect = read

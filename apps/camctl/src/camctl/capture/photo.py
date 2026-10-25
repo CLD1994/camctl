@@ -129,7 +129,7 @@ class PhotoDriverPort(Protocol):
 class PhotoFinishPort(Protocol):
     """照片调用结果保存端口。"""
 
-    def finish(self, ticket: Any, outcome: CallOutcome) -> None: ...
+    async def finish(self, ticket: Any, outcome: CallOutcome) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -194,7 +194,7 @@ async def run_photo(context: PhotoContext) -> PhotoStep:
     ):
         return PhotoStep(phase=decision)
     dispatch = await context.ports.driver.shoot(None)
-    context.ports.finishes.finish(None, _outcome(dispatch))
+    (await context.ports.finishes.finish(None, _outcome(dispatch)))
     final = decide_photo(
         PhotoState(
             action_terminal=False,

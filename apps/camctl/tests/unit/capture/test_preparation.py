@@ -4,9 +4,13 @@ import asyncio
 import sqlite3
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
+
+pytestmark = pytest.mark.asyncio
+from support.capture_database import capture_database
+from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 
 from camctl.capture.baseline import BaselinePreparation, PreparationPhase
 from camctl.capture.handlers import CaptureRuntime
@@ -32,7 +36,9 @@ from camctl.persistence.repositories.capture import CaptureRepository
 
 def _world(mocker, *, recover=True):
     runtime = create_autospec(CaptureRuntime, instance=True)
-    runtime.owned = SimpleNamespace(connection=create_autospec(sqlite3.Connection, instance=True))
+    runtime.owned = OwnedConnection(create_autospec(sqlite3.Connection, instance=True),
+        DatabaseMetadata("camctl", "a" * 32, 5, "/staging", "/ready", "/processing"))
+    runtime.database = capture_database(runtime.owned)
     runtime.operations = create_autospec(OperationRepository, instance=True)
     runtime.scheduling = create_autospec(SchedulingRepository, instance=True)
     runtime.driver = create_autospec(ControlDriver, instance=True)
@@ -73,8 +79,23 @@ def _world(mocker, *, recover=True):
     runtime.prepare_baseline.return_value = BaselinePreparation(PreparationPhase.READY)
     if recover:
         mocker.patch("camctl.capture.preparation._recover_old_preparation", autospec=True, return_value=True)
-    mocker.patch("camctl.capture.preparation._activity", autospec=True,
-                 return_value={"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    activity_reader = mocker.patch("camctl.capture.preparation._activity", autospec=True,
+        return_value={"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    mocker.patch("camctl.capture.preparation.row_facts", autospec=True,
+        side_effect=lambda connection, table, identity: action if table == "actions" else activity_reader.return_value)
+
+    def execute(sql, parameters=()):
+        if sql.startswith("SELECT id FROM device_activities WHERE action_id="):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = (7,)
+            return cursor
+        if sql.startswith("SELECT a.status,a.effect_state,e.occurred_at FROM operation_attempts"):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = runtime.last_attempt.return_value
+            return cursor
+        return runtime.owned.connection.execute.return_value
+
+    runtime.owned.connection.execute.side_effect = execute
     return runtime, action, ticket
 
 
@@ -239,7 +260,7 @@ async def test_unsettled_baseline_save_precedes_late_window_expiration(mocker, p
     runtime.capture.release_occupancy.assert_not_called()
 
 
-def test_running_cancellation_preserves_original_baseline_error_until_release(mocker):
+async def test_running_cancellation_preserves_original_baseline_error_until_release(mocker):
     from camctl.capture import baseline, preparation
     from camctl.capture.baseline import PendingBaseline
     from camctl.devices.bindings import DeviceBinding
@@ -260,8 +281,10 @@ def test_running_cancellation_preserves_original_baseline_error_until_release(mo
     mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
         return_value=StartFacts(activity, None, 0, True, 1))
     runtime.capture.preparation_calls_resolved.return_value = True
-    runtime.resume_baselines.side_effect = (
-        lambda action_id: baseline.resume_baseline_settlement(action_id, runtime=runtime))
+    async def resume_baselines(action_id):
+        return await baseline.resume_baseline_settlement(action_id, runtime=runtime)
+
+    runtime.resume_baselines.side_effect = resume_baselines
 
     def finish(request):
         assert isinstance(request, FinishCanceledCapture) and not request.preparation_resolved
@@ -275,7 +298,7 @@ def test_running_cancellation_preserves_original_baseline_error_until_release(mo
     runtime.save_capture_completion.side_effect = finish
     runtime.capture.release_occupancy.side_effect = release
 
-    assert settle_preparation(runtime, 1)
+    assert await settle_preparation(runtime, 1)
 
     assert action["status"] == 6 and runtime.pending_baselines == {}
     runtime.capture.release_occupancy.assert_called_once()
@@ -313,7 +336,7 @@ async def test_photo_existing_start_always_keeps_original_start_chain(mocker, st
     runtime.last_attempt.return_value = (status, effect, 0)
     mocker.patch("camctl.persistence.repositories.capture_facts.load_start_facts", autospec=True,
         return_value=StartFacts(None, {"status": 2}, 1, not_started, 4))
-    assert preparation_dispatch_reason(runtime, 1) == "already_dispatched"
+    assert await preparation_dispatch_reason(runtime, 1) == "already_dispatched"
     assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
     runtime.preparation_driver.prepare_capture.assert_not_called()
     runtime.prepare_baseline.assert_not_called()
@@ -348,7 +371,7 @@ async def test_unknown_result_save_keeps_original_request_and_never_repeats_sett
     assert prepared_by(runtime, action) is None
     runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
         FinishAttemptResult(FinishDisposition.SAVED))
-    resume_preparation_saves(runtime.owned, runtime.preparation_cache, operations=runtime.operations)
+    await resume_preparation_saves(runtime.database, runtime.preparation_cache, operations=runtime.operations)
     assert runtime.operations.finish_attempt.call_args.args[:2] == (original, key)
     assert prepared_by(runtime, action) == ticket
     await advance_preparation(runtime, 1)
@@ -361,6 +384,7 @@ async def test_unknown_result_save_keeps_original_request_and_never_repeats_sett
 async def test_second_cancellation_waits_for_actual_result_save_before_connection_close(mocker, save_fails, world):
     runtime, _, _ = world(mocker)
     entered, interrupted, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    closed = asyncio.Event()
     result = runtime.preparation_driver.prepare_capture.return_value
 
     async def call(request):
@@ -380,7 +404,8 @@ async def test_second_cancellation_waits_for_actual_result_save_before_connectio
         try:
             await advance_preparation(runtime, 1)
         finally:
-            runtime.owned.connection.close()
+            await runtime.database.close()
+            closed.set()
 
     task = asyncio.create_task(advance_and_close())
     await entered.wait()
@@ -389,7 +414,7 @@ async def test_second_cancellation_waits_for_actual_result_save_before_connectio
     task.cancel()
     await asyncio.sleep(0)
     assert not task.done()
-    runtime.owned.connection.close.assert_not_called()
+    assert not closed.is_set()
     release.set()
     with pytest.raises(asyncio.CancelledError) as failure:
         await task
@@ -397,7 +422,7 @@ async def test_second_cancellation_waits_for_actual_result_save_before_connectio
     if save_fails:
         assert isinstance(failure.value.__cause__, ConsistencyError)
     runtime.operations.finish_attempt.assert_called_once()
-    runtime.owned.connection.close.assert_called_once()
+    assert closed.is_set()
 
 
 @pytest.mark.asyncio
@@ -422,7 +447,7 @@ async def test_local_proof_check_receives_original_activity_ticket(mocker, world
     assert prepared_by(runtime, action) is None
 
 
-def test_cold_preparation_recovers_original_responsibility_without_settings_or_success(mocker):
+async def test_cold_preparation_recovers_original_responsibility_without_settings_or_success(mocker):
     from camctl.operations.attempts import RunOutcome
 
     runtime, action, _ = _world(mocker, recover=False)
@@ -430,7 +455,7 @@ def test_cold_preparation_recovers_original_responsibility_without_settings_or_s
     cursor.fetchall.return_value = [(8, "prepare/7/" + "b" * 32, 7, 1, 1)]
     runtime.owned.connection.execute.return_value = cursor
     runtime._attempt_recovery_evidence.return_value = runtime.evidence
-    assert _recover_old_preparation(runtime, 1)
+    assert await _recover_old_preparation(runtime, 1)
     owner = runtime.preparation_cache.owners[1]
     assert owner.saved and not owner.successful
     assert owner.finish.run_finish.status is RunOutcome.UNCONFIRMED
@@ -488,7 +513,7 @@ async def test_terminal_preparation_releases_only_after_actual_settings_finish(m
     task = asyncio.create_task(advance_preparation(runtime, 1))
     await entered.wait()
     action.update(status=6, cancel_requested=1)
-    assert not settle_preparation(runtime, 1)
+    assert not await settle_preparation(runtime, 1)
     runtime.capture.release_occupancy.assert_not_called()
     release.set()
     assert (await task).phase is PreparationPhase.ABORTED

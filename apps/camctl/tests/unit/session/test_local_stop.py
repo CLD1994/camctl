@@ -57,7 +57,7 @@ async def test_helper_initial_stop_failure_still_waits_all_actual_settlements(se
     failure = ValueError('original stop failed')
     actual_failure = LookupError('original settle failed') if settle_failed else None
     owner = Owner('first', calls, stop_error=failure, settle_error=actual_failure)
-    context = SimpleNamespace(local_work=CombinedLocalWork((owner, Owner('last', calls))), logging_owner=None)
+    context = SimpleNamespace(snapshot_owner=None, local_work=CombinedLocalWork((owner, Owner('last', calls))), logging_owner=None)
     expected = ExceptionGroup if settle_failed else ValueError
     with pytest.raises(expected) as caught:
         await _settle_local_work(context)
@@ -103,7 +103,7 @@ async def test_observer_repeated_cancel_does_not_skip_or_repeat_stop_or_settle(s
     calls, gate = [], asyncio.Event()
     stop = ValueError('ordinary stop') if stop_failed else None
     sweep = LookupError('startup sweep') if sweep_failed else None
-    context = SimpleNamespace(local_work=Owner('work', calls, stop_error=stop, gate=gate),
+    context = SimpleNamespace(snapshot_owner=None, local_work=Owner('work', calls, stop_error=stop, gate=gate),
         logging_owner=Owner('log', calls, stop_error=sweep))
     observer = asyncio.create_task(_settle_local_work(context, stop_new=False))
     await asyncio.sleep(0)
@@ -130,7 +130,7 @@ async def test_parent_cancel_records_original_stop_and_sweep_once_before_actual_
     calls = []
     stop = asyncio.CancelledError('internal stop control')
     sweep = ValueError('sweep failure')
-    context = SimpleNamespace(local_work=Owner('work', calls, stop_error=stop), logging_owner=Owner('log', calls, stop_error=sweep))
+    context = SimpleNamespace(snapshot_owner=None, local_work=Owner('work', calls, stop_error=stop), logging_owner=Owner('log', calls, stop_error=sweep))
     waiter = _RequiredPhaseWaiter(context)
     parent = asyncio.CancelledError('real parent')
     waiter.record_parent_cancel(parent)
@@ -146,7 +146,7 @@ async def test_parent_cancel_records_original_stop_and_sweep_once_before_actual_
 
 async def test_restricted_logging_new_permit_stops_only_resumed_log_once():
     calls = []
-    context = SimpleNamespace(local_work=Owner('ordinary', calls), logging_owner=Owner('log', calls))
+    context = SimpleNamespace(snapshot_owner=None, local_work=Owner('ordinary', calls), logging_owner=Owner('log', calls))
     waiter = _RequiredPhaseWaiter(context)
     await _settle_local_work(context, waiter=waiter)
     waiter.resumed_restricted_logging()
@@ -157,7 +157,7 @@ async def test_restricted_logging_new_permit_stops_only_resumed_log_once():
 
 async def test_normal_settlement_does_not_consume_future_stop_request():
     calls = []
-    context = SimpleNamespace(local_work=Owner('ordinary', calls), logging_owner=None)
+    context = SimpleNamespace(snapshot_owner=None, local_work=Owner('ordinary', calls), logging_owner=None)
     waiter = _RequiredPhaseWaiter(context)
     await _settle_local_work(context, stop_new=False, waiter=waiter)
     assert calls == [('settle', 'ordinary'), ('settled', 'ordinary')]
@@ -196,7 +196,7 @@ async def test_observer_keeps_notes_without_creating_reverse_cause_cycle(link, e
             entered.set()
             await release.wait()
 
-    context = SimpleNamespace(local_work=Work(), logging_owner=None)
+    context = SimpleNamespace(snapshot_owner=None, local_work=Work(), logging_owner=None)
     observer = asyncio.create_task(_settle_local_work(context, stop_new=False))
     await entered.wait()
     observer.cancel('original observer')
@@ -213,7 +213,7 @@ async def test_observer_keeps_notes_without_creating_reverse_cause_cycle(link, e
 
 @pytest.mark.parametrize('stop_new', [False, True])
 async def test_helper_without_local_work_completes_normally(stop_new):
-    await _settle_local_work(SimpleNamespace(local_work=None, logging_owner=None), stop_new=stop_new)
+    await _settle_local_work(SimpleNamespace(local_work=None, logging_owner=None, snapshot_owner=None), stop_new=stop_new)
 
 
 @pytest.mark.parametrize('grouped', [False, True])
@@ -247,11 +247,11 @@ async def test_capture_actual_error_keeps_classification_and_stops_all_other_chi
     original = sqlite3.OperationalError('original device database')
     stop = ValueError('sibling stop diagnostic')
 
-    def factory(_owned, _device):
+    async def factory(_database, _device):
         raise original
 
     connection = SimpleNamespace(close=Mock())
-    context = SimpleNamespace(open_connection=lambda: SimpleNamespace(connection=connection))
+    context = SimpleNamespace(snapshot_owner=None, database=object())
     capture = CaptureFlow(factory)
     capture._devices = {'current': Owner('current', calls), 'first': Owner('first', calls, stop_error=stop), 'last': Owner('last', calls)}
     with pytest.raises(StateDbFailure) as caught:
@@ -259,4 +259,4 @@ async def test_capture_actual_error_keeps_classification_and_stops_all_other_chi
     assert caught.value.__cause__ is original
     assert calls == [('stop', 'first'), ('stop', 'last')]
     assert 'sibling stop diagnostic' in str(original.__notes__)
-    connection.close.assert_called_once()
+    connection.close.assert_not_called()

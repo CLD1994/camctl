@@ -14,7 +14,10 @@ import asyncio
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from camctl.outputs.read_attempts import ReadDispatchPrevented
 
 from camctl.capture.media import SaveDisposition, SaveReceipt
 from camctl.contracts.enums import enum_for
@@ -78,16 +81,17 @@ class ReadSessionOpener(Protocol):
     """按源文件与偏移打开读取会话的端口；适配层持有设备绑定。"""
 
     async def open_session(
-        self, source_device_file_id: int, offset: int,
-    ) -> RecordingSource: ...
+        self, source_device_file_id: int, offset: int, *,
+        on_start: Callable[[], None] | None = None,
+    ) -> RecordingSource | ReadDispatchPrevented: ...
 
 
 class RecordingCopies(Protocol):
     """内部输入拷贝端口；适配层组合资格、分段与完整性事务。"""
 
-    def qualify(self, candidate: FileCandidate) -> SaveReceipt: ...
+    async def qualify(self, candidate: FileCandidate) -> SaveReceipt: ...
 
-    def copy_state(self, copy_id: int) -> CopyStateFacts: ...
+    async def copy_state(self, copy_id: int) -> CopyStateFacts: ...
 
     async def prepare(self, copy_id: int) -> CopyStep: ...
 
@@ -102,6 +106,7 @@ class InputPhase(Enum):
     """输入取得编排的结果分区。"""
 
     WAITING = "waiting"
+    READ_NOT_STARTED = "read_not_started"
     REJECTED_FINAL = "rejected_final"
     INPUT_READY = "input_ready"
     QUALIFY_REJECTED = "qualify_rejected"
@@ -129,6 +134,7 @@ class InputStep:
     read_end: ReadEnd | None = None
     stop_requested: bool = False
     content_complete: bool = False
+    dispatch_prevented: ReadDispatchPrevented | None = None
     preparation_settlement: ReadPreparationSettlement = ReadPreparationSettlement.SETTLED
 
 
@@ -175,7 +181,7 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
     示发起责任不再执行，本次停止推进。摘要不一致登记新一轮重拷后
     不就地重试，由下一次执行从零重读。
     """
-    receipt = context.copies.qualify(FileCandidate(
+    receipt = await context.copies.qualify(FileCandidate(
         action_id=context.action_id,
         item_id=None,
         processing_id=context.processing_id,
@@ -199,7 +205,7 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
         return InputStep(InputPhase.WAITING, reason=qualification.reason)
     copy_id = qualification.copy_id
 
-    facts = context.copies.copy_state(copy_id)
+    facts = await context.copies.copy_state(copy_id)
     if (facts.verification_state in _READY_VERIFICATIONS
             and facts.target_sha256 is not None):
         return InputStep(
@@ -217,11 +223,13 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
                        stop_requested=True, content_complete=True)
 
     try:
-        if context.on_read_start is not None:
-            context.on_read_start()
         session = await context.sessions.open_session(
             context.source_device_file_id, facts.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
-            else prepared.decision.offset)
+            else prepared.decision.offset, on_start=context.on_read_start)
+        from camctl.outputs.read_attempts import ReadDispatchPrevented
+        if isinstance(session, ReadDispatchPrevented):
+            return InputStep(InputPhase.READ_NOT_STARTED, copy_id=copy_id,
+                reason=session.reason, dispatch_prevented=session)
     except Exception as error:
         settlement = (error.settlement if isinstance(error, ReadPreparationError)
                       else ReadPreparationSettlement.SETTLED)

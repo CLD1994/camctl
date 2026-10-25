@@ -34,11 +34,12 @@ from camctl.operations.attempts import (
     RunOutcome,
     StaleRunFinish,
 )
-from camctl.operations.models import ErrorValue
+from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.scheduling import ExpireActionRequest
 from camctl.persistence.repositories.capture import FinishResidualBindingFailure, RecordingFailure
+from camctl.persistence.transaction import row_facts
 from camctl.scheduling.rules import WindowPhase, window_phase
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
 from camctl.persistence.repositories.operations import (
@@ -208,7 +209,7 @@ def _observed_activity(response: Any) -> int | None:
     return None
 
 
-def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
+async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     """核对保存的设备及驱动；没有绑定端口的调用方提供匹配前提。"""
     from camctl.capture.handlers import _binding
 
@@ -217,32 +218,31 @@ def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     return binding_failure_details(runtime.binding_check(_binding(action)))
 
 
-def _finish_original_binding_failure(
+async def _finish_original_binding_failure(
     runtime: Any, candidate: ResidualCandidate, details: Mapping[str, Any],
     trigger_id: int | None = None,
 ) -> bool:
     """原调用已结束时，结束固定残留责任及适用的新触发动作。"""
-    with closing(runtime.owned.connection.execute(
-        "SELECT responsibility_key FROM operation_runs WHERE activity_id = ?"
+    def read(owned, parameters=(candidate.activity_id,)):
+        with closing(owned.connection.execute("SELECT responsibility_key FROM operation_runs WHERE activity_id = ?"
         " AND status IN (1, 2) AND (kind = 8 OR (kind = 6 AND query_purpose = 5))"
-        " ORDER BY id", (candidate.activity_id,),
-    )) as cursor:
-        keys = tuple(row[0] for row in cursor.fetchall())
+        " ORDER BY id", parameters)) as cursor:
+            return tuple(row[0] for row in cursor.fetchall())
+    keys = await runtime.database.read(read, description="读取拍摄直接事实")
     if not keys:
         return False
-    with closing(runtime.owned.connection.execute(
+    running = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id = a.run_id"
         " WHERE r.activity_id = ? AND a.status = 1"
         " AND (r.kind = 8 OR (r.kind = 6 AND r.query_purpose = 5)) LIMIT 1",
-        (candidate.activity_id,),
-    )) as cursor:
-        if cursor.fetchone() is not None:
-            return False
-    outcome = runtime.capture.finish_residual_binding_failure(
-        FinishResidualBindingFailure(
+        (candidate.activity_id,)).fetchone())
+    if running is not None:
+        return False
+    _save_inputs = (FinishResidualBindingFailure(
             trigger_id, candidate.activity_id, runtime.wall_us(),
-            RecordingFailure("device_binding_unavailable", details), keys),
-        new_operation_key(), runtime.owned)
+            RecordingFailure("device_binding_unavailable", details), keys), new_operation_key())
+    _save_options = dict()
+    outcome = (await runtime.database.write(lambda owned: runtime.capture.finish_residual_binding_failure(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise ConsistencyError(
             f"原残留绑定失败事务未完成（{outcome.kind.value}）: {outcome.error}")
@@ -265,17 +265,17 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
     now = runtime.wall_us()
     phase = window_phase(runtime.window_of(trigger), now)
     if phase is WindowPhase.AFTER_WINDOW:
-        outcome = runtime.scheduling.expire_action(
-            ExpireActionRequest(
-                action_id=trigger["id"], trusted_wall_now=now, occurred_at=now),
-            new_operation_key(), runtime.owned)
+        _save_inputs = (ExpireActionRequest(
+                action_id=trigger["id"], trusted_wall_now=now, occurred_at=now), new_operation_key())
+        _save_options = dict()
+        outcome = (await runtime.database.write(lambda owned: runtime.scheduling.expire_action(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise RuntimeError(
                 f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
         return False
     if phase is WindowPhase.BEFORE_START:
         return False
-    if _original_binding_failure(runtime, trigger) is not None:
+    if (await _original_binding_failure(runtime, trigger)) is not None:
         # 普通动作先取得本地执行身份，再由其绑定失败事务结束。
         return True
     from camctl.capture.software_recovery import pass_software_recovery_gate
@@ -286,8 +286,7 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
         # 未配置的驱动仍沿原 ACTIVE 查询/停止链处理。
         if getattr(runtime, "software_recovery_driver", None) is not None:
             return False
-    candidates = residual_candidates(
-        runtime.owned.connection, trigger["device_id"])
+    candidates = (await runtime.database.read(lambda owned, inputs=(trigger["device_id"],), options=dict(): residual_candidates(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if not candidates:
         return True
     if len(candidates) > 1:
@@ -295,20 +294,19 @@ async def pass_residual_gate(runtime: Any, trigger: Mapping[str, Any]) -> bool:
             f"同设备出现多个残留候选: {trigger['device_id']} "
             + repr([c.activity_id for c in candidates]))
     candidate = candidates[0]
-    flow = _unfinished_winddown(runtime.owned.connection, candidate.activity_id)
-    if flow is None and _succeeded_winddown(runtime.owned.connection, candidate.activity_id):
+    flow = (await runtime.database.read(lambda owned, inputs=(candidate.activity_id,), options=dict(): _unfinished_winddown(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
+    if flow is None and (await runtime.database.read(lambda owned, inputs=(candidate.activity_id,), options=dict(): _succeeded_winddown(owned.connection, inputs[0], **options), description="读取拍摄直接事实")):
         # 成功流程已存在而活动未收口：补齐收场后放行（中断恢复）。
-        _conclude_activity(runtime, candidate.action_id)
-        return not residual_candidates(
-            runtime.owned.connection, trigger["device_id"])
-    if flow is None and _trigger_idle_confirmed(runtime.owned.connection, trigger["id"]):
+        (await _conclude_activity(runtime, candidate.action_id))
+        return not (await runtime.database.read(lambda owned, inputs=(trigger["device_id"],), options=dict(): residual_candidates(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
+    if flow is None and (await runtime.database.read(lambda owned, inputs=(trigger["id"],), options=dict(): _trigger_idle_confirmed(owned.connection, inputs[0], **options), description="读取拍摄直接事实")):
         return True
-    details = _original_binding_failure(runtime, runtime.action(candidate.action_id))
+    details = (await _original_binding_failure(runtime, (await runtime.action(candidate.action_id))))
     if flow is not None and details is not None:
         if trigger["status"] == 1:
             # ACTION_STARTED 是执行失败的前提，此处只放行本地开始。
             return True
-        _finish_original_binding_failure(runtime, candidate, details, trigger["id"])
+        (await _finish_original_binding_failure(runtime, candidate, details, trigger["id"]))
         return False
     if flow is not None:
         await _advance_winddown(runtime, candidate, flow)
@@ -331,13 +329,13 @@ async def _preflight_check(
         # 取消规则收尾。
         return False
     responsibility = _preflight_key(trigger["id"])
-    if runtime.retry_wait_remaining(
+    if (await runtime.retry_wait_remaining(
             responsibility,
-            runtime.query_config.retry_interval_s) is not None:
+            runtime.query_config.retry_interval_s)) is not None:
         return False
-    ticket = _begin_query_attempt(
+    ticket = (await _begin_query_attempt(
         runtime, responsibility, trigger["id"], _NO_TARGET,
-        QueryPurpose.BEFORE_EXECUTION)
+        QueryPurpose.BEFORE_EXECUTION))
     if ticket is None:
         return False
     response = await runtime.state_query.query_state(ControlRequest(
@@ -349,20 +347,20 @@ async def _preflight_check(
     observed = _observed_activity(response)
     if response.error is None and observed is None:
         # 可靠确认空闲：保存观察，执行前检查责任结束，触发动作继续。
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+        (await runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED))
         return True
     if response.error is None and observed == candidate.activity_id:
         # 确认目标残留仍在录制：检查责任结束，建立收场流程并首停。
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED)
+        (await runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED))
         if candidate.stop_capable:
             await _stop_residual(runtime, trigger["id"], candidate)
         return False
     # 其他有效活动占用或调用错误：责任未满足，按间隔再次检查。
-    runtime.finish(ticket, outcome, retry_wait=True)
+    (await runtime.finish(ticket, outcome, retry_wait=True))
     return False
 
 
-def _begin_query_attempt(
+async def _begin_query_attempt(
     runtime: Any, responsibility: str, action_id: int, target: AttemptTarget,
     purpose: QueryPurpose,
 ):
@@ -377,20 +375,21 @@ def _begin_query_attempt(
         config=runtime.query_config,
         occurred_at=runtime.wall_us(),
     )
-    outcome = runtime.operations.begin_attempt(
-        intent, new_operation_key(), runtime.owned)
+    _save_inputs = (intent, new_operation_key())
+    _save_options = dict()
+    outcome = (await runtime.database.write(lambda owned: runtime.operations.begin_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise RuntimeError(
             f"查询意图事务未完成（{outcome.kind.value}）: {outcome.error}")
     if outcome.value.disposition is not BeginDisposition.GRANTED:
         if outcome.value.reason == "budget_exhausted":
-            finished = runtime.operations.finish_stale_runs(
-                StaleRunFinish(
+            _save_inputs = (StaleRunFinish(
                     responsibility_keys=(responsibility,),
                     status=RunOutcome.UNCONFIRMED,
                     error=ErrorValue(code="result_unconfirmed", stage="device"),
-                    occurred_at=runtime.wall_us()),
-                new_operation_key(), runtime.owned)
+                    occurred_at=runtime.wall_us()), new_operation_key())
+            _save_options = dict()
+            finished = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
             if finished.kind is not DbOutcomeKind.COMPLETED:
                 raise ConsistencyError(f"查询预算耗尽的结果未保存: {finished.error}")
         return None
@@ -409,35 +408,36 @@ async def _advance_winddown(
     """
 
     run_id, trigger_id, _ = flow
-    with closing(runtime.owned.connection.execute(
-        "SELECT action_id, activity_id, status, attempts_used"
-        " FROM operation_runs WHERE id = ? AND kind = 8", (run_id,),
-    )) as cursor:
-        current = cursor.fetchone()
+    def read(owned, parameters=(run_id,)):
+        with closing(owned.connection.execute("SELECT action_id, activity_id, status, attempts_used"
+        " FROM operation_runs WHERE id = ? AND kind = 8", parameters)) as cursor:
+            return cursor.fetchone()
+    current = await runtime.database.read(read, description="读取拍摄直接事实")
     if current is None or current[:2] != (trigger_id, candidate.activity_id):
         raise ConsistencyError("残留收场流程与原触发动作或目标活动不符")
     if current[2] not in (1, 2):
         return
     responsibility = _winddown_key(trigger_id, candidate.activity_id)
-    trigger = runtime.action(trigger_id)
+    trigger = (await runtime.action(trigger_id))
     expired = window_phase(runtime.window_of(trigger), runtime.wall_us()) is WindowPhase.AFTER_WINDOW
     if current[3] == 0 and (trigger["cancel_requested"]
                            or trigger["status"] in _TRIGGER_TERMINAL or expired):
-        result = runtime.operations.finish_stale_runs(
-            StaleRunFinish(
+        _save_inputs = (StaleRunFinish(
                 responsibility_keys=(responsibility,),
                 status=(RunOutcome.EXPIRED if not trigger["cancel_requested"]
                         and (trigger["status"] == 5 or expired) else RunOutcome.CANCELED),
-                occurred_at=runtime.wall_us()), new_operation_key(), runtime.owned)
+                occurred_at=runtime.wall_us()), new_operation_key())
+        _save_options = dict()
+        result = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if result.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"未派发残留收场的结束事实未保存: {result.error}")
         return
-    attempt = _last_attempt(runtime.owned.connection, responsibility)
+    attempt = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _last_attempt(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
         return
-    details = _original_binding_failure(runtime, runtime.action(candidate.action_id))
+    details = (await _original_binding_failure(runtime, (await runtime.action(candidate.action_id))))
     if details is not None:
-        _finish_original_binding_failure(runtime, candidate, details)
+        (await _finish_original_binding_failure(runtime, candidate, details))
         return
     unconfirmed = (
         attempt is not None
@@ -446,9 +446,9 @@ async def _advance_winddown(
     if unconfirmed and await _confirm_by_query(
             runtime, trigger_id, candidate):
         return
-    if runtime.retry_wait_remaining(
+    if (await runtime.retry_wait_remaining(
             responsibility,
-            runtime.residual_config.retry_interval_s) is not None:
+            runtime.residual_config.retry_interval_s)) is not None:
         return
     await _stop_residual(runtime, trigger_id, candidate)
 
@@ -469,10 +469,11 @@ async def _stop_residual(
     )
 
     responsibility = _winddown_key(trigger_id, candidate.activity_id)
-    existing = _run_row(runtime.owned.connection, responsibility)
-    if existing is None or existing[2] == 0:
+    existing = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _run_row(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
+    first_stop = existing is None or existing[2] == 0
+    if first_stop:
         # 首次停止前重新核对当前触发资格；查询等待期间可能已经取消或超窗。
-        trigger = runtime.action(trigger_id)
+        trigger = (await runtime.action(trigger_id))
         if (trigger["cancel_requested"] or trigger["status"] in _TRIGGER_TERMINAL
                 or window_phase(runtime.window_of(trigger), runtime.wall_us())
                 is not WindowPhase.IN_WINDOW):
@@ -486,17 +487,34 @@ async def _stop_residual(
         config=runtime.residual_config,
         occurred_at=runtime.wall_us(),
     )
-    begin = runtime.operations.begin_attempt(
-        intent, new_operation_key(), runtime.owned)
+    _save_inputs = (intent, new_operation_key())
+    _save_options = dict()
+    begin = (await runtime.database.write(lambda owned: runtime.operations.begin_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if begin.kind is not DbOutcomeKind.COMPLETED:
         raise RuntimeError(
             f"残留收场意图事务未完成（{begin.kind.value}）: {begin.error}")
     if begin.value.disposition is not BeginDisposition.GRANTED:
         if begin.value.reason == "budget_exhausted":
-            _finish_winddown_exhausted(runtime, responsibility, candidate)
+            (await _finish_winddown_exhausted(runtime, responsibility, candidate))
         return
     ticket = begin.value.ticket
-    owner = runtime.action(candidate.action_id)
+    def read_dispatch_facts(owned):
+        return (row_facts(owned.connection, "actions", candidate.action_id),
+            row_facts(owned.connection, "actions", trigger_id) if first_stop else None)
+
+    owner, trigger = await runtime.database.read(read_dispatch_facts,
+        description="读取残留停止派发资格")
+    if first_stop:
+        expired = window_phase(runtime.window_of(trigger), runtime.wall_us()) is WindowPhase.AFTER_WINDOW
+        if trigger["cancel_requested"] or trigger["status"] in _TRIGGER_TERMINAL or expired:
+            reason = "window_ended" if not trigger["cancel_requested"] and (trigger["status"] == 5 or expired) else "canceled"
+            prevented = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue(reason, "dispatch"),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                    EvidenceValue("dispatch_prevented", 1, {})))
+            await runtime.finish(ticket, prevented,
+                end_run=RunOutcome.EXPIRED if reason == "window_ended" else RunOutcome.CANCELED)
+            return
     response = await runtime.stopper.stop(ControlRequest(
         operation="stop_recording", binding=_binding(owner),
         params=owner["effective_params_json"], ticket=ticket,
@@ -505,29 +523,29 @@ async def _stop_residual(
         response, "stop_confirmed", evidence_type="stop_returned")
     if confirmed:
         # 可靠确认的残留停止：尝试结果、流程成功与活动收场同事务。
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
-                       residual_conclude=candidate.action_id)
+        (await runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+                       residual_conclude=candidate.action_id))
         # 范围限制等收场拒绝已随同事务表达；重入按幂等补足收场。
-        _conclude_activity(runtime, candidate.action_id)
+        (await _conclude_activity(runtime, candidate.action_id))
     else:
-        runtime.finish(ticket, outcome, retry_wait=True)
+        (await runtime.finish(ticket, outcome, retry_wait=True))
 
 
-def _finish_winddown_exhausted(
+async def _finish_winddown_exhausted(
     runtime: Any, responsibility: str, candidate: ResidualCandidate,
 ) -> None:
     """停止预算耗尽的收场流程失败终态化。"""
 
-    row = _run_row(runtime.owned.connection, responsibility)
+    row = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _run_row(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if row is None:
         return
-    receipt = runtime.operations.finish_stale_runs(
-        StaleRunFinish(
+    _save_inputs = (StaleRunFinish(
             responsibility_keys=(responsibility,),
             status=RunOutcome.FAILED,
             error=_stop_error(candidate, int(row[0])),
-            occurred_at=runtime.wall_us()),
-        new_operation_key(), runtime.owned)
+            occurred_at=runtime.wall_us()), new_operation_key())
+    _save_options = dict()
+    receipt = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
 
@@ -558,27 +576,27 @@ async def _confirm_by_query(
     if runtime.state_query is None:
         return False
     responsibility = _confirm_key(trigger_id, candidate.activity_id)
-    row = _run_row(runtime.owned.connection, responsibility)
+    row = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _run_row(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if row is not None and int(row[1]) not in (1, 2):
         # 查询责任已终态：继续停止路径。
         return False
-    attempt = _last_attempt(runtime.owned.connection, responsibility)
+    attempt = (await runtime.database.read(lambda owned, inputs=(responsibility,), options=dict(): _last_attempt(owned.connection, inputs[0], **options), description="读取拍摄直接事实"))
     if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.RUNNING):
         return True
     if attempt is not None and int(attempt[0]) == int(_ATTEMPT_STATUS.FAILED):
         # 查询调用失败：不反复查询，按重复停止能力继续停止。
         return False
-    if runtime.retry_wait_remaining(
+    if (await runtime.retry_wait_remaining(
             responsibility,
-            runtime.query_config.retry_interval_s) is not None:
+            runtime.query_config.retry_interval_s)) is not None:
         return True
-    ticket = _begin_query_attempt(
+    ticket = (await _begin_query_attempt(
         runtime, responsibility, trigger_id,
         AttemptTarget(activity_id=candidate.activity_id),
-        QueryPurpose.RESIDUAL_STOP_CONFIRMATION)
+        QueryPurpose.RESIDUAL_STOP_CONFIRMATION))
     if ticket is None:
         return False
-    owner = runtime.action(candidate.action_id)
+    owner = (await runtime.action(candidate.action_id))
     response = await runtime.state_query.query_state(ControlRequest(
         operation="query", binding=_binding(owner),
         params=owner["effective_params_json"], ticket=ticket,
@@ -589,13 +607,13 @@ async def _confirm_by_query(
     if response.error is None and observed is None:
         # 可靠确认空闲：目标录像已不再执行，查询结果、残留停止结束
         # 与活动收场同事务保存。
-        runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
+        (await runtime.finish(ticket, outcome, end_run=RunOutcome.SUCCEEDED,
                        query_conclude=candidate.action_id,
                        query_conclude_stop_keys=(
-                           _winddown_key(trigger_id, candidate.activity_id),))
+                           _winddown_key(trigger_id, candidate.activity_id),)))
         return True
     # 仍在录制、其他活动或调用错误：保存事实，继续停止路径。
-    runtime.finish(ticket, outcome, retry_wait=True)
+    (await runtime.finish(ticket, outcome, retry_wait=True))
     return True
 
 
@@ -620,67 +638,61 @@ def residual_flow(
             OperationRepository,
         )
 
-        owned = context.open_connection()
-        try:
-            if resume_actual_file_facts is not None:
-                await resume_actual_file_facts(owned)
-            now = context.clock.utc_micros()
-            discovery.begin_round(owned.connection, now)
-            await _recover_old_attempts(owned, capture_factory, owns_device=owns_device, discovery=discovery, now=now)
-            _settle_orphan_queries(context, owned, OperationRepository(), discovery=discovery, now=now)
-            if owned.metadata.format_version >= 3:
-                from camctl.capture.software_recovery import advance_recovery
-                recovery_page = discovery.rows(owned.connection, "software_recovery", now,
-                    "SELECT r.id,r.activity_id,a.device_id FROM software_recoveries r"
-                    " JOIN actions a ON a.id=r.action_id JOIN device_activities d ON d.id=r.activity_id"
-                    " WHERE d.occupancy_state=1 AND r.phase NOT IN (?,?)",
-                    (int(enum_for("software_recoveries.phase").ISOLATED),
-                     int(enum_for("software_recoveries.phase").ABANDONED)), identity="r.id")
-                for _, activity_id, device_id in recovery_page.items:
-                    if owns_device is not None and owns_device(device_id):
-                        continue
-                    runtime = capture_factory(owned, device_id)
-                    if runtime is not None:
-                        await advance_recovery(runtime, activity_id)
+        database = context.database
+        if resume_actual_file_facts is not None:
+            await resume_actual_file_facts(database)
+        now = context.clock.utc_micros()
+        await discovery.begin_round(database, now)
+        await _recover_old_attempts(database, capture_factory, owns_device=owns_device, discovery=discovery, now=now)
+        await _settle_orphan_queries(context, database, OperationRepository(), discovery=discovery, now=now)
+        if database.metadata.format_version >= 3:
+            from camctl.capture.software_recovery import advance_recovery
+            recovery_page = await discovery.rows(database, "software_recovery", now,
+                "SELECT r.id,r.activity_id,a.device_id FROM software_recoveries r"
+                " JOIN actions a ON a.id=r.action_id JOIN device_activities d ON d.id=r.activity_id"
+                " WHERE d.occupancy_state=1 AND r.phase NOT IN (?,?)",
+                (int(enum_for("software_recoveries.phase").ISOLATED),
+                 int(enum_for("software_recoveries.phase").ABANDONED)), identity="r.id")
+            for _, activity_id, device_id in recovery_page.items:
+                if owns_device is not None and owns_device(device_id):
+                    continue
+                runtime = await capture_factory(database, device_id)
+                if runtime is not None:
+                    await advance_recovery(runtime, activity_id)
 
-            page = discovery.rows(owned.connection, "residual", now,
-                "SELECT id, action_id, activity_id, attempts_used"
-                " FROM operation_runs WHERE kind = 8"
-                " AND status IN (1, 2)")
-            flows = page.items
-            for (run_id, trigger_id, activity_id, used) in flows:
+        page = await discovery.rows(database, "residual", now,
+            "SELECT id, action_id, activity_id, attempts_used"
+            " FROM operation_runs WHERE kind = 8"
+            " AND status IN (1, 2)")
+        flows = page.items
+        for (run_id, trigger_id, activity_id, used) in flows:
+            def read(owned):
                 with closing(owned.connection.execute(
-                    "SELECT a.status, da.action_id, da.stop_supported,"
-                    " da.safe_repeat_stop, a2.device_id"
-                    " FROM operation_runs r"
-                    " JOIN actions a ON a.id = r.action_id"
-                    " JOIN device_activities da ON da.id = r.activity_id"
-                    " JOIN actions a2 ON a2.id = da.action_id"
-                    " WHERE r.id = ?", (run_id,),
-                )) as cursor:
-                    facts = cursor.fetchone()
-                if facts is None:
-                    raise ConsistencyError(f"残留收场关联事实缺失: {run_id}")
-                if owns_device is not None and owns_device(facts[4]):
-                    continue
-                candidate = ResidualCandidate(
-                    activity_id=activity_id, action_id=int(facts[1]),
-                    stop_supported=int(facts[2]), safe_repeat_stop=int(facts[3]))
-                runtime = capture_factory(owned, facts[4])
-                if runtime is None:
-                    continue
-                await _advance_winddown(
-                    runtime, candidate, (run_id, trigger_id, used))
-            if discovery.pending and getattr(context, "wake", None) is not None:
-                from camctl.scheduling.notifications import WakeReason
-                context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
-        finally:
-            owned.connection.close()
-
+                    "SELECT a.status,da.action_id,da.stop_supported,da.safe_repeat_stop,a2.device_id"
+                    " FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+                    " JOIN device_activities da ON da.id=r.activity_id"
+                    " JOIN actions a2 ON a2.id=da.action_id WHERE r.id=?", (run_id,))) as cursor:
+                    return cursor.fetchone()
+            facts = await database.read(read)
+            if facts is None:
+                raise ConsistencyError(f"残留收场关联事实缺失: {run_id}")
+            if owns_device is not None and owns_device(facts[4]):
+                continue
+            candidate = ResidualCandidate(
+                activity_id=activity_id, action_id=int(facts[1]),
+                stop_supported=int(facts[2]), safe_repeat_stop=int(facts[3]))
+            runtime = await capture_factory(database, facts[4])
+            if runtime is None:
+                continue
+            await _advance_winddown(
+                runtime, candidate, (run_id, trigger_id, used))
+        if discovery.pending and getattr(context, "wake", None) is not None:
+            from camctl.scheduling.notifications import WakeReason
+            context.wake.mark_changed(WakeReason.READ_OPPORTUNITY)
     return flow
 
 
-async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device=None,
+async def _recover_old_attempts(database: Any, capture_factory: Any, *, owns_device=None,
                                 discovery=None, now=0) -> None:
     """每轮结束一批具有可靠旧边界的原调用，沿用原身份及预算。"""
     from camctl.capture.handlers import _RECOVERABLE_OPERATIONS
@@ -689,7 +701,7 @@ async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device
     discovery = discovery if discovery is not None else ReadDiscoveryOwner()
     kinds = tuple(_RECOVERABLE_OPERATIONS)
     marks = ",".join("?" for _ in kinds)
-    page = discovery.rows(owned.connection, "attempts", now,
+    page = await discovery.rows(database, "attempts", now,
         "SELECT t.id, t.attempt_no, r.id, r.kind, r.activity_id, r.responsibility_key, a.device_id"
         " FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
         " LEFT JOIN actions a ON a.id=r.action_id"
@@ -703,7 +715,7 @@ async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device
         if owns_device is not None and owns_device(device_id):
             continue
         if device_id not in runtimes:
-            runtimes[device_id] = capture_factory(owned, device_id)
+            runtimes[device_id] = await capture_factory(database, device_id)
         runtime = runtimes[device_id]
         if runtime is None:
             continue
@@ -712,11 +724,11 @@ async def _recover_old_attempts(owned: Any, capture_factory: Any, *, owns_device
             None if activity_id is None else str(activity_id), responsibility, run_id)
         # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
         # 使下一次查询被"先建立重试等待"守卫拒绝。
-        runtime.recover_attempt(
-            ticket, retry_wait=ticket.operation == "query")
+        (await runtime.recover_attempt(
+            ticket, retry_wait=ticket.operation == "query"))
 
 
-def _settle_orphan_queries(context: Any, owned: Any, operations: Any, *, discovery=None, now=0) -> None:
+async def _settle_orphan_queries(context: Any, database: Any, operations: Any, *, discovery=None, now=0) -> None:
     """按查询用途和原停止责任结算，不以触发者终态覆盖必要核实。
 
     普通停止核实与活动核实随所属动作和停止责任收场：原停止已按
@@ -725,7 +737,7 @@ def _settle_orphan_queries(context: Any, owned: Any, operations: Any, *, discove
     """
 
     discovery = discovery if discovery is not None else ReadDiscoveryOwner()
-    page = discovery.rows(owned.connection, "queries", now,
+    page = await discovery.rows(database, "queries", now,
         "SELECT r.id,r.responsibility_key, r.query_purpose, a.status, a.cancel_requested,"
         " stop.id, stop.status, stop.attempts_used,"
         " nstop.status, act.activity_state FROM operation_runs r"
@@ -764,10 +776,8 @@ def _settle_orphan_queries(context: Any, owned: Any, operations: Any, *, discove
                 final = RunOutcome.CANCELED
             else:
                 final = RunOutcome.SUCCEEDED if stop_status == 3 else RunOutcome.CANCELED
-        outcome = operations.finish_stale_runs(
-            StaleRunFinish(
-                responsibility_keys=(responsibility,),
-                status=final,
-                occurred_at=context.clock.utc_micros()),
-            new_operation_key(), owned)
+        request = StaleRunFinish(responsibility_keys=(responsibility,), status=final,
+            occurred_at=context.clock.utc_micros())
+        key = new_operation_key()
+        outcome = await database.write(lambda owned: operations.finish_stale_runs(request, key, owned), key=key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error

@@ -33,41 +33,51 @@ class ReadDownloadCleanup:
         self.after = None
         self._lock = asyncio.Lock()
 
-    def initialize(self, owned, *, horizon):
+    async def initialize(self, database, *, horizon):
+        def read_ceiling(owned):
+            with closing(owned.connection.execute(
+                "SELECT COALESCE(MAX(a.intent_event_id),0) FROM operation_attempts a"
+                " JOIN operation_runs r ON r.id=a.run_id JOIN file_copies c ON c.id=r.copy_id"
+                " JOIN device_files d ON d.id=c.source_device_file_id"
+                " JOIN actions s ON s.id=d.observer_action_id WHERE r.kind=? AND s.driver_id=?",
+                (_READ_FILE, DRIVER_ID))) as cursor:
+                return int(cursor.fetchone()[0])
+
+        ceiling = await database.read(read_ceiling, description="READ下载遗留上界读取")
         self.horizon = horizon
-        self.ceiling = int(owned.connection.execute(
-            "SELECT COALESCE(MAX(a.intent_event_id),0) FROM operation_attempts a"
-            " JOIN operation_runs r ON r.id=a.run_id JOIN file_copies c ON c.id=r.copy_id"
-            " JOIN device_files d ON d.id=c.source_device_file_id"
-            " JOIN actions s ON s.id=d.observer_action_id WHERE r.kind=? AND s.driver_id=?",
-            (_READ_FILE, DRIVER_ID)).fetchone()[0])
+        self.ceiling = ceiling
 
-    async def run(self, owned):
+    async def run(self, database):
         async with self._lock:
-            await self._run(owned)
+            await self._run(database)
 
-    async def _run(self, owned):
+    async def _run(self, database):
         if self.finished:
             return
         if self.ceiling is None:
             # 未接入启动初始化的调用方只固定本次候选范围；缺少主机
             # 上界仍阻止 RUNNING/ASSUMED 清理，不推断旧执行已经停止。
-            self.initialize(owned, horizon=self.horizon)
+            await self.initialize(database, horizon=self.horizon)
         if self.after is None:
             self.after = await load_download_cursor(self.staging)
             if self.after >= self.ceiling:
                 self.after = 0
-        with closing(owned.connection.execute(
-                "SELECT r.id,a.attempt_no,r.copy_id,r.responsibility_key,r.kind,a.status,a.intent_event_id,"
-                "a.result_event_id,a.effect_state,a.result_json,a.error_json,s.driver_id"
-                " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
-                " JOIN file_copies c ON c.id=r.copy_id"
-                " JOIN device_files d ON d.id=c.source_device_file_id"
-                " JOIN actions s ON s.id=d.observer_action_id"
-                " WHERE r.kind=? AND s.driver_id=? AND a.intent_event_id>? AND a.intent_event_id<=?"
-                " ORDER BY a.intent_event_id LIMIT ?",
-                (_READ_FILE, DRIVER_ID, self.after, self.ceiling, self.remaining))) as cursor:
-            candidates = cursor.fetchall()
+        after, ceiling, remaining = self.after, self.ceiling, self.remaining
+
+        def read_candidates(owned):
+            with closing(owned.connection.execute(
+                    "SELECT r.id,a.attempt_no,r.copy_id,r.responsibility_key,r.kind,a.status,a.intent_event_id,"
+                    "a.result_event_id,a.effect_state,a.result_json,a.error_json,s.driver_id"
+                    " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+                    " JOIN file_copies c ON c.id=r.copy_id"
+                    " JOIN device_files d ON d.id=c.source_device_file_id"
+                    " JOIN actions s ON s.id=d.observer_action_id"
+                    " WHERE r.kind=? AND s.driver_id=? AND a.intent_event_id>? AND a.intent_event_id<=?"
+                    " ORDER BY a.intent_event_id LIMIT ?",
+                    (_READ_FILE, DRIVER_ID, after, ceiling, remaining))) as cursor:
+                return cursor.fetchall()
+
+        candidates = await database.read(read_candidates, description="READ下载遗留候选读取")
         for run_id, attempt_no, *row in candidates:
             self.remaining -= 1
             self.after = row[4]

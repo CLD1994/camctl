@@ -34,7 +34,7 @@ from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
-    from camctl.persistence.runtime import OwnedConnection
+    from camctl.persistence.business import BusinessDatabase
 
 _DELIVERY_STATUS = enum_for("deliveries.status")
 _HEX = frozenset("0123456789abcdef")
@@ -423,7 +423,7 @@ class DeliveryContext:
     """发布与恢复的协作者、目录、发布条件与事实时刻。"""
 
     repository: "OutputsRepository"
-    owned: "OwnedConnection"
+    database: "BusinessDatabase"
     directories: DeliveryDirectories
     occurred_at: int
     publication_conditions_met: bool = True
@@ -514,13 +514,14 @@ def _staging_ref(
     )
 
 
-def _save_intent(delivery_id: int, context: DeliveryContext) -> IntentSaveOutcome:
+async def _save_intent(delivery_id: int, context: DeliveryContext) -> IntentSaveOutcome:
     """保存发布意图；SKIPPED 表示发起责任不再执行。"""
-    outcome = context.repository.save_publication_intent(
-        PublicationIntentRequest(
-            delivery_id=delivery_id, occurred_at=context.occurred_at),
-        new_operation_key(), context.owned,
-    )
+    key = new_operation_key()
+    request = PublicationIntentRequest(
+        delivery_id=delivery_id, occurred_at=context.occurred_at)
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_publication_intent(request, key, owned),
+        key=key, description="交付发布意图保存")
     _require_completed(outcome, "intent_save_failed", "intent_save_unknown")
     result = outcome.value
     if result.disposition is IntentDisposition.SKIPPED:
@@ -529,27 +530,29 @@ def _save_intent(delivery_id: int, context: DeliveryContext) -> IntentSaveOutcom
     return result
 
 
-def _save_publication(delivery_id: int, context: DeliveryContext) -> None:
+async def _save_publication(delivery_id: int, context: DeliveryContext) -> None:
     """保存本地交付完成事实；确认已发生的外部交接结果。"""
-    outcome = context.repository.save_publication(
-        PublicationSaveRequest(
-            delivery_id=delivery_id, occurred_at=context.occurred_at),
-        new_operation_key(), context.owned,
-    )
+    key = new_operation_key()
+    request = PublicationSaveRequest(
+        delivery_id=delivery_id, occurred_at=context.occurred_at)
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_publication(request, key, owned),
+        key=key, description="交付发布结果保存")
     _require_completed(
         outcome, "publication_save_failed", "publication_save_unknown")
 
 
-def _save_unconfirmed(
+async def _save_unconfirmed(
     delivery_id: int, failure: DeliveryFailure, context: DeliveryContext,
 ) -> None:
     """保存终局未知失败；不安排自动重投。"""
-    outcome = context.repository.save_unconfirmed_failure(
-        UnconfirmedFailureSave(
-            delivery_id=delivery_id, failure=failure,
-            occurred_at=context.occurred_at),
-        new_operation_key(), context.owned,
-    )
+    key = new_operation_key()
+    request = UnconfirmedFailureSave(
+        delivery_id=delivery_id, failure=failure,
+        occurred_at=context.occurred_at)
+    outcome = await context.database.write(
+        lambda owned: context.repository.save_unconfirmed_failure(request, key, owned),
+        key=key, description="交付未知结论保存")
     _require_completed(
         outcome, "unconfirmed_save_failed", "unconfirmed_save_unknown")
 
@@ -576,7 +579,9 @@ async def publish_delivery(
     未知失败，不自动重投。移动结果未知时不猜测，保留诊断等待
     下一次观察。
     """
-    state = context.repository.load_delivery_state(delivery_id, context.owned)
+    state = await context.database.read(
+        lambda owned: context.repository.load_delivery_state(delivery_id, owned),
+        description="交付发布状态读取")
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
     return await executor.run_owned_async_file_task(AsyncFileTask(
         FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
@@ -596,20 +601,20 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
         raise DeliveryHandoffError(
             "handoff_undecidable", str(decision.error))
     if decision.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY:
-        _save_publication(delivery_id, context)
+        await _save_publication(delivery_id, context)
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
     if decision.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
         assert decision.failure is not None
-        _save_unconfirmed(delivery_id, decision.failure, context)
+        await _save_unconfirmed(delivery_id, decision.failure, context)
         return DeliveryResult(DeliveryPhase.FAILED_FINAL, decision)
-    _save_intent(delivery_id, context)
+    await _save_intent(delivery_id, context)
     ref, roots, directories = _staging_ref(state, context.directories)
     publish = await publish_file(ref, roots, directories, ReadyName(state.file_name))
     if publish.stage is PublishStage.MOVED:
         if publish.directory in (
             DirectorySyncStage.SYNCED, DirectorySyncStage.UNSUPPORTED,
         ):
-            _save_publication(delivery_id, context)
+            await _save_publication(delivery_id, context)
             return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
         # 已移动事实保留：同步失败不撤销移动，也不保存完成事实。
         raise DeliveryHandoffError(
@@ -617,11 +622,11 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
     if publish.stage is PublishStage.NOT_MOVED:
         retry = await asyncio.to_thread(_decide_again, state, context)
         if retry.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY:
-            _save_publication(delivery_id, context)
+            await _save_publication(delivery_id, context)
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)
         if retry.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
             assert retry.failure is not None
-            _save_unconfirmed(delivery_id, retry.failure, context)
+            await _save_unconfirmed(delivery_id, retry.failure, context)
             return DeliveryResult(DeliveryPhase.FAILED_FINAL, retry)
         raise DeliveryHandoffError("publish_move_failed", publish.error or "")
     raise DeliveryHandoffError(

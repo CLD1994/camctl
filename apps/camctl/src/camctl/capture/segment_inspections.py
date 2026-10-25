@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
 from camctl.capture.media_facts import probe_document, read_probe
 from camctl.capture.media_flow import (
-    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support,
+    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support, _read_dispatched,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -23,6 +23,7 @@ from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarg
 from camctl.outputs.qualification import FileCandidate, OperationConfig, QualificationOutcome
 from camctl.outputs.read_attempts import hold_read_end, retry_read_business, retry_read_ends, run_owned_read
 from camctl.outputs.slots import SlotOutcome, SlotRequest
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.segment_inspections import (
@@ -125,7 +126,7 @@ def _step_from_ref(ref: SegmentInspectionRef, copy_id: int | None = None) -> Seg
                                  reason=reason)
 
 
-def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
+async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
     identity = request.inspection_id
     pending = flow.pending_segment_inspection_results.get(identity)
     if pending is None:
@@ -133,24 +134,21 @@ def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
         flow.pending_segment_inspection_results[identity] = pending
     elif pending[0] != request:
         raise ConsistencyError("同一分段检查已有不同的待保存结果")
-    outcome = SegmentInspectionRepository().save_result(pending[0], pending[1], flow.owned)
+    outcome = await flow.database.write(lambda owned: SegmentInspectionRepository().save_result(pending[0], pending[1], owned), key=pending[1])
     if outcome.kind is DbOutcomeKind.COMPLETED:
         del flow.pending_segment_inspection_results[identity]
         return True
     return False
 
 
-def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
+async def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
                                    occurred_at: int) -> bool:
     """把已可靠终结的 inspection READ 错误写成原检查结果。"""
-    row = flow.owned.connection.execute(
-        "SELECT c.inspection_id,c.committed_bytes,c.source_size,c.source_sha256,"
+    row = (await flow.database.read(lambda owned, inputs=("SELECT c.inspection_id,c.committed_bytes,c.source_size,c.source_sha256,"
         "c.target_sha256,c.verification_state,c.verification_error_json,"
         "r.id,r.status,r.error_json,r.retry_wait_required,r.attempts_used"
         " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
-        " WHERE c.id=? AND r.kind=? LIMIT 2",
-        (copy_id, int(enum_for("operation_runs.kind").READ_FILE)),
-    ).fetchall()
+        " WHERE c.id=? AND r.kind=? LIMIT 2", (copy_id, int(enum_for("operation_runs.kind").READ_FILE))): owned.connection.execute(*inputs).fetchall(), description="读取拍摄直接事实"))
     if len(row) != 1 or row[0][0] is None:
         raise ConsistencyError("分段检查读取失败缺少唯一的检查副本归属")
     (inspection_id, committed_bytes, source_size, source_sha256, target_sha256,
@@ -161,17 +159,14 @@ def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
     if retry_wait_required != 0:
         raise ConsistencyError("已失败的分段检查读取仍要求重试等待")
     attempt_running = int(enum_for("operation_attempts.status").RUNNING)
-    unfinished = flow.owned.connection.execute(
-        "SELECT 1 FROM operation_attempts WHERE run_id=("
+    unfinished = (await flow.database.read(lambda owned, inputs=("SELECT 1 FROM operation_attempts WHERE run_id=("
         " SELECT id FROM operation_runs WHERE copy_id=? AND kind=?)"
-        " AND (status=? OR result_json IS NULL) LIMIT 1",
-        (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running),
-    ).fetchone()
+        " AND (status=? OR result_json IS NULL) LIMIT 1", (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
     if unfinished is not None:
         return False
 
     repository = SegmentInspectionRepository()
-    inspection = repository.read(inspection_id, flow.owned)
+    inspection = (await flow.database.read(lambda owned: repository.read(inspection_id, owned)))
     if inspection.state != int(_INSPECTION_STATE.PENDING):
         return inspection_id not in flow.pending_segment_inspection_results
     if run_error_raw is None:
@@ -188,10 +183,8 @@ def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
                 or target_sha256 is None or verification_state != failed_state
                 or verification_error is None):
             raise ConsistencyError("源摘要失败的分段检查缺少完整读取或校验诊断")
-        attempt = flow.owned.connection.execute(
-            "SELECT attempt_no,status,result_json FROM operation_attempts"
-            " WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1", (run_id,),
-        ).fetchone()
+        attempt = (await flow.database.read(lambda owned, inputs=("SELECT attempt_no,status,result_json FROM operation_attempts"
+            " WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1", (run_id,)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
         if attempt is None or attempt[0] != attempts_used:
             raise ConsistencyError("源摘要失败的分段检查缺少最后原读取尝试")
         if (attempt[1] != int(enum_for("operation_attempts.status").SUCCEEDED)
@@ -218,21 +211,18 @@ def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
                                      tool_error=None, failure=failure),
         occurred_at=occurred_at,
     )
-    return _save_result(flow, request)
+    return (await _save_result(flow, request))
 
 
-def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
+async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
                                          occurred_at: int) -> bool:
     """检查结果可靠终态后，按原 release_read_slot 申请补齐机会释放。"""
     from camctl.outputs.read_attempts import save_read_business
 
-    row = flow.owned.connection.execute(
-        "SELECT c.inspection_id,c.slot_device_id,r.status,r.retry_wait_required,s.state"
+    row = (await flow.database.read(lambda owned, inputs=("SELECT c.inspection_id,c.slot_device_id,r.status,r.retry_wait_required,s.state"
         " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " JOIN segment_inspections s ON s.id=c.inspection_id"
-        " WHERE c.id=? AND r.kind=? LIMIT 2",
-        (copy_id, int(enum_for("operation_runs.kind").READ_FILE)),
-    ).fetchall()
+        " WHERE c.id=? AND r.kind=? LIMIT 2", (copy_id, int(enum_for("operation_runs.kind").READ_FILE))): owned.connection.execute(*inputs).fetchall(), description="读取拍摄直接事实"))
     if len(row) != 1 or row[0][0] is None:
         raise ConsistencyError("终态分段检查缺少唯一的检查读取副本")
     inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state = row[0]
@@ -247,26 +237,22 @@ def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
     if retry_wait_required != 0:
         return False
     attempt_running = int(enum_for("operation_attempts.status").RUNNING)
-    unfinished = flow.owned.connection.execute(
-        "SELECT 1 FROM operation_attempts WHERE run_id=("
+    unfinished = (await flow.database.read(lambda owned, inputs=("SELECT 1 FROM operation_attempts WHERE run_id=("
         " SELECT id FROM operation_runs WHERE copy_id=? AND kind=?)"
-        " AND (status=? OR result_json IS NULL) LIMIT 1",
-        (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running),
-    ).fetchone()
+        " AND (status=? OR result_json IS NULL) LIMIT 1", (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
     if unfinished is not None:
         return False
-    save_read_business(
+    (await save_read_business(
         flow, copy_id, "release_read_slot",
         SlotRequest(copy_id, occurred_at), OutputsRepository().release_read_slot,
-    )
+    ))
     return True
 
 
-def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
+async def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
                                                 occurred_at: int) -> bool:
     """仅补齐该动作已终态检查副本上欠缺的读取机会释放。"""
     complete = True
-    connection = flow.owned.connection
     # UNKNOWN 的释放必须按原 copy id 与原 request/key 续接。先核对该 copy
     # 当前仍属于本动作的终态 inspection，不能把其他读取责任并入本次收场。
     pending_copy_ids = tuple(
@@ -274,23 +260,23 @@ def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
         if operation == "release_read_slot"
     )
     for copy_id in pending_copy_ids:
-        rows = connection.execute(
+        rows = (await flow.database.read(lambda owned: owned.connection.execute(
             "SELECT s.id FROM file_copies c"
             " JOIN segment_inspections s ON s.id=c.inspection_id"
             " WHERE c.id=? AND s.action_id=? AND s.state!=? LIMIT 2",
             (copy_id, action_id, int(_INSPECTION_STATE.PENDING)),
-        ).fetchall()
+        ).fetchall()))
         if len(rows) > 1:
             raise ConsistencyError("同一读取机会关联了重复的当前动作检查责任")
         if rows:
-            complete = settle_terminal_inspection_read_slot(
-                flow, copy_id, occurred_at) and complete
+            complete = (await settle_terminal_inspection_read_slot(
+                flow, copy_id, occurred_at)) and complete
 
     batch_size = _inspection_batch_size(flow)
     after_inspection_id = 0
     after_copy_id = 0
     while True:
-        rows = connection.execute(
+        rows = (await flow.database.read(lambda owned: owned.connection.execute(
             "SELECT s.id,c.id FROM segment_inspections s"
             " JOIN file_copies c ON c.inspection_id=s.id"
             " WHERE s.action_id=? AND s.state!=? AND c.slot_device_id IS NOT NULL"
@@ -298,12 +284,12 @@ def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
             " ORDER BY s.id,c.id LIMIT ?",
             (action_id, int(_INSPECTION_STATE.PENDING), after_inspection_id,
              after_inspection_id, after_copy_id, batch_size),
-        ).fetchall()
+        ).fetchall()))
         if not rows:
             break
         for inspection_id, copy_id in rows:
-            complete = settle_terminal_inspection_read_slot(
-                flow, copy_id, occurred_at) and complete
+            complete = (await settle_terminal_inspection_read_slot(
+                flow, copy_id, occurred_at)) and complete
         after_inspection_id, after_copy_id = rows[-1]
     return complete
 
@@ -329,11 +315,9 @@ def _copy_candidate(flow: MediaFlow, request: SegmentInspectionRequest,
         config=request.budget, occurred_at=flow.occurred_at(), inspection_id=inspection_id)
 
 
-def _run_state(flow: MediaFlow, copy_id: int):
-    rows = flow.owned.connection.execute(
-        "SELECT id,status,attempts_used,max_attempts_used,retry_wait_required"
-        " FROM operation_runs WHERE copy_id=? AND kind=? LIMIT 2",
-        (copy_id, int(enum_for("operation_runs.kind").READ_FILE))).fetchall()
+async def _run_state(flow: MediaFlow, copy_id: int):
+    rows = (await flow.database.read(lambda owned, inputs=("SELECT id,status,attempts_used,max_attempts_used,retry_wait_required"
+        " FROM operation_runs WHERE copy_id=? AND kind=? LIMIT 2", (copy_id, int(enum_for("operation_runs.kind").READ_FILE))): owned.connection.execute(*inputs).fetchall(), description="读取拍摄直接事实"))
     if len(rows) != 1:
         raise ConsistencyError("分段检查副本必须对应唯一 READ_FILE 流程")
     return rows[0]
@@ -346,10 +330,10 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
     read_flow = replace(flow, max_read_attempts=config.max_attempts,
                          read_idle_timeout_s=config.timeout_s,
                          retry_interval_s=config.retry_interval_s)
-    _ensure_checksum_support(read_flow, source_file_id)
+    (await _ensure_checksum_support(read_flow, source_file_id))
     copies = read_flow.copies()
-    qualified = copies.qualify(_copy_candidate(read_flow, request, inspection_id,
-                                              source_file_id, original_name))
+    qualified = (await copies.qualify(_copy_candidate(read_flow, request, inspection_id,
+                                              source_file_id, original_name)))
     if qualified.disposition.value != "saved":
         from camctl.capture.media import SaveDisposition
         phase = InputPhase.QUALIFY_UNKNOWN if qualified.disposition is SaveDisposition.UNKNOWN else InputPhase.QUALIFY_REJECTED
@@ -359,9 +343,9 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
         return InputStep(InputPhase.REJECTED_FINAL if qualification.outcome is QualificationOutcome.REJECTED_FINAL
                          else InputPhase.WAITING, reason=qualification.reason)
     copy_id = qualification.copy_id
-    state = copies.copy_state(copy_id)
+    state = (await copies.copy_state(copy_id))
     if state.verification_state not in (3, 5) or state.target_sha256 is None:
-        run_id, run_status, attempts_used, max_attempts_used, retry_wait_required = _run_state(read_flow, copy_id)
+        run_id, run_status, attempts_used, max_attempts_used, retry_wait_required = (await _run_state(read_flow, copy_id))
         if run_status == int(_RUN_STATUS.FAILED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="run_ended")
         wait_key = f"read/{copy_id}"
@@ -371,17 +355,17 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
                 interval_s=config.retry_interval_s,
                 now_ns=read_flow.monotonic_ns()) is not None:
             return InputStep(InputPhase.RETRY_WAITING, copy_id=copy_id)
-        slot = copies.repository.grant_read_slot(SlotRequest(copy_id, read_flow.occurred_at()),
-                                                  new_operation_key(), read_flow.owned)
+        request_slot, slot_key = SlotRequest(copy_id, read_flow.occurred_at()), new_operation_key()
+        slot = await read_flow.database.write(lambda owned: copies.repository.grant_read_slot(request_slot, slot_key, owned), key=slot_key)
         if slot.kind is not DbOutcomeKind.COMPLETED:
             raise ConsistencyError(f"分段检查读取机会未可靠保存: {slot.error}")
         if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=slot.value.reason)
-        ticket, reason = __import__("camctl.capture.media_flow", fromlist=["acquire_read_attempt"]).acquire_read_attempt(
+        ticket, reason = (await __import__("camctl.capture.media_flow", fromlist=["acquire_read_attempt"]).acquire_read_attempt(
             read_flow, AttemptIntent("read", request.action_id, OperationKind.READ_FILE,
                 AttemptTarget(copy_id=copy_id), None,
                 AttemptConfig(config.max_attempts, config.timeout_s, config.retry_interval_s),
-                read_flow.occurred_at(), copy_round=state.round))
+                read_flow.occurred_at(), copy_round=state.round)))
         if ticket is None:
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=reason)
     else:
@@ -397,7 +381,7 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
             if original_name and Path(original_name).suffix else None),
         config=config, segment_size=read_flow.segment_size,
         staging=read_flow.roots.staging, copies=copies, sessions=sessions,
-        occurred_at=read_flow.occurred_at(), digest=(read_flow.digest_for(source_file_id)
+        occurred_at=read_flow.occurred_at(), digest=(await read_flow.digest_for(source_file_id)
             if read_flow.digest_for is not None else read_flow.digest),
         read_end=(read_flow.pending_read_ends[ticket.target_id].end
             if ticket is not None and ticket.target_id in read_flow.pending_read_ends else None),
@@ -406,16 +390,18 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
                 resume=lambda current, held: _resume_local_internal_end(
                     current, held, read_flow, context), evidence=read_flow.evidence)),
         on_read_start=(None if ticket is None else
-            lambda: read_flow.pending_read_ends.pop(copy_id, None)),
+            lambda: _read_dispatched(read_flow, copy_id)),
         inspection_id=inspection_id)
 
-    async def read_and_save():
-        step = await obtain_recording_input(context)
+    async def read_and_save(control):
+        current = replace(context, sessions=(sessions if ticket is None else
+            sessions.for_attempt(ticket, idle_timeout_s=config.timeout_s, control=control)))
+        step = await obtain_recording_input(current)
         if ticket is not None:
-            _finish_internal_read(read_flow, ticket, step, max_attempts=config.max_attempts)
+            (await _finish_internal_read(read_flow, ticket, step, max_attempts=config.max_attempts))
         return step
 
-    result = await run_owned_read(read_flow, copy_id, read_and_save) if ticket is not None else await read_and_save()
+    result = await run_owned_read(read_flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
     if result.phase is InputPhase.SEGMENT_FAILED and result.source_failed:
         read_flow.retry_gate.established(f"read/{copy_id}", read_flow.monotonic_ns())
     elif result.phase in (InputPhase.INPUT_READY, InputPhase.RECOPY_PENDING):
@@ -461,7 +447,8 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     repository = SegmentInspectionRepository()
     inspection_request = InspectionCreate(request.action_id, request.member_id,
         _target_document(request.target), _budget_document(request.budget), request.occurred_at)
-    created = repository.create(inspection_request, new_operation_key(), flow.owned)
+    key = new_operation_key()
+    created = await flow.database.write(lambda owned: repository.create(inspection_request, key, owned), key=key)
     if created.kind is not DbOutcomeKind.COMPLETED:
         if created.kind is DbOutcomeKind.ROLLED_BACK and isinstance(
             created.error, ConsistencyError
@@ -473,7 +460,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     if (not json_equal(ref.target_json, _target_document(request.target))
             or not json_equal(ref.budget_json, _budget_document(request.budget))):
         raise ConsistencyError("分段检查成员不能更换原目标或读取预算")
-    copy_facts = read_inspection_for_member(request.action_id, request.member_id, flow.owned).copy
+    copy_facts = (await flow.database.read(lambda owned, inputs=(request.action_id, request.member_id), options=dict(): read_inspection_for_member(inputs[0], inputs[1], owned, **options), description="读取拍摄直接事实")).copy
     copy_id = copy_facts.copy_id if copy_facts is not None else None
 
     # 已确定的 AttemptFinish 是第一责任：先沿原 ticket/key 保存，不能
@@ -487,12 +474,12 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             if ticket is not None and int(ticket.target_id) == copy_id:
                 identity = (ticket.run_id, ticket.attempt_id)
                 pending_read_identities.append(identity)
-                _save_internal_read_and_settle(flow, pending_read)
+                (await _save_internal_read_and_settle(flow, pending_read))
 
     # 原 inspection request/key 的未知回执先重送；它可能已在数据库
     # 可靠提交，只是本进程尚未收到回执。
     pending = flow.pending_segment_inspection_results.get(ref.inspection_id)
-    if pending is not None and not _save_result(flow, pending[0]):
+    if pending is not None and not (await _save_result(flow, pending[0])):
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             ref.inspection_id, copy_id, reason="result_save_unknown")
 
@@ -505,35 +492,33 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             pending_read = flow.pending_read_results.get(identity)
             if pending_read is None:
                 continue
-            _save_internal_read_and_settle(flow, pending_read)
+            (await _save_internal_read_and_settle(flow, pending_read))
             if identity in flow.pending_read_results:
                 return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
                     ref.inspection_id, copy_id, reason="result_save_unknown")
 
-    ref = repository.read(ref.inspection_id, flow.owned)
+    ref = (await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned)))
     if ref.state != int(_INSPECTION_STATE.PENDING):
         if copy_id is not None:
-            settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at())
+            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at()))
         return _step_from_ref(ref, copy_id)
 
     # 原完整 ReadEnd 的本地续接必须先于任何 run-ended 合成。
-    retry_read_business(flow)
+    (await retry_read_business(flow))
     await retry_read_ends(flow)
 
     pending = flow.pending_segment_inspection_results.get(ref.inspection_id)
-    if pending is not None and not _save_result(flow, pending[0]):
+    if pending is not None and not (await _save_result(flow, pending[0])):
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             ref.inspection_id, copy_id, reason="result_save_unknown")
 
-    ref = repository.read(ref.inspection_id, flow.owned)
+    ref = (await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned)))
     if ref.state != int(_INSPECTION_STATE.PENDING):
         if copy_id is not None:
-            settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at())
+            (await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at()))
         return _step_from_ref(ref, copy_id)
 
-    owner = flow.owned.connection.execute(
-        "SELECT status,cancel_requested FROM actions WHERE id=?", (request.action_id,),
-    ).fetchone()
+    owner = (await flow.database.read(lambda owned, inputs=("SELECT status,cancel_requested FROM actions WHERE id=?", (request.action_id,)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
     if owner is None:
         raise ConsistencyError("分段检查的来源动作不存在")
     action_status = enum_for("actions.status")
@@ -546,26 +531,26 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             reason="inspection_canceled" if owner[1] else "source_terminal")
 
     if copy_id is not None:
-        _run_id, run_status, _used, _maximum, _wait = _run_state(flow, copy_id)
+        _run_id, run_status, _used, _maximum, _wait = (await _run_state(flow, copy_id))
         if run_status == int(_RUN_STATUS.FAILED):
-            saved = settle_inspection_read_failure(flow, copy_id, request.occurred_at)
+            saved = (await settle_inspection_read_failure(flow, copy_id, request.occurred_at))
             if not saved:
                 return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
                     ref.inspection_id, copy_id, reason="result_save_unknown")
-            settle_terminal_inspection_read_slot(flow, copy_id, request.occurred_at)
-            return _step_from_ref(repository.read(ref.inspection_id, flow.owned), copy_id)
+            (await settle_terminal_inspection_read_slot(flow, copy_id, request.occurred_at))
+            return _step_from_ref((await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned))), copy_id)
 
-    source_file_id, original_name = _member_source(flow.owned, request.action_id, request.member_id)
+    source_file_id, original_name = (await flow.database.read(lambda owned, inputs=(request.action_id, request.member_id), options=dict(): _member_source(owned, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
     input_step = await _obtain_input(flow, request, ref.inspection_id, source_file_id, original_name)
     # 摘要校验失败可能在 _finish_internal_read 中完成了读取与检查收场。
     # 未知回执时必须等待原 key 核实，不能因数据库已经可见终态而释放 slot。
     if ref.inspection_id in flow.pending_segment_inspection_results:
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             ref.inspection_id, input_step.copy_id, reason="result_save_unknown")
-    ref = repository.read(ref.inspection_id, flow.owned)
+    ref = (await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned)))
     if ref.state != int(_INSPECTION_STATE.PENDING):
         if input_step.copy_id is not None:
-            settle_terminal_inspection_read_slot(flow, input_step.copy_id, flow.occurred_at())
+            (await settle_terminal_inspection_read_slot(flow, input_step.copy_id, flow.occurred_at()))
         return _step_from_ref(ref, input_step.copy_id)
     if input_step.phase is not InputPhase.INPUT_READY or input_step.input_file is None:
         if input_step.phase is InputPhase.QUALIFY_REJECTED and input_step.error is not None:
@@ -574,12 +559,12 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
         if input_step.phase is InputPhase.WAITING and input_step.reason == "run_ended":
             if input_step.copy_id is None:
                 raise ConsistencyError("已结束分段检查读取缺少拷贝身份")
-            saved = settle_inspection_read_failure(
-                flow, input_step.copy_id, request.occurred_at)
+            saved = (await settle_inspection_read_failure(
+                flow, input_step.copy_id, request.occurred_at))
             if saved:
-                settle_terminal_inspection_read_slot(
-                    flow, input_step.copy_id, request.occurred_at)
-                return _step_from_ref(repository.read(ref.inspection_id, flow.owned),
+                (await settle_terminal_inspection_read_slot(
+                    flow, input_step.copy_id, request.occurred_at))
+                return _step_from_ref((await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned))),
                                       input_step.copy_id)
             return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
                 ref.inspection_id, input_step.copy_id, reason="result_save_unknown")
@@ -618,10 +603,10 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             document = _result_document(metric, probe=probe, ran=True, tool_error=None)
             state = (_INSPECTION_STATE.COMPLETED if metric.value is not None
                      else _INSPECTION_STATE.UNCONFIRMED)
-    saved = _save_result(flow, InspectionResultSave(ref.inspection_id, int(state),
-        document, flow.occurred_at()))
+    saved = (await _save_result(flow, InspectionResultSave(ref.inspection_id, int(state),
+        document, flow.occurred_at())))
     if not saved:
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING, ref.inspection_id,
             input_step.copy_id, metric=metric, input_file=input_step.input_file,
             reason="result_save_unknown")
-    return _step_from_ref(repository.read(ref.inspection_id, flow.owned), input_step.copy_id)
+    return _step_from_ref((await flow.database.read(lambda owned: repository.read(ref.inspection_id, owned))), input_step.copy_id)

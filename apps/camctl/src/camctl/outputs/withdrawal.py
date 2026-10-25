@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.host_files.handoff import HandoffIdentity, WithdrawStage, withdraw_file
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
+from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
+
+if TYPE_CHECKING:
+    from camctl.persistence.business import BusinessDatabase
 
 _WITHDRAWAL = enum_for("deliveries.withdrawal_state")
 _DELIVERY = enum_for("deliveries.status")
@@ -31,7 +36,7 @@ class PendingWithdrawal:
 
 @dataclass(frozen=True)
 class WithdrawalContext:
-    owned: Any
+    database: "BusinessDatabase"
     repository: Any
     ready: Path
     processing: Path
@@ -40,12 +45,19 @@ class WithdrawalContext:
     pending: dict[int, PendingWithdrawal]
 
 
-def _identity(delivery_id: int, context: WithdrawalContext):
-    rows = context.owned.connection.execute(
+def _identity_rows(delivery_id, owned):
+    with closing(owned.connection.execute(
         "SELECT d.action_id,d.file_name,d.status,d.withdrawal_state,d.withdrawal_error_json,"
         " c.target_file_id,f.owner_delivery_id FROM deliveries d"
         " JOIN file_copies c ON c.delivery_id=d.id JOIN intermediate_files f ON f.id=c.target_file_id"
-        " WHERE d.id=?", (delivery_id,)).fetchall()
+        " WHERE d.id=?", (delivery_id,))) as cursor:
+        return cursor.fetchall()
+
+
+async def _identity(delivery_id: int, context: WithdrawalContext):
+    rows = await context.database.read(
+        lambda owned: _identity_rows(delivery_id, owned),
+        description="交付撤回身份读取")
     if len(rows) != 1 or rows[0][6] != delivery_id:
         raise ConsistencyError("交付撤回缺少原交付的唯一目标文件归属")
     if rows[0][2] not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN)):
@@ -65,19 +77,25 @@ def _position(name: str, context: WithdrawalContext) -> str:
     return "unknown"
 
 
-def _save(pending: PendingWithdrawal, context: WithdrawalContext) -> None:
-    result = context.repository.advance_withdrawal(pending.request, pending.key, context.owned)
-    if result.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"撤回原结果事务未可靠完成（{result.kind.value}）: {result.error}")
-    context.pending.pop(pending.request.delivery_id)
+async def _save(pending: PendingWithdrawal, context: WithdrawalContext) -> None:
+    async def save_and_apply():
+        result = await context.database.write(
+            lambda owned: context.repository.advance_withdrawal(
+                pending.request, pending.key, owned),
+            key=pending.key, description="交付撤回原结果保存")
+        if result.kind is not DbOutcomeKind.COMPLETED:
+            raise ConsistencyError(
+                f"撤回原结果事务未可靠完成（{result.kind.value}）: {result.error}")
+        context.pending.pop(pending.request.delivery_id)
+
+    await settle_required(save_and_apply())
 
 
-def _remember(delivery_id, identity, choice, error, context):
+async def _remember(delivery_id, identity, choice, error, context):
     pending = PendingWithdrawal(identity[0], identity[5], identity[1],
         AdvanceWithdrawal(delivery_id, choice, context.occurred_at(), error), new_operation_key())
     context.pending[delivery_id] = pending
-    _save(pending, context)
+    await _save(pending, context)
 
 
 def _failure(delivery_id: int, error: str | None, *, unknown: bool) -> dict:
@@ -88,7 +106,7 @@ def _failure(delivery_id: int, error: str | None, *, unknown: bool) -> dict:
 
 async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> bool:
     """消费一份撤回，实际占用时保持未完成；取消后完成原保存。"""
-    identity = _identity(delivery_id, context)
+    identity = await _identity(delivery_id, context)
     pending = context.pending.get(delivery_id)
     if pending is not None and (pending.action_id, pending.file_id, pending.file_name) != (
             identity[0], identity[5], identity[1]):
@@ -98,11 +116,11 @@ async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> boo
 
     async def body(_control):
         if pending is not None:
-            _save(pending, context)
+            await _save(pending, context)
             return
         state = identity[3]
         if state == int(_WITHDRAWAL.NOT_REQUESTED):
-            _remember(delivery_id, identity, WithdrawalChoice.REQUESTED, None, context)
+            await _remember(delivery_id, identity, WithdrawalChoice.REQUESTED, None, context)
             state = int(_WITHDRAWAL.PENDING)
         if state != int(_WITHDRAWAL.PENDING):
             # 后到请求只采用既有独立责任结论，不第二次删除。
@@ -116,7 +134,7 @@ async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> boo
                 raise ConsistencyError("原交付撤回状态无法解释") from failure
             from camctl.contracts.json_values import parse_exact_json
             error = parse_exact_json(identity[4]) if identity[4] is not None else None
-            _remember(delivery_id, identity, choice, error, context)
+            await _remember(delivery_id, identity, choice, error, context)
             return
         position = await asyncio.to_thread(_position, identity[1], context)
         if position == "processing":
@@ -134,7 +152,7 @@ async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> boo
                 choice, error = WithdrawalChoice.UNKNOWN, _failure(delivery_id, actual.error, unknown=True)
         else:
             choice, error = WithdrawalChoice.UNKNOWN, _failure(delivery_id, None, unknown=True)
-        _remember(delivery_id, identity, choice, error, context)
+        await _remember(delivery_id, identity, choice, error, context)
 
     await context.executor.run_owned_async_file_task(AsyncFileTask(
         FileTaskId(f"withdrawal/{delivery_id}/{new_operation_key()}"), (identity[5],),

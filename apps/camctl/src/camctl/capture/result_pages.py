@@ -9,7 +9,8 @@ from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, Ut
 from camctl.devices.directory import DirectoryCursor
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.result_format import error_document, result_document
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.business import settle_required
+from camctl.persistence.models import db_outcome_for, DbOutcome, DbOutcomeKind
 
 
 @dataclass(frozen=True)
@@ -98,25 +99,40 @@ class ResultPageSaveOwner:
             self.pending = PendingResultPageSave(deepcopy(request), key if key is not None else new_operation_key())
         return self.pending
 
-    def save(self, repository, owned) -> DbOutcome[ResultPageRef]:
-        pending = self.pending
-        if pending is None:
-            raise ConsistencyError("没有原结果页保存责任")
-        if pending.response is not None:
-            return DbOutcome(DbOutcomeKind.COMPLETED, pending.response)
-        receipt = repository.save_result_page(pending.request, pending.key, owned)
-        if receipt.kind is DbOutcomeKind.COMPLETED:
-            response = receipt.value
-            page = page_from_outcome(pending.request.ticket, pending.request.outcome.outcome, cursor=pending.request.cursor)
-            if (not isinstance(response, ResultPageRef) or response.ticket != pending.request.ticket
-                    or response.page_no != pending.request.page_no or response.next_cursor != page.next_cursor):
-                raise ConsistencyError("结果页可靠回执不是原尝试、原批次或原后续游标")
+    async def save(self, repository, database) -> DbOutcome[ResultPageRef]:
+        async def save_and_apply():
+            _delivery_error = None
+            pending = self.pending
+            if pending is None:
+                raise ConsistencyError("没有原结果页保存责任")
+            if pending.response is not None:
+                if _delivery_error is not None:
+                    raise _delivery_error
+                return DbOutcome(DbOutcomeKind.COMPLETED, pending.response)
             try:
-                ObjectId(response.event_id)
-            except ValueError as error:
-                raise ConsistencyError("结果页回执缺少实际历史身份") from error
-            self.pending = replace(pending, response=response)
-        return receipt
+                receipt = await database.write(
+                    lambda owned: repository.save_result_page(pending.request, pending.key, owned),
+                    key=pending.key, description="保存原结果页")
+            except BaseException as failure:
+                receipt = db_outcome_for(failure)
+                if receipt is None or receipt.kind is not DbOutcomeKind.COMPLETED:
+                    raise
+                _delivery_error = failure
+            if receipt.kind is DbOutcomeKind.COMPLETED:
+                response = receipt.value
+                page = page_from_outcome(pending.request.ticket, pending.request.outcome.outcome, cursor=pending.request.cursor)
+                if (not isinstance(response, ResultPageRef) or response.ticket != pending.request.ticket
+                        or response.page_no != pending.request.page_no or response.next_cursor != page.next_cursor):
+                    raise ConsistencyError("结果页可靠回执不是原尝试、原批次或原后续游标")
+                try:
+                    ObjectId(response.event_id)
+                except ValueError as error:
+                    raise ConsistencyError("结果页回执缺少实际历史身份") from error
+                self.pending = replace(pending, response=response)
+            if _delivery_error is not None:
+                raise _delivery_error
+            return receipt
+        return await settle_required(save_and_apply())
 
     def take(self) -> ResultPageRef:
         if self.pending is None or self.pending.response is None:

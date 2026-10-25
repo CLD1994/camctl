@@ -3,9 +3,10 @@ import asyncio
 from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, create_autospec
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
+from support.capture_database import capture_database
 
 from camctl.capture import result_scans
 from camctl.capture.result_inputs import page_from_outcome, RESULT_PAGE_CONTRACT
@@ -58,7 +59,7 @@ def _runtime():
     capture = create_autospec(CaptureRepository, instance=True)
     capture.read_result_source.return_value = ResultSource(
         ResultSourceKind.STOP, 8, _completion_context(), requires_file_wait=True)
-    return SimpleNamespace(owned=object(), capture=capture,
+    return SimpleNamespace(database=capture_database(), capture=capture,
         results=create_autospec(DriverResultListing, instance=True), evidence=_REGISTRY,
         wall_us=Mock(side_effect=[1_750_000_000_000_000, 1_750_000_000_000_100]),
         monotonic_ns=Mock(side_effect=[1_000_000, 2_000_000]))
@@ -158,12 +159,12 @@ async def test_pause_preserves_directory_cache_until_original_scan_finishes():
     scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
     pending.reading_context.directory_scan = scan
 
-    assert not await result_scans.advance_result_scan(pending, runtime=runtime, can_read=lambda: False)
+    assert not await result_scans.advance_result_scan(pending, runtime=runtime, can_read=AsyncMock(return_value=False))
     runtime.results.list_page.assert_not_awaited()
     scan.close.assert_not_called()
     assert not pending.reading_context.closed
 
-    assert await result_scans.advance_result_scan(pending, runtime=runtime, can_read=lambda: True)
+    assert await result_scans.advance_result_scan(pending, runtime=runtime, can_read=AsyncMock(return_value=True))
     scan.close.assert_called_once()
 
 
