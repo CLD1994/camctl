@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import inspect
 import sqlite3
 from typing import TypeVar
@@ -56,6 +56,12 @@ async def settle_required(awaitable: Awaitable[T]) -> T:
     return result
 
 
+@dataclass(frozen=True)
+class _SharedSaveResult:
+    value: object = None
+    error: BaseException | None = None
+
+
 class SharedSave:
     """同一拥有者的原保存共同等待；回执和内存应用均由原任务完成。"""
 
@@ -65,8 +71,23 @@ class SharedSave:
     async def run(self, save_and_apply: Callable[[], Awaitable[T]]) -> T:
         """保留原成功或失败结果；晚到等待者不能隐式重放保存。"""
         if self._task is None:
-            self._task = asyncio.create_task(save_and_apply())
-        return await settle_required(self._task)
+            async def apply():
+                try:
+                    return _SharedSaveResult(value=await save_and_apply())
+                except BaseException as error:
+                    # Task 的取消状态不保留重复观察同一控制错误的语义。
+                    return _SharedSaveResult(error=error)
+            self._task = asyncio.create_task(apply())
+        result, cancelled = await _settle(self._task)
+        if result.error is not None:
+            if cancelled is not None:
+                raise result.error from cancelled
+            raise result.error
+        if cancelled is not None:
+            if isinstance(result.value, DbOutcome):
+                _attach_actual(cancelled, result.value)
+            raise cancelled
+        return result.value
 
     def reset(self) -> None:
         """调用方明确开始下一阶段或核实；不能替换仍在进行的原保存。"""
@@ -77,7 +98,8 @@ class SharedSave:
     def retry_failed(self) -> None:
         """明确恢复原申请；成功与尚在进行的保存继续保留原任务。"""
         task = self._task
-        if task is not None and task.done() and (task.cancelled() or task.exception() is not None):
+        if task is not None and task.done() and (task.cancelled()
+                or task.exception() is not None or task.result().error is not None):
             self._task = None
 
 

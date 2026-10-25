@@ -5,7 +5,8 @@ import asyncio
 import pytest
 
 from camctl.persistence import business
-from camctl.persistence.models import DbExecutorError
+from camctl.persistence.models import DbExecutorError, DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for
+from camctl.persistence.transaction import WriteReceipt, _attach_write_receipt, write_receipt_for
 
 pytestmark = pytest.mark.asyncio
 
@@ -171,6 +172,56 @@ async def test_explicit_recovery_can_retry_original_task_cancellation():
         return "saved"
 
     assert await shared.run(recovered) == "saved"
+
+
+@pytest.mark.parametrize("error_type", [asyncio.CancelledError, RuntimeError])
+@pytest.mark.parametrize("cancel_count", [0, 1, 2])
+async def test_actual_control_error_keeps_original_receipts_for_all_waiters(error_type, cancel_count):
+    shared = business.SharedSave()
+    entered, release = asyncio.Event(), asyncio.Event()
+    actual = error_type("原保存控制错误")
+    outcome = DbOutcome(DbOutcomeKind.COMPLETED, value="saved")
+    receipt = WriteReceipt("completed", result="saved")
+    _attach_db_outcome(actual, outcome)
+    _attach_write_receipt(actual, receipt)
+    applied = []
+
+    async def save_and_apply():
+        entered.set()
+        await release.wait()
+        applied.append("saved")
+        raise actual
+
+    async def receive():
+        try:
+            await shared.run(save_and_apply)
+        except BaseException as error:
+            return error
+
+    first = asyncio.create_task(receive())
+    await entered.wait()
+    second = asyncio.create_task(receive())
+    await asyncio.sleep(0)
+    for n in range(cancel_count):
+        first.cancel(f"等待者取消{n}")
+        await asyncio.sleep(0)
+    assert not first.done() and not second.done() and not applied
+    release.set()
+    results = await asyncio.gather(first, second)
+    late = await receive()
+
+    assert results[0] is actual and results[1] is actual and late is actual
+    assert db_outcome_for(late) is outcome and write_receipt_for(late) is receipt
+    assert applied == ["saved"]
+    if cancel_count:
+        assert actual.__cause__.args == ("等待者取消0",)
+
+    shared.retry_failed()
+
+    async def recovered():
+        return "recovered"
+
+    assert await shared.run(recovered) == "recovered"
 
 
 async def test_different_owners_do_not_wait_for_each_others_save():
