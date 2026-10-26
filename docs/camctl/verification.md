@@ -18,6 +18,8 @@ Linux 开发容器、Python 3.11.17 下，旧代码的四项增删交错均稳�
 
 最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2213 项通过**，耗时 32.79 秒，退出 0。原始失败、通过日志与执行证据保存在 `.local/verification/timelapse-scan-concurrency-20261026/`。本次未运行集成测试或调用设备；OSMO 文件信息读取超时属于独立的现场问题，不计入此项修复结论。
 
+修复提交 `b3d00889` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，Python 3.11.17、SQLite 3.53.1，依赖检查通过。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件在源码、发行物和安装副本之间一致；主代理另行核对了全部生产 Python 文件、状态库、配置及两份能力说明。部署记录保存在 `.local/deployments/20261026-capture-scan-snapshot-0639/`。部署保留 host 与客户端的已安装版本，真实拍摄由用户验证。
+
 ## 相机首次准备的省电与 USB 模式设置（2026-10-26）
 
 Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。
