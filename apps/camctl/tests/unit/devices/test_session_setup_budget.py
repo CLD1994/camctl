@@ -185,15 +185,21 @@ async def test_real_timeout_keeps_its_error_command_and_remaining_budget(phase):
 
 
 @pytest.mark.asyncio
-async def test_lapse_lock_keeps_normal_service_error_check():
+async def test_lapse_lock_service_error_text_allows_preparation_with_split_budget():
     command = ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0")
     raw = RawToolOutcome(LocalExit(exit_code=0),
         b"SimuDev: when send control set data, server not exist!", None, None, stderr=b"")
     driver, transport, request = _world(setup_s="0", overrides={command: raw})
     result = await driver.prepare_capture(request)
-    assert result.outcome.status is AttemptStatus.FAILED
-    assert result.error["details"]["command"] == list(command)
-    assert _command(transport.calls[-1]) == command
+    assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert result.error is None
+    assert driver.prepared_capture_matches(_start(request))
+    assert driver.pending_session_setup_timeout_s(request.binding) == 0
+    call = next(item for item in result.outcome.settlement.evidence.data["calls"]
+                if item["command"] == list(command))
+    assert call["stdout_hex"] == raw.output.hex()
+    assert call["result_document"]["observations"][0]["data"]["confirmation_basis"] == (
+        "action6_simulate_device_output_unchecked/v1")
 
 
 @pytest.mark.asyncio

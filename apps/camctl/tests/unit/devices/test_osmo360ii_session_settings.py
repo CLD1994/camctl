@@ -79,7 +79,7 @@ async def test_partial_setup_keeps_only_reliably_accepted_settings():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("setting_index", [0, 1, 3])
+@pytest.mark.parametrize("setting_index", [0, 1, 2, 3])
 @pytest.mark.parametrize("fault", [{"stderr": b"setting failed"}, {"output_failure": "truncated"},
                                   {"error": "timeout"},
                                   {"output": b"SimuDev: when send control set data, server not exist!\n"}])

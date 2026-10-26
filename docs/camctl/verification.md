@@ -10,9 +10,15 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## Action6 会话设置的临时输出处理（2026-10-26）
+
+Action6 将关闭延时摄影熄屏省电的设置纳入[相机会话准备](../architecture/camera-parameters.md#相机会话准备)的临时输出处理，普通准备和软件恢复共用同一精确命令规则。调用历史继续保留原始 stdout、stderr 和确认依据；调用错误及其他命令按各自契约处理。
+
+Linux 开发容器、Python 3.11.17 下，执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_session_settings.py apps/camctl/tests/unit/devices/test_session_setup_budget.py apps/camctl/tests/unit/devices/test_osmo360ii_session_settings.py apps/camctl/tests/unit/devices/test_camera_power_session_settings.py -q --tb=short`，**113 项通过，1.45 秒，退出 0**。覆盖普通录像、原生延时、独立准备、软件恢复、原输出保存、会话缓存、调用失败以及 OSMO 的严格输出检查。使用正式驱动与受接口约束的传输替身；更新后的省电设置接受用例在生产修改前失败。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-lapse-lock-20261026/`。本项未运行集成测试或真实设备验证，未更新真机验证安装。
+
 ## 会话设备配置的独立预算（2026-10-26）
 
-[实施计划](../superpowers/plans/2026-10-26-session-setup-budget.md)为 ADB 相机的首次会话设备配置单独授予 30 秒，普通设置使用整体预算扣除设备配置部分后的完整控制预算。准备拥有者冻结本次整体与阶段预算；实际阶段分别计时，不能互相借用额度。候选发现、唤醒、准备占用及范围收尾使用同一个实际提前量：默认首次最多提前 40 秒，同会话配置缓存后恢复 10 秒，0 继续关闭提前准备。真正 START、基准读取及软件恢复保持原有各自期限。Action6 的三条返回文本特例不变，`LapseLockTime 0` 继续正常校验。
+[实施计划](../superpowers/plans/2026-10-26-session-setup-budget.md)为 ADB 相机的首次会话设备配置单独授予 30 秒，普通设置使用整体预算扣除设备配置部分后的完整控制预算。准备拥有者冻结本次整体与阶段预算；实际阶段分别计时，不能互相借用额度。候选发现、唤醒、准备占用及范围收尾使用同一个实际提前量：默认首次最多提前 40 秒，同会话配置缓存后恢复 10 秒，0 继续关闭提前准备。真正 START、基准读取及软件恢复保持原有各自期限。Action6 的返回文字处理遵守[相机会话准备](../architecture/camera-parameters.md#相机会话准备)。
 
 源码 `d55acfa2` 在 Linux 开发容器、Python 3.11.17 下，拍摄、装配及受影响驱动定向单元 **2599 项通过，44.35 秒，退出 0**。覆盖设备配置满 30 秒后普通设置仍获完整预算、两个阶段各自超限、缓存及新会话、原错误与调用事实、取消、冻结意图和实际请求一致、0 提前量及范围触发。生产装配使用真实驱动与受约束传输替身，验证缓存使提前量由 40 变为 10，重开会话再变为 40；数据库边界使用替身。原日志及收据位于 `.local/verification/session-setup-budget-20261026/`。未运行集成或真实拍摄，未增加操作种类或状态库格式。
 

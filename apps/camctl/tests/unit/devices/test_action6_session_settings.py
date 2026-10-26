@@ -22,7 +22,7 @@ SETTINGS = (
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
 )
-OUTPUT_UNCHECKED = (SETTINGS[0], SETTINGS[1], SETTINGS[3])
+OUTPUT_UNCHECKED = SETTINGS[:4]
 UNVERIFIED_OUTPUT = b"SimuDev: when send control notify data, server not exist!\n"
 
 
@@ -64,22 +64,21 @@ async def test_setup_is_independent_per_device_and_repeated_in_new_session():
                                   {"output": b"SimuDev: when send control set data, server not exist!\n"}])
 async def test_unknown_setup_blocks_start_and_is_not_cached(fault):
     bad = replace(RawToolOutcome(LocalExit(exit_code=0), b"accepted\n", None, None, stderr=b""), **fault)
-    transport = Action6ContractTransport(overrides={SETTINGS[2]: bad})
+    transport = Action6ContractTransport(overrides={SETTINGS[4]: bad})
     driver = _action6_contract_driver(transport)
     assert (await driver.control(_timelapse_request())).error is not None
-    assert tuple(commands(transport)) == SETTINGS[:3]
+    assert tuple(commands(transport)) == SETTINGS[:5]
     transport.overrides.clear()
     assert (await driver.control(_timelapse_request())).error is None
-    assert commands(transport).count(SETTINGS[0]) == 1
-    assert commands(transport).count(SETTINGS[1]) == 1
-    assert commands(transport).count(SETTINGS[2]) == 2
+    assert all(commands(transport).count(command) == 1 for command in SETTINGS[:4])
+    assert commands(transport).count(SETTINGS[4]) == 2
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("first", [_request, _timelapse_request])
 @pytest.mark.parametrize("prepare_only", [False, True])
 @pytest.mark.parametrize("stderr", [b"", b"unverified diagnostic\xff\n"])
-async def test_three_temporary_settings_ignore_output_and_reuse_completed_calls(
+async def test_temporary_settings_ignore_output_and_reuse_completed_calls(
         first, prepare_only, stderr):
     raw = RawToolOutcome(LocalExit(exit_code=0), UNVERIFIED_OUTPUT, None, None, stderr=stderr)
     transport = Action6ContractTransport(overrides=dict.fromkeys(OUTPUT_UNCHECKED, raw))
