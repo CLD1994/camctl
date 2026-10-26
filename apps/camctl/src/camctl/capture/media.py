@@ -689,7 +689,8 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
             else osv_output_error(status.source_probe, probed.value, trim_s))
         if error is not None:
             return await _save_repair_failure(context, output,
-                error=_error_from_message("repair", error))
+                artifact=artifact, error=_error_from_message("repair", error),
+                failure_probe=probed.value if isinstance(probed.value, MediaProbe) else None)
     if artifact.complete:
         return await _complete_repair(context, output, output_ref, artifact,
             output_probe=probed.value if _osv_input(context.input_file) else None)
@@ -713,10 +714,14 @@ async def _complete_repair(context: RepairContext, output: RepairOutputFile,
 
 async def _save_repair_failure(context: RepairContext, output: RepairOutputFile,
                          artifact: MediaArtifact | None = None,
-                         *, error: ProcessingError | None = None) -> RepairStep:
+                         *, error: ProcessingError | None = None,
+                         failure_probe: MediaProbe | None = None) -> RepairStep:
+    if artifact is None and failure_probe is None:
+        failure_probe = context.processing.source_probe
     saved = await context.saves.save_repair_result(RepairResultSave(
         context.processing.processing_id, RepairOutcome.FAILED,
-        context.occurred_at, error=error if error is not None else repair_error_from_artifact(artifact)))
+        context.occurred_at, error=error if error is not None else repair_error_from_artifact(artifact),
+        artifact=artifact, failure_probe=failure_probe))
     if saved.disposition is SaveDisposition.REJECTED:
         return RepairStep(RepairExecutionPhase.FAILED_REJECTED,
                           output_file=output, error=saved.error)

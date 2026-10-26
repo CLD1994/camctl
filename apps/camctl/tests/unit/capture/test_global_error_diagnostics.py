@@ -453,3 +453,69 @@ async def test_call_control_classification_keeps_actual_timeout_and_cleanup_erro
         async with diagnostic_scope():
             await runtime._save_call_result(identity, pending)
     assert bool(records) is expected
+
+
+async def test_result_page_call_error_and_validation_error_have_independent_records():
+    from decimal import Decimal
+    from camctl.capture.result_inputs import ResultPage
+    from camctl.capture.result_scans import PendingResultScan, advance_result_scan
+    from camctl.devices.evidence import EvidenceRegistry
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.operations.tool_diagnostics import DiagnosticsValidationError
+    ticket = AttemptTicket(1, 'result', '71', 'results/71', 9)
+    outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
+        error=ErrorValue('device_error', 'result', {'reason': 'device-call-error'}),
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('returned', 1)),
+        diagnostics=ToolDiagnostics(2, ()))
+    page = ResultPage((), None, None, False, None, outcome, False)
+    runtime = SimpleNamespace(results=SimpleNamespace(list_page=AsyncMock(return_value=page)),
+        wall_us=lambda: 100, monotonic_ns=lambda: 200,
+        evidence=EvidenceRegistry((EvidenceContract('returned', 1, 'result', frozenset(), max_diagnostic_calls=1),)))
+    pending = PendingResultScan(ticket, None, Decimal(1))
+    records = []
+    with error_diagnostics_context(None, records.append):
+        async with diagnostic_scope():
+            with pytest.raises(DiagnosticsValidationError) as raised:
+                await advance_result_scan(pending, runtime=runtime)
+            record_error(raised.value, stage='outer')
+        async with diagnostic_scope():
+            record_error(raised.value, stage='outer_replay')
+    documents = _documents(records)
+    assert len(documents) == 2
+    assert documents[0]['error']['details']['reason'] == 'device-call-error'
+    assert documents[1]['error']['type'].endswith('DiagnosticsValidationError')
+    assert documents[1]['error']['message']
+
+
+@pytest.mark.parametrize('stage', ['observation', 'checksum', 'synchronization'])
+async def test_media_stopping_retains_actual_file_error(stage):
+    from pathlib import Path
+    from camctl.host_files.io import HashResult, SyncResult, DirectorySyncStage
+    from camctl.host_files.media import MediaArtifact, MediaToolResult
+    from camctl.host_files.models import FileObservation, FileObservationKind
+    failure = OSError(5, 'media file observation failed')
+    failure.__cause__ = ValueError('original file fact')
+    artifact = MediaArtifact('tool_cancelled' if stage == 'observation' else None,
+        FileObservation(FileObservationKind.ERROR if stage == 'observation' else FileObservationKind.VALID_OBJECT,
+            Path('/staging/output.mp4'), error=failure if stage == 'observation' else None,
+            is_file=None if stage == 'observation' else True, size_bytes=1),
+        checksum=HashResult(None, 1, 'checksum close failed') if stage == 'checksum' else None,
+        synchronization=SyncResult(False, DirectorySyncStage.NOT_ATTEMPTED, 'file sync failed')
+            if stage == 'synchronization' else None,
+        postprocessing_stopped=stage == 'checksum',
+        tool_diagnostics=MediaToolResult(stopped_before_start=True) if stage == 'observation' else None)
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.read.return_value = (21,)
+    database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    records = []
+    with error_diagnostics_context(None, records.append):
+        async with diagnostic_scope():
+            await CaptureProcessingSaves(database).save_repair_result(RepairResultSave(
+                3, RepairOutcome.FAILED, 100, error=ProcessingError('tool_failed', 'repair', {}),
+                artifact=artifact))
+    document, = _documents(records)
+    encoded = json.dumps(document)
+    assert {'observation': 'original file fact', 'checksum': 'checksum close failed',
+        'synchronization': 'file sync failed'}[stage] in encoded
+    if stage == 'observation':
+        assert document['details']['artifact']['observation']['error']['errno'] == 5

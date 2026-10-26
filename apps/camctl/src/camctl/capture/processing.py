@@ -9,7 +9,7 @@ RECORDING_PROCESSED 保存检查、修复与取消收场的实际阶段。媒体
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Mapping
@@ -17,7 +17,7 @@ from typing import Any, Mapping
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ObjectId
 from camctl.host_files.paths import validate_file_extension
-from camctl.host_files.media import MediaProbe
+from camctl.host_files.media import MediaProbe, MediaArtifact
 
 __all__ = [
     "CheckBasis",
@@ -432,6 +432,8 @@ class RepairResultSave:
     output_file_id: int | None = None
     error: ProcessingError | None = None
     output_probe: MediaProbe | None = None
+    artifact: MediaArtifact | None = field(default=None, compare=False, repr=False)
+    failure_probe: MediaProbe | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         ObjectId(self.processing_id)

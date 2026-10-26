@@ -326,14 +326,38 @@ class CaptureProcessingSaves:
         held = await self._resolve_owner(held)
         actual = held.command
         if isinstance(actual, CheckResultSave) and (actual.media.error is not None or actual.media.issues):
-            record_error(actual.media.error or actual.media.issues[0], stage="capture.media_check",
-                context={"action_id": held.action_id, "processing_id": actual.processing_id},
-                details={"issues": actual.media.issues, "source_probe": actual.source_probe},
-                state=held.diagnostic)
+            tool = None if actual.source_probe is None else actual.source_probe.tool_diagnostics
+            if tool is None or not tool.control_only or actual.media.issues:
+                record_error(actual.media.error or actual.media.issues[0], stage="capture.media_check",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"issues": actual.media.issues, "source_probe": actual.source_probe},
+                    state=held.diagnostic)
         elif isinstance(actual, RepairResultSave) and actual.error is not None:
-            record_error(actual.error, stage="capture.media_repair",
-                context={"action_id": held.action_id, "processing_id": actual.processing_id},
-                state=held.diagnostic)
+            tool = (actual.failure_probe.tool_diagnostics if actual.failure_probe is not None else
+                    actual.artifact.tool_diagnostics if actual.artifact is not None else None)
+            artifact = actual.artifact
+            control = tool is not None and tool.control_only
+            # 原输入探测已由 CHECK 或 START 消费；这里仅从保存事实派生修复失败。
+            # 缺少新工具事实的旧历史仍保留原消费行为。
+            source_failure = (artifact is None and actual.failure_probe is not None
+                and actual.failure_probe.error is not None and tool is not None)
+            if artifact is not None:
+                control |= artifact.postprocessing_stopped
+                if (artifact.observation.error is not None
+                        or artifact.checksum is not None and artifact.checksum.error is not None
+                        or artifact.synchronization is not None and artifact.synchronization.error is not None):
+                    control = False
+            if not control and not source_failure:
+                record_error(actual.error, stage="capture.media_repair",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"artifact": artifact, "failure_probe": actual.failure_probe},
+                    state=held.diagnostic)
+        elif isinstance(actual, RepairStart) and actual.source_probe is not None and actual.source_probe.error is not None:
+            probe = actual.source_probe
+            if probe.tool_diagnostics is None or not probe.tool_diagnostics.control_only:
+                record_error(probe.error, stage="capture.media_repair_probe",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"source_probe": probe}, state=held.diagnostic)
         try:
             outcome = await self.database.write(
                 lambda owned: getattr(self.repository, stage.value)(held.command, held.key, owned),

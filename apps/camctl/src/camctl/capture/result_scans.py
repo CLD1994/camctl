@@ -44,6 +44,7 @@ class PendingResultScan:
     #: 本轮主机不再读取；实际扫描是否完整仍由可靠末页单独表达。
     finished: bool = False
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    validation_diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     reading_context: ResultReadingContext = field(init=False)
 
     def __post_init__(self):
@@ -111,7 +112,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
             except DiagnosticsValidationError as error:
                 record_error(error, stage="capture.result_page_validation",
                     context={"ticket": pending.ticket, "page_no": pending.page_no},
-                    details={"outcome": page.outcome}, state=pending.diagnostic)
+                    details={"outcome": page.outcome}, state=pending.validation_diagnostic)
                 raise
             request = ResultPageSave(pending.ticket, pending.page_no, pending.cursor, validated, occurred_at)
             pending.saves.begin(request)

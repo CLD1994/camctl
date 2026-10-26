@@ -618,7 +618,9 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             state = (_INSPECTION_STATE.COMPLETED if metric.value is not None
                      else _INSPECTION_STATE.UNCONFIRMED)
         if result.ran and (result.error is not None or not isinstance(result.value, MediaProbe)
-                           or metric.value is None or result.value.error is not None):
+                           or metric.value is None or result.value.error is not None) and not (
+                isinstance(result.value, MediaProbe) and result.value.tool_diagnostics is not None
+                and result.value.tool_diagnostics.control_only):
             record_error(result.error or {"reason": metric.reason, "probe": result.value},
                 stage="capture.segment_probe",
                 context={"action_id": request.action_id, "inspection_id": ref.inspection_id,
