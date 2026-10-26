@@ -751,6 +751,7 @@ def session_capture_assembly(
     """
 
     from camctl.devices.start_entry import StartEntryCoordinator
+    from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
     from camctl.capture.preparation import RuntimePreparationCache
     from uuid import uuid4
     preparation_cache = RuntimePreparationCache() if preparation_cache is None else preparation_cache
