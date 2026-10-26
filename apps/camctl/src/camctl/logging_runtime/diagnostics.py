@@ -9,16 +9,16 @@ from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 import json
-from os import PathLike, getpid
+from os import PathLike
 import traceback
 
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord, admission_result_for
+from camctl.logging_runtime.formatting import log_metadata
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.operations.models import CallOutcome, ErrorValue
 from camctl.operations.process import RawToolOutcome
@@ -298,8 +298,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     target = _target.get()
     if target is None or (target.closed and not target.background):
         return state
-    metadata = {"level": "ERROR", "logged_at_utc": datetime.now(timezone.utc).isoformat(),
-                "pid": getpid()}
+    metadata = log_metadata(LogLevel.ERROR)
     try:
         document = _document(payload)
     except Exception as error:
@@ -321,7 +320,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         # 格式化失败仍持有已经排除媒体 stdout 的完整事实，不能截断。
         message = f"错误诊断格式化失败：{type(error).__name__}: {error}; diagnostic={document!r}"
         state._fallback_only = True
-    state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback)
+    state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback, structured=True)
     state._target = target
     state.status = DiagnosticStatus.HELD
     if target.background and (target.finished or target.closed):

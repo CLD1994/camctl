@@ -497,7 +497,7 @@ class FileChannel:
             level=_LEVEL_NAMES[record.level],
             pathname=__file__,
             lineno=0,
-            msg=record.message.rstrip("\n"),
+            msg=record.rendered_message().rstrip("\n"),
             args=(),
             exc_info=None,
         )

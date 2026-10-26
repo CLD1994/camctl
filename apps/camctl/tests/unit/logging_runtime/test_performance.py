@@ -13,7 +13,12 @@ from camctl.logging_runtime.service import LogChannel
 def _payload(channel):
     record = channel.slog.call_args.args[0]
     assert record.level is LogLevel.DEBUG
-    return json.loads(record.message.removeprefix("性能计时 "))
+    payload = json.loads(record.message)
+    assert payload.pop("level") == "DEBUG"
+    assert payload.pop("event") == "timing"
+    assert payload.pop("logged_at_utc").endswith("+00:00")
+    assert isinstance(payload.pop("pid"), int)
+    return payload
 
 
 def test_elapsed_time_and_original_action_are_delivered_without_file_access(monkeypatch):

@@ -8,6 +8,7 @@ import random
 import sys
 import threading
 from dataclasses import dataclass, field
+from os import getpid
 from typing import Callable
 
 import janus
@@ -17,6 +18,7 @@ from camctl.logging_runtime.admission import (
     decide_admission, record_drop,
 )
 from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.formatting import encode_record, utc_now
 
 __all__ = ["AdmissionResult", "ChannelError", "LogChannel", "LogRecord",
            "PendingLog", "admission_result_for"]
@@ -28,6 +30,18 @@ class LogRecord:
     message: str
     source: LogSource = LogSource.COROUTINE
     fallback: Callable[[str], bool | None] | None = field(default=None, compare=False, repr=False)
+    structured: bool = field(default=False, compare=False, repr=False)
+    _logged_at_utc: str = field(default_factory=utc_now, init=False, compare=False, repr=False)
+    _pid: int = field(default_factory=getpid, init=False, compare=False, repr=False)
+
+    def rendered_message(self) -> str:
+        if self.structured:
+            return self.message
+        try:
+            return encode_record(self.level, {"stage": "runtime", "message": self.message},
+                                 logged_at_utc=self._logged_at_utc, pid=self._pid)
+        except Exception:
+            return self.message
 
 
 @dataclass(frozen=True)
@@ -365,7 +379,7 @@ class LogChannel:
             return False
         self._fallback_state.active = True
         try:
-            written = (record.fallback or self._fallback)(record.message) is not False
+            written = (record.fallback or self._fallback)(record.rendered_message()) is not False
             if not written:
                 self._fallback_failed = True
             return written
