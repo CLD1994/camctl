@@ -996,7 +996,9 @@ async def _run_session(
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return fatal
             try:
-                decision = classify_work(await _run_work_facts(context))
+                # 数据库空闲后先交付已有后台轮次，再由关闭事务复核全部
+                # 责任；本地发现任务不能使等待它结束的收场入口永远跳过。
+                decision = classify_work(await _run_work_facts(context, include_local=False))
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
@@ -1257,8 +1259,9 @@ def _work_facts_query(context: SessionContext):
     return query
 
 
-async def _run_work_facts(context: SessionContext) -> WorkFacts:
-    query = _work_facts_query(context)
+async def _run_work_facts(context: SessionContext, *, include_local: bool = True) -> WorkFacts:
+    """预判可收场时读取数据库原责任，完整检查仍保留本地责任。"""
+    query = _work_facts_query(context) if include_local else context.facts_query
     return await context.database.read(
         lambda owned: query(owned.connection), description="会话工作事实")
 
