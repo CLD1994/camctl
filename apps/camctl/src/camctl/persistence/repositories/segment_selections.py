@@ -109,16 +109,19 @@ class _SelectionProof:
     event: object
 
 
+def is_segmented_result_policy(policy):
+    """按同一组已登记分段策略解释批次事实及仓储来源。"""
+    return policy in (
+        CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
+        CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
+    )
+
+
 def is_segmented_source(db, action_id):
     action = row_facts(db, "actions", action_id)
     if action is None or action["execution_spec_json"] is None:
         return False
-    return (
-        action["execution_spec_json"].get("result_policy") in (
-            CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
-            CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
-        )
-    )
+    return is_segmented_result_policy(action["execution_spec_json"].get("result_policy"))
 
 
 def _at(db, table, identity, transaction, owner):

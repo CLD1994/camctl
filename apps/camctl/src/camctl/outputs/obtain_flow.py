@@ -302,14 +302,15 @@ def _source_spec(action: Mapping) -> SourceSpec:
 
 async def _fix_pending_selections(
         runtime: ObtainRuntime, now: int) -> None:
-    """对每个待固定的选择计算快照并保存；来源未完成保持等待。"""
+    """先恢复原保存，再按来源直接事实推进选择；来源未完成保持等待。"""
     from camctl.outputs.definitions import read_excluded_output_ids, read_selection_request
 
     from camctl.persistence.repositories.segment_selections import (
         FixSegmentSelection,
         fix_segment_selection,
-        is_segmented_source,
+        is_segmented_result_policy,
     )
+    from camctl.persistence.repositories.outputs import _processing_completed_facts
 
     async def save_selection(identity, pending):
         async def save_and_apply():
@@ -334,16 +335,31 @@ async def _fix_pending_selections(
     for identity, pending in tuple(runtime.pending_segment_selections.items()):
         await save_selection(identity, pending)
     page = await runtime.discovery.rows(runtime.database, "selections", now,
-        "SELECT s.id,d.depends_on_action_id,d.action_id FROM obtain_source_selections s"
+        "SELECT s.id,d.depends_on_action_id,d.action_id,source.status,"
+        "json_extract(source.execution_spec_json,'$.result_policy'),"
+        "p.id,p.check_state,p.repair_state,p.discard_state FROM obtain_source_selections s"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
         " JOIN actions a ON a.id=d.action_id"
+        " LEFT JOIN actions source ON source.id=d.depends_on_action_id"
+        " LEFT JOIN recording_processing p ON p.action_id=source.id"
         " WHERE a.status=2 AND a.cancel_requested=0 AND a.source_resolution_state=2"
         " AND s.status=?", (int(_SELECTION_STATUS.PENDING),), identity="s.id")
-    for selection_id, member_id, action_id in page.items:
+    for (selection_id, member_id, action_id, source_status, result_policy,
+         processing_id, check_state, repair_state, discard_state) in page.items:
+        if is_segmented_result_policy(result_policy):
+            if source_status in (int(_ACTION_STATUS.PENDING), int(_ACTION_STATUS.RUNNING)):
+                continue
+            processing = None if processing_id is None else {
+                "check_state": check_state, "repair_state": repair_state, "discard_state": discard_state}
+            if not _processing_completed_facts(processing):
+                continue
+            request, key = FixSegmentSelection(int(selection_id), now), new_operation_key()
+            pending = PendingSegmentSelection(request, key)
+            runtime.pending_segment_selections[int(selection_id)] = pending
+            await save_selection(int(selection_id), pending)
+            continue
         def inputs(owned):
             connection = owned.connection
-            if is_segmented_source(connection, int(member_id)):
-                return None
             action = _action_facts(connection, action_id)
             mode, requested = read_selection_request(
                 parse_exact_json(action["execution_spec_json"]),
@@ -352,12 +368,6 @@ async def _fix_pending_selections(
                 requested_output_ids=requested)
             return action, mode, requested, facts
         inputs_value = await runtime.database.read(inputs)
-        if inputs_value is None:
-            request, key = FixSegmentSelection(int(selection_id), now), new_operation_key()
-            pending = PendingSegmentSelection(request, key)
-            runtime.pending_segment_selections[int(selection_id)] = pending
-            await save_selection(int(selection_id), pending)
-            continue
         action, mode, requested, facts = inputs_value
         input_fields = parse_exact_json(action["input_fields_json"])
         snapshot = select_outputs(
