@@ -1,5 +1,7 @@
 # 软件验证与实施顺序
 
+[关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
+
 [设计入口](README.md) · [实现总览](implementation.md)
 
 本页定义 camctl 实现的测试分工和跨职责验证要求。各业务专题中的决策表及验收场景仍须逐项落实。具体阶段与门禁见[第一版实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)，接口、测试文件、失败用例和执行步骤见其引用的[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)及[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md)。进入代码实施前核对所需前置交付和实际代码。
