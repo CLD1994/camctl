@@ -1373,10 +1373,13 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
                 "exception": exception_diagnostic(error),
             })
         try:
-            if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
-                await _advance_report_flow(context, flow)
-            else:
-                await flow(context)
+            from camctl.logging_runtime.diagnostics import diagnostic_scope
+
+            async with diagnostic_scope():
+                if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
+                    await _advance_report_flow(context, flow)
+                else:
+                    await flow(context)
         except ClockBecameUntrusted:
             raise
         except (DirectoryBindingError, DeviceConfigurationError):

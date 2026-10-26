@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.logging_runtime.diagnostics import diagnostic_scope
 
 
 class FlowWakeup(Enum):
@@ -69,7 +70,8 @@ class BackgroundFlow:
 
     async def _run(self, context):
         try:
-            result = await self._flow(context)
+            async with diagnostic_scope():
+                result = await self._flow(context)
             return _FlowResult(wakeup_required=result is not FlowWakeup.IDLE)
         except BaseException as error:
             # shield 不传递内部取消异常；把原异常作为结果保存到消费时。
