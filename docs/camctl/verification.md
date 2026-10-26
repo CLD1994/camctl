@@ -16,6 +16,8 @@
 
 Linux 开发容器、Python 3.11.17 下，新增九项定向单元通过，覆盖有无设备端口、有无分页、原文件信息读取错误、正常成功但未全的重试、3 秒间隔边界、在途尝试、原归属及文件登记错误保持。测试使用受接口约束的数据库、仓储和文件登记替身，保留真实结果解码与页校验，不连接真实数据库或设备。最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2222 项通过，35.62 秒，退出 0**；独立审查通过。原始日志保存在 `.local/verification/results-closed-recovery-20261026/`。本次未运行集成测试，真实设备恢复由用户验证。
 
+修复提交 `e32d1996` 已安装到现有真机验证环境。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件三方一致，依赖检查通过；主代理另行逐字节核对全部生产 Python 文件和当前索引。状态库、配置、两份能力说明摘要及依赖版本保持，host 与客户端安装版本保留。部署证据见 `.local/deployments/20261026-results-closed/`，部署未启动实际会话或连接原数据库。
+
 ## 延时摄影共享结果清单的并发修复（2026-10-26）
 
 [修复计划](../superpowers/plans/2026-10-26-timelapse-scan-concurrency.md)针对共享清单的异步遍历：延时摄影处理器先同步固定扫描条目，再异步查询归属，保持跨设备并发与原页保存责任。相邻原申请恢复循环已经固定条目后再等待；新增回归通过公开 `capture_handler("camera_timelapse")`、受接口约束的替身及明确同步点控制交错。
