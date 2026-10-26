@@ -1,4 +1,5 @@
 #include "camctl_host.h"
+#include "demo_stop.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -17,7 +18,7 @@ static void usage(FILE *stream) {
         "                 [--config <camctl配置路径>] [--initial-plan <计划路径>]\n"
         "                 [--retry-limit <次数>] [--retry-delay-ms <毫秒>]\n"
         "省略路径时使用运行账户 home 下的 .camctl；先安装 CLI 并执行 camctl init。\n"
-        "终端命令：submit <绝对路径>、claim、logs、help。路径保留空格，不加引号。\n",
+        "终端命令：submit <绝对路径>、claim、logs、help、quit、exit。路径保留空格，不加引号。\n",
         stream);
 }
 static int number(const char *text, uint32_t *value) {
@@ -138,11 +139,17 @@ int main(int argc, char **argv) {
         return 1;
     }
     setvbuf(stdout, NULL, _IOLBF, 0);
+    static demo_stop stop;
+    if (demo_stop_prepare(&stop)) {
+        fprintf(stderr, "准备退出信号失败：%s\n", strerror(errno));
+        return 1;
+    }
     if (camctl_host_register_motor_control_callback(motor) || camctl_host_init(&config, initial)) {
         fprintf(stderr, "模块初始化失败：%s\n", strerror(errno));
         return 1;
     }
-    puts("模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。");
+    demo_stop_start(&stop);
+    puts("模块初始化完成；可输入 submit <绝对路径>、claim、logs、help、quit 或 exit。");
     char line[CAMCTL_HOST_PATH_MAX + 32];
     while (fgets(line, sizeof(line), stdin)) {
         size_t n = strlen(line);
@@ -156,6 +163,7 @@ int main(int argc, char **argv) {
         line[--n] = 0;
         if (n && line[n - 1] == '\r')
             line[n - 1] = 0;
+        (void)demo_stop_command(&stop, line);
         if (!strncmp(line, "submit ", 7)) {
             if (camctl_host_submit(line + 7))
                 printf("输入处理未确认完成：%s；请保留计划文件并查看日志。\n", strerror(errno));
@@ -171,7 +179,7 @@ int main(int argc, char **argv) {
         else if (*line)
             puts("未知命令；输入 help 查看用法。");
     }
-    puts("终端输入已结束，模块继续运行；外部终止进程可结束本次演示。");
+    puts("终端输入已结束，模块继续运行；SIGTERM 会完成 camctl 收场后退出。");
     for (;;)
         pause();
 }

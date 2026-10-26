@@ -30,7 +30,7 @@ static void reset_attempt(host_child *c) {
     c->length = c->stderr_length = 0;
     c->output_bytes_seen = c->stderr_bytes_seen = 0;
     c->overflow = c->io_error = c->stderr_overflow = c->stderr_io_error = false;
-    c->ended = c->reaped = c->wait_fault = false;
+    c->ended = c->reaped = c->wait_fault = c->stop_requested = false;
     c->termination = HOST_EXIT_UNKNOWN;
     c->exit_code = 0;
     c->started = false;
@@ -296,6 +296,32 @@ static bool group_identity(host_child *c, host_child_log log, void *context) {
         return false;
     }
     return true;
+}
+void host_child_request_stop(host_child *c, host_child_log log, void *context) {
+    if (!c->pid || c->ended || c->reaped || c->wait_fault || c->stop_requested)
+        return;
+    siginfo_t info = {0};
+    if (waitid(P_PID, (id_t)c->pid, &info, WEXITED | WNOHANG | WNOWAIT)) {
+        int error = errno;
+        if (error == ECHILD)
+            identity_lost(c, log, context, error);
+        else if (error != EINTR)
+            event(log, context, "stop_wait_unknown", strerror(error));
+        return;
+    }
+    if (info.si_pid) {
+        if (info.si_pid != c->pid)
+            identity_lost(c, log, context, ESTALE);
+        return;
+    }
+    if (!group_identity(c, log, context))
+        return;
+    if (kill(c->pid, SIGINT)) {
+        event(log, context, "stop_request_failed", strerror(errno));
+        return;
+    }
+    c->stop_requested = true;
+    event(log, context, "stop_requested", "SIGINT sent; child and group settlement pending");
 }
 static void settle(host_child *c, host_child_log log, void *context) {
     if (!observe_exit(c, log, context) || !group_identity(c, log, context))

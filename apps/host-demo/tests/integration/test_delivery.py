@@ -180,6 +180,7 @@ class DeliveryIntegration(unittest.TestCase):
         example = prefix / 'share/doc/camctl_host/examples/demo.c'
         executable = build / 'independent-example'
         self.run_command(['cc', '-std=c11', '-D_GNU_SOURCE', str(example),
+                          str(example.with_name('demo_stop.c')),
                           f'-I{prefix}/include', str(prefix / 'lib/libcamctl_host.a'),
                           '-pthread', '-o', str(executable)], build)
         self.run_command([str(executable), '--help'], build)

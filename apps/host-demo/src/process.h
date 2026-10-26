@@ -14,7 +14,7 @@ typedef struct {
     char *output;
     size_t length, capacity;
     uint64_t output_bytes_seen;
-    bool overflow, io_error, ended, reaped, wait_fault;
+    bool overflow, io_error, ended, reaped, wait_fault, stop_requested;
     char *stderr_output;
     size_t stderr_length, stderr_capacity;
     uint64_t stderr_bytes_seen;
@@ -48,6 +48,7 @@ void host_child_init(host_child *c, char *output, size_t output_capacity, char *
 int host_child_spawn(host_child *c, const camctl_host_config *config, host_command command,
                      const char *plan);
 void host_child_collect(host_child *c, host_child_log log, void *context);
+void host_child_request_stop(host_child *c, host_child_log log, void *context);
 bool host_child_done(const host_child *c);
 int host_pipe(int fds[2]);
 int host_child_prepare_notifications(host_child *c);

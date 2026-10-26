@@ -95,7 +95,7 @@ static void *logger_main(void *arg) {
     for (;;) {
         while (!l->stop && !l->queue.head)
             pthread_cond_wait(&l->ready, &l->mutex);
-        if (l->stop)
+        if (l->stop && (!l->drain || !l->queue.head))
             break;
         host_log_record *r = host_log_queue_pop(&l->queue);
         pthread_mutex_unlock(&l->mutex);
@@ -144,6 +144,21 @@ void host_logger_abort(host_logger *l) {
     pthread_join(l->thread, NULL);
     pthread_cond_destroy(&l->ready);
     pthread_mutex_destroy(&l->mutex);
+}
+int host_logger_close(host_logger *l) {
+    if (l->closed)
+        return 0;
+    pthread_mutex_lock(&l->mutex);
+    l->drain = l->stop = true;
+    pthread_cond_signal(&l->ready);
+    pthread_mutex_unlock(&l->mutex);
+    int error = pthread_join(l->thread, NULL);
+    if (error)
+        return error;
+    pthread_cond_destroy(&l->ready);
+    pthread_mutex_destroy(&l->mutex);
+    l->closed = true;
+    return 0;
 }
 void host_log(host_logger *l, const char *format, ...) {
     size_t cap = l->config->log_record_capacity;

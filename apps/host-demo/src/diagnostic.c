@@ -313,7 +313,7 @@ static void *diagnostic_main(void *context) {
     for (;;) {
         while (!writer->stop && !writer->count)
             pthread_cond_wait(&writer->ready, &writer->mutex);
-        if (writer->stop)
+        if (writer->stop && (!writer->drain || !writer->count))
             break;
         host_child *child = writer->items[writer->head];
         writer->items[writer->head] = NULL;
@@ -395,6 +395,21 @@ void host_diagnostic_abort(host_diagnostic_writer *writer) {
     pthread_join(writer->thread, NULL);
     pthread_cond_destroy(&writer->ready);
     pthread_mutex_destroy(&writer->mutex);
+}
+int host_diagnostic_close(host_diagnostic_writer *writer) {
+    if (writer->closed)
+        return 0;
+    pthread_mutex_lock(&writer->mutex);
+    writer->drain = writer->stop = true;
+    pthread_cond_signal(&writer->ready);
+    pthread_mutex_unlock(&writer->mutex);
+    int error = pthread_join(writer->thread, NULL);
+    if (error)
+        return error;
+    pthread_cond_destroy(&writer->ready);
+    pthread_mutex_destroy(&writer->mutex);
+    writer->closed = true;
+    return 0;
 }
 
 void host_diagnostic_request(host_diagnostic_writer *writer, host_child *child) {

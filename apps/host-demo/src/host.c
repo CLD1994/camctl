@@ -24,6 +24,8 @@ typedef struct host_submission {
     int error;
 } host_submission;
 
+typedef enum { HOST_RUNNING, HOST_STOPPING, HOST_STOPPED } host_lifecycle;
+
 typedef struct {
     camctl_host_config config;
     char paths[6][CAMCTL_HOST_PATH_MAX + 1];
@@ -34,6 +36,10 @@ typedef struct {
     host_diagnostic_writer diagnostics;
     pthread_mutex_t inputs_mutex, claim_mutex;
     pthread_t worker;
+    host_lifecycle lifecycle; /* instance_mutex 同时保护借用、受理和启动。 */
+    size_t api_users;
+    bool stop_joining;
+    bool worker_joined, callback_joined;
     int wake[2];
     uint64_t next_id, next_attempt_id;
     bool clock_failed;
@@ -43,19 +49,47 @@ typedef struct {
     pthread_cond_t callback_ready;
     pthread_t callback_thread;
     camctl_host_motor_control_callback motor;
-    bool callback_stop;
+    bool callback_stop, callback_active;
     char *notification_bytes;
     size_t notification_offset, notification_length;
     int runtime_error; /* inputs_mutex 保护；无法继续启动时拒绝新路径。 */
     int submit_start_error; /* 工作线程保存当前提交最后一次明确的启动错误。 */
 } host;
 static pthread_mutex_t instance_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t instance_ready = PTHREAD_COND_INITIALIZER;
 static host *instance;
 static host_callbacks registrations;
+/* 身份在线程局部析构期间仍保留，且不比较已经 join 的线程标识。 */
+static _Thread_local bool module_thread;
 static const char *command_name(host_command c) { return c == HOST_RUN ? "run" : "submit"; }
 static int failure(int e) {
     errno = e;
     return -1;
+}
+static host *borrow_instance(void) {
+    pthread_mutex_lock(&instance_mutex);
+    host *h = instance;
+    int error = !h ? ENODEV : h->lifecycle != HOST_RUNNING ? ECANCELED : 0;
+    if (!error)
+        h->api_users++;
+    pthread_mutex_unlock(&instance_mutex);
+    if (error) {
+        errno = error;
+        return NULL;
+    }
+    return h;
+}
+static void release_instance(host *h) {
+    pthread_mutex_lock(&instance_mutex);
+    h->api_users--;
+    pthread_cond_broadcast(&instance_ready);
+    pthread_mutex_unlock(&instance_mutex);
+}
+static bool stopping(host *h) {
+    pthread_mutex_lock(&instance_mutex);
+    bool result = h->lifecycle != HOST_RUNNING;
+    pthread_mutex_unlock(&instance_mutex);
+    return result;
 }
 int camctl_host_register_motor_control_callback(camctl_host_motor_control_callback callback) {
     pthread_mutex_lock(&instance_mutex);
@@ -69,6 +103,7 @@ static void wake_worker(host *h) {
         host_log(&h->logger, "worker_wake_failed errno=%d", errno);
 }
 static void *callback_main(void *p) {
+    module_thread = true;
     host *h = p;
     pthread_mutex_lock(&h->callback_mutex);
     for (;;) {
@@ -78,10 +113,13 @@ static void *callback_main(void *p) {
             break;
         host_notification v;
         host_callback_queue_pop(&h->callbacks, &v);
+        h->callback_active = true;
         pthread_mutex_unlock(&h->callback_mutex);
         wake_worker(h);
         h->motor(v.position);
         pthread_mutex_lock(&h->callback_mutex);
+        h->callback_active = false;
+        wake_worker(h);
     }
     pthread_mutex_unlock(&h->callback_mutex);
     return NULL;
@@ -187,10 +225,18 @@ static void finish_submit(host *h, int error) {
     finish_submit_locked(h, error);
     pthread_mutex_unlock(&h->inputs_mutex);
 }
-static void fail_submissions(host *h) {
+static void fail_unstarted_submissions(host *h, int error) {
     pthread_mutex_lock(&h->inputs_mutex);
-    while (h->inputs.count)
-        finish_submit_locked(h, h->runtime_error);
+    host_child *c = &h->children[HOST_SUBMIT];
+    bool active = c->pid || c->submit_completion_pending;
+    size_t keep = active && h->inputs.count ? 1 : 0;
+    for (size_t i = keep; i < h->inputs.count; i++) {
+        host_input *input = &h->inputs.items[(h->inputs.head + i) % h->inputs.capacity];
+        input->submission->error = error;
+        input->submission->done = true;
+        pthread_cond_signal(&input->submission->ready);
+    }
+    h->inputs.count = keep;
     pthread_mutex_unlock(&h->inputs_mutex);
 }
 static void collect(host *h, host_command command) {
@@ -240,7 +286,7 @@ static void complete_diagnostic_submits(host *h) {
     c->submit_completion_pending = false;
     finish_submit(h, error);
 }
-static void launch(host *h, host_command command, uint64_t now) {
+static void launch_locked(host *h, host_command command, uint64_t now) {
     if (h->clock_failed)
         return;
     host_child *c = &h->children[command];
@@ -327,7 +373,36 @@ static void launch(host *h, host_command command, uint64_t now) {
                  c->call_id, c->attempt_id, command_name(command), (long)c->pid);
     }
 }
+static void launch(host *h, host_command command, uint64_t now) {
+    /* 停止状态转换不能插入最终资格检查与实际 spawn 之间。 */
+    pthread_mutex_lock(&instance_mutex);
+    if (h->lifecycle == HOST_RUNNING && !h->runtime_error)
+        launch_locked(h, command, now);
+    pthread_mutex_unlock(&instance_mutex);
+}
+static bool stop_drained(host *h) {
+    for (int i = 0; i < 2; i++)
+        if (h->children[i].pid || host_diagnostic_busy(&h->diagnostics, &h->children[i]))
+            return false;
+    pthread_mutex_lock(&h->inputs_mutex);
+    bool inputs_done = !h->inputs.count;
+    pthread_mutex_unlock(&h->inputs_mutex);
+    if (!inputs_done)
+        return false;
+    if (h->motor) {
+        pthread_mutex_lock(&h->callback_mutex);
+        bool callbacks_done = !h->callbacks.length && !h->callback_active;
+        if (callbacks_done) {
+            h->callback_stop = true;
+            pthread_cond_signal(&h->callback_ready);
+        }
+        pthread_mutex_unlock(&h->callback_mutex);
+        return callbacks_done;
+    }
+    return true;
+}
 static void *worker_main(void *p) {
+    module_thread = true;
     host *h = p;
     /* init发布实例后才允许子进程产生回调，重入入口可看见完整实例。 */
     pthread_mutex_lock(&instance_mutex);
@@ -338,11 +413,20 @@ static void *worker_main(void *p) {
         collect(h, HOST_SUBMIT);
         host_diagnostic_dispatch_pending(&h->diagnostics, h->children);
         complete_diagnostic_submits(h);
-        if (!h->clock_failed) {
+        if (stopping(h)) {
+            fail_unstarted_submissions(h, ECANCELED);
+            for (int i = 0; i < 2; i++) {
+                child_log_context ctx = {h, &h->children[i], (host_command)i};
+                host_child_request_stop(&h->children[i], child_log, &ctx);
+            }
+            if (stop_drained(h)) {
+                return NULL;
+            }
+        } else if (!h->clock_failed && !h->runtime_error) {
             launch(h, HOST_RUN, now);
             launch(h, HOST_SUBMIT, now);
         } else
-            fail_submissions(h);
+            fail_unstarted_submissions(h, h->runtime_error);
         struct pollfd fds[6];
         nfds_t n = 1;
         fds[0] = (struct pollfd){h->wake[0], POLLIN, 0};
@@ -359,10 +443,12 @@ static void *worker_main(void *p) {
             pthread_mutex_lock(&h->inputs_mutex);
             h->runtime_error = e;
             pthread_mutex_unlock(&h->inputs_mutex);
-            fail_submissions(h);
+            fail_unstarted_submissions(h, e);
             host_log(&h->logger, "poll_failed errno=%d", e);
-            /* 保留进程占位，避免错误循环；该线程停止，公开领取仍可工作。 */
-            return NULL;
+            /* 事件等待失效也必须继续收取原调用；不放弃在管进程或真实结果。
+             * 空 poll 沿用原轮询预算，避免故障描述符导致立即反复返回。 */
+            (void)poll(NULL, 0, 50);
+            continue;
         }
         if (fds[0].revents & POLLIN) {
             char bytes[256];
@@ -520,31 +606,36 @@ unlock:
     return failure(e);
 }
 int camctl_host_submit(const char *path) {
-    pthread_mutex_lock(&instance_mutex);
-    host *h = instance;
-    pthread_mutex_unlock(&instance_mutex);
+    host *h = borrow_instance();
     if (!h)
-        return failure(ENODEV);
+        return -1;
     host_submission submission = {0};
     int e = pthread_cond_init(&submission.ready, NULL);
-    if (e)
+    if (e) {
+        release_instance(h);
         return failure(e);
+    }
     /* 入队后，完成记录必须保持有效；取消在工作线程释放该记录后生效。 */
     int cancel_state;
     e = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
     if (e) {
         pthread_cond_destroy(&submission.ready);
+        release_instance(h);
         return failure(e);
     }
+    pthread_mutex_lock(&instance_mutex);
     pthread_mutex_lock(&h->inputs_mutex);
     uint64_t id = h->next_id;
-    e = h->runtime_error ? h->runtime_error : host_inputs_push(&h->inputs, path, id, &submission);
+    e = h->lifecycle != HOST_RUNNING ? ECANCELED : h->runtime_error ? h->runtime_error
+        : host_inputs_push(&h->inputs, path, id, &submission);
     if (!e)
         h->next_id++;
     pthread_mutex_unlock(&h->inputs_mutex);
+    pthread_mutex_unlock(&instance_mutex);
     if (e) {
         host_log(&h->logger, "submit rejected errno=%d", e);
         pthread_cond_destroy(&submission.ready);
+        release_instance(h);
         pthread_setcancelstate(cancel_state, NULL);
         pthread_testcancel();
         return failure(e);
@@ -560,19 +651,134 @@ int camctl_host_submit(const char *path) {
     e = submission.error;
     pthread_mutex_unlock(&h->inputs_mutex);
     pthread_cond_destroy(&submission.ready);
+    release_instance(h);
     pthread_setcancelstate(cancel_state, NULL);
     pthread_testcancel();
     return e ? failure(e) : 0;
 }
 void camctl_host_claim(void) {
-    pthread_mutex_lock(&instance_mutex);
-    host *h = instance;
-    pthread_mutex_unlock(&instance_mutex);
-    if (!h) {
-        errno = ENODEV;
+    host *h = borrow_instance();
+    if (!h)
+        return;
+    int cancel_state;
+    int error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    if (error) {
+        release_instance(h);
+        errno = error;
         return;
     }
     pthread_mutex_lock(&h->claim_mutex);
     host_claim_posix(&h->config, &h->logger);
     pthread_mutex_unlock(&h->claim_mutex);
+    release_instance(h);
+    pthread_setcancelstate(cancel_state, NULL);
+    pthread_testcancel();
+}
+
+static int stop_result(int error, int cancel_state) {
+    pthread_setcancelstate(cancel_state, NULL);
+    pthread_testcancel();
+    return error ? failure(error) : 0;
+}
+static void release_storage(host *h) {
+    if (h->motor) {
+        pthread_cond_destroy(&h->callback_ready);
+        pthread_mutex_destroy(&h->callback_mutex);
+        host_notification_destroy(&h->notification);
+        free(h->callbacks.items);
+        h->callbacks.items = NULL;
+        free(h->notification_bytes);
+        h->notification_bytes = NULL;
+    }
+    for (int i = 0; i < 2; i++) {
+        host_child_close_notifications(&h->children[i]);
+        free(h->children[i].output);
+        h->children[i].output = NULL;
+        free(h->children[i].stderr_output);
+        h->children[i].stderr_output = NULL;
+        host_group_scan_reset(&h->children[i].scan);
+    }
+    close(h->wake[0]);
+    close(h->wake[1]);
+    h->wake[0] = h->wake[1] = -1;
+    free(h->inputs.items);
+    h->inputs.items = NULL;
+    pthread_mutex_destroy(&h->inputs_mutex);
+    pthread_mutex_destroy(&h->claim_mutex);
+}
+int camctl_host_stop(void) {
+    int cancel_state;
+    int error = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cancel_state);
+    if (error)
+        return failure(error);
+    pthread_mutex_lock(&instance_mutex);
+    host *h = instance;
+    if (!h) {
+        pthread_mutex_unlock(&instance_mutex);
+        return stop_result(ENODEV, cancel_state);
+    }
+    for (;;) {
+        if (h->lifecycle == HOST_STOPPED) {
+            pthread_mutex_unlock(&instance_mutex);
+            return stop_result(0, cancel_state);
+        }
+        if (module_thread) {
+            pthread_mutex_unlock(&instance_mutex);
+            return stop_result(EDEADLK, cancel_state);
+        }
+        if (!h->stop_joining)
+            break;
+        error = pthread_cond_wait(&instance_ready, &instance_mutex);
+        if (error) {
+            pthread_mutex_unlock(&instance_mutex);
+            return stop_result(error, cancel_state);
+        }
+    }
+    h->lifecycle = HOST_STOPPING;
+    h->stop_joining = true;
+    pthread_mutex_unlock(&instance_mutex);
+    wake_worker(h);
+
+    if (!h->worker_joined) {
+        error = pthread_join(h->worker, NULL);
+        if (error)
+            goto failed;
+        pthread_mutex_lock(&instance_mutex);
+        h->worker_joined = true;
+        pthread_mutex_unlock(&instance_mutex);
+    }
+    if (h->motor && !h->callback_joined) {
+        error = pthread_join(h->callback_thread, NULL);
+        if (error)
+            goto failed;
+        pthread_mutex_lock(&instance_mutex);
+        h->callback_joined = true;
+        pthread_mutex_unlock(&instance_mutex);
+    }
+    pthread_mutex_lock(&instance_mutex);
+    while (h->api_users && !error)
+        error = pthread_cond_wait(&instance_ready, &instance_mutex);
+    pthread_mutex_unlock(&instance_mutex);
+    if (error)
+        goto failed;
+    error = host_diagnostic_close(&h->diagnostics);
+    if (error)
+        goto failed;
+    error = host_logger_close(&h->logger);
+    if (error)
+        goto failed;
+    release_storage(h);
+    pthread_mutex_lock(&instance_mutex);
+    h->lifecycle = HOST_STOPPED;
+    h->stop_joining = false;
+    pthread_cond_broadcast(&instance_ready);
+    pthread_mutex_unlock(&instance_mutex);
+    return stop_result(0, cancel_state);
+
+failed:
+    pthread_mutex_lock(&instance_mutex);
+    h->stop_joining = false;
+    pthread_cond_broadcast(&instance_ready);
+    pthread_mutex_unlock(&instance_mutex);
+    return stop_result(error, cancel_state);
 }

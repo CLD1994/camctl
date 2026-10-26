@@ -14,7 +14,8 @@ static const char *stderr_data;
 static size_t position, stderr_position, stderr_size;
 static bool exited, lost, eof, stderr_stays_open;
 static int close_count, wait_code, reaps, signals, kill_error, scans, observations;
-static int wait_error, reap_error;
+static int wait_error, reap_error, stop_signals, group_checks, group_error;
+static pid_t observed_pid;
 static pid_t current_group;
 static host_group_status group_state;
 int __wrap_waitid(idtype_t type, id_t pid, siginfo_t *info, int options) {
@@ -25,7 +26,7 @@ int __wrap_waitid(idtype_t type, id_t pid, siginfo_t *info, int options) {
     if (lost || wait_error) { errno = lost ? ECHILD : wait_error; return -1; }
     *info = (siginfo_t){0};
     if (exited) {
-        info->si_pid = 123;
+        info->si_pid = observed_pid;
         info->si_code = wait_code;
         info->si_status = 0;
     }
@@ -42,13 +43,24 @@ pid_t __wrap_waitpid(pid_t pid, int *status, int options) {
 }
 pid_t __wrap_getpgid(pid_t pid) {
     assert_int_equal(pid, 123);
+    group_checks++;
+    if (group_error) { errno = group_error; return -1; }
     return current_group;
 }
 int __wrap_kill(pid_t pid, int signal) {
-    assert_int_equal(pid, -123);
-    assert_int_equal(signal, SIGKILL);
-    assert_true(exited);
     assert_int_equal(reaps, 0);
+    if (signal == SIGINT) {
+        assert_int_equal(pid, 123);
+        assert_false(exited);
+        assert_int_equal(current_group, 123);
+        assert_true(observations > 0);
+        assert_true(group_checks > 0);
+        stop_signals++;
+    } else {
+        assert_int_equal(pid, -123);
+        assert_int_equal(signal, SIGKILL);
+        assert_true(exited);
+    }
     signals++;
     if (kill_error) { errno = kill_error; return -1; }
     return 0;
@@ -103,7 +115,8 @@ static void prepare(host_child *c, char *buffer, size_t length) {
     stderr_data = "";
     exited = lost = eof = stderr_stays_open = false;
     close_count = reaps = signals = kill_error = scans = observations = 0;
-    wait_error = reap_error = 0; wait_code = CLD_EXITED;
+    wait_error = reap_error = stop_signals = group_checks = group_error = 0;
+    wait_code = CLD_EXITED; observed_pid = 123;
     current_group = 123; group_state = HOST_GROUP_COMPLETE;
 }
 static void final_message_before_exit(void **p) {
@@ -217,6 +230,123 @@ static void final_reap_failure_keeps_call(void **p) {
     exited = eof = true; reap_error = ECHILD; host_child_collect(&c, NULL, NULL);
     assert_false(host_child_done(&c)); assert_true(c.wait_fault); assert_int_equal(signals, 0);
 }
+static void stop_without_child_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    c.pid = c.pgid = 0;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_int_equal(observations, 0);
+    assert_int_equal(group_checks, 0); assert_int_equal(signals, 0);
+}
+static void stop_after_observed_exit_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    c.ended = true;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_int_equal(observations, 0);
+    assert_int_equal(signals, 0);
+}
+static void stop_after_reap_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    c.reaped = true;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_int_equal(observations, 0);
+    assert_int_equal(signals, 0);
+}
+static void stop_after_identity_loss_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    c.wait_fault = true;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_int_equal(observations, 0);
+    assert_int_equal(signals, 0);
+}
+static void stop_with_exit_record_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    exited = true;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_false(c.reaped);
+    assert_int_equal(observations, 1); assert_int_equal(group_checks, 0);
+    assert_int_equal(signals, 0); assert_int_equal(reaps, 0);
+}
+static void stop_without_child_record_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    lost = true;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.wait_fault); assert_false(c.stop_requested);
+    assert_int_equal(signals, 0); assert_int_equal(reaps, 0);
+}
+static void stop_with_different_child_record_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    exited = true; observed_pid = 456;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.wait_fault); assert_false(c.stop_requested);
+    assert_int_equal(signals, 0); assert_int_equal(reaps, 0);
+}
+static void stop_with_unknown_wait_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    wait_error = EINVAL;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.wait_fault); assert_false(c.stop_requested);
+    assert_int_equal(signals, 0); assert_int_equal(group_checks, 0);
+}
+static void stop_with_changed_group_has_no_signal(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    current_group = 789;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.wait_fault); assert_false(c.stop_requested);
+    assert_int_equal(signals, 0); assert_int_equal(reaps, 0);
+}
+static void stop_with_unknown_group_retries(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    group_error = EACCES;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.wait_fault); assert_false(c.stop_requested); assert_int_equal(signals, 0);
+    group_error = 0; host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.stop_requested); assert_int_equal(stop_signals, 1);
+}
+static void stop_signals_only_child_once(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    host_child_request_stop(&c, NULL, NULL);
+    host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.stop_requested); assert_false(c.ended); assert_false(c.reaped);
+    assert_int_equal(stop_signals, 1); assert_int_equal(signals, 1);
+    assert_int_equal(observations, 1); assert_int_equal(group_checks, 1);
+    assert_int_equal(scans, 0); assert_int_equal(reaps, 0); assert_false(host_child_done(&c));
+}
+static void stop_after_interrupted_observation_retries(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    wait_error = EINTR;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.wait_fault); assert_false(c.stop_requested); assert_int_equal(signals, 0);
+    wait_error = 0; host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.stop_requested); assert_int_equal(stop_signals, 1);
+}
+static void stop_after_signal_failure_retries(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    kill_error = EPERM;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_false(host_child_done(&c));
+    kill_error = 0; host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.stop_requested); assert_int_equal(stop_signals, 2);
+    assert_int_equal(reaps, 0);
+}
+static void stop_after_missing_signal_target_keeps_call(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    kill_error = ESRCH;
+    host_child_request_stop(&c, NULL, NULL);
+    assert_false(c.stop_requested); assert_false(c.ended); assert_false(c.reaped);
+    assert_false(host_child_done(&c)); assert_int_equal(reaps, 0);
+    kill_error = 0; host_child_request_stop(&c, NULL, NULL);
+    assert_true(c.stop_requested); assert_int_equal(stop_signals, 2);
+}
+static void stop_still_collects_group_after_exit(void **p) {
+    (void)p; char buffer[128]; host_child c; prepare(&c, buffer, sizeof(buffer));
+    host_child_request_stop(&c, NULL, NULL);
+    exited = eof = true; group_state = HOST_GROUP_LIVE;
+    host_child_collect(&c, NULL, NULL);
+    assert_false(host_child_done(&c)); assert_int_equal(stop_signals, 1);
+    assert_int_equal(signals, 2); assert_int_equal(reaps, 0);
+    group_state = HOST_GROUP_COMPLETE; host_child_collect(&c, NULL, NULL);
+    assert_true(host_child_done(&c)); assert_int_equal(reaps, 1);
+}
 int main(void) {
     const struct CMUnitTest t[] = {
         cmocka_unit_test(final_message_before_exit), cmocka_unit_test(overflow_drains),
@@ -227,6 +357,21 @@ int main(void) {
         cmocka_unit_test(test_kill_does_not_release_run_slot),
         cmocka_unit_test(unknown_scan_keeps_exit_record), cmocka_unit_test(early_reap_stops_group_signals),
         cmocka_unit_test(changed_group_never_signals_old_number), cmocka_unit_test(signal_failure_keeps_call),
-        cmocka_unit_test(interrupted_observation_retries), cmocka_unit_test(final_reap_failure_keeps_call)};
+        cmocka_unit_test(interrupted_observation_retries), cmocka_unit_test(final_reap_failure_keeps_call),
+        cmocka_unit_test(stop_without_child_has_no_signal),
+        cmocka_unit_test(stop_after_observed_exit_has_no_signal),
+        cmocka_unit_test(stop_after_reap_has_no_signal),
+        cmocka_unit_test(stop_after_identity_loss_has_no_signal),
+        cmocka_unit_test(stop_with_exit_record_has_no_signal),
+        cmocka_unit_test(stop_without_child_record_has_no_signal),
+        cmocka_unit_test(stop_with_different_child_record_has_no_signal),
+        cmocka_unit_test(stop_with_unknown_wait_has_no_signal),
+        cmocka_unit_test(stop_with_changed_group_has_no_signal),
+        cmocka_unit_test(stop_with_unknown_group_retries),
+        cmocka_unit_test(stop_signals_only_child_once),
+        cmocka_unit_test(stop_after_interrupted_observation_retries),
+        cmocka_unit_test(stop_after_signal_failure_retries),
+        cmocka_unit_test(stop_after_missing_signal_target_keeps_call),
+        cmocka_unit_test(stop_still_collects_group_after_exit)};
     return cmocka_run_group_tests(t, NULL, NULL);
 }

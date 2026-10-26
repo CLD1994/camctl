@@ -103,6 +103,13 @@ int camctl_host_submit(const char *plan_path);
 /* 主程序决定调用时机，同步逐文件移动并覆盖同名文件，诊断异步记录。 */
 void camctl_host_claim(void);
 
+/* 停止接收和启动新工作，请求所有在管 camctl 停止，等待原组、输出、通知、
+ * 回调和诊断收场后返回 0；不取消已经保存的计划，不设强杀活 camctl 的期限。
+ * 普通线程并发或重复调用共享同一次收场。未初始化为 ENODEV；工作/回调线程
+ * 调用为 EDEADLK。停止期间 submit/claim 为 ECANCELED，停止后不可重新 init。
+ * 不能从信号处理函数调用；用户回调或工具不返回时，本调用可能持续等待。 */
+int camctl_host_stop(void);
+
 #ifdef __cplusplus
 }
 #endif

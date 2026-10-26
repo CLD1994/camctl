@@ -92,8 +92,11 @@ static int launch(void) {
     host_child child;
     char output[64], stderr_output[64];
     host_child_init(&child, output, sizeof(output), stderr_output, sizeof(stderr_output));
+    child.stop_requested = true;
     child.notifications_enabled = notifications;
-    return host_child_spawn(&child, &cfg, command, NULL);
+    int error = host_child_spawn(&child, &cfg, command, NULL);
+    assert_false(child.stop_requested);
+    return error;
 }
 static void test_group_failure_never_executes_camctl(void **state) {
     (void)state;
