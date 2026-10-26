@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 
 from camctl.capture.handlers import CaptureRuntime, ListingPhase, ListingRound
+from camctl.capture.preparation import RuntimePreparationCache
 from camctl.capture.scope_closure import advance_ended_scope
 from camctl.operations.attempts import AttemptConfig, BeginAttemptResult, BeginDisposition, OperationKind, RunOutcome
 from camctl.devices.evidence import DeviceObservation
@@ -29,6 +30,7 @@ def _world(mocker, *, old_scope=True, error=None, finalized_event_id=None):
         "scheduled_at": 1_000_000, "max_delay_ms": 3000}
     runtime.action.side_effect = lambda identity: dict(old if identity == 21 else trigger)
     runtime.prepare_lead_s = Decimal("10")
+    runtime.preparation_cache = RuntimePreparationCache()
     runtime.wall_us = mocker.Mock(return_value=1_000_000)
     runtime.binding_check = None
     runtime.pending_result_scans = {}
@@ -125,6 +127,18 @@ async def test_no_ended_scope_continues_preparation_without_new_attempt(mocker):
 
     runtime.operations.begin_attempt.assert_not_called()
     read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_session_setup_allows_scope_closure_in_the_extra_preparation_period(mocker):
+    runtime, _, trigger, _, _, _, _ = _world(mocker, old_scope=False)
+    trigger["driver_id"] = "dji-osmo360-ii"
+    runtime.session_setup_budget = mocker.Mock(return_value=Decimal("30"))
+    runtime.wall_us.return_value = trigger["scheduled_at"] - 40_000_000
+
+    assert await advance_ended_scope(runtime, trigger) is True
+
+    runtime.operations.begin_attempt.assert_not_called()
 
 
 @pytest.mark.asyncio

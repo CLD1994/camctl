@@ -123,6 +123,46 @@ async def test_existing_ready_preparation_has_no_new_completion_notice(mocker):
     runtime.preparation_driver.prepare_capture.assert_awaited_once()
 
 
+async def test_first_session_setup_reserves_extra_lead_and_freezes_total_budget(mocker):
+    from camctl.capture import preparation
+    from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
+
+    runtime, action, _ = _world(mocker)
+    runtime.start_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
+    runtime.session_setup_budget = mocker.Mock(return_value=Decimal("30"))
+    runtime.wall_us.return_value = action["scheduled_at"] - 40_000_000
+    preparation._activity.side_effect = (None, {"id": 7, "occupancy_state": 1, "dispatch_state": 1})
+    runtime.scheduling.reserve_preparation.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+        ReservePreparationResult(ReservePreparationOutcome.RESERVED, 7))
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+
+    reserve = runtime.scheduling.reserve_preparation.call_args.args[0]
+    intent = runtime.operations.begin_attempt.call_args.args[0]
+    request = runtime.preparation_driver.prepare_capture.call_args.args[0]
+    assert reserve.prepare_lead_s == Decimal("40")
+    assert intent.config.timeout_s == request.timeout_s == Decimal("40")
+    assert request.session_setup_timeout_s == Decimal("30")
+    runtime.session_setup_budget.return_value = Decimal("0")
+    assert runtime.preparation_cache.owners[1].intent.config.timeout_s == Decimal("40")
+
+
+@pytest.mark.parametrize("configured_lead", [Decimal("0"), Decimal("10")])
+async def test_setup_cache_and_disabled_advance_keep_their_ordinary_time_boundaries(mocker, configured_lead):
+    runtime, action, _ = _world(mocker)
+    runtime.prepare_lead_s = configured_lead
+    runtime.session_setup_budget = mocker.Mock(return_value=Decimal("0"))
+    runtime.wall_us.return_value = action["scheduled_at"] - 30_000_000
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+    runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+    runtime.session_setup_budget.return_value = Decimal("30")
+    if configured_lead == 0:
+        assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+        runtime.preparation_driver.prepare_capture.assert_not_awaited()
+
+
 @pytest.mark.parametrize("action_type", [2, 3], ids=["recording", "timelapse"])
 async def test_ready_preparation_stays_ready_after_action_starts_with_scope_closure(mocker, action_type):
     runtime, action, ticket = _world(mocker)

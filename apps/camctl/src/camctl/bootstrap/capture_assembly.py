@@ -54,6 +54,7 @@ from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recove
 from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
+from camctl.devices.capture_preparation import preparation_lead_s
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError,
     DriverRegistry,
@@ -664,6 +665,25 @@ def _window_of(action: Mapping[str, Any]) -> LaunchWindow:
         window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000)
 
 
+class _PreparationLeads(Mapping):
+    """每次发现读取驱动的会话配置缓存，保持首次及后续提前量一致。"""
+
+    def __init__(self, ordinary, setup_budgets):
+        self._ordinary = ordinary
+        self._setup_budgets = setup_budgets
+
+    def __getitem__(self, device_id):
+        query = self._setup_budgets.get(device_id)
+        setup = Decimal("0") if query is None else query()
+        return preparation_lead_s(self._ordinary[device_id], setup)
+
+    def __iter__(self):
+        return iter(self._ordinary)
+
+    def __len__(self):
+        return len(self._ordinary)
+
+
 def session_capture_assembly(
     *,
     devices: Mapping[str, Mapping[str, Any]],
@@ -735,12 +755,18 @@ def session_capture_assembly(
     from uuid import uuid4
     preparation_cache = RuntimePreparationCache() if preparation_cache is None else preparation_cache
     session_key = uuid4().hex if session_key is None else session_key
-    preparation_leads = {}
+    ordinary_preparation_leads = {}
+    session_setup_budgets = {}
     for device_id, declaration in devices.items():
         entry = drivers.entry(declaration.get("driver"))
         if entry is not None and getattr(entry.declaration, "capture_preparation_supported", False) is True:
-            preparation_leads[device_id] = declaration.get("connection", {}).get(
+            ordinary_preparation_leads[device_id] = declaration.get("connection", {}).get(
                 "prepare_lead_s", entry.driver.default_prepare_lead_s)
+            if isinstance(entry.driver, AdbCameraDriver):
+                session_setup_budgets[device_id] = (
+                    lambda driver=entry.driver, binding=DeviceBinding(device_id, entry.driver_id):
+                    driver.pending_session_setup_timeout_s(binding))
+    preparation_leads = _PreparationLeads(ordinary_preparation_leads, session_setup_budgets)
     start_entries = StartEntryCoordinator() if start_entries is None else start_entries
     anchors = {} if recording_anchors is None else recording_anchors
     listings: dict[int, tuple[tuple, tuple]] = {}
@@ -929,7 +955,9 @@ def session_capture_assembly(
             preparation_driver=preparation_driver,
             preparation_cache=preparation_cache,
             session_key=session_key,
-            prepare_lead_s=preparation_leads.get(device_id, Decimal(0)),
+            prepare_lead_s=ordinary_preparation_leads.get(device_id, Decimal(0)),
+            session_setup_budget=(entry.driver.pending_session_setup_timeout_s
+                if isinstance(entry.driver, AdbCameraDriver) else None),
             pending_capture_completions=capture_completions,
             pending_host_photo_prepares=host_photo_prepares,
             pending_host_photo_completions=host_photo_completions,

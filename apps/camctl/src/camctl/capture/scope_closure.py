@@ -27,9 +27,11 @@ def _blocked(runtime, trigger_id, activity_id, reason):
 
 
 async def _trigger_ready(runtime, trigger_id):
+    from camctl.capture.preparation import effective_preparation_lead_s
+
     action = await runtime.action(trigger_id)
     return (action["status"] in (1, 2) and not action["cancel_requested"]
-        and action["scheduled_at"] - runtime.prepare_lead_s * 1_000_000 <= runtime.wall_us()
+        and action["scheduled_at"] - effective_preparation_lead_s(runtime, action) * 1_000_000 <= runtime.wall_us()
         <= action["scheduled_at"] + action["max_delay_ms"] * 1000)
 
 

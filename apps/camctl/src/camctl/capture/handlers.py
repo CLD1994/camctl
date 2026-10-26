@@ -1030,6 +1030,8 @@ class CaptureRuntime(_FileObservationSaves):
     preparation_cache: Any = None
     session_key: str | None = None
     prepare_lead_s: Decimal = Decimal(0)
+    #: 当前会话尚需执行的设备配置预算；仅查询驱动内存，不访问设备。
+    session_setup_budget: Callable[[DeviceBinding], Decimal] | None = None
 
     @property
     def baseline_timeout_s(self):
