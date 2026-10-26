@@ -12,7 +12,7 @@ from camctl.logging_runtime.service import LogChannel
 
 def _payload(channel):
     record = channel.slog.call_args.args[0]
-    assert record.level is LogLevel.INFO
+    assert record.level is LogLevel.DEBUG
     return json.loads(record.message.removeprefix("性能计时 "))
 
 

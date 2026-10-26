@@ -4,7 +4,7 @@
 
 ## 准备与执行
 
-使用人工验证环境的 `config.toml`，将 `[log]` 的 `level` 设置为 `"INFO"`，使阶段计时进入 `paths.log_file`。本次环境的文件为 `/home/cld/.camctl/manual-validation-20261025/camctl.log`。日志仍遵守普通队列与轮换规则，业务事实以报告和数据库为准。
+使用人工验证环境的 `config.toml`，将 `[log]` 的 `level` 设置为 `"DEBUG"`，使耗时明细进入 `paths.log_file`；设置为 `"INFO"` 时记录关键阶段和实际外部命令。本次环境的文件为 `/home/cld/.camctl/manual-validation-20261025/camctl.log`。日志仍遵守普通队列与轮换规则，业务事实以报告和数据库为准。
 
 重新生成具有新 `request_id` 和未来绝对时间的计划，使用与对照轮相同的设备、录像时长、分段模式及后续延时摄影参数。动作间隔和允许延迟分别记录，不能将允许延迟等同于录像时长或任务间隔。通过既有 host 终端提交，完成后用 `claim` 领取报告和媒体。
 

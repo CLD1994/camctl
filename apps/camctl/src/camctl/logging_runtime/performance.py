@@ -28,7 +28,7 @@ def performance_logging(channel):
 
 
 def record_performance(stage: str, elapsed_ns: int, **fields) -> None:
-    """普通 INFO 诊断不等待文件写入，投递失败不改变业务结果。"""
+    """普通 DEBUG 诊断不等待文件写入，投递失败不改变业务结果。"""
     channel = _channel.get()
     if channel is None:
         return
@@ -37,7 +37,7 @@ def record_performance(stage: str, elapsed_ns: int, **fields) -> None:
         ensure_ascii=False, separators=(",", ":"),
     )
     try:
-        channel.slog(LogRecord(level=LogLevel.INFO, message=message))
+        channel.slog(LogRecord(level=LogLevel.DEBUG, message=message))
     except Exception:
         # 普通辅助诊断投递失败不授予或撤销业务资格，也不重试投递。
         return
