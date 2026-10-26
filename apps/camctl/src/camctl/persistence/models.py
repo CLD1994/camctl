@@ -79,13 +79,19 @@ def _attach_db_outcome(error: BaseException, outcome: DbOutcome) -> None:
     setattr(error, _DB_OUTCOME_ATTRIBUTE, outcome)
 
 
-def db_failure(error_type: type[Exception], message: str, outcome: DbOutcome) -> BaseException:
-    """给业务边界附上原数据库异常，控制对象及实际结果保持不变。"""
+def db_outcome_errors(outcome: DbOutcome) -> tuple[BaseException, ...]:
+    """在结果模型所属边界统一取得实际错误，不混入业务返回值。"""
     errors = []
     for error in (outcome.error, outcome.control, outcome.observer_error,
                   outcome.handoff_error, *outcome.secondary_errors):
         if error is not None and all(error is not original for original in errors):
             errors.append(error)
+    return tuple(errors)
+
+
+def db_failure(error_type: type[Exception], message: str, outcome: DbOutcome) -> BaseException:
+    """给业务边界附上原数据库异常，控制对象及实际结果保持不变。"""
+    errors = db_outcome_errors(outcome)
     control = next((error for error in errors if not isinstance(error, Exception)), None)
     if control is not None:
         import json
