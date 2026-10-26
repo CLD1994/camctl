@@ -27,7 +27,7 @@ def _own_traceback(error: BaseException) -> list[dict]:
             for frame, lineno in traceback.walk_tb(error.__traceback__)]
 
 
-def exception_diagnostic(error: BaseException | None) -> dict | None:
+def exception_diagnostic(error: BaseException | None, *, include_message: bool = True) -> dict | None:
     """保存全部标准异常关系；循环和共享节点引用首次出现的路径。"""
     if error is None:
         return None
@@ -62,11 +62,15 @@ def exception_diagnostic(error: BaseException | None) -> dict | None:
         kind = type(original)
         node.update(
             type=f"{kind.__module__}.{kind.__qualname__}",
-            message=str(original), traceback=_own_traceback(original),
+            traceback=_own_traceback(original),
             cause=reference(original.__cause__, path + "/cause"),
             context=reference(original.__context__, path + "/context"),
             suppress_context=original.__suppress_context__,
         )
+        if include_message:
+            node["message"] = str(original)
+        else:
+            node["arguments"] = original.args
         if hasattr(original, "__notes__"):
             node["notes"] = list(original.__notes__)
         if isinstance(original, BaseExceptionGroup):

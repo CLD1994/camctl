@@ -163,7 +163,8 @@ def _event(identity, before, *, additional_row=False):
 def _summary(channel):
     assert channel.slog.call_count == 1
     record = channel.slog.call_args.args[0]
-    payload = json.loads(record.message.split(" ", 1)[1])
+    payload = json.loads(record.message)
+    assert payload["level"] == "DEBUG" and payload["event"] == "timing"
     assert payload["stage"] == "db_transaction"
     return payload
 

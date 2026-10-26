@@ -141,6 +141,32 @@ def test_invalid_message_format_preserves_original_exception_and_stack():
         route.close()
 
 
+def test_exception_message_format_failure_does_not_escape_logging():
+    class UnprintableError(Exception):
+        def __str__(self):
+            raise RuntimeError("exception formatting failed")
+    root, manager = logger_graph()
+    channel, attempts = channel_stub(), []
+    route = install_standard_logging(channel, attempts.append, manager=manager)
+    error = UnprintableError("original argument")
+    error.add_note("original note")
+    error.__cause__ = ValueError("original cause")
+    try:
+        try:
+            raise error
+        except UnprintableError:
+            manager.getLogger("vendor").error("normal message", exc_info=True, stack_info=True)
+        assert len(attempts) == 1
+        message = json.loads(attempts[0])["message"]
+        assert "original argument" in message and "original note" in message
+        assert "original cause" in message and "UnprintableError" in message
+        assert "traceback" in message and "Stack (most recent call last)" in message
+        assert "exception formatting failed" in message
+        channel.slog.assert_not_called()
+    finally:
+        route.close()
+
+
 def test_route_owns_source_filters_and_restores_them():
     root, manager = logger_graph()
     vendor = manager.getLogger("vendor")

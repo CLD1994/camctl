@@ -42,10 +42,23 @@ class _Fallback:
             self.local.active = False
 
 
-def _with_exception_and_stack(record: logging.LogRecord, message: str) -> str:
+def _with_exception_and_stack(record: logging.LogRecord, message: str, *, fallback=False) -> str:
     if record.exc_info is not None and record.exc_info[1] is not None:
-        message += "\n异常诊断: " + json.dumps(
-            exception_diagnostic(record.exc_info[1]), ensure_ascii=False, separators=(",", ":"))
+        try:
+            encoded = json.dumps(exception_diagnostic(record.exc_info[1]),
+                                 ensure_ascii=False, separators=(",", ":"))
+        except Exception as format_error:
+            if not fallback:
+                raise
+            # 消息无法格式化时仍沿共同编码器保存整个原异常图。
+            facts = exception_diagnostic(record.exc_info[1], include_message=False)
+            try:
+                encoded = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                encoded = repr(facts)
+            encoded += (f"\n异常格式化错误: {type(format_error).__name__} "
+                        f"args={format_error.args!r}")
+        message += "\n异常诊断: " + encoded
     elif record.exc_text:
         message += "\n" + record.exc_text
     if record.stack_info:
@@ -86,7 +99,8 @@ class _StandardHandler(logging.Handler):
                 else:
                     message = _with_exception_and_stack(
                         record, f"[{record.levelname}/{record.levelno}] {record.name} "
-                        f"{record.pathname}:{record.lineno} msg={record.msg!r} args={record.args!r}")
+                        f"{record.pathname}:{record.lineno} msg={record.msg!r} args={record.args!r}",
+                        fallback=True)
                 diagnostic = LogRecord(
                     LogLevel.ERROR, message + f"\n日志接纳错误: {type(error).__name__}: {error}")
                 self.fallback(diagnostic.rendered_message())
