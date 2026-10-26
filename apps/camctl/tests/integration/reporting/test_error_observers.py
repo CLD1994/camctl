@@ -10,6 +10,7 @@ from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_
 from camctl.reporting import publication
 from camctl.reporting.messages import MessageProtocolError
 from camctl.reporting.maintenance import MaintenanceLimits, ReportMaintenanceContext, ReportPorts, maintain_reports
+from camctl.persistence.models import DbOutcomeKind
 
 
 async def _inline(function, *args, **kwargs):
@@ -151,3 +152,182 @@ async def test_explicit_stop_retains_channel_terminal_error_diagnostic(error_typ
     assert len(diagnostics) == 1
     assert "收场通道的实际错误" in diagnostics[0]
     assert "PermissionError" in diagnostics[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind", [
+    DbOutcomeKind.NOT_EXECUTED,
+    DbOutcomeKind.ROLLED_BACK,
+    DbOutcomeKind.UNKNOWN,
+])
+@pytest.mark.parametrize("moved", [False, True])
+async def test_report_file_failure_requires_reliable_failure_store(monkeypatch, store_kind, moved):
+    import json
+    from unittest.mock import AsyncMock
+    from camctl.host_files.handoff import PublishResult, PublishStage
+    from camctl.host_files.io import DirectorySyncStage
+    from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+
+    file_error = _error()
+    store_error = OSError("failure-store-broke")
+    secondary = OSError("failure-store-close-broke")
+    session = create_autospec(publication.PublicationSession, instance=True)
+    session.prepare.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    session.record_intent.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    session.record_failure.return_value = DbOutcome(store_kind, error=store_error, secondary_errors=(secondary,))
+    monkeypatch.setattr(publication.asyncio, "to_thread", _inline)
+    monkeypatch.setattr(publication, "_list_stale_ready", lambda *args: ((), None))
+    move = AsyncMock(return_value=PublishResult(
+        PublishStage.MOVED if moved else PublishStage.NOT_MOVED,
+        DirectorySyncStage.FAILED if moved else DirectorySyncStage.NOT_ATTEMPTED,
+        moved, "report-file-broke", file_error))
+    monkeypatch.setattr(publication, "_move_staged", move)
+    diagnostics = []
+    with error_diagnostics_context(None, diagnostics.append):
+        result = await publication.deliver_staged_report(7,
+            publication.StagedReport(name=publication.report_file_name(7, "a" * 64), size_bytes=7, sha256="a" * 64),
+            HandoffDirectories(Path("/staging"), Path("/ready")), session,
+            context={"database_id": "b" * 32})
+        await flush_diagnostics()
+
+    assert result.outcome is (publication.DeliveryOutcome.STORE_FAILED
+        if store_kind is DbOutcomeKind.ROLLED_BACK else publication.DeliveryOutcome.UNKNOWN)
+    saved_error = json.dumps(exception_diagnostic(result.exception), ensure_ascii=False)
+    assert "failure-store-broke" in saved_error
+    assert "failure-store-close-broke" in saved_error
+    assert len(diagnostics) == 2
+    assert any("报告目录拒绝访问" in diagnostic for diagnostic in diagnostics)
+    assert any("failure-store-broke" in diagnostic and "failure-store-close-broke" in diagnostic
+        for diagnostic in diagnostics)
+    move.assert_awaited_once()
+    session.record_failure.assert_awaited_once()
+    session.save_publication.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_directories", [
+    ("processing",), ("staging",), ("ready", "processing", "staging"),
+])
+async def test_recovery_diagnoses_every_executed_directory_observation(monkeypatch, failed_directories):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from camctl.bootstrap import flows
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.models import DbOutcome
+    from camctl.reporting.supervisor import WorkerSupervisor
+    from camctl.session.service import StateDbFailure
+
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.metadata = SimpleNamespace(instance_id="a" * 32)
+    database.read.return_value = (7,)
+    context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: 1))
+    supervisor = create_autospec(WorkerSupervisor, instance=True)
+    flow = flows.report_flow(state_db=Path("/state.db"), staging=Path("/staging"),
+        ready=Path("/ready"), processing=Path("/processing"), history=None,
+        database=None, supervisor=supervisor, start_actions=False)
+
+    def rows(database, sql, parameters=()):
+        return [(2, 1)] if "SELECT status, to_wm FROM reports" in sql else []
+
+    monkeypatch.setattr(flows, "_query_rows", AsyncMock(side_effect=rows))
+    save = AsyncMock(return_value=DbOutcome(DbOutcomeKind.COMPLETED))
+    monkeypatch.setattr(flows, "_policy_write", save)
+    errors = {name: PermissionError(f"{name}-observation-broke") for name in failed_directories}
+    for name, error in errors.items():
+        error.__cause__ = OSError(f"{name}-original-cause")
+
+    def list_directory(path):
+        name = "staging" if Path(path) == Path("/staging/reports") else Path(path).name
+        if name in errors:
+            raise errors[name]
+        return [publication.report_file_name(7, "b" * 64)] if name == "ready" else []
+
+    monkeypatch.setattr(publication.os, "listdir", list_directory)
+    diagnostics = []
+    with error_diagnostics_context(None, diagnostics.append):
+        if "ready" in failed_directories:
+            with pytest.raises(StateDbFailure) as caught:
+                await flow(context)
+            record_error(caught.value, stage="outer_session")
+        else:
+            await flow(context)
+        await flush_diagnostics()
+
+    assert len(diagnostics) == len(failed_directories)
+    for name in failed_directories:
+        matched = [diagnostic for diagnostic in diagnostics if f"{name}-observation-broke" in diagnostic]
+        assert len(matched) == 1
+        assert f"{name}-original-cause" in matched[0]
+        assert '"report_id":7' in matched[0]
+        assert "a" * 32 in matched[0]
+    supervisor.generate.assert_not_awaited()
+    assert save.await_count == (0 if "ready" in failed_directories else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_kind,moved", [
+    (DbOutcomeKind.ROLLED_BACK, True), (DbOutcomeKind.UNKNOWN, False),
+])
+async def test_failure_store_error_stops_real_report_flow_without_duplicate_diagnostic(monkeypatch, store_kind, moved):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from camctl.bootstrap import flows
+    from camctl.contracts.history_values import HistoryBoundary
+    from camctl.host_files.handoff import PublishResult, PublishStage
+    from camctl.host_files.io import DirectorySyncStage
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.persistence.business import BusinessDatabase
+    from camctl.persistence.models import DbOutcome
+    from camctl.reporting import messages
+    from camctl.reporting.messages import ResultSuccessMessage
+    from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor
+    from camctl.session.service import StateDbFailure
+
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.metadata = SimpleNamespace(instance_id="a" * 32)
+    database.read.side_effect = [(7,), SimpleNamespace(from_wm=0, to_wm=1,
+        boundary=HistoryBoundary(1, 1)), ()]
+    database.write.side_effect = [DbOutcome(DbOutcomeKind.COMPLETED), DbOutcome(DbOutcomeKind.COMPLETED),
+        DbOutcome(store_kind, error=OSError("failure-store-broke"),
+                  secondary_errors=(OSError("failure-store-close-broke"),))]
+    supervisor = create_autospec(WorkerSupervisor, instance=True)
+    supervisor.generate.return_value = WorkerGeneration(GenerationOutcomeKind.SUCCESS, "job-7",
+        success=ResultSuccessMessage("job-7", "a" * 32,
+            "/staging/reports/" + publication.report_file_name(7, "b" * 64), 7, "b" * 64))
+    monkeypatch.setattr(messages, "new_job_id", lambda: "job-7")
+    monkeypatch.setattr(flows, "_query_rows", AsyncMock(side_effect=lambda database, sql, parameters=():
+        [(1, 1)] if "SELECT status, to_wm FROM reports" in sql else []))
+    monkeypatch.setattr(publication.asyncio, "to_thread", _inline)
+    monkeypatch.setattr(publication, "_list_stale_ready", lambda *args: ((), None))
+    move = AsyncMock(return_value=PublishResult(
+        PublishStage.MOVED if moved else PublishStage.NOT_MOVED,
+        DirectorySyncStage.FAILED if moved else DirectorySyncStage.NOT_ATTEMPTED,
+        moved, "report-file-broke", _error()))
+    monkeypatch.setattr(publication, "_move_staged", move)
+    failed_callback = AsyncMock()
+    flow = flows.report_flow(state_db=Path("/state.db"), staging=Path("/staging"),
+        ready=Path("/ready"), processing=Path("/processing"),
+        history=SimpleNamespace(entity_batch_size=1, event_batch_size=1),
+        database=SimpleNamespace(busy_timeout_ms=1), supervisor=supervisor,
+        start_actions=False, on_failure=failed_callback)
+    context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: 1))
+    diagnostics = []
+    with error_diagnostics_context(None, diagnostics.append):
+        with pytest.raises(StateDbFailure) as caught:
+            await flow(context)
+        record_error(caught.value, stage="outer_session")
+        await flush_diagnostics()
+
+    assert len(diagnostics) == 2
+    assert sum("failure-store-broke" in diagnostic for diagnostic in diagnostics) == 1
+    assert sum("报告目录拒绝访问" in diagnostic for diagnostic in diagnostics) == 1
+    original = json.dumps(exception_diagnostic(caught.value), ensure_ascii=False)
+    assert "failure-store-broke" in original
+    assert "failure-store-close-broke" in original
+    failed_callback.assert_not_awaited()
+    move.assert_awaited_once()
+    assert database.write.await_count == 3

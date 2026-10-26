@@ -951,6 +951,7 @@ def report_flow(
         from camctl.devices.bindings import DeviceConfigurationError
         from camctl.history.replay import ReplayError
         from camctl.host_files.handoff import HandoffDirectories
+        from camctl.logging_runtime.diagnostics import diagnostic_state_for, record_error
         from camctl.persistence.repositories.history import HistoryRepository
         from camctl.persistence.runtime import DbConfig, DirectoryBindingError, StateDatabaseError
         from camctl.reporting.messages import ErrorKind, JobMessage, new_job_id
@@ -958,6 +959,7 @@ def report_flow(
             DeliveryOutcome,
             DbPublicationSession,
             ReportDirectories,
+            REPORTS_DIRECTORY,
             StagedReport,
             deliver_staged_report,
             observe_report_locations,
@@ -986,9 +988,26 @@ def report_flow(
             # 发布，不重新生成。
             locations = observe_report_locations(ReportDirectories(
                 staging=staging, ready=ready, processing=processing))
-            if locations.ready.error is not None:
-                raise StateDbFailure(
-                    f"报告目录观察失败: {locations.ready.error}") from locations.ready.exception
+            ready_error = None
+            for name, path, sighting in (
+                    ("ready", ready, locations.ready),
+                    ("processing", processing, locations.processing),
+                    ("staging", staging / REPORTS_DIRECTORY, locations.staging)):
+                if sighting.error is not None or sighting.exception is not None:
+                    actual = (sighting.exception if sighting.exception is not None
+                              else RuntimeError(sighting.error))
+                    record_error(actual, stage="report_directory_observe",
+                                 context={"report_id": report_id,
+                                          "database_id": business.metadata.instance_id,
+                                          "directory": name, "path": path},
+                                 details={"summary": sighting.error})
+                    if name == "ready":
+                        ready_error = actual
+            if ready_error is not None:
+                failure = StateDbFailure(f"报告目录观察失败: {locations.ready.error}")
+                record_error(failure, stage="report_directory_observe",
+                             state=diagnostic_state_for(ready_error))
+                raise failure from ready_error
             recovered = next(
                 (identity for identity in locations.ready.files
                  if identity.report_id == report_id), None)
@@ -1053,7 +1072,6 @@ def report_flow(
             raise DirectoryBindingError(generation.failure.error_message) from _report_generation_error(
                 generation, generation.failure.error_message)
         if generation.kind is not GenerationOutcomeKind.SUCCESS:
-            from camctl.logging_runtime.diagnostics import diagnostic_state_for, record_error
             failure = generation.failure
             detail = (f"{failure.error_code}: {failure.error_message}"
                       if failure is not None else generation.detail)
@@ -1096,10 +1114,12 @@ def report_flow(
                                 DeliveryOutcome.UNKNOWN):
             if delivery.exception is not None and not isinstance(delivery.exception, Exception):
                 raise delivery.exception
-            raise StateDbFailure(
-                f"报告 {report_id} 发布记录失败: {delivery.error}") from delivery.exception
-        from camctl.logging_runtime.diagnostics import record_error
-
+            failure = StateDbFailure(f"报告 {report_id} 发布记录失败: {delivery.error}")
+            failure.__cause__ = delivery.exception
+            record_error(failure, stage="report_publication_store",
+                         context={"report_id": report_id, "database_id": business.metadata.instance_id},
+                         state=diagnostic_state_for(delivery.exception))
+            raise failure
         error = delivery.exception
         if error is None:
             error = RuntimeError(

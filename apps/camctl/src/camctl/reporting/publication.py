@@ -463,6 +463,20 @@ def _store_failure(outcome: DbOutcome) -> DeliveryResult:
         DeliveryOutcome.UNKNOWN, error=f"unknown: {outcome.error}", exception=exception)
 
 
+async def _save_report_failure(report_id, reason, session, file_result, context):
+    """只有失败事实可靠保存后，才把文件失败交给后续报告机会。"""
+    outcome = await session.record_failure(report_id, {"error": reason})
+    if outcome.kind is DbOutcomeKind.COMPLETED:
+        return None
+    failure = _store_failure(outcome)
+    record_error(failure.exception, stage="report_failure_store",
+                 context={**(context or {}), "report_id": report_id},
+                 details={"outcome": outcome, "file_stage": file_result.stage,
+                          "directory_sync": file_result.directory,
+                          "source_removed": file_result.source_removed})
+    return failure
+
+
 async def deliver_report(
     report_id: int,
     payload: bytes,
@@ -549,7 +563,9 @@ async def deliver_staged_report(
             exception=failures[-1] if failures else None)
     if file_result.stage is not PublishStage.MOVED:
         reason = file_result.error or "not moved"
-        await session.record_failure(report_id, {"error": reason})
+        failure = await _save_report_failure(report_id, reason, session, file_result, context)
+        if failure is not None:
+            return failure
         return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=reason,
                               exception=failures[-1] if failures else None)
     try:
@@ -562,7 +578,9 @@ async def deliver_staged_report(
             record_error(failure, stage="report_publication_validate",
                          context={**(context or {}), "report_id": report_id}, details={"file_result": file_result})
             failures.append(failure)
-        await session.record_failure(report_id, {"error": detail})
+        failure = await _save_report_failure(report_id, detail, session, file_result, context)
+        if failure is not None:
+            return failure
         return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=detail,
                               exception=failures[-1] if failures else None)
 
