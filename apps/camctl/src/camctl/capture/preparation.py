@@ -70,6 +70,7 @@ class RuntimePreparationCache:
     endings: dict[int, tuple[str, Any, Any]] = field(default_factory=dict)
     request_saves: dict[OperationKey, SharedSave] = field(default_factory=dict)
     changed_actions: set[int] = field(default_factory=set)
+    scope_diagnostics: dict[int, DiagnosticState] = field(default_factory=dict)
 
     def take_wakeup(self, action_id):
         """合并本动作尚未交给调度的实际返回和首次保存应用。"""
@@ -551,6 +552,11 @@ async def _advance_preparation(runtime, action_id):
     now = runtime.wall_us()
     if now < action["scheduled_at"] - runtime.prepare_lead_s * 1_000_000:
         return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+    if runtime.scope_closure_supported is True:
+        from camctl.capture.scope_closure import advance_ended_scope
+        if not await advance_ended_scope(runtime, action):
+            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+        now = runtime.wall_us()
     activity = (await _activity(runtime, action_id))
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest

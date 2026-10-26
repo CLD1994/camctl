@@ -73,7 +73,7 @@ from camctl.persistence.repositories.host_capture import HostCaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import TimelapseRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing, OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION
 from camctl.persistence.transaction import row_facts
 from camctl.logging_runtime.performance import measure_performance, record_performance
 from camctl.scheduling.rules import LaunchWindow
@@ -496,12 +496,16 @@ class DriverResultListing:
                         timeout_s: Decimal, output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
                         video_result_mode: str | None = None,
-                        reading_context: ResultReadingContext | None = None) -> ResultPage:
+                        reading_context: ResultReadingContext | None = None,
+                        scope_only: bool = False) -> ResultPage:
         """一次页调用保持原票据和期限，不在驱动适配层循环或重试。"""
+        prefix = "scope" if scope_only else "results"
         if (ticket.operation != "result" or ticket.target_id is None
-                or ticket.responsibility_key != f"results/{ticket.target_id}"):
+                or ticket.responsibility_key != f"{prefix}/{ticket.target_id}"):
             raise ValueError("结果列举要求原 RESULTS 活动票据")
         params = {"activity_id": ticket.target_id}
+        if scope_only:
+            params["scope_only"] = True
         if video_result_mode is not None:
             params["video_result_mode"] = video_result_mode
         if cursor is not None:
@@ -920,6 +924,8 @@ def session_capture_assembly(
             pending_start_results=pending_start_results,
             start_entries=start_entries,
             capture_preparation_supported=preparation_driver is not None,
+            scope_closure_supported=isinstance(entry.driver, AdbCameraDriver)
+                and database.metadata.format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION,
             preparation_driver=preparation_driver,
             preparation_cache=preparation_cache,
             session_key=session_key,

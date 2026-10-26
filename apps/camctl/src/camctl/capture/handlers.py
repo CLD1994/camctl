@@ -881,7 +881,7 @@ class ResultFilesPort(Protocol):
                         output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
                         video_result_mode: str | None = None,
-                        reading_context=None) -> ResultPage: ...
+                        reading_context=None, scope_only: bool = False) -> ResultPage: ...
 
 
 class RecordingStatePort(Protocol):
@@ -941,6 +941,7 @@ class CaptureRuntime(_FileObservationSaves):
     monotonic_ns: Callable[[], int]
     window_of: Callable[[Mapping[str, Any]], LaunchWindow]
     wait_config: Callable[[Mapping[str, Any]], CaptureWaitConfig]
+    scope_closure_supported: bool = False
     #: 核对已保存设备身份与本次固定配置；未提供时由调用方保证绑定匹配。
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
     recording_state: RecordingStatePort | None = None
@@ -5249,7 +5250,8 @@ async def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCal
     return replace(pending, completion_page=completion, result_disposition_ready=True)
 
 
-async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan) -> ListingRound:
+async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan, *,
+                                read_allowed=None) -> ListingRound:
     if runtime.results is None and not pending.finished:
         if pending.saves.pending is None:
             raise CapabilityNotDeclaredError(
@@ -5264,8 +5266,10 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
     source = (await _result_source(runtime, pending.ticket))
     pending.completion_context = deepcopy(source.context)
     async def can_read():
+        if read_allowed is not None and not await read_allowed():
+            return False
         action = (await runtime.action(action_id))
-        if (source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
+        if (not pending.scope_only and source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
                 and (await runtime.last_attempt(f"stop/{action_id}")) is None):
             return False
         entries = (None if pending.last_ref is None else
@@ -5285,14 +5289,15 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
     return (await _held_listing(runtime, pending.ticket))
 
 
-async def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
-    return (await _qualify_listing_collection(runtime, action_id, (await _saved_result_listing_input(runtime, action_id))))
+async def _saved_result_listing(runtime: CaptureRuntime, action_id: int, *, responsibility=None) -> ListingRound:
+    return (await _qualify_listing_collection(runtime, action_id, (await _saved_result_listing_input(
+        runtime, action_id, responsibility=responsibility))))
 
 
-async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int, *, responsibility=None) -> ListingRound:
     """CLOSED 消费原已保存输入；不取得当前驱动端口或新的时钟。"""
     activity_id = (await _activity_id_of(runtime, action_id))
-    responsibility = f"results/{activity_id}"
+    responsibility = f"results/{activity_id}" if responsibility is None else responsibility
     def read(owned, parameters=(responsibility,)):
         with closing(owned.connection.execute("SELECT r.id,r.action_id,r.activity_id,r.kind,t.attempt_no,t.status,t.effect_state,"
         " t.result_json,t.error_json,e.occurred_at FROM operation_runs r"
@@ -5302,7 +5307,8 @@ async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -
             return cursor.fetchone()
     row = await runtime.database.read(read, description="读取拍摄当前责任")
     if (row is None or row[1] != action_id or row[2] != activity_id
-            or row[3] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)):
+            or row[3] not in (int(_RUN_KIND.CHECK_CAPTURE_RESULTS),
+                              int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE))):
         raise ConsistencyError("RESULTS 责任缺少可核对的完整本地输入")
     ticket = AttemptTicket(row[4], "result", str(activity_id), responsibility, row[0])
     actual = saved_outcome(row[5], row[6], parse_exact_json(row[7]),

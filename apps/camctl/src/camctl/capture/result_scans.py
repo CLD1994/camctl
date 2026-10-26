@@ -45,6 +45,7 @@ class PendingResultScan:
     finished: bool = False
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     validation_diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    scope_only: bool = False
     reading_context: ResultReadingContext = field(init=False)
 
     def __post_init__(self):
@@ -99,6 +100,8 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
             }
             if pending.video_result_mode is not None:
                 page_kwargs["video_result_mode"] = pending.video_result_mode
+            if pending.scope_only:
+                page_kwargs["scope_only"] = True
             page = await runtime.results.list_page(pending.ticket, **page_kwargs)
             # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
             occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
