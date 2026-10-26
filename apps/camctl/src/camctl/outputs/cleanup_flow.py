@@ -449,6 +449,14 @@ def _raise_supervision_with_error(
     if diagnostic is None or pending.supervision_diagnostic_delivered:
         return
     supervision_error = diagnostic.exception or RuntimeError(diagnostic.render())
+    if not isinstance(prior, Exception):
+        note = "清理监督次级错误: " + json.dumps({
+            "context": context, "error": exception_diagnostic(supervision_error),
+            "facts": [asdict(fact) for fact in diagnostic.facts],
+        }, ensure_ascii=False, separators=(",", ":"))
+        if note not in tuple(getattr(prior, "__notes__", ())):
+            prior.add_note(note)
+        raise prior
     combined = BaseExceptionGroup(
         "清理结果保存与文件任务监督均有故障",
         [prior, supervision_error])

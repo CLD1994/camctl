@@ -85,3 +85,31 @@ async def test_original_supervision_result_replay_logs_one_complete_graph():
     assert json.loads(records[0])['context']['cleanup_item_id'] == 91
     assert delivery.value.__cause__ is diagnostic.exception
     runtime.outputs.finish_cleanup_attempt.assert_called_once()
+
+
+async def test_database_control_and_supervision_error_keep_original_control():
+    import asyncio
+    import json
+    from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.persistence.models import _attach_db_outcome
+    from camctl.bootstrap.cleanup_assembly import _exception_facts
+    from camctl.outputs.cleanup_flow import CleanupSupervisionDiagnostic
+    runtime = _runtime(_actual_result(False), _saved(AttemptStatus.FAILED))
+    pending = _pending(runtime, AttemptTicket(1, 'delete', '91', 'delete/91', 7))
+    runner = ValueError('runner supervision failure')
+    runner.__cause__ = OSError(13, 'runner original IO failure')
+    pending.supervision_diagnostic = CleanupSupervisionDiagnostic(tuple(_exception_facts(runner, 'runner')), runner)
+    control = asyncio.CancelledError('original database control')
+    original_cause = OSError(5, 'original save failure')
+    control.__cause__ = original_cause
+    outcome = DbOutcome(DbOutcomeKind.UNKNOWN, error=original_cause, control=control)
+    _attach_db_outcome(control, outcome)
+    with pytest.raises(asyncio.CancelledError) as caught:
+        cleanup_flow._raise_supervision_with_error(pending, control, 'original save pending')
+    assert caught.value is control
+    assert control.__cause__ is original_cause
+    assert db_outcome_for(control) is outcome
+    assert not pending.supervision_diagnostic_delivered
+    document = json.dumps(exception_diagnostic(control), ensure_ascii=False)
+    assert 'runner supervision failure' in document and 'runner original IO failure' in document
+    assert 'errno' in document
