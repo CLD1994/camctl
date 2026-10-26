@@ -16,7 +16,9 @@ Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延�
 
 Linux 开发容器、CPython 3.11.17 下执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices -q --tb=short`，设备组件单元 **1809 项通过、1 条既有 asyncio 标记警告**，pytest 耗时 69.93 秒，退出 0。新增 14 个用例使用正式驱动与受接口约束的传输替身，覆盖两机型的录像与延时首次准备、匹配 START、同会话复用、新会话重发、两条命令分别失败，以及软件恢复重新设置的成功与失败。新增前 10 个反例在原实现上均失败；独立复核已核对各生产入口及测试的独立期望。
 
-命令、起止时间、输出、退出码和源码身份保存在 `.local/verification/camera-idle-settings-20261026/`。本项未运行集成测试或调用相机，也未更新当前人工环境的安装包；真实设备是否保持亮屏、避免省电及保持 ADB 连接，仍由用户验证。
+命令、起止时间、输出、退出码和源码身份保存在 `.local/verification/camera-idle-settings-20261026/`。本项未运行集成测试或调用相机；真实设备是否保持亮屏、避免省电及保持 ADB 连接，仍由用户验证。
+
+同日按用户要求更新 `/home/cld/.camctl/manual-validation-20261026` 的 camctl 与 host-demo，安装源码为 `d8c3b614`。323 个生产 Python 文件、27 项权威资源在源码、wheel 和安装副本之间逐项一致；相机设置对应的 camctl 源码与上述受测版本一致。安装解释器为 CPython 3.11.17、SQLite 3.53.1，依赖版本不变。旧会话经 SIGINT 收场，部署未打开数据库连接、初始化或迁移状态库，也未调用相机；配置、状态库和日志等文件状态保持。部署后两进程保持停止，使用原 `start-host-demo.sh` 启动；安装收据与数据保留核对位于 `.local/deployments/20261026-host-stop-camera-idle/`。
 
 ## 读取错误诊断的完整交付（2026-10-26）
 
