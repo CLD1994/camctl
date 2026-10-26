@@ -102,7 +102,7 @@ class _StandardHandler(logging.Handler):
                         f"{record.pathname}:{record.lineno} msg={record.msg!r} args={record.args!r}",
                         fallback=True)
                 diagnostic = LogRecord(
-                    LogLevel.ERROR, message + f"\n日志接纳错误: {type(error).__name__}: {error}")
+                    LogLevel.ERROR, message + f"\n日志接纳错误: {type(error).__name__} args={error.args!r}")
                 self.fallback(diagnostic.rendered_message())
         finally:
             self.local.active = False

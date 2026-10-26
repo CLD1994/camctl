@@ -141,9 +141,12 @@ def test_invalid_message_format_preserves_original_exception_and_stack():
         route.close()
 
 
-def test_exception_message_format_failure_does_not_escape_logging():
+@pytest.mark.parametrize("recursive_format_error", [False, True])
+def test_exception_message_format_failure_does_not_escape_logging(recursive_format_error):
     class UnprintableError(Exception):
         def __str__(self):
+            if recursive_format_error:
+                raise UnprintableError("exception formatting failed")
             raise RuntimeError("exception formatting failed")
     root, manager = logger_graph()
     channel, attempts = channel_stub(), []
