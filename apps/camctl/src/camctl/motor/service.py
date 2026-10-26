@@ -6,6 +6,9 @@ from typing import Any, Callable
 
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.operations.models import ErrorValue
+from camctl.contracts.workflow_errors import registered_error
 from camctl.motor.models import (
     FinishSendRequest, MotorFinalKind, PrepareOutcome, PrepareSendRequest, SendPermit,
 )
@@ -102,7 +105,24 @@ def _decision(facts, runtime: MotorRuntime, now: int) -> MotorDecision:
         runtime.writer.available, window))
 
 
-async def _finish(runtime: MotorRuntime, request: FinishSendRequest) -> None:
+async def _finish(runtime: MotorRuntime, request: FinishSendRequest, *, notification=None) -> None:
+    code = {
+        MotorFinalKind.FAILED: "motor_notification_failed",
+        MotorFinalKind.CHANNEL_UNAVAILABLE: "motor_channel_unavailable",
+        MotorFinalKind.UNCONFIRMED: "motor_notification_unconfirmed",
+    }.get(request.kind)
+    if code is not None:
+        details = {}
+        if request.kind is not MotorFinalKind.UNCONFIRMED:
+            details["reason"] = request.reason
+        if request.written_bytes is not None:
+            details["written_bytes"] = request.written_bytes
+        if request.errno is not None:
+            details["errno"] = request.errno
+        stage = registered_error(code)["stage"]
+        record_error(ErrorValue(code, stage, details), stage=stage,
+                     context={"action_id": request.action_id},
+                     details={"send_result": request, "notification": notification})
     await _save(runtime, "finish_send", request, "结果事务",
                 apply=lambda _value: runtime.permits.pop(request.action_id, None))
 
@@ -161,7 +181,7 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
         unavailable = runtime.writer.unavailability
         await _finish(runtime, FinishSendRequest(action_id, now,
             MotorFinalKind.CHANNEL_UNAVAILABLE, permit=permit,
-            reason=unavailable.reason, errno=unavailable.errno))
+            reason=unavailable.reason, errno=unavailable.errno), notification=unavailable)
     elif decision is MotorDecision.SEND:
         # 从这里起不能再证明“未开始发送”，即使写入或结果保存抛异常。
         runtime.permits.pop(action_id)
@@ -175,7 +195,7 @@ async def advance_motor(action_id: int, runtime: MotorRuntime) -> MotorDecision:
                     else MotorFinalKind.FAILED)
             request = FinishSendRequest(action_id, now, kind, permit=permit,
                 written_bytes=result.written_bytes, errno=result.errno, reason=result.reason)
-        await _finish(runtime, request)
+        await _finish(runtime, request, notification=result)
     else:
         raise ConsistencyError(f"电机流程出现不可解释决定: {decision}")
     return decision

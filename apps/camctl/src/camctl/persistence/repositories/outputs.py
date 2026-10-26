@@ -7820,7 +7820,10 @@ class _FixCleanupTargetsCommand:
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CleanupTargetsSaved(
                 CleanupTargetsDisposition.SAVED,
-                tuple(row_id for row_id, _ in members + terminal)))
+                tuple(row_id for row_id, _ in members + terminal),
+                tuple((row_id, ErrorValue("output_not_found", "output_selection",
+                                         {"requested_output_id": str(identity)}))
+                      for row_id, identity in terminal)))
 
     def _scope_targets(self, connection) -> tuple[int, ...] | None:
         """范围清理按固定来源枚举产物；来源未就绪时返回 None 表示等待。
@@ -7934,7 +7937,8 @@ class _FixCleanupTargetsCommand:
             row["after"]["values"]["requested_output_id"]
             for event in saved
             for row in event["body"]["rows"]
-            if row["table"] == "cleanup_items"}
+            if row["table"] == "cleanup_items"
+            and "requested_output_id" in row["after"]["values"]}
         expected = _explicit_cleanup_request(action)
         if expected is None:
             scope = self._scope_targets(connection)
@@ -7946,7 +7950,12 @@ class _FixCleanupTargetsCommand:
             read_only=True,
             result=CleanupTargetsSaved(
                 CleanupTargetsDisposition.ALREADY,
-                _saved_member_ids(connection, command.action_id)))
+                _saved_member_ids(connection, command.action_id),
+                tuple((row["id"], ErrorValue("output_not_found", "output_selection",
+                          row["after"]["values"]["error_details_json"]))
+                      for event in saved for row in event["body"]["rows"]
+                      if row["table"] == "cleanup_items"
+                      and row["after"]["values"].get("error_code") == _CLEANUP_ITEM_NOT_FOUND)))
 
 
 def _explicit_cleanup_request(action) -> tuple[int, ...] | None:

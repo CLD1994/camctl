@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
@@ -29,6 +29,8 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FileRef
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CopyTargetRef
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.session.supervision import Supervisor
 
@@ -194,6 +196,7 @@ class DeliveryDecision:
     failure: DeliveryFailure | None = None
     error: object | None = None
     observed_location: HandoffPlace | None = None
+    exceptions: tuple[BaseException, ...] = field(default=(), compare=False, repr=False)
 
 
 def _unconfirmed_failure(delivery_id: int) -> DeliveryFailure:
@@ -546,6 +549,8 @@ async def _save_unconfirmed(
     delivery_id: int, failure: DeliveryFailure, context: DeliveryContext,
 ) -> None:
     """保存终局未知失败；不安排自动重投。"""
+    record_error(ErrorValue(failure.code, failure.stage, failure.details),
+                 stage=failure.stage, context={"delivery_id": delivery_id})
     key = new_operation_key()
     request = UnconfirmedFailureSave(
         delivery_id=delivery_id, failure=failure,
@@ -565,7 +570,11 @@ def _decide_again(
     facts = state.facts
     if not context.publication_conditions_met:
         facts = replace(facts, publication_conditions_met=False)
-    return decide_handoff(facts, locations)
+    decision = decide_handoff(facts, locations)
+    return replace(decision, exceptions=tuple(
+        observation.error for observation in (
+            locations.staging, locations.ready, locations.processing)
+        if isinstance(observation.error, BaseException)))
 
 
 async def publish_delivery(
@@ -589,8 +598,19 @@ async def publish_delivery(
         lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
 
 
+def _record_location_errors(delivery_id, decision) -> None:
+    if not decision.exceptions:
+        return
+    error = (decision.exceptions[0] if len(decision.exceptions) == 1 else
+             BaseExceptionGroup("交付位置观察发生多个错误", decision.exceptions))
+    record_error(error, stage="delivery_observation",
+                 context={"delivery_id": delivery_id},
+                 details={"decision": decision.outcome})
+
+
 async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
     decision = await asyncio.to_thread(_decide_again, state, context)
+    _record_location_errors(delivery_id, decision)
     if decision.outcome is DeliveryHandoffOutcome.COMPLETED:
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
     if decision.outcome is DeliveryHandoffOutcome.NOT_ACTIVE:
@@ -610,6 +630,11 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
     await _save_intent(delivery_id, context)
     ref, roots, directories = _staging_ref(state, context.directories)
     publish = await publish_file(ref, roots, directories, ReadyName(state.file_name))
+    if publish.exception is not None:
+        record_error(publish.exception, stage="delivery_publication",
+                     context={"delivery_id": delivery_id},
+                     details={"move_stage": publish.stage, "directory": publish.directory,
+                              "source_removed": publish.source_removed, "error": publish.error})
     if publish.stage is PublishStage.MOVED:
         if publish.directory in (
             DirectorySyncStage.SYNCED, DirectorySyncStage.UNSUPPORTED,
@@ -621,6 +646,7 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
             "publication_sync_failed", publish.error or "目录同步失败")
     if publish.stage is PublishStage.NOT_MOVED:
         retry = await asyncio.to_thread(_decide_again, state, context)
+        _record_location_errors(delivery_id, retry)
         if retry.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY:
             await _save_publication(delivery_id, context)
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)

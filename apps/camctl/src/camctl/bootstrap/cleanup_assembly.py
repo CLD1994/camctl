@@ -36,6 +36,7 @@ from camctl.host_files.models import (
 from camctl.host_files.paths import observe_file, resolve_file
 from camctl.host_files.tasks import (
     FileTask, FileTaskExecutor, FileTaskId, FileTaskResult, FileTaskHandle)
+from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.operations.owned_calls import check_call_interruption, current_call_scope
 from camctl.operations.recovery import RecoveryBoundary, recovery_registry
@@ -211,6 +212,8 @@ class HostArtifacts(HostArtifactPort):
             after = observe_file(request.file_ref, BoundDirectories(self._staging))
             if after.kind is FileObservationKind.MISSING:
                 return _local_absent(request.cleanup_item_id, error)
+            if after.kind is FileObservationKind.ERROR and isinstance(after.error, BaseException):
+                error = BaseExceptionGroup("删除及后续文件观察均失败", [error, after.error])
             return _local_io_error("delete", error)
         return _local_absent(request.cleanup_item_id)
 
@@ -410,15 +413,17 @@ def _local_absent(item_id: int, error: OSError | None = None) -> DeviceCallResul
         data={"cleanup_item_id": str(item_id)}),),
         None if error is None else {
             "code": "local_io_failed", "stage": "delete",
-            "details": {"error": f"{type(error).__name__}: {error}"},
+            "details": {"error": f"{type(error).__name__}: {error}",
+                        "diagnostic": exception_diagnostic(error)},
         })
 
 
-def _local_io_error(operation: str, error: OSError | None) -> DeviceCallResult:
+def _local_io_error(operation: str, error: BaseException | None) -> DeviceCallResult:
     return DeviceCallResult((), {
         "code": "local_io_failed", "stage": operation,
         "details": {"error": ("unknown local filesystem error" if error is None else
-                               f"{type(error).__name__}: {error}")},
+                               f"{type(error).__name__}: {error}"),
+                    "diagnostic": exception_diagnostic(error)},
     })
 
 
