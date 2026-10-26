@@ -13,6 +13,7 @@ from camctl.operations.process import (
     OUTPUT_LIMIT_BYTES, LocalExit, RawToolOutcome, SignalFailure, SignalStage,
     ToolStartError,
 )
+from camctl.operations.models import AttemptTicket
 
 pytestmark = pytest.mark.asyncio
 _PATH = "/DCIM/a 'quoted'\npreview.LRF"
@@ -21,7 +22,8 @@ _PATH = "/DCIM/a 'quoted'\npreview.LRF"
 def _stream(raw=None, *, error=None, size=3252796, offset=65539):
     filesystem = AdbFilesystem(DeviceBinding("osmo", "dji-osmo360-ii"),
         "serial-1", SimpleNamespace(), tools=ShellFileTools())
-    stream = _AdbSourceStream(filesystem, _PATH, offset, size)
+    stream = _AdbSourceStream(filesystem, _PATH, offset, size,
+                              AttemptTicket(1, "read", "5", "read/5", 9), 11)
     stream.future = Future()
     if error is not None:
         stream.future.set_exception(error)

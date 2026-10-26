@@ -19,6 +19,7 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.events import log_context
 from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.models import AttemptTicket, ErrorValue
 from camctl.operations.process import OUTPUT_LIMIT_BYTES, RawToolOutcome, ToolSpec, ToolStartError
@@ -422,12 +423,14 @@ class AdbFilesystem:
 
     async def _run(self, script, timeout_s, stop):
         spec = ToolSpec(shell_argv(self.serial, script), timeout_s, self.terminate_grace_s)
-        return await self.transport.run(spec, stop)
+        with log_context(device_id=self.binding.device_id, driver_id=self.binding.driver_id):
+            return await self.transport.run(spec, stop)
 
     async def _file_call(self, identity, operation, script_for, decode, timeout_s, stop):
         path = self._identity(identity)
         try:
-            raw = await self._run(script_for(path), timeout_s, stop)
+            with log_context(device_path=path, file_operation=operation):
+                raw = await self._run(script_for(path), timeout_s, stop)
         except ToolStartError as error:
             return FileAccessRead(None, None, _error(None, operation, str(error)), error)
         if not _returned(raw):
@@ -499,7 +502,7 @@ class AdbFilesystem:
         if type(offset) is not int or not 0 <= offset <= source.size_bytes:
             raise ValueError("读取偏移不在原固定长度范围内")
         # 先校验会话输入，再启动唯一受管流，避免无效输入产生进程。
-        stream = _AdbSourceStream(self, path, offset, source.size_bytes)
+        stream = _AdbSourceStream(self, path, offset, source.size_bytes, ticket, source.file_id)
         session = ReadSession(source, offset, stream, idle_timeout_s)
         stream.start()
         return session
@@ -520,9 +523,10 @@ class AdbReadError(DiagnosticError, OSError):
 class _AdbSourceStream:
     """一个读取尝试持有一个受管进程，文件字节经两块有界队列交付。"""
 
-    def __init__(self, filesystem, path, offset, size):
+    def __init__(self, filesystem, path, offset, size, ticket, file_id):
         self.fs, self.path, self.offset = filesystem, path, offset
         self.expected_size = size
+        self.ticket, self.file_id = ticket, file_id
         self.remaining = size - offset
         self.skip = offset % 65536
         self.queue = queue.Queue(maxsize=2)
@@ -563,7 +567,11 @@ class _AdbSourceStream:
     async def _run(self):
         spec = ToolSpec(shell_argv(self.fs.serial, self.fs.tools.read_script(self.path, self.offset)),
                         None, self.fs.terminate_grace_s)
-        return await self.fs.transport.run_stream(spec, self.stop, self._receive)
+        with log_context(device_id=self.fs.binding.device_id, driver_id=self.fs.binding.driver_id,
+                         run_id=self.ticket.run_id, attempt_id=self.ticket.attempt_id,
+                         copy_id=self.ticket.target_id, file_id=self.file_id,
+                         device_path=self.path, offset=self.offset):
+            return await self.fs.transport.run_stream(spec, self.stop, self._receive)
 
     async def _receive(self, data):
         skipped = min(self.skip, len(data))

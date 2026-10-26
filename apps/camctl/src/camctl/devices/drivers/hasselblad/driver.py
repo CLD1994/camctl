@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
+from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
@@ -31,6 +32,7 @@ from camctl.host_files.capture_sources import (
     prepare_capture_workspace,
     verify_capture_files,
 )
+from camctl.logging_runtime.events import log_context, measure_stage
 from camctl.operations.models import (
     AttemptStatus,
     CallInfo,
@@ -215,8 +217,12 @@ class HasselbladDriver:
             if remaining <= 0:
                 raise CameraReadError("preparation_timeout", steps)
             settled = False
-            raw = await self._run_step(config=config, name=name, args=args,
-                                       timeout_s=remaining, steps=steps)
+            with log_context(device_id=identity.binding.device_id,
+                             driver_id=identity.binding.driver_id,
+                             file_id=source.file_id, run_id=ticket.run_id,
+                             attempt_id=ticket.attempt_id):
+                raw = await self._run_step(config=config, name=name, args=args,
+                                           timeout_s=remaining, steps=steps)
             settled = True
             if raw is None:
                 raise CameraReadError("tool_start_failed", steps)
@@ -350,7 +356,8 @@ class HasselbladDriver:
             self.terminate_grace_s,
         )
         try:
-            raw = await self.transport.run(spec, _NeverStop())
+            with log_context(command=args):
+                raw = await self.transport.run(spec, _NeverStop())
         except ToolStartError as failure:
             steps.append({
                 "name": name,
@@ -473,7 +480,14 @@ class HasselbladDriver:
                 if isinstance(budget, DeviceCallResult):
                     return budget
                 args = (*args, "--output", str(workspace))
-            raw = await self._run_step(config=config, name=name, args=args, timeout_s=budget, steps=steps)
+            stage = ("camera_start_command" if command.name is PhotoStep.CAPTURE else
+                     "camera_setting" if command.name not in (PhotoStep.LIST, PhotoStep.INFO) else None)
+            with log_context(device_id=request.binding.device_id,
+                             driver_id=request.binding.driver_id, activity_id=activity_id,
+                             run_id=request.ticket.run_id, attempt_id=request.ticket.attempt_id):
+                with measure_stage(stage, command=args, timeout_s=str(budget)) if stage is not None else nullcontext():
+                    raw = await self._run_step(config=config, name=name, args=args,
+                                               timeout_s=budget, steps=steps)
             complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
             def stream(data):
                 state = ToolStreamState.UNAVAILABLE if data is None else (

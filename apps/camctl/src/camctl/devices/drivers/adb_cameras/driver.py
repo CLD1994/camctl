@@ -15,7 +15,7 @@ from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
-from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.events import log_context, measure_stage
 from camctl.logging_runtime.diagnostics import record_error
 from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
     EvidenceValue, Settlement, SettlementBasis)
@@ -133,7 +133,16 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         command = replace(command, timeout_s=request.timeout_s if timeout_s is None else timeout_s,
                           terminate_grace_s=self.terminate_grace_s)
         transport = self.transport if raw_capture is None else _RawOutcomeCapture(self.transport, raw_capture)
-        return await invoke(command, request.ticket, transport)
+        fields = dict(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
+                      run_id=request.ticket.run_id, attempt_id=request.ticket.attempt_id,
+                      operation=request.ticket.operation)
+        if kind in (CameraCall.SETTING, CameraCall.START, CameraCall.STOP, CameraCall.RESULT, CameraCall.QUERY):
+            fields["activity_id"] = request.ticket.target_id
+        if kind in (CameraCall.FILE_QUERY, CameraCall.DELETE):
+            fields.update((name, request.params[name]) for name in ("cleanup_item_id", "obtain_item_id")
+                          if name in request.params)
+        with log_context(**fields):
+            return await invoke(command, request.ticket, transport)
 
     def _tool_start_failed(self, request, failure):
         outcome = CallOutcome(status=AttemptStatus.FAILED,
@@ -275,7 +284,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 and request.operation in self.contract.setting_call_history_operations)
             raw_capture = [] if record_setting_call else None
             try:
-                with measure_performance(
+                with measure_stage(
                         "camera_start_command" if kind is CameraCall.START else "camera_setting",
                         device_id=request.binding.device_id,
                         activity_id=request.ticket.target_id,
@@ -361,8 +370,13 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         action_type = {"stop_recording": "camera_record", "stop_timelapse": "camera_timelapse"}.get(request.operation)
         if action_type is None:
             raise ValueError("没有该相机停止操作")
-        argv = shell_argv(serial, shlex.join(stop_for(self.contract.driver_id, action_type)))
-        return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.STOP, serial, argv))
+        command = stop_for(self.contract.driver_id, action_type)
+        argv = shell_argv(serial, shlex.join(command))
+        with measure_stage("camera_stop_command", device_id=request.binding.device_id,
+                           activity_id=request.ticket.target_id, run_id=request.ticket.run_id,
+                           attempt_id=request.ticket.attempt_id, command=list(command),
+                           timeout_s=str(request.timeout_s)):
+            return DeviceCallResult.from_outcome(await self._invoke(request, CameraCall.STOP, serial, argv))
 
     async def list_results(self, request, batch):
         serial = self._request(request, "result")
@@ -421,7 +435,12 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         timeout = self.contract.digest_timeout_s(request.params["size_bytes"])
         if not isinstance(timeout, Decimal) or not timeout.is_finite() or timeout <= 0:
             raise ValueError("驱动的整片摘要调用期限必须是有限正秒数")
-        result = await filesystem.source_digest(identity, timeout_s=timeout, stop=_NeverStop())
+        fields = {"file_id": request.params["file_id"]}
+        if request.ticket is not None:
+            fields.update(run_id=request.ticket.run_id, attempt_id=request.ticket.attempt_id,
+                          operation=request.ticket.operation)
+        with log_context(**fields):
+            result = await filesystem.source_digest(identity, timeout_s=timeout, stop=_NeverStop())
         if result.error is not None:
             return DeviceCallResult((), {"code": result.error.code, "stage": result.error.stage,
                                        "details": dict(result.error.details)},

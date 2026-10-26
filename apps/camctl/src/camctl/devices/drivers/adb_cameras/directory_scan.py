@@ -8,6 +8,7 @@ from camctl.contracts.pages import Page
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest
 from camctl.devices.file_identity import FileIdentity
 from camctl.logging_runtime.performance import record_performance
+from camctl.logging_runtime.events import log_context
 from camctl.operations.process import OUTPUT_LIMIT_BYTES, ToolSpec
 
 from .filesystem import _error, _returned
@@ -197,7 +198,9 @@ class AdbDirectoryScan:
                 started = time.monotonic_ns()
                 called = True
                 try:
-                    raw = await fs.transport.run_stream(spec, stop, receive)
+                    with log_context(device_id=self.binding.device_id, driver_id=self.binding.driver_id,
+                                     directory=request.directories[index]):
+                        raw = await fs.transport.run_stream(spec, stop, receive)
                 finally:
                     elapsed_ns = time.monotonic_ns() - started
                     record_performance("adb_directory", elapsed_ns,
