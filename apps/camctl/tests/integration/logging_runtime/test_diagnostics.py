@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from camctl.logging_runtime.diagnostics import (
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.session.service import _drive_flows
 
 pytestmark = pytest.mark.asyncio
 
@@ -177,3 +179,65 @@ async def test_admitted_record_uses_command_fallback_when_consumer_cannot_write(
     assert len(command_fallback) == 1
     assert json.loads(command_fallback[0])["error"]["message"] == "original-business-error"
     assert not other_fallback
+
+
+@pytest.mark.parametrize("cancel_flush", [False, True])
+async def test_background_admission_allows_later_flow_stop_and_same_device_rounds(
+    tmp_path, cancel_flush,
+):
+    channel, writer, runtime = await full_channel(tmp_path)
+    fallback = []
+    operations = []
+    states = []
+
+    async def device_flow(context):
+        for number in range(2):
+            async with diagnostic_scope():
+                states.append(record_error(ValueError(f"device-round-{number}"), stage="device"))
+                operations.append(f"device-round-{number}")
+            await asyncio.sleep(0)
+
+    async def stop_flow(context):
+        operations.append("required-stop")
+
+    context = SimpleNamespace(flows={"device": device_flow, "stop": stop_flow}, local_work=None)
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        driving = asyncio.create_task(_drive_flows(context))
+        flushing = None
+        try:
+            done, _ = await asyncio.wait({driving}, timeout=1)
+            assert driving in done
+            assert driving.result() is None
+            assert operations == ["device-round-0", "device-round-1", "required-stop"]
+            assert all(state.status is DiagnosticStatus.HELD for state in states)
+            flushing = asyncio.create_task(flush_diagnostics())
+            await asyncio.sleep(0)
+            assert not flushing.done()
+            assert channel.listener_alive
+            if cancel_flush:
+                flushing.cancel("first flush cancellation")
+                await asyncio.sleep(0)
+                flushing.cancel("repeat flush cancellation")
+                await asyncio.sleep(0)
+                assert not flushing.done()
+            writer.release.set()
+            if cancel_flush:
+                with pytest.raises(asyncio.CancelledError) as raised:
+                    await flushing
+                assert raised.value.args == ("first flush cancellation",)
+            else:
+                await flushing
+            assert all(state.status is DiagnosticStatus.ADMITTED for state in states)
+        finally:
+            writer.release.set()
+            if not driving.done():
+                driving.cancel()
+                await asyncio.gather(driving, return_exceptions=True)
+            if flushing is not None and not flushing.done():
+                await asyncio.gather(flushing, return_exceptions=True)
+            await flush_diagnostics()
+            await close_logging(runtime)
+    text = (tmp_path / "camctl.log").read_text(encoding="utf-8")
+    assert all(text.count(f"device-round-{number}") == 1 for number in range(2))
+    assert not fallback
+    assert not channel.listener_alive

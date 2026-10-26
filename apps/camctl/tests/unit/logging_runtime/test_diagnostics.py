@@ -2,7 +2,9 @@
 
 import asyncio
 import base64
+from datetime import datetime, timezone
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -47,6 +49,236 @@ async def test_record_without_command_target_has_no_async_or_output_side_effect(
         async with diagnostic_scope():
             await flush_diagnostics()
     assert state.status is DiagnosticStatus.NEW
+
+
+async def test_record_freezes_common_log_metadata_separately_from_business_time():
+    channel = MemoryChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_error(ValueError("business"), stage="read", context={"occurred_at": "business-time"})
+        await flush_diagnostics()
+    payload = document(channel)
+    assert payload["level"] == "ERROR"
+    assert payload["pid"] == os.getpid()
+    timestamp = datetime.fromisoformat(payload["logged_at_utc"])
+    assert timestamp.utcoffset() == timezone.utc.utcoffset(timestamp)
+    assert payload["context"]["occurred_at"] == "business-time"
+
+
+async def test_background_context_creates_one_consumer_for_all_records():
+    channel = MemoryChannel()
+    created = []
+    real_create_task = asyncio.create_task
+
+    def create_task(coroutine, **kwargs):
+        task = real_create_task(coroutine, **kwargs)
+        created.append(task)
+        return task
+
+    with patch("asyncio.create_task", side_effect=create_task) as create:
+        with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+            for number in range(3):
+                async with diagnostic_scope():
+                    record_error(ValueError(str(number)), stage="read")
+            await flush_diagnostics()
+    assert create.call_count == 1
+    assert len(channel.records) == 3
+    assert created[0].done()
+
+
+async def test_background_scope_never_blocks_later_stop_or_same_device_work():
+    class BlockedChannel(MemoryChannel):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def alog(self, record):
+            self.entered.set()
+            await self.release.wait()
+            return await super().alog(record)
+
+    channel = BlockedChannel()
+    operations = []
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+        async with diagnostic_scope():
+            first = record_error(ValueError("first"), stage="read")
+        await channel.entered.wait()
+        async with diagnostic_scope():
+            second = record_error(ValueError("second"), stage="read")
+            operations.append("same-device-next-body")
+        operations.append("required-stop")
+        assert first.status is second.status is DiagnosticStatus.HELD
+        channel.release.set()
+        await flush_diagnostics()
+    assert operations == ["same-device-next-body", "required-stop"]
+    assert first.status is second.status is DiagnosticStatus.ADMITTED
+
+
+async def test_background_consumer_can_admit_while_business_body_is_still_running():
+    admitted = asyncio.Event()
+
+    class SignallingChannel(MemoryChannel):
+        async def alog(self, record):
+            result = await super().alog(record)
+            admitted.set()
+            return result
+
+    channel = SignallingChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+        state = record_error(ValueError("business"), stage="read")
+        await admitted.wait()
+        assert state.status is DiagnosticStatus.ADMITTED
+        await flush_diagnostics()
+
+
+async def test_background_flush_protects_existing_task_from_repeated_parent_cancel():
+    class BlockedChannel(MemoryChannel):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def alog(self, record):
+            self.entered.set()
+            await self.release.wait()
+            return await super().alog(record)
+
+    channel = BlockedChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+        states = [record_error(ValueError(str(number)), stage="cleanup") for number in range(3)]
+        await channel.entered.wait()
+        flushing = asyncio.create_task(flush_diagnostics())
+        await asyncio.sleep(0)
+        flushing.cancel("first parent cancellation")
+        await asyncio.sleep(0)
+        flushing.cancel("repeat parent cancellation")
+        await asyncio.sleep(0)
+        assert not flushing.done()
+        channel.release.set()
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await flushing
+        assert raised.value.args == ("first parent cancellation",)
+        assert all(state.status is DiagnosticStatus.ADMITTED for state in states)
+        await flush_diagnostics()
+    assert len(channel.records) == 3
+
+
+async def test_background_serve_control_error_is_owned_until_flush():
+    original = KeyboardInterrupt("serve control")
+    fallback = []
+
+    class ControlledChannel(MemoryChannel):
+        async def alog(self, record):
+            raise original
+
+    with error_diagnostics_context(ControlledChannel(), fallback.append, background=True):
+        state = record_error(ValueError("business"), stage="read")
+        with pytest.raises(KeyboardInterrupt) as raised:
+            await flush_diagnostics()
+        assert raised.value is original
+        await flush_diagnostics()
+    assert state.status is DiagnosticStatus.FALLBACK
+    assert len(fallback) == 1
+
+
+async def test_background_serve_admission_cancel_is_reported_after_remaining_records():
+    original = asyncio.CancelledError("serve admission cancellation")
+    accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
+
+    class ControlledChannel(MemoryChannel):
+        async def alog(self, record):
+            self.records.append(record)
+            if len(self.records) == 1:
+                raise original
+            return accepted
+
+    channel = ControlledChannel()
+    with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
+        with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+            states = [record_error(ValueError(str(number)), stage="read") for number in range(2)]
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await flush_diagnostics()
+            assert raised.value is original
+            assert all(state.status is DiagnosticStatus.ADMITTED for state in states)
+            await flush_diagnostics()
+    assert len(channel.records) == 2
+
+
+async def test_background_late_record_after_flush_goes_directly_to_fallback():
+    channel = MemoryChannel()
+    fallback = []
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        await flush_diagnostics()
+        state = record_error(ValueError("late"), stage="late")
+        assert state.status is DiagnosticStatus.FALLBACK
+    assert len(fallback) == 1
+    assert not channel.records
+
+
+async def test_background_scope_preserves_copy_acknowledgement_before_ordinary_admission():
+    channel = MemoryChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text), background=True):
+        async with diagnostic_scope():
+            state = record_error(ValueError("report-copy"), stage="report")
+            original_record = diagnostic_record_for(state)
+            await asyncio.sleep(0)
+            assert not channel.records
+            assert original_record is not None
+            acknowledge_diagnostic(state)
+        await flush_diagnostics()
+    assert state.status is DiagnosticStatus.ADMITTED
+    assert not channel.records
+
+
+async def test_background_child_after_context_exit_uses_original_fallback_target():
+    channel = MemoryChannel()
+    fallback = []
+    release = asyncio.Event()
+
+    async def child():
+        await release.wait()
+        return record_error(ValueError("late-child"), stage="shared_save")
+
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        child_task = asyncio.create_task(child())
+        await flush_diagnostics()
+    release.set()
+    state = await child_task
+    assert state.status is DiagnosticStatus.FALLBACK
+    assert len(fallback) == 1
+    assert not channel.records
+
+
+async def test_background_context_requires_flush_even_if_consumer_already_failed():
+    original = KeyboardInterrupt("serve control")
+
+    class ControlledChannel(MemoryChannel):
+        async def alog(self, record):
+            raise original
+
+    with pytest.raises(RuntimeError) as raised:
+        with error_diagnostics_context(ControlledChannel(), lambda text: None, background=True):
+            record_error(ValueError("business"), stage="read")
+            await asyncio.sleep(0)
+    assert raised.value.__cause__ is original
+
+
+async def test_background_late_scope_handoff_uses_fallback_after_owner_has_stopped():
+    fallback = []
+    held = asyncio.Event()
+    release = asyncio.Event()
+
+    async def child():
+        async with diagnostic_scope():
+            state = record_error(ValueError("held-before-stop"), stage="shared_save")
+            held.set()
+            await release.wait()
+        return state
+
+    with error_diagnostics_context(MemoryChannel(), fallback.append, background=True):
+        task = asyncio.create_task(child())
+        await held.wait()
+        await flush_diagnostics()
+    release.set()
+    state = await task
+    assert state.status is DiagnosticStatus.FALLBACK
+    assert len(fallback) == 1
 
 
 async def test_scope_prepares_snapshot_and_waits_after_business_body():

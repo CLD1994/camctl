@@ -9,10 +9,11 @@ from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 import json
-from os import PathLike
+from os import PathLike, getpid
 import traceback
 
 from camctl.logging_runtime.admission import AdmissionKind
@@ -59,6 +60,14 @@ class _Target:
     fallback: Callable[[str], None]
     root: _Owner = field(default_factory=_Owner)
     closed: bool = False
+    background: bool = False
+    wake: asyncio.Event | None = None
+    task: asyncio.Task | None = None
+    stopping: bool = False
+    finished: bool = False
+    serve_error: BaseException | None = None
+    error_reported: bool = False
+    flushed: bool = False
 
 
 @dataclass
@@ -72,15 +81,26 @@ _scope: ContextVar[_Scope | None] = ContextVar("error_diagnostics_scope", defaul
 
 
 @contextmanager
-def error_diagnostics_context(channel: LogChannel | None, fallback: Callable[[str], None]):
+def error_diagnostics_context(
+    channel: LogChannel | None, fallback: Callable[[str], None], *, background: bool = False,
+):
     """装配命令目标；命令负责在退出本上下文前完成必要收场与 flush。"""
-    target = _Target(channel, fallback)
+    target = _Target(channel, fallback, background=background)
+    if background:
+        asyncio.get_running_loop()
+        target.wake = asyncio.Event()
     token = _target.set(target)
+    if background:
+        target.task = asyncio.create_task(_serve(target), name="camctl-error-diagnostics")
     try:
         yield
     finally:
         target.closed = True
         _target.reset(token)
+        if target.background and not target.flushed:
+            target.stopping = True
+            _notify(target)
+            raise RuntimeError("后台诊断上下文退出前必须 await flush_diagnostics()") from target.serve_error
 
 
 @asynccontextmanager
@@ -102,6 +122,9 @@ async def diagnostic_scope():
         else:
             # 子任务继承的是同一个 scope；关闭后到达的记录直接交命令。
             scope.owner.closed = True
+            if target.background:
+                _retain_at_root(scope.owner, target)
+                return
             try:
                 await _drain(scope.owner, target)
             except BaseException:
@@ -115,6 +138,9 @@ async def flush_diagnostics() -> None:
     """在必要业务收场后、日志消费者关闭前交接命令持有的诊断。"""
     target = _target.get()
     if target is None or target.closed:
+        return
+    if target.background:
+        await _finish_background(target)
         return
     first_cancel = None
     while target.root.pending:
@@ -198,8 +224,10 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     if state.status is not DiagnosticStatus.NEW:
         return state
     target = _target.get()
-    if target is None or target.closed:
+    if target is None or (target.closed and not target.background):
         return state
+    metadata = {"level": "ERROR", "logged_at_utc": datetime.now(timezone.utc).isoformat(),
+                "pid": getpid()}
     try:
         document = _document(payload)
     except Exception as error:
@@ -214,6 +242,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
                         "diagnostic_format_error": _type_name(error),
                         "diagnostic_fallback_error": _type_name(fallback_error)}
         state._fallback_only = True
+    document = {**metadata, **document}
     try:
         message = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
     except Exception as error:
@@ -222,10 +251,15 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         state._fallback_only = True
     state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback)
     state.status = DiagnosticStatus.HELD
+    if target.background and (target.finished or target.closed):
+        _fallback(state, target)
+        return state
     scope = _scope.get()
     owner = (scope.owner if scope is not None and scope.target is target
              and not scope.owner.closed else target.root)
     owner.pending.append(state)
+    if owner is target.root:
+        _notify(target)
     return state
 
 
@@ -307,8 +341,91 @@ def _type_name(value: object) -> str:
 
 
 def _retain_at_root(owner: _Owner, target: _Target) -> None:
-    target.root.pending.extend(owner.pending)
+    if target.background and (target.finished or target.closed):
+        while owner.pending:
+            state = owner.pending[0]
+            if state.status is DiagnosticStatus.HELD:
+                _fallback(state, target)
+            owner.pending.popleft()
+        return
+    target.root.pending.extend(state for state in owner.pending
+                               if state.status is DiagnosticStatus.HELD)
     owner.pending.clear()
+    _notify(target)
+
+
+def _notify(target: _Target) -> None:
+    if target.wake is not None:
+        target.wake.set()
+
+
+async def _serve(target: _Target) -> None:
+    assert target.wake is not None
+    try:
+        while True:
+            try:
+                if not target.root.pending:
+                    if target.stopping:
+                        break
+                    target.wake.clear()
+                    await target.wake.wait()
+                await _drain(target.root, target)
+            except asyncio.CancelledError as error:
+                _remember_serve_error(target, error)
+            except BaseException as error:
+                _remember_serve_error(target, error)
+                break
+    finally:
+        target.finished = True
+        _fallback_remaining(target)
+
+
+def _fallback_remaining(target: _Target) -> None:
+    while target.root.pending:
+        state = target.root.pending.popleft()
+        if state.status is not DiagnosticStatus.HELD:
+            continue
+        try:
+            _fallback(state, target)
+        except BaseException as error:
+            _remember_serve_error(target, error)
+            # stderr 控制错误由 flush 外传，该诊断不再递归投递。
+            state.status = DiagnosticStatus.FALLBACK
+
+
+async def _finish_background(target: _Target) -> None:
+    assert target.task is not None
+    target.stopping = True
+    _notify(target)
+    first_cancel = None
+    while True:
+        try:
+            await asyncio.shield(target.task)
+            break
+        except asyncio.CancelledError as error:
+            if target.task.cancelled():
+                target.finished = True
+                _remember_serve_error(target, error)
+                _fallback_remaining(target)
+                break
+            if first_cancel is None:
+                first_cancel = error
+    serve_error = None if target.error_reported else target.serve_error
+    target.error_reported = True
+    target.flushed = True
+    if first_cancel is not None:
+        if serve_error is not None:
+            first_cancel.add_note(f"诊断任务控制错误: {_type_name(serve_error)}")
+        raise first_cancel
+    if serve_error is not None:
+        raise serve_error
+
+
+def _remember_serve_error(target: _Target, error: BaseException) -> None:
+    if target.serve_error is None:
+        target.serve_error = error
+    elif target.serve_error is not error:
+        target.serve_error.add_note(f"诊断任务后续控制错误: {_type_name(error)}")
 
 
 async def _drain(owner: _Owner, target: _Target) -> None:
