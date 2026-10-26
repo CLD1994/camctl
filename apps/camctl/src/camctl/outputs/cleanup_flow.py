@@ -15,14 +15,14 @@ from __future__ import annotations
 from camctl.persistence.models import db_failure
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 from typing import Any, Awaitable, Callable, Mapping
 
 from camctl.persistence.business import BusinessDatabase, settle_required
-from camctl.persistence.models import db_outcome_for
+from camctl.persistence.models import db_outcome_for, db_failure
 
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
@@ -38,6 +38,7 @@ from camctl.outputs.cleanup_round import (CleanupConsumption, record_consumption
 from camctl.operations.owned_calls import (
     owned_tool_call, check_call_interruption, current_call_scope)
 from camctl.operations.validation import OutcomeValidationError
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.outputs.cleanup_ownership import (
     CleanupSaveNotApplicable, PendingCleanupSave, save_cleanup_request,
     verify_cleanup_transaction)
@@ -423,7 +424,7 @@ class LocalArtifactRequest:
         return self.file_ref.relative_path
 
 
-class LocalArtifactTaskFailure(RuntimeError):
+class LocalArtifactTaskFailure(DiagnosticError, RuntimeError):
     """任务实际结果已取回，但执行器监督交接自身发生错误。"""
 
     def __init__(
@@ -432,18 +433,22 @@ class LocalArtifactTaskFailure(RuntimeError):
             message: str | None = None):
         rendered = (message if supervision_diagnostic is None else
                     supervision_diagnostic.render())
-        super().__init__(rendered or "主机文件等待取消，原 completion 已取回")
+        super().__init__(rendered or "主机文件等待取消，原 completion 已取回",
+                         diagnostic_details={"supervision": None if supervision_diagnostic is None
+                             else exception_diagnostic(supervision_diagnostic.exception),
+                             "supervision_facts": [] if supervision_diagnostic is None else
+                                 [asdict(fact) for fact in supervision_diagnostic.facts]})
         self.actual = actual
         self.supervision_diagnostic = supervision_diagnostic
 
 
 def _raise_supervision_with_error(
         pending, prior: BaseException, context: str) -> None:
-    """保存仍不可靠时同时交付原数据库问题和纯数据监督诊断。"""
+    """保存仍不可靠时同时交付原数据库问题和原监督错误。"""
     diagnostic = pending.supervision_diagnostic
     if diagnostic is None or pending.supervision_diagnostic_delivered:
         return
-    supervision_error = RuntimeError(diagnostic.render())
+    supervision_error = diagnostic.exception or RuntimeError(diagnostic.render())
     combined = BaseExceptionGroup(
         "清理结果保存与文件任务监督均有故障",
         [prior, supervision_error])
@@ -457,9 +462,14 @@ def _deliver_supervision(pending, operation: str) -> None:
     if diagnostic is None or pending.supervision_diagnostic_delivered:
         return
     pending.supervision_diagnostic_delivered = True
-    raise ConsistencyError(
+    error = ConsistencyError(
         f"{operation}实际结果已可靠保存，文件任务监督交接失败: "
-        f"{diagnostic.render()}") from RuntimeError(diagnostic.render())
+        f"{diagnostic.render()}")
+    error.__cause__ = diagnostic.exception or RuntimeError(diagnostic.render())
+    record_error(error, stage=f"cleanup_{pending.ticket.operation}_supervision",
+                 state=pending.diagnostic_state,
+                 context={"database_id": pending.database_id, "cleanup_item_id": pending.item_id})
+    raise error
 
 
 class LocalArtifactTargetError(ConsistencyError):
@@ -481,6 +491,7 @@ class CleanupStep:
     phase: str
     detail: str | None = None
     diagnostic: str | None = None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 class CleanupQueryConsumer(Enum):
@@ -542,9 +553,10 @@ class CleanupSupervisionFault:
 
 @dataclass(frozen=True)
 class CleanupSupervisionDiagnostic:
-    """本次文件结果交接的有界故障集合；不持有运行时异常或任务。"""
+    """本次文件结果交接的故障事实和原异常图，不持有任务。"""
 
     facts: tuple[CleanupSupervisionFault, ...]
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
     def render(self) -> str:
         rendered = []
@@ -1438,7 +1450,11 @@ async def _save_delete_return(runtime, pending):
         if not isinstance(saved, DbOutcome):
             raise ConsistencyError("删除结束未返回合法数据库回执")
         if saved.kind is not DbOutcomeKind.COMPLETED:
-            return CleanupStep("finish_rejected", str(saved.error))
+            error = db_failure(ConsistencyError,
+                f"删除原实际结果未可靠保存（{saved.kind.value}），清理成员={pending.item_id}", saved)
+            if not isinstance(error, Exception):
+                raise error
+            return CleanupStep("finish_rejected", str(saved.error), exception=error)
         await apply_completed(saved)
     return None
 
@@ -1672,7 +1688,7 @@ async def _delete_once(runtime, item_id, action_id, output_id):
         raise
     if rejected is not None:
         _raise_supervision_with_error(
-            pending, ConsistencyError(
+            pending, rejected.exception or ConsistencyError(
                 f"删除原实际结果未可靠保存: {rejected.phase} {rejected.detail}"),
             "删除原实际结果尚未可靠保存")
         return rejected
@@ -2445,7 +2461,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             step = await delete_source_file(local, item_id)
             wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                raise ConsistencyError(
+                raise step.exception or ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
         from camctl.outputs.cleanup_discovery import cleanup_item_batches
         async for batch in cleanup_item_batches(runtime.database, batch_size=runtime.discovery_batch_size):
@@ -2455,7 +2471,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
                 step = await delete_source_file(local, item_id)
                 wakeup_required = True
                 if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                    raise ConsistencyError(
+                    raise step.exception or ConsistencyError(
                         f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     finally:
         runtime.last_recovery_diagnostic = local.last_recovery_diagnostic
@@ -2472,7 +2488,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             step = await delete_source_file(runtime, item_id)
             wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                raise ConsistencyError(
+                raise step.exception or ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)

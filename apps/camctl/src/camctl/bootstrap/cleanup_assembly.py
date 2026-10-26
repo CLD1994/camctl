@@ -135,7 +135,7 @@ class HostArtifacts(HostArtifactPort):
                 if interruption is not None:
                     failures.append(interruption)
                 if supervision_diagnostic is not None:
-                    failures.append(RuntimeError(supervision_diagnostic.render()))
+                    failures.append(supervision_diagnostic.exception or RuntimeError(supervision_diagnostic.render()))
                 error = (BaseExceptionGroup(
                     "主机文件收场未取得原 completion，等待控制与监督诊断均须保留",
                     failures) if len(failures) > 1 else
@@ -160,7 +160,7 @@ class HostArtifacts(HostArtifactPort):
             failure = LocalArtifactTaskFailure(actual, supervision_diagnostic)
             if interruption is not None and scope is None:
                 raise failure from interruption
-            raise failure from RuntimeError(supervision_diagnostic.render())
+            raise failure from (supervision_diagnostic.exception or RuntimeError(supervision_diagnostic.render()))
         return actual
 
     def _validate_request(self, request: LocalArtifactRequest) -> None:
@@ -298,8 +298,25 @@ def _exception_facts(error, source, context=None):
     return facts
 
 
+def _has_supervision_error(error):
+    pending, seen = [error], set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        elif isinstance(current, Exception):
+            return True
+        pending.extend(value for value in (current.__cause__, current.__context__) if value is not None)
+    return False
+
+
 def _interruption_facts(error, context):
-    """只记录取消携带的原故障与 notes，不把取消本身改成监督错误。"""
+    """只记录取消携带的真实故障，不把取消或说明备注改成监督错误。"""
+    if not _has_supervision_error(error):
+        return []
     facts = []
     notes = tuple(_safe_error_text(note)
                   for note in getattr(error, "__notes__", ()))
@@ -319,18 +336,32 @@ def _interruption_facts(error, context):
     return facts
 
 
-def _supervision_diagnostic(facts):
+def _supervision_diagnostic(facts, errors=()):
     unique = tuple(dict.fromkeys(facts))
-    return None if not unique else CleanupSupervisionDiagnostic(unique)
+    originals = []
+    for error in errors:
+        if all(error is not original for original in originals):
+            originals.append(error)
+    if len(originals) == 1:
+        actual = originals[0]
+    elif originals:
+        actual = BaseExceptionGroup("清理文件任务监督发生多个实际错误", originals)
+    else:
+        actual = None
+    return None if not unique and actual is None else CleanupSupervisionDiagnostic(unique, actual)
 
 
 async def _collect_file_result(executor, owner, task, interruption, runner_error):
     """shield 同一共享 drain，完整保留全部失败并从原 handle 补取 completion。"""
     task_context = _task_context(task)
     facts = []
+    errors = []
     if runner_error is not None:
+        errors.append(runner_error)
         facts.extend(_exception_facts(runner_error, "runner", task_context))
     if interruption is not None:
+        if _has_supervision_error(interruption):
+            errors.append(interruption)
         facts.extend(_interruption_facts(interruption, task_context))
     # fallback 必须使用进入共享 drain 前接管的局部引用；callback 可能在
     # drain 期间结束并主动释放 owner.handle。
@@ -345,10 +376,14 @@ async def _collect_file_result(executor, owner, task, interruption, runner_error
             if interruption is None:
                 interruption = error
             facts.extend(_interruption_facts(error, task_context))
+            if _has_supervision_error(error):
+                errors.append(error)
             if drain.done() and drain.cancelled():
-                facts.extend(_exception_facts(error, "shared_drain_cancelled"))
+                if _has_supervision_error(error):
+                    facts.extend(_exception_facts(error, "shared_drain_cancelled"))
                 break
         except Exception as error:
+            errors.append(error)
             facts.extend(_exception_facts(error, "shared_drain"))
             break
 
@@ -363,15 +398,21 @@ async def _collect_file_result(executor, owner, task, interruption, runner_error
                 if interruption is None:
                     interruption = error
                 facts.extend(_interruption_facts(error, task_context))
+                if _has_supervision_error(error):
+                    errors.append(error)
                 if take.done() and take.cancelled():
-                    facts.extend(_exception_facts(error, "fallback_cancelled", task_context))
+                    if _has_supervision_error(error):
+                        facts.extend(_exception_facts(error, "fallback_cancelled", task_context))
                     break
             except Exception as error:
+                errors.append(error)
                 facts.extend(_exception_facts(error, "fallback", task_context))
                 break
     if supervision is not None:
         for failure in supervision.failed:
             record = failure.record
+            if failure.exception is not None:
+                errors.append(failure.exception)
             error_type, separator, error_message = failure.error.partition(": ")
             facts.append(CleanupSupervisionFault(
                 source="supervisor_owner",
@@ -384,7 +425,7 @@ async def _collect_file_result(executor, owner, task, interruption, runner_error
             ))
     if result is not None:
         owner.record_result(result)
-    return result, interruption, _supervision_diagnostic(facts)
+    return result, interruption, _supervision_diagnostic(facts, errors)
 
 
 def _device_result(request: LocalArtifactRequest, result: FileTaskResult | None) -> DeviceCallResult:
