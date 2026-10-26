@@ -21,7 +21,7 @@ from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from support.capture_database import capture_database
 
 
-def _world(mocker, *, old_scope=True, error=None):
+def _world(mocker, *, old_scope=True, error=None, finalized_event_id=None):
     runtime = create_autospec(CaptureRuntime, instance=True)
     old = {"id": 21, "status": 4, "device_id": "camera", "driver_id": "dji-osmo360-ii",
         "execution_spec_json": {"video_result_mode": "segmented"}, "error_code": "capture_failed"}
@@ -41,7 +41,7 @@ def _world(mocker, *, old_scope=True, error=None):
     def execute(sql, parameters=()):
         cursor = create_autospec(sqlite3.Cursor, instance=True)
         if sql.startswith("SELECT d.id,d.action_id"):
-            cursor.fetchone.return_value = (7, 21) if old_scope else None
+            cursor.fetchone.return_value = (7, 21, finalized_event_id) if old_scope else None
         elif sql.startswith("SELECT id,status FROM operation_runs") or sql.startswith("SELECT r.id, a.attempt_no"):
             cursor.fetchone.return_value = None
         else:
@@ -104,6 +104,17 @@ async def test_scope_read_error_keeps_occupancy_and_independent_retry(mocker):
     assert finish.call_args.args[1].outcome.error is error
     assert finish.call_args.kwargs == {"retry_wait": True}
     release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_saved_scope_resumes_occupancy_release_without_another_read_or_attempt(mocker):
+    runtime, old, trigger, read, _, _, release = _world(mocker, finalized_event_id=80)
+
+    assert await advance_ended_scope(runtime, trigger) is True
+
+    release.assert_awaited_once_with(runtime, old["id"])
+    read.assert_not_awaited()
+    runtime.operations.begin_attempt.assert_not_called()
 
 
 @pytest.mark.asyncio

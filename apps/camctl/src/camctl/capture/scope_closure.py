@@ -64,24 +64,29 @@ async def _finish_incomplete(runtime, pending):
 async def advance_ended_scope(runtime, trigger):
     """仅在有效准备时段核实已结束的旧范围；返回是否可以继续准备。"""
     from camctl.capture import handlers as common
+    from camctl.capture.segment_completion import release_segment_occupancy
 
     if not await _trigger_ready(runtime, trigger["id"]):
         return False
 
     def candidate(owned):
         with closing(owned.connection.execute(
-            "SELECT d.id,d.action_id FROM device_activities d JOIN actions a ON a.id=d.action_id"
+            "SELECT d.id,d.action_id,d.output_set_finalized_event_id"
+            " FROM device_activities d JOIN actions a ON a.id=d.action_id"
             " WHERE a.device_id=? AND a.id<>? AND a.status IN(3,4,5,6)"
             " AND d.activity_state=3 AND d.occupancy_state=1 AND d.ownership_mode=2"
             " AND d.baseline_state=3 AND d.result_set_state<>3"
-            " AND d.output_set_finalized_event_id IS NULL ORDER BY d.id LIMIT 1",
+            " ORDER BY d.id LIMIT 1",
             (trigger["device_id"], trigger["id"]))) as cursor:
             return cursor.fetchone()
 
     found = await runtime.database.read(candidate, description="读取已结束相机的范围责任")
     if found is None:
         return True
-    activity_id, owner_id = found
+    activity_id, owner_id, finalized_event_id = found
+    if finalized_event_id is not None:
+        await release_segment_occupancy(runtime, owner_id)
+        return True
     if runtime.results is None:
         return False
     from camctl.capture.residual import _original_binding_failure
@@ -179,7 +184,5 @@ async def advance_ended_scope(runtime, trigger):
         finish = StaleRunFinish((responsibility,), RunOutcome.SUCCEEDED, runtime.wall_us())
         await _write(runtime, lambda owned: runtime.operations.finish_stale_runs(finish, key, owned),
             key, "结束已保存的范围核实责任")
-    from camctl.capture.segment_completion import release_segment_occupancy
-
     await release_segment_occupancy(runtime, owner_id)
     return True

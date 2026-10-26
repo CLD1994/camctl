@@ -1277,8 +1277,9 @@ class CaptureRuntime(_FileObservationSaves):
             return (await self.database.write(lambda owned: self.capture.finish_query_conclude(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if (pending.result_set is not None or pending.completion_page is not None
                 or pending.finalized_page is not None):
-            if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
-                raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
+            if run["kind"] not in (
+                    int(_RUN_KIND.CHECK_CAPTURE_RESULTS), int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE)):
+                raise ConsistencyError("结果复合保存必须使用结果核实或范围收尾责任")
             options = {"completion_page": pending.completion_page}
             if pending.finalized_page is not None:
                 options["finalized_page"] = pending.finalized_page
