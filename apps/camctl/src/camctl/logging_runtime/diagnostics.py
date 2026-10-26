@@ -16,8 +16,7 @@ from os import PathLike
 
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime import service
-from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.logging_runtime.service import LogChannel, LogRecord, admission_result_for
 from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.operations.models import CallOutcome, ErrorValue
 from camctl.operations.process import RawToolOutcome
@@ -213,7 +212,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         # 格式化失败仍持有已经排除媒体 stdout 的完整事实，不能截断。
         message = f"错误诊断格式化失败：{type(error).__name__}: {error}; diagnostic={document!r}"
         state._fallback_only = True
-    state._record = LogRecord(LogLevel.ERROR, message)
+    state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback)
     state.status = DiagnosticStatus.HELD
     scope = _scope.get()
     owner = (scope.owner if scope is not None and scope.target is target
@@ -288,12 +287,6 @@ def _retain_at_root(owner: _Owner, target: _Target) -> None:
     owner.pending.clear()
 
 
-def _admission_result_for(error: BaseException):
-    # 在日志基础接口接入前亦可导入本模块；最终装配提供实际接纳结果。
-    reader = getattr(service, "admission_result_for", None)
-    return None if reader is None else reader(error)
-
-
 async def _drain(owner: _Owner, target: _Target) -> None:
     while owner.pending:
         state = owner.pending[0]
@@ -310,7 +303,7 @@ async def _drain(owner: _Owner, target: _Target) -> None:
             except Exception:
                 _fallback(state, target)
             except BaseException as error:
-                result = _admission_result_for(error)
+                result = admission_result_for(error)
                 if result is not None and result.decision.kind is AdmissionKind.ACCEPTED:
                     state.status = DiagnosticStatus.ADMITTED
                     owner.pending.popleft()

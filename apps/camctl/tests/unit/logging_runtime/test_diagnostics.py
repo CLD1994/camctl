@@ -172,7 +172,7 @@ async def test_root_flush_finishes_all_records_before_propagating_first_cancella
             return accepted
 
     channel = CancellingChannel()
-    with patch("camctl.logging_runtime.diagnostics._admission_result_for", return_value=accepted):
+    with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
         with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
             states = [record_error(ValueError(str(index)), stage="root") for index in range(3)]
             with pytest.raises(asyncio.CancelledError) as raised:
@@ -389,7 +389,7 @@ async def test_cancelled_admission_remembers_actual_acceptance_and_preserves_rem
             return accepted
 
     channel = CancellingChannel()
-    with patch("camctl.logging_runtime.diagnostics._admission_result_for", return_value=accepted):
+    with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=accepted):
         with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
             with pytest.raises(asyncio.CancelledError) as raised:
                 async with diagnostic_scope():
@@ -462,7 +462,7 @@ async def test_unadmitted_cancel_keeps_state_for_root_without_replacing_cancella
             return accepted
 
     channel = CancellingChannel()
-    with patch("camctl.logging_runtime.diagnostics._admission_result_for", return_value=None):
+    with patch("camctl.logging_runtime.diagnostics.admission_result_for", return_value=None):
         with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
             with pytest.raises(asyncio.CancelledError) as raised:
                 async with diagnostic_scope():
