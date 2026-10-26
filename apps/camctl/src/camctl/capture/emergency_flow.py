@@ -25,6 +25,7 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.operations.result_format import error_document, result_document
+from camctl.logging_runtime.events import measure_stage
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.capture import CaptureRepository
@@ -68,13 +69,16 @@ class DriverStopAdapter:
         self.stop_observation: Mapping[str, Any] | None = None
 
     async def stop(self) -> _Confirmed:
-        response = await self._stopper.stop(ControlRequest(
-            operation="stop",
-            binding=DeviceBinding(self._target.device_id, self._target.driver_id),
-            params=self._target.params,
-            ticket=None,
-            timeout_s=self._timeout_s,
-        ))
+        with measure_stage("capture.emergency_stop", action_id=self._target.action_id,
+                activity_id=self._target.activity_id, device_id=self._target.device_id,
+                stop_attempt=len(self.attempts) + 1, timeout_s=str(self._timeout_s)):
+            response = await self._stopper.stop(ControlRequest(
+                operation="stop",
+                binding=DeviceBinding(self._target.device_id, self._target.driver_id),
+                params=self._target.params,
+                ticket=None,
+                timeout_s=self._timeout_s,
+            ))
         attempt, observation = _stop_attempt_document(
             response, self._target.activity_id)
         self.attempts.append(attempt)

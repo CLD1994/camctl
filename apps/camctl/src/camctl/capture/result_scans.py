@@ -1,8 +1,10 @@
 """同一 RESULTS 轮次的有界分页拥有者。"""
+import asyncio
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Awaitable, Callable, Mapping
+from time import monotonic_ns
 
 from camctl.capture.result_inputs import ResultPage, page_from_outcome
 from camctl.capture.results import FileKind
@@ -19,6 +21,7 @@ from camctl.operations.tool_diagnostics import DiagnosticsValidationError
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.events import log_context, record_event
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 
 
@@ -46,6 +49,10 @@ class PendingResultScan:
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     validation_diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     scope_only: bool = False
+    action_id: int | None = None
+    device_id: str | None = None
+    round_began_ns: int | None = field(default=None, init=False, repr=False)
+    round_ended: bool = field(default=False, init=False, repr=False)
     reading_context: ResultReadingContext = field(init=False)
 
     def __post_init__(self):
@@ -57,6 +64,22 @@ class PendingResultScan:
 
     def close(self):
         self.reading_context.close()
+
+    def log_fields(self):
+        fields = {"activity_id": self.ticket.target_id, "run_id": self.ticket.run_id,
+            "attempt_id": self.ticket.attempt_id, "scope_only": self.scope_only}
+        if self.action_id is not None:
+            fields["action_id"] = self.action_id
+        if self.device_id is not None:
+            fields["device_id"] = self.device_id
+        return fields
+
+    def log_return(self, event, **fields):
+        if self.round_began_ns is not None and not self.round_ended:
+            self.round_ended = True
+            record_event("capture.result_scan", event=event,
+                elapsed_ms=round((monotonic_ns() - self.round_began_ns) / 1_000_000, 3),
+                **self.log_fields(), **fields)
 
 
 async def resume_result_page_saves(database, *, pending_scans, repository):
@@ -75,6 +98,15 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         can_read: Callable[[], Awaitable[bool]] | None = None,
         page_qualified: Callable[[SavedResultPage], Awaitable[bool]] | None = None) -> bool:
     """可靠交接后继续原轮次；实际错误或中断不产生隐式重读。"""
+    try:
+        return await _advance_result_scan(pending, runtime=runtime,
+            can_read=can_read, page_qualified=page_qualified)
+    except asyncio.CancelledError as error:
+        pending.log_return("cancelled", exception_type=type(error).__name__, page_no=pending.page_no)
+        raise
+
+
+async def _advance_result_scan(pending, *, runtime, can_read, page_qualified):
     if pending.finished:
         pending.close()
         return True
@@ -91,6 +123,9 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         check_call_interruption()
         pending.in_call = True
         try:
+            if pending.round_began_ns is None:
+                pending.round_began_ns = monotonic_ns()
+                record_event("capture.result_scan", event="started", **pending.log_fields())
             page_kwargs = {
                 "cursor": pending.cursor,
                 "timeout_s": result_page_timeout_s(pending.timeout_s, pending.completion_context),
@@ -102,9 +137,10 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
                 page_kwargs["video_result_mode"] = pending.video_result_mode
             if pending.scope_only:
                 page_kwargs["scope_only"] = True
-            page = await runtime.results.list_page(pending.ticket, **page_kwargs)
-            # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
-            occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
+            with log_context(**pending.log_fields()):
+                page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+                # 实际返回立即成为原申请；保存未知不再取时钟或执行列举。
+                occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
             if not isinstance(page, ResultPage):
                 raise ConsistencyError("分页端口未返回完整实际 ResultPage")
             record_call_outcome(page.outcome, ticket=pending.ticket,
@@ -123,6 +159,8 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
         except BaseException as error:
             # 未取得可保存的实际结果时保留原责任，下一推进不能重新列举。
             pending.interrupted = True
+            pending.log_return("cancelled" if isinstance(error, asyncio.CancelledError)
+                else "raised", exception_type=type(error).__name__, page_no=pending.page_no)
             try:
                 pending.close()
             except OSError as close_error:
@@ -167,6 +205,10 @@ async def _apply_saved_page(pending, runtime, page_qualified, held):
     pending.cursor = page.next_cursor
     pending.finished = page.next_cursor is None or page.outcome.error is not None or not qualified
     if pending.finished:
+        pending.log_return("returned", page_count=pending.page_no,
+            scan_complete=page.scan_complete, qualified=qualified,
+            status=page.outcome.status.value,
+            error_code=None if page.outcome.error is None else page.outcome.error.code)
         pending.close()
     else:
         pending.page_no += 1

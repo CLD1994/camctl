@@ -50,7 +50,7 @@ async def test_original_segment_save_fields_reach_transaction_summary(resumed):
     assert len(seen) == 1 and seen[0][0] is request and seen[0][2] is owned
     if resumed:
         assert seen[0][1] == key
-    records = [json.loads(call.args[0].message.removeprefix("性能计时 "))
+    records = [json.loads(call.args[0].message)
                for call in channel.slog.call_args_list]
     summary, = [record for record in records if record["stage"] == "db_transaction"]
     assert (summary["action_id"], summary["method"], summary["resumed"]) == (

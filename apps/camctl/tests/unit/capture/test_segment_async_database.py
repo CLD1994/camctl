@@ -1,5 +1,6 @@
 """分段保存的真实回执与主协程原申请交接。"""
 import asyncio
+import json
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import create_autospec
@@ -12,6 +13,11 @@ from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
+from camctl.capture.segment_finish import FinishSegmentRecording, SegmentFinishResult
+from camctl.capture.segment_storage import SegmentResultRef
+from camctl.contracts.history_values import HistoryBoundary
 
 pytestmark = pytest.mark.asyncio
 
@@ -91,6 +97,37 @@ async def test_completed_control_error_clears_segment_pending_before_propagation
         DbOutcomeKind.COMPLETED, 'saved', control=error)
     with pytest.raises(Control, match='committed control'):
         await segment_completion._save(state, 7, repository, 'finish_segment_recording', object())
+    assert not state.pending_segment_writes
+
+
+@pytest.mark.parametrize("control_error", [False, True])
+async def test_segment_completion_logs_once_after_reliable_commit_including_notification_error(control_error):
+    from support.business_database import inline_business_database
+
+    state, owned, repository = runtime()
+    state.database = inline_business_database(owned)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    ref = SegmentResultRef(7, 3, 1)
+    request = FinishSegmentRecording(ref, 71, 9, 1000)
+    result = SegmentFinishResult(ref, 3, 2, HistoryBoundary(1, 9), 2, 1, 1, 1)
+    failure = RuntimeError("已提交后的回执通知错误") if control_error else None
+    repository.finish_segment_recording.return_value = DbOutcome(
+        DbOutcomeKind.COMPLETED, result, control=failure)
+    with event_logging(channel):
+        if control_error:
+            with pytest.raises(RuntimeError) as caught:
+                await segment_completion._save(state, 7, repository, "finish_segment_recording", request)
+            assert caught.value is failure
+        else:
+            assert await segment_completion._save(state, 7, repository,
+                "finish_segment_recording", request) is result
+        await segment_completion.resume_segment_writes(state.database, state.pending_segment_writes, 7)
+    info = [json.loads(call.args[0].message) for call in channel.slog.call_args_list
+        if json.loads(call.args[0].message)["level"] == "INFO"]
+    payload, = info
+    assert (payload["stage"], payload["event"], payload["action_id"], payload["activity_id"],
+        payload["run_id"], payload["action_status"], payload["output_count"]) == (
+        "capture.completion", "settled", 7, 71, 9, 3, 2)
     assert not state.pending_segment_writes
 
 

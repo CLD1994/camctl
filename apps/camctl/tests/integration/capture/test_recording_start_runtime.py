@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from decimal import Decimal
+from unittest.mock import create_autospec
 
 import pytest
 
@@ -21,6 +22,8 @@ from camctl.operations.models import (
     Settlement, SettlementBasis,
 )
 from camctl.persistence.repositories.scheduling import SchedulingRepository
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 
 from .test_capture_contract import _NOW, _RECORD, _environment, _runtime
 
@@ -141,6 +144,38 @@ async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(
         assert state.started_confirmed and state.stop_target_ns == _ANCHOR + 60_000_000_000
         await capture_handler("camera_record")(12, runtime)
         assert len(driver.calls) == 1
+    finally:
+        owned.connection.close()
+
+
+async def test_actual_start_info_preserves_anchor_and_wait_does_not_repeat(tmp_path):
+    from .test_global_error_diagnostics import _configured as configured_runtime
+
+    owned = _world(tmp_path)
+    try:
+        mono = [_ANCHOR]
+        driver = StartDriver(_result(confirmed=True))
+        runtime = configured_runtime(owned, driver)
+        runtime.evidence = _START_EVIDENCE
+        runtime.monotonic_ns = lambda: mono[0]
+        channel = create_autospec(LogChannel, instance=True, spec_set=True)
+        def consume(record):
+            payload = json.loads(record.message)
+            if payload["stage"] == "capture.start" and payload["event"] == "returned":
+                mono[0] += 5_000_000_000
+        channel.slog.side_effect = consume
+        with event_logging(channel):
+            await capture_handler("camera_record")(12, runtime)
+            await capture_handler("camera_record")(12, runtime)
+        payloads = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+        starts = [payload for payload in payloads if payload["stage"] == "capture.start"]
+        assert [payload["event"] for payload in starts] == ["started", "returned"]
+        assert all((payload["level"], payload["action_id"], payload["activity_id"],
+            payload["run_id"], payload["attempt_id"]) == ("INFO", 12, "12", _start(owned)[0], 1)
+            for payload in starts)
+        assert len(driver.calls) == 1
+        state = await runtime.recording_state.recording_state(12)
+        assert state.stop_target_ns == _ANCHOR + 60_000_000_000
     finally:
         owned.connection.close()
 

@@ -537,10 +537,16 @@ async def _stop_residual(
             await runtime.finish(ticket, prevented,
                 end_run=RunOutcome.EXPIRED if reason == "window_ended" else RunOutcome.CANCELED)
             return
-    response = await runtime.stopper.stop(ControlRequest(
-        operation="stop_recording", binding=_binding(owner),
-        params=owner["effective_params_json"], ticket=ticket,
-        timeout_s=runtime.residual_config.timeout_s))
+    from camctl.logging_runtime.events import measure_stage
+
+    with measure_stage("capture.residual_stop", action_id=candidate.action_id,
+            trigger_action_id=trigger_id, device_id=owner["device_id"],
+            activity_id=candidate.activity_id, run_id=ticket.run_id,
+            attempt_id=ticket.attempt_id):
+        response = await runtime.stopper.stop(ControlRequest(
+            operation="stop_recording", binding=_binding(owner),
+            params=owner["effective_params_json"], ticket=ticket,
+            timeout_s=runtime.residual_config.timeout_s))
     outcome, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
     if confirmed:

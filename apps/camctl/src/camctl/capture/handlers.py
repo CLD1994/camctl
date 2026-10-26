@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.diagnostic_controls import is_capture_control_error
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.devices.start_entry import StartEntryCoordinator, EntryPhase, is_hasselblad_photo
 from camctl.capture.finite_cancel import finite_cancel_policy
 from camctl.capture.diagnostics import preparation_failure_diagnostic
@@ -597,6 +598,9 @@ async def resume_capture_completions(
             if result.kind is not DbOutcomeKind.COMPLETED:
                 raise db_failure(ConsistencyError, f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}", result)
         del pending_capture_completions[identity]
+        if not stop_only:
+            record_event("capture.completion", event="settled", action_id=identity,
+                request_type=type(pending.request).__name__)
         if notification_error is not None:
             raise notification_error
 
@@ -1428,6 +1432,9 @@ class CaptureRuntime(_FileObservationSaves):
                     if scan is not None:
                         scan.close()
                         self.pending_result_scans.pop(identity)
+                        scan.log_return("returned", scan_complete=False,
+                            page_count=0 if scan.last_ref is None else scan.last_ref.page_no,
+                            reason="result_disposition_saved")
                     if delivery_error is not None:
                         raise delivery_error
                     return
@@ -1843,15 +1850,19 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
         if permit.phase is not EntryPhase.READY:
             raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")
     try:
-        result = await runtime.driver.control(ControlRequest(
-            operation=operation,
-            binding=_binding(action),
-            params=action["effective_params_json"],
-            ticket=ticket, timeout_s=_start_call_timeout(action),
-            dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
-            start_entry=permit,
-            prepared_by=prepared_ticket,
-        ))
+        with measure_stage("capture.start", action_id=action["id"],
+                device_id=action["device_id"], activity_id=ticket.target_id,
+                run_id=ticket.run_id, attempt_id=ticket.attempt_id, operation=operation):
+            result = await runtime.driver.control(ControlRequest(
+                operation=operation,
+                binding=_binding(action),
+                params=action["effective_params_json"],
+                ticket=ticket, timeout_s=_start_call_timeout(action),
+                dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
+                start_entry=permit,
+                prepared_by=prepared_ticket,
+            ))
+            returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     finally:
         if permit is not None:
             permit.active = False
@@ -1859,7 +1870,6 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     if result.outcome is not None:
         confirmed = outcome.effect is EffectState.CONFIRMED
     # 返回时取得事实时间；结果事务和日志耗时不能改变设备返回锚点。
-    returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     captured_facts = None
     anchor = None
     if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
@@ -2136,13 +2146,17 @@ async def _record_start_once(runtime: CaptureRuntime, action) -> HandlerOutcome:
         dispatch = None
 
         async def start(self, ticket):
-            result = await runtime.driver.control(ControlRequest(
-                "start_recording", _binding(action), action["effective_params_json"],
-                ticket=ticket, timeout_s=runtime.start_config.timeout_s,
-                start_return_meaning=action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED)),
-                dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
-                prepared_by=_prepared_start_ticket(runtime, action)))
-            received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
+            with measure_stage("capture.start", action_id=action["id"],
+                    device_id=action["device_id"], activity_id=ticket.target_id,
+                    run_id=ticket.run_id, attempt_id=ticket.attempt_id,
+                    operation="start_recording"):
+                result = await runtime.driver.control(ControlRequest(
+                    "start_recording", _binding(action), action["effective_params_json"],
+                    ticket=ticket, timeout_s=runtime.start_config.timeout_s,
+                    start_return_meaning=action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED)),
+                    dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
+                    prepared_by=_prepared_start_ticket(runtime, action)))
+                received_at, anchor_ns = runtime.wall_us(), runtime.monotonic_ns()
             meaning = action["execution_spec_json"].get("start_return_meaning", int(StartReturn.STARTED))
             outcome, confirmed = _operation_outcome(result,
                 "recording_sent" if meaning == int(StartReturn.SENT) else "start_confirmed")
@@ -2574,14 +2588,17 @@ async def _stop_call(runtime: CaptureRuntime, action,
     if outcome.value.disposition is not BeginDisposition.GRANTED:
         return HandlerOutcome("stop_not_granted", outcome.value.reason)
     ticket = outcome.value.ticket
-    response = await runtime.stopper.stop(ControlRequest(
-        operation=operation,
-        binding=_binding(action),
-        params=action["effective_params_json"],
-        ticket=ticket,
-        timeout_s=runtime.stop_config.timeout_s,
-    ))
-    returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
+    with measure_stage("capture.stop", action_id=action["id"],
+            device_id=action["device_id"], activity_id=ticket.target_id,
+            run_id=ticket.run_id, attempt_id=ticket.attempt_id, operation=operation):
+        response = await runtime.stopper.stop(ControlRequest(
+            operation=operation,
+            binding=_binding(action),
+            params=action["effective_params_json"],
+            ticket=ticket,
+            timeout_s=runtime.stop_config.timeout_s,
+        ))
+        returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     call, confirmed = _operation_outcome(
         response, "stop_confirmed", evidence_type="stop_returned")
     if response.outcome is not None:
@@ -5518,11 +5535,14 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
         pending = PendingResultScan(ticket, activity["output_scope_json"],
                                     runtime.check_config.timeout_s,
                                     completion_context=(await _result_source(runtime, ticket)).context,
-                                    video_result_mode=video_result_mode)
+                                    video_result_mode=video_result_mode,
+                                    action_id=action_id, device_id=action["device_id"])
         runtime.pending_result_scans[(ticket.run_id, ticket.attempt_id)] = pending
         return await _continue_result_scan(runtime, pending)
-    result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)
-    observed_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
+    with measure_stage("capture.result_scan", action_id=action_id,
+            activity_id=ticket.target_id, run_id=ticket.run_id, attempt_id=ticket.attempt_id):
+        result = await runtime.results.list_round(ticket, timeout_s=runtime.check_config.timeout_s)
+        observed_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     runtime.hold_call_result(ticket, result.outcome, occurred_at=observed_at,
                              returned_ns=returned_ns, result_listing=result.entries)
     listing = (await _held_listing(runtime, ticket))

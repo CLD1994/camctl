@@ -60,6 +60,9 @@ async def _finish_incomplete(runtime, pending):
         await runtime.finish(pending.ticket, outcome, retry_wait=True)
         pending.close()
         runtime.pending_result_scans.pop((pending.ticket.run_id, pending.ticket.attempt_id), None)
+        pending.log_return("returned", scan_complete=False,
+            page_count=0 if pending.last_ref is None else pending.last_ref.page_no,
+            reason="scope_trigger_ended")
 
 
 @owned_tool_call
@@ -163,7 +166,8 @@ async def advance_ended_scope(runtime, trigger):
         action = await runtime.action(owner_id)
         pending = PendingResultScan(ticket, scope, runtime.check_config.timeout_s,
             completion_context=source.context,
-            video_result_mode=action["execution_spec_json"].get("video_result_mode"), scope_only=True)
+            video_result_mode=action["execution_spec_json"].get("video_result_mode"), scope_only=True,
+            action_id=owner_id, device_id=action["device_id"])
         runtime.pending_result_scans[(ticket.run_id, ticket.attempt_id)] = pending
     if listing is None:
         listing = await common._continue_result_scan(runtime, pending,

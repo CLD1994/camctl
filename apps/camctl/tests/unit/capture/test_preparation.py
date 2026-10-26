@@ -1,6 +1,7 @@
 """设置准备的实际返回、可靠保存和当前会话凭据分别成立。"""
 
 import asyncio
+import json
 import sqlite3
 from decimal import Decimal
 from types import SimpleNamespace
@@ -33,6 +34,9 @@ from camctl.persistence.business import BusinessDatabase, SharedSave
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.service import LogChannel
 
 
 def _world(mocker, *, recover=True):
@@ -121,6 +125,39 @@ async def test_existing_ready_preparation_has_no_new_completion_notice(mocker):
     assert second.phase is PreparationPhase.READY
     assert second.wakeup_required is False
     runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_preparation_logs_actual_call_once_when_original_save_is_retried(mocker):
+    runtime, _, ticket = _world(mocker)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.UNKNOWN)
+    with event_logging(channel):
+        with pytest.raises(ConsistencyError):
+            await advance_preparation(runtime, 1)
+        runtime.operations.finish_attempt.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
+            FinishAttemptResult(FinishDisposition.SAVED))
+        await resume_preparation_saves(runtime.database, runtime.preparation_cache,
+            operations=runtime.operations)
+        await advance_preparation(runtime, 1)
+    records = [call.args[0] for call in channel.slog.call_args_list]
+    payloads = [json.loads(record.message) for record in records]
+    stages = [payload for payload in payloads if payload["stage"] == "capture.preparation"]
+    assert [payload["event"] for payload in stages] == ["started", "returned"]
+    assert all(record.level is LogLevel.INFO for record in records)
+    assert all((payload["action_id"], payload["activity_id"], payload["device_id"],
+        payload["run_id"], payload["attempt_id"]) == (1, 7, "cam-1", ticket.run_id, 1)
+        for payload in stages)
+    assert "elapsed_ms" in stages[-1]
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
+async def test_preparation_wait_does_not_log_an_unexecuted_stage(mocker):
+    runtime, action, _ = _world(mocker)
+    runtime.wall_us.return_value = action["scheduled_at"] - 30_000_000
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.WAITING
+    channel.slog.assert_not_called()
 
 
 async def test_first_session_setup_reserves_extra_lead_and_freezes_total_budget(mocker):

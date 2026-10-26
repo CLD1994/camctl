@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import create_autospec, patch
 import sqlite3
+import json
 
 import pytest
 
@@ -25,6 +26,8 @@ from camctl.persistence.repositories.capture import (
     FinishCapture, FinishRecordingResults,
 )
 from camctl.persistence.repositories.operations import OperationRepository
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 
 
 def _requests():
@@ -83,9 +86,15 @@ async def test_reliable_confirmation_releases_original_request(command, method):
     status = 6 if isinstance(command, FinishCanceledCapture) else 4 if isinstance(command, FinishBindingFailure) else 3
     getattr(repository, method).return_value = DbOutcome(DbOutcomeKind.COMPLETED, CaptureResult(status, 2, ()))
     owned = _owned()
-    await resume_capture_completions(capture_database(owned), pending_capture_completions=held, capture=repository)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        await resume_capture_completions(capture_database(owned), pending_capture_completions=held, capture=repository)
+        await resume_capture_completions(capture_database(owned), pending_capture_completions=held, capture=repository)
     assert held == {}
     getattr(repository, method).assert_called_once_with(command, pending.key, owned)
+    payload, = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert (payload["level"], payload["stage"], payload["event"], payload["action_id"]) == (
+        "INFO", "capture.completion", "settled", 23)
 
 
 async def test_unknown_request_type_is_diagnosed_before_saving():

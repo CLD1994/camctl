@@ -29,6 +29,7 @@ from camctl.operations.models import (
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.operations.diagnostic_controls import is_capture_control_error
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
+from camctl.logging_runtime.events import measure_stage
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
@@ -357,11 +358,15 @@ def prepared_by(runtime, action):
 @owned_tool_call
 async def _call_prepare(owner, runtime, request):
     owner.entered = True
-    owner.actual = await runtime.preparation_driver.prepare_capture(request)
-    if not isinstance(owner.actual, DeviceCallResult):
-        raise ConsistencyError("设置准备没有交回实际控制结果")
-    owner.wakeup_pending = True
-    owner.returned_at = runtime.wall_us()
+    with measure_stage("capture.preparation", action_id=owner.action_id,
+            device_id=request.binding.device_id, activity_id=owner.activity_id,
+            run_id=owner.ticket.run_id, attempt_id=owner.ticket.attempt_id,
+            timeout_s=str(request.timeout_s)):
+        owner.actual = await runtime.preparation_driver.prepare_capture(request)
+        if not isinstance(owner.actual, DeviceCallResult):
+            raise ConsistencyError("设置准备没有交回实际控制结果")
+        owner.wakeup_pending = True
+        owner.returned_at = runtime.wall_us()
     (await _save_owner(owner, runtime.database, runtime.operations))
 
 
