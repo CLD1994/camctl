@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field, replace
@@ -509,7 +511,7 @@ def _require_completed(outcome, stage: str) -> None:
     """仓储结果不是完成时按数据库错误保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return
-    raise WorkFileCleanupError(stage, str(outcome.error))
+    raise db_failure(lambda detail: WorkFileCleanupError(stage, detail), str(outcome.error), outcome)
 
 
 def _delete_failure(facts: WorkFileFacts) -> WorkFileFailure:

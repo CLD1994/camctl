@@ -89,7 +89,7 @@ def db_outcome_errors(outcome: DbOutcome) -> tuple[BaseException, ...]:
     return tuple(errors)
 
 
-def db_failure(error_type: type[Exception], message: str, outcome: DbOutcome) -> BaseException:
+def db_failure(error_type: Callable[[str], Exception], message: str, outcome: DbOutcome) -> BaseException:
     """给业务边界附上原数据库异常，控制对象及实际结果保持不变。"""
     errors = db_outcome_errors(outcome)
     control = next((error for error in errors if not isinstance(error, Exception)), None)

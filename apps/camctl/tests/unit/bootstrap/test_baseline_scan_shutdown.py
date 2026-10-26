@@ -247,4 +247,4 @@ async def test_failure_diagnostic_cancellation_still_closes_baseline_and_log(moc
     assert caught.value.args == ("diagnostic wait canceled",)
     scan.close.assert_called_once()
     close_log.assert_awaited_once()
-    assert events == ["diagnostic", "baseline", "logs"]
+    assert events == ["baseline", "diagnostic", "logs"]

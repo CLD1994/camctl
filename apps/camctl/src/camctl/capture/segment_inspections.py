@@ -363,7 +363,7 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
         request_slot, slot_key = SlotRequest(copy_id, read_flow.occurred_at()), new_operation_key()
         slot = await read_flow.database.write(lambda owned: copies.repository.grant_read_slot(request_slot, slot_key, owned), key=slot_key)
         if slot.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"分段检查读取机会未可靠保存: {slot.error}")
+            raise db_failure(ConsistencyError, f"分段检查读取机会未可靠保存: {slot.error}", slot)
         if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=slot.value.reason)
         ticket, reason = (await __import__("camctl.capture.media_flow", fromlist=["acquire_read_attempt"]).acquire_read_attempt(

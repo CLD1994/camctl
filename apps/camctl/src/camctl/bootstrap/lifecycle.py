@@ -1260,14 +1260,6 @@ async def _execute_command(
         outcome = await run_session(context, source)
     except BaseException as error:
         primary_error = error
-        try:
-            await _emit_session_error(deps, _format_session_exception(error))
-        except BaseException as diagnostic_error:
-            if isinstance(error, Exception) and not isinstance(diagnostic_error, Exception):
-                _attach_session_diagnostic_error(diagnostic_error, "此前会话异常", error)
-                primary_error = diagnostic_error
-                raise
-            _attach_session_diagnostic_error(error, "会话失败诊断异常", diagnostic_error)
         raise
     finally:
         selected_control = (
@@ -1295,6 +1287,10 @@ async def _execute_command(
             if id(error) not in seen_cleanup_errors:
                 seen_cleanup_errors.add(id(error))
                 cleanup_errors.append((label, error))
+                if isinstance(error, Exception):
+                    from camctl.logging_runtime.diagnostics import record_error
+
+                    record_error(error, stage="shutdown", context={"resource": label})
             if isinstance(error, Exception):
                 if selected_control is not None:
                     attach_cleanup_error(selected_control, label, error)
@@ -1321,14 +1317,6 @@ async def _execute_command(
             else:
                 attach_cleanup_error(selected_control, label, error)
 
-        # 会话失败结论先于监督方收场与日志关闭记录。
-        if outcome is not None and not outcome.succeeded:
-            try:
-                await _emit_session_error(
-                    deps, _failed_outcome_message(deps, outcome)
-                )
-            except BaseException as error:
-                remember_cleanup_error("会话失败诊断异常", error)
         async def stop_worker(worker):
             nonlocal outcome
             if worker is None:
@@ -1337,11 +1325,13 @@ async def _execute_command(
             if stopped.state_failure is not None:
                 if outcome is not None:
                     outcome = _shutdown_state_outcome(outcome, stopped.state_failure)
-                await _emit_session_error(deps, stopped.state_failure.error_message)
+                from camctl.logging_runtime.diagnostics import record_error
+                record_error(_worker_failure_details(stopped.state_failure), stage="report_shutdown")
             elif stopped.configuration_failure is not None:
                 if outcome is not None:
                     outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
-                await _emit_session_error(deps, stopped.configuration_failure.error_message)
+                from camctl.logging_runtime.diagnostics import record_error
+                record_error(_worker_failure_details(stopped.configuration_failure), stage="report_shutdown")
 
         for worker in (supervisor, restricted_supervisor):
             try:
@@ -1376,6 +1366,16 @@ async def _execute_command(
                         scan.close()
                     except BaseException as error:
                         remember_cleanup_error("结果读取缓存关闭异常", error)
+        # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
+        try:
+            if primary_error is not None:
+                from camctl.logging_runtime.diagnostics import diagnostic_state_for
+                if diagnostic_state_for(primary_error) is None:
+                    await _emit_session_error(deps, _format_session_exception(primary_error))
+            if outcome is not None and not outcome.succeeded:
+                await _emit_session_error(deps, _failed_outcome_message(deps, outcome))
+        except BaseException as error:
+            remember_cleanup_error("会话失败诊断异常", error)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(
@@ -1473,12 +1473,18 @@ def _emergency_settlement_of(deps: RuntimeDeps):
     return settle
 
 
+def _worker_failure_details(failure: ResultFailureMessage) -> dict:
+    """消费子进程返回的完整有限诊断，保留降级通道与容量事实。"""
+    return {**vars(failure), "error_kind": failure.error_kind.value}
+
+
 def _shutdown_state_outcome(
     outcome: SessionOutcome, failure: ResultFailureMessage,
 ) -> SessionOutcome:
     """收场的状态库错误主导普通报告错误，其他已有致命错误保持并附加诊断。"""
     details = {"stage": "shutdown",
-               "message": f"{failure.error_code}: {failure.error_message}"}
+               "message": f"{failure.error_code}: {failure.error_message}",
+               "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
     previous = dict(outcome.details)
@@ -1494,7 +1500,8 @@ def _shutdown_configuration_outcome(
     outcome: SessionOutcome, failure: ResultFailureMessage,
 ) -> SessionOutcome:
     """配置前提错误主导普通报告错误，保留已有致命主错误及诊断。"""
-    details = {"stage": "shutdown", "message": failure.error_message}
+    details = {"stage": "shutdown", "message": failure.error_message,
+               "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
     previous = dict(outcome.details)

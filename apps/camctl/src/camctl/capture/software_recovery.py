@@ -1,6 +1,8 @@
 """原终态活动的有界软件重启责任，不复用原 START、STOP 或 RESULTS。"""
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -119,7 +121,7 @@ async def _save(runtime, activity, state, *, evidence=None, ended=False):
     key = new_operation_key()
     receipt = await runtime.database.write(lambda owned: save_recovery(request, key, owned), key=key)
     if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"软件恢复事实尚未可靠保存: {receipt.kind.value}: {receipt.error}")
+        raise db_failure(ConsistencyError, f"软件恢复事实尚未可靠保存: {receipt.kind.value}: {receipt.error}", receipt)
     return (await runtime.database.read(lambda owned, inputs=("device_activities", activity["id"]), options=dict(): row_facts(owned.connection, inputs[0], inputs[1], **options), description="读取拍摄直接事实"))
 
 

@@ -382,7 +382,7 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
         async def save_original(_control=None):
             receipt = await saves._save(held.stage, held.command)
             if receipt.disposition is not SaveDisposition.SAVED:
-                raise ConsistencyError(f"原媒体结果未可靠保存: {receipt.error}") from receipt.error
+                raise db_failure(ConsistencyError, f"原媒体结果未可靠保存: {receipt.error}", receipt)
             return receipt
 
         if held.file_ids:

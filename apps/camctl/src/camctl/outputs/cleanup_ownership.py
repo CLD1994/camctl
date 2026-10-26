@@ -92,12 +92,11 @@ def _record_result_failures(pending, value) -> None:
                          context={"database_id": pending.database_id,
                                   "action_id": pending.request.action_id,
                                   "cleanup_item_id": item_id})
-    elif isinstance(value, ResolveSourcesOutcome) and value.error_code is not None:
-        code, spec = registered_error_spec("action_error_id", value.error_code)
-        record_error(ErrorValue(code, spec["stage"], value.error_details or {}),
-                     stage=spec["stage"], state=pending.diagnostic_state,
-                     context={"database_id": pending.database_id,
-                              "action_id": pending.request.action_id})
+    elif isinstance(value, ResolveSourcesOutcome):
+        from camctl.outputs.diagnostics import record_source_resolution
+
+        record_source_resolution(value, pending.request.action_id, state=pending.diagnostic_state,
+                                 context={"database_id": pending.database_id})
 
 
 async def _save_cleanup_request(runtime, method: str, request, *, action=False):

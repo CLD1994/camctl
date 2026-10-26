@@ -1,6 +1,8 @@
 """电机动作的单次发送流程；数据库许可与管道效果分开保存。"""
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -35,7 +37,7 @@ class MotorRuntime:
 
 def _completed(result, step: str):
     if result.kind is not DbOutcomeKind.COMPLETED:
-        raise StateDbFailure(f"电机{step}未可靠完成（{result.kind.value}）: {result.error}")
+        raise db_failure(StateDbFailure, f"电机{step}未可靠完成（{result.kind.value}）: {result.error}", result)
     return result.value
 
 

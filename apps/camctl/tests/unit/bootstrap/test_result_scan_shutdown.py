@@ -140,4 +140,4 @@ async def test_failure_diagnostic_wait_cancellation_still_closes_cache_and_share
     assert caught.value.args == ("diagnostic wait canceled",)
     scan.close.assert_called_once()
     close_log.assert_awaited_once()
-    assert events == ["diagnostic", "scan", "logs"]
+    assert events == ["scan", "diagnostic", "logs"]

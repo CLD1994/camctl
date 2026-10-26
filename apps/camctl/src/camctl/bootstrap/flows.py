@@ -280,7 +280,7 @@ class CaptureFlow:
             else:
                 continue
             if outcome.kind is not DbOutcomeKind.COMPLETED:
-                raise StateDbFailure(f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}")
+                raise db_failure(StateDbFailure, f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
     async def _advance_device(self, context, device_id, action_ids):
         database = context.database
@@ -337,7 +337,7 @@ class CaptureFlow:
                     outcome = await _save_command(database, scheduling.expire_action,
                         ExpireActionRequest(action_id, current, current))
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}")
+                        raise db_failure(StateDbFailure, f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
                     wakeup_required |= outcome.value.outcome is ExpireOutcome.EXPIRED
                     continue
                 if runtime is not None:
@@ -358,7 +358,7 @@ class CaptureFlow:
                 outcome = await _save_command(database, scheduling.start_action,
                     StartActionRequest(action_id, current, current))
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+                    raise db_failure(StateDbFailure, f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
                 wakeup_required |= outcome.value.outcome is StartOutcome.STARTED
             if runtime is None or self._stopping:
                 return FlowWakeup.RECHECK if wakeup_required else FlowWakeup.IDLE

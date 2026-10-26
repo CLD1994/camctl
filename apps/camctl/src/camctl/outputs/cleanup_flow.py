@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 import json
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -1147,7 +1149,7 @@ async def _finish_binding_failure(runtime, item_id, *, canceled=False, binding_r
     if isinstance(saved.value, CleanupSaveNotApplicable):
         return CleanupStep("cancel_pending")
     if saved.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"清理绑定失败事务未完成（{saved.kind.value}）: {saved.error}")
+        raise db_failure(ConsistencyError, f"清理绑定失败事务未完成（{saved.kind.value}）: {saved.error}", saved)
     runtime.retry_gate.cleared(f"delete/{item_id}")
     runtime.retry_gate.cleared(f"exists/{item_id}")
     return CleanupStep("canceled" if canceled else "failed", "device_binding_unavailable")
@@ -2427,7 +2429,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             saved = await save_cleanup_request(runtime, method, pending.request, action=True)
             from camctl.persistence.models import DbOutcomeKind
             if saved.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"原清理动作申请续接未完成: {method} {saved.error}")
+                raise db_failure(ConsistencyError, f"原清理动作申请续接未完成: {method} {saved.error}", saved)
             wakeup_required = True
     recovered = {pending.item_id for pending in runtime.pending_queries.values()}
     recovered.update(runtime.pending_companions)

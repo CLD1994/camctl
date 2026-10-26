@@ -113,8 +113,8 @@ def test_cli_diagnostic_failure_preserves_control_priority_and_full_secondary_er
 
     selected, attached = (original, diagnostic) if primary_control else (diagnostic, original)
     assert caught.value is selected
-    assert any(json.loads(note.split("异常诊断: ", 1)[1])["message"] == str(attached)
-               for note in selected.__notes__ if "异常诊断: " in note)
+    assert any(json.loads(note[note.index("{"):])["message"] == str(attached)
+               for note in selected.__notes__ if "{" in note)
     assert out.getvalue() == ""
 
 
