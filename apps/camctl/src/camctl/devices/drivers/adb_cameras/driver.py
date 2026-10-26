@@ -245,7 +245,8 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                         device_id=request.binding.device_id,
                         activity_id=request.ticket.target_id,
                         run_id=request.ticket.run_id,
-                        attempt_id=request.ticket.attempt_id):
+                        attempt_id=request.ticket.attempt_id,
+                        command=list(command), timeout_s=str(remaining)):
                     outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
                                                  raw_capture=raw_capture)
             except ToolStartError as error:
@@ -253,6 +254,11 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                         or (not record_setting_call and kind is not CameraCall.START)):
                     raise
                 outcome = self._tool_start_failed(request, error)
+            if outcome.error is not None:
+                outcome = replace(outcome, error=ErrorValue(
+                    outcome.error.code, outcome.error.stage,
+                    {**outcome.error.details, "command": list(command),
+                     "timeout_s": str(remaining)}))
             if record_setting_call:
                 raw = raw_capture[0] if raw_capture else None
                 attached_calls.append(self._call_record(command, outcome, raw))
