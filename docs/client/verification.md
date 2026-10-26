@@ -2,6 +2,12 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 计划记录分页与草稿编辑反馈（2026-10-26）
+
+Windows、Node.js 24.22.1 中，保存时机和编辑器静态渲染用例先复现自动保存等待过短、在途请求结束立即续存新输入，以及正常保存详情和首次校验汇总常驻的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2`，76 个单元文件的 3314 项全部通过，退出 0。覆盖记录分页和指定记录所在页、连续输入重计时、自动保存期间的新修改、显式完成全部保存、失败与冲突恢复，以及正常保存反馈和恢复操作入口。
+
+`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。页面集成用例更新了导出检查触发时机、保存等待和反馈预期；本项未执行集成测试或浏览器自动化，因此没有新增浏览器滚动位置和像素布局的运行证据。未启动服务或改写日常数据。完整日志为 `tmp/client-records-editor-unit.log` 和 `tmp/client-records-editor-build.log`。
+
 ## 默认取回的产物排除项（2026-10-26）
 
 Windows、Node.js 24.22.1 中，新增用例先在原实现复现计划范围外产物及预览进入排除列表、列表长度被直接表述为跳过数量的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/obtain.test.ts tests/unit/builtin-obtain-fields.test.ts tests/unit/web-editing.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，四个单元文件的 116 项全部通过，退出 0。

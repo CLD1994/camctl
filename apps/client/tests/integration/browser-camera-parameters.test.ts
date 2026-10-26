@@ -696,6 +696,7 @@ it("裸曝光方式原文与非法旧值的诊断分开呈现并保留全部责�
   await check(field.locator(".current-input-error")).toContainText("输入");
   await check(field.locator(".current-input-error")).not.toContainText("对象");
   await check(field.locator(".retained-content-errors")).toContainText("对象");
+  await page.getByTestId("export-button").click();
   await check(page.locator(".pending-validation-note")).toBeVisible();
   await page.locator(".raw-validation > summary").click();
   await check(
@@ -905,6 +906,7 @@ it("超限时长的字段、摘要和 HTTP 诊断均保留原上界", async () =
     })
     .locator(".field-error");
   await check(field).toContainText("9223372036854775");
+  await page.getByTestId("export-button").click();
   await check(page.locator(".validation")).toContainText("9223372036854775");
   const response = await page.request.post(
     `${page.url()}api/drafts/${draft.id}/validate`,
@@ -1221,6 +1223,7 @@ it("曝光缺失子成员的校验摘要定位对应选择器并保持草稿", a
   await check(
     page.getByRole("combobox", { name: "mode (mode)", exact: true }),
   ).not.toHaveAttribute("aria-invalid", "true");
+  await page.getByTestId("export-button").click();
   const summary = page
     .getByTestId("validation-issues")
     .locator(".validation-link");
@@ -1294,6 +1297,7 @@ it.each([{ omit: true }, { value: "{}" }])(
   async (exposure) => {
     const { app, page, draft } = await setup("10", false, exposure);
     const before = app.draft(draft.id);
+    await page.getByTestId("export-button").click();
     const summary = page
       .getByTestId("validation-issues")
       .locator(".validation-link");

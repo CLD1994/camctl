@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { DraftSession } from "../../src/web/session";
+import { DraftSession, DRAFT_SAVE_DELAY_MS } from "../../src/web/session";
 import { ActionUiIdentity } from "../../src/web/action-ui-identity";
 import { HttpError } from "../../src/web/api";
 import { DraftCopyOperation } from "../../src/web/draft-copy";
@@ -398,7 +398,7 @@ it("Task6 核实普通保存未写入不产生第二次保存", async () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(s.content).toEqual(local);
     s.schedule();
-    await vi.advanceTimersByTimeAsync(450);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS);
     expect(save).toHaveBeenCalledTimes(1);
   } finally {
     vi.useRealTimers();
@@ -843,7 +843,7 @@ it("普通失败派生后显式重试使用当前revision，再次拒绝不自�
     vi.useRealTimers();
   }
 });
-it("普通失败派生后新编辑449/450毫秒保存，重复R及schedule不重计时", async () => {
+it("普通失败派生后新编辑完整等待窗口保存，重复R及schedule不重计时", async () => {
   vi.useFakeTimers();
   try {
     const { base, local, derived, coordinated, capabilities } =
@@ -879,7 +879,7 @@ it("普通失败派生后新编辑449/450毫秒保存，重复R及schedule不重
     await vi.advanceTimersByTimeAsync(200);
     s.observeTarget({ kind: "available", draft: derived, capabilities });
     s.schedule();
-    await vi.advanceTimersByTimeAsync(249);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 201);
     expect(save).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(save).toHaveBeenNthCalledWith(2, "d1", 2, edited);
@@ -1089,7 +1089,7 @@ it("普通可靠拒绝和重复B轮询不周期重发同一输入", async () => 
     vi.useRealTimers();
   }
 });
-it("普通失败显式重试只增加一次，失败后新编辑按449/450毫秒保存", async () => {
+it("普通失败显式重试只增加一次，失败后新编辑按完整等待窗口保存", async () => {
   vi.useFakeTimers();
   try {
     const save = vi.fn(async () => {
@@ -1107,7 +1107,7 @@ it("普通失败显式重试只增加一次，失败后新编辑按449/450毫秒
     expect(save).toHaveBeenCalledTimes(2);
     s.edit(record(1, "new").content);
     s.schedule();
-    await vi.advanceTimersByTimeAsync(449);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1);
     expect(save).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
     expect(save).toHaveBeenNthCalledWith(3, "d1", 1, record(1, "new").content);
@@ -1117,7 +1117,7 @@ it("普通失败显式重试只增加一次，失败后新编辑按449/450毫秒
     vi.useRealTimers();
   }
 });
-it("普通在途保存失败后，已发生的新编辑仍取得自己的450毫秒资格", async () => {
+it("普通在途保存失败后，已发生的新编辑仍取得自己的等待窗口资格", async () => {
   vi.useFakeTimers();
   try {
     const first = deferred<Draft>();
@@ -1138,14 +1138,14 @@ it("普通在途保存失败后，已发生的新编辑仍取得自己的450毫�
     s.schedule();
     first.reject(new HttpError("invalid_content", "rejected", [], 400));
     await expect(flushing).rejects.toThrow();
-    await vi.advanceTimersByTimeAsync(450);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS);
     expect(save).toHaveBeenNthCalledWith(2, "d1", 1, record(1, "new").content);
     expect(s.saved).toBe(true);
   } finally {
     vi.useRealTimers();
   }
 });
-it("迟到普通拒绝不从读回时刻重新计算期间新编辑的450毫秒", async () => {
+it("迟到普通拒绝不从读回时刻重新计算期间新编辑的等待窗口", async () => {
   vi.useFakeTimers();
   try {
     const first = deferred<Draft>();
@@ -1167,7 +1167,7 @@ it("迟到普通拒绝不从读回时刻重新计算期间新编辑的450毫秒"
     await vi.advanceTimersByTimeAsync(200);
     first.reject(new HttpError("invalid_content", "rejected", [], 400));
     await expect(flushing).rejects.toThrow();
-    await vi.advanceTimersByTimeAsync(249);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 201);
     expect(save).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(save).toHaveBeenNthCalledWith(2, "d1", 1, record(1, "new").content);
@@ -1525,7 +1525,7 @@ function setup(remote = record(2, "remote")) {
   session.observeTarget({ kind: "available", draft: remote });
   return { session, save };
 }
-it("完整采用终止旧450毫秒计时器且保留远端全部资料", async () => {
+it("完整采用终止旧等待窗口计时器且保留远端全部资料", async () => {
   vi.useFakeTimers();
   try {
     const remote = record(2, "remote");
@@ -1725,7 +1725,7 @@ it.each(["export", "delete", "append"])(
     expect(s.canEdit).toBe(false);
   },
 );
-it("450毫秒自动保存与连续修改重计时", async () => {
+it("等待窗口自动保存与连续修改重计时", async () => {
   vi.useFakeTimers();
   try {
     const save = vi.fn(
@@ -1741,11 +1741,11 @@ it("450毫秒自动保存与连续修改重计时", async () => {
     );
     s.edit(record(1, "one").content);
     s.schedule();
-    await vi.advanceTimersByTimeAsync(449);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1);
     expect(save).not.toHaveBeenCalled();
     s.edit(record(1, "two").content);
     s.schedule();
-    await vi.advanceTimersByTimeAsync(449);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1);
     expect(save).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(save).toHaveBeenCalledTimes(1);
@@ -1984,12 +1984,12 @@ it("无身份异长远端集合完整采用后全部重建局部键", () => {
   expect(keys).not.toContain(identity.keys[0]);
   expect(s.saved).toBe(true);
 });
-it("冲突重新可靠回到完整基线时恢复450毫秒普通保存", async () => {
+it("冲突重新可靠回到完整基线时恢复等待窗口普通保存", async () => {
   vi.useFakeTimers();
   try {
     const { session, save } = setup();
     session.observeTarget({ kind: "available", draft: record(3, "base") });
-    await vi.advanceTimersByTimeAsync(449);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1);
     expect(save).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(save).toHaveBeenCalledWith("d1", 3, record(1, "local").content);
