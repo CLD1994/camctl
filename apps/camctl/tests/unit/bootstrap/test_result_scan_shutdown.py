@@ -107,18 +107,19 @@ async def test_assembly_exception_ends_command_once_and_preserves_original_error
     session.assert_not_awaited()
 
 
-async def test_business_result_does_not_predict_successful_log_shutdown(mocker):
+@pytest.mark.parametrize("original", [OSError("log shutdown failed"), asyncio.CancelledError()])
+async def test_business_result_does_not_predict_successful_log_shutdown(mocker, original):
     deps, scan, session, close_log, events = _world(mocker)
-    original = OSError("log shutdown failed")
     close_log.side_effect = original
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(type(original)) as caught:
         await lifecycle.execute_command(deps, None, flows={})
     assert caught.value is original
     command_records = [json.loads(call.args[0].message)
         for call in deps.log_runtime.channel.slog.call_args_list
         if json.loads(call.args[0].message).get("stage") == "command"]
     assert [record["event"] for record in command_records] == ["started", "result"]
-    assert command_records[-1]["succeeded"] is True
+    assert command_records[-1]["business_succeeded"] is True
+    assert "succeeded" not in command_records[-1]
 
 
 async def test_result_cache_close_failure_preserves_error_and_closes_other_resources(mocker):

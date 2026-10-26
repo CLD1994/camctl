@@ -1060,7 +1060,7 @@ async def _execute_command(
         and deps.state_db_regular is True
     )
     if deps.startup_error is not None and not minimal_bad_database_run:
-        finish_command(succeeded=False, reason=deps.startup_error.reason)
+        finish_command(business_succeeded=False, business_reason=deps.startup_error.reason)
         if deps.log_runtime is not None:
             try:
                 await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error))
@@ -1403,7 +1403,7 @@ async def _execute_command(
             finish_command(event=("cancelled" if isinstance(command_error, asyncio.CancelledError)
                          else "raised"), exception_type=type(command_error).__name__)
         elif outcome is not None:
-            finish_command(succeeded=outcome.succeeded, reason=outcome.reason)
+            finish_command(business_succeeded=outcome.succeeded, business_reason=outcome.reason)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(

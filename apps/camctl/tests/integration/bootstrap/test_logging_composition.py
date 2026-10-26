@@ -61,6 +61,8 @@ class TestSessionLogging:
             assert all(datetime.fromisoformat(record["logged_at_utc"]).utcoffset().total_seconds() == 0
                 for record in important)
             assert not any(record.get("event") == "timing" for record in records)
+            assert important[-1]["business_succeeded"] is True
+            assert "succeeded" not in important[-1]
         finally:
             close_runtime(deps)
 
