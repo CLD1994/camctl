@@ -76,8 +76,10 @@ def _world(mocker, *, old_scope=True, error=None):
 
 
 @pytest.mark.asyncio
-async def test_scope_success_releases_old_owner_without_changing_original_failure(mocker):
+@pytest.mark.parametrize("trigger_status", [1, 2], ids=["pending", "running_before_start"])
+async def test_scope_success_releases_old_owner_without_changing_original_failure(mocker, trigger_status):
     runtime, old, trigger, read, register, finish, release = _world(mocker)
+    trigger["status"] = trigger_status
 
     assert await advance_ended_scope(runtime, trigger) is True
 

@@ -123,6 +123,34 @@ async def test_existing_ready_preparation_has_no_new_completion_notice(mocker):
     runtime.preparation_driver.prepare_capture.assert_awaited_once()
 
 
+@pytest.mark.parametrize("action_type", [2, 3], ids=["recording", "timelapse"])
+async def test_ready_preparation_stays_ready_after_action_starts_with_scope_closure(mocker, action_type):
+    runtime, action, ticket = _world(mocker)
+    action["type"] = action_type
+    runtime.scope_closure_supported = True
+    runtime.prepare_baseline.return_value = BaselinePreparation(
+        PreparationPhase.READY, wakeup_required=False)
+    original_execute = runtime.owned.connection.execute.side_effect
+
+    def execute(sql, parameters=()):
+        if sql.startswith("SELECT d.id,d.action_id"):
+            cursor = create_autospec(sqlite3.Cursor, instance=True)
+            cursor.fetchone.return_value = None
+            return cursor
+        return original_execute(sql, parameters)
+
+    runtime.owned.connection.execute.side_effect = execute
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert prepared_by(runtime, action) == ticket
+
+    action.update(status=2, execution_started=1)
+    runtime.wall_us.return_value = action["scheduled_at"]
+
+    assert (await advance_preparation(runtime, 1)).phase is PreparationPhase.READY
+    assert prepared_by(runtime, action) == ticket
+    runtime.preparation_driver.prepare_capture.assert_awaited_once()
+
+
 async def test_device_busy_reservation_does_not_report_completion_progress(mocker):
     from camctl.persistence.repositories.scheduling import ReservePreparationOutcome, ReservePreparationResult
     from camctl.capture import preparation
