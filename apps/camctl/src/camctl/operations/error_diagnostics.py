@@ -69,13 +69,13 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
         )
         if include_message:
             node["message"] = str(original)
-        else:
-            node["arguments"] = original.args
         if hasattr(original, "__notes__"):
             node["notes"] = list(original.__notes__)
         if isinstance(original, BaseExceptionGroup):
             node["exceptions"] = [reference(child, f"{path}/exceptions/{index}")
                                   for index, child in enumerate(original.exceptions)]
+        if not include_message:
+            node["arguments"] = facts_document(original.args, path + "/arguments")
         if isinstance(original, OSError):
             node["errno"] = original.errno
             for name in ("filename", "filename2"):
