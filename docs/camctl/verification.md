@@ -12,7 +12,9 @@
 
 ## Action6 会话设置的临时输出处理（2026-10-26）
 
-Action6 将关闭延时摄影熄屏省电的设置纳入[相机会话准备](../architecture/camera-parameters.md#相机会话准备)的临时输出处理，普通准备和软件恢复共用同一精确命令规则。调用历史继续保留原始 stdout、stderr 和确认依据；调用错误及其他命令按各自契约处理。
+Action6 将关闭延时摄影熄屏省电和两路屏幕实时画面的设置纳入[相机会话准备](../architecture/camera-parameters.md#相机会话准备)的临时输出处理，普通准备和软件恢复共用同一精确命令规则。调用历史继续保留原始 stdout、stderr 和确认依据；调用错误及其他命令按各自契约处理。
+
+两路实时画面设置的扩展在 Linux 开发容器、Python 3.11.17 下，使用下述相同四个测试文件执行定向单元验证，**130 项通过，1.57 秒，退出 0**。六条会话设置均覆盖返回文字忽略、原输出保留、同会话缓存、新会话重发、真实调用故障和软件恢复；码率及 OSMO 继续核对自己的输出规则。拆分预算中的两条实时画面接受用例在生产修改前失败，省电设置对照用例通过。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-liveview-output-20261026/`。本项未运行集成测试或真实设备验证。
 
 Linux 开发容器、Python 3.11.17 下，执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_session_settings.py apps/camctl/tests/unit/devices/test_session_setup_budget.py apps/camctl/tests/unit/devices/test_osmo360ii_session_settings.py apps/camctl/tests/unit/devices/test_camera_power_session_settings.py -q --tb=short`，**113 项通过，1.45 秒，退出 0**。覆盖普通录像、原生延时、独立准备、软件恢复、原输出保存、会话缓存、调用失败以及 OSMO 的严格输出检查。使用正式驱动与受接口约束的传输替身；更新后的省电设置接受用例在生产修改前失败。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-lapse-lock-20261026/`。本项未运行集成测试或真实设备验证。
 

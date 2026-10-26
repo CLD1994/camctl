@@ -22,7 +22,7 @@ SETTINGS = (
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
 )
-OUTPUT_UNCHECKED = SETTINGS[:4]
+OUTPUT_UNCHECKED = SETTINGS
 UNVERIFIED_OUTPUT = b"SimuDev: when send control notify data, server not exist!\n"
 
 
@@ -59,9 +59,7 @@ async def test_setup_is_independent_per_device_and_repeated_in_new_session():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", [{"stderr": b"setting failed"}, {"error": "timeout"},
-                                  {"output_failure": "truncated"},
-                                  {"output": b"SimuDev: when send control set data, server not exist!\n"}])
+@pytest.mark.parametrize("fault", [{"error": "timeout"}, {"output_failure": "truncated"}])
 async def test_unknown_setup_blocks_start_and_is_not_cached(fault):
     bad = replace(RawToolOutcome(LocalExit(exit_code=0), b"accepted\n", None, None, stderr=b""), **fault)
     transport = Action6ContractTransport(overrides={SETTINGS[4]: bad})
@@ -143,12 +141,14 @@ async def test_temporary_setting_tool_start_failure_blocks_capture(command):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", [SETTINGS[4], SETTINGS[5], ("simulate_device", "-s", "bitrate", "2")])
-async def test_other_action6_settings_still_require_confirmed_output(command):
-    raw = RawToolOutcome(LocalExit(exit_code=0), UNVERIFIED_OUTPUT, None, None, stderr=b"")
+@pytest.mark.parametrize("fault", [{"stderr": b"setting failed"}, {"output": UNVERIFIED_OUTPUT}])
+async def test_bitrate_still_requires_confirmed_output(fault):
+    command = ("simulate_device", "-s", "bitrate", "2")
+    raw = replace(RawToolOutcome(LocalExit(exit_code=0), b"accepted\n", None, None, stderr=b""), **fault)
     transport = Action6ContractTransport(overrides={command: raw})
     result = await _action6_contract_driver(transport).control(_request())
-    assert result.error["details"]["reason"] == "simulation_service_unavailable"
+    assert result.error["details"]["reason"] == (
+        "stderr_present" if "stderr" in fault else "simulation_service_unavailable")
     assert commands(transport)[-1] == command
 
 

@@ -185,8 +185,12 @@ async def test_real_timeout_keeps_its_error_command_and_remaining_budget(phase):
 
 
 @pytest.mark.asyncio
-async def test_lapse_lock_service_error_text_allows_preparation_with_split_budget():
-    command = ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0")
+@pytest.mark.parametrize("command", [
+    ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0"),
+    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
+    ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
+])
+async def test_temporary_setup_service_error_text_allows_preparation_with_split_budget(command):
     raw = RawToolOutcome(LocalExit(exit_code=0),
         b"SimuDev: when send control set data, server not exist!", None, None, stderr=b"")
     driver, transport, request = _world(setup_s="0", overrides={command: raw})

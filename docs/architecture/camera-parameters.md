@@ -101,14 +101,16 @@ Action6 与 OSMO 360 II 在每台相机、本次执行会话的首次拍摄准�
 
 设置取得可靠接受结果后，同会话后续拍摄准备复用记录；新会话清空内存记录，并在需要拍摄时执行设置。普通录像与原生延时共用这些准备步骤，设置在动作自身的拍摄参数及 START 之前执行。文件访问与恢复 STOP 沿各自原操作执行。除下述 Action6 临时特例外，工具即使退出 0，stdout 明确报告服务不存在或服务查找失败时，设置仍为未确认，不缓存接受结果，也不继续 START。本地命令被接受不表示相机实际状态已独立读回；通用调用、期限与失败规则见[驱动执行边界](camera-capabilities.md#驱动执行与产物边界)。
 
-**Action6 临时输出处理：** 以下四条精确命令只核实本地调用正常完成，忽略 stdout 和 stderr 的文字内容，包括服务不存在、服务查找失败等提示。指令对 Action6 的有效性与返回格式尚待官方确认；取得确认后须据此复核本规则及相应测试。
+**Action6 临时输出处理：** 以下六条精确命令只核实本地调用正常完成，忽略 stdout 和 stderr 的文字内容，包括服务不存在、服务查找失败等提示。指令对 Action6 的有效性与返回格式尚待官方确认；取得确认后须据此复核本规则及相应测试。
 
 - `simulate_device -n DualGuiCmd 12`
 - `simulate_device -s DevicePowerUserIdleControlAutoShutdownTime 0`
 - `simulate_device -s DevicePowerUserIdleControlLapseLockTime 0`
 - `simulate_device -s 0xa13cdabe 3`
+- `simulate_device -s DeviceSystemLiveviewStream 0 0`
+- `simulate_device -s DeviceSystemLiveviewStream 1 0`
 
-这四条命令仍受工具启动失败、超时、取消、退出缺失、信号终止、非零退出及输出获取失败或不完整的约束。正常完成后继续后续准备，并按相同会话缓存规则复用。观察中的 `confirmation_basis = action6_simulate_device_output_unchecked/v1` 只表示按本临时规则核实调用完成，不证明设置有效或相机状态已读回。普通录像的版本化设置调用历史无损保存 stdout 和 stderr；软件恢复准备沿同一命令解释规则执行并保存原调用结果。两路实时画面、其他参数、START、STOP 和 OSMO 均不适用此特例。
+这六条命令仍受工具启动失败、超时、取消、退出缺失、信号终止、非零退出及输出获取失败或不完整的约束。正常完成后继续后续准备，并按相同会话缓存规则复用。观察中的 `confirmation_basis = action6_simulate_device_output_unchecked/v1` 只表示按本临时规则核实调用完成，不证明设置有效或相机状态已读回。普通录像的版本化设置调用历史无损保存 stdout 和 stderr；软件恢复准备沿同一命令解释规则执行并保存原调用结果。其他参数、START、STOP 和 OSMO 均不适用此特例。
 
 ### OSMO 360 II 的可选参数
 
