@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## MP4 类型缺失时的预览（2026-10-26）
+
+Windows、Node.js 24.22.1 中，四项新增用例先在原实现复现 MP4 类型缺失或为通用二进制类型时无法取得查看类型、按交付名称识别失败及产物归入其他文件的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/media.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，两个单元文件的 44 项全部通过，退出 0。覆盖原始名称与已关联交付名称、扩展名大小写、明确类型优先、扩展名后的额外后缀及未关联文件的读取边界。`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。
+
+设置 `CAMCTL_TEST_BROWSER_CHANNEL=chrome` 后，执行 `node node_modules/vitest/vitest.mjs run tests/integration/browser-media-download.test.ts tests/integration/media.test.ts --maxWorkers=1`，两个集成文件的 17 项全部通过，退出 0。其中 13 项使用系统 Chrome；新增 MP4 用例通过真实报告导入、文件核验、视频播放与进度、HTTP 范围读取及完整原文件下载，核对报告原类型保持不变。另四项使用与图片名称一致的 PNG 夹具，核对媒体先到或报告先到、明确类型与未知类型、文件恢复及不可用状态。既有 LRF、OSV、图片与其他文件的播放、下载、核验前拒绝读取及解码失败处理同时通过。
+
+测试使用独立临时目录与项目生成的媒体夹具，未在用户原始 MP4 上执行播放复测，也未运行完整客户端测试套件。日志为 `tmp/mp4-preview-red.log`、`tmp/mp4-preview-unit.log`、`tmp/mp4-preview-build.log` 和 `tmp/mp4-preview-integration.log`。
+
 ## 计划记录分页与草稿编辑反馈（2026-10-26）
 
 Windows、Node.js 24.22.1 中，保存时机和编辑器静态渲染用例先复现自动保存等待过短、在途请求结束立即续存新输入，以及正常保存详情和首次校验汇总常驻的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit --maxWorkers=2`，76 个单元文件的 3314 项全部通过，退出 0。覆盖记录分页和指定记录所在页、连续输入重计时、自动保存期间的新修改、显式完成全部保存、失败与冲突恢复，以及正常保存反馈和恢复操作入口。
