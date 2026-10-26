@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -36,6 +36,7 @@ from camctl.cancellation.rules import (
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.operations.models import ErrorValue
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_failure
@@ -130,6 +131,7 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                         item_id,_MODE_BY_ELIGIBILITY[eligibility],occurred),
                     motor_permit=motor_permit,
                     action_type=loaded.action["type"],
+                    origin_action_id=command.origin_action_id,
                 )
         row = await database.read(
             lambda owned: _fetchone(
@@ -168,7 +170,8 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                         if target_status[0] == 6
                         else CancelOutcomeChoice.ALREADY_TERMINAL)
                     await _save_target(runtime, target_id, RecordCancelResult(
-                        item_id,runtime.occurred_at(),outcome=basis))
+                        item_id,runtime.occurred_at(),outcome=basis),
+                        origin_action_id=command.origin_action_id)
         final = await database.read(
             lambda owned: _fetchone(
                 owned.connection,
@@ -212,41 +215,53 @@ async def _save_target(runtime, target_id, request, *, motor_permit=None, action
     key = new_operation_key()
 
     async def persist_and_classify():
-        repository_method = getattr(runtime.repository, method)
-        if isinstance(request, ApplyCancelTarget):
-            outcome = await database.write(
-                lambda owned: repository_method(
-                    request, key, owned, motor_permit=motor_permit),
-                key=key,
-                description="保存取消生效",
-            )
-        else:
-            outcome = await database.write(
-                lambda owned: repository_method(request, key, owned),
-                key=key,
-                description="保存取消结果",
-            )
-        if outcome.kind is DbOutcomeKind.UNKNOWN and action_type == 8:
-            try:
-                def verify(owned):
-                    if owned.metadata.instance_id != database.metadata.instance_id:
-                        raise ConsistencyError(
-                            "电机取消原操作核实连接与原状态库不符")
-                    return runtime.repository.verify_motor_operation(
-                        request, key, owned)
-
-                proof = await database.read(
-                    verify,
-                    description="核实电机取消原操作",
+        stage = ("cancel.apply_member" if isinstance(request, ApplyCancelTarget)
+                 else "cancel.finish_member")
+        with measure_stage(stage, database_id=database.metadata.instance_id,
+                           target_action_id=target_id, item_id=request.item_id,
+                           operation_key=key,
+                           **({"action_id": origin_action_id} if origin_action_id is not None else {})):
+            repository_method = getattr(runtime.repository, method)
+            if isinstance(request, ApplyCancelTarget):
+                outcome = await database.write(
+                    lambda owned: repository_method(
+                        request, key, owned, motor_permit=motor_permit),
+                    key=key,
+                    description="保存取消生效",
                 )
-            except Exception as error:
+            else:
+                outcome = await database.write(
+                    lambda owned: repository_method(request, key, owned),
+                    key=key,
+                    description="保存取消结果",
+                )
+            if outcome.kind is DbOutcomeKind.UNKNOWN and action_type == 8:
+                try:
+                    def verify(owned):
+                        if owned.metadata.instance_id != database.metadata.instance_id:
+                            raise ConsistencyError(
+                                "电机取消原操作核实连接与原状态库不符")
+                        return runtime.repository.verify_motor_operation(
+                            request, key, owned)
+
+                    proof = await database.read(
+                        verify,
+                        description="核实电机取消原操作",
+                    )
+                except Exception as error:
+                    raise ConsistencyError(
+                        f"电机取消原操作核实失败: {error}") from error
                 raise ConsistencyError(
-                    f"电机取消原操作核实失败: {error}") from error
-            raise ConsistencyError(
-                "电机取消提交未知已核实原操作后停止本会话: "
-                f"{proof.kind.value}; {proof.error}"
-            )
-        _completed(outcome)
+                    "电机取消提交未知已核实原操作后停止本会话: "
+                    f"{proof.kind.value}; {proof.error}"
+                )
+            _completed(outcome)
+
+            result_fields = ({"cancel_mode": request.mode.value}
+                             if isinstance(request, ApplyCancelTarget) else
+                             {"outcome": None if request.outcome is None else request.outcome.value,
+                              "error_code": request.code})
+            record_event(stage, event="committed", **result_fields)
 
     await settle_required(persist_and_classify())
 
@@ -328,7 +343,8 @@ async def _save_origin_settlement(runtime, request):
     database = runtime.database
     identity = database.metadata.instance_id, request.action_id
     pending = runtime.pending_origin_settlements
-    if identity not in pending:
+    first_application = identity not in pending
+    if first_application:
         pending[identity] = request, new_operation_key()
     original, key = pending[identity]
     if original != request:
@@ -341,14 +357,22 @@ async def _save_origin_settlement(runtime, request):
         raise ConsistencyError("原取消收场阶段不可解释")
 
     async def save_and_apply():
-        result = await database.write(
-            lambda owned: method(original, key, owned),
-            key=key,
-            description="保存取消发起者收场",
-        )
-        if result.kind is DbOutcomeKind.COMPLETED:
-            pending.pop(identity)
-        return result
+        stage = ("cancel.origin_stop_waiting" if isinstance(original, StopWaitCancelItems)
+                 else "cancel.origin_finish")
+        boundary = (measure_stage(stage, database_id=database.metadata.instance_id,
+                                  action_id=request.action_id, operation_key=key)
+                    if first_application else nullcontext())
+        with boundary:
+            result = await database.write(
+                lambda owned: method(original, key, owned),
+                key=key,
+                description="保存取消发起者收场",
+            )
+            if result.kind is DbOutcomeKind.COMPLETED:
+                record_event(stage, event="committed", database_id=database.metadata.instance_id,
+                             action_id=request.action_id, operation_key=key)
+                pending.pop(identity)
+            return result
 
     return await settle_required(save_and_apply())
 

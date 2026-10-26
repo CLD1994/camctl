@@ -13,6 +13,7 @@ from typing import Any, Protocol, Mapping
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
 from camctl.contracts.values import OperationKey
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure, db_outcome_for
 
 __all__ = [
@@ -111,6 +112,17 @@ async def accept_input(
     业务拒绝是已提交结果；回滚、未知或连接失效按状态库错误上
     交，不解释为业务结果。事件时间取自上下文的时钟端口。
     """
+    with measure_stage("acceptance", database_id=database.metadata.instance_id, operation_key=key,
+                       command_mode=context.mode.value, input_path=source.path):
+        return await _accept_input(source, context, key, database)
+
+
+async def _accept_input(
+    source: ParsedInput | InputDiagnostic,
+    context: AcceptanceContext,
+    key: OperationKey,
+    database,
+) -> AcceptanceResult:
     occurred_at = context.clock.utc_micros() if context.clock is not None else 0
     command = ProcessInput(
         source=source,
@@ -124,12 +136,16 @@ async def accept_input(
     if isinstance(source, InputDiagnostic):
         record_error(source.exception or {"message": source.detail}, stage="input_" + source.stage.value,
                      context={"path": source.path, "operation_key": key})
-    def record_result_diagnostics(result):
+    def consume_completed_result(result):
         if not isinstance(source, InputDiagnostic):
             for diagnostic in result.diagnostics:
                 record_error(diagnostic["error"], stage="admission",
                              context={"operation_key": key, "input_path": source.path,
                                       **diagnostic.get("context", {})})
+        record_event("acceptance", event="committed",
+                     plan_disposition=result.plan_disposition.value,
+                     ack_disposition=result.ack_disposition.value,
+                     **({"plan_id": result.plan_id} if result.plan_id is not None else {}))
 
     try:
         outcome = await database.write(
@@ -141,10 +157,10 @@ async def accept_input(
         actual = db_outcome_for(error)
         if (actual is not None and actual.kind is DbOutcomeKind.COMPLETED
                 and isinstance(actual.value, AcceptanceResult)):
-            record_result_diagnostics(actual.value)
+            consume_completed_result(actual.value)
         raise
     if outcome.kind is DbOutcomeKind.COMPLETED:
-        record_result_diagnostics(outcome.value)
+        consume_completed_result(outcome.value)
         return outcome.value
     error = db_failure(AcceptanceStateError,
         f"输入处理未完成（{outcome.kind.value}）: {outcome.error}", outcome)

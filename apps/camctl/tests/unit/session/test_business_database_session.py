@@ -1,6 +1,7 @@
 """会话只交付完整操作，锁与派生维护按真实结果收场。"""
 
 import asyncio
+import json
 import sqlite3
 from unittest.mock import AsyncMock, create_autospec
 
@@ -8,6 +9,8 @@ import pytest
 
 from camctl.acceptance.service import CommandMode
 from camctl.contracts.clock import ClockPort
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from camctl.persistence.models import DbEnqueueTimeoutError, DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.session import CloseDecision
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
@@ -80,6 +83,31 @@ async def test_normal_session_publishes_database_after_lock_and_closes_after_own
     assert order[-1] == "settled-snapshot"
     repository.acquire_admission.assert_called_once()
     repository.close_admission.assert_called_once()
+
+
+async def test_admission_records_actual_acquire_and_one_release_through_final_cleanup():
+    context, _, owned, _, _, _ = world()
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        result = await run_session(context, None)
+    assert result.succeeded
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    admission_records = [record for record in records if record["stage"] == "session.admission"]
+    assert [record["event"] for record in admission_records] == ["acquired", "released"]
+    assert all(record["level"] == "INFO" and record["database_id"] == owned.metadata.instance_id
+               for record in admission_records)
+
+
+async def test_failed_admission_release_keeps_failure_without_a_released_event():
+    context, _, _, _, _, admission = world()
+    admission.close.side_effect = OSError("actual release failure")
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        result = await run_session(context, None)
+    assert not result.succeeded
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert [record["event"] for record in records if record["stage"] == "session.admission"] == [
+        "acquired"]
 
 
 async def test_acquire_parent_cancel_still_takes_lease_before_final_release():

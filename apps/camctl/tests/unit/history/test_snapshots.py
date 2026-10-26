@@ -11,10 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import json
+from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.contracts.history_values import HistoryBoundary
+from camctl.logging_runtime.events import event_logging
+from camctl.logging_runtime.service import LogChannel
 from camctl.history.snapshots import (
     EntityImage,
     MaintenanceContext,
@@ -108,6 +112,27 @@ def _context(store, *, threshold: int = 1, batch_size: int = 16,
         state=state if state is not None else MaintenanceState(),
         store=store,
     )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_logs_actual_nonempty_batch_and_keeps_idle_round_quiet():
+    store = _ScriptedStore(images=(_image(),), candidates=(_REF,))
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        result = await maintain_snapshots(_context(store))
+        before_idle = channel.slog.call_count
+        store.candidates = ()
+        idle = await maintain_snapshots(_context(store))
+    assert result.outcome is MaintenanceOutcome.DRAINED
+    assert len(result.saved) == 1
+    assert idle.outcome is MaintenanceOutcome.IDLE
+    assert channel.slog.call_count == before_idle
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert [(record["stage"], record["event"]) for record in records] == [
+        ("snapshot.batch", "started"), ("snapshot.saved", "committed"),
+        ("snapshot.batch", "returned")]
+    assert all(record["level"] == "INFO" and record["entity_refs"] == [
+        {"entity_type": 1, "entity_id": 8}] for record in records)
 
 
 # ---- prepare_snapshot：事务外编码 ----

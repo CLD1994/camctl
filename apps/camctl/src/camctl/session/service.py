@@ -18,6 +18,7 @@ from contextlib import closing
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.notification import notify_acceptance
 from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_input
@@ -786,11 +787,20 @@ async def _run_session(
     # 受理事务在时钟检查前结束。
     session_lease: SessionLease | None = None
     admission_lease: AdmissionLease | None = None
+    admission_release_recorded = False
     database: Any = None
     local_errors: list[Exception] = []
     observed_errors: list[BaseException] = []
     waiter = _RequiredPhaseWaiter(context)
     previous_report_observer = context.report_change_wm
+
+    def release_admission() -> None:
+        nonlocal admission_release_recorded
+        admission_lease.close()
+        if not admission_release_recorded:
+            record_event("session.admission", event="released",
+                         database_id=database.metadata.instance_id)
+            admission_release_recorded = True
 
     async def drive() -> SessionOutcome:
         nonlocal session_lease, admission_lease, database
@@ -880,16 +890,22 @@ async def _run_session(
 
         def acquire_and_register() -> None:
             acquired.append(context.acquire_admission())
+            record_event("session.admission", event="acquired",
+                         database_id=database.metadata.instance_id)
 
         try:
             key = new_operation_key()
             async def acquire_phase():
                 nonlocal admission_lease
                 try:
-                    return await database.write(
-                        lambda owned: context.session_repository.acquire_admission(
-                            AcquireAdmission(acquire_and_register), key, owned),
-                        key=key, description="取得接纳资格")
+                    with measure_stage("session.acquire_admission",
+                                       database_id=database.metadata.instance_id,
+                                       operation_key=key):
+                        result = await database.write(
+                            lambda owned: context.session_repository.acquire_admission(
+                                AcquireAdmission(acquire_and_register), key, owned),
+                            key=key, description="取得接纳资格")
+                        return result
                 finally:
                     if acquired:
                         admission_lease = acquired[0]
@@ -951,7 +967,7 @@ async def _run_session(
                         return _outcome_error(
                             "clock_invalid", {"error": str(clock_error)})
                     try:
-                        admission_lease.close()
+                        release_admission()
                     except Exception as error:
                         _remember_error(observed_errors, error)
                         outcome = _transaction_error_outcome(
@@ -1024,7 +1040,8 @@ async def _run_session(
                             if decision.kind is WorkDecisionKind.EXIT_REPORT_ERROR
                             else SessionOutcome(succeeded=True))
                 outcome = await waiter.run("close-admission", lambda: _try_close(
-                    context, database, admission_lease, observed_errors))
+                    context, database, admission_lease, observed_errors,
+                    release_admission=release_admission))
                 if outcome is not None:
                     return outcome
                 # 关闭事务观察到新工作：继续推进，不释放接纳。
@@ -1192,7 +1209,7 @@ async def _run_session(
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     if admission_lease is not None:
         try:
-            admission_lease.close()
+            release_admission()
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "internal_error"))
     if session_lease is not None:
@@ -1782,6 +1799,7 @@ async def _try_close(
     context: SessionContext, database: Any,
     admission_lease: AdmissionLease,
     observed_errors: list[BaseException] | None = None,
+    *, release_admission: Callable[[], None] | None = None,
 ) -> SessionOutcome | None:
     """在关闭事务内重查工作并按结果释放接纳；仍需驱动时返回 None。"""
     from camctl.persistence.repositories.session import CloseAdmission
@@ -1791,7 +1809,9 @@ async def _try_close(
         query = _work_facts_query(context)
         outcome = await database.write(
             lambda owned: context.session_repository.close_admission(
-                CloseAdmission(facts_query=query, release_admission=admission_lease.close),
+                CloseAdmission(facts_query=query,
+                               release_admission=(admission_lease.close if release_admission is None
+                                                  else release_admission)),
                 key, owned), key=key, description="原子关闭接纳")
     except Exception as error:
         if observed_errors is not None:
