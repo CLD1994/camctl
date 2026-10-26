@@ -9,7 +9,7 @@ import pytest
 
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import (
-    DiagnosticState, DiagnosticStatus, diagnostic_scope,
+    DiagnosticState, DiagnosticStatus, diagnostic_scope, diagnostic_state_for,
     error_diagnostics_context, flush_diagnostics, record_call_outcome, record_error,
 )
 from camctl.logging_runtime.models import LogLevel
@@ -18,6 +18,7 @@ from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.models import (
     AttemptStatus, AttemptTicket, CallInfo, CallOutcome, EffectState, ErrorValue,
 )
+from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.tool_diagnostics import (
     ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState,
 )
@@ -74,6 +75,39 @@ async def test_original_state_is_reused_while_held_and_after_admission():
         await flush_diagnostics()
     assert len(channel.records) == 1
     assert document(channel)["error"]["message"] == "original"
+
+
+async def test_original_exception_owns_state_without_an_explicit_result_state():
+    channel = MemoryChannel()
+    error = ValueError("original")
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        async with diagnostic_scope():
+            state = record_error(error, stage="dispatch")
+            assert diagnostic_state_for(error) is state
+            assert record_error(error, stage="fatal") is state
+        assert record_error(error, stage="command") is state
+        await flush_diagnostics()
+    assert len(channel.records) == 1
+    assert document(channel)["stage"] == "dispatch"
+
+
+async def test_distinct_exception_with_same_message_gets_distinct_diagnostic():
+    channel = MemoryChannel()
+    first = ValueError("same")
+    second = ValueError("same")
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_error(first, stage="read")
+        record_error(second, stage="read")
+        await flush_diagnostics()
+    assert len(channel.records) == 2
+    assert diagnostic_state_for(first) is not diagnostic_state_for(second)
+
+
+async def test_no_target_leaves_original_exception_unmodified():
+    error = ValueError("business")
+    assert diagnostic_state_for(error) is None
+    record_error(error, stage="read")
+    assert diagnostic_state_for(error) is None
 
 
 async def test_scope_hands_off_in_record_order_without_write_receipts():
@@ -308,3 +342,60 @@ async def test_formatter_failure_uses_fallback_with_untruncated_original_details
     assert value in fallback[0]
     assert "business" in fallback[0]
     assert not channel.records
+
+
+async def test_tool_encoding_failure_falls_back_with_original_bytes_and_no_media_stdout():
+    channel = MemoryChannel()
+    fallback = []
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(1, "read", ToolStream(ToolStreamState.COMPLETE, b"MEDIA-SECRET"), ToolStream(ToolStreamState.COMPLETE, b"problem\xff")),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "read"), diagnostics=diagnostics)
+    with patch("camctl.logging_runtime.diagnostics.encode_diagnostics", side_effect=ValueError("format")):
+        with error_diagnostics_context(channel, fallback.append):
+            state = record_call_outcome(outcome)
+            await flush_diagnostics()
+    assert state.status is DiagnosticStatus.FALLBACK
+    assert "70726f626c656dff" in fallback[0]
+    assert "problem" in fallback[0]
+    assert "MEDIA-SECRET" not in fallback[0]
+    assert b"MEDIA-SECRET".hex() not in fallback[0]
+    assert not channel.records
+
+
+async def test_raw_tool_stdout_is_not_exposed_by_generic_dataclass_snapshot():
+    channel = MemoryChannel()
+    raw = RawToolOutcome(LocalExit(exit_code=1), b"MEDIA-SECRET", "output_failed", None, stderr=b"problem\xff")
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_error(ValueError("read"), stage="read", details={"tool_outcome": raw})
+        await flush_diagnostics()
+    snapshot = document(channel)["details"]["tool_outcome"]
+    assert snapshot["output"] == {"byte_count": 12}
+    assert snapshot["stderr"] == {"hex": "70726f626c656dff", "text": "problem\\xff"}
+    assert snapshot["exit"]["exit_code"] == 1
+    assert b"MEDIA-SECRET".hex() not in channel.records[0].message
+
+
+async def test_unadmitted_cancel_keeps_state_for_root_without_replacing_cancellation():
+    original = asyncio.CancelledError("cancel")
+    accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
+
+    class CancellingChannel(MemoryChannel):
+        cancelled = False
+
+        async def alog(self, record):
+            if not self.cancelled:
+                self.cancelled = True
+                raise original
+            self.records.append(record)
+            return accepted
+
+    channel = CancellingChannel()
+    with patch("camctl.logging_runtime.diagnostics._admission_result_for", return_value=None):
+        with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+            with pytest.raises(asyncio.CancelledError) as raised:
+                async with diagnostic_scope():
+                    state = record_error(ValueError("read"), stage="read")
+            assert raised.value is original
+            assert state.status is DiagnosticStatus.HELD
+            await flush_diagnostics()
+    assert state.status is DiagnosticStatus.ADMITTED
+    assert len(channel.records) == 1

@@ -19,12 +19,13 @@ from camctl.logging_runtime import service
 from camctl.logging_runtime.service import LogChannel, LogRecord
 from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.operations.models import CallOutcome, ErrorValue
+from camctl.operations.process import RawToolOutcome
 from camctl.operations.result_format import error_document
-from camctl.operations.tool_diagnostics import ToolDiagnostics, encode_diagnostics
+from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, encode_diagnostics
 
 __all__ = [
     "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome",
-    "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics",
+    "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
 ]
 
 
@@ -124,9 +125,21 @@ def record_error(
     details: Mapping | None = None,
 ) -> DiagnosticState:
     """同步冻结一次实际错误，不等待接纳，也不创建后台任务。"""
-    return _record(
-        {"stage": stage, "error": error, "context": context, "details": details}, state,
-    )
+    if state is None:
+        state = diagnostic_state_for(error)
+    state = _record({"stage": stage, "error": error, "context": context, "details": details}, state)
+    if isinstance(error, BaseException) and state.status is not DiagnosticStatus.NEW:
+        error._camctl_diagnostic_state = state
+    return state
+
+
+def diagnostic_state_for(error: object) -> DiagnosticState | None:
+    """查询原异常自身持有的诊断状态，不改变异常类型或维护全局身份。"""
+    if isinstance(error, BaseException):
+        state = getattr(error, "_camctl_diagnostic_state", None)
+        if isinstance(state, DiagnosticState):
+            return state
+    return None
 
 
 def record_call_outcome(
@@ -157,7 +170,13 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     target = _target.get()
     if target is None or target.closed:
         return state
-    document = _document(payload)
+    try:
+        document = _document(payload)
+    except Exception as error:
+        # 编码器拒绝原结果时，仍沿原 dataclass 字段保存安全字节事实。
+        document = {"diagnostic_format_error": type(error).__name__,
+                    "diagnostic": _document(payload, structured=False)}
+        state._fallback_only = True
     try:
         message = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
     except Exception as error:
@@ -173,13 +192,17 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     return state
 
 
-def _document(value, *, name: str | None = None):
+def _document(value, *, name: str | None = None, structured: bool = True):
     """复用原结构形成独立快照，并给已有 stderr 字节编码补可读文本。"""
+    def convert(item, *, name=None):
+        return _document(item, name=name, structured=structured)
+
     if isinstance(value, BaseException):
-        return _document(exception_diagnostic(value))
+        return convert(exception_diagnostic(value))
     if isinstance(value, ErrorValue):
-        return _document(error_document(value))
-    if isinstance(value, ToolDiagnostics):
+        if structured:
+            return convert(error_document(value))
+    if isinstance(value, ToolDiagnostics) and structured:
         result = encode_diagnostics(value)
         for call in result["calls"]:
             stdout = call["stdout"]
@@ -190,7 +213,7 @@ def _document(value, *, name: str | None = None):
                               bytes.fromhex(stderr["hex"]).decode("utf-8", "backslashreplace"))
         return result
     if isinstance(value, Enum):
-        return _document(value.value)
+        return convert(value.value)
     if isinstance(value, bytes):
         if name == "stdout":
             return {"byte_count": len(value)}
@@ -198,9 +221,21 @@ def _document(value, *, name: str | None = None):
             return {"hex": value.hex(), "text": value.decode("utf-8", "backslashreplace")}
         return {"bytes_hex": value.hex()}
     if is_dataclass(value) and not isinstance(value, type):
-        return {item.name: _document(getattr(value, item.name), name=item.name) for item in fields(value)}
+        if name == "stdout" and isinstance(value, ToolStream):
+            data = value.data
+            return {"state": convert(value.state),
+                    "byte_count": len(data) if isinstance(data, bytes) else None}
+        result = {}
+        for item in fields(value):
+            field_name = item.name
+            if isinstance(value, RawToolOutcome) and field_name == "output":
+                field_name = "stdout"
+            elif isinstance(value, ToolStream) and field_name == "data" and name == "stderr":
+                field_name = "stderr"
+            result[item.name] = convert(getattr(value, item.name), name=field_name)
+        return result
     if isinstance(value, Mapping):
-        result = {key: _document(item, name=key) for key, item in value.items()}
+        result = {key: convert(item, name=key) for key, item in value.items()}
         for encoding in ("hex", "base64"):
             encoded = result.get(f"stderr_{encoding}")
             if isinstance(encoded, str):
@@ -212,7 +247,7 @@ def _document(value, *, name: str | None = None):
                 result["stderr_text"] = raw.decode("utf-8", "backslashreplace")
         return result
     if isinstance(value, (tuple, list)):
-        return [_document(item) for item in value]
+        return [convert(item) for item in value]
     if isinstance(value, (Decimal, PathLike)):
         return str(value)
     return value
