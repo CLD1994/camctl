@@ -13,7 +13,7 @@ from typing import Any, Protocol, Mapping
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
 from camctl.contracts.values import OperationKey
-from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure, db_outcome_for
 
 __all__ = [
     "AcceptanceContext",
@@ -146,10 +146,7 @@ async def accept_input(
     if outcome.kind is DbOutcomeKind.COMPLETED:
         record_result_diagnostics(outcome.value)
         return outcome.value
-    error = AcceptanceStateError(
-        f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"
-    )
+    error = db_failure(AcceptanceStateError,
+        f"输入处理未完成（{outcome.kind.value}）: {outcome.error}", outcome)
     error.outcome_kind = outcome.kind
-    if outcome.error is None:
-        raise error
-    raise error from outcome.error
+    raise error
