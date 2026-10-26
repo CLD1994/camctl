@@ -26,6 +26,7 @@ from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, enco
 __all__ = [
     "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome",
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
+    "diagnostic_record_for", "acknowledge_diagnostic",
 ]
 
 
@@ -142,6 +143,17 @@ def diagnostic_state_for(error: object) -> DiagnosticState | None:
     return None
 
 
+def diagnostic_record_for(state: DiagnosticState) -> LogRecord | None:
+    """取得原不可变记录，供需要实际写入凭据的日志副本流程复用。"""
+    return state._record
+
+
+def acknowledge_diagnostic(state: DiagnosticState) -> None:
+    """副本拥有者取得实际追加成功凭据后交接原记录，不推断写入结果。"""
+    if state.status is DiagnosticStatus.HELD:
+        state.status = DiagnosticStatus.ADMITTED
+
+
 def record_call_outcome(
     outcome: CallOutcome,
     *,
@@ -151,16 +163,23 @@ def record_call_outcome(
     state: DiagnosticState | None = None,
 ) -> DiagnosticState | None:
     """保留调用错误及伴随流程错误；正常控制分支由业务调用方分类。"""
+    if state is None:
+        state = diagnostic_state_for(run_error)
     if state is not None and state.status is not DiagnosticStatus.NEW:
+        if isinstance(run_error, BaseException):
+            run_error._camctl_diagnostic_state = state
         return state
     if outcome.error is None and run_error is None:
         return None
     error = outcome.error if outcome.error is not None else run_error
     stage = error.stage if isinstance(error, ErrorValue) else "call_outcome"
-    return _record({
+    state = _record({
         "stage": stage, "error": error, "outcome": outcome, "ticket": ticket,
         "run_error": run_error, "context": context,
     }, state)
+    if isinstance(run_error, BaseException) and state.status is not DiagnosticStatus.NEW:
+        run_error._camctl_diagnostic_state = state
+    return state
 
 
 def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:

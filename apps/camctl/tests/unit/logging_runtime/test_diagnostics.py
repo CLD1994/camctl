@@ -9,7 +9,8 @@ import pytest
 
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import (
-    DiagnosticState, DiagnosticStatus, diagnostic_scope, diagnostic_state_for,
+    DiagnosticState, DiagnosticStatus, acknowledge_diagnostic, diagnostic_record_for,
+    diagnostic_scope, diagnostic_state_for,
     error_diagnostics_context, flush_diagnostics, record_call_outcome, record_error,
 )
 from camctl.logging_runtime.models import LogLevel
@@ -108,6 +109,52 @@ async def test_no_target_leaves_original_exception_unmodified():
     assert diagnostic_state_for(error) is None
     record_error(error, stage="read")
     assert diagnostic_state_for(error) is None
+
+
+async def test_actual_copy_append_acknowledges_original_record_without_resending():
+    channel = MemoryChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        async with diagnostic_scope():
+            state = record_error(ValueError("report"), stage="report")
+            original_record = diagnostic_record_for(state)
+            assert original_record is not None
+            assert json.loads(original_record.message)["error"]["message"] == "report"
+            # 副本调用方已经持有实际追加成功凭据时，才执行此交接。
+            acknowledge_diagnostic(state)
+        await flush_diagnostics()
+    assert state.status is DiagnosticStatus.ADMITTED
+    assert not channel.records
+    assert diagnostic_record_for(state) is original_record
+
+
+async def test_unwritten_copy_keeps_original_record_for_ordinary_admission():
+    channel = MemoryChannel()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        state = record_error(ValueError("report"), stage="report")
+        original_record = diagnostic_record_for(state)
+        # 未获得追加凭据或副本被抑制时，不执行 acknowledge。
+        await flush_diagnostics()
+    assert channel.records == [original_record]
+    assert state.status is DiagnosticStatus.ADMITTED
+
+
+async def test_acknowledge_does_not_create_a_record_for_unprepared_state():
+    state = DiagnosticState()
+    acknowledge_diagnostic(state)
+    assert state.status is DiagnosticStatus.NEW
+    assert diagnostic_record_for(state) is None
+
+
+async def test_run_error_exception_owns_explicit_call_diagnostic_state():
+    channel = MemoryChannel()
+    error = RuntimeError("run")
+    state = DiagnosticState()
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_call_outcome(CallOutcome(), run_error=error, state=state)
+        assert diagnostic_state_for(error) is state
+        assert record_error(error, stage="fatal") is state
+        await flush_diagnostics()
+    assert len(channel.records) == 1
 
 
 async def test_scope_hands_off_in_record_order_without_write_receipts():
