@@ -157,6 +157,32 @@ async def test_run_error_exception_owns_explicit_call_diagnostic_state():
     assert len(channel.records) == 1
 
 
+async def test_root_flush_finishes_all_records_before_propagating_first_cancellation():
+    first_cancel = asyncio.CancelledError("first")
+    repeat_cancel = asyncio.CancelledError("repeat")
+    accepted = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
+
+    class CancellingChannel(MemoryChannel):
+        async def alog(self, record):
+            self.records.append(record)
+            if len(self.records) == 1:
+                raise first_cancel
+            if len(self.records) == 2:
+                raise repeat_cancel
+            return accepted
+
+    channel = CancellingChannel()
+    with patch("camctl.logging_runtime.diagnostics._admission_result_for", return_value=accepted):
+        with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+            states = [record_error(ValueError(str(index)), stage="root") for index in range(3)]
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await flush_diagnostics()
+            assert raised.value is first_cancel
+            assert all(state.status is DiagnosticStatus.ADMITTED for state in states)
+            await flush_diagnostics()
+    assert len(channel.records) == 3
+
+
 async def test_scope_hands_off_in_record_order_without_write_receipts():
     channel = MemoryChannel()
     with error_diagnostics_context(channel, lambda text: pytest.fail(text)):

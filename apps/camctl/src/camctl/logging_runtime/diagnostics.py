@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -113,8 +114,18 @@ async def diagnostic_scope():
 async def flush_diagnostics() -> None:
     """在必要业务收场后、日志消费者关闭前交接命令持有的诊断。"""
     target = _target.get()
-    if target is not None and not target.closed:
-        await _drain(target.root, target)
+    if target is None or target.closed:
+        return
+    first_cancel = None
+    while target.root.pending:
+        try:
+            await _drain(target.root, target)
+        except asyncio.CancelledError as error:
+            # 必要业务收场已经完成；命令继续交接其余记录再传播原取消。
+            if first_cancel is None:
+                first_cancel = error
+    if first_cancel is not None:
+        raise first_cancel
 
 
 def record_error(
