@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 默认取回的产物排除项（2026-10-26）
+
+Windows、Node.js 24.22.1 中，新增用例先在原实现复现计划范围外产物及预览进入排除列表、列表长度被直接表述为跳过数量的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/obtain.test.ts tests/unit/builtin-obtain-fields.test.ts tests/unit/web-editing.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，四个单元文件的 116 项全部通过，退出 0。
+
+覆盖计划与动作默认取回、其他计划交付同一来源产物、当前计划仅取回其他来源、本地只有预览、来源明细尚未到达、原片与修复成品分别排除、重复交付去重、可读取性核对失败及精确预览取回。草稿参数的静态渲染用例确认排除项数量与默认范围说明，并核对显示过程保持已保存参数。
+
+`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。`browser-media` 中相关文案断言随界面更新；本项未运行集成测试或浏览器自动化测试，未改写当前服务的草稿和媒体数据。
+
 ## 自动预览名称与用户动作序号（2026-10-26）
 
 Windows、Node.js 24.22.1 和系统 Chrome 中，`automatic-previews`、`validation-presentation`、`preview-renaming`、`preview-current-state`、`preview-editor`、`preview-reload`、`web-editing` 七个单元文件的 273 项通过，`automatic-previews` 集成文件的 76 项通过。覆盖源动作改名后派生名称与引用同步、重名及 128 字符边界、能力不可用、无效名称保留，以及多个来源消除名称冲突后保存、重开、复制和直接导出。
