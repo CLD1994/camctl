@@ -40,6 +40,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 | 文档 | 用途 |
 | --- | --- |
+| [全局错误诊断接入](../superpowers/plans/2026-10-26-global-error-diagnostics.md) | 全部错误结果、异常和第三方 ERROR 的接纳、原事实交付、取消与收场及覆盖验收。 |
 | [第一版实施路线图与模块计划目录](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口) | 引用 15 个模块计划及跨组件集成计划，按任务编排阶段、前置交付和完整业务链门禁 |
 | [视频结果模式与 Action6 分段计划](../superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md) | 单文件／多段部署选择、公共层重构、两设备特化、实际内容检查、副本复用及分层验收 |
 | [跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md) | C 进程启动与原组收场、客户端协议接入、真实业务闭环及全量验收映射 |

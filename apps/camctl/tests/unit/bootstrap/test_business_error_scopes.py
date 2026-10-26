@@ -64,5 +64,3 @@ async def test_fatal_background_result_precedes_diagnostic_admission():
         stopped = True
         await flush_diagnostics()
         assert len(channel.records) == 1
-
-
