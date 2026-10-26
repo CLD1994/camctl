@@ -4626,8 +4626,9 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
 
 async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> None:
     (await _resolve_natural_wait(context, action_id))
+    # 归属查询会让出执行；其他设备可以同时登记或移除自己的扫描。
     (await resume_result_page_saves(context.database, pending_scans={identity: scan
-        for identity, scan in context.pending_result_scans.items()
+        for identity, scan in tuple(context.pending_result_scans.items())
         if (await context.action_id_of_ticket(scan.ticket)) == action_id}, repository=context.capture))
     (await context.resume_capture_completions(action_id))
     (await context.resume_baselines(action_id))

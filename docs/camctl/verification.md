@@ -10,6 +10,14 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 延时摄影共享结果清单的并发修复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-timelapse-scan-concurrency.md)针对共享清单的异步遍历：延时摄影处理器先同步固定扫描条目，再异步查询归属，保持跨设备并发与原页保存责任。相邻原申请恢复循环已经固定条目后再等待；新增回归通过公开 `capture_handler("camera_timelapse")`、受接口约束的替身及明确同步点控制交错。
+
+Linux 开发容器、Python 3.11.17 下，旧代码的四项增删交错均稳定触发 `dictionary changed size during iteration`，两项错误保持用例通过。修复后新增六项通过，覆盖另一设备新增、移除扫描，当前动作有无原页，原申请及操作键只保存一次，异动作原页保持未消费，新增扫描在后续推进可见，以及查询异常、保存错误的原异常链保持。
+
+最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2213 项通过**，耗时 32.79 秒，退出 0。原始失败、通过日志与执行证据保存在 `.local/verification/timelapse-scan-concurrency-20261026/`。本次未运行集成测试或调用设备；OSMO 文件信息读取超时属于独立的现场问题，不计入此项修复结论。
+
 ## 相机首次准备的省电与 USB 模式设置（2026-10-26）
 
 Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。
