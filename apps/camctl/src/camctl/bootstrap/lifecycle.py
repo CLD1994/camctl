@@ -406,13 +406,12 @@ def _log_wiring(
 
     stderr_failed = False
 
-    def report_writer_failure(message: str) -> None:
+    def report_writer_failure(message: str) -> bool:
         nonlocal stderr_failed
         if on_stderr_diagnostic is not None:
-            on_stderr_diagnostic(message)
-            return
+            return on_stderr_diagnostic(message) is not False
         if stderr_failed:
-            return
+            return False
         import sys
 
         try:
@@ -420,6 +419,8 @@ def _log_wiring(
             sys.stderr.flush()
         except Exception:
             stderr_failed = True
+            return False
+        return True
 
     channel = LogChannel(
         capacity=log_config.queue_capacity,
@@ -428,6 +429,7 @@ def _log_wiring(
         level=level,
         sample_probability=float(log_config.info_sample_probability),
         writer=writer,
+        fallback=report_writer_failure,
     )
     channel.start()
     return LogRuntime(
@@ -475,9 +477,14 @@ async def _emit_log_diagnostic(
         try:
             result = await deps.log_runtime.channel.deliver_important(
                 LogRecord(level=LogLevel.ERROR, message=message))
-            if result.delivered is True:
+            if result.delivered is True or result.fallback_written is True:
                 return
         except Exception as error:
+            from camctl.logging_runtime.service import admission_result_for
+
+            admission = admission_result_for(error)
+            if admission is not None and admission.fallback_written is True:
+                return
             # deliver_important 等待监听线程凭据，异常代表文件通道不
             # 可用；不能仅凭 alog 入队结果宣称诊断已写出。
             message += f"\n日志诊断写入异常: {_format_session_exception(error)}"
@@ -497,10 +504,10 @@ def _mark_log_path_unsafe(deps: RuntimeDeps) -> None:
         ChannelError("共享文件日志 I/O 或协调失败"))
 
 
-def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
+def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> bool:
     """stderr 失败后停止重复尝试，且不写入 stdout。"""
     if deps.stderr_diagnostic_failed:
-        return
+        return False
     import sys
 
     try:
@@ -508,6 +515,8 @@ def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
         sys.stderr.flush()
     except Exception:
         deps.stderr_diagnostic_failed = True
+        return False
+    return True
 
 
 def _attach_runtime_close_note(
@@ -535,10 +544,24 @@ async def _close_log_runtime(
     primary_error: BaseException | None = None,
 ) -> None:
     from camctl.logging_runtime.lifecycle import close_logging
+    from camctl.logging_runtime.diagnostics import flush_diagnostics
 
+    diagnostic_control = None
+    try:
+        await flush_diagnostics()
+    except Exception as error:
+        _write_stderr_diagnostic(deps, "业务错误诊断交接失败: " + _format_session_exception(error))
+    except BaseException as error:
+        # 已进入日志收场时必要业务已经结束；交接完成后仍须关闭组件，
+        # 最后继续交付原控制对象。
+        diagnostic_control = error
     try:
         result = await close_logging(deps.log_runtime)
     except BaseException as error:
+        if diagnostic_control is not None:
+            _attach_runtime_close_note(diagnostic_control, "后续日志关闭异常", error)
+            _write_stderr_diagnostic(deps, "日志关闭失败: " + _format_session_exception(error))
+            raise diagnostic_control
         notes = "; ".join(tuple(getattr(error, "__notes__", ())))
         diagnostic = (
             "共享日志关闭诊断：stage=log_close; outcome=unknown; "
@@ -569,6 +592,8 @@ async def _close_log_runtime(
             note = f"后续日志关闭错误: {result.close_error}"
             if note not in tuple(getattr(primary_error, "__notes__", ())):
                 primary_error.add_note(note)
+    if diagnostic_control is not None:
+        raise diagnostic_control
 
 
 async def _on_report_recovered(
@@ -711,11 +736,14 @@ def _failure_log_wiring(deps: RuntimeDeps):
             )
             channel_box["channel"] = channel
             deps.failure_channel = channel
+        from camctl.logging_runtime.diagnostics import diagnostic_record_for, record_error
+
+        state = record_error(error, stage="report", context={"command": deps.mode.value})
+        trigger = diagnostic_record_for(state)
+        if trigger is None:
+            trigger = LogRecord(LogLevel.ERROR, "报告处理失败: " + _format_session_exception(error))
         return CopyRequest(
-            trigger=LogRecord(
-                level=LogLevel.ERROR,
-                message=f"报告处理失败: {type(error).__name__}: {error}",
-            ),
+            trigger=trigger,
             staging_root=staging,
             ready_dir=Path(deps.config.paths.ready).expanduser(),
             channel=channel,
@@ -956,6 +984,39 @@ def _report_assembly(
 
 
 async def execute_command(
+    deps: RuntimeDeps,
+    source: ParsedInput | InputDiagnostic | None,
+    *,
+    flows: Mapping[str, Any] | None = None,
+    restricted_flows: Mapping[str, Any] | None = None,
+    wake: Any = None,
+    poll_interval_s: float | None = None,
+) -> SessionOutcome:
+    """为本命令及原业务子任务装配共同诊断目标和第三方路由。"""
+    from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
+    from camctl.logging_runtime.standard_logging import install_standard_logging
+
+    channel = None if deps.log_runtime is None else deps.log_runtime.channel
+    fallback = lambda message: _write_stderr_diagnostic(deps, message)
+    installation = None
+    with error_diagnostics_context(channel, fallback):
+        try:
+            if channel is not None:
+                installation = install_standard_logging(channel, fallback)
+            return await _execute_command(
+                deps, source, flows=flows, restricted_flows=restricted_flows,
+                wake=wake, poll_interval_s=poll_interval_s,
+            )
+        finally:
+            try:
+                # 无文件日志或装配尚未进入正常收场的路径也交付原诊断。
+                await flush_diagnostics()
+            finally:
+                if installation is not None:
+                    installation.close()
+
+
+async def _execute_command(
     deps: RuntimeDeps,
     source: ParsedInput | InputDiagnostic | None,
     *,

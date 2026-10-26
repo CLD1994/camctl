@@ -4,6 +4,14 @@ from collections.abc import Mapping
 import traceback
 
 
+_FACTS_ATTRIBUTE = "_camctl_exception_diagnostic_facts"
+
+
+def attach_diagnostic_facts(error: BaseException, facts: Mapping) -> None:
+    """事实所属模块附加有限诊断；原异常由共同编码器按对象身份引用。"""
+    setattr(error, _FACTS_ATTRIBUTE, dict(facts))
+
+
 class DiagnosticError(Exception):
     """明确携带 JSON 可编码诊断的异常；调用方负责提供原始事实。"""
 
@@ -38,6 +46,17 @@ def exception_diagnostic(error: BaseException | None) -> dict | None:
         remaining.append((original, node, path))
         return node
 
+    def facts_document(value, path):
+        if isinstance(value, BaseException):
+            return reference(value, path)
+        if isinstance(value, Mapping):
+            return {name: facts_document(item, path + "/" + name)
+                    for name, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [facts_document(item, path + f"/{index}")
+                    for index, item in enumerate(value)]
+        return value
+
     while remaining:
         original, node, path = remaining.pop()
         kind = type(original)
@@ -60,4 +79,7 @@ def exception_diagnostic(error: BaseException | None) -> dict | None:
                 node[name] = {"bytes_hex": value.hex()} if isinstance(value, bytes) else value
         if isinstance(original, DiagnosticError):
             node["diagnostic_details"] = dict(original.diagnostic_details)
+        facts = getattr(original, _FACTS_ATTRIBUTE, None)
+        if isinstance(facts, Mapping):
+            node["diagnostic_facts"] = facts_document(facts, path + "/diagnostic_facts")
     return result

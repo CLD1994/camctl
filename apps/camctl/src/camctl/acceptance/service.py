@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
@@ -61,6 +61,7 @@ class AcceptanceResult:
     diagnostic_id: int | None = None
     #: submit 的事务内接管结果；run 的输入受理不计算该字段。
     needs_run: bool | None = None
+    diagnostics: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,12 +119,21 @@ async def accept_input(
         occurred_at=occurred_at,
         submit_handoff=context.submit_handoff,
     )
+    from camctl.logging_runtime.diagnostics import record_error
+
+    if isinstance(source, InputDiagnostic):
+        record_error(source.exception or {"message": source.detail}, stage="input_" + source.stage.value,
+                     context={"path": source.path, "operation_key": key})
     outcome = await database.write(
         lambda owned: context.repository.process_input(command, key, owned),
         key=key,
         description="输入处理",
     )
     if outcome.kind is DbOutcomeKind.COMPLETED:
+        if not isinstance(source, InputDiagnostic):
+            for diagnostic in outcome.value.diagnostics:
+                record_error(diagnostic["error"], stage="admission",
+                             context={"operation_key": key, **diagnostic.get("context", {})})
         return outcome.value
     error = AcceptanceStateError(
         f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"

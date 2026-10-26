@@ -3,6 +3,7 @@
 import asyncio
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -24,6 +25,7 @@ from camctl.devices.directory import DirectoryRead, DirectoryScan
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.session.outcome import SessionOutcome
+from camctl.logging_runtime.service import LogChannel
 from support.capture_database import capture_database
 
 pytestmark = pytest.mark.asyncio
@@ -41,7 +43,8 @@ def _world(mocker):
     events = []
     deps = lifecycle.RuntimeDeps(CommandMode.SUBMIT, load_config({}, ConfigDefaults()),
         Path("/state.db"), Path("/session.lock"), Path("/admission.lock"), None)
-    deps.log_runtime = object()
+    deps.log_runtime = SimpleNamespace(channel=create_autospec(LogChannel, instance=True, spec_set=True))
+    mocker.patch("camctl.logging_runtime.standard_logging.install_standard_logging", autospec=True)
     pending, scan = _baseline(events, "baseline")
     deps.capture_baselines[1] = pending
     mocker.patch.object(lifecycle, "_failure_log_wiring", autospec=True, return_value=(None, None))

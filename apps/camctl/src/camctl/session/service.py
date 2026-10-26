@@ -1417,6 +1417,9 @@ async def _advance_report_flow(context: SessionContext, flow, *, on_fatal=None) 
 
 async def _trigger_failure_log(context: SessionContext, error: Exception) -> None:
     """报告首次失败触发一次日志副本交付；副本失败不扩大错误。"""
+    from camctl.logging_runtime.diagnostics import record_error
+
+    record_error(error, stage="report")
     if context.failure_log is None or context.copy_request_factory is None:
         return
 
@@ -1444,6 +1447,12 @@ async def _trigger_failure_log_owned(
 
     def consume_unsafe_write_result(write_result: Any) -> bool:
         """保留 ownerless/custom delivery 的共享日志停用回执消费。"""
+        if write_result is not None and write_result.appended is True:
+            from camctl.logging_runtime.diagnostics import acknowledge_diagnostic, diagnostic_state_for
+
+            state = diagnostic_state_for(error)
+            if state is not None:
+                acknowledge_diagnostic(state)
         if (write_result is None
                 or not write_result.disables_file_logging):
             return False
