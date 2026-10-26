@@ -7,7 +7,7 @@ from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnosti
 from camctl.motor.models import MotorActionFacts
 from camctl.motor.notification import NotificationWriteResult, WriteKind
 from camctl.motor.service import advance_motor
-from .test_service import make_runtime, PENDING
+from unit.motor.test_service import make_runtime, PENDING
 
 pytestmark = pytest.mark.asyncio
 

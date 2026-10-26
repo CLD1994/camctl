@@ -31,7 +31,7 @@ from camctl.persistence.repositories.capture import (
     CaptureRepository, CaptureResult, FinishBindingFailure, FinishCapture, FinishRecordingResults,
 )
 from camctl.persistence.repositories.operations import OperationRepository
-from .test_stop_result_handoff import _runtime
+from unit.capture.test_stop_result_handoff import _runtime
 
 pytestmark = pytest.mark.asyncio
 
@@ -210,8 +210,8 @@ async def test_failed_result_page_and_final_attempt_share_one_diagnostic(mocker)
     from decimal import Decimal
     from camctl.capture.result_scans import PendingResultScan, advance_result_scan
     from camctl.capture.result_pages import ResultPageRef
-    from .test_result_scan import _runtime as scan_runtime, _page
-    from .test_result_pages import _TICKET
+    from unit.capture.test_result_scan import _runtime as scan_runtime, _page
+    from unit.capture.test_result_pages import _TICKET
     scan_world = scan_runtime()
     scan_world.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
         ResultPageRef(_TICKET, 1, 10, None))
@@ -294,7 +294,7 @@ async def test_tolerated_action6_setting_error_is_logged_with_the_outer_result(l
     from decimal import Decimal
     from camctl.logging_runtime.diagnostics import record_call_outcome
     from camctl.operations.process import LocalExit, RawToolOutcome
-    from ..devices.test_adb_camera_driver import (
+    from unit.devices.test_adb_camera_driver import (
         Action6ContractTransport, _action6_contract_driver, _request,
     )
     bitrate = ('simulate_device', '-s', 'bitrate', '2')
@@ -335,7 +335,7 @@ async def test_capture_completion_preserves_all_database_errors_for_fatal_diagno
 async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_control(operation, ran):
     from camctl.capture.media import execute_check, execute_repair
     from camctl.host_files.tasks import FileTaskId, FileTaskResult
-    from .test_media_execution import (
+    from unit.capture.test_media_execution import (
         _Saves, _Tools, _status, _check_context, _repair_context, _saved, _REGISTERED_OUTPUT,
     )
     result = FileTaskResult(FileTaskId(operation), ran,
@@ -359,7 +359,7 @@ async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_contr
 async def test_file_observation_error_survives_successful_business_fact_save(kind):
     from camctl.capture.files import FilePresenceSave, FileCompletionSave
     from camctl.capture.handlers import FileFactStage
-    from .test_file_fact_identity import _runtime_with_saved_ownership
+    from unit.capture.test_file_fact_identity import _runtime_with_saved_ownership
     runtime, _, _ = _runtime_with_saved_ownership()
     runtime.database = create_autospec(BusinessDatabase, instance=True)
     runtime.database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED, object())

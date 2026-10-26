@@ -10,11 +10,11 @@ from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnosti
 from camctl.operations.models import AttemptStatus, AttemptTicket
 from camctl.outputs import handoff, work_files
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from .test_cleanup_query_save_responsibility import (
+from unit.outputs.test_cleanup_query_save_responsibility import (
     _runtime, _saved, _actual_result, _TICKET, original_config_reader,
 )
-from .test_cleanup_delete_save_responsibility import _pending
-from .test_work_files import _facts
+from unit.outputs.test_cleanup_delete_save_responsibility import _pending
+from unit.outputs.test_work_files import _facts
 
 pytestmark = pytest.mark.asyncio
 

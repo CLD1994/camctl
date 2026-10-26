@@ -9,7 +9,7 @@ from camctl.motor.models import PrepareOutcome, PrepareSendResult
 from camctl.motor.service import advance_motor
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.session.service import StateDbFailure
-from .test_service import make_runtime, KEY
+from unit.motor.test_service import make_runtime, KEY
 
 pytestmark = pytest.mark.asyncio
 

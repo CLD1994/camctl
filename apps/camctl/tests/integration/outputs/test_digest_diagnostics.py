@@ -25,7 +25,7 @@ from camctl.outputs.obtain_flow import _LOCAL_READ_EVIDENCE
 from camctl.outputs.read_attempts import hold_read_result
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 
-from ..devices.test_adb_camera_driver import EVIDENCE, Transport, _driver
+from unit.devices.test_adb_camera_driver import EVIDENCE, Transport, _driver
 from .test_read_diagnostics import Channel
 
 

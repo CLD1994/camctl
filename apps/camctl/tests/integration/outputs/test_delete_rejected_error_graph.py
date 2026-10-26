@@ -8,8 +8,8 @@ from camctl.operations.models import AttemptStatus, AttemptTicket
 from camctl.outputs import cleanup_flow
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.outputs import OutputsRepository
-from .test_cleanup_query_save_responsibility import _runtime, _saved, _actual_result, original_config_reader
-from .test_cleanup_delete_save_responsibility import _pending
+from unit.outputs.test_cleanup_query_save_responsibility import _runtime, _saved, _actual_result, original_config_reader
+from unit.outputs.test_cleanup_delete_save_responsibility import _pending
 
 pytestmark = pytest.mark.asyncio
 
