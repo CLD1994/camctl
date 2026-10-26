@@ -238,26 +238,71 @@ async def test_pause_preserves_directory_cache_until_original_scan_finishes():
 
 
 @pytest.mark.asyncio
-async def test_cache_close_failure_keeps_saved_actual_page_and_retries_only_close():
+@pytest.mark.parametrize("delivery_failure", [False, True])
+async def test_cache_close_failure_keeps_saved_actual_page_and_retries_only_close(delivery_failure):
     runtime = _runtime()
     actual = _page(finalized=True)
     runtime.results.list_page.return_value = actual
     reliable = ResultPageRef(_TICKET, 1, 10, None)
-    runtime.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED, reliable)
+    runtime.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED, reliable,
+        control=RuntimeError("saved page notification failed") if delivery_failure else None)
     pending = result_scans.PendingResultScan(_TICKET, {"directories": ["/DCIM"]}, Decimal("3"))
     scan = create_autospec(AdbDirectoryScan, instance=True, spec_set=True)
-    scan.close.side_effect = [OSError("cache close failed"), None]
+    close_error = OSError("cache close failed")
+    scan.close.side_effect = [close_error, None]
     pending.reading_context.directory_scan = scan
-
-    with pytest.raises(OSError):
-        await result_scans.advance_result_scan(pending, runtime=runtime)
-
-    assert pending.finished and pending.last_ref == reliable
-    assert pending.last_outcome.outcome == actual.outcome and pending.saves.pending is None
-    assert await result_scans.advance_result_scan(pending, runtime=runtime)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    def info():
+        payloads = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+        return [payload for payload in payloads if payload["level"] == "INFO"]
+    with event_logging(channel):
+        with pytest.raises(OSError) as caught:
+            await result_scans.advance_result_scan(pending, runtime=runtime)
+        assert caught.value is close_error
+        assert pending.finished and pending.last_ref == reliable
+        assert pending.last_outcome.outcome == actual.outcome and pending.saves.pending is None
+        started, raised = info()
+        assert (started["stage"], started["event"]) == ("capture.result_scan", "started")
+        assert (raised["event"], raised["phase"], raised["exception_type"],
+            raised["page_saved"], raised["cache_closed"]) == (
+            "raised", "cache_close", "OSError", True, False)
+        assert await result_scans.advance_result_scan(pending, runtime=runtime)
+        retry_start, retry_end = info()[2:]
+        assert (retry_start["stage"], retry_start["event"], retry_end["stage"], retry_end["event"]) == (
+            "capture.result_scan_close", "started", "capture.result_scan_close", "returned")
+        assert await result_scans.advance_result_scan(pending, runtime=runtime)
+        assert len(info()) == 4
     runtime.results.list_page.assert_awaited_once()
     runtime.capture.save_result_page.assert_called_once()
     assert scan.close.call_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_saved_final_page_delivery_error_is_logged_after_cache_close_without_false_return(error_type):
+    runtime = _runtime()
+    actual = _page(finalized=True)
+    runtime.results.list_page.return_value = actual
+    reliable = ResultPageRef(_TICKET, 1, 10, None)
+    failure = error_type("saved page notification failed")
+    runtime.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED, reliable, control=failure)
+    pending = result_scans.PendingResultScan(_TICKET, None, Decimal("3"))
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel):
+        with pytest.raises(error_type) as caught:
+            await result_scans.advance_result_scan(pending, runtime=runtime)
+        assert caught.value is failure
+        assert pending.finished and pending.last_ref == reliable and pending.reading_context.closed
+        assert pending.last_outcome.outcome == actual.outcome and pending.saves.pending is None
+        assert await result_scans.advance_result_scan(pending, runtime=runtime)
+    runtime.results.list_page.assert_awaited_once()
+    runtime.capture.save_result_page.assert_called_once()
+    payloads = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    info = [payload for payload in payloads if payload["level"] == "INFO"]
+    assert [payload["event"] for payload in info] == ["started",
+        "cancelled" if error_type is asyncio.CancelledError else "raised"]
+    assert (info[-1]["phase"], info[-1]["exception_type"], info[-1]["page_saved"],
+        info[-1]["cache_closed"]) == ("page_delivery", error_type.__name__, True, True)
 
 
 @pytest.mark.asyncio

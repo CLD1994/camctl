@@ -21,7 +21,7 @@ from camctl.operations.tool_diagnostics import DiagnosticsValidationError
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.logging_runtime.performance import measure_performance
-from camctl.logging_runtime.events import log_context, record_event
+from camctl.logging_runtime.events import log_context, measure_stage, record_event
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 
 
@@ -108,7 +108,7 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
 
 async def _advance_result_scan(pending, *, runtime, can_read, page_qualified):
     if pending.finished:
-        pending.close()
+        _close_finished_scan(pending)
         return True
     if pending.interrupted:
         raise ConsistencyError("原结果扫描已中断，须沿原尝试恢复与新轮次规则收场")
@@ -205,16 +205,37 @@ async def _apply_saved_page(pending, runtime, page_qualified, held):
     pending.cursor = page.next_cursor
     pending.finished = page.next_cursor is None or page.outcome.error is not None or not qualified
     if pending.finished:
-        pending.log_return("returned", page_count=pending.page_no,
+        _close_finished_scan(pending, delivery_error=delivery_error,
             scan_complete=page.scan_complete, qualified=qualified,
             status=page.outcome.status.value,
             error_code=None if page.outcome.error is None else page.outcome.error.code)
-        pending.close()
     else:
         pending.page_no += 1
     if delivery_error is not None:
         raise delivery_error
     return pending.finished
+
+
+def _close_finished_scan(pending, *, delivery_error=None, **fields):
+    fields = {"page_count": 0 if pending.last_ref is None else pending.last_ref.page_no,
+        "page_saved": pending.last_ref is not None, **fields}
+    try:
+        if pending.round_ended and not pending.reading_context.closed:
+            with measure_stage("capture.result_scan_close", **pending.log_fields(), **fields):
+                pending.close()
+        else:
+            pending.close()
+    except BaseException as error:
+        pending.log_return("cancelled" if isinstance(error, asyncio.CancelledError) else "raised",
+            exception_type=type(error).__name__, phase="cache_close",
+            cache_closed=pending.reading_context.closed, **fields)
+        raise
+    if delivery_error is not None:
+        pending.log_return("cancelled" if isinstance(delivery_error, asyncio.CancelledError) else "raised",
+            exception_type=type(delivery_error).__name__, phase="page_delivery",
+            cache_closed=pending.reading_context.closed, **fields)
+        raise delivery_error
+    pending.log_return("returned", cache_closed=pending.reading_context.closed, **fields)
 
 
 def completed_wait_from_page(saved: SavedResultPage, context, *, repository, owned) -> dict | None:
