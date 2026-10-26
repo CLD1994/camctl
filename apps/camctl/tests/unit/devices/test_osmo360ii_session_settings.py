@@ -79,21 +79,22 @@ async def test_partial_setup_keeps_only_reliably_accepted_settings():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("setting_index", [0, 1, 3])
 @pytest.mark.parametrize("fault", [{"stderr": b"setting failed"}, {"output_failure": "truncated"},
                                   {"error": "timeout"},
                                   {"output": b"SimuDev: when send control set data, server not exist!\n"}])
-async def test_unknown_initial_setting_is_not_skipped_on_next_authorized_start(fault):
+async def test_unknown_initial_setting_is_not_skipped_on_next_authorized_start(fault, setting_index):
     class FaultTransport(Transport):
         async def run(self, spec, stop):
             outcome = await super().run(spec, stop)
-            return replace(outcome, **fault) if len(self.commands) == 1 else outcome
+            return replace(outcome, **fault) if len(self.commands) == setting_index + 1 else outcome
 
     transport = FaultTransport()
     driver = _driver(transport)
     assert (await driver.control(request("record"))).error is not None
-    assert transport.commands == INITIAL_SETTINGS[:1]
+    assert transport.commands == INITIAL_SETTINGS[:setting_index + 1]
     assert (await driver.control(request("record"))).error is None
-    assert transport.commands.count(INITIAL_SETTINGS[0]) == 2
+    assert transport.commands.count(INITIAL_SETTINGS[setting_index]) == 2
 
 
 @pytest.mark.asyncio

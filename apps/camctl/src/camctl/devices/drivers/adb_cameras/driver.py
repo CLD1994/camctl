@@ -140,6 +140,7 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             "error": error_document(outcome.error),
             "result_document": result_document(outcome),
             "stdout_hex": None if raw is None or raw.output is None else raw.output.hex(),
+            "stderr_hex": None if raw is None or raw.stderr is None else raw.stderr.hex(),
         }
 
     def _with_attached_calls(self, request, outcome, calls):

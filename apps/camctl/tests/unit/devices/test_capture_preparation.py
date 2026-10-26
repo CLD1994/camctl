@@ -249,7 +249,7 @@ async def test_software_recovery_preparation_clears_proof_even_when_first_settin
     driver = _action6_contract_driver(Action6ContractTransport())
     preparation = _preparation(_request())
     await driver.prepare_capture(preparation)
-    raw = RawToolOutcome(LocalExit(exit_code=0), b"", None, None, stderr=b"failed")
+    raw = RawToolOutcome(LocalExit(exit_code=1), b"", None, None, stderr=b"failed")
     mocker.patch.object(driver, "_recovery_raw", autospec=True, return_value=raw)
     result = await driver.recovery_prepare(preparation.binding, preparation.params,
         activity_id=7, directories=("/DCIM",), timeout_s=Decimal("3"))

@@ -61,7 +61,7 @@ def _call_details(raw: RawToolOutcome) -> dict[str, JsonValue]:
     }
 
 
-def _call_failure(raw: RawToolOutcome) -> _FailureReason | None:
+def _call_failure(raw: RawToolOutcome, *, ignore_stderr_text: bool = False) -> _FailureReason | None:
     if raw.error is not None:
         return _FailureReason.TRANSPORT_ERROR
     if raw.output_failure is not None:
@@ -74,7 +74,7 @@ def _call_failure(raw: RawToolOutcome) -> _FailureReason | None:
         return _FailureReason.EXIT_NONZERO
     if raw.stderr is None:
         return _FailureReason.STDERR_UNAVAILABLE
-    if raw.stderr != b"":
+    if not ignore_stderr_text and raw.stderr != b"":
         return _FailureReason.STDERR_PRESENT
     if raw.output is None:
         return _FailureReason.STDOUT_UNAVAILABLE
@@ -173,16 +173,18 @@ class Action6DjiInterpreter:
 
 @dataclass(frozen=True)
 class Action6SimulationSettingInterpreter:
-    """`simulate_device` 的本地成功只确认设置命令已接受，不确认相机实际状态。"""
+    """解释设置调用；临时忽略文字时只确认本地调用完成，不确认设置有效。"""
 
     activity_id: str
+    ignore_output_text: bool = False
 
     def __post_init__(self):
         parse_object_id(self.activity_id)
 
     def interpret(self, raw: RawToolOutcome) -> InterpretedFacts:
         details = _call_details(raw)
-        failure = _simulation_call_failure(raw)
+        failure = (_call_failure(raw, ignore_stderr_text=True) if self.ignore_output_text
+                   else _simulation_call_failure(raw))
         if failure is not None:
             details["reason"] = failure.value
             return InterpretedFacts((), ErrorValue(
@@ -190,6 +192,7 @@ class Action6SimulationSettingInterpreter:
         observation = DeviceObservation("setting_command_accepted", 1, {
             "activity_id": self.activity_id,
             "response_payload": None,
-            "confirmation_basis": "action6_simulate_device_exit/v1",
+            "confirmation_basis": ("action6_simulate_device_output_unchecked/v1" if self.ignore_output_text
+                                   else "action6_simulate_device_exit/v1"),
         })
         return InterpretedFacts((observation,), None, EffectState.CONFIRMED)
