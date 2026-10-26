@@ -4,6 +4,8 @@
 
 本页完整定义日志入口、队列接纳、取消与退出，并说明标准库、Janus 和文件处理器的适配方式。日志配置、通道故障及日志副本的业务规则见[运行日志](../architecture/logging.md)。先读组件分工和投递规则，再核对水位判定与实现适配。
 
+关键阶段、全部实际外部命令使用 `INFO`，纯耗时明细使用 `DEBUG`。逐行 JSON 的公共字段、关联身份及实际执行边界由[阶段与命令日志规格](../superpowers/specs/2026-10-26-operational-logging.md)维护；这些辅助记录采用本页的非阻塞接纳策略，原错误诊断的责任保持不变。
+
 ## 普通日志执行与多进程轮换
 
 普通日志复用标准库 `logging` 的日志级别、`LogRecord`、处理器和格式化机制，协程通过可等待的日志入口投递。各个需要写文件日志的 Python 进程独立创建日志入口适配、`QueueHandler`、`janus` 有界队列、`QueueListener` 和 `ConcurrentRotatingFileHandler`；文件处理器来自第三方库 `concurrent-log-handler`。组件职责如下：
