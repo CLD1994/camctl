@@ -1407,6 +1407,13 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
 
 async def _advance_report_flow(context: SessionContext, flow, *, on_fatal=None) -> None:
     """报告调用及后台实际任务共用同一失败分类和日志入口。"""
+    from camctl.logging_runtime.diagnostics import diagnostic_scope
+
+    async with diagnostic_scope():
+        await _advance_report_flow_result(context, flow, on_fatal=on_fatal)
+
+
+async def _advance_report_flow_result(context: SessionContext, flow, *, on_fatal=None) -> None:
     try:
         await flow(context)
     except ClockBecameUntrusted:
@@ -1426,20 +1433,30 @@ async def _advance_report_flow(context: SessionContext, flow, *, on_fatal=None) 
 
 async def _trigger_failure_log(context: SessionContext, error: Exception) -> None:
     """报告首次失败触发一次日志副本交付；副本失败不扩大错误。"""
-    from camctl.logging_runtime.diagnostics import record_error
-
-    record_error(error, stage="report")
+    from camctl.logging_runtime.diagnostics import (
+        adopt_diagnostic, diagnostic_scope, diagnostic_state_for,
+        record_error, reserve_diagnostic,
+    )
     if context.failure_log is None or context.copy_request_factory is None:
+        record_error(error, stage="report")
         return
 
+    # 原记录可能已由生成或发布消费者准备，须在副本 task 创建前交接。
+    # 父等待取消后，仍由实际副本拥有者持有，不能被普通消费抢先写入。
+    reservation = reserve_diagnostic(diagnostic_state_for(error))
+
     async def operation() -> None:
-        await _trigger_failure_log_owned(context, error)
+        async with diagnostic_scope():
+            if reservation is not None:
+                adopt_diagnostic(reservation)
+            record_error(error, stage="report")
+            await _trigger_failure_log_owned(context, error)
 
     owner = getattr(context, "logging_owner", None)
     if owner is not None:
         await owner.run_service_operation("report_failure", operation)
         return
-    await _trigger_failure_log_owned(context, error)
+    await operation()
 
 
 async def _trigger_failure_log_owned(

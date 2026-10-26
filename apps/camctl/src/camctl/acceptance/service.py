@@ -13,7 +13,7 @@ from typing import Any, Protocol, Mapping
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
 from camctl.contracts.values import OperationKey
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
 
 __all__ = [
     "AcceptanceContext",
@@ -124,16 +124,27 @@ async def accept_input(
     if isinstance(source, InputDiagnostic):
         record_error(source.exception or {"message": source.detail}, stage="input_" + source.stage.value,
                      context={"path": source.path, "operation_key": key})
-    outcome = await database.write(
-        lambda owned: context.repository.process_input(command, key, owned),
-        key=key,
-        description="输入处理",
-    )
-    if outcome.kind is DbOutcomeKind.COMPLETED:
+    def record_result_diagnostics(result):
         if not isinstance(source, InputDiagnostic):
-            for diagnostic in outcome.value.diagnostics:
+            for diagnostic in result.diagnostics:
                 record_error(diagnostic["error"], stage="admission",
-                             context={"operation_key": key, **diagnostic.get("context", {})})
+                             context={"operation_key": key, "input_path": source.path,
+                                      **diagnostic.get("context", {})})
+
+    try:
+        outcome = await database.write(
+            lambda owned: context.repository.process_input(command, key, owned),
+            key=key,
+            description="输入处理",
+        )
+    except BaseException as error:
+        actual = db_outcome_for(error)
+        if (actual is not None and actual.kind is DbOutcomeKind.COMPLETED
+                and isinstance(actual.value, AcceptanceResult)):
+            record_result_diagnostics(actual.value)
+        raise
+    if outcome.kind is DbOutcomeKind.COMPLETED:
+        record_result_diagnostics(outcome.value)
         return outcome.value
     error = AcceptanceStateError(
         f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"

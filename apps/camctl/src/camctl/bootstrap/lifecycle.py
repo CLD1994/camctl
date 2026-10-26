@@ -999,7 +999,7 @@ async def execute_command(
     channel = None if deps.log_runtime is None else deps.log_runtime.channel
     fallback = lambda message: _write_stderr_diagnostic(deps, message)
     installation = None
-    with error_diagnostics_context(channel, fallback):
+    with error_diagnostics_context(channel, fallback, background=True):
         try:
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
