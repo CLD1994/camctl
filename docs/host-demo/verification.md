@@ -4,6 +4,26 @@
 
 本记录对应 `apps/host-demo` 第一版源码、静态库和终端演示。组件不包含业务 CLI、设备驱动或文件传输实现。
 
+## 主程序主动停止验证（2026-10-26 UTC）
+
+Linux x86_64 开发容器，GCC 13.3.0、CMake 3.28.3，CTest 的 Python 协作者指定 CPython 3.11.17。生产实现合入主工作区的提交为 `c465ec25`；独立审查后，在主工作区重新执行完整 Debug 构建及全部单元测试。
+
+```sh
+cmake -S apps/host-demo -B .local/host-stop-build -DHOST_BUILD_TESTS=ON \
+  -DHOST_TEST_PYTHON=/workspaces/camctl/apps/camctl/.venv311/bin/python \
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build .local/host-stop-build -- -j4
+ctest --test-dir .local/host-stop-build -L unit -V --output-on-failure
+```
+
+配置、构建和测试均退出 0；16 个单元入口、162 例全部通过。新增停止入口、写入器关闭和演示退出单元分别为 18、5、11 例；进程单元共 28 例，包含具体 PID 一次 SIGINT 及身份失效的反例。线程创建、等待、信号、进程和文件接口使用受约束的替身，没有运行真实线程或子进程。
+
+覆盖停止后拒绝受理和启动、保留已启动提交的真实结果、时钟与等待故障不放弃在管进程、在途 API 等待、并发与重复停止、回调排空和重入、自线程停止拒绝、通知队列满及已读残块、诊断和日志排空，以及关闭错误后的阶段保留。独立审查发现的线程编号复用与线程退出尾部自停问题，通过 C11 线程局部身份判定闭合。
+
+`node scripts/check-doc-links.mjs` 和 `git diff --check` 通过。命令、原始日志、逐入口数量及组件文件 SHA-256 保存在 `.local/verification/host-stop-20261026/`。原始单元日志包含非 UTF-8 夹具字节，原始日志完整保留；仅解析计数时替换不可解码字节。
+
+本次按用户要求未运行集成测试，未连接设备、操作真实状态库、更新真机安装版或停止当前运行进程。安装示例的编译消费者已经同步维护，但真实线程、信号、安装示例与进程组的组合行为尚未复验，交由后续人工验证。
+
 ## 开发容器重建后的组件与安装版验证（2026-10-24 UTC）
 
 本次环境为 Ubuntu 24.04.5 x86_64、GCC 13.3.0、CMake 3.28.3、Python 3.11.17 和 SQLite 3.53.1。独立工作树 `.local/worktrees/host-refresh-20261025/` 在 `fdcdc92` 完成 Debug 构建及完整 CTest：35/35 通过，其中 13 个单元入口、22 个集成入口，退出 0，83.39 秒。交付集成入口同时核对源码包内容、解包后构建、安装目录、独立链接消费者与文档链接。Release 构建、安装及源码包生成均退出 0；完整命令和输出保存在该工作树的 `.local/host-refresh-verify/logs/`。
