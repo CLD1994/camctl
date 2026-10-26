@@ -30,7 +30,7 @@ cc -std=c11 main.c -I"$HOME/.camctl/host/include" \
   "$HOME/.camctl/host/lib/libcamctl_host.a" -pthread -o main
 ```
 
-也可将组件作为 CMake 子目录加入工程，再用 `target_link_libraries(main PRIVATE camctl_host)`。自行管理构建时，编译 `src` 中除 `demo.c` 外的 C 文件及 `vendor/yyjson/yyjson.c`，加入 `include`、`src`、`vendor/yyjson` 头文件目录，定义 `_GNU_SOURCE` 并链接 pthread。依赖清单和摘要见 [vendor/manifest.cmake](vendor/manifest.cmake)。
+也可将组件作为 CMake 子目录加入工程，再用 `target_link_libraries(main PRIVATE camctl_host)`。自行管理构建时，编译 `src` 中除 `demo*.c` 外的 C 文件及 `vendor/yyjson/yyjson.c`，加入 `include`、`src`、`vendor/yyjson` 头文件目录，定义 `_GNU_SOURCE` 并链接 pthread。依赖清单和摘要见 [vendor/manifest.cmake](vendor/manifest.cmake)。
 
 在构建目录生成源码包与当前平台的二进制包：
 
@@ -51,7 +51,7 @@ camctl 与主程序以同一个账户运行，默认部署目录为该账户的 
 
 ## 三个调用时机
 
-公开头文件为 [camctl_host.h](include/camctl_host.h)。以下代码放入现有主程序的对应位置；完整可编译的调用示例为 [demo.c](src/demo.c)。
+公开头文件为 [camctl_host.h](include/camctl_host.h)。以下代码放入现有主程序的对应位置；完整调用示例为 [demo.c](src/demo.c)，编译演示时同时加入其旁边的 `demo_stop.c`，并保留 `demo_stop.h`。安装后的配套示例源码位于同一 `examples` 目录。
 
 ```c
 #include "camctl_host.h"
