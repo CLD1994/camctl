@@ -372,11 +372,12 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         result = await filesystem.source_digest(identity, timeout_s=timeout, stop=_NeverStop())
         if result.error is not None:
             return DeviceCallResult((), {"code": result.error.code, "stage": result.error.stage,
-                                       "details": dict(result.error.details)})
+                                       "details": dict(result.error.details)},
+                raw_outcome=result.outcome, diagnostic_error=result.failure)
         observation = DeviceObservation("file_digest", 1, {"file_id": request.params["file_id"], "sha256": result.value})
         validate_observation(observation, self.contract.evidence.contract(observation.type, observation.version),
                              expected_identity=request.params["file_id"])
-        return DeviceCallResult((observation,), None)
+        return DeviceCallResult((observation,), None, raw_outcome=result.outcome)
 
     async def delete(self, request):
         serial = self._request(request, "delete")

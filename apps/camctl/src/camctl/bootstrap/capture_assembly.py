@@ -233,17 +233,21 @@ class DriverDigestReader:
             },
         )
         result = await self._driver.digest(request)
+        raw = getattr(result, "raw_outcome", None)
+        original_error = getattr(result, "diagnostic_error", None)
         usable = [observation for observation in result.observations
                   if observation.type == _DIGEST_TYPE]
         if result.error is not None and not usable:
             return SourceDigest(
                 digest=None, error=dict(result.error) if isinstance(
-                    result.error, Mapping) else str(result.error))
+                    result.error, Mapping) else str(result.error),
+                raw_outcome=raw, diagnostic_error=original_error)
         if len(usable) != 1:
             return SourceDigest(
                 digest=None,
                 error="digest_observation_invalid:"
-                      f" 期望一份摘要观察，实际 {len(usable)}")
+                      f" 期望一份摘要观察，实际 {len(usable)}",
+                raw_outcome=raw, diagnostic_error=original_error)
         from camctl.devices.evidence import validate_observation
 
         contract = self._evidence.contract(_DIGEST_TYPE, _DIGEST_VERSION)
@@ -251,10 +255,12 @@ class DriverDigestReader:
             validate_observation(
                 usable[0], contract, expected_identity=self._file_row_id)
             sha256 = usable[0].data.get("sha256")
-            return SourceDigest(digest=sha256, error=None)
+            return SourceDigest(digest=sha256, error=None, raw_outcome=raw,
+                                diagnostic_error=original_error or result.error)
         except ValueError as error:
             return SourceDigest(
-                digest=None, error=f"digest_observation_invalid: {error}")
+                digest=None, error=f"digest_observation_invalid: {error}",
+                raw_outcome=raw, diagnostic_error=error)
 
 
 class DriverResultListing:

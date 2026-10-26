@@ -20,7 +20,7 @@ from camctl.devices.evidence import DeviceObservation, OPERATIONS
 if TYPE_CHECKING:
     from camctl.devices.directory import DirectoryRead, DirectoryRequest
     from camctl.devices.file_identity import FileIdentity
-    from camctl.operations.process import StopSignal
+    from camctl.operations.process import RawToolOutcome, StopSignal
     from camctl.operations.models import AttemptTicket, CallOutcome
 
 
@@ -133,6 +133,9 @@ class DeviceCallResult:
     outcome: CallOutcome | None = None
     #: 仅本次内部诊断构造约束；冻结上下文，原拥有者持有结果后才调用。
     diagnostics_check: Callable[[CallOutcome], None] | None = None
+    #: 摘要等辅助文件调用的原受管工具事实，不从兼容错误视图重新构造。
+    raw_outcome: RawToolOutcome | None = None
+    diagnostic_error: BaseException | None = None
 
     def __post_init__(self) -> None:
         if self.outcome is not None:

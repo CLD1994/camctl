@@ -46,6 +46,7 @@ from camctl.session.supervision import Supervisor
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
     from camctl.persistence.business import BusinessDatabase
+    from camctl.operations.process import RawToolOutcome
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _VERIFICATION = enum_for("file_copies.verification_state")
@@ -933,6 +934,9 @@ class SourceDigest:
 
     digest: str | None = None
     error: object | None = None
+    raw_outcome: RawToolOutcome | None = None
+    diagnostic_error: object | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         _require_digest("digest", self.digest)
@@ -1059,13 +1063,20 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
     hashed = await asyncio.to_thread(hash_target, ref, context.roots)
     if hashed.error is not None or hashed.digest is None:
         raise CopyCompletionError("host_digest_failed", hashed.error or "未知失败")
-    source_sha256, source_error = facts.source_sha256, None
+    source_sha256, source_error, source_diagnostic = facts.source_sha256, None, None
     if source_sha256 is None \
             and facts.source_support is SourceChecksumSupport.SUPPORTED:
         if context.digest is None:
             raise CopyCompletionError(
                 "digest_reader_missing", "支持源端校验但未提供源摘要端口")
         fetched = await context.digest.read_digest()
+        if fetched.error is not None or fetched.diagnostic_error is not None:
+            source_diagnostic = record_error(
+                fetched.error if fetched.error is not None else fetched.diagnostic_error,
+                stage="source_verification",
+                context={"copy_id": copy_id, "path": str(ref.root / ref.relative_path)},
+                details={"raw_outcome": fetched.raw_outcome, "exception": fetched.diagnostic_error},
+                state=fetched.diagnostic)
         if fetched.digest is None:
             source_error = fetched.error
         else:
@@ -1113,7 +1124,10 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
             _owner_stage(outcome.value.reason), "发起责任不再执行")
     _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
     if save_state == int(_VERIFICATION.FAILED):
-        raise CopyCompletionError("verification_failed", str(decision.error))
+        error = CopyCompletionError("verification_failed", str(decision.error))
+        if source_diagnostic is not None:
+            record_error(error, stage="source_verification", state=source_diagnostic)
+        raise error
     return await _save_prepared(copy_id, context, hashed.digest)
 
 
