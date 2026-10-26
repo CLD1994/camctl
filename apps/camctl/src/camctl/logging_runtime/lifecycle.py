@@ -145,6 +145,11 @@ async def _close_logging_owned(
     runtime: LogRuntime, *, stop_timeout_s: float, operation: _CloseOperation,
 ) -> CloseResult:
     channel = runtime.channel
+    if runtime.path_unsafe:
+        from camctl.logging_runtime.service import ChannelError
+        channel.disable_channel(ChannelError("共享文件日志 I/O 或协调不可用"))
+    await channel.finish_producers()
+    await channel.join()
     dropped = channel.counters.total_dropped()
     close_errors: list[str] = []
 

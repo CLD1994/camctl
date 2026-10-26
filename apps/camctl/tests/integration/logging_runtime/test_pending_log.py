@@ -1,4 +1,4 @@
-"""L3 重要日志取消与通道禁用的单元/组件测试。
+"""L3 重要日志取消与通道禁用的组件集成测试。
 
 队列满且协程取消：必要收场不被日志等待阻塞，重要记录由自身责
 任保留；通道禁用后等待者以失败凭据退出，未写记录不标成功。
@@ -33,7 +33,7 @@ class BlockingWriter:
 class TestPendingLog:
     def _channel(self, writer) -> LogChannel:
         return LogChannel(
-            capacity=2,
+            capacity=3,
             low_watermark=1,
             high_watermark=2,
             level=LogLevel.DEBUG,

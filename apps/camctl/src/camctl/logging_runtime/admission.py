@@ -31,6 +31,8 @@ class AdmissionKind(enum.Enum):
     DROPPED = "dropped"
     FILTERED_OUT = "filtered_out"
     CHANNEL_FAILED = "channel_failed"
+    WAITING = "waiting"
+    FALLBACK_STDERR = "fallback_stderr"
 
 
 class LogSource(enum.Enum):
@@ -79,6 +81,12 @@ def decide_admission(log_input: AdmissionInput) -> AdmissionDecision:
     if log_input.filtered_out:
         return AdmissionDecision(AdmissionKind.FILTERED_OUT, log_input.level)
     level = log_input.level
+    if log_input.queue_depth >= log_input.queue_capacity:
+        if level is LogLevel.ERROR:
+            kind = (AdmissionKind.WAITING if log_input.source is LogSource.COROUTINE
+                    else AdmissionKind.FALLBACK_STDERR)
+            return AdmissionDecision(kind, level)
+        return AdmissionDecision(AdmissionKind.DROPPED, level)
     if level in (LogLevel.WARNING, LogLevel.ERROR):
         return AdmissionDecision(AdmissionKind.ACCEPTED, level)
     queue = log_input.queue_depth

@@ -55,7 +55,7 @@ def _channel(writer, *, capacity=8, low=3, high=6, random_source=None) -> LogCha
 class TestAtomicAdmission:
     async def test_concurrent_admission_is_atomic(self) -> None:
         writer = CollectingWriter()
-        channel = _channel(writer, capacity=8, low=100, high=200)
+        channel = _channel(writer, capacity=8, low=3, high=6)
         channel.start()
         results: list = []
         lock = threading.Lock()
@@ -84,9 +84,10 @@ class TestAtomicAdmission:
         for result in results:
             assert result.queue_depth <= 8
         accepted = [r for r in results if r.decision.kind is AdmissionKind.ACCEPTED]
-        dropped = [r for r in results if r.decision.kind is AdmissionKind.DROPPED]
-        assert len(accepted) + len(dropped) == 60
-        assert channel.counters.error_dropped == len(dropped)
+        fallback = [r for r in results if r.decision.kind is AdmissionKind.FALLBACK_STDERR]
+        assert len(accepted) + len(fallback) == 60
+        assert sum(record.message.startswith("async-") for record in writer.written) == 30
+        assert channel.counters.error_dropped == 0
 
     async def test_info_samples_once_per_record(self) -> None:
         writer = CollectingWriter()
@@ -101,7 +102,7 @@ class TestAtomicAdmission:
         assert counting.calls == 3
         # 非采样区（低水位）不调用随机源。
         counting2 = CountingRandom()
-        channel2 = _channel(writer, capacity=16, low=50, high=100, random_source=counting2)
+        channel2 = _channel(writer, capacity=16, low=6, high=12, random_source=counting2)
         await channel2.alog(LogRecord(level=LogLevel.INFO, message="low"))
         assert counting2.calls == 0
         # 排空两个通道并确认 FIFO 保留已接纳记录。
@@ -127,7 +128,7 @@ class TestAtomicAdmission:
 
     async def test_accepted_fifo_order_preserved(self) -> None:
         writer = CollectingWriter()
-        channel = _channel(writer, capacity=32, low=100, high=200)
+        channel = _channel(writer, capacity=32, low=20, high=24)
         channel.start()
         for index in range(10):
             await channel.alog(LogRecord(level=LogLevel.ERROR, message=f"m{index}"))
