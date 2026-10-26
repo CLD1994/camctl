@@ -29,7 +29,7 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FileRef
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CopyTargetRef
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.session.supervision import Supervisor
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.operations.models import ErrorValue
@@ -505,10 +505,8 @@ def _require_completed(outcome, stage_failed: str, stage_unknown: str) -> None:
     """仓储结果不是完成时按分区保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return
-    raise DeliveryHandoffError(
-        stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed,
-        str(outcome.error),
-    )
+    stage = stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed
+    raise db_failure(lambda message: DeliveryHandoffError(stage, message), str(outcome.error), outcome)
 
 
 def _staging_ref(

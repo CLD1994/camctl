@@ -31,7 +31,7 @@ from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.host_files.tasks import FileTaskExecutor
 from camctl.outputs.handoff import DeliveryDirectories
 from camctl.outputs.obtain_flow import (
-    DeviceReadAssembly, ObtainRuntime, advance_obtain,
+    DeviceReadAssembly, ObtainRuntime, advance_obtain, settle_obtain_diagnostics,
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -187,5 +187,10 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
             notifier = getattr(context, "wake", None)
             if notifier is not None:
                 notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
+
+    async def settle_diagnostics(context: Any) -> None:
+        await settle_obtain_diagnostics(factory(context.database))
+
+    flow.settle_diagnostics = settle_diagnostics
 
     return flow

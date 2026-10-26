@@ -28,7 +28,7 @@ from camctl.contracts.workflow_errors import (
 )
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 

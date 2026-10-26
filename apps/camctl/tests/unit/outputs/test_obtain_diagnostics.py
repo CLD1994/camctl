@@ -1,7 +1,8 @@
 """取回的已处理业务失败仍交付原错误事实。"""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+import asyncio
 
 import pytest
 
@@ -16,7 +17,7 @@ from camctl.contracts.pages import Page
 from camctl.contracts.values import new_operation_key
 from camctl.logging_runtime.diagnostics import DiagnosticState
 from camctl.outputs.copy import _register_recopy
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome
 from camctl.persistence.repositories.outputs import ResolveSourcesOutcome
 
 from .test_read_diagnostics import Channel
@@ -122,3 +123,53 @@ async def test_checksum_failure_is_held_before_recopy_registration(exhausted):
     assert len(channel.records) == 1
     assert channel.records[0]["stage"] == ("checksum_exhausted" if exhausted else "checksum_verification")
     assert channel.records[0]["context"]["copy_round"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("controlled", [False, True])
+async def test_completed_selection_delivery_error_defers_original_pages_until_settlement(controlled):
+    from camctl.persistence.repositories.segment_selections import FixSegmentSelection
+
+    key = new_operation_key()
+    ref = SimpleNamespace(action_id=11, selection_id=17, operation_key=key)
+    saved = SimpleNamespace(diagnostic_ref=ref)
+    failure = asyncio.CancelledError("original control") if controlled else OSError("observer failed")
+    _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, saved,
+        control=failure if controlled else None, observer_error=None if controlled else failure))
+    pending = obtain_flow.PendingSegmentSelection(FixSegmentSelection(17, 123), key)
+    unsaved = obtain_flow.PendingSegmentSelection(FixSegmentSelection(18, 123), new_operation_key())
+    stopped = False
+    async def read(_callback, **_kwargs):
+        assert stopped, "诊断读取不得先于必要停止"
+        return Page(({"error": {"code": "preview_missing", "details": {"source": "original"}}},), None)
+    database = SimpleNamespace(write=AsyncMock(side_effect=failure), read=AsyncMock(side_effect=read))
+    flow = SimpleNamespace(database=database, pending_segment_selections={17: pending, 18: unsaved})
+    channel = Channel()
+    with error_diagnostics_context(channel, lambda _: None):
+        with pytest.raises(type(failure)) as caught:
+            async with diagnostic_scope():
+                await obtain_flow._fix_pending_selections(flow, 123)
+        assert caught.value is failure and pending.saved is saved
+        assert database.read.await_count == 0 and not channel.records
+        stopped = True
+        async with diagnostic_scope():
+            await obtain_flow.settle_obtain_diagnostics(flow)
+            await obtain_flow.settle_obtain_diagnostics(flow)
+        assert database.read.await_count == 1
+    assert flow.pending_segment_selections == {18: unsaved}
+    assert len(channel.records) == 1 and channel.records[0]["stage"] == "output_selection"
+
+
+@pytest.mark.asyncio
+async def test_obtain_flow_settlement_port_uses_original_context_database(monkeypatch):
+    from camctl.bootstrap import obtain_assembly
+
+    runtime = SimpleNamespace()
+    factory = Mock(return_value=runtime)
+    settle = AsyncMock()
+    monkeypatch.setattr(obtain_assembly, "settle_obtain_diagnostics", settle)
+    flow = obtain_assembly.obtain_flow(factory)
+    context = SimpleNamespace(database=object())
+    await flow.settle_diagnostics(context)
+    factory.assert_called_once_with(context.database)
+    settle.assert_awaited_once_with(runtime)

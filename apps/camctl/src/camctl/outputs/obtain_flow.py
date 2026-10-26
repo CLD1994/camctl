@@ -78,6 +78,7 @@ __all__ = [
     "DeviceReadAssembly",
     "ObtainRuntime",
     "advance_obtain",
+    "settle_obtain_diagnostics",
 ]
 
 _ACTION_STATUS = enum_for("actions.status")
@@ -200,6 +201,16 @@ async def _consume_selection_diagnostics(runtime, pending):
             return
         pending.cursor = page.next_cursor
         pending.diagnostic = DiagnosticState()
+
+
+async def settle_obtain_diagnostics(runtime):
+    """必要业务停止后，只交接已提交选择的原诊断回执，不启动或重试业务。"""
+    for identity, pending in tuple(runtime.pending_segment_selections.items()):
+        if pending.saved is None or pending.diagnostics_done:
+            continue
+        await _consume_selection_diagnostics(runtime, pending)
+        if pending.diagnostics_done:
+            del runtime.pending_segment_selections[identity]
 
 
 async def advance_obtain(runtime: ObtainRuntime) -> None:

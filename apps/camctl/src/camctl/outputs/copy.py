@@ -39,7 +39,7 @@ from camctl.host_files.segments import (
     DEFAULT_CHUNK_SIZE_BYTES, SegmentFailure, SegmentResult, SegmentSpec,
     transfer_segment,
 )
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 
@@ -1010,10 +1010,8 @@ def _require_completed(outcome, stage_failed: str, stage_unknown: str) -> None:
     """仓储结果不是完成时按分区保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return
-    raise CopyCompletionError(
-        stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed,
-        str(outcome.error),
-    )
+    stage = stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed
+    raise db_failure(lambda message: CopyCompletionError(stage, message), str(outcome.error), outcome)
 
 
 async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionStep:
