@@ -12,7 +12,7 @@ import asyncio
 import errno
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -112,6 +112,7 @@ class PublishResult:
     directory: _io.DirectorySyncStage
     source_removed: bool
     error: str | None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ class WithdrawResult:
 
     stage: WithdrawStage
     error: str | None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 # 窄注入点：系统调用故障的确定注入位置；仅测试替换。
@@ -226,56 +228,64 @@ def _publish_path(
     except FileNotFoundError:
         return _not_moved("source_missing")
     except OSError as failure:
-        return _not_moved(_describe("inspect_failed", failure))
+        return _not_moved(_describe("inspect_failed", failure), failure)
+    failures: list[BaseException] = []
     try:
         _stat(target_path)
     except FileNotFoundError:
         pass
-    except OSError:
-        # 目标可否创建由移动原语裁决，预检错误不阻断。
-        pass
+    except OSError as failure:
+        # 目标可否创建由移动原语裁决，预检错误仍交回所属协程。
+        failures.append(failure)
     else:
-        return _not_moved("target_exists")
+        return _not_moved("target_exists", _combined_failures(failures))
 
     error: str | None = None
     if _RENAME_WITHOUT_OVERWRITE:
         try:
             _rename(source, target_path)
         except FileExistsError:
-            return _not_moved("target_exists")
+            return _not_moved("target_exists", _combined_failures(failures))
         except FileNotFoundError:
-            return _not_moved("source_missing")
-        except InterruptedError:
+            return _not_moved("source_missing", _combined_failures(failures))
+        except InterruptedError as failure:
+            failures.append(failure)
             return PublishResult(
                 stage=PublishStage.UNKNOWN,
                 directory=_io.DirectorySyncStage.NOT_ATTEMPTED,
                 source_removed=False,
                 error="move_unknown: InterruptedError",
+                exception=_combined_failures(failures),
             )
         except OSError as failure:
-            return _not_moved(_describe("move_failed", failure))
+            return _not_moved(_describe("move_failed", failure),
+                              _combined_failures([*failures, failure]))
         source_removed = True
     else:
         try:
             _link(source, target_path)
         except FileExistsError:
-            return _not_moved("target_exists")
+            return _not_moved("target_exists", _combined_failures(failures))
         except FileNotFoundError:
-            return _not_moved("source_missing")
+            return _not_moved("source_missing", _combined_failures(failures))
         except OSError as failure:
-            return _not_moved(_describe("move_failed", failure))
+            return _not_moved(_describe("move_failed", failure),
+                              _combined_failures([*failures, failure]))
         try:
             _unlink(source)
         except OSError as failure:
             # 目标已建立：已移动事实保留，源删除失败单独表达。
+            failures.append(failure)
             error = _describe("source_remove_failed", failure)
             source_removed = False
         else:
             source_removed = True
 
-    directory, sync_error = _sync_directories(
+    directory, sync_error, sync_failure = _sync_directories(
         source.parent, directories.ready
     )
+    if sync_failure is not None:
+        failures.append(sync_failure)
     if error is None:
         error = sync_error
     return PublishResult(
@@ -283,6 +293,7 @@ def _publish_path(
         directory=directory,
         source_removed=source_removed,
         error=error,
+        exception=_combined_failures(failures),
     )
 
 
@@ -292,38 +303,49 @@ def _withdraw(identity: HandoffIdentity) -> WithdrawResult:
         _remove(path)
     except FileNotFoundError:
         return WithdrawResult(stage=WithdrawStage.NOT_PRESENT, error=None)
-    except InterruptedError:
+    except InterruptedError as failure:
         return WithdrawResult(
-            stage=WithdrawStage.UNKNOWN, error="remove_unknown: InterruptedError"
+            stage=WithdrawStage.UNKNOWN, error="remove_unknown: InterruptedError",
+            exception=failure
         )
     except OSError as failure:
         return WithdrawResult(
-            stage=WithdrawStage.FAILED, error=_describe("remove_failed", failure)
+            stage=WithdrawStage.FAILED, error=_describe("remove_failed", failure),
+            exception=failure
         )
     return WithdrawResult(stage=WithdrawStage.WITHDRAWN, error=None)
 
 
 def _sync_directories(
     source_directory: Path, ready_directory: Path
-) -> tuple[_io.DirectorySyncStage, str | None]:
+) -> tuple[_io.DirectorySyncStage, str | None, BaseException | None]:
     if not _DIRECTORY_SYNC_SUPPORTED:
-        return _io.DirectorySyncStage.UNSUPPORTED, None
+        return _io.DirectorySyncStage.UNSUPPORTED, None, None
     for directory in (source_directory, ready_directory):
         try:
             _sync_directory(directory)
         except OSError as failure:
             return _io.DirectorySyncStage.FAILED, _describe(
                 "directory_sync_failed", failure
-            )
-    return _io.DirectorySyncStage.SYNCED, None
+            ), failure
+    return _io.DirectorySyncStage.SYNCED, None, None
 
 
-def _not_moved(reason: str) -> PublishResult:
+def _combined_failures(failures: list[BaseException]) -> BaseException | None:
+    if not failures:
+        return None
+    if len(failures) == 1:
+        return failures[0]
+    return BaseExceptionGroup("文件交接发生多个错误", failures)
+
+
+def _not_moved(reason: str, exception: BaseException | None = None) -> PublishResult:
     return PublishResult(
         stage=PublishStage.NOT_MOVED,
         directory=_io.DirectorySyncStage.NOT_ATTEMPTED,
         source_removed=False,
         error=reason,
+        exception=exception,
     )
 
 
