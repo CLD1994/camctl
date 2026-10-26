@@ -12,6 +12,8 @@
 
 ## 已结束活动的输出范围收尾（2026-10-26）
 
+范围责任的事件登记覆盖普通流程的建立、实际配置、结束，首次及后续尝试，以及重试等待的建立、完成和放弃。上述八处种类约束接受 `RESOLVE_OUTPUT_SCOPE=11`，原事件校验继续生效。Linux 开发容器、Python 3.11.17 下，内存登记替身与历史解码定向单元 **179 项通过，0.72 秒，退出 0**；新增单元分别验证创建种类和完整前态种类，不读取真实包资源。日志位于隔离工作区 `.local/verification/scope-event-registration/unit.log`。真实包资源的九项登记回归归入 `tests/integration/history/test_scope_event_registration.py`，本次未运行；这些单元结果不证明构建、安装内容或真机流程。
+
 [实施计划](../superpowers/plans/2026-10-26-ended-output-scope.md)将已结束但范围未知的占用接入后续有效拍摄的提前准备。Action6 与 OSMO 的范围读取只保存目录身份与分页结束，不调用文件元数据；保留原结束后等待。原基准差集的全部归属核实后，独立保存范围确定事实并按统一条件释放旧占用。旧拍摄终态、错误、原 RESULTS 次数保持，范围责任独立有限计数。格式 V6 及显式输出范围升级入口保留已有库和历史。
 
 提交 `10492c1a` 验证准备完成后由 `pending` 转为 `running` 的衔接：录像和延时摄影在 START 前再次核对准备时，继续取得原准备凭据；同样允许仍在准备中的 `running` 动作触发旧范围收尾。新增三个分区在修复前失败，修复后 `test_scope_closure.py` 与 `test_preparation.py` 共 **86 项通过，6.13 秒**，Python 3.11.17，退出 0。原日志位于 `.local/verification/report145-start-state-20261026/unit.log`。范围收尾开关在该状态转换用例中真实启用，准备和范围模块共同执行，数据库与设备边界使用替身；未运行集成测试或设备命令。
