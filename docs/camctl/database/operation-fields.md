@@ -31,6 +31,10 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 
 ## 操作流程的身份与参数
 
+`RESOLVE_OUTPUT_SCOPE` 要求整体格式 V6，拥有者为原拍摄动作，目标为其原活动。原活动必须已经 `ENDED`、占用仍为 `HELD` 且基准为 `FIXED`，输出范围尚未确定；原动作可以已经终态。该责任使用 `operation=result`，按原设备本次 `result_check` 配置独立累计有限次数、超时和间隔，不修改原 `CHECK_CAPTURE_RESULTS` 流程、尝试、动作终态或错误。新拍摄在有效提前准备期间触发范围收尾，调度重扫和重启复用同一责任。
+
+范围页沿用 `result_files_listed/v2` 的可靠分页结构，只枚举文件身份，不读取元数据。成功末页的 `set_finalized=true` 与原固定基准差集的完整归属共同支持 `OUTPUTS_FINALIZED`，文件大小未知、文件完整性未确认不阻止范围成立。适用的结束后等待仍沿原可靠停止来源核对；范围事实可靠保存后，沿统一占用释放入口解除原占用。
+
 `operation_runs.id` 表示一项操作责任；普通未完成责任可以跨会话继续，应急责任限于其所属会话。`action_id` 必填，表示承担该流程的动作；普通交付读取还填写 `delivery_id`，此时其历史归属交付；后续残留收场归属原设备活动动作的历史，`action_id` 另表示触发者。该流程实际改变原动作的公开字段时，报告更新原动作。`responsibility_key` 按下表格式确定，全库唯一，里面的 ID 使用无前导零十进制表示。
 
 | `kind` | 责任键 | 必填目标引用 |
@@ -43,6 +47,7 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 | `CHECK_FILE_EXISTS`（显式取回源检查） | `obtain-exists/<obtain_item_id>` | `obtain_item_id` |
 | `QUERY_ACTIVITY` | 按[活动查询的责任范围](#活动查询的责任范围)唯一确定 | 执行前检查指向 `action_id` 保存的设备绑定；其余用途必填目标 `activity_id` |
 | `CHECK_CAPTURE_RESULTS` | `results/<activity_id>` | `activity_id` |
+| `RESOLVE_OUTPUT_SCOPE` | `scope/<activity_id>` | 原拍摄动作的 `activity_id` |
 | `STOP_RESIDUAL` | `followup/<action_id>/<activity_id>` | 原历史 `activity_id`；动作是新的触发者 |
 | `EMERGENCY_STOP` | `emergency/<session_key>/<activity_id>` | `activity_id` 和 `session_key` |
 | `PREPARE_CAPTURE` | `prepare/<activity_id>/<session_key>` | 原动作的 `activity_id` 和当前 `session_key` |

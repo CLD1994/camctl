@@ -101,14 +101,20 @@ def _load_fixed_file(db,file_id,file_event_id):
 
 
 
-def _page_file(connection, page_id, file, boundary, *, run_id, completed=False):
+def _page_file(connection, page_id, file, boundary, *, run_id, completed=False, scope_run=None):
     if page_id > boundary.last_event_id or page_id > file['last_event_id']:
         raise ConsistencyError('文件引用页越过固定文件边界')
     saved, raw = result_pages.read_saved_page(connection, page_id)
     record = read_event(connection, page_id)
     identity = parse_exact_json(file['identity_key'])[2]
+    same_source = raw['run_id'] == run_id
+    if not same_source and scope_run is not None:
+        original_run = row_facts(connection, 'operation_runs', raw['run_id'])
+        result_pages.result_responsibility(original_run)
+        same_source = (original_run['action_id'] == scope_run['action_id']
+            and original_run['activity_id'] == scope_run['activity_id'])
     if (record.transaction.last_event_id > boundary.last_event_id
-            or raw['run_id'] != run_id or (identity, file['id']) not in saved.file_ids):
+            or not same_source or (identity, file['id']) not in saved.file_ids):
         raise ConsistencyError('文件引用页不是同一来源的真实文件')
     if completed:
         entries = [entry for entry in saved.page.entries if entry.identity == identity]
@@ -119,14 +125,15 @@ def _page_file(connection, page_id, file, boundary, *, run_id, completed=False):
     return saved
 
 
-def _completion_page(connection, page, file, boundary):
+def _completion_page(connection, page, file, boundary, *, scope_run=None):
     evidence = file['completion_evidence_json']
     if file['completion_state'] != int(enum_for('device_files.completion_state').COMPLETE):
         return None
     if not isinstance(evidence, dict) or 'result_page_event_id' not in evidence:
         return None
     page_id = ObjectId(evidence['result_page_event_id'])
-    _page_file(connection, page_id, file, boundary, run_id=page.ticket.run_id, completed=True)
+    _page_file(connection, page_id, file, boundary, run_id=page.ticket.run_id,
+               completed=True, scope_run=scope_run)
     return int(page_id)
 
 
@@ -152,6 +159,9 @@ def _read_result_file_input(connection, page, file_id, boundary, *, pairing_fact
     if (action is None or run['id'] != page.ticket.run_id
             or str(run['activity_id']) != page.ticket.target_id):
         raise ConsistencyError('文件原页没有同一实际流程和活动')
+    scope_run = (run if page.ticket.responsibility_key == f"scope/{page.ticket.target_id}" else None)
+    if scope_run is not None and page.ticket.responsibility_key != result_pages.result_responsibility(run):
+        raise ConsistencyError('范围文件输入没有原独立范围责任')
     file = read_file_at_boundary(connection, file_id, boundary)
     identity = parse_exact_json(file['identity_key'])
     if (tuple(identity[:2]) != (action['device_id'], action['driver_id'])
@@ -169,8 +179,8 @@ def _read_result_file_input(connection, page, file_id, boundary, *, pairing_fact
     difference = int(enum_for('device_files.ownership_evidence_json.method').RESULT_PAGE_DIFFERENCE)
     if isinstance(ownership, dict) and ownership.get('method') == difference:
         _page_file(connection, ObjectId(ownership['result_page_event_id']), file, boundary,
-                   run_id=run['id'])
-    completed_page = _completion_page(connection, page, file, boundary)
+                   run_id=run['id'], scope_run=scope_run)
+    completed_page = _completion_page(connection, page, file, boundary, scope_run=scope_run)
     result = SegmentMemberInput(file_id, page.event_id if completed_page is None else completed_page,
         file['last_event_id'], role, OwnershipState.OWNED if owned else OwnershipState.UNKNOWN,
         FileCompletionState.UNKNOWN if completed_page is None else FileCompletionState.COMPLETE,

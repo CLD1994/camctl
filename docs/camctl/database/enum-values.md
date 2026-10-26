@@ -160,6 +160,7 @@
 | 3 | `V3` |
 | 4 | `V4` |
 | 5 | `V5` |
+| 6 | `V6` |
 
 ### `deliveries.status`
 
@@ -459,6 +460,7 @@
 | 8 | `STOP_RESIDUAL` |
 | 9 | `EMERGENCY_STOP` |
 | 10 | `PREPARE_CAPTURE` |
+| 11 | `RESOLVE_OUTPUT_SCOPE` |
 
 ### `operation_runs.query_purpose`
 

@@ -37,6 +37,7 @@ CURRENT_FORMAT_VERSION = max(SUPPORTED_FORMAT_VERSIONS)
 HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
 CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
 PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
+OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V6)
 _ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
@@ -272,6 +273,20 @@ def require_capture_preparation_format(
         )
 
 
+def require_output_scope_format(format_version: int | None) -> None:
+    """独立范围责任只在支持该操作流程约束的整体格式中保存。"""
+    if (
+        isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version not in SUPPORTED_FORMAT_VERSIONS
+        or format_version < OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION
+    ):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持独立输出范围责任；"
+            "请先执行 init --upgrade-output-scope"
+        )
+
+
 def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] | None:
     """读取指定已知列声明中的简单整数等值或 IN 检查，不解析通用 SQL。"""
     if not isinstance(sql, str):
@@ -381,6 +396,12 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
+        if format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION:
+            from camctl.persistence.output_scope_structure import verify_output_scope_structure
+            try:
+                verify_output_scope_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"输出范围格式结构无效: {error}") from error
         if format_version >= int(_FORMAT_VERSIONS.V3):
             from camctl.persistence.recovery_structure import verify_recovery_structure
             try:

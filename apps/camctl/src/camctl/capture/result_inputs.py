@@ -58,8 +58,10 @@ def page_from_outcome(ticket: AttemptTicket, outcome: CallOutcome, *,
                       cursor: DirectoryCursor | None = None,
                       binding: DeviceBinding | None = None) -> ResultPage:
     """解码原实际观察；没有观察的错误保留，非法观察不会变成空目录。"""
-    if ticket.operation != "result" or ticket.responsibility_key != f"results/{ticket.target_id}":
-        raise ConsistencyError("结果页要求原 RESULTS 活动票据")
+    scope_only = ticket.responsibility_key == f"scope/{ticket.target_id}"
+    if ticket.operation != "result" or ticket.responsibility_key not in (
+            f"results/{ticket.target_id}", f"scope/{ticket.target_id}"):
+        raise ConsistencyError("结果页要求原结果核实或范围收尾活动票据")
     listed = [value for value in outcome.observations if value.type == RESULT_LISTED_TYPE]
     if not listed:
         if outcome.error is None:
@@ -70,6 +72,8 @@ def page_from_outcome(ticket: AttemptTicket, outcome: CallOutcome, *,
     value = listed[0]
     if type(value.version) is not int:
         raise ConsistencyError("结果文件观察版本必须是登记整数")
+    if scope_only and value.version != 2:
+        raise ConsistencyError("范围收尾要求 v2 连续分页观察")
     contract = RESULT_FILES_CONTRACT if value.version == 1 else RESULT_PAGE_CONTRACT
     validate_observation(value, contract, expected_identity=ticket.target_id)
     if set(value.data) != contract.fields or not isinstance(value.data["entries"], (list, tuple)):
