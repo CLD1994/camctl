@@ -8,12 +8,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Mapping
 
 from camctl.contracts.values import ObjectId, UtcMicros
 from camctl.devices.start_entry import EntryBlock
+from camctl.logging_runtime.diagnostics import DiagnosticState
 
 __all__ = [
     "ApplyCancelTarget",
@@ -112,6 +113,7 @@ class CancelTargetError(Exception):
         super().__init__(f"{code}: {dict(details)}")
         self.code = code
         self.details = dict(details)
+        self.diagnostic_state = DiagnosticState()
 
 
 @dataclass(frozen=True)
@@ -328,6 +330,7 @@ class RecordCancelResult:
     outcome: CancelOutcomeChoice | None = None
     code: str | None = None
     details: dict | None = None
+    diagnostic_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         ObjectId(self.item_id)

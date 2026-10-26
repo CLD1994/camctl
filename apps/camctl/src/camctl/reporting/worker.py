@@ -280,11 +280,17 @@ def worker_main(
             while True:
                 try:
                     payload = connection.recv_bytes(MAX_MESSAGE_BYTES + 1)
-                except (EOFError, OSError, ValueError):
+                except EOFError:
+                    return 0
+                except (OSError, ValueError) as error:
+                    _write_diagnostic_stderr({"stage": "report_worker_receive",
+                                              "diagnostic": exception_diagnostic(error)})
                     return 0
                 try:
                     message = decode_message(payload)
-                except MessageProtocolError:
+                except MessageProtocolError as error:
+                    _write_diagnostic_stderr({"stage": "report_worker_decode",
+                                              "diagnostic": exception_diagnostic(error)})
                     return 0
                 if isinstance(message, ShutdownMessage):
                     return 0
@@ -295,11 +301,17 @@ def worker_main(
                 return 0
         finally:
             lock.close()
+    except BaseException as error:
+        if not getattr(error, "_camctl_worker_diagnostic_attempted", False):
+            _write_diagnostic_stderr({"stage": "report_worker",
+                                      "diagnostic": exception_diagnostic(error)})
+        raise
     finally:
         try:
             connection.close()
-        except OSError:
-            pass
+        except OSError as error:
+            _write_diagnostic_stderr({"stage": "report_worker_close",
+                                      "diagnostic": exception_diagnostic(error)})
 
 
 def _try_send_startup_failure(
@@ -352,6 +364,7 @@ def _send_result(
     try:
         connection.send_bytes(encode_message(message))
     except (OSError, ValueError, MessageProtocolError) as error:
+        error._camctl_worker_diagnostic_attempted = True
         document = {**_diagnostic_context(message),
                     "communication_error": exception_diagnostic(error)}
         if isinstance(message, (StartupFailedMessage, ResultFailureMessage)):

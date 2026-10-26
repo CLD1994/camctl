@@ -36,6 +36,8 @@ from camctl.reporting.messages import (
 )
 from camctl.reporting.maintenance import MaintenanceLimits
 from camctl.reporting.worker import worker_main
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.operations.error_diagnostics import DiagnosticError
 
 __all__ = [
     "GenerationOutcomeKind",
@@ -67,6 +69,8 @@ class WorkerStartup:
     ready: bool
     failure: StartupFailedMessage | None = None
     detail: str = ""
+    exception: BaseException | None = None
+    stopped: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,9 @@ class WorkerGeneration:
     success: ResultSuccessMessage | None = None
     failure: ResultFailureMessage | None = None
     detail: str = ""
+    exception: BaseException | None = None
+    startup_failure: StartupFailedMessage | None = None
+    stopped: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,6 +149,7 @@ class WorkerSupervisor:
         self._retirement_task: asyncio.Task[WorkerShutdown] | None = None
         self._stopping = False
         self._retirement_protocol_detail = ""
+        self._retirement_protocol_error: BaseException | None = None
 
     def _default_spawn(self):
         return _default_spawn(self._lock_path, self._limits.startup_seconds)
@@ -163,6 +171,7 @@ class WorkerSupervisor:
         self._retirement_task = None
         self._stopping = False
         self._retirement_protocol_detail = ""
+        self._retirement_protocol_error = None
         process, parent_end, child_end = self._spawn()
         # 父进程不使用子进程端：spawn 传递后立即关闭本地引用。
         child_end.close()
@@ -177,18 +186,18 @@ class WorkerSupervisor:
                 return WorkerStartup(ready=False, detail="启动时限内未收到就绪通知")
             try:
                 event = await self._receive(communicator, remaining)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as error:
                 await self._retire()
-                return WorkerStartup(ready=False, detail="启动时限内未收到就绪通知")
+                return WorkerStartup(ready=False, detail="启动时限内未收到就绪通知", exception=error)
             except asyncio.CancelledError:
                 if not self._stopping:
                     await self._retire()
                     raise
                 await self._retire()
-                return WorkerStartup(ready=False, detail="启动期间已请求停止")
+                return WorkerStartup(ready=False, detail="启动期间已请求停止", stopped=True)
             if self._stopping:
                 await self._retire()
-                return WorkerStartup(ready=False, detail="启动期间已请求停止")
+                return WorkerStartup(ready=False, detail="启动期间已请求停止", stopped=True)
             if isinstance(event, MessageEvent):
                 if isinstance(event.message, ReadyMessage) and self._process.is_alive():
                     return WorkerStartup(ready=True)
@@ -203,7 +212,7 @@ class WorkerSupervisor:
             error = event.error
             detail = "启动通道结束" if error is None else f"启动通道错误: {error}"
             await self._retire()
-            return WorkerStartup(ready=False, detail=detail)
+            return WorkerStartup(ready=False, detail=detail, exception=error)
 
     async def generate(self, job: JobMessage) -> WorkerGeneration:
         """派发一次生成任务并在总时限内等待匹配任务身份的有效结果。
@@ -216,7 +225,8 @@ class WorkerSupervisor:
         if not startup.ready:
             return WorkerGeneration(
                 kind=GenerationOutcomeKind.START_FAILED, job_id=job.job_id,
-                detail=startup.detail)
+                detail=startup.detail, exception=startup.exception,
+                startup_failure=startup.failure, stopped=startup.stopped)
         process, communicator = self._process, self._communicator
         assert process is not None and communicator is not None
         self._active_job = job
@@ -228,7 +238,7 @@ class WorkerSupervisor:
                 OSError) as error:
             return await self._finish_generation(
                 job, GenerationOutcomeKind.CHANNEL_LOST,
-                detail=f"任务发送失败: {error}")
+                detail=f"任务发送失败: {error}", exception=error)
         except asyncio.CancelledError:
             await self._retire()
             raise
@@ -236,7 +246,7 @@ class WorkerSupervisor:
             if self._stopping:
                 return await self._finish_generation(
                     job, GenerationOutcomeKind.CHANNEL_LOST,
-                    detail="生成任务已请求停止")
+                    detail="生成任务已请求停止", stopped=True)
             remaining = deadline - self._clock()
             if remaining <= 0:
                 return await self._finish_generation(
@@ -244,21 +254,21 @@ class WorkerSupervisor:
                     detail="生成总时限内未取得有效结果")
             try:
                 event = await self._receive(communicator, remaining)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as error:
                 return await self._finish_generation(
                     job, GenerationOutcomeKind.TIMEOUT,
-                    detail="生成总时限内未取得有效结果")
+                    detail="生成总时限内未取得有效结果", exception=error)
             except asyncio.CancelledError:
                 if not self._stopping:
                     await self._retire()
                     raise
                 return await self._finish_generation(
                     job, GenerationOutcomeKind.CHANNEL_LOST,
-                    detail="生成任务已请求停止")
+                    detail="生成任务已请求停止", stopped=True)
             if self._stopping:
                 return await self._finish_generation(
                     job, GenerationOutcomeKind.CHANNEL_LOST,
-                    detail="生成任务已请求停止")
+                    detail="生成任务已请求停止", stopped=True)
             if isinstance(event, ChannelClosed):
                 error = event.error
                 kind = (GenerationOutcomeKind.PROTOCOL
@@ -267,7 +277,7 @@ class WorkerSupervisor:
                 return await self._finish_generation(
                     job, kind,
                     detail="通道结束且无已送达的有效结果" if error is None
-                    else f"通道错误且无已送达的有效结果: {error}")
+                    else f"通道错误且无已送达的有效结果: {error}", exception=error)
             message = event.message
             if isinstance(message, (ResultSuccessMessage, ResultFailureMessage)):
                 if not self._matches_job(message, job):
@@ -319,11 +329,16 @@ class WorkerSupervisor:
     async def _finish_generation(
         self, job: JobMessage, kind: GenerationOutcomeKind, *,
         failure: ResultFailureMessage | None = None, detail: str = "",
+        exception: BaseException | None = None,
+        stopped: bool = False,
     ) -> WorkerGeneration:
         """保留原停止原因，并让有效迟到 STATE 进入既有错误分区。"""
         shutdown = await self._retire()
         if self._retirement_protocol_detail:
             detail = "; ".join(filter(None, (detail, self._retirement_protocol_detail)))
+        if self._retirement_protocol_error is not None:
+            exception = (self._retirement_protocol_error if exception is None else
+                BaseExceptionGroup("报告生成及收场通信失败", (exception, self._retirement_protocol_error)))
         if shutdown.state_failure is not None:
             kind, failure = GenerationOutcomeKind.STATE_FAILURE, shutdown.state_failure
         elif shutdown.configuration_failure is not None:
@@ -331,7 +346,8 @@ class WorkerSupervisor:
         elif failure is None and self._retirement_protocol_detail:
             kind = GenerationOutcomeKind.PROTOCOL
         return WorkerGeneration(
-            kind=kind, job_id=job.job_id, failure=failure, detail=detail)
+            kind=kind, job_id=job.job_id, failure=failure, detail=detail,
+            exception=exception, stopped=stopped)
 
     async def stop(self) -> WorkerShutdown:
         """请求退出并确认实际退出；宽限到期升级终止与强杀。"""
@@ -370,8 +386,11 @@ class WorkerSupervisor:
                             communicator.send(ShutdownMessage()),
                             self._limits.stop_grace_seconds)
                     except (asyncio.TimeoutError, CommunicatorClosed,
-                            MessageProtocolError, OSError):
-                        pass
+                            MessageProtocolError, OSError) as error:
+                        record_error(error, stage="report_shutdown_send",
+                                     context=None if job is None else {
+                                         "report_id": job.report_id, "job_id": job.job_id,
+                                         "database_id": job.instance_id})
                 if not await self._join_within(
                         process, self._limits.stop_grace_seconds):
                     process.terminate()
@@ -395,8 +414,14 @@ class WorkerSupervisor:
                 if event is None:
                     event = await communicator.receive()
                 if isinstance(event, ChannelClosed):
+                    if event.error is not None:
+                        record_error(event.error, stage="report_retirement_channel",
+                                     context=None if job is None else {
+                                         "report_id": job.report_id, "job_id": job.job_id,
+                                         "database_id": job.instance_id})
                     if job is not None and isinstance(event.error, MessageProtocolError):
                         self._retirement_protocol_detail = f"收场通信协议错误: {event.error}"
+                        self._retirement_protocol_error = event.error
                     break
                 message = event.message
                 if job is not None and isinstance(
@@ -412,6 +437,13 @@ class WorkerSupervisor:
                           and message.error_code == "configuration_error"
                           and configuration_failure is None):
                         configuration_failure = message
+                    elif isinstance(message, ResultFailureMessage):
+                        record_error(DiagnosticError(message.error_message,
+                            diagnostic_details={"worker_failure": dict(vars(message),
+                                error_kind=message.error_kind.value)}),
+                            stage="report_retirement_result",
+                            context={"report_id": job.report_id, "job_id": job.job_id,
+                                     "database_id": job.instance_id})
                 event = None
         self._process = None
         self._communicator = None

@@ -30,7 +30,7 @@ from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind
+from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind, db_failure
 from camctl.persistence.business import settle_required
 from camctl.persistence.repositories.scheduling import (
     ExpireActionRequest,
@@ -595,7 +595,7 @@ def cancel_flow(
             for request, key in tuple(start_entries.pending_cancels.values()):
                 resumed = await _fix_cancel_request(database, repository, request, key, start_entries)
                 if resumed.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(f"原入口取消复合申请仍未完成: {resumed.error}")
+                    raise db_failure(StateDbFailure, f"原入口取消复合申请仍未完成: {resumed.error}", resumed)
         occurred = context.clock.utc_micros
         withdrawal_context = WithdrawalContext(database, OutputsRepository(), ready,
             processing, occurred, executor, pending_withdrawals)
@@ -627,7 +627,7 @@ def cancel_flow(
         for _, origin_id in tuple(pending_origin_settlements):
             resumed = await settle_origin_cancel(OriginSettle(origin_id), cancellation_runtime)
             if resumed.kind is not DbOutcomeKind.COMPLETED:
-                raise StateDbFailure(f"原取消收场申请仍未完成: {resumed.error}")
+                raise db_failure(StateDbFailure, f"原取消收场申请仍未完成: {resumed.error}", resumed)
         now_us = None if unscheduled_only else occurred()
         due = await database.read(lambda owned: _due_cancel_actions(owned, now_us))
         for action_id, status, spec_json in due:
@@ -637,8 +637,8 @@ def cancel_flow(
                     started = await _save_command(database, repository.start_cancel_action,
                         StartCancelAction(action_id=action_id, occurred_at=occurred()))
                     if started.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(
-                            f"取消动作开始事务未完成（{started.kind.value}）: {started.error}")
+                        raise db_failure(StateDbFailure,
+                            f"取消动作开始事务未完成（{started.kind.value}）: {started.error}", started)
                     if started.value.disposition is CancelStartDisposition.REJECTED:
                         continue
                 item_ids = await _resolve_and_fix(database, repository, action_id, spec_json,
@@ -652,8 +652,8 @@ def cancel_flow(
             finished = await _save_command(database, repository.finish_cancel_action,
                 FinishCancelAction(action_id, occurred()))
             if finished.kind is not DbOutcomeKind.COMPLETED:
-                raise StateDbFailure(
-                    f"取消动作终态事务未完成（{finished.kind.value}）: {finished.error}")
+                raise db_failure(StateDbFailure,
+                    f"取消动作终态事务未完成（{finished.kind.value}）: {finished.error}", finished)
     return flow
 
 
@@ -727,16 +727,23 @@ async def _resolve_and_fix(
         start_entries.pending_cancels[action_id] = (request, key)
     saved = await _fix_cancel_request(database, repository, request, key, start_entries)
     if saved.kind is not DbOutcomeKind.COMPLETED:
-        raise StateDbFailure(f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}")
+        raise db_failure(StateDbFailure, f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}", saved)
     return saved.value.item_ids
 
 
 async def _fail_cancel_targets(database, repository, action_id, error, occurred):
     from camctl.cancellation.models import FailCancelTargets
+    from camctl.logging_runtime.diagnostics import record_error
+
+    if error.code == "cancel_self_target":
+        record_error(error, stage="cancel_targets",
+                     context={"database_id": database.metadata.instance_id, "action_id": action_id},
+                     state=error.diagnostic_state,
+                     details={"code": error.code, "details": error.details})
     outcome = await _save_command(database, repository.fail_cancel_targets,
         FailCancelTargets(action_id, error, occurred()))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise StateDbFailure(f"取消目标解析失败事务未完成（{outcome.kind.value}）: {outcome.error}")
+        raise db_failure(StateDbFailure, f"取消目标解析失败事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
 
 def _report_status_params(spec_json: str) -> dict:
@@ -748,6 +755,24 @@ def _report_status_params(spec_json: str) -> dict:
     if not isinstance(params, dict):
         raise StateDbFailure(f"报告动作参数不是对象: {params!r}")
     return params
+
+
+def _report_generation_error(generation, detail: str) -> Exception:
+    """把报告协作者交回的原错误与跨进程诊断绑定到同一错误。"""
+    from camctl.operations.error_diagnostics import DiagnosticError
+
+    failure = generation.failure
+    startup = generation.startup_failure
+    error = DiagnosticError(detail, diagnostic_details={
+        "generation": {"kind": generation.kind.value, "job_id": generation.job_id,
+                       "detail": generation.detail, "stopped": generation.stopped},
+        "worker_failure": None if failure is None else dict(vars(failure),
+            error_kind=failure.error_kind.value),
+        "startup_failure": None if startup is None else dict(vars(startup),
+            phase=startup.phase.value),
+    })
+    error.__cause__ = generation.exception
+    return error
 
 
 async def _start_due_report_actions(database: Any, now_us: int) -> None:
@@ -778,8 +803,8 @@ async def _start_due_report_actions(database: Any, now_us: int) -> None:
         outcome = await _policy_write(database, start_sync, action_id=int(action_id),
             mode=mode, after_report_id=after_report_id, occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise StateDbFailure(
-                f"同步开始事务未完成（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(StateDbFailure,
+                f"同步开始事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
 
 async def _settle_canceled_sync_actions(database: Any, now_us: int) -> None:
@@ -792,8 +817,8 @@ async def _settle_canceled_sync_actions(database: Any, now_us: int) -> None:
     for action_id in action_ids:
         outcome = await _policy_write(database, finish_canceled_sync_action, action_id=action_id, occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise StateDbFailure(
-                f"报告取消收场事务未完成（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(StateDbFailure,
+                f"报告取消收场事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
 
 async def _settle_covered_local_syncs(database: Any, now_us: int) -> None:
@@ -815,8 +840,8 @@ async def _settle_covered_local_syncs(database: Any, now_us: int) -> None:
         outcome = await _policy_write(database, record_local_report, action_id=int(action_id),
             local_report_id=int(report_id), occurred_at=now_us)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise StateDbFailure(
-                f"同步本地完成事务未完成（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(StateDbFailure,
+                f"同步本地完成事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
 
 def _covered_local_actions(owned: Any, from_wm: int, frozen_event_id: int) -> tuple[int, ...]:
@@ -911,12 +936,12 @@ def report_flow(
             # 失败事实也必须可靠保存，才能把本次责任交给后续机会。
             raise StateDbFailure(f"报告失败记录无法可靠保存: {error}") from error
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise StateDbFailure(
-                f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(StateDbFailure,
+                f"报告失败记录事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
     async def _recover_or_generate(
-            report_id: int, business: Any, now_us: int, clock) -> str | None:
-        """推进一份报告；失败时返回已确认的实际失败摘要。"""
+            report_id: int, business: Any, now_us: int, clock) -> Exception | None:
+        """推进一份报告；失败时返回持有原诊断状态的实际错误。"""
         from camctl.contracts.history_values import BoundaryError
         from camctl.contracts.json_values import JsonParseError
         from camctl.contracts.public_projection import PublicProjectionError
@@ -963,7 +988,7 @@ def report_flow(
                 staging=staging, ready=ready, processing=processing))
             if locations.ready.error is not None:
                 raise StateDbFailure(
-                    f"报告目录观察失败: {locations.ready.error}")
+                    f"报告目录观察失败: {locations.ready.error}") from locations.ready.exception
             recovered = next(
                 (identity for identity in locations.ready.files
                  if identity.report_id == report_id), None)
@@ -971,9 +996,9 @@ def report_flow(
                 outcome = await _policy_write(business, record_recovered_publication, report_id,
                     observed_sha256=recovered.sha256, occurred_at=now_us)
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise StateDbFailure(
+                    raise db_failure(StateDbFailure,
                         f"发布恢复事务未完成（{outcome.kind.value}）:"
-                        f" {outcome.error}")
+                        f" {outcome.error}", outcome)
                 await _settle_covered_local_syncs(business, now_us)
                 return None
 
@@ -1016,22 +1041,31 @@ def report_flow(
             raise
         if generation.kind is GenerationOutcomeKind.STATE_FAILURE:
             failure = generation.failure
+            detail = f"{failure.error_code}: {failure.error_message}"
             raise StateDbFailure(
                 f"报告 {report_id} 生成遇到状态库错误: "
-                f"{failure.error_code}: {failure.error_message}")
+                f"{detail}") from _report_generation_error(generation, detail)
         if (generation.failure is not None
                 and generation.failure.error_kind is ErrorKind.REPORT
                 and generation.failure.error_code == "configuration_error"):
             from camctl.persistence.runtime import DirectoryBindingError
 
-            raise DirectoryBindingError(generation.failure.error_message)
+            raise DirectoryBindingError(generation.failure.error_message) from _report_generation_error(
+                generation, generation.failure.error_message)
         if generation.kind is not GenerationOutcomeKind.SUCCESS:
+            from camctl.logging_runtime.diagnostics import diagnostic_state_for, record_error
             failure = generation.failure
             detail = (f"{failure.error_code}: {failure.error_message}"
                       if failure is not None else generation.detail)
             failure_detail = f"报告生成失败: {detail}"
+            error = _report_generation_error(generation, failure_detail)
+            record_error(error,
+                stage="report_generate",
+                context={"report_id": report_id, "job_id": job_id,
+                         "database_id": business.metadata.instance_id},
+                state=diagnostic_state_for(generation.exception))
             await _record_failure(business, report_id, now_us, failure_detail)
-            return f"report_id={report_id}; {failure_detail}"
+            return error
         success = generation.success
         identity = parse_report_file_name(Path(success.path).name)
         if (identity is None or identity.report_id != report_id
@@ -1046,6 +1080,7 @@ def report_flow(
                 HandoffDirectories(staging, ready),
                 DbPublicationSession(business, occurred_at=clock),
                 local_actions=local_actions,
+                context={"database_id": business.metadata.instance_id},
             )
         except prerequisite_errors:
             raise
@@ -1059,17 +1094,25 @@ def report_flow(
             return None
         if delivery.outcome in (DeliveryOutcome.STORE_FAILED,
                                 DeliveryOutcome.UNKNOWN):
+            if delivery.exception is not None and not isinstance(delivery.exception, Exception):
+                raise delivery.exception
             raise StateDbFailure(
-                f"报告 {report_id} 发布记录失败: {delivery.error}")
+                f"报告 {report_id} 发布记录失败: {delivery.error}") from delivery.exception
+        from camctl.logging_runtime.diagnostics import record_error
+
+        error = delivery.exception
+        if error is None:
+            error = RuntimeError(
+                f"report_id={report_id}; 报告发布失败: {delivery.outcome.value}: {delivery.error}")
+            record_error(error, stage="report_publish", context={"report_id": report_id},
+                         details={"outcome": delivery.outcome.value, "error": delivery.error})
         if delivery.outcome is DeliveryOutcome.HANDOFF_FAILED:
             # 交接不完整的实际错误已由发布编排按其规则保存。
-            return (
-                f"report_id={report_id}; 报告文件交接失败: "
-                f"{delivery.error or delivery.outcome.value}")
+            return error
         failure_detail = (
             f"报告发布失败: {delivery.outcome.value}: {delivery.error}")
         await _record_failure(business, report_id, now_us, failure_detail)
-        return f"report_id={report_id}; {failure_detail}"
+        return error
 
     progress = _ReportMaintenanceProgress()
 
@@ -1112,8 +1155,8 @@ def report_flow(
                 async def freeze_and_apply():
                     outcome = await _policy_write(business, ReportingRepository().freeze_report, occurred_at=now_us)
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
-                        raise StateDbFailure(
-                            f"报告冻结事务未完成（{outcome.kind.value}）: {outcome.error}")
+                        raise db_failure(StateDbFailure,
+                            f"报告冻结事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
                     if getattr(context, "report_change_wm", None) is not None:
                         progress.checked_to_wm = max(progress.checked_to_wm, outcome.value.checked_to_wm)
                     return outcome
@@ -1125,23 +1168,28 @@ def report_flow(
             progress.remaining_reports = ()
             for index, report_id in enumerate(pending):
                 progress.remaining_reports = pending[index + 1:]
-                failure_detail = await _recover_or_generate(
+                failure = await _recover_or_generate(
                     report_id, business, now_us, context.clock.utc_micros)
-                if failure_detail is not None:
+                if failure is not None:
                     round_clean = False
                     if on_failure is not None:
                         try:
-                            await on_failure(context, RuntimeError(failure_detail))
-                        except Exception:
-                            pass
+                            await on_failure(context, failure)
+                        except Exception as error:
+                            from camctl.logging_runtime.diagnostics import record_error
+
+                            record_error(error, stage="report_failure_callback",
+                                         context={"report_id": report_id})
             if on_recovered is not None and round_clean:
                 remaining = await business.read(lambda owned: (
                     _in_flight_report_ids(owned), _failed_report_ids(owned)))
                 if not any(remaining):
                     try:
                         await on_recovered()
-                    except Exception:
-                        pass
+                    except Exception as error:
+                        from camctl.logging_runtime.diagnostics import record_error
+
+                        record_error(error, stage="report_recovery_callback")
         except DirectoryBindingError:
             raise
         except (StateDatabaseError, sqlite3.Error, ConsistencyError,

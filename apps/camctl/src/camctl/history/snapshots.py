@@ -11,7 +11,7 @@ maintain_snapshots 通过窄仓储端口分批推进：候选空则等待唤醒�
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from contextlib import ExitStack
 from enum import Enum
 from typing import TYPE_CHECKING, Mapping, Protocol
@@ -326,6 +326,7 @@ class MaintenanceResult:
     outcome: MaintenanceOutcome
     saved: tuple[SavedProgress, ...] = ()
     batches: int = 0
+    exception: SnapshotEnqueueTimeout | None = field(default=None, compare=False, repr=False)
 
 
 def _close_resources(resources):
@@ -396,11 +397,11 @@ async def maintain_snapshots(
         try:
             candidates = await context.store.snapshot_candidates(
                 context.threshold, context.batch_size)
-        except SnapshotEnqueueTimeout:
+        except SnapshotEnqueueTimeout as error:
             context.state.disable()
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.DISABLED,
-                saved=tuple(saved), batches=batches)
+                saved=tuple(saved), batches=batches, exception=error)
         if context.state.closing:
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.CLOSING,
@@ -410,12 +411,13 @@ async def maintain_snapshots(
                 outcome=MaintenanceOutcome.IDLE, saved=tuple(saved), batches=batches)
         try:
             images = await context.store.load_entity_images(tuple(candidates))
-        except SnapshotEnqueueTimeout:
+        except SnapshotEnqueueTimeout as error:
             context.state.disable()
             return MaintenanceResult(
                 outcome=MaintenanceOutcome.DISABLED,
-                saved=tuple(saved), batches=batches)
+                saved=tuple(saved), batches=batches, exception=error)
         prepared = []
+        enqueue_failure = None
         try:
             if context.state.closing:
                 return MaintenanceResult(
@@ -429,14 +431,22 @@ async def maintain_snapshots(
             if prepared:
                 try:
                     batch_saved = await context.store.save_snapshots(tuple(prepared))
-                except SnapshotEnqueueTimeout:
+                except SnapshotEnqueueTimeout as error:
+                    enqueue_failure = error
                     context.state.disable()
                     return MaintenanceResult(
                         outcome=MaintenanceOutcome.DISABLED,
-                        saved=tuple(saved), batches=batches)
+                        saved=tuple(saved), batches=batches, exception=error)
                 saved.extend(batch_saved)
         finally:
-            _close_resources((*prepared,*images))
+            try:
+                _close_resources((*prepared,*images))
+            except BaseException as close_error:
+                if enqueue_failure is not None:
+                    previous = close_error.__cause__
+                    close_error.__cause__ = (enqueue_failure if previous is None else
+                        BaseExceptionGroup("快照入队及关闭原因", (enqueue_failure, previous)))
+                raise
         batches += 1
         await asyncio.sleep(0)
         if len(candidates) < context.batch_size:

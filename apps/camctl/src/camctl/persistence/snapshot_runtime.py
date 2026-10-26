@@ -18,6 +18,7 @@ from camctl.history.snapshots import (
     MaintenanceContext, MaintenanceOutcome, MaintenanceState,
     SnapshotEnqueueTimeout, SnapshotMaintenanceError, maintain_snapshots,
 )
+from camctl.logging_runtime.diagnostics import record_error
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.history import SqliteSnapshotStore
@@ -58,6 +59,8 @@ class SnapshotMaintenanceOwner:
         on_disabled: Callable[[str], None] | None = None,
     ) -> None:
         self._state = MaintenanceState()
+        self._path = path
+        self._database_id = database.metadata.instance_id
         self._store = SqliteSnapshotStore(path, database.executor, config=config)
         self._context = MaintenanceContext(
             threshold, batch_size, self._state, self._store)
@@ -115,10 +118,10 @@ class SnapshotMaintenanceOwner:
             name="camctl-snapshot-discovery")
         try:
             upper, eligible = await self._discovery_task
-        except SnapshotEnqueueTimeout:
+        except SnapshotEnqueueTimeout as error:
             # 入队超时已按停用分类交付，不作为后续 check/settle 的数据库故障。
             self._discovery_task = None
-            self._disable()
+            self._disable(error)
             return
         except asyncio.CancelledError:
             if self._state.closing:
@@ -162,27 +165,30 @@ class SnapshotMaintenanceOwner:
     def _tasks(self):
         return tuple(task for task in (self._task, self._discovery_task) if task is not None)
 
-    def _disable(self) -> None:
+    def _disable(self, error: SnapshotEnqueueTimeout | None = None) -> None:
         self._state.disable()
         if self._task is not None and self._task is not asyncio.current_task() and not self._task.done():
             self._task.cancel()
         if not self._disabled_reported:
             self._disabled_reported = True
+            if error is not None:
+                record_error(error, stage="snapshot_enqueue",
+                             context={"state_db": self._path, "database_id": self._database_id})
             self._on_disabled("快照操作入队前超时，本次会话停止快照维护")
 
     async def _run(self) -> None:
         try:
             self._last_plan_id, _ = await self._store.discover_objects(
                 None, self._context.threshold)
-        except SnapshotEnqueueTimeout:
-            self._disable()
+        except SnapshotEnqueueTimeout as error:
+            self._disable(error)
             return
         self._discovery_ready = True
         while not self._state.closing and not self._state.disabled:
             observed = self._notifier.snapshot()
             result = await maintain_snapshots(self._context, max_batches=1)
             if result.outcome is MaintenanceOutcome.DISABLED:
-                self._disable()
+                self._disable(result.exception)
                 return
             if result.outcome is MaintenanceOutcome.CLOSING:
                 return

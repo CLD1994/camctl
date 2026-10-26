@@ -15,10 +15,10 @@ import hashlib
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, NamedTuple, Protocol, Sequence
+from typing import Callable, Mapping, NamedTuple, Protocol, Sequence
 
 from camctl.contracts.values import ObjectId, new_operation_key
 from camctl.host_files.handoff import (
@@ -33,7 +33,8 @@ from camctl.host_files.handoff import (
     withdraw_ready_file,
 )
 from camctl.host_files.io import DirectorySyncStage
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure
 from camctl.persistence.business import BusinessDatabase
 from camctl.reporting import policy
 from camctl.reporting.ack import AckReport
@@ -127,6 +128,7 @@ class Sighting:
 
     files: tuple[ReportFileIdentity, ...]
     error: str | None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -241,13 +243,14 @@ class DeliveryOutcome(Enum):
 class DeliveryResult:
     """发布编排结果；成功时携带最终文件事实。"""
 
-    __slots__ = ("outcome", "report", "error")
+    __slots__ = ("outcome", "report", "error", "exception")
 
     def __init__(self, outcome: DeliveryOutcome, report: StagedReport | None = None,
-                 error: str | None = None) -> None:
+                 error: str | None = None, exception: BaseException | None = None) -> None:
         self.outcome = outcome
         self.report = report
         self.error = error
+        self.exception = exception
 
 
 class PublicationSession(Protocol):
@@ -293,8 +296,17 @@ def _report_staging_directory(staging_root: Path) -> Path:
     return staging_root / REPORTS_DIRECTORY
 
 
+class _FileFailure(str):
+    """兼容原摘要接口，同时把真实异常交回原协程。"""
+
+    def __new__(cls, summary: str, exception: BaseException):
+        value = super().__new__(cls, summary)
+        value.exception = exception
+        return value
+
+
 def _describe(kind: str, failure: Exception) -> str:
-    return f"{kind}: {type(failure).__name__}: {failure}"
+    return _FileFailure(f"{kind}: {type(failure).__name__}: {failure}", failure)
 
 
 # 窄注入点：真实文件操作的系统调用边界；仅测试替换。
@@ -330,7 +342,9 @@ def _stage_payload(staging_root: Path, name: str, payload: bytes) -> str | None:
             os.close(fd)
         except OSError as failure:
             close_error = _describe("close_failed", failure)
-            error = close_error if error is None else f"{error}; {close_error}"
+            error = (close_error if error is None else _FileFailure(
+                f"{error}; {close_error}",
+                BaseExceptionGroup("报告写入及关闭失败", (error.exception, failure))))
     return error
 
 
@@ -370,7 +384,19 @@ def _retain_file_receipt(cancellation: asyncio.CancelledError, receipt: ReportFi
     cancellation.add_note(f"报告文件阶段 {receipt.stage.value} 实际结果: {detail}")
 
 
-async def _settled_file_step(operation, *, stage: ReportFileStage):
+def _record_file_result(result, *, stage: ReportFileStage, context=None) -> BaseException | None:
+    failure = result[1] if stage is ReportFileStage.LIST else result
+    exception = getattr(failure, "exception", None)
+    summary = failure if isinstance(failure, str) else getattr(failure, "error", None)
+    if exception is not None or summary is not None:
+        exception = exception if exception is not None else RuntimeError(str(summary))
+        record_error(exception,
+                     stage=f"report_file_{stage.value}", context=context,
+                     details={"result": result})
+    return exception
+
+
+async def _settled_file_step(operation, *, stage: ReportFileStage, context=None, failures=None):
     """沿实际文件等待模式收场当前阶段，取消不推进下一阶段。"""
     worker = asyncio.create_task(operation)
     cancellation = None
@@ -385,9 +411,13 @@ async def _settled_file_step(operation, *, stage: ReportFileStage):
                 cancellation = error
         except BaseException as error:
             if cancellation is not None:
+                record_error(error, stage=f"report_file_{stage.value}", context=context)
                 _retain_file_receipt(cancellation, ReportFileReceipt(stage, error=error))
                 raise cancellation from error
             raise
+    failure = _record_file_result(result, stage=stage, context=context)
+    if failure is not None and failures is not None:
+        failures.append(failure)
     if cancellation is not None:
         _retain_file_receipt(cancellation, ReportFileReceipt(stage, value=result))
         raise cancellation
@@ -397,14 +427,14 @@ async def _settled_file_step(operation, *, stage: ReportFileStage):
 def _sighting(directory: Path, *, missing_as_empty: bool = False) -> Sighting:
     try:
         names = os.listdir(directory)
-    except FileNotFoundError:
+    except FileNotFoundError as failure:
         # staging 的报告子目录由首次写入创建：尚不存在表示无残留。
         # ready 与 processing 是部署绑定目录，缺失仍是观察错误。
         if missing_as_empty:
             return Sighting((), None)
-        return Sighting((), _describe("missing_directory", FileNotFoundError()))
+        return Sighting((), _describe("missing_directory", failure), failure)
     except OSError as failure:
-        return Sighting((), _describe("list_failed", failure))
+        return Sighting((), _describe("list_failed", failure), failure)
     files = []
     for name in names:
         identity = parse_report_file_name(name)
@@ -424,12 +454,13 @@ def observe_report_locations(directories: ReportDirectories) -> ReportLocations:
 
 
 def _store_failure(outcome: DbOutcome) -> DeliveryResult:
+    exception = db_failure(RuntimeError, "报告数据库操作失败", outcome)
     if outcome.kind is DbOutcomeKind.ROLLED_BACK:
         return DeliveryResult(
             DeliveryOutcome.STORE_FAILED,
-            error=f"rolled_back: {outcome.error}")
+            error=f"rolled_back: {outcome.error}", exception=exception)
     return DeliveryResult(
-        DeliveryOutcome.UNKNOWN, error=f"unknown: {outcome.error}")
+        DeliveryOutcome.UNKNOWN, error=f"unknown: {outcome.error}", exception=exception)
 
 
 async def deliver_report(
@@ -439,6 +470,7 @@ async def deliver_report(
     session: PublicationSession,
     *,
     local_actions: Sequence[int] = (),
+    context: Mapping | None = None,
 ) -> DeliveryResult:
     """把报告字节写入 staging 后执行发布的完整编排。
 
@@ -451,12 +483,17 @@ async def deliver_report(
     staged = StagedReport(
         name=report_file_name(report_id, digest),
         size_bytes=len(payload), sha256=digest)
+    failures = []
     stage_error = await _settled_file_step(asyncio.to_thread(
-        _stage_payload, directories.staging, staged.name, payload), stage=ReportFileStage.WRITE)
+        _stage_payload, directories.staging, staged.name, payload), stage=ReportFileStage.WRITE,
+        context={**(context or {}), "report_id": report_id,
+                 "staging": directories.staging, "name": staged.name},
+        failures=failures)
     if stage_error is not None:
-        return DeliveryResult(DeliveryOutcome.WRITE_FAILED, error=stage_error)
+        return DeliveryResult(DeliveryOutcome.WRITE_FAILED, error=stage_error,
+                              exception=failures[-1] if failures else None)
     return await deliver_staged_report(
-        report_id, staged, directories, session, local_actions=local_actions)
+        report_id, staged, directories, session, local_actions=local_actions, context=context)
 
 
 async def deliver_staged_report(
@@ -466,6 +503,7 @@ async def deliver_staged_report(
     session: PublicationSession,
     *,
     local_actions: Sequence[int] = (),
+    context: Mapping | None = None,
 ) -> DeliveryResult:
     """发布已在 staging 完整写好的报告文件；不重写报告字节。
 
@@ -481,36 +519,52 @@ async def deliver_staged_report(
     if intent.kind is not DbOutcomeKind.COMPLETED:
         return _store_failure(intent)
 
+    failures = []
     stale, stale_error = await _settled_file_step(asyncio.to_thread(
-        _list_stale_ready, directories.ready, staged.name), stage=ReportFileStage.LIST)
+        _list_stale_ready, directories.ready, staged.name), stage=ReportFileStage.LIST,
+        context={**(context or {}), "report_id": report_id,
+                 "ready": directories.ready, "name": staged.name},
+        failures=failures)
     if stale_error is not None:
         return DeliveryResult(DeliveryOutcome.WITHDRAW_FAILED,
-                              error=stale_error)
+                              error=stale_error, exception=failures[-1] if failures else None)
     for name in stale:
         withdrawn = await _settled_file_step(asyncio.to_thread(
-            _withdraw_stale, directories.ready, name), stage=ReportFileStage.WITHDRAW)
+            _withdraw_stale, directories.ready, name), stage=ReportFileStage.WITHDRAW,
+            context={**(context or {}), "report_id": report_id, "ready": directories.ready, "name": name},
+            failures=failures)
         if withdrawn.stage in (WithdrawStage.FAILED, WithdrawStage.UNKNOWN):
             return DeliveryResult(
                 DeliveryOutcome.WITHDRAW_FAILED,
-                error=withdrawn.error or withdrawn.stage.value)
+                error=withdrawn.error or withdrawn.stage.value,
+                exception=failures[-1] if failures else None)
 
     file_result = await _settled_file_step(_move_staged(
-        directories.staging, directories.ready, staged.name), stage=ReportFileStage.MOVE)
+        directories.staging, directories.ready, staged.name), stage=ReportFileStage.MOVE,
+        context={**(context or {}), "report_id": report_id, "staging": directories.staging,
+                 "ready": directories.ready, "name": staged.name}, failures=failures)
     if file_result.stage is PublishStage.UNKNOWN:
         return DeliveryResult(
-            DeliveryOutcome.UNKNOWN, error=file_result.error)
+            DeliveryOutcome.UNKNOWN, error=file_result.error,
+            exception=failures[-1] if failures else None)
     if file_result.stage is not PublishStage.MOVED:
         reason = file_result.error or "not moved"
         await session.record_failure(report_id, {"error": reason})
-        return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=reason)
+        return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=reason,
+                              exception=failures[-1] if failures else None)
     try:
         policy.validate_report_publication_result(file_result)
     except Exception as failure:
         # 移动已发生但交接不完整（同步失败、源未移除等）：保存实
         # 际文件处理错误，不解释为成功。
         detail = file_result.error or str(failure)
+        if file_result.exception is None and file_result.error is None:
+            record_error(failure, stage="report_publication_validate",
+                         context={**(context or {}), "report_id": report_id}, details={"file_result": file_result})
+            failures.append(failure)
         await session.record_failure(report_id, {"error": detail})
-        return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=detail)
+        return DeliveryResult(DeliveryOutcome.HANDOFF_FAILED, error=detail,
+                              exception=failures[-1] if failures else None)
 
     saved = await session.save_publication(report_id, file_result)
     if saved.kind is not DbOutcomeKind.COMPLETED:
@@ -524,6 +578,10 @@ async def deliver_staged_report(
             settlement_error = (
                 f"local action {action_id}: {settled.kind.value}"
                 + (f": {settled.error}" if settled.error else ""))
+            record_error(settled.error if settled.error is not None else RuntimeError(settlement_error),
+                         stage="report_local_settlement",
+                         context={**(context or {}), "report_id": report_id, "action_id": action_id},
+                         details={"outcome": settled})
             break
     return DeliveryResult(DeliveryOutcome.PUBLISHED, staged,
                           settlement_error)
