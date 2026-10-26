@@ -117,6 +117,8 @@ class ControlRequest:
     result_directory_reader: ResultDirectoryReader | None = None
     #: 当前会话同一活动已完成设置的原准备尝试；仅用于实际 START。
     prepared_by: AttemptTicket | None = None
+    #: 整体 timeout_s 中独立授予首次设备配置的部分，普通设置使用剩余部分。
+    session_setup_timeout_s: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)

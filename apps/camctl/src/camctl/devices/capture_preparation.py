@@ -22,6 +22,14 @@ CAPTURE_OPERATIONS = MappingProxyType({
 })
 CAPTURE_ACTION_TYPES = tuple(CAPTURE_OPERATIONS)
 DEFAULT_PREPARE_LEAD_S = Decimal("10")
+DEFAULT_SESSION_SETUP_TIMEOUT_S = Decimal("30")
+
+
+def preparation_lead_s(ordinary_lead_s: Decimal, session_setup_s: Decimal) -> Decimal:
+    """首次设备配置额外预留时间；0 仍表示关闭提前准备。"""
+    return ordinary_lead_s + session_setup_s if ordinary_lead_s > 0 else ordinary_lead_s
+
+
 CAPTURE_PREPARATION_COMPLETED = EvidenceContract(
     "capture_preparation_completed", 1, "control", frozenset({"activity_id"}),
     identity_field="activity_id")
