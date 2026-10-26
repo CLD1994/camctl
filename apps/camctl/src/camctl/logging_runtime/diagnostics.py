@@ -29,6 +29,7 @@ __all__ = [
     "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome",
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
     "diagnostic_record_for", "acknowledge_diagnostic",
+    "DiagnosticReservation", "reserve_diagnostic", "adopt_diagnostic", "release_diagnostic",
 ]
 
 
@@ -46,6 +47,9 @@ class DiagnosticState:
     status: DiagnosticStatus = field(default=DiagnosticStatus.NEW, init=False)
     _record: LogRecord | None = field(default=None, init=False, repr=False)
     _fallback_only: bool = field(default=False, init=False, repr=False)
+    _target: _Target | None = field(default=None, init=False, repr=False)
+    _owner: _Owner | None = field(default=None, init=False, repr=False)
+    _admitting: bool = field(default=False, init=False, repr=False)
 
 
 @dataclass
@@ -68,12 +72,29 @@ class _Target:
     serve_error: BaseException | None = None
     error_reported: bool = False
     flushed: bool = False
+    reservations: list[DiagnosticReservation] = field(default_factory=list)
+
+
+class _ReservationStatus(Enum):
+    RESERVED = "reserved"
+    ADOPTED = "adopted"
+    RELEASED = "released"
+
+
+@dataclass(eq=False)
+class DiagnosticReservation:
+    """当前命令临时持有的副本交接，不改变原诊断状态或记录。"""
+
+    state: DiagnosticState
+    _target: _Target = field(repr=False)
+    _status: _ReservationStatus = field(default=_ReservationStatus.RESERVED, repr=False)
 
 
 @dataclass
 class _Scope:
     target: _Target
     owner: _Owner = field(default_factory=_Owner)
+    task: asyncio.Task | None = field(default_factory=asyncio.current_task)
 
 
 _target: ContextVar[_Target | None] = ContextVar("error_diagnostics_target", default=None)
@@ -139,6 +160,8 @@ async def flush_diagnostics() -> None:
     target = _target.get()
     if target is None or target.closed:
         return
+    for reservation in tuple(target.reservations):
+        release_diagnostic(reservation)
     if target.background:
         await _finish_background(target)
         return
@@ -189,6 +212,55 @@ def acknowledge_diagnostic(state: DiagnosticState) -> None:
     """副本拥有者取得实际追加成功凭据后交接原记录，不推断写入结果。"""
     if state.status is DiagnosticStatus.HELD:
         state.status = DiagnosticStatus.ADMITTED
+
+
+def reserve_diagnostic(state: DiagnosticState | None) -> DiagnosticReservation | None:
+    """从当前拥有者取出尚未开始接纳的记录，交给即将开始的副本责任。"""
+    target = _target.get()
+    if (state is None or target is None or target.closed or target.finished
+            or state._target is not target or state.status is not DiagnosticStatus.HELD
+            or state._admitting or state._owner is None):
+        return None
+    state._owner.pending.remove(state)
+    state._owner = None
+    reservation = DiagnosticReservation(state, target)
+    target.reservations.append(reservation)
+    return reservation
+
+
+def adopt_diagnostic(reservation: DiagnosticReservation) -> DiagnosticState:
+    """实际副本任务在自己的 scope 内接管原记录；父等待取消不撤回接管。"""
+    if reservation._status is _ReservationStatus.ADOPTED:
+        return reservation.state
+    if reservation._status is _ReservationStatus.RELEASED:
+        raise RuntimeError("诊断已经放回命令，副本任务不能再次接管")
+    target = reservation._target
+    scope = _scope.get()
+    if (_target.get() is not target or scope is None or scope.target is not target
+            or scope.task is not asyncio.current_task()
+            or scope.owner.closed or target.closed or target.finished):
+        raise RuntimeError("实际副本任务必须在当前命令自己的 diagnostic_scope 内接管诊断")
+    target.reservations.remove(reservation)
+    reservation._status = _ReservationStatus.ADOPTED
+    _enqueue(scope.owner, reservation.state)
+    return reservation.state
+
+
+def release_diagnostic(reservation: DiagnosticReservation | None) -> None:
+    """仅在确认操作不会启动时退回；已接管的责任继续由实际副本任务持有。"""
+    if reservation is None or reservation._status is not _ReservationStatus.RESERVED:
+        return
+    target = reservation._target
+    target.reservations.remove(reservation)
+    reservation._status = _ReservationStatus.RELEASED
+    state = reservation.state
+    if state.status is not DiagnosticStatus.HELD:
+        return
+    if target.closed or target.finished:
+        _fallback(state, target)
+    else:
+        _enqueue(target.root, state)
+        _notify(target)
 
 
 def record_call_outcome(
@@ -250,6 +322,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         message = f"错误诊断格式化失败：{type(error).__name__}: {error}; diagnostic={document!r}"
         state._fallback_only = True
     state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback)
+    state._target = target
     state.status = DiagnosticStatus.HELD
     if target.background and (target.finished or target.closed):
         _fallback(state, target)
@@ -257,7 +330,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     scope = _scope.get()
     owner = (scope.owner if scope is not None and scope.target is target
              and not scope.owner.closed else target.root)
-    owner.pending.append(state)
+    _enqueue(owner, state)
     if owner is target.root:
         _notify(target)
     return state
@@ -341,17 +414,27 @@ def _type_name(value: object) -> str:
 
 
 def _retain_at_root(owner: _Owner, target: _Target) -> None:
-    if target.background and (target.finished or target.closed):
-        while owner.pending:
-            state = owner.pending[0]
-            if state.status is DiagnosticStatus.HELD:
+    while owner.pending:
+        state = owner.pending[0]
+        late = target.background and (target.finished or target.closed)
+        if state.status is DiagnosticStatus.HELD:
+            if late:
                 _fallback(state, target)
-            owner.pending.popleft()
-        return
-    target.root.pending.extend(state for state in owner.pending
-                               if state.status is DiagnosticStatus.HELD)
-    owner.pending.clear()
+        _pop_pending(owner)
+        if state.status is DiagnosticStatus.HELD and not late:
+            _enqueue(target.root, state)
     _notify(target)
+
+
+def _enqueue(owner: _Owner, state: DiagnosticState) -> None:
+    state._owner = owner
+    owner.pending.append(state)
+
+
+def _pop_pending(owner: _Owner) -> DiagnosticState:
+    state = owner.pending.popleft()
+    state._owner = None
+    return state
 
 
 def _notify(target: _Target) -> None:
@@ -382,7 +465,7 @@ async def _serve(target: _Target) -> None:
 
 def _fallback_remaining(target: _Target) -> None:
     while target.root.pending:
-        state = target.root.pending.popleft()
+        state = _pop_pending(target.root)
         if state.status is not DiagnosticStatus.HELD:
             continue
         try:
@@ -432,13 +515,14 @@ async def _drain(owner: _Owner, target: _Target) -> None:
     while owner.pending:
         state = owner.pending[0]
         if state.status is not DiagnosticStatus.HELD:
-            owner.pending.popleft()
+            _pop_pending(owner)
             continue
         record = state._record
         assert record is not None
         if target.channel is None or state._fallback_only:
             _fallback(state, target)
         else:
+            state._admitting = True
             try:
                 result = await target.channel.alog(record)
             except Exception:
@@ -447,17 +531,19 @@ async def _drain(owner: _Owner, target: _Target) -> None:
                 result = admission_result_for(error)
                 if result is not None and result.decision.kind is AdmissionKind.ACCEPTED:
                     state.status = DiagnosticStatus.ADMITTED
-                    owner.pending.popleft()
+                    _pop_pending(owner)
                 elif result is not None and result.decision.kind is AdmissionKind.CHANNEL_FAILED:
                     _fallback(state, target)
-                    owner.pending.popleft()
+                    _pop_pending(owner)
                 raise
             else:
                 if result.decision.kind is AdmissionKind.ACCEPTED:
                     state.status = DiagnosticStatus.ADMITTED
                 else:
                     _fallback(state, target)
-        owner.pending.popleft()
+            finally:
+                state._admitting = False
+        _pop_pending(owner)
 
 
 def _fallback(state: DiagnosticState, target: _Target) -> None:
