@@ -43,6 +43,7 @@ async def consume_read(pending, runtime):
     )
     if result.error is not None:
         pending.error = result.error
+        pending.diagnostic = owner.error_diagnostic
     elif result.state is BaselineReadState.UNCONFIRMED:
         pending.error = ErrorValue(
             "capture_result_unconfirmed",

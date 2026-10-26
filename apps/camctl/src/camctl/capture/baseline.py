@@ -13,8 +13,9 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor, DirectoryRead, DirectoryRequest, DirectoryScan
 from camctl.operations.models import ErrorValue
 from camctl.operations.owned_calls import check_call_interruption
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.persistence.business import SharedSave, settle_required
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for, db_failure
 from camctl.persistence.transaction import row_facts
 
 
@@ -62,6 +63,7 @@ class PendingBaseline:
     completed: bool = False
     closed: bool = False
     wakeup_pending: bool = False
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     async def read_directory(self, request, *, directory, stop):
         if self.closed or self.completed:
@@ -145,7 +147,7 @@ async def recover_terminal_baselines(*, runtime, limit=None):
             )
             result = (await resume_baseline_settlement(action_id, runtime=runtime))
             if result is not None and result.phase is PreparationPhase.PENDING:
-                raise ConsistencyError(f"原基准收场仍未可靠完成: {result.database_error}")
+                raise ConsistencyError(f"原基准收场仍未可靠完成: {result.database_error}") from result.database_error
 
 
 async def resume_baseline_save(action_id, *, runtime) -> BaselinePreparation | None:
@@ -204,7 +206,10 @@ async def _resume_baseline_save(action_id, *, runtime):
                     raise
                 notification_error = error
             if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise _PendingSave(receipt.error)
+                failure = db_failure(ConsistencyError, "原基准释放未可靠保存", receipt)
+                if not isinstance(failure, Exception):
+                    raise failure
+                raise _PendingSave(failure)
             if receipt.value.outcome is ReleaseOutcome.REJECTED:
                 raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
             pending.completed = True
@@ -222,7 +227,10 @@ async def _resume_baseline_save(action_id, *, runtime):
                 raise
             notification_error = error
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise _PendingSave(receipt.error)
+            failure = db_failure(ConsistencyError, "原基准申请未可靠保存", receipt)
+            if not isinstance(failure, Exception):
+                raise failure
+            raise _PendingSave(failure)
         pending.saves.take()
         pending.wakeup_pending = True
         if isinstance(original, BaselineFixSave):
@@ -352,6 +360,12 @@ async def _prepare_baseline(action_id: int, activity_id: int, *, runtime) -> Bas
             if not isinstance(result, DirectoryRead):
                 raise ConsistencyError("目录端口必须返回完整的可靠页或实际错误")
             if result.error is not None:
+                record_error(result.error, stage="capture.baseline",
+                    context={"action_id": action_id, "activity_id": activity_id,
+                             "binding": pending.binding},
+                    details={"tool_outcome": result.outcome,
+                             "stdout_hex": None if result.outcome is None or result.outcome.output is None
+                             else result.outcome.output.hex()}, state=pending.diagnostic)
                 pending.error = result.error
                 return BaselinePreparation(PreparationPhase.FAILED, error=result.error)
             page = result.page

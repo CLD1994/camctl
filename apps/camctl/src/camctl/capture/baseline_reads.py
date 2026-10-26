@@ -8,9 +8,10 @@ from camctl.capture.baseline_saves import BaselineSaveOwner
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.directory import DirectoryRead
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for, db_failure
 
 
 class _DirectoryStop:
@@ -37,6 +38,7 @@ class PendingBaselineRead:
     locally_created: bool=True
     aborted_before_call: bool=False
     wakeup_pending: bool=False
+    error_diagnostic: DiagnosticState=field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 async def resume_baseline_read_save(owner,*,capture,database):
@@ -63,7 +65,9 @@ async def _resume_baseline_read_save(owner, *, capture, database):
                 raise
             notification_error = error
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            owner.diagnostic=receipt.error
+            owner.diagnostic=db_failure(ConsistencyError, "原基准调用保存未可靠完成", receipt)
+            if not isinstance(owner.diagnostic, Exception):
+                raise owner.diagnostic
             raise _PendingReadSave()
         request=pending.request
         response=owner.saves.take()
@@ -114,6 +118,13 @@ async def _read_and_freeze(owner,directory,wall_us,baseline=None):
     owner.wakeup_pending=True
     if not isinstance(actual,DirectoryRead):
         raise ConsistencyError('目录调用没有交回真实页或实际错误')
+    if actual.error is not None:
+        record_error(actual.error, stage="capture.baseline",
+            context={"action_id": owner.intent.action_id, "activity_id": owner.intent.activity_id,
+                     "read_no": owner.intent.read_no, "binding": owner.intent.binding},
+            details={"tool_outcome": actual.outcome,
+                     "stdout_hex": None if actual.outcome is None or actual.outcome.output is None
+                     else actual.outcome.output.hex()}, state=owner.error_diagnostic)
     owner.clock_attempted=True
     owner.returned_at=wall_us()
     owner.return_request=BaselineReadReturn(owner.intent_view.call_id,owner.returned_at,actual.error,actual)

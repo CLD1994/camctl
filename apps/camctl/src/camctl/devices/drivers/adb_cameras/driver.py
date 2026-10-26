@@ -16,12 +16,14 @@ from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
 from camctl.devices.ports import DeviceCallResult
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.diagnostics import record_error
 from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState, ErrorValue,
     EvidenceValue, Settlement, SettlementBasis)
 from camctl.operations.process import RawToolOutcome, ToolStartError
 from camctl.operations.result_format import error_document, result_document
 from camctl.operations.validation import validate_outcome
 from camctl.operations.owned_calls import current_call_scope
+from camctl.operations.diagnostic_controls import is_capture_control_error
 from .commands import settings_from_effective_params, start_for, stop_for
 from .contracts import CAPTURE_PREPARATION_COMPLETED, CameraCall
 from .filesystem import AdbFilesystem
@@ -157,6 +159,12 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             raise ValueError("Action6 设置调用历史无法附加到未登记的外层收场依据")
         outcome = replace(outcome, settlement=Settlement(settlement.basis, EvidenceValue(type_, version, data)))
         validate_outcome(request.ticket, outcome, self.contract.evidence)
+        failed = [call for call in calls if not is_capture_control_error(call["error"])
+                  and (call["error"] is not None or call["status"] == AttemptStatus.FAILED.value)]
+        if (outcome.error is None or is_capture_control_error(outcome.error)) and failed:
+            record_error({"setting_calls": failed}, stage="device_settings",
+                context={"binding": request.binding, "ticket": request.ticket},
+                details={"outcome": outcome})
         return DeviceCallResult.from_outcome(outcome)
 
     def _prevented(self, request, reason, previous, attached_calls=()):

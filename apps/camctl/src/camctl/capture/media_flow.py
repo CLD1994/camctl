@@ -19,6 +19,7 @@ from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 from types import SimpleNamespace
 from typing import Any, Callable
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 
 from camctl.capture.files import FileChecksumSave
 from camctl.capture.media_facts import probe_document, saved_source_probe
@@ -82,7 +83,7 @@ from camctl.outputs.read_attempts import (
     retry_read_business, run_owned_read, save_read_result, read_failure_details,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
-from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import db_failure, db_outcome_errors, DbOutcomeKind as _DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -243,6 +244,7 @@ class PendingMediaRequest:
     action_id: int | None
     file_ids: tuple[int, ...]
     save_error: BaseException | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 def _media_request_values(command):
@@ -282,9 +284,14 @@ class CaptureProcessingSaves:
     def _commit(outcome) -> SaveReceipt:
         if outcome.kind is _DbOutcomeKind.COMPLETED:
             return SaveReceipt(SaveDisposition.SAVED, value=outcome.value)
+        errors = db_outcome_errors(outcome)
+        error = (errors[0] if len(errors) == 1 else
+            db_failure(ConsistencyError, "原媒体申请保存未可靠完成", outcome)) if errors else None
+        if error is not None and not isinstance(error, Exception):
+            raise error
         if outcome.kind is _DbOutcomeKind.ROLLED_BACK:
-            return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
-        return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
+            return SaveReceipt(SaveDisposition.REJECTED, error=error)
+        return SaveReceipt(SaveDisposition.UNKNOWN, error=error)
 
     async def save_check_result(self, command):
         return await self._save(MediaSaveStage.CHECK, command)
@@ -317,6 +324,16 @@ class CaptureProcessingSaves:
                 or not json_equal(_media_request_values(command), _media_request_values(held.command))):
             raise ConsistencyError("尚未保存的原媒体申请不能由后续申请替换")
         held = await self._resolve_owner(held)
+        actual = held.command
+        if isinstance(actual, CheckResultSave) and (actual.media.error is not None or actual.media.issues):
+            record_error(actual.media.error or actual.media.issues[0], stage="capture.media_check",
+                context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                details={"issues": actual.media.issues, "source_probe": actual.source_probe},
+                state=held.diagnostic)
+        elif isinstance(actual, RepairResultSave) and actual.error is not None:
+            record_error(actual.error, stage="capture.media_repair",
+                context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                state=held.diagnostic)
         try:
             outcome = await self.database.write(
                 lambda owned: getattr(self.repository, stage.value)(held.command, held.key, owned),

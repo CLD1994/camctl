@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
@@ -24,13 +25,14 @@ from camctl.outputs.qualification import FileCandidate, OperationConfig, Qualifi
 from camctl.outputs.read_attempts import hold_read_end, retry_read_business, retry_read_ends, run_owned_read
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_errors
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.segment_inspections import (
     InspectionCreate, InspectionResultSave, SegmentInspectionRef,
     SegmentInspectionRepository, read_inspection_for_member,
 )
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
+from camctl.logging_runtime.diagnostics import record_error
 
 __all__ = [
     "SegmentInspectionPhase",
@@ -138,6 +140,9 @@ async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
     if outcome.kind is DbOutcomeKind.COMPLETED:
         del flow.pending_segment_inspection_results[identity]
         return True
+    if any(not isinstance(error, asyncio.CancelledError) for error in db_outcome_errors(outcome)):
+        record_error(db_failure(ConsistencyError, "原分段检查结果保存未可靠完成", outcome),
+            stage="capture.segment_save", context={"inspection_id": identity})
     return False
 
 
@@ -456,6 +461,10 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             created.error, ConsistencyError
         ):
             raise created.error
+        if any(not isinstance(error, asyncio.CancelledError) for error in db_outcome_errors(created)):
+            record_error(db_failure(ConsistencyError, "分段检查登记未可靠完成", created),
+                stage="capture.segment_create",
+                context={"action_id": request.action_id, "member_id": request.member_id})
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             reason="inspection_create_unknown", error=created.error)
     ref = created.value
@@ -581,6 +590,9 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     try:
         result = await probe_call(input_step.input_file, count_frames=count_frames)
     except Exception as error:
+        record_error(error, stage="capture.segment_probe",
+            context={"action_id": request.action_id, "inspection_id": ref.inspection_id,
+                     "member_id": request.member_id, "copy_id": input_step.copy_id})
         metric = VideoMetric(request.target.metric, None, "probe_failed")
         document = _result_document(metric, probe=None, ran=False,
                                     tool_error=str(error),
@@ -605,6 +617,12 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
             document = _result_document(metric, probe=probe, ran=True, tool_error=None)
             state = (_INSPECTION_STATE.COMPLETED if metric.value is not None
                      else _INSPECTION_STATE.UNCONFIRMED)
+        if result.ran and (result.error is not None or not isinstance(result.value, MediaProbe)
+                           or metric.value is None or result.value.error is not None):
+            record_error(result.error or {"reason": metric.reason, "probe": result.value},
+                stage="capture.segment_probe",
+                context={"action_id": request.action_id, "inspection_id": ref.inspection_id,
+                         "member_id": request.member_id, "copy_id": input_step.copy_id})
     saved = (await _save_result(flow, InspectionResultSave(ref.inspection_id, int(state),
         document, flow.occurred_at())))
     if not saved:

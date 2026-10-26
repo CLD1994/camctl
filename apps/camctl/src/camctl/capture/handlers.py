@@ -28,8 +28,11 @@ if TYPE_CHECKING:
     from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.operations.diagnostic_controls import is_capture_control_error
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 from camctl.devices.start_entry import StartEntryCoordinator, EntryPhase, is_hasselblad_photo
 from camctl.capture.finite_cancel import finite_cancel_policy
+from camctl.capture.diagnostics import preparation_failure_diagnostic
 from camctl.persistence.repositories.finite_cancel import (
     FiniteCancelEndSave, read_finite_cancel_assessment, save_finite_cancel_end,
 )
@@ -177,7 +180,7 @@ from camctl.outputs.catalog import (
     OutputDraft,
     OutputKind,
 )
-from camctl.persistence.models import db_outcome_for, DatabaseAccessError, DbOutcomeKind
+from camctl.persistence.models import db_failure, db_outcome_for, DatabaseAccessError, DbOutcomeKind
 from camctl.persistence.business import BusinessDatabase, SharedSave, settle_required
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
@@ -318,6 +321,7 @@ class PendingCallResult:
     query_conclude: int | None = None
     query_conclude_stop_keys: tuple[str, ...] = ()
     diagnostics_check: Callable[[CallOutcome], None] | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     @property
     def validated(self) -> bool:
@@ -375,6 +379,7 @@ class PendingCaptureCompletion:
     request: CaptureCompletionRequest
     input_reads: PendingCaptureInputReads | None = None
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     @property
     def action_id(self) -> int:
@@ -394,6 +399,7 @@ class PendingResultCheckClose:
     key: OperationKey
     request: ResultSetSave | ResultRunClose | OutputSetFinalizationSave | FiniteCancelEndSave
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 async def resume_result_check_closes(
@@ -407,6 +413,9 @@ async def resume_result_check_closes(
     async def save_one(identity, pending):
         if pending.request.action_id != identity:
             raise ConsistencyError("原核实收尾申请与所属动作不一致")
+        if isinstance(pending.request, ResultSetSave) and pending.request.error is not None:
+            record_error(pending.request.error, stage="capture.result_check",
+                context={"action_id": identity}, state=pending.diagnostic)
         if isinstance(pending.request, ResultSetSave):
             method = repository.close_result_check_unconfirmed
         elif isinstance(pending.request, ResultRunClose):
@@ -428,7 +437,7 @@ async def resume_result_check_closes(
         complete = (receipt.kind is DbOutcomeKind.COMPLETED
             and (not isinstance(pending.request, ResultSetSave) or receipt.value is not None))
         if not complete:
-            raise ConsistencyError(f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}")
+            raise db_failure(ConsistencyError, f"原核实收尾申请未可靠保存，完整申请仍持有: {receipt.error}", receipt)
         if retry_gate is not None and not isinstance(pending.request, OutputSetFinalizationSave):
             activity = await database.read(lambda owned: _activity_id_of_connection(owned.connection, identity))
             retry_gate.cleared(f"results/{activity}")
@@ -499,6 +508,19 @@ async def resume_capture_completions(
     async def save_one(identity, pending):
         if pending.action_id != identity:
             raise ConsistencyError("原拍摄完整申请与所属动作不一致")
+        request = pending.request
+        if isinstance(request, FinishRecordingResults):
+            request = request.capture
+        elif isinstance(request, (StartCloseRequest, StopCloseRequest)):
+            request = request.action_finish
+        if isinstance(request, (FinishCapture, FinishBindingFailure)) and request.failure is not None:
+            record_error(request.failure, stage="capture.completion",
+                context={"action_id": identity}, state=pending.diagnostic,
+                details={"baseline_error": request.baseline_error}
+                    if isinstance(request, FinishCapture) and request.baseline_error is not None else None)
+        elif isinstance(pending.request, StopCloseRequest) and pending.request.finish.error is not None:
+            record_error(pending.request.finish.error, stage="capture.stop_close",
+                context={"action_id": identity}, state=pending.diagnostic)
         notification_error = None
         canceled = isinstance(pending.request, FinishCanceledCapture)
         start_close = isinstance(pending.request, StartCloseRequest)
@@ -520,8 +542,7 @@ async def resume_capture_completions(
                     return await pending.shared.run(lambda: save_one(identity, pending))
             notification_error = receipt.handoff_error
             if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(
-                    f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}")
+                raise db_failure(ConsistencyError, f"原拍摄收场未可靠保存，完整申请仍持有: {receipt.error}", receipt)
             if isinstance(pending.request, ExpireActionRequest):
                 if receipt.value is None or receipt.value.outcome is not ExpireOutcome.EXPIRED:
                     raise ConsistencyError("原准备后过期申请未取得可靠过期结果")
@@ -574,8 +595,7 @@ async def resume_capture_completions(
                     raise
                 notification_error = notification_error or error
             if result.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(
-                    f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}")
+                raise db_failure(ConsistencyError, f"拍摄终态后的原读取流程未可靠收尾，完整申请仍持有: {result.error}", result)
         del pending_capture_completions[identity]
         if notification_error is not None:
             raise notification_error
@@ -657,6 +677,7 @@ class PendingFileFact:
     key: OperationKey
     response: ObservationOutcome | None = None
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 class FileFactStage(Enum):
@@ -778,7 +799,7 @@ class _FileObservationSaves:
                             raise _delivery_error
                         return
                     error = receipt.error
-                raise ConsistencyError(f"原文件发现未可靠保存，原请求仍持有: {error}")
+                raise db_failure(ConsistencyError, f"原文件发现未可靠保存，原请求仍持有: {error}", receipt)
             pending.shared.retry_failed()
             await pending.shared.run(save_and_apply)
 
@@ -794,6 +815,10 @@ class _FileObservationSaves:
             raise ConsistencyError("原文件事实子阶段的完整申请不可替换")
         if pending.response is not None:
             return
+        if isinstance(command, (FilePresenceSave, FileCompletionSave)) and command.error is not None:
+            record_error(command.error, stage="capture.file_fact",
+                context={"action_id": identity[0], "file_id": command.file_id,
+                         "fact_stage": stage.value}, state=pending.diagnostic)
         save = {FileFactStage.PRESENCE: self.capture.save_file_presence,
                 FileFactStage.OWNERSHIP: self.capture.save_file_ownership,
                 FileFactStage.COMPLETION: self.capture.save_file_completion,
@@ -817,7 +842,7 @@ class _FileObservationSaves:
                         raise _delivery_error
                     return
                 error = receipt.error
-            raise ConsistencyError(f"原文件事实未可靠保存，原申请仍持有: {error}")
+            raise db_failure(ConsistencyError, f"原文件事实未可靠保存，原申请仍持有: {error}", receipt)
         pending.shared.retry_failed()
         await pending.shared.run(save_and_apply)
 
@@ -1029,7 +1054,7 @@ class CaptureRuntime(_FileObservationSaves):
         from camctl.capture.baseline import PreparationPhase, resume_baseline_settlement
         result = (await resume_baseline_settlement(action_id, runtime=self))
         if result is not None and result.phase is PreparationPhase.PENDING:
-            raise ConsistencyError(f"原基准保存未可靠完成: {result.database_error}")
+            raise ConsistencyError(f"原基准保存未可靠完成: {result.database_error}") from result.database_error
         return result
 
     def record_recovery_diagnostic(self, diagnostic: RecoveryDiagnostic | SoftwareRecoveryDiagnostic) -> None:
@@ -1077,6 +1102,12 @@ class CaptureRuntime(_FileObservationSaves):
     ) -> None:
         """首次保存前交接完整申请；未知和回滚后继续由会话持有。"""
         pending = PendingCaptureCompletion(new_operation_key(), request)
+        command = request.capture if isinstance(request, FinishRecordingResults) else (
+            request.action_finish if isinstance(request, (StartCloseRequest, StopCloseRequest)) else request)
+        if isinstance(command, FinishCapture):
+            diagnostic = preparation_failure_diagnostic(self, command.action_id, command.failure)
+            if diagnostic is not None:
+                pending = replace(pending, diagnostic=diagnostic)
         if pending.action_id in self.pending_capture_completions:
             raise ConsistencyError("原拍摄完整申请尚未核实，不能替换")
         self.pending_capture_completions[pending.action_id] = pending
@@ -1124,7 +1155,7 @@ class CaptureRuntime(_FileObservationSaves):
                         raise
                     _delivery_error = failure
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
-                    raise ConsistencyError(f"启动授予事务未可靠完成: {outcome.error}")
+                    raise db_failure(ConsistencyError, f"启动授予事务未可靠完成: {outcome.error}", outcome)
             except BaseException:
                 if permit is not None:
                     permit.phase = EntryPhase.UNKNOWN
@@ -1201,7 +1232,12 @@ class CaptureRuntime(_FileObservationSaves):
                     raise DiagnosticsValidationError("原诊断构造检查失败") from failure
             validated = validate_outcome(original.ticket, original.outcome.outcome, self.evidence)
         except DiagnosticsValidationError as failure:
-            raise ConsistencyError("原诊断校验失败，完整结果与字节仍持有") from failure
+            error = ConsistencyError("原诊断校验失败，完整结果与字节仍持有")
+            error.__cause__ = failure
+            record_error(error, stage="capture.result_validation",
+                context={"ticket": original.ticket}, state=pending.diagnostic,
+                details={"outcome": original.outcome.outcome})
+            raise error
         except OutcomeValidationError:
             # 一般无效观察仍由既有业务分支拒绝，不保留可保存的原申请。
             del self.pending_start_results[identity]
@@ -1330,6 +1366,15 @@ class CaptureRuntime(_FileObservationSaves):
                     if pending.preparation is not None:
                         pending = (await _prepare_held_start_result(self, pending))
                         self.pending_start_results[identity] = pending
+                    actual = pending.finish.outcome.outcome
+                    run_error = None if pending.finish.run_finish is None else pending.finish.run_finish.error
+                    if (not is_capture_control_error(actual.error)
+                            or run_error is not None and not is_capture_control_error(run_error)):
+                        scan = self.pending_result_scans.get(identity)
+                        record_call_outcome(actual, ticket=pending.finish.ticket,
+                            run_error=run_error,
+                            context={"stage": "capture.call_result"},
+                            state=pending.diagnostic if scan is None else scan.diagnostic)
                     delivery_error = None
                     try:
                         receipt = await self._write_call_result(pending)
@@ -1382,7 +1427,9 @@ class CaptureRuntime(_FileObservationSaves):
                     if delivery_error is not None:
                         raise delivery_error
                     return
-            raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}")
+            if receipt is not None:
+                raise db_failure(ConsistencyError, f"原调用结果未可靠保存，原结果仍持有: {error}", receipt)
+            raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}") from error
         return await settle_required(save_and_apply())
 
     async def resume_start_results(self, action_id: int) -> bool:
@@ -1493,7 +1540,7 @@ class CaptureRuntime(_FileObservationSaves):
             _save_options = dict()
             receipt = (await self.database.write(lambda owned: self.operations.finish_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
             if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"原调用恢复结果未可靠保存: {receipt.error}")
+                raise db_failure(ConsistencyError, f"原调用恢复结果未可靠保存: {receipt.error}", receipt)
         self.last_recovery_diagnostic = None
         return True
 
@@ -1695,7 +1742,8 @@ async def _save_activity(runtime: CaptureRuntime, action_id: int, **facts) -> No
             action_id=action_id, occurred_at=runtime.wall_us(), **facts), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.save_activity_observation(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
 def _preflight_capture_timing(runtime, action):
@@ -2007,7 +2055,7 @@ async def _baseline_before_control(runtime: CaptureRuntime, action) -> HandlerOu
     if result.phase is PreparationPhase.WAITING:
         return HandlerOutcome("not_granted", "baseline_pending")
     if result.phase is PreparationPhase.PENDING:
-        raise ConsistencyError(f"基准保存未可靠完成: {result.database_error}")
+        raise ConsistencyError(f"基准保存未可靠完成: {result.database_error}") from result.database_error
     current = (await runtime.action(action["id"]))
     if current["status"] in _ACTION_TERMINAL:
         (await runtime.resume_baselines(action["id"]))
@@ -2317,8 +2365,7 @@ async def _conclude_activity(runtime: CaptureRuntime, action_id: int) -> None:
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.conclude_activity(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"活动收场事务未完成（{receipt.kind.value}）: {receipt.error}")
+        raise db_failure(ConsistencyError, f"活动收场事务未完成（{receipt.kind.value}）: {receipt.error}", receipt)
 
 
 async def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: RunOutcome,
@@ -2336,7 +2383,8 @@ async def _settle_open_start(runtime: CaptureRuntime, action_id: int, status: Ru
             occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
 async def _settle_start_without_sent_at(
@@ -2518,8 +2566,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
     _save_options = dict()
     outcome = (await runtime.database.write(lambda owned: runtime.operations.begin_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"停止意图事务未完成（{outcome.kind.value}）: {outcome.error}")
+        raise db_failure(ConsistencyError, f"停止意图事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
     if outcome.value.disposition is not BeginDisposition.GRANTED:
         return HandlerOutcome("stop_not_granted", outcome.value.reason)
     ticket = outcome.value.ticket
@@ -2793,7 +2840,7 @@ async def _settle_unstarted_attempt(runtime: CaptureRuntime, action, attempt) ->
     _save_options = dict()
     result = (await runtime.database.write(lambda owned: runtime.scheduling.expire_action(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if result.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"可靠无效果启动的过期事务未完成: {result.error}")
+        raise db_failure(ConsistencyError, f"可靠无效果启动的过期事务未完成: {result.error}", result)
     return result.value.outcome is ExpireOutcome.EXPIRED
 
 
@@ -2946,7 +2993,8 @@ async def _release_occupancy(runtime: CaptureRuntime, action_id: int) -> None:
             action_id=action_id, occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.release_occupancy(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
 def _target_duration_ms(action: Mapping[str, Any]) -> int:
@@ -3196,8 +3244,7 @@ async def _handle_binding_failure(
         receipt = (await save_read_business(_read_result_scope(runtime), action["id"], "capture_binding_failure", request,
                                     runtime.capture.finish_binding_failure))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(
-                f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}")
+            raise db_failure(ConsistencyError, f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}", receipt)
     else:
         (await runtime.save_capture_completion(request))
     (await runtime.resume_baselines(action["id"]))
@@ -3493,7 +3540,7 @@ async def _confirm_record_start(runtime, action, facts):
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.operations.begin_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"启动核实意图未可靠提交: {receipt.error}")
+        raise db_failure(ConsistencyError, f"启动核实意图未可靠提交: {receipt.error}", receipt)
     if receipt.value.disposition is not BeginDisposition.GRANTED:
         return
     ticket = receipt.value.ticket
@@ -3759,7 +3806,8 @@ async def _save_source_file(
             occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.save_source_file(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
 async def _save_not_needed_decision(
@@ -3774,7 +3822,8 @@ async def _save_not_needed_decision(
             occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
 
 
 async def _save_excess_decisions(
@@ -3792,7 +3841,8 @@ async def _save_excess_decisions(
             occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     receipt = (await runtime.database.write(lambda owned: runtime.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    if receipt.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
     _save_inputs = (RepairDecisionSave(
             processing_id=processing_id,
             decision=RepairDecisionChoice.PENDING,
@@ -3808,7 +3858,8 @@ async def _save_excess_decisions(
             occurred_at=runtime.wall_us()), new_operation_key())
     _save_options = dict()
     repair = (await runtime.database.write(lambda owned: runtime.capture.save_repair_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-    assert repair.kind is DbOutcomeKind.COMPLETED, repair.error
+    if repair.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(AssertionError, "拍摄业务保存未可靠完成", repair)
 
 
 def _media_responsibility_open(row) -> bool:
@@ -4083,7 +4134,8 @@ async def _save_winddown_progress(
                 occurred_at=runtime.wall_us()), new_operation_key())
         _save_options = dict()
         receipt = (await runtime.database.write(lambda owned: runtime.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
     if row[6] is None:
         (await _save_source_file(runtime, int(row[0]), source_file_id))
     return True
@@ -4234,7 +4286,8 @@ async def _advance_recording_outcome(
                     target_duration_ms=target_ms), occurred_at=context.wall_us()), new_operation_key())
             _save_options = dict()
             receipt = (await context.database.write(lambda owned: context.capture.save_check_decision(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            if receipt.kind is not DbOutcomeKind.COMPLETED:
+                raise db_failure(AssertionError, "拍摄业务保存未可靠完成", receipt)
         else:
             (await _save_not_needed_decision(context, int(row[0]), target_ms))
         row = (await _load_processing_row(context, action_id))
@@ -4485,7 +4538,7 @@ async def _save_natural_wait(context, action_id, state):
             return receipt.value
         if receipt.kind is not DbOutcomeKind.UNKNOWN:
             state.pending = None
-        raise ConsistencyError(f"延时等待保存未可靠完成（{receipt.kind.value}）: {receipt.error}")
+        raise db_failure(ConsistencyError, f"延时等待保存未可靠完成（{receipt.kind.value}）: {receipt.error}", receipt)
     return await settle_required(save_and_apply())
 
 
@@ -4500,7 +4553,7 @@ async def _resolve_natural_wait(context, action_id):
         _save_options = dict(reconfigure=pending.reconfigure)
         receipt = (await context.database.write(lambda owned: context.timelapse.verify_wait(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原延时等待申请尚未可靠核实: {receipt.error}")
+            raise db_failure(ConsistencyError, f"原延时等待申请尚未可靠核实: {receipt.error}", receipt)
         if receipt.value is not None:
             if isinstance(pending.command, ScheduleWait):
                 _publish_natural_wait(context, action_id, state, pending.arrangement)
@@ -4873,8 +4926,7 @@ async def _begin_check_round(runtime: CaptureRuntime, action_id: int):
     _save_options = dict()
     outcome = (await runtime.database.write(lambda owned: runtime.operations.begin_attempt(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"核实意图事务未完成（{outcome.kind.value}）: {outcome.error}")
+        raise db_failure(ConsistencyError, f"核实意图事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
     return outcome.value
 
 

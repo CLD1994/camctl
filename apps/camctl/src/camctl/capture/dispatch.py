@@ -16,6 +16,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import DeviceConfigurationError
 from camctl.persistence.models import DatabaseAccessError
 from camctl.scheduling.service import ActionDescriptor
+from camctl.logging_runtime.diagnostics import record_error
 
 __all__ = ["ReadyActions", "dispatch_ready", "ready_capture_actions"]
 
@@ -83,6 +84,9 @@ async def dispatch_ready(
             results.append((descriptor.action_id, outcome if isinstance(outcome, HandlerOutcome)
                             else HandlerOutcome("dispatched")))
         except BaseException as error:
+            if not isinstance(error, asyncio.CancelledError):
+                record_error(error, stage="capture.dispatch",
+                    context={"action_id": descriptor.action_id, "action_type": descriptor.action_type})
             results.append((descriptor.action_id, error))
             if isinstance(error, (DatabaseAccessError, ConsistencyError, DeviceConfigurationError, asyncio.CancelledError)):
                 break

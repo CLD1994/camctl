@@ -44,6 +44,7 @@ from camctl.host_files.media import MediaArtifact, MediaProbe
 from camctl.host_files.models import FilePurpose, FileRef
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId, FileTaskResult
 from camctl.session.supervision import Supervisor
+from camctl.logging_runtime.diagnostics import record_error
 from camctl.outputs.work_files import (
     ACTION_WORK_FILE_DELETE_FAILED,
     WorkFileCleanupError,
@@ -455,8 +456,12 @@ async def _execute_check(context: CheckContext) -> CheckStep:
     result = await context.tools.probe(context.input_file)
     if not result.ran or result.value is None:
         detail = result.error or "probe task did not run"
+        failure = RuntimeError(detail)
+        if result.ran:
+            record_error(failure, stage="capture.media_probe",
+                context={"processing_id": status.processing_id})
         return CheckStep(CheckExecutionPhase.PROBE_NOT_COMPLETED,
-                         error=RuntimeError(detail))
+                         error=failure)
     probe = result.value
     if _osv_input(context.input_file) and probe.error is None:
         issues = osv_input_issues(probe, status.target_duration_ms)
@@ -587,8 +592,12 @@ async def _prepare_osv_repair(context: RepairContext) -> RepairStep:
             and context.processing.check_state == int(_CHECK_STATE.NOT_PERFORMED)):
         result = await context.tools.probe(context.input_file)
         if not result.ran or result.value is None:
+            failure = RuntimeError(result.error or "input probe task did not run")
+            if result.ran:
+                record_error(failure, stage="capture.media_repair_probe",
+                    context={"processing_id": context.processing.processing_id})
             return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
-                error=RuntimeError(result.error or "input probe task did not run"))
+                error=failure)
         context = replace(context, processing=replace(context.processing, source_probe=result.value))
     output = await _repair_output(context)
     if isinstance(output, RepairStep):
@@ -666,8 +675,12 @@ async def _execute_repair(context, output, output_ref) -> RepairStep:
         result = await context.tools.repair(context.input_file, output_ref, trim_s=trim_s)
     if not result.ran or result.value is None:
         detail = result.error or "repair task did not run"
+        failure = RuntimeError(detail)
+        if result.ran:
+            record_error(failure, stage="capture.media_repair",
+                context={"processing_id": status.processing_id})
         return RepairStep(RepairExecutionPhase.TOOL_NOT_COMPLETED,
-                          output_file=output, error=RuntimeError(detail))
+                          output_file=output, error=failure)
     artifact = result.value
     if artifact.complete and _osv_input(context.input_file):
         probed = await context.tools.probe(output_ref)
