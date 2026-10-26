@@ -434,6 +434,28 @@ async def test_tool_encoding_failure_falls_back_with_original_bytes_and_no_media
     assert not channel.records
 
 
+async def test_exception_message_formatting_failure_does_not_replace_business_error():
+    class UnprintableError(DiagnosticError):
+        def __str__(self):
+            raise ValueError("exception message formatting failed")
+
+    error = UnprintableError("original failure", diagnostic_details={"stderr_hex": "6b6e6f776eff"})
+    channel = MemoryChannel()
+    fallback = []
+    with error_diagnostics_context(channel, fallback.append):
+        state = record_error(error, stage="read")
+        await flush_diagnostics()
+    assert state.status is DiagnosticStatus.FALLBACK
+    assert len(fallback) == 1
+    payload = json.loads(fallback[0])
+    assert payload["diagnostic"]["error"]["type"].endswith("UnprintableError")
+    assert payload["diagnostic"]["error"]["arguments"] == ["original failure"]
+    assert payload["diagnostic"]["error"]["diagnostic_details"]["stderr_text"] == "known\\xff"
+    assert payload["diagnostic_format_error"]["type"] == "builtins.ValueError"
+    assert "exception message formatting failed" in payload["diagnostic_format_error"]["arguments"]
+    assert not channel.records
+
+
 async def test_raw_tool_stdout_is_not_exposed_by_generic_dataclass_snapshot():
     channel = MemoryChannel()
     raw = RawToolOutcome(LocalExit(exit_code=1), b"MEDIA-SECRET", "output_failed", None, stderr=b"problem\xff")

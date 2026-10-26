@@ -13,11 +13,12 @@ from decimal import Decimal
 from enum import Enum
 import json
 from os import PathLike
+import traceback
 
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord, admission_result_for
-from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.operations.models import CallOutcome, ErrorValue
 from camctl.operations.process import RawToolOutcome
 from camctl.operations.result_format import error_document
@@ -203,8 +204,15 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         document = _document(payload)
     except Exception as error:
         # 编码器拒绝原结果时，仍沿原 dataclass 字段保存安全字节事实。
-        document = {"diagnostic_format_error": type(error).__name__,
-                    "diagnostic": _document(payload, structured=False)}
+        try:
+            document = {"diagnostic_format_error": _document(error, structured=False),
+                        "diagnostic": _document(payload, structured=False)}
+        except Exception as fallback_error:
+            # 诊断准备本身失效时只保留仍能取得的类型，结束该诊断责任。
+            document = {"stage": payload["stage"],
+                        "error_type": _type_name(payload["error"]),
+                        "diagnostic_format_error": _type_name(error),
+                        "diagnostic_fallback_error": _type_name(fallback_error)}
         state._fallback_only = True
     try:
         message = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
@@ -227,7 +235,18 @@ def _document(value, *, name: str | None = None, structured: bool = True):
         return _document(item, name=name, structured=structured)
 
     if isinstance(value, BaseException):
-        return convert(exception_diagnostic(value))
+        if structured:
+            return convert(exception_diagnostic(value))
+        # 原异常无法格式化时不再调用 __str__，保留安全取得的原字段。
+        result = {"type": _type_name(value), "arguments": convert(value.args),
+                  "traceback": [{"filename": frame.f_code.co_filename, "lineno": lineno,
+                                 "function": frame.f_code.co_name}
+                                for frame, lineno in traceback.walk_tb(value.__traceback__)]}
+        if isinstance(value, DiagnosticError):
+            result["diagnostic_details"] = convert(value.diagnostic_details)
+        if hasattr(value, "__notes__"):
+            result["notes"] = convert(value.__notes__)
+        return result
     if isinstance(value, ErrorValue):
         if structured:
             return convert(error_document(value))
@@ -280,6 +299,11 @@ def _document(value, *, name: str | None = None, structured: bool = True):
     if isinstance(value, (Decimal, PathLike)):
         return str(value)
     return value
+
+
+def _type_name(value: object) -> str:
+    kind = type(value)
+    return f"{kind.__module__}.{kind.__qualname__}"
 
 
 def _retain_at_root(owner: _Owner, target: _Target) -> None:
