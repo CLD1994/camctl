@@ -10,6 +10,14 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 相机首次准备的省电与 USB 模式设置（2026-10-26）
+
+Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。
+
+Linux 开发容器、CPython 3.11.17 下执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices -q --tb=short`，设备组件单元 **1809 项通过、1 条既有 asyncio 标记警告**，pytest 耗时 69.93 秒，退出 0。新增 14 个用例使用正式驱动与受接口约束的传输替身，覆盖两机型的录像与延时首次准备、匹配 START、同会话复用、新会话重发、两条命令分别失败，以及软件恢复重新设置的成功与失败。新增前 10 个反例在原实现上均失败；独立复核已核对各生产入口及测试的独立期望。
+
+命令、起止时间、输出、退出码和源码身份保存在 `.local/verification/camera-idle-settings-20261026/`。本项未运行集成测试或调用相机，也未更新当前人工环境的安装包；真实设备是否保持亮屏、避免省电及保持 ADB 连接，仍由用户验证。
+
 ## 读取错误诊断的完整交付（2026-10-26）
 
 [修复计划](../superpowers/plans/2026-10-26-read-error-diagnostics.md)落实[读取与分段契约](file-runtime.md)：普通取回、自动预览、内部媒体读取及本地主机来源读取，在原 READ 尝试中保存完整异常诊断和已知结束事实。原分段分类、已处理范围、同步和写入范围是否可确认、源结束及关闭错误均继续传递。ADB 保留实际调用事实与原始 stderr 字节；哈苏准备读取保留每步调用、全部原因和收场分类。

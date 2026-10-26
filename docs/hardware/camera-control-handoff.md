@@ -235,18 +235,12 @@ dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00
 | --- | --- | --- |
 | Action6、OSMO 360 / 360 II | 跳过时间设置 | `simulate_device -n DualGuiCmd 12` |
 | Action6、OSMO 360 / 360 II | 关闭自动休眠 | `simulate_device -s DevicePowerUserIdleControlAutoShutdownTime 0` |
+| Action6、OSMO 360 II | 关闭延时摄影熄屏省电 | `simulate_device -s DevicePowerUserIdleControlLapseLockTime 0` |
+| Action6、OSMO 360 / 360 II | 选择仅充电 | `simulate_device -s 0xa13cdabe 3` |
 | Action6 | 关闭主屏幕实时画面 | `simulate_device -s DeviceSystemLiveviewStream 0 0` |
 | Action6 | 关闭前置屏幕实时画面 | `simulate_device -s DeviceSystemLiveviewStream 1 0` |
 
-用户于 2026-10-23 提供以上适用范围，并说明 Action6 未接两块屏幕时，需要关闭这两路实时画面来解决 `duss_event_send_sync_v2() error: -1002`。命令接受结果、相机实际运行及该错误是否消失分别由实机验证记录说明。
-
-### OSMO 360 / 360 II 会话设置
-
-OSMO 360 / 360 II 在上述通用设置之外还请求仅充电。此命令由用户于 2026-10-19 转交，来自官方新增接口。
-
-| 设置用途 | 相机内命令 |
-| --- | --- |
-| 选择仅充电 | `simulate_device -s 0xa13cdabe 3` |
+Action6 未连接主屏幕和前置屏幕时，关闭这两路实时画面用于处理 `duss_event_send_sync_v2() error: -1002`。命令接受结果、相机实际运行及该错误是否消失分别由实机验证记录说明。
 
 ## OSMO 360 / 360 II 全景录像
 

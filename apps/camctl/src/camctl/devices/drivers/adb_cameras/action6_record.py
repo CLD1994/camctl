@@ -104,7 +104,8 @@ class _Action6Contract(CameraContract):
                 if callable(cap.task_factory) else None),
             description=cap.description + "MP4 为视频原片，唯一同目录、同 stem 的 LRF 为可选视频预览；"
                 "JPG、DNG 为独立照片原片，不生成照片预览。"
-                "本会话首次拍摄准备时跳过时间设置、关闭自动休眠，并关闭两路屏幕实时画面；"
+                "本会话首次拍摄准备时跳过时间设置、关闭自动休眠和延时摄影熄屏省电、"
+                "选择仅充电，并关闭两路屏幕实时画面；"
                 "本地设置命令被接受不表示已读回相机实际状态。"
                 + ("完成判断采用正常设备执行有限目标后自行结束的运行假设；"
                    f"目标后结果余量为 {ACTION6_TIMELAPSE_RESULT_MARGIN_S} 秒，"

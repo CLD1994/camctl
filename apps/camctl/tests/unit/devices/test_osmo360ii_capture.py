@@ -132,10 +132,10 @@ def _request(action="record", mode="manual", dispatch_check=lambda: None):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action,mode,count,observation,start", [
-    ("record", "manual", 14, "start_confirmed", ["02", "01"]),
-    ("record", "auto", 13, "start_confirmed", ["02", "01"]),
-    ("timelapse", "manual", 14, "timelapse_sent", ["01", "01"]),
-    ("timelapse", "auto", 11, "timelapse_sent", ["01", "01"]),
+    ("record", "manual", 15, "start_confirmed", ["02", "01"]),
+    ("record", "auto", 14, "start_confirmed", ["02", "01"]),
+    ("timelapse", "manual", 15, "timelapse_sent", ["01", "01"]),
+    ("timelapse", "auto", 12, "timelapse_sent", ["01", "01"]),
 ])
 async def test_real_driver_contract_dispatches_settings_and_one_scoped_start(action, mode, count, observation, start):
     transport = Transport()
@@ -150,8 +150,8 @@ async def test_real_driver_contract_dispatches_settings_and_one_scoped_start(act
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action,fail_at", [("record", index) for index in range(1, 14)]
-    + [("timelapse", index) for index in range(1, 11)])
+@pytest.mark.parametrize("action,fail_at", [("record", index) for index in range(1, 15)]
+    + [("timelapse", index) for index in range(1, 12)])
 async def test_each_failed_setting_prevents_every_later_setting_and_start(action, fail_at):
     transport = Transport(fail_at)
     result = await _driver(transport).control(_request(action, "manual" if action == "record" else "auto"))
@@ -162,8 +162,8 @@ async def test_each_failed_setting_prevents_every_later_setting_and_start(action
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action,cancel_after", [("record", 0), ("record", 1), ("record", 13),
-    ("timelapse", 0), ("timelapse", 1), ("timelapse", 10)])
+@pytest.mark.parametrize("action,cancel_after", [("record", 0), ("record", 1), ("record", 14),
+    ("timelapse", 0), ("timelapse", 1), ("timelapse", 11)])
 async def test_dispatch_cancellation_prevents_subsequent_start(action, cancel_after):
     transport = Transport()
     check = lambda: "canceled" if len(transport.commands) >= cancel_after else None

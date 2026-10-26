@@ -16,6 +16,8 @@ from .test_adb_camera_driver import (
 SETTINGS = (
     ("simulate_device", "-n", "DualGuiCmd", "12"),
     ("simulate_device", "-s", "DevicePowerUserIdleControlAutoShutdownTime", "0"),
+    ("simulate_device", "-s", "DevicePowerUserIdleControlLapseLockTime", "0"),
+    ("simulate_device", "-s", "0xa13cdabe", "3"),
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "0", "0"),
     ("simulate_device", "-s", "DeviceSystemLiveviewStream", "1", "0"),
 )
@@ -33,7 +35,7 @@ async def test_setup_precedes_record_or_native_and_is_reused(first):
     for request in (first(), _request(), _timelapse_request()):
         assert (await driver.control(request)).error is None
     actual = commands(transport)
-    assert tuple(actual[:4]) == SETTINGS
+    assert tuple(actual[:len(SETTINGS)]) == SETTINGS
     assert all(actual.count(command) == 1 for command in SETTINGS)
     assert actual.count(("simulate_device", "-s", "bitrate", "2")) == 1 + (first is _request)
 
