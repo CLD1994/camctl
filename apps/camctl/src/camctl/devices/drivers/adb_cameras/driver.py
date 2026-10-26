@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from camctl.devices.adb_transport import invoke, ManagedTransport
 from camctl.devices.bindings import DeviceConfigurationError, BindingStatus, check_binding
-from camctl.devices.capture_preparation import PreparedCaptureCache
+from camctl.devices.capture_preparation import DEFAULT_SESSION_SETUP_TIMEOUT_S, PreparedCaptureCache
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
 from camctl.devices.evidence import DeviceObservation, validate_observation
 from camctl.devices.file_identity import FileIdentity
@@ -87,6 +87,10 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
 
     def _serial(self, binding):
         self._check_recovery_access(binding)
+        return self._configured_serial(binding)
+
+    def _configured_serial(self, binding):
+        """只读取本地绑定与配置路由，不授权设备执行。"""
         result = check_binding(binding, SimpleNamespace(devices=self.devices))
         if binding.driver_id != self.contract.driver_id or result.status is not BindingStatus.MATCHED:
             raise DeviceConfigurationError("原相机绑定在本次配置中不可用")
@@ -98,6 +102,14 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         except ValueError as error:
             raise DeviceConfigurationError(str(error)) from error
         return serial
+
+    def pending_session_setup_timeout_s(self, binding) -> Decimal:
+        """未确认的设备配置共用独立预算；本地隔离不阻止提前量计算。"""
+        serial = self._configured_serial(binding)
+        if any((binding, serial, command) not in self._configured_settings
+               for command in self.contract.session_setup_commands):
+            return DEFAULT_SESSION_SETUP_TIMEOUT_S
+        return Decimal("0")
 
     def _request(self, request, operation):
         if request.ticket is None or request.ticket.operation != operation:
@@ -168,8 +180,16 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 details={"outcome": outcome})
         return DeviceCallResult.from_outcome(outcome)
 
-    def _prevented(self, request, reason, previous, attached_calls=()):
-        error = ErrorValue(reason, "dispatch")
+    def _prevented(self, request, reason, previous, attached_calls=(), *,
+                   command=None, timeout_s=None, phase=None):
+        details = {}
+        if command is not None:
+            details["command"] = list(command)
+        if timeout_s is not None:
+            details["timeout_s"] = str(timeout_s)
+        if phase is not None:
+            details["phase"] = phase
+        error = ErrorValue(reason, "dispatch", details)
         if previous is None:
             outcome = CallOutcome(status=AttemptStatus.FAILED, error=error, effect=EffectState.NO_EFFECT,
                 settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue("dispatch_prevented", 1, {})))
@@ -205,7 +225,14 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             raise ValueError("实际启动缺少与原设备、活动、参数及准备尝试匹配的会话凭据")
         if prepare_only and request.prepared_by is not None:
             raise ValueError("独立设置准备不能携带已有准备凭据")
+        setup_timeout = request.session_setup_timeout_s
+        if (not isinstance(setup_timeout, Decimal) or not setup_timeout.is_finite()
+                or setup_timeout < 0 or setup_timeout >= request.timeout_s):
+            raise ValueError("设备配置预算必须是整体期限内的有限非负秒数，并保留正的普通控制预算")
+        split_budget = setup_timeout > 0
+        ordinary_timeout = request.timeout_s - setup_timeout
         began_ns = self.monotonic_ns()
+        ordinary_began_ns = None if split_budget else began_ns
         params = deepcopy(dict(request.params)) if prepare_only else None
         if prepared:
             commands = ((CameraCall.START, start_for(self.contract.driver_id, action_type)),)
@@ -224,6 +251,13 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             once = kind is CameraCall.SETTING and command in self.contract.session_once_commands
             if once and session_key in self._configured_settings:
                 continue
+            is_setup = (split_budget and kind is CameraCall.SETTING
+                        and command in self.contract.session_setup_commands)
+            phase = "session_setup" if is_setup else "settings"
+            phase_timeout = setup_timeout if is_setup else ordinary_timeout
+            if not is_setup and ordinary_began_ns is None:
+                ordinary_began_ns = self.monotonic_ns()
+            phase_began_ns = began_ns if is_setup else ordinary_began_ns
             argv = shell_argv(serial, shlex.join(command))
             reason = await request.dispatch_check()
             if reason is not None:
@@ -231,9 +265,10 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
             scope = current_call_scope()
             if scope is not None and scope.interrupted is not None:
                 return self._prevented(request, "transport_cancelled", previous, attached_calls)
-            remaining = request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000)
+            remaining = phase_timeout - Decimal(self.monotonic_ns() - phase_began_ns) / Decimal(1_000_000_000)
             if remaining <= 0:
-                return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
+                return self._prevented(request, "start_preparation_timeout", previous, attached_calls,
+                    **({"command": command, "timeout_s": phase_timeout, "phase": phase} if split_budget else {}))
             is_non_blocking_aperture = (kind is CameraCall.SETTING
                 and (request.operation, command) in self.contract.non_blocking_setting_commands)
             record_setting_call = (kind is CameraCall.SETTING
@@ -246,7 +281,8 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                         activity_id=request.ticket.target_id,
                         run_id=request.ticket.run_id,
                         attempt_id=request.ticket.attempt_id,
-                        command=list(command), timeout_s=str(remaining)):
+                        command=list(command), timeout_s=str(remaining),
+                        **({"phase": phase} if split_budget else {})):
                     outcome = await self._invoke(request, kind, serial, argv, timeout_s=remaining,
                                                  raw_capture=raw_capture)
             except ToolStartError as error:
@@ -258,7 +294,8 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                 outcome = replace(outcome, error=ErrorValue(
                     outcome.error.code, outcome.error.stage,
                     {**outcome.error.details, "command": list(command),
-                     "timeout_s": str(remaining)}))
+                     "timeout_s": str(remaining),
+                     **({"phase": phase} if split_budget else {})}))
             if record_setting_call:
                 raw = raw_capture[0] if raw_capture else None
                 attached_calls.append(self._call_record(command, outcome, raw))
@@ -292,6 +329,9 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
                     observations=() if attached_calls else outcome.observations,
                     call_info=None if attached_calls else outcome.call_info)
                 return self._with_attached_calls(request, failed, attached_calls)
+            if is_setup and Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000) > setup_timeout:
+                return self._prevented(request, "start_preparation_timeout", previous, attached_calls,
+                    command=command, timeout_s=remaining, phase=phase)
         if not prepare_only or previous is None or preparation_basis is None:
             raise AssertionError("相机调用组合缺少实际设置或启动步骤")
         reason = await request.dispatch_check()
@@ -300,8 +340,13 @@ class AdbCameraDriver(SoftwareRecoveryDriver):
         scope = current_call_scope()
         if scope is not None and scope.interrupted is not None:
             return self._prevented(request, "transport_cancelled", previous, attached_calls)
-        if request.timeout_s - Decimal(self.monotonic_ns() - began_ns) / Decimal(1_000_000_000) <= 0:
-            return self._prevented(request, "start_preparation_timeout", previous, attached_calls)
+        final_timeout = setup_timeout if ordinary_began_ns is None else ordinary_timeout
+        final_began_ns = began_ns if ordinary_began_ns is None else ordinary_began_ns
+        remaining = final_timeout - Decimal(self.monotonic_ns() - final_began_ns) / Decimal(1_000_000_000)
+        if remaining < 0 or (remaining == 0 and not split_budget):
+            return self._prevented(request, "start_preparation_timeout", previous, attached_calls,
+                **({"command": command, "timeout_s": final_timeout,
+                    "phase": "session_setup" if ordinary_began_ns is None else "settings"} if split_budget else {}))
         # 组合完成由全部必需设置的可靠结果承载。非阻断调用的原失败
         # 保留在附属历史中，不把它的未派发依据改写为成功调用。
         completed = replace(preparation_basis, observations=(DeviceObservation(
