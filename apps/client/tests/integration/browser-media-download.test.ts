@@ -206,6 +206,8 @@ it.each(["cleaned", "unknown"] as const)(
 );
 
 it.each([
+  ["MP4", undefined],
+  ["mp4", "application/octet-stream"],
   ["LRF", undefined],
   ["oSv", "application/octet-stream"],
 ] as const)(
