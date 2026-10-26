@@ -41,7 +41,7 @@ def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch
     out, err = StringIO(), StringIO()
     assert cli._run_init(cli.parse_command(["init", "--upgrade-capture-preparation"]), out, err) == 0
     initialize.assert_called_once_with(config, state_db,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=True, upgrade_output_scope=False)
     assert out.getvalue() == "" and err.getvalue() == ""
 
 
@@ -67,7 +67,7 @@ def test_initialize_keeps_upgrade_inside_owned_lease_and_forwards_it(monkeypatch
 
     def under_lease(*args, **kwargs):
         lease.close.assert_not_called()
-        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True}
+        assert kwargs == {"upgrade_software_recovery": False, "upgrade_capture_preparation": True, "upgrade_output_scope": False}
         return initialization.InitResult(initialization.InitOutcome.VERIFIED_EXISTING, "验证通过")
 
     monkeypatch.setattr(initialization, "_initialize_under_lease",
@@ -158,4 +158,4 @@ def test_initial_publish_race_preserves_the_capture_upgrade_request(monkeypatch)
     result = initialization._create_new(state_db, roots, binding, upgrade_capture_preparation=True)
     assert result.outcome is initialization.InitOutcome.VERIFIED_EXISTING
     verify.assert_called_once_with(state_db, roots, binding,
-        upgrade_software_recovery=False, upgrade_capture_preparation=True)
+        upgrade_software_recovery=False, upgrade_capture_preparation=True, upgrade_output_scope=False)

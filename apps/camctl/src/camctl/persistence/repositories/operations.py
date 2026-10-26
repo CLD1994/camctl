@@ -113,6 +113,7 @@ _ACTIVITY_KINDS = (
     OperationKind.STOP,
     OperationKind.CHECK_CAPTURE_RESULTS,
     OperationKind.PREPARE_CAPTURE,
+    OperationKind.RESOLVE_OUTPUT_SCOPE,
 )
 
 
@@ -477,7 +478,7 @@ def _find_responsibility(connection, intent: AttemptIntent) -> int | None:
         columns = ("copy_id",)
     elif kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
         columns = ("obtain_item_id",) if intent.target.obtain_item_id is not None else ("cleanup_item_id",)
-    elif kind is OperationKind.CHECK_CAPTURE_RESULTS:
+    elif kind in (OperationKind.CHECK_CAPTURE_RESULTS, OperationKind.RESOLVE_OUTPUT_SCOPE):
         columns = ("activity_id",)
     elif kind is OperationKind.STOP_RESIDUAL:
         columns = ("action_id", "activity_id")
@@ -580,6 +581,13 @@ class BeginAttemptCommand:
             if capture_scope_blocked(connection, action["device_id"], action["id"],
                                      activity["ownership_mode"], activity["output_scope_json"]):
                 return self._rejected("device_busy")
+        if intent.kind is OperationKind.RESOLVE_OUTPUT_SCOPE:
+            activity = self._state["device_activities"][intent.target.activity_id]
+            if (activity["activity_state"] != 3 or activity["occupancy_state"] != 1
+                    or activity["baseline_state"] != 3):
+                return self._rejected("scope_not_held")
+            if activity["output_set_finalized_event_id"] is not None:
+                return self._rejected("scope_resolved")
 
         found = _find_responsibility(connection, intent)
         run_facts = (
@@ -1522,6 +1530,9 @@ class OperationRepository:
         if intent.kind is OperationKind.PREPARE_CAPTURE:
             from .preparation import require_action_preparation_format
             require_action_preparation_format(owned, intent.action_id)
+        if intent.kind is OperationKind.RESOLVE_OUTPUT_SCOPE:
+            from camctl.persistence.runtime import require_output_scope_format
+            require_output_scope_format(owned.metadata.format_version)
         receipt = commit_operation(BeginAttemptCommand(intent, key), key, owned)
         return _outcome_of(receipt)
 
@@ -1604,6 +1615,7 @@ def _query_configuration_guard(event, context) -> None:
             if kind in (
                 int(_RUN_KIND.QUERY_ACTIVITY),
                 int(_RUN_KIND.CHECK_CAPTURE_RESULTS),
+                int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE),
             ):
                 if (
                     facts.get("timeout_s_json") is None
@@ -1688,6 +1700,12 @@ def _attempt_intent_guard(event, context) -> None:
     elif attempt_no != 1:
         _fail("首次建立的流程必须从第 1 次尝试开始")
     kind = run_after.get("kind")
+    if kind == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE):
+        activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
+        if (activity.get("activity_state") != 3 or activity.get("occupancy_state") != 1
+                or activity.get("baseline_state") != 3
+                or activity.get("output_set_finalized_event_id") is not None):
+            _fail("范围收尾意图要求原活动已结束、占用仍保留、基准固定且范围未确定")
     if kind==int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
         if context.current_reads is None:
             _fail('RESULTS意图缺少原连接的固定集合核验')

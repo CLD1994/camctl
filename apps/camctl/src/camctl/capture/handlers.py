@@ -881,7 +881,7 @@ class ResultFilesPort(Protocol):
                         output_scope: Mapping | None = None,
                         completion_context: Mapping | None = None,
                         video_result_mode: str | None = None,
-                        reading_context=None) -> ResultPage: ...
+                        reading_context=None, scope_only: bool = False) -> ResultPage: ...
 
 
 class RecordingStatePort(Protocol):
@@ -941,6 +941,7 @@ class CaptureRuntime(_FileObservationSaves):
     monotonic_ns: Callable[[], int]
     window_of: Callable[[Mapping[str, Any]], LaunchWindow]
     wait_config: Callable[[Mapping[str, Any]], CaptureWaitConfig]
+    scope_closure_supported: bool = False
     #: 核对已保存设备身份与本次固定配置；未提供时由调用方保证绑定匹配。
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
     recording_state: RecordingStatePort | None = None
@@ -1029,6 +1030,8 @@ class CaptureRuntime(_FileObservationSaves):
     preparation_cache: Any = None
     session_key: str | None = None
     prepare_lead_s: Decimal = Decimal(0)
+    #: 当前会话尚需执行的设备配置预算；仅查询驱动内存，不访问设备。
+    session_setup_budget: Callable[[DeviceBinding], Decimal] | None = None
 
     @property
     def baseline_timeout_s(self):
@@ -1276,8 +1279,9 @@ class CaptureRuntime(_FileObservationSaves):
             return (await self.database.write(lambda owned: self.capture.finish_query_conclude(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if (pending.result_set is not None or pending.completion_page is not None
                 or pending.finalized_page is not None):
-            if run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
-                raise ConsistencyError("集合结论必须使用原 RESULTS 责任")
+            if run["kind"] not in (
+                    int(_RUN_KIND.CHECK_CAPTURE_RESULTS), int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE)):
+                raise ConsistencyError("结果复合保存必须使用结果核实或范围收尾责任")
             options = {"completion_page": pending.completion_page}
             if pending.finalized_page is not None:
                 options["finalized_page"] = pending.finalized_page
@@ -4626,8 +4630,9 @@ async def _timelapse_handler(action_id: int, context: CaptureRuntime) -> None:
 
 async def _timelapse_handler_once(action_id: int, context: CaptureRuntime) -> None:
     (await _resolve_natural_wait(context, action_id))
+    # 归属查询会让出执行；其他设备可以同时登记或移除自己的扫描。
     (await resume_result_page_saves(context.database, pending_scans={identity: scan
-        for identity, scan in context.pending_result_scans.items()
+        for identity, scan in tuple(context.pending_result_scans.items())
         if (await context.action_id_of_ticket(scan.ticket)) == action_id}, repository=context.capture))
     (await context.resume_capture_completions(action_id))
     (await context.resume_baselines(action_id))
@@ -5248,7 +5253,8 @@ async def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCal
     return replace(pending, completion_page=completion, result_disposition_ready=True)
 
 
-async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan) -> ListingRound:
+async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan, *,
+                                read_allowed=None) -> ListingRound:
     if runtime.results is None and not pending.finished:
         if pending.saves.pending is None:
             raise CapabilityNotDeclaredError(
@@ -5263,8 +5269,10 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
     source = (await _result_source(runtime, pending.ticket))
     pending.completion_context = deepcopy(source.context)
     async def can_read():
+        if read_allowed is not None and not await read_allowed():
+            return False
         action = (await runtime.action(action_id))
-        if (source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
+        if (not pending.scope_only and source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
                 and (await runtime.last_attempt(f"stop/{action_id}")) is None):
             return False
         entries = (None if pending.last_ref is None else
@@ -5284,14 +5292,15 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
     return (await _held_listing(runtime, pending.ticket))
 
 
-async def _saved_result_listing(runtime: CaptureRuntime, action_id: int) -> ListingRound:
-    return (await _qualify_listing_collection(runtime, action_id, (await _saved_result_listing_input(runtime, action_id))))
+async def _saved_result_listing(runtime: CaptureRuntime, action_id: int, *, responsibility=None) -> ListingRound:
+    return (await _qualify_listing_collection(runtime, action_id, (await _saved_result_listing_input(
+        runtime, action_id, responsibility=responsibility))))
 
 
-async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -> ListingRound:
+async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int, *, responsibility=None) -> ListingRound:
     """CLOSED 消费原已保存输入；不取得当前驱动端口或新的时钟。"""
     activity_id = (await _activity_id_of(runtime, action_id))
-    responsibility = f"results/{activity_id}"
+    responsibility = f"results/{activity_id}" if responsibility is None else responsibility
     def read(owned, parameters=(responsibility,)):
         with closing(owned.connection.execute("SELECT r.id,r.action_id,r.activity_id,r.kind,t.attempt_no,t.status,t.effect_state,"
         " t.result_json,t.error_json,e.occurred_at FROM operation_runs r"
@@ -5301,7 +5310,8 @@ async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int) -
             return cursor.fetchone()
     row = await runtime.database.read(read, description="读取拍摄当前责任")
     if (row is None or row[1] != action_id or row[2] != activity_id
-            or row[3] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)):
+            or row[3] not in (int(_RUN_KIND.CHECK_CAPTURE_RESULTS),
+                              int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE))):
         raise ConsistencyError("RESULTS 责任缺少可核对的完整本地输入")
     ticket = AttemptTicket(row[4], "result", str(activity_id), responsibility, row[0])
     actual = saved_outcome(row[5], row[6], parse_exact_json(row[7]),
@@ -5452,15 +5462,24 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
         (await _register_listing(runtime, action_id, (await _saved_result_listing(runtime, action_id))))
     elif in_flight is not None:
         # 原尝试已经结束时，分页文件子责任仍可能尚未可靠保存。
-        # 先恢复这些原事实，再允许新轮取得设备结果。
+        # 先恢复这些原事实，再按原重试要求区分新轮与结果收尾。
         ticket = (await _original_ticket(runtime, responsibility, "result"))
         def read(owned, parameters=(ticket.run_id,)):
-            with closing(owned.connection.execute("SELECT 1 FROM operation_attempts WHERE run_id=?"
-            " AND result_last_page_event_id IS NOT NULL LIMIT 1", parameters)) as cursor:
-                return cursor.fetchone() is not None
-        has_pages = await runtime.database.read(read, description="读取拍摄直接事实")
-        if has_pages:
-            (await _register_listing(runtime, action_id, (await _saved_result_listing(runtime, action_id))))
+            with closing(owned.connection.execute("SELECT retry_wait_required, EXISTS("
+            "SELECT 1 FROM operation_attempts WHERE run_id=r.id"
+            " AND result_last_page_event_id IS NOT NULL) FROM operation_runs r WHERE r.id=?",
+            parameters)) as cursor:
+                return cursor.fetchone()
+        saved_state = await runtime.database.read(read, description="读取拍摄直接事实")
+        if saved_state is None:
+            raise ConsistencyError("原 RESULTS 尝试缺少所属流程")
+        saved_listing = None
+        if saved_state[1]:
+            saved_listing = await _saved_result_listing(runtime, action_id)
+            await _register_listing(runtime, action_id, saved_listing)
+        if saved_state[0] == 0:
+            # 原结果的处置已确定；集合等后续保存尚未完成不授予新尝试。
+            return saved_listing if saved_listing is not None else await _saved_result_listing(runtime, action_id)
     if (await runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts)) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)

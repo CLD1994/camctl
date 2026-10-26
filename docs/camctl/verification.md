@@ -10,6 +10,74 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## Action6 会话设置的临时输出处理（2026-10-26）
+
+Action6 将关闭延时摄影熄屏省电和两路屏幕实时画面的设置纳入[相机会话准备](../architecture/camera-parameters.md#相机会话准备)的临时输出处理，普通准备和软件恢复共用同一精确命令规则。调用历史继续保留原始 stdout、stderr 和确认依据；调用错误及其他命令按各自契约处理。
+
+两路实时画面设置的扩展在 Linux 开发容器、Python 3.11.17 下，使用下述相同四个测试文件执行定向单元验证，**130 项通过，1.57 秒，退出 0**。六条会话设置均覆盖返回文字忽略、原输出保留、同会话缓存、新会话重发、真实调用故障和软件恢复；码率及 OSMO 继续核对自己的输出规则。拆分预算中的两条实时画面接受用例在生产修改前失败，省电设置对照用例通过。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-liveview-output-20261026/`。本项未运行集成测试或真实设备验证。
+
+提交 `aac523d8` 已更新到现有真机验证安装。331 个生产 Python 文件及 27 项资源在提交归档、wheel 和安装副本中逐字节一致，主代理另行核对核心命令文件与当前源码一致；安装后的隔离导入检查确认两路实时画面命令均使用临时输出处理。5375 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，依赖版本与主机 ADB 路由保留。host 和 camctl 保持停止，客户端继续运行；本次安装未执行数据库或设备命令。完整收据和旧 wheel、状态库、配置备份位于 `.local/deployments/20261026-action6-liveview-output/`。
+
+Linux 开发容器、Python 3.11.17 下，执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_session_settings.py apps/camctl/tests/unit/devices/test_session_setup_budget.py apps/camctl/tests/unit/devices/test_osmo360ii_session_settings.py apps/camctl/tests/unit/devices/test_camera_power_session_settings.py -q --tb=short`，**113 项通过，1.45 秒，退出 0**。覆盖普通录像、原生延时、独立准备、软件恢复、原输出保存、会话缓存、调用失败以及 OSMO 的严格输出检查。使用正式驱动与受接口约束的传输替身；更新后的省电设置接受用例在生产修改前失败。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-lapse-lock-20261026/`。本项未运行集成测试或真实设备验证。
+
+提交 `c4301d4e` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，安装解释器为 Python 3.11.17、SQLite 3.53.1。331 个生产 Python 文件及 27 项权威资源在提交归档、wheel 和实际安装中逐字节一致；包内另一个 Python 文件为资源示例脚本，随资源共同核对。主代理另行核对核心命令文件与当前源码一致，安装后的隔离导入及临时输出处理检查通过，依赖版本保留。5369 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，主机 ADB 路由保留。安装完成时 host 和 camctl 均已停止；交付记录整理期间观察到 host 启动，保留该运行状态，进程观察另存于部署目录的 `final-processes.json`。旧 wheel、状态库与配置备份及完整收据位于 `.local/deployments/20261026-action6-lapse-lock/`，安装过程未执行数据库或设备命令。
+
+## 会话设备配置的独立预算（2026-10-26）
+
+[实施计划](../superpowers/plans/2026-10-26-session-setup-budget.md)为 ADB 相机的首次会话设备配置单独授予 30 秒，普通设置使用整体预算扣除设备配置部分后的完整控制预算。准备拥有者冻结本次整体与阶段预算；实际阶段分别计时，不能互相借用额度。候选发现、唤醒、准备占用及范围收尾使用同一个实际提前量：默认首次最多提前 40 秒，同会话配置缓存后恢复 10 秒，0 继续关闭提前准备。真正 START、基准读取及软件恢复保持原有各自期限。Action6 的返回文字处理遵守[相机会话准备](../architecture/camera-parameters.md#相机会话准备)。
+
+源码 `d55acfa2` 在 Linux 开发容器、Python 3.11.17 下，拍摄、装配及受影响驱动定向单元 **2599 项通过，44.35 秒，退出 0**。覆盖设备配置满 30 秒后普通设置仍获完整预算、两个阶段各自超限、缓存及新会话、原错误与调用事实、取消、冻结意图和实际请求一致、0 提前量及范围触发。生产装配使用真实驱动与受约束传输替身，验证缓存使提前量由 40 变为 10，重开会话再变为 40；数据库边界使用替身。原日志及收据位于 `.local/verification/session-setup-budget-20261026/`。未运行集成或真实拍摄，未增加操作种类或状态库格式。
+
+提交 `d55acfa2` 已安装到现有真机验证环境，主代理逐字节核对七个生产接缝在源码、wheel 和安装中一致。部署保留主机 ADB、配置及业务数据，host 和 camctl 已停止；收据位于 `.local/deployments/20261026-session-setup-budget/`，实际拍摄由用户继续验证。
+
+## 分段来源的选择等待（2026-10-26）
+
+待选来源批次一次带回来源动作状态、分段策略和录像处理状态。分段来源尚在拍摄或适用处理未结束时，编排直接等待，不逐来源读取完整事实或提交选择事务；来源结束后，下一轮沿原仓储事务复核并固定。已持有的保存与诊断回执继续优先恢复，普通非分段选择沿原路径执行。
+
+Linux 开发容器、Python 3.11.17 下，`test_pending_source_selections.py` **21 项通过，0.99 秒，退出 0**，日志位于隔离工作区 `.local/verification/pending-segment-selection/unit.log`。用例使用数据库和批次发现替身，覆盖两种分段策略的拍摄等待、终态转换、检查／修复／丢弃等待、原保存恢复及错误、普通来源选择和空候选；未运行真实 SQLite 查询组合、集成或设备测试，未重测现场事务数量及耗时。
+
+主分支合并后，取回、装配及拍摄准备相关单元 **1833 项通过，22.50 秒，退出 0**；相机驱动相关定向单元另为 **265 项通过，4.57 秒**，两组存在重叠，不合计为唯一用例数。相机失败结果及逐条计时现在附带实际设备命令和本次剩余调用期限，原错误码、响应和退出事实继续保留。新增两个分区先复现命令缺失，再验证超时和非零退出时的上下文。日志及诊断副本批次查询的只读核对位于 `.local/verification/latest-plan-obtain-wait-20261026/`；未运行集成测试或重新执行拍摄。
+
+提交 `bf145155` 已安装到现有真机验证环境，主代理核对取回编排、分段选择仓储及相机驱动在源码、wheel 和安装中一致。主机 ADB 路由保持，host 和 camctl 已停止；部署收据位于 `.local/deployments/20261026-obtain-source-wait/`。现场新计划的空事务数量和 OSMO 设置超时原因由后续人工验证继续确认。
+
+## 已结束活动的输出范围收尾（2026-10-26）
+
+公共保存入口允许范围末页与原尝试共同保存，仓储继续限制范围责任只能提交范围事实。定向单元 **38 项通过，1.25 秒，退出 0**，Python 3.11.17；新增用例实际经过末页处置、结果持有、可靠保存和仓储分派，覆盖实时结果、已保存末页恢复、无关操作拒绝及保存未知或回滚时原页和原键保留。另覆盖范围已固定但占用未释放时，在后续有效准备期间只继续原释放而不新增读取或尝试。首批五个保存入口分区在修改前有三个失败；最终日志位于 `.local/verification/scope-result-save-20261026/unit.log`。数据库和设备边界使用替身，未运行集成或设备验证。
+
+范围保存及释放接续提交 `d8f83839` 的安装记录核对了两个生产入口及事件登记在源码、wheel 和安装中一致，并确认当时 host 与 camctl 已停止。部署收据位于 `.local/deployments/20261026-scope-result-save/`。该次部署未初始化或迁移状态库，保留已保存的范围末页。
+
+范围责任的事件登记覆盖普通流程的建立、实际配置、结束，首次及后续尝试，以及重试等待的建立、完成和放弃。上述八处种类约束接受 `RESOLVE_OUTPUT_SCOPE=11`，原事件校验继续生效。Linux 开发容器、Python 3.11.17 下，内存登记替身与历史解码定向单元 **179 项通过，0.72 秒，退出 0**；新增单元分别验证创建种类和完整前态种类，不读取真实包资源。日志位于隔离工作区 `.local/verification/scope-event-registration/unit.log`。真实包资源的九项登记回归归入 `tests/integration/history/test_scope_event_registration.py`，本次未运行；这些单元结果不证明构建、安装内容或真机流程。
+
+事件登记修复 `097fce88` 的安装记录逐字节核对权威事件登记、wheel 内资源和实际安装资源一致，并核对上述八处声明均包含种类 11。部署收据见 `.local/deployments/20261026-scope-events/`，单元日志副本及安装核对见 `.local/verification/scope-events-20261026/`。该次部署未运行初始化、迁移或设备命令。
+
+[实施计划](../superpowers/plans/2026-10-26-ended-output-scope.md)将已结束但范围未知的占用接入后续有效拍摄的提前准备。Action6 与 OSMO 的范围读取只保存目录身份与分页结束，不调用文件元数据；保留原结束后等待。原基准差集的全部归属核实后，独立保存范围确定事实并按统一条件释放旧占用。旧拍摄终态、错误、原 RESULTS 次数保持，范围责任独立有限计数。格式 V6 及显式输出范围升级入口保留已有库和历史。
+
+提交 `10492c1a` 验证准备完成后由 `pending` 转为 `running` 的衔接：录像和延时摄影在 START 前再次核对准备时，继续取得原准备凭据；同样允许仍在准备中的 `running` 动作触发旧范围收尾。新增三个分区在修复前失败，修复后 `test_scope_closure.py` 与 `test_preparation.py` 共 **86 项通过，6.13 秒**，Python 3.11.17，退出 0。原日志位于 `.local/verification/report145-start-state-20261026/unit.log`。范围收尾开关在该状态转换用例中真实启用，准备和范围模块共同执行，数据库与设备边界使用替身；未运行集成测试或设备命令。
+
+`10492c1a` 已构建并安装到 `/home/cld/.camctl/manual-validation-20261026`，主代理核对了实际安装源码及当前索引。host 和 camctl 已停止，使用原启动脚本继续人工验证。部署未初始化或迁移状态库，收据位于 `.local/deployments/20261026-start-state/deployment-receipt.json`。
+
+Linux 开发容器、Python 3.11.17 下，持久化、操作及升级定向单元 **617 项通过**；接通后的拍摄、装配及受影响驱动单元 **2299 项通过，35.75 秒**；最后接口与新入口定向 **43 项通过，1.38 秒**。新驱动分区覆盖两台相机的单文件及分段模式、大小未知、停止后等待和目录错误；生产入口分区覆盖独立责任、原失败保持、释放、失败重试及无有效触发时不读取。原始主代理日志位于 `.local/verification/output-scope-20261026/`。本次不运行集成或真实设备验证，由用户在安装后人工验证。
+
+提交 `32743a43` 已安装到现有真机验证环境，停止后原库完整备份并显式升级为 V6，升级命令退出 0，依赖检查通过。主代理另行核对六个生产入口的安装字节及当前索引。配置、能力说明和客户端、host 安装版本保留，未启动实际业务会话或设备命令。收据及原库备份见 `.local/deployments/20261026-output-scope/`。
+
+## 已保存拍摄结果的收尾恢复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-results-closed-recovery.md)落实原结果已经保存而后续整理尚未完成的恢复。公共结果入口先恢复原文件子责任，再按原重试要求分派：无需重试时返回经原票据、归属、结果和页时刻校验的 `CLOSED` 输入；需要重试时保留原间隔和累计次数；原在途尝试继续由原拥有者处理。原页发现查询同时取得重试标记，不增加独立查询，有页结果复用原文件恢复已经取得的输入。
+
+Linux 开发容器、Python 3.11.17 下，新增九项定向单元通过，覆盖有无设备端口、有无分页、原文件信息读取错误、正常成功但未全的重试、3 秒间隔边界、在途尝试、原归属及文件登记错误保持。测试使用受接口约束的数据库、仓储和文件登记替身，保留真实结果解码与页校验，不连接真实数据库或设备。最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2222 项通过，35.62 秒，退出 0**；独立审查通过。原始日志保存在 `.local/verification/results-closed-recovery-20261026/`。本次未运行集成测试，真实设备恢复由用户验证。
+
+修复提交 `e32d1996` 已安装到现有真机验证环境。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件三方一致，依赖检查通过；主代理另行逐字节核对全部生产 Python 文件和当前索引。状态库、配置、两份能力说明摘要及依赖版本保持，host 与客户端安装版本保留。部署证据见 `.local/deployments/20261026-results-closed/`，部署未启动实际会话或连接原数据库。
+
+## 延时摄影共享结果清单的并发修复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-timelapse-scan-concurrency.md)针对共享清单的异步遍历：延时摄影处理器先同步固定扫描条目，再异步查询归属，保持跨设备并发与原页保存责任。相邻原申请恢复循环已经固定条目后再等待；新增回归通过公开 `capture_handler("camera_timelapse")`、受接口约束的替身及明确同步点控制交错。
+
+Linux 开发容器、Python 3.11.17 下，旧代码的四项增删交错均稳定触发 `dictionary changed size during iteration`，两项错误保持用例通过。修复后新增六项通过，覆盖另一设备新增、移除扫描，当前动作有无原页，原申请及操作键只保存一次，异动作原页保持未消费，新增扫描在后续推进可见，以及查询异常、保存错误的原异常链保持。
+
+最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2213 项通过**，耗时 32.79 秒，退出 0。原始失败、通过日志与执行证据保存在 `.local/verification/timelapse-scan-concurrency-20261026/`。本次未运行集成测试或调用设备；OSMO 文件信息读取超时属于独立的现场问题，不计入此项修复结论。
+
+修复提交 `b3d00889` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，Python 3.11.17、SQLite 3.53.1，依赖检查通过。328 个生产 Python 文件、27 项权威资源及 2 个构建辅助文件在源码、发行物和安装副本之间一致；主代理另行核对了全部生产 Python 文件、状态库、配置及两份能力说明。部署记录保存在 `.local/deployments/20261026-capture-scan-snapshot-0639/`。部署保留 host 与客户端的已安装版本，真实拍摄由用户验证。
+
 ## 相机首次准备的省电与 USB 模式设置（2026-10-26）
 
 Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。

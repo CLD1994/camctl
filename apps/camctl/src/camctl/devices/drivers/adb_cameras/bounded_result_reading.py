@@ -269,7 +269,11 @@ async def list_declared_results(driver, request, batch, profile):
         return read.reply(read.wait_error("call_unavailable"))
     directory_request = DirectoryRequest(request.binding,
         tuple(scope["directories"]), cursor, read.batch, read.remaining())
-    if profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES and request.result_directory_reader is not None:
+    scope_only = request.params.get("scope_only", False)
+    if type(scope_only) is not bool:
+        raise ValueError("范围读取标记必须是布尔值")
+    raw_page = scope_only or profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES
+    if raw_page and request.result_directory_reader is not None:
         listing = await request.result_directory_reader(filesystem, directory_request, stop=_NeverStop())
     else:
         listing = await filesystem.read_directory(directory_request, stop=_NeverStop())
@@ -283,7 +287,7 @@ async def list_declared_results(driver, request, batch, profile):
         "set_finalized": False, "completion_evidence": None}
 
     by_suffix = {item.suffix.casefold(): item for item in profile.formats}
-    if profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES:
+    if raw_page:
         page_formats = {**by_suffix, profile.preview_format.suffix.casefold(): profile.preview_format}
         raw_files = tuple(
             (identity, file_format)
@@ -295,6 +299,10 @@ async def list_declared_results(driver, request, batch, profile):
             for identity, file_format in raw_files
         ]
         page["entries"] = page_entries
+        if scope_only:
+            # 完整路径范围独立于大小和文件完成；原停止等待仍由上方执行。
+            page["set_finalized"] = complete and listing.page.next_cursor is None
+            return read.reply(page=page)
         candidates = (tuple(identity for identity, _ in raw_files)
             if request.result_candidates is None else
             await request.result_candidates(tuple(identity for identity, _ in raw_files)))

@@ -31,6 +31,10 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 
 ## 操作流程的身份与参数
 
+`RESOLVE_OUTPUT_SCOPE` 要求整体格式 V6，拥有者为原拍摄动作，目标为其原活动。原活动必须已经 `ENDED`、占用仍为 `HELD` 且基准为 `FIXED`，输出范围尚未确定；原动作可以已经终态。该责任使用 `operation=result`，按原设备本次 `result_check` 配置独立累计有限次数、超时和间隔，不修改原 `CHECK_CAPTURE_RESULTS` 流程、尝试、动作终态或错误。新拍摄在有效提前准备期间触发范围收尾，调度重扫和重启复用同一责任。
+
+范围页沿用 `result_files_listed/v2` 的可靠分页结构，只枚举文件身份，不读取元数据。成功末页的 `set_finalized=true` 与原固定基准差集的完整归属共同支持 `OUTPUTS_FINALIZED`，文件大小未知、文件完整性未确认不阻止范围成立。适用的结束后等待仍沿原可靠停止来源核对；范围事实可靠保存后，沿统一占用释放入口解除原占用。
+
 `operation_runs.id` 表示一项操作责任；普通未完成责任可以跨会话继续，应急责任限于其所属会话。`action_id` 必填，表示承担该流程的动作；普通交付读取还填写 `delivery_id`，此时其历史归属交付；后续残留收场归属原设备活动动作的历史，`action_id` 另表示触发者。该流程实际改变原动作的公开字段时，报告更新原动作。`responsibility_key` 按下表格式确定，全库唯一，里面的 ID 使用无前导零十进制表示。
 
 | `kind` | 责任键 | 必填目标引用 |
@@ -43,13 +47,14 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 | `CHECK_FILE_EXISTS`（显式取回源检查） | `obtain-exists/<obtain_item_id>` | `obtain_item_id` |
 | `QUERY_ACTIVITY` | 按[活动查询的责任范围](#活动查询的责任范围)唯一确定 | 执行前检查指向 `action_id` 保存的设备绑定；其余用途必填目标 `activity_id` |
 | `CHECK_CAPTURE_RESULTS` | `results/<activity_id>` | `activity_id` |
+| `RESOLVE_OUTPUT_SCOPE` | `scope/<activity_id>` | 原拍摄动作的 `activity_id` |
 | `STOP_RESIDUAL` | `followup/<action_id>/<activity_id>` | 原历史 `activity_id`；动作是新的触发者 |
 | `EMERGENCY_STOP` | `emergency/<session_key>/<activity_id>` | `activity_id` 和 `session_key` |
 | `PREPARE_CAPTURE` | `prepare/<activity_id>/<session_key>` | 原动作的 `activity_id` 和当前 `session_key` |
 
 `activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，应急和独立准备流程必须填写，其他流程必须为空；它区分同一会话的唯一责任，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
 
-录像和延时的 `PREPARE_CAPTURE` 要求整体格式 V4，照片要求 V5。取得准备资格时，原动作保持 `PENDING + execution_started=0`，通过 `DEVICE_OBSERVED.CREATE` 建立唯一活动及占用；到计划时间开始执行时复用该活动。录像和延时的原动作已经开始且原 `START` 均可靠无效果时，新会话设置准备复用原活动和固定基准，保留执行标记及累计 `START` 次数；照片存在任一 START 责任时沿原收场或恢复路径处理。每个会话对同一活动只允许一次设置组合，流程及尝试的 `max_attempts_used=1`，`timeout_s_json` 保存本次启动控制超时，`retry_interval_s_json` 为空，`retry_wait_required=0`。准备尝试按普通意图和结果事件可靠保存，允许流程因取消或窗口结束进入 `CANCELED` 或 `EXPIRED`；已开始的调用仍须独立收场。设置成功不消耗 `START` 次数，也不替代驱动当前会话凭据和适用的固定完整基准。详细资格与恢复规则见[拍摄提前准备规格](../../superpowers/specs/2026-10-25-capture-preparation-design.md)。
+录像和延时的 `PREPARE_CAPTURE` 要求整体格式 V4，照片要求 V5。取得准备资格时，原动作保持 `PENDING + execution_started=0`，通过 `DEVICE_OBSERVED.CREATE` 建立唯一活动及占用；到计划时间开始执行时复用该活动。录像和延时的原动作已经开始且原 `START` 均可靠无效果时，新会话设置准备复用原活动和固定基准，保留执行标记及累计 `START` 次数；照片存在任一 START 责任时沿原收场或恢复路径处理。每个会话对同一活动只允许一次设置组合，流程及尝试的 `max_attempts_used=1`，`timeout_s_json` 保存本次设置准备的整体预算，包含适用的独立设备配置预算及普通控制预算，`retry_interval_s_json` 为空，`retry_wait_required=0`。准备尝试按普通意图和结果事件可靠保存，允许流程因取消或窗口结束进入 `CANCELED` 或 `EXPIRED`；已开始的调用仍须独立收场。设置成功不消耗 `START` 次数，也不替代驱动当前会话凭据和适用的固定完整基准。详细资格与恢复规则见[拍摄提前准备规格](../../superpowers/specs/2026-10-25-capture-preparation-design.md)。
 
 显式取回源检查的固定归属沿 `obtain_items.selection_id → obtain_source_selections.dependency_id → action_dependencies.action_id` 核对原获取动作；以 `requested_output_id` 定位产物，再以唯一 `device_file_id` 或 `intermediate_file_id` 载体确定设备或主机配置。未选择条目的 `output_id` 可以为空。这项身份核对不判定产物可用性、文件存在性或取回资格。主机 CHECK 的流程和每次尝试保存空 timeout/interval；开放原责任的后续票据还要求上一票已有完整结果与结果事件，沿用累计次数。设备 CHECK 保存正 timeout 和非负 interval，间隔为零仍要求已有重试等待责任。原键重送核对原 owner、采用配置和时刻，返回原票据及历史；终态或预算耗尽不建立新尝试。
 

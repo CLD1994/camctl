@@ -58,6 +58,7 @@ class Command:
     host_notification_fd: int | None = None
     upgrade_software_recovery: bool = False
     upgrade_capture_preparation: bool = False
+    upgrade_output_scope: bool = False
 
 
 class _Parser(argparse.ArgumentParser):
@@ -82,6 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     upgrade = init_parser.add_mutually_exclusive_group()
     upgrade.add_argument("--upgrade-software-recovery", action="store_true", help="备份并显式升级软件恢复格式")
     upgrade.add_argument("--upgrade-capture-preparation", action="store_true", help="备份并显式升级拍摄准备格式")
+    upgrade.add_argument("--upgrade-output-scope", action="store_true", help="备份并显式升级输出范围格式")
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("plan_path", nargs="?")
@@ -125,7 +127,8 @@ def parse_command(argv: Sequence[str]) -> Command:
     return Command(kind=kind, plan_path=plan_path, config_path=parsed.config_path,
                    host_notification_fd=getattr(parsed, "host_notification_fd", None),
                    upgrade_software_recovery=getattr(parsed, "upgrade_software_recovery", False),
-                   upgrade_capture_preparation=getattr(parsed, "upgrade_capture_preparation", False))
+                   upgrade_capture_preparation=getattr(parsed, "upgrade_capture_preparation", False),
+                   upgrade_output_scope=getattr(parsed, "upgrade_output_scope", False))
 
 
 def encode_session_result(
@@ -395,7 +398,8 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
         config = adapter.load(_config_arg(command))
         result = initialize_state(config, adapter.state_db_path(config),
             upgrade_software_recovery=command.upgrade_software_recovery,
-            upgrade_capture_preparation=command.upgrade_capture_preparation)
+            upgrade_capture_preparation=command.upgrade_capture_preparation,
+            upgrade_output_scope=command.upgrade_output_scope)
     except (ConfigError, OSError) as error:
         _diagnose_error(err, "camctl init: 初始化失败", error)
         return 1

@@ -84,7 +84,8 @@ def _load_proof(connection, request, *, current_boundary=None):
                    actual_attempt['result_last_page_event_id'])
     if first is None or last is None or not first <= ref.event_id <= last:
         raise ConsistencyError('归属原页不在真实尝试可靠页范围')
-    if action['execution_spec_json'].get('result_policy') not in {
+    scope_only = run['kind'] == int(enum_for('operation_runs.kind').RESOLVE_OUTPUT_SCOPE)
+    if not scope_only and action['execution_spec_json'].get('result_policy') not in {
             item.value for item in CaptureResultPolicy}:
         raise ConsistencyError('原动作没有声明 OSMO 结果策略')
     old_action, old_activity, attempt, old_run = pages.committed_page_proof(
@@ -102,10 +103,26 @@ def _load_proof(connection, request, *, current_boundary=None):
         raise ConsistencyError('原差集文件没有唯一实际观察')
     entry = entries[0]
     suffix = entry.identity.rpartition('.')[2].lower()
+    policy = action['execution_spec_json'].get('result_policy')
     action6 = action['execution_spec_json'].get('result_policy') == (
         CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
     )
-    if action6:
+    if scope_only:
+        # 范围页仅保证身份与差集；用途只消费冻结策略或原页明确信息。
+        role = int(_ROLE.UNDETERMINED)
+        if policy in {item.value for item in CaptureResultPolicy}:
+            from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
+
+            kind = profile_for_policy(policy).classify_file(entry.identity).kind
+            if kind is SegmentFileKind.PREVIEW:
+                role = int(_ROLE.PREVIEW)
+            elif kind in (SegmentFileKind.VIDEO, SegmentFileKind.PHOTO):
+                role = int(_ROLE.ORIGINAL)
+        elif entry.paired_identity is not None:
+            role = int(_ROLE.PREVIEW)
+        elif entry.format_id is not None:
+            role = int(_ROLE.ORIGINAL)
+    elif action6:
         from camctl.devices.segment_profiles import SegmentFileKind, profile_for_policy
         from camctl.devices.drivers.adb_cameras.action6_formats import format_for_suffix
 
@@ -134,6 +151,10 @@ def _load_proof(connection, request, *, current_boundary=None):
     if (file is None or file['identity_key'] != file_identity_key(
             action['device_id'], action['driver_id'], entry.identity)):
         raise ConsistencyError('差集文件与原设备绑定的实际稳定身份不符')
+    if (scope_only and role == int(_ROLE.UNDETERMINED)
+            and file.get('source_action_id') == action['id']
+            and file.get('ownership_evidence_json') is not None):
+        role = file['role']
     return action['id'], role, file
 
 

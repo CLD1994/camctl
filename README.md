@@ -27,6 +27,8 @@ npm start
 
 ## 资料与开发
 
+开发容器通过宿主机的 ADB 服务访问相机，服务地址由[容器配置](.devcontainer/devcontainer.json)中的 `containerEnv.ADB_SERVER_SOCKET` 指定，重建容器后生效。已有人工验证环境在启动 host-demo 前通过其 `environment.sh` 设置同一地址，后续 camctl 和 ADB 子进程继承该变量。使用 `adb devices -l` 核对设备连接。
+
 - [全局设计](docs/architecture/README.md)与[阅读路线](docs/architecture/reading-guide.md)。
 - [目录与组件边界](docs/architecture/repository-layout.md)。
 - [公共协议](protocol/README.md)：Schema 与标准样例。

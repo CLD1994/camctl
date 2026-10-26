@@ -161,7 +161,7 @@ class CaptureFlow:
         self._recording_wakeups = RecordingWakeups()
         self._notification_tasks: dict[str, asyncio.Task] = {}
         leads = getattr(capture_factory, "preparation_leads", None)
-        self._preparation_leads = dict(leads) if isinstance(leads, Mapping) else {}
+        self._preparation_leads = leads if isinstance(leads, Mapping) else {}
         self._preparation_at = None
         self._device_candidates: dict[str, tuple[int, ...]] = {}
 

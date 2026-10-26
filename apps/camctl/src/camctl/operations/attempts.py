@@ -59,6 +59,7 @@ class OperationKind(Enum):
     CHECK_CAPTURE_RESULTS = "results"
     STOP_RESIDUAL = "followup"
     PREPARE_CAPTURE = "prepare"
+    RESOLVE_OUTPUT_SCOPE = "scope"
 
 
 class QueryPurpose(Enum):
@@ -86,7 +87,7 @@ class RunStatus(Enum):
 #: 以活动为目标的种类；其余种类按目标列互斥规则使用文件或查询目标。
 _ACTIVITY_KINDS = frozenset(
     {OperationKind.START, OperationKind.STOP, OperationKind.CHECK_CAPTURE_RESULTS,
-     OperationKind.PREPARE_CAPTURE}
+     OperationKind.PREPARE_CAPTURE, OperationKind.RESOLVE_OUTPUT_SCOPE}
 )
 
 
@@ -135,7 +136,7 @@ class AttemptConfig:
     """本次尝试实际采用的预算与期限配置。
 
     timeout_s 为空表示主机本地操作没有应用层调用时限；
-    retry_interval_s 为空表示不适用定时重试。kind 6/7 的流程要求
+    retry_interval_s 为空表示不适用定时重试。查询、结果核实与范围收尾要求
     两者齐全，由登记的结构约束与仓储共同校验。
     """
 
@@ -189,6 +190,7 @@ _KIND_TARGET_COLUMNS = {
     OperationKind.CHECK_CAPTURE_RESULTS: frozenset({"activity_id"}),
     OperationKind.STOP_RESIDUAL: frozenset({"activity_id"}),
     OperationKind.PREPARE_CAPTURE: frozenset({"activity_id"}),
+    OperationKind.RESOLVE_OUTPUT_SCOPE: frozenset({"activity_id"}),
 }
 
 _QUERY_PURPOSE_COLUMNS = {
@@ -236,6 +238,11 @@ class AttemptIntent:
             _positive_int(self.copy_round, "copy_round")
         elif self.copy_round is not None:
             raise AttemptConfigError("只有读取尝试保存 copy_round")
+        if self.kind is OperationKind.RESOLVE_OUTPUT_SCOPE and (
+            self.operation != "result" or self.config.timeout_s is None
+            or self.config.retry_interval_s is None
+        ):
+            raise AttemptConfigError("范围收尾要求 result 调用及完整超时、重试间隔配置")
 
 
 def query_responsibility_key(
@@ -296,6 +303,8 @@ def operation_responsibility_key(
             return f"prepare/{target.activity_id}/{session_key}"
         if kind is OperationKind.CHECK_CAPTURE_RESULTS:
             return f"results/{target.activity_id}"
+        if kind is OperationKind.RESOLVE_OUTPUT_SCOPE:
+            return f"scope/{target.activity_id}"
         return f"{kind.value}/{action_id}"
     if kind is OperationKind.STOP_RESIDUAL:
         return f"followup/{action_id}/{target.activity_id}"

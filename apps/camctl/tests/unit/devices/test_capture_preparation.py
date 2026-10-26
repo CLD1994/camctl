@@ -89,6 +89,38 @@ async def test_preparation_returns_real_setting_and_matching_start_sends_only_st
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "exit_nonzero"])
+async def test_failed_osmo_preparation_preserves_exact_command_and_call_budget(failure):
+    expected = ("dji_mb_ctrl", "-R", "diag", "-g", "1", "-t", "0", "-s", "2", "-c", "1e", "0000")
+
+    class FailedSettingTransport(OsmoTransport):
+        async def run(self, spec, stop):
+            command = tuple(shlex.split(shlex.split(spec.argv[5])[2]))
+            if command != expected:
+                return await super().run(spec, stop)
+            self.commands.append(list(command))
+            self.specs.append(spec)
+            return RawToolOutcome(
+                LocalExit(signal=15) if failure == "timeout" else LocalExit(exit_code=1),
+                b"", "timeout" if failure == "timeout" else None, None,
+                stderr=b"" if failure == "timeout" else b"device rejected setting")
+
+    transport = FailedSettingTransport()
+    driver = _osmo_driver(transport)
+    result = await driver.prepare_capture(_preparation(_osmo_request("timelapse", "auto")))
+
+    assert result.outcome.status is AttemptStatus.FAILED
+    assert result.outcome.error.details["command"] == list(expected)
+    assert result.outcome.error.details["timeout_s"] == "10"
+    details = (result.outcome.error.details["response_error"]["details"]
+        if failure == "timeout" else result.outcome.error.details)
+    assert details["local_signal"] == (15 if failure == "timeout" else None)
+    assert details["stderr_hex"] == (b"" if failure == "timeout" else b"device rejected setting").hex()
+    assert transport.commands[-1] == list(expected)
+    assert not driver.prepared_capture_matches(_start(_preparation(_osmo_request("timelapse", "auto"))))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mismatch", ["activity", "ticket", "operation", "params", "boolean",
                                      "binding", "serial", "session", "driver"])
 async def test_prepared_start_rejects_each_mismatched_proof_without_device_call(mismatch):
@@ -249,7 +281,7 @@ async def test_software_recovery_preparation_clears_proof_even_when_first_settin
     driver = _action6_contract_driver(Action6ContractTransport())
     preparation = _preparation(_request())
     await driver.prepare_capture(preparation)
-    raw = RawToolOutcome(LocalExit(exit_code=0), b"", None, None, stderr=b"failed")
+    raw = RawToolOutcome(LocalExit(exit_code=1), b"", None, None, stderr=b"failed")
     mocker.patch.object(driver, "_recovery_raw", autospec=True, return_value=raw)
     result = await driver.recovery_prepare(preparation.binding, preparation.params,
         activity_id=7, directories=("/DCIM",), timeout_s=Decimal("3"))

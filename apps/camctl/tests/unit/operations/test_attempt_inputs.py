@@ -41,6 +41,24 @@ def test_intent_requires_explicit_fact_time():
                       config=AttemptConfig(2, "5", "1"))
 
 
+def test_output_scope_has_its_own_fixed_activity_responsibility():
+    intent = _intent(operation="result", kind=OperationKind.RESOLVE_OUTPUT_SCOPE,
+        target=AttemptTarget(activity_id=71), query_purpose=None)
+    assert attempts.responsibility_key(intent) == "scope/71"
+    assert attempts.ticket_target_id(intent) == "71"
+
+
+@pytest.mark.parametrize("operation,config", [
+    ("query", AttemptConfig(2, "5", "1")),
+    ("result", AttemptConfig(2, None, "1")),
+    ("result", AttemptConfig(2, "5", None)),
+])
+def test_output_scope_requires_result_operation_and_full_budget(operation, config):
+    with pytest.raises(AttemptConfigError):
+        _intent(operation=operation, kind=OperationKind.RESOLVE_OUTPUT_SCOPE,
+            target=AttemptTarget(activity_id=71), query_purpose=None, config=config)
+
+
 def test_finish_requires_explicit_fact_time():
     finish = _finish(1)
     with pytest.raises(TypeError):

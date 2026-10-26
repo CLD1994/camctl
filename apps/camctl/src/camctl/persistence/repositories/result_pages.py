@@ -46,6 +46,21 @@ _BASELINE_FIX = _BASELINE_EVENT["branches"]["FIX"]["reason"]
 _BASELINE_FIX_EMPTY = _BASELINE_EVENT["branches"]["FIX_EMPTY"]["reason"]
 
 
+def result_responsibility(run):
+    """结果页与范围页都消费原流程登记的唯一活动责任。"""
+    if run is None:
+        raise ConsistencyError("结果页缺少原活动流程")
+    if run["kind"] == int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+        expected = f"results/{run['activity_id']}"
+    elif run["kind"] == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE):
+        expected = f"scope/{run['activity_id']}"
+    else:
+        raise ConsistencyError("结果页流程不是结果或范围核实责任")
+    if run["responsibility_key"] != expected:
+        raise ConsistencyError("结果页流程种类与原活动责任键不符")
+    return expected
+
+
 def capture_result_scope(action_id, ticket, last_page_event_id):
     """原单次扫描的只读上界，由所有集合与完成消费者共同使用。"""
     from camctl.history.reads import CaptureResultReadScope
@@ -79,7 +94,8 @@ def verify_output_scope_ownership(reader, action, ticket, last_page_event_id):
     for entry, facts in iter_result_file_facts(reader, action, ticket, last_page_event_id):
         if (facts['source_action_id'] == action['id'] and facts['ownership_evidence_json'] is not None):
             continue
-        if (facts['source_action_id'] is None and is_optional_preview(
+        if (ticket.responsibility_key != f"scope/{ticket.target_id}"
+                and facts['source_action_id'] is None and is_optional_preview(
                 entry.kind, entry.format_id, entry.paired_identity, rules)):
             continue
         raise ConsistencyError('原完整扫描仍有未确认归属的新增必要文件')
@@ -171,9 +187,9 @@ def _load_ticket(connection, ticket):
     ObjectId(ticket.run_id)
     ObjectId(ticket.attempt_id)
     run = row_facts(connection, "operation_runs", ticket.run_id)
-    if (run is None or run["kind"] != int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
+    if (run is None
             or ticket.operation != "result" or ticket.target_id != str(run["activity_id"])
-            or ticket.responsibility_key != run["responsibility_key"]):
+            or ticket.responsibility_key != result_responsibility(run)):
         raise ConsistencyError("结果页票据与原活动责任不符")
     with closing(connection.execute("SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
                                    (ticket.run_id, ticket.attempt_id))) as cursor:
@@ -188,7 +204,7 @@ def _load_ticket(connection, ticket):
     return run, attempt, action, activity
 
 
-def _decode(event):
+def _decode(event, *, run=None):
     name, branch, _ = validate_event_structure(event)
     if name != "RESULT_PAGE" or branch != "APPEND" or set(event.evidence) != {"attempt_id", "result_page"}:
         raise ConsistencyError("结果页引用不是完整页事实")
@@ -199,8 +215,11 @@ def _decode(event):
         ObjectId(event.evidence["attempt_id"])
         for field in ("run_id", "attempt_no", "activity_id", "page_no"):
             ObjectId(raw[field])
+        responsibility = f"results/{raw['activity_id']}" if run is None else result_responsibility(run)
+        if run is not None and (run["id"] != raw["run_id"] or run["activity_id"] != raw["activity_id"]):
+            raise ConsistencyError("结果页历史与原流程、活动不同")
         ticket = AttemptTicket(raw["attempt_no"], "result", str(raw["activity_id"]),
-                               f"results/{raw['activity_id']}", raw["run_id"])
+                               responsibility, raw["run_id"])
         cursor = None if raw["cursor"] is None else DirectoryCursor.from_json(raw["cursor"])
         actual = raw["outcome"]
         if not isinstance(actual, dict) or set(actual) != {"status", "effect_state", "error", "result"}:
@@ -450,7 +469,7 @@ def _at_record(connection, event_id):
     """形成页与原键核实使用的完整页关系核验，不供普通消费复用判定。"""
     record = read_event(connection, event_id)
     event, txn = record.event, record.transaction
-    saved, raw = _decode(event)
+    saved, raw = _decode_saved_event(connection, event)
     try:
         _verify_page_relations(connection, saved, raw, event, txn)
     except EventValidationError as error:
@@ -466,8 +485,19 @@ def _at(connection, event_id):
 def read_saved_page(connection, event_id):
     """普通消费原页事实；新页形成及原键重算使用独立完整核验口。"""
     record = read_event(connection, event_id)
-    saved, raw = _decode(record.event)
+    saved, raw = _decode_saved_event(connection, record.event)
     return saved, raw
+
+
+def _decode_saved_event(connection, event):
+    """责任键从原流程读取，不在结果页正文维护第二份。"""
+    try:
+        run_id = ObjectId(event.evidence["result_page"]["run_id"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("结果页缺少原流程身份") from error
+    run = row_facts(connection, "operation_runs", run_id)
+    result_responsibility(run)
+    return _decode(event, run=run)
 
 
 def committed_page_proof(connection, saved, raw, event, transaction):
@@ -577,7 +607,7 @@ def read_pages(ticket, cursor, batch, owned):
             saved_record = verified.get(event_id)
             if saved_record is None:
                 event, txn = record.event, record.transaction
-                page, raw = _decode(event)
+                page, raw = _decode_saved_event(owned.connection, event)
                 try:
                     _verify_page_relations(owned.connection, page, raw, event, txn)
                 except EventValidationError as error:
@@ -1219,7 +1249,7 @@ def _actual_page_write_context(event, page, context, reads):
             or (run["id"], run["action_id"], run["activity_id"])
                 != (scope.run_id, scope.action_id, scope.activity_id)
             or activity["action_id"] != action["id"]
-            or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+            or page.ref.ticket.responsibility_key != result_responsibility(run)
             or attempt["status"] != int(_ATTEMPT_STATUS.RUNNING)
             or attempt["attempt_no"] != page.ref.ticket.attempt_id
             or page.ref.ticket.run_id != run["id"]
@@ -1357,7 +1387,7 @@ def _replay_page_context(connection, event, original, transaction, *, current_bo
             or run["id"] != ticket.run_id
             or run["activity_id"] != int(ticket.target_id)
             or run["responsibility_key"] != ticket.responsibility_key
-            or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+            or ticket.responsibility_key != result_responsibility(run)
             or attempt["status"] != int(_ATTEMPT_STATUS.RUNNING)):
         raise ConsistencyError("原结果页F前资格与原typed request不一致")
 
@@ -1579,7 +1609,8 @@ class _ReplayPageReads:
 
 def _page_guard(event, context):
     try:
-        page, raw = _decode(event)
+        run_id = event.evidence["result_page"]["run_id"]
+        page, raw = _decode(event, run=context.state_rows.get("operation_runs", {}).get(run_id))
         from camctl.persistence.event_reads import SqlEventReads
         reads = context.current_reads
         actual_context = None
@@ -1588,7 +1619,8 @@ def _page_guard(event, context):
             actual_context = _actual_page_write_context(event, page, context, reads)
         attempt = context.state_rows.get("operation_attempts", {}).get(event.evidence["attempt_id"])
         run = None if attempt is None else context.state_rows.get("operation_runs", {}).get(attempt["run_id"])
-        if (attempt is None or run is None or attempt["status"] != _ATTEMPT_STATUS.RUNNING or run["kind"] != _RUN_KIND.CHECK_CAPTURE_RESULTS
+        if (attempt is None or run is None or attempt["status"] != _ATTEMPT_STATUS.RUNNING
+                or page.ref.ticket.responsibility_key != result_responsibility(run)
                 or run["id"] != page.ref.ticket.run_id or run["activity_id"] != int(page.ref.ticket.target_id)
                 or attempt["attempt_no"] != page.ref.ticket.attempt_id):
             raise ConsistencyError("结果页的原活动、流程与运行中尝试不符")

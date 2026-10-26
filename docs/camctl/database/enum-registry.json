@@ -126,7 +126,8 @@
         "V2": 2,
         "V3": 3,
         "V4": 4,
-        "V5": 5
+        "V5": 5,
+        "V6": 6
       }
     },
     "deliveries.status": {
@@ -371,7 +372,8 @@
         "CHECK_CAPTURE_RESULTS": 7,
         "STOP_RESIDUAL": 8,
         "EMERGENCY_STOP": 9,
-        "PREPARE_CAPTURE": 10
+        "PREPARE_CAPTURE": 10,
+        "RESOLVE_OUTPUT_SCOPE": 11
       }
     },
     "operation_runs.query_purpose": {

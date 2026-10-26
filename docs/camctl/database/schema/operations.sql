@@ -3,7 +3,7 @@ CREATE TABLE operation_runs (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
     delivery_id INTEGER REFERENCES deliveries(id) DEFERRABLE INITIALLY DEFERRED,
-    kind INTEGER NOT NULL CHECK (kind BETWEEN 1 AND 10),
+    kind INTEGER NOT NULL CHECK (kind BETWEEN 1 AND 11),
     query_purpose INTEGER CHECK (query_purpose IS NULL OR query_purpose IN (1,2,3,4,5)),
     responsibility_key TEXT NOT NULL UNIQUE CHECK (length(responsibility_key) > 0),
     activity_id INTEGER REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
@@ -19,7 +19,7 @@ CREATE TABLE operation_runs (
     retry_wait_required INTEGER NOT NULL CHECK (retry_wait_required IN (0,1)),
     error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
     CHECK ((kind = 6 AND query_purpose IS NOT NULL) OR (kind <> 6 AND query_purpose IS NULL)),
-    CHECK ((kind IN (1,2,7,8,9,10) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+    CHECK ((kind IN (1,2,7,8,9,10,11) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 6 AND query_purpose = 1 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 6 AND query_purpose IN (2,3,4,5) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 3 AND activity_id IS NULL AND copy_id IS NOT NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
@@ -38,7 +38,8 @@ CREATE TABLE operation_runs (
         WHEN 5 THEN 'query/residual/' || action_id || '/' || activity_id
         END),
     CHECK (kind <> 7 OR responsibility_key = 'results/' || activity_id),
-    CHECK (kind NOT IN (6,7) OR (timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL)),
+    CHECK (kind <> 11 OR responsibility_key = 'scope/' || activity_id),
+    CHECK (kind NOT IN (6,7,11) OR (timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL)),
     CHECK ((kind IN (9,10) AND session_key IS NOT NULL) OR (kind NOT IN (9,10) AND session_key IS NULL)),
     CHECK (kind <> 10 OR (responsibility_key = 'prepare/' || activity_id || '/' || session_key
         AND max_attempts_used = 1 AND attempts_used <= 1 AND timeout_s_json IS NOT NULL

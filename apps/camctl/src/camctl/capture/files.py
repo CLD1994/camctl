@@ -152,8 +152,9 @@ class OwnershipFromResultPageSave:
         if (ticket.operation != "result" or not isinstance(ticket.target_id, str)
                 or not ticket.target_id.isascii() or not ticket.target_id.isdecimal()
                 or str(ObjectId(int(ticket.target_id))) != ticket.target_id
-                or ticket.responsibility_key != f"results/{ticket.target_id}"):
-            raise ValueError("原页归属要求原 RESULTS 活动票据")
+                or ticket.responsibility_key not in (
+                    f"results/{ticket.target_id}", f"scope/{ticket.target_id}")):
+            raise ValueError("原页归属要求原结果核实或范围收尾活动票据")
         if (self.page.next_cursor is not None
                 and not isinstance(self.page.next_cursor, DirectoryCursor)):
             raise TypeError("原页归属游标必须保持 DirectoryCursor 或空")

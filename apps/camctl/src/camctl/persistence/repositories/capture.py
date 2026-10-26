@@ -5214,8 +5214,12 @@ class _FinishResultCheckCommand:
         if saved is not None:
             return self._reuse(scope, saved)
         run = row_facts(connection, "operation_runs", self._finish.ticket.run_id)
-        if run is None or run["kind"] != int(_RUN_KIND.CHECK_CAPTURE_RESULTS):
+        if run is None or run["kind"] not in (
+                int(_RUN_KIND.CHECK_CAPTURE_RESULTS), int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE)):
             raise ConsistencyError("结果复合保存必须属于原结果核实流程")
+        if run["kind"] == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE) and (
+                self._confirm is not None or self._completion_page is not None):
+            raise ConsistencyError("范围收尾只保存范围事实，不改变原采集判定")
         if self._confirm is not None and self._confirm.action_id != run["action_id"]:
             raise ConsistencyError("集合结论与原结果尝试所属动作不同")
         count = 1 + int(run["status"] in (1, 2)
@@ -7299,7 +7303,8 @@ def _result_check_guard(event, context) -> None:
         if (attempt.get("status") != int(_ATTEMPT_STATUS.SUCCEEDED)
                 or attempt.get("error_json") is not None
                 or attempt.get("result_last_page_event_id") != page_id
-                or run.get("kind") != int(_RUN_KIND.CHECK_CAPTURE_RESULTS)
+                or run.get("kind") not in (int(_RUN_KIND.CHECK_CAPTURE_RESULTS),
+                                            int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE))
                 or run.get("activity_id") != row.row_id or run.get("action_id") != activity.get("action_id")):
             raise EventValidationError("独立集合事实不属于原活动的可靠成功扫描末页")
         try:
