@@ -5453,15 +5453,24 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
         (await _register_listing(runtime, action_id, (await _saved_result_listing(runtime, action_id))))
     elif in_flight is not None:
         # 原尝试已经结束时，分页文件子责任仍可能尚未可靠保存。
-        # 先恢复这些原事实，再允许新轮取得设备结果。
+        # 先恢复这些原事实，再按原重试要求区分新轮与结果收尾。
         ticket = (await _original_ticket(runtime, responsibility, "result"))
         def read(owned, parameters=(ticket.run_id,)):
-            with closing(owned.connection.execute("SELECT 1 FROM operation_attempts WHERE run_id=?"
-            " AND result_last_page_event_id IS NOT NULL LIMIT 1", parameters)) as cursor:
-                return cursor.fetchone() is not None
-        has_pages = await runtime.database.read(read, description="读取拍摄直接事实")
-        if has_pages:
-            (await _register_listing(runtime, action_id, (await _saved_result_listing(runtime, action_id))))
+            with closing(owned.connection.execute("SELECT retry_wait_required, EXISTS("
+            "SELECT 1 FROM operation_attempts WHERE run_id=r.id"
+            " AND result_last_page_event_id IS NOT NULL) FROM operation_runs r WHERE r.id=?",
+            parameters)) as cursor:
+                return cursor.fetchone()
+        saved_state = await runtime.database.read(read, description="读取拍摄直接事实")
+        if saved_state is None:
+            raise ConsistencyError("原 RESULTS 尝试缺少所属流程")
+        saved_listing = None
+        if saved_state[1]:
+            saved_listing = await _saved_result_listing(runtime, action_id)
+            await _register_listing(runtime, action_id, saved_listing)
+        if saved_state[0] == 0:
+            # 原结果的处置已确定；集合等后续保存尚未完成不授予新尝试。
+            return saved_listing if saved_listing is not None else await _saved_result_listing(runtime, action_id)
     if (await runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts)) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)

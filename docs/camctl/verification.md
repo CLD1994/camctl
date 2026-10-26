@@ -10,6 +10,12 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+## 已保存拍摄结果的收尾恢复（2026-10-26）
+
+[修复计划](../superpowers/plans/2026-10-26-results-closed-recovery.md)落实原结果已经保存而后续整理尚未完成的恢复。公共结果入口先恢复原文件子责任，再按原重试要求分派：无需重试时返回经原票据、归属、结果和页时刻校验的 `CLOSED` 输入；需要重试时保留原间隔和累计次数；原在途尝试继续由原拥有者处理。原页发现查询同时取得重试标记，不增加独立查询，有页结果复用原文件恢复已经取得的输入。
+
+Linux 开发容器、Python 3.11.17 下，新增九项定向单元通过，覆盖有无设备端口、有无分页、原文件信息读取错误、正常成功但未全的重试、3 秒间隔边界、在途尝试、原归属及文件登记错误保持。测试使用受接口约束的数据库、仓储和文件登记替身，保留真实结果解码与页校验，不连接真实数据库或设备。最终执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/capture apps/camctl/tests/unit/bootstrap -q`，**2222 项通过，35.62 秒，退出 0**；独立审查通过。原始日志保存在 `.local/verification/results-closed-recovery-20261026/`。本次未运行集成测试，真实设备恢复由用户验证。
+
 ## 延时摄影共享结果清单的并发修复（2026-10-26）
 
 [修复计划](../superpowers/plans/2026-10-26-timelapse-scan-concurrency.md)针对共享清单的异步遍历：延时摄影处理器先同步固定扫描条目，再异步查询归属，保持跨设备并发与原页保存责任。相邻原申请恢复循环已经固定条目后再等待；新增回归通过公开 `capture_handler("camera_timelapse")`、受接口约束的替身及明确同步点控制交错。
