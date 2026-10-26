@@ -21,6 +21,7 @@ __all__ = [
     "ErrorKind",
     "JobMessage",
     "MessageKind",
+    "MessageCapacityError",
     "MessageProtocolError",
     "ReadyMessage",
     "ResultFailureMessage",
@@ -48,6 +49,10 @@ _MAX_TEXT_CHARS = 1024
 
 class MessageProtocolError(Exception):
     """控制消息违反通信契约（版本、字段、取值或容量）。"""
+
+
+class MessageCapacityError(MessageProtocolError):
+    """完整控制消息超过固定容量；发送方可改用明确的诊断通道。"""
 
 
 class MessageKind(enum.Enum):
@@ -93,6 +98,20 @@ def _require_pattern(value, name: str, pattern: re.Pattern) -> str:
     return value
 
 
+def _require_diagnostic(diagnostic, fallback, size_bytes) -> None:
+    if diagnostic is not None and not isinstance(diagnostic, dict):
+        raise MessageProtocolError("diagnostic 必须是 JSON 对象或 None")
+    if fallback is None:
+        if size_bytes is not None:
+            raise MessageProtocolError("diagnostic_size_bytes 必须与降级通道同时提供")
+        return
+    if fallback != "stderr":
+        raise MessageProtocolError("diagnostic_fallback 仅支持 stderr")
+    if diagnostic is not None:
+        raise MessageProtocolError("完整诊断与降级通道不能同时提供")
+    _require_int(size_bytes, "diagnostic_size_bytes", minimum=1)
+
+
 @dataclass(frozen=True)
 class ReadyMessage:
     """子进程就绪通知：可以接收生成任务。"""
@@ -104,11 +123,16 @@ class StartupFailedMessage:
 
     phase: StartupPhase
     reason: str
+    diagnostic: dict | None = None
+    diagnostic_fallback: str | None = None
+    diagnostic_size_bytes: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.phase, StartupPhase):
             raise MessageProtocolError(f"启动失败阶段必须使用 StartupPhase: {self.phase!r}")
         _require_text(self.reason, "reason", maximum=256)
+        _require_diagnostic(
+            self.diagnostic, self.diagnostic_fallback, self.diagnostic_size_bytes)
 
 
 @dataclass(frozen=True)
@@ -175,6 +199,9 @@ class ResultFailureMessage:
     error_kind: ErrorKind
     error_code: str
     error_message: str
+    diagnostic: dict | None = None
+    diagnostic_fallback: str | None = None
+    diagnostic_size_bytes: int | None = None
 
     def __post_init__(self) -> None:
         _require_pattern(self.job_id, "job_id", _JOB_ID_PATTERN)
@@ -183,6 +210,8 @@ class ResultFailureMessage:
             raise MessageProtocolError(f"错误分类必须使用 ErrorKind: {self.error_kind!r}")
         _require_text(self.error_code, "error_code", maximum=_MAX_CODE_CHARS)
         _require_text(self.error_message, "error_message", maximum=_MAX_TEXT_CHARS)
+        _require_diagnostic(
+            self.diagnostic, self.diagnostic_fallback, self.diagnostic_size_bytes)
 
 
 @dataclass(frozen=True)
@@ -202,6 +231,12 @@ ControlMessage = (
 # 各消息在线上的封闭字段集（不含 version 与 kind）。
 _RESULT_SUCCESS_FIELDS = {"status"}
 _RESULT_FAILURE_FIELDS = {"status"}
+_DIAGNOSTIC_FIELDS = {"diagnostic", "diagnostic_fallback", "diagnostic_size_bytes"}
+
+
+def _diagnostic_fields(message: StartupFailedMessage | ResultFailureMessage) -> dict:
+    return {name: getattr(message, name) for name in _DIAGNOSTIC_FIELDS
+            if getattr(message, name) is not None}
 
 
 def encode_message(message: ControlMessage) -> bytes:
@@ -211,7 +246,8 @@ def encode_message(message: ControlMessage) -> bytes:
         payload["kind"] = MessageKind.READY.value
     elif isinstance(message, StartupFailedMessage):
         payload.update(kind=MessageKind.STARTUP_FAILED.value,
-                       phase=message.phase.value, reason=message.reason)
+                       phase=message.phase.value, reason=message.reason,
+                       **_diagnostic_fields(message))
     elif isinstance(message, JobMessage):
         payload.update(kind=MessageKind.JOB.value, **vars(message))
     elif isinstance(message, ResultSuccessMessage):
@@ -221,18 +257,19 @@ def encode_message(message: ControlMessage) -> bytes:
                        error_kind=message.error_kind.value,
                        error_code=message.error_code,
                        error_message=message.error_message,
-                       job_id=message.job_id, instance_id=message.instance_id)
+                       job_id=message.job_id, instance_id=message.instance_id,
+                       **_diagnostic_fields(message))
     elif isinstance(message, ShutdownMessage):
         payload["kind"] = MessageKind.SHUTDOWN.value
     else:
         raise MessageProtocolError(f"未知控制消息类型: {type(message).__name__}")
     try:
         data = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                          ensure_ascii=False).encode("utf-8")
+                          ensure_ascii=False).encode("utf-8", "backslashreplace")
     except (TypeError, ValueError) as error:
         raise MessageProtocolError("控制消息不能编码为 JSON") from error
     if len(data) > MAX_MESSAGE_BYTES:
-        raise MessageProtocolError(
+        raise MessageCapacityError(
             f"控制消息超过容量 {MAX_MESSAGE_BYTES} 字节: {len(data)}")
     return data
 
@@ -242,7 +279,7 @@ def decode_message(data: bytes) -> ControlMessage:
     if not isinstance(data, (bytes, bytearray)):
         raise MessageProtocolError("控制消息必须是字节串")
     if len(data) > MAX_MESSAGE_BYTES:
-        raise MessageProtocolError(
+        raise MessageCapacityError(
             f"控制消息超过容量 {MAX_MESSAGE_BYTES} 字节: {len(data)}")
     try:
         payload = json.loads(bytes(data).decode("utf-8"))
@@ -266,13 +303,15 @@ def decode_message(data: bytes) -> ControlMessage:
         _require_fields(fields, set())
         return ShutdownMessage()
     if message_kind is MessageKind.STARTUP_FAILED:
-        _require_fields(fields, {"phase", "reason"})
+        _require_fields(fields - _DIAGNOSTIC_FIELDS, {"phase", "reason"})
         try:
             phase = StartupPhase(payload["phase"])
         except ValueError as error:
             raise MessageProtocolError(
                 f"未知启动失败阶段: {payload['phase']!r}") from error
-        return StartupFailedMessage(phase=phase, reason=payload["reason"])
+        return StartupFailedMessage(
+            phase=phase, reason=payload["reason"],
+            **{name: payload.get(name) for name in _DIAGNOSTIC_FIELDS})
     if message_kind is MessageKind.JOB:
         _require_fields(fields, {
             "job_id", "report_id", "from_wm", "to_wm", "frozen_event_id",
@@ -299,7 +338,7 @@ def decode_message(data: bytes) -> ControlMessage:
             path=payload["path"], size_bytes=payload["size_bytes"],
             sha256=payload["sha256"])
     if status == "failure":
-        _require_fields(fields, _RESULT_FAILURE_FIELDS | {
+        _require_fields(fields - _DIAGNOSTIC_FIELDS, _RESULT_FAILURE_FIELDS | {
             "job_id", "instance_id", "error_kind", "error_code", "error_message"})
         try:
             error_kind = ErrorKind(payload["error_kind"])
@@ -309,7 +348,8 @@ def decode_message(data: bytes) -> ControlMessage:
         return ResultFailureMessage(
             job_id=payload["job_id"], instance_id=payload["instance_id"],
             error_kind=error_kind, error_code=payload["error_code"],
-            error_message=payload["error_message"])
+            error_message=payload["error_message"],
+            **{name: payload.get(name) for name in _DIAGNOSTIC_FIELDS})
     raise MessageProtocolError(f"结果消息缺少合法 status: {status!r}")
 
 

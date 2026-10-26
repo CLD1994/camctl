@@ -10,9 +10,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,7 @@ from camctl.contracts.public_projection import PublicProjectionError
 from camctl.contracts.values import ConsistencyError
 from camctl.history.events import HistoryEventError
 from camctl.history.replay import ReplayError
+from camctl.operations.error_diagnostics import exception_diagnostic
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import (
     DbConfig,
@@ -38,6 +41,7 @@ from camctl.reporting.messages import (
     MAX_MESSAGE_BYTES,
     ErrorKind,
     JobMessage,
+    MessageCapacityError,
     MessageProtocolError,
     ReadyMessage,
     ResultFailureMessage,
@@ -222,12 +226,13 @@ def run_job(job: JobMessage) -> ResultSuccessMessage | ResultFailureMessage:
             path=str(canonical), size_bytes=generated.size_bytes,
             sha256=generated.sha256)
     except BaseException as error:
-        return ResultFailureMessage(
+        failure = ResultFailureMessage(
             job_id=job.job_id, instance_id=observed,
             error_kind=classify_worker_error(error),
             error_code=("configuration_error" if isinstance(error, DirectoryBindingError)
                         else type(error).__name__),
-            error_message=str(error)[:1024] or type(error).__name__)
+            error_message=_failure_summary(error, 1024))
+        return _with_diagnostic(failure, exception_diagnostic(error))
 
 
 def _read_job_metadata(job: JobMessage) -> DatabaseMetadata:
@@ -262,14 +267,14 @@ def worker_main(
         try:
             lock = acquire_work_lock(Path(lock_path), remaining)
         except WorkLockError as error:
-            _try_send_startup_failure(connection, StartupPhase.WORK_LOCK, str(error))
+            _try_send_startup_failure(connection, StartupPhase.WORK_LOCK, error)
             return 3
         try:
             try:
                 ensure_runtime_library()
             except StateDatabaseError as error:
                 _try_send_startup_failure(
-                    connection, StartupPhase.RUNTIME_CHECK, str(error))
+                    connection, StartupPhase.RUNTIME_CHECK, error)
                 return 3
             connection.send_bytes(encode_message(ReadyMessage()))
             while True:
@@ -284,7 +289,7 @@ def worker_main(
                 if isinstance(message, ShutdownMessage):
                     return 0
                 if isinstance(message, JobMessage):
-                    connection.send_bytes(encode_message(run_job(message)))
+                    _send_result(connection, run_job(message))
                     continue
                 # 主进程不会发送就绪或结果：按通道不可靠结束。
                 return 0
@@ -298,10 +303,80 @@ def worker_main(
 
 
 def _try_send_startup_failure(
-    connection: Any, phase: StartupPhase, reason: str
+    connection: Any, phase: StartupPhase, reason: str | BaseException
+) -> None:
+    diagnostic = (exception_diagnostic(reason) if isinstance(reason, BaseException)
+                  else {"reason": reason})
+    message = _with_diagnostic(
+        StartupFailedMessage(phase=phase, reason=_failure_summary(reason, 256)), diagnostic)
+    try:
+        _send_result(connection, message)
+    except (OSError, ValueError, MessageProtocolError):
+        pass  # 原诊断已尝试交给 stderr；主进程仍按原启动失败或超时收场。
+
+
+def _failure_summary(error: str | BaseException, maximum: int) -> str:
+    # 摘要遵守控制字段的文本约束，原消息始终完整保存在 diagnostic 中。
+    text = str(error).replace("\x00", "\\0")
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")[:maximum] or type(error).__name__
+
+
+def _with_diagnostic(
+    message: StartupFailedMessage | ResultFailureMessage, diagnostic: dict,
+):
+    """完整消息超限时，直接沿继承的 stderr 尝试交付原诊断一次。"""
+    complete = replace(message, diagnostic=diagnostic)
+    try:
+        encode_message(complete)
+    except MessageCapacityError:
+        # 此数值只计原诊断的紧凑 JSON 字节，使用 ASCII 转义，不含外层上下文及换行。
+        size_bytes = len(json.dumps(
+            diagnostic, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=True).encode("utf-8"))
+        fallback = replace(message, diagnostic_fallback="stderr",
+                           diagnostic_size_bytes=size_bytes)
+        _write_diagnostic_stderr({**_diagnostic_context(message), "diagnostic": diagnostic})
+        return fallback
+    return complete
+
+
+def _diagnostic_context(message) -> dict:
+    if isinstance(message, StartupFailedMessage):
+        return {"phase": message.phase.value}
+    return {"job_id": message.job_id, "instance_id": message.instance_id}
+
+
+def _send_result(
+    connection: Any, message: StartupFailedMessage | ResultFailureMessage | ResultSuccessMessage,
 ) -> None:
     try:
-        connection.send_bytes(encode_message(
-            StartupFailedMessage(phase=phase, reason=reason[:256])))
-    except (OSError, ValueError, MessageProtocolError):
-        pass  # 通道不可用时启动失败无法送达，主进程按超时收场。
+        connection.send_bytes(encode_message(message))
+    except (OSError, ValueError, MessageProtocolError) as error:
+        document = {**_diagnostic_context(message),
+                    "communication_error": exception_diagnostic(error)}
+        if isinstance(message, (StartupFailedMessage, ResultFailureMessage)):
+            if message.diagnostic is not None:
+                document["diagnostic"] = message.diagnostic
+            elif message.diagnostic_fallback is not None:
+                # 超限原图已经输出过，只补交本次实际通信错误及其关联事实。
+                document.update(diagnostic_fallback=message.diagnostic_fallback,
+                                diagnostic_size_bytes=message.diagnostic_size_bytes)
+        _write_diagnostic_stderr(document)
+        raise
+
+
+def _write_diagnostic_stderr(document: dict) -> None:
+    data = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True).encode("utf-8") + b"\n"
+    remaining = memoryview(data)
+    try:
+        while remaining:
+            try:
+                written = os.write(2, remaining)
+            except InterruptedError:
+                continue
+            if written <= 0:
+                break
+            remaining = remaining[written:]
+    except OSError:
+        pass  # stderr 已失效，不递归诊断或改变原结果与通信错误。
