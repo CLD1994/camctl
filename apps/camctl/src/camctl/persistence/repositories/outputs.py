@@ -13,12 +13,13 @@ from __future__ import annotations
 import hashlib
 from contextlib import closing
 from decimal import Decimal
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
+from camctl.logging_runtime.diagnostics import DiagnosticState
 from camctl.history.decoding import decode_event_row
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.history_values import HistoryBoundary
@@ -321,6 +322,7 @@ class ResolveSourcesOutcome:
     source_plan_id: int | None = None
     error_code: int | None = None
     error_details: dict[str, Any] | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -2151,10 +2153,12 @@ class _GrantFileCommand:
                 delivery_id=None,
                 target_file_id=None,
                 reason=f"error_code={error_code}",
+                error_code=error_code, error_details=details,
             ),
         )
 
     def _wait_final(self, error_code: int) -> CommandPlan:
+        item = self._state["obtain_items"].get(self._command.item_id)
         return CommandPlan(
             events=(),
             owners=self._owners,
@@ -2167,6 +2171,8 @@ class _GrantFileCommand:
                 delivery_id=None,
                 target_file_id=None,
                 reason=f"error_code={error_code}",
+                error_code=error_code,
+                error_details=_decoded(item["error_details_json"]) if item is not None else {},
             ),
         )
 

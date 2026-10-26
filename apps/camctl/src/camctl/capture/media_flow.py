@@ -190,10 +190,15 @@ class RecordingInputCopies:
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
     async def qualify(self, candidate: FileCandidate) -> SaveReceipt:
+        from camctl.outputs.diagnostics import record_qualification
+
         key = new_operation_key()
-        return self._receipt(await self.database.write(
+        receipt = self._receipt(await self.database.write(
             lambda owned: self.repository.grant_file(candidate, key, owned),
             key=key, description="内部输入资格"))
+        if receipt.disposition is SaveDisposition.SAVED:
+            record_qualification(receipt.value, candidate)
+        return receipt
 
     async def copy_state(self, copy_id: int):
         return await self.database.read(
@@ -597,7 +602,9 @@ async def run_recording_media(
             sessions.for_attempt(ticket, idle_timeout_s=flow.read_idle_timeout_s, control=control)))
         step = await obtain_recording_input(current)
         if ticket is not None:
-            await _finish_internal_read(flow, ticket, step)
+            await _finish_internal_read(flow, ticket, step, diagnostic_context={
+                "action_id": action_id, "processing_id": processing_id,
+                "source_device_file_id": source_device_file_id})
         return step
 
     input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
@@ -660,7 +667,10 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     async def complete_and_save(_control):
         step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
-        await _finish_internal_read(flow, held.ticket, step)
+        await _finish_internal_read(flow, held.ticket, step, diagnostic_context={
+            "action_id": context.action_id, "processing_id": context.processing_id,
+            "inspection_id": context.inspection_id,
+            "source_device_file_id": context.source_device_file_id})
 
     await run_owned_read(flow, copy_id, complete_and_save)
 
@@ -674,12 +684,13 @@ def _read_dispatched(flow, copy_id):
 
 
 async def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
-                          max_attempts: int | None = None) -> None:
+                          max_attempts: int | None = None, diagnostic_context=None) -> None:
     """连接已经关闭后保存读取结果；重拷继续原尝试。"""
-    await settle_required(_finish_internal_read_result(flow, ticket, step, max_attempts=max_attempts))
+    await settle_required(_finish_internal_read_result(flow, ticket, step,
+        max_attempts=max_attempts, diagnostic_context=diagnostic_context))
 
 
-async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
+async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diagnostic_context=None):
     from camctl.outputs.read_attempts import require_preparation_settled
 
     if step.phase is InputPhase.READ_NOT_STARTED:
@@ -716,7 +727,7 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     if (step.phase is not InputPhase.INPUT_READY and not step.source_failed
             and not checksum_failed and not verification_failed):
-        raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
+        raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}") from step.error
     succeeded = (step.phase is InputPhase.INPUT_READY
                  or checksum_failed or verification_failed)
     # 原 ticket 的连续编号已由意图／恢复事务核实，实际返回后先持有结果。
@@ -738,7 +749,10 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
         run_finish = None
     pending = hold_read_result(flow, AttemptFinish(
         ticket, validate_outcome(ticket, outcome, flow.evidence), flow.occurred_at(),
-        retry_wait=not succeeded and not exhausted, run_finish=run_finish))
+        retry_wait=not succeeded and not exhausted, run_finish=run_finish),
+        context=diagnostic_context,
+        diagnostic_error=step.error if checksum_failed or verification_failed else None,
+        diagnostic_stage=step.phase.value)
     await _save_internal_read_and_settle(flow, pending)
 
 

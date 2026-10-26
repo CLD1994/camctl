@@ -29,10 +29,10 @@ from camctl.host_files.io import DirectorySyncStage
 from camctl.host_files.models import BoundDirectories, FileRef
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import CopyTargetRef
-from camctl.logging_runtime.diagnostics import record_error
-from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.session.supervision import Supervisor
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.operations.models import ErrorValue
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -158,6 +158,7 @@ class DeliveryFailure:
     code: str
     stage: str
     details: Mapping[str, Any]
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.code, str) or not isinstance(self.stage, str):
@@ -198,6 +199,13 @@ class DeliveryDecision:
     observed_location: HandoffPlace | None = None
     exceptions: tuple[BaseException, ...] = field(default=(), compare=False, repr=False)
 
+    @property
+    def cause(self):
+        if not self.exceptions:
+            return None
+        return (self.exceptions[0] if len(self.exceptions) == 1 else
+                BaseExceptionGroup("交付位置观察发生多个错误", self.exceptions))
+
 
 def _unconfirmed_failure(delivery_id: int) -> DeliveryFailure:
     return DeliveryFailure(
@@ -207,9 +215,10 @@ def _unconfirmed_failure(delivery_id: int) -> DeliveryFailure:
     )
 
 
-def _undecidable(reason: str) -> DeliveryDecision:
+def _undecidable(reason: str, cause=None) -> DeliveryDecision:
     return DeliveryDecision(
-        outcome=DeliveryHandoffOutcome.UNDECIDABLE, error=reason)
+        outcome=DeliveryHandoffOutcome.UNDECIDABLE, error=reason,
+        exceptions=(cause,) if isinstance(cause, BaseException) else ())
 
 
 def _confirm_prepared_copy(
@@ -257,7 +266,7 @@ def decide_handoff(facts: DeliveryFacts, files: DeliveryLocations) -> DeliveryDe
     for place in HandoffPlace:
         if not files.at(place).observed:
             return _undecidable(
-                f"{place.value} 观察不可靠: {files.at(place).error!r}")
+                f"{place.value} 观察不可靠: {files.at(place).error!r}", files.at(place).error)
     delivered = [
         place for place in (HandoffPlace.READY, HandoffPlace.PROCESSING)
         if files.at(place).present
@@ -546,11 +555,12 @@ async def _save_publication(delivery_id: int, context: DeliveryContext) -> None:
 
 
 async def _save_unconfirmed(
-    delivery_id: int, failure: DeliveryFailure, context: DeliveryContext,
+    delivery_id: int, failure: DeliveryFailure, context: DeliveryContext, *, publish_error=None,
 ) -> None:
     """保存终局未知失败；不安排自动重投。"""
-    record_error(ErrorValue(failure.code, failure.stage, failure.details),
-                 stage=failure.stage, context={"delivery_id": delivery_id})
+    record_error(ErrorValue(failure.code, failure.stage, dict(failure.details)),
+        stage=failure.stage, context={"delivery_id": delivery_id}, state=failure.diagnostic,
+        details=None if publish_error is None else {"publish_error": publish_error})
     key = new_operation_key()
     request = UnconfirmedFailureSave(
         delivery_id=delivery_id, failure=failure,
@@ -619,7 +629,7 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
         return DeliveryResult(DeliveryPhase.HELD, decision)
     if decision.outcome is DeliveryHandoffOutcome.UNDECIDABLE:
         raise DeliveryHandoffError(
-            "handoff_undecidable", str(decision.error))
+            "handoff_undecidable", str(decision.error)) from decision.cause
     if decision.outcome is DeliveryHandoffOutcome.DELIVERED_LOCALLY:
         await _save_publication(delivery_id, context)
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
@@ -630,8 +640,8 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
     await _save_intent(delivery_id, context)
     ref, roots, directories = _staging_ref(state, context.directories)
     publish = await publish_file(ref, roots, directories, ReadyName(state.file_name))
-    if publish.exception is not None:
-        record_error(publish.exception, stage="delivery_publication",
+    if publish.exception is not None or publish.error is not None:
+        record_error(publish.exception or publish.error, stage="delivery_publication",
                      context={"delivery_id": delivery_id},
                      details={"move_stage": publish.stage, "directory": publish.directory,
                               "source_removed": publish.source_removed, "error": publish.error})
@@ -643,7 +653,7 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
             return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
         # 已移动事实保留：同步失败不撤销移动，也不保存完成事实。
         raise DeliveryHandoffError(
-            "publication_sync_failed", publish.error or "目录同步失败")
+            "publication_sync_failed", publish.error or "目录同步失败") from publish.exception
     if publish.stage is PublishStage.NOT_MOVED:
         retry = await asyncio.to_thread(_decide_again, state, context)
         _record_location_errors(delivery_id, retry)
@@ -652,11 +662,11 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)
         if retry.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
             assert retry.failure is not None
-            await _save_unconfirmed(delivery_id, retry.failure, context)
+            await _save_unconfirmed(delivery_id, retry.failure, context, publish_error=publish.error)
             return DeliveryResult(DeliveryPhase.FAILED_FINAL, retry)
-        raise DeliveryHandoffError("publish_move_failed", publish.error or "")
+        raise DeliveryHandoffError("publish_move_failed", publish.error or "") from retry.cause
     raise DeliveryHandoffError(
-        "publication_move_unknown", publish.error or "移动结果未知")
+        "publication_move_unknown", publish.error or "移动结果未知") from publish.exception
 
 
 class WithdrawalChoice(Enum):

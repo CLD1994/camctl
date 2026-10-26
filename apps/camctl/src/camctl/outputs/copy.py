@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
 
@@ -25,6 +25,8 @@ from camctl.contracts.values import (
 )
 from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.operations.models import ErrorValue
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
     sync_target,
@@ -956,6 +958,7 @@ class CompletionContext:
     max_recopies: int = 1
     key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 class CompletionPhase(Enum):
@@ -1129,6 +1132,15 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         target_sha256=target_sha256, max_recopies=context.max_recopies,
         occurred_at=context.occurred_at,
     )
+    exhausted = (RecopyExhausted(context.max_recopies, facts.recopies_used)
+                 if facts.recopies_used >= context.max_recopies else None)
+    record_error(exhausted if exhausted is not None else
+        ErrorValue("checksum_mismatch", "checksum_verification", {
+            "source_sha256": source_sha256, "target_sha256": target_sha256}),
+        stage="checksum_exhausted" if exhausted is not None else "checksum_verification",
+        context={"copy_id": copy_id, "copy_round": facts.round,
+                 "max_recopies": context.max_recopies, "recopies_used": facts.recopies_used},
+        state=context.diagnostic)
     outcome = await context.database.write(
         lambda owned: context.repository.register_recopy(request, key, owned),
         key=key, description="拷贝重拷登记")
@@ -1138,7 +1150,10 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
     if result.disposition is RecopyDisposition.SKIPPED:
         raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
     if result.disposition is RecopyDisposition.EXHAUSTED:
-        raise RecopyExhausted(context.max_recopies, facts.recopies_used)
+        error = exhausted or RecopyExhausted(context.max_recopies, facts.recopies_used)
+        record_error(error, stage="checksum_exhausted", state=context.diagnostic,
+                     context={"copy_id": copy_id})
+        raise error
     return CompletionStep(phase=CompletionPhase.RECOPY_REGISTERED, recopy=result)
 
 

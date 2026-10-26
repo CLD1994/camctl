@@ -51,6 +51,7 @@ from camctl.outputs.copy import (
     CopySegmentError, RecopyExhausted, ResumeOutcome, SegmentOutcome,
     SegmentSaveDisposition)
 from camctl.outputs.dispatch import plan_device_work
+from camctl.outputs.diagnostics import record_qualification, record_selection, record_source_resolution
 from camctl.outputs.read_discovery import ReadDiscoveryOwner
 from camctl.outputs.handoff import (
     DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery)
@@ -61,8 +62,9 @@ from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.outputs.sources import (
     ResolutionState, SelectionSnapshot, SourceResolution, SourceSpec,
     read_source_spec, select_outputs)
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_for
 from camctl.persistence.business import settle_required
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.outputs.database_reads import read_one
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -160,6 +162,46 @@ class ObtainRuntime:
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
 
 
+@dataclass
+class PendingSegmentSelection:
+    """原选择申请与其固定范围诊断回执的本次交接位置。"""
+
+    request: Any
+    key: Any
+    saved: Any = None
+    cursor: Any = None
+    diagnostics_done: bool = False
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+
+
+async def _consume_selection_diagnostics(runtime, pending):
+    from camctl.persistence.repositories.segment_selections import read_original_selection_error_page
+
+    if pending.diagnostics_done:
+        return
+    ref = pending.saved.diagnostic_ref
+    while True:
+        try:
+            page = await runtime.database.read(
+                lambda owned: read_original_selection_error_page(ref, pending.cursor, owned),
+                description="原分段选择的固定范围错误回执")
+        except Exception as error:
+            record_error(error, stage="selection_diagnostic_receipt",
+                context={"action_id": ref.action_id, "selection_id": ref.selection_id,
+                         "operation_key": ref.operation_key}, state=pending.diagnostic)
+            pending.diagnostics_done = True
+            return
+        if page.items:
+            record_error({"failures": page.items}, stage="output_selection",
+                context={"action_id": ref.action_id, "selection_id": ref.selection_id,
+                         "operation_key": ref.operation_key}, state=pending.diagnostic)
+        if page.exhausted:
+            pending.diagnostics_done = True
+            return
+        pending.cursor = page.next_cursor
+        pending.diagnostic = DiagnosticState()
+
+
 async def advance_obtain(runtime: ObtainRuntime) -> None:
     """推进一个轮次的取回执行链；各步按已保存事实幂等。"""
     from camctl.outputs.read_attempts import retry_read_business, retry_read_ends
@@ -206,9 +248,9 @@ async def _start_due(runtime: ObtainRuntime, now: int) -> None:
     for action_id in due:
         outcome = await _save_repository(runtime, runtime.outputs.start_obtain_action, StartObtainAction(action_id=action_id, occurred_at=now), new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(
+            raise db_failure(ConsistencyError,
                 f"取回开始事务未完成（{outcome.kind.value}）:"
-                f" {outcome.error}")
+                f" {outcome.error}", outcome)
 
 
 def _action_facts(connection, action_id: int) -> dict:
@@ -235,9 +277,10 @@ async def _resolve_sources(
             action_id=action["id"], spec=_source_spec(action),
             occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
+        raise db_failure(ConsistencyError,
             f"来源解析事务未完成（{outcome.kind.value}）:"
-            f" {outcome.error}")
+            f" {outcome.error}", outcome)
+    record_source_resolution(outcome.value, action["id"])
     return bool(outcome.value.fixed)
 
 
@@ -257,18 +300,28 @@ async def _fix_pending_selections(
         is_segmented_source,
     )
 
-    async def save_selection(identity, request, key):
+    async def save_selection(identity, pending):
         async def save_and_apply():
-            receipt = await _save_repository(runtime, fix_segment_selection, request, key)
-            if receipt.kind is not DbOutcomeKind.COMPLETED:
-                if receipt.kind is DbOutcomeKind.ROLLED_BACK:
-                    del runtime.pending_segment_selections[identity]
-                raise ConsistencyError(f"原分段选择尚未可靠固定: {receipt.error}")
+            if pending.saved is None:
+                try:
+                    receipt = await _save_repository(runtime, fix_segment_selection, pending.request, pending.key)
+                except BaseException as error:
+                    actual = db_outcome_for(error)
+                    if actual is not None and actual.kind is DbOutcomeKind.COMPLETED:
+                        pending.saved = actual.value
+                    raise
+                if receipt.kind is not DbOutcomeKind.COMPLETED:
+                    if receipt.kind is DbOutcomeKind.ROLLED_BACK:
+                        del runtime.pending_segment_selections[identity]
+                    raise db_failure(ConsistencyError, f"原分段选择尚未可靠固定: {receipt.error}", receipt)
+                pending.saved = receipt.value
+            if pending.saved is not None:
+                await _consume_selection_diagnostics(runtime, pending)
             del runtime.pending_segment_selections[identity]
         await settle_required(save_and_apply())
 
-    for identity, (request, key) in tuple(runtime.pending_segment_selections.items()):
-        await save_selection(identity, request, key)
+    for identity, pending in tuple(runtime.pending_segment_selections.items()):
+        await save_selection(identity, pending)
     page = await runtime.discovery.rows(runtime.database, "selections", now,
         "SELECT s.id,d.depends_on_action_id,d.action_id FROM obtain_source_selections s"
         " JOIN action_dependencies d ON d.id=s.dependency_id"
@@ -290,8 +343,9 @@ async def _fix_pending_selections(
         inputs_value = await runtime.database.read(inputs)
         if inputs_value is None:
             request, key = FixSegmentSelection(int(selection_id), now), new_operation_key()
-            runtime.pending_segment_selections[int(selection_id)] = (request, key)
-            await save_selection(int(selection_id), request, key)
+            pending = PendingSegmentSelection(request, key)
+            runtime.pending_segment_selections[int(selection_id)] = pending
+            await save_selection(int(selection_id), pending)
             continue
         action, mode, requested, facts = inputs_value
         input_fields = parse_exact_json(action["input_fields_json"])
@@ -303,10 +357,13 @@ async def _fix_pending_selections(
             excluded_output_ids=read_excluded_output_ids(input_fields))
         if not isinstance(snapshot, SelectionSnapshot) or not snapshot.is_fixed:
             continue
+        record_selection(snapshot, action_id=action_id, selection_id=selection_id,
+                         source_action_id=int(member_id))
         outcome = await _save_repository(runtime, runtime.outputs.fix_selection,
             FixSelection(int(selection_id), snapshot, now), new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"选择固定事务未完成（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(ConsistencyError,
+                f"选择固定事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
 
 
 async def _qualify_selected_items(
@@ -325,9 +382,10 @@ async def _qualify_selected_items(
             runtime, action, int(item_id), int(output_id), int(selection_id), now)
         outcome = await _save_repository(runtime, runtime.outputs.grant_file, candidate, new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(
+            raise db_failure(ConsistencyError,
                 f"读取资格事务未完成（{outcome.kind.value}）:"
-                f" {outcome.error}")
+                f" {outcome.error}", outcome)
+        record_qualification(outcome.value, candidate)
 
 
 async def _delivery_candidate(
@@ -503,9 +561,9 @@ async def _publish_and_finish(
         return len(deliveries)
     outcome = await _save_repository(runtime, runtime.outputs.finish_obtain, FinishObtain(action_id=action_id, occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
+        raise db_failure(ConsistencyError,
             f"取回完成事务未完成（{outcome.kind.value}）:"
-            f" {outcome.error}")
+            f" {outcome.error}", outcome)
     return len(deliveries)
 
 
@@ -569,7 +627,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 failed = await save_read_business(runtime, copy_id, "read_binding_failure", FailReadBinding(
                     copy_id, source_id, result, now), runtime.outputs.fail_read_binding)
                 if failed.kind is not DbOutcomeKind.COMPLETED:
-                    raise ConsistencyError(f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}")
+                    raise db_failure(ConsistencyError,
+                        f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
                 runtime.retry_gate.cleared(f"read/{copy_id}")
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
@@ -622,8 +681,8 @@ async def _advance_read(
         return
     slot = await _save_repository(runtime, runtime.outputs.grant_read_slot, SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()), new_operation_key())
     if slot.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"读取机会事务未完成（{slot.kind.value}）: {slot.error}")
+        raise db_failure(ConsistencyError,
+            f"读取机会事务未完成（{slot.kind.value}）: {slot.error}", slot)
     if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
         return
     ticket = await _begin_read_attempt(runtime, assembly, facts, now)
@@ -949,7 +1008,7 @@ async def _finish_read_attempt_phase(
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     if (step.phase is not InputPhase.INPUT_READY and not step.source_failed
             and not checksum_failed and not verification_failed):
-        raise ConsistencyError(f"读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
+        raise ConsistencyError(f"读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}") from step.error
     succeeded = (step.phase is InputPhase.INPUT_READY
                  or checksum_failed or verification_failed)
     # 原 ticket 的连续 attempt_no 已在取得／恢复时核实为原累计次数。
@@ -982,7 +1041,11 @@ async def _finish_read_attempt_phase(
             outcome=validate_outcome(ticket, outcome, assembly.evidence),
             occurred_at=runtime.occurred_at(),
             retry_wait=(not succeeded) and not exhausted,
-            run_finish=run_finish))
+            run_finish=run_finish),
+        context={name: facts[name] for name in (
+            "action_id", "output_id", "source_device_file_id", "source_intermediate_file_id") if name in facts},
+        diagnostic_error=step.error if checksum_failed or verification_failed else None,
+        diagnostic_stage=step.phase.value)
     await _save_read_result_and_settle(runtime, pending, facts)
 
 
@@ -1065,7 +1128,7 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
                 runtime.outputs.release_read_slot, retry=retry, business_saves=pending.business_saves,
                 on_completed=complete_business)
             if released.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"原读取机会释放未可靠保存: {released.error}")
+                raise db_failure(ConsistencyError, f"原读取机会释放未可靠保存: {released.error}", released)
         else:
             complete_business(None)
         return
@@ -1298,8 +1361,8 @@ async def _retry_failed_local_source_fallback(
         return False
     outcome = await _save_repository(runtime, runtime.outputs.fallback_read_source, request, read_source_fallback_key(request.copy_id))
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(
-            f"原读取源切换事务未可靠确认（{outcome.kind.value}）: {outcome.error}")
+        raise db_failure(ConsistencyError,
+            f"原读取源切换事务未可靠确认（{outcome.kind.value}）: {outcome.error}", outcome)
     from camctl.persistence.repositories.outputs import (
         ReadSourceFallbackDisposition,
     )
@@ -1373,7 +1436,7 @@ async def _finish_local_attempt_phase(
             evidence=EvidenceValue(
                 type="read_returned", version=1, data={})),
         observations=())
-    from camctl.outputs.read_attempts import hold_read_result
+    from camctl.outputs.read_attempts import controlled_read_stop, hold_read_result
 
     pending = hold_read_result(runtime, AttemptFinish(
             ticket=ticket,
@@ -1384,7 +1447,11 @@ async def _finish_local_attempt_phase(
                 "checksum_mismatch", "source_read", {
                     "max_recopies": step.error.max_recopies,
                     "recopies_used": step.error.recopies_used}))
-                if checksum_failed else _run_finish(succeeded, exhausted))))
+                if checksum_failed else _run_finish(succeeded, exhausted))),
+        context={name: facts[name] for name in (
+            "action_id", "output_id", "source_device_file_id", "source_intermediate_file_id") if name in facts},
+        diagnostic_error=step.error if checksum_failed else None,
+        diagnostic_stage=step.phase.value, suppress_diagnostic=controlled_read_stop(step))
     await _save_read_result_and_settle(runtime, pending, facts)
     if succeeded:
         runtime.retry_gate.cleared(f"read/{facts['id']}")
@@ -1410,4 +1477,4 @@ async def _ensure_checksum_support(
             support=2 if assembly.digest_supported else 3,
             occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"摘要能力声明未完成: {outcome.error}")
+        raise db_failure(ConsistencyError, f"摘要能力声明未完成: {outcome.error}", outcome)

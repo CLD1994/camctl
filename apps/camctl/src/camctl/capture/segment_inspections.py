@@ -398,7 +398,9 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
             sessions.for_attempt(ticket, idle_timeout_s=config.timeout_s, control=control)))
         step = await obtain_recording_input(current)
         if ticket is not None:
-            (await _finish_internal_read(read_flow, ticket, step, max_attempts=config.max_attempts))
+            (await _finish_internal_read(read_flow, ticket, step, max_attempts=config.max_attempts,
+                diagnostic_context={"action_id": request.action_id, "inspection_id": inspection_id,
+                    "source_device_file_id": source_file_id}))
         return step
 
     result = await run_owned_read(read_flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)

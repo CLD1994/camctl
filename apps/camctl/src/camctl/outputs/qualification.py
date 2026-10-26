@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from typing import Mapping
@@ -16,6 +16,7 @@ from typing import Mapping
 from camctl.contracts.values import MAX_OBJECT_ID, ObjectId, UtcMicros
 from camctl.devices.bindings import BindingResult, BindingStatus
 from camctl.host_files.paths import validate_file_extension
+from camctl.logging_runtime.diagnostics import DiagnosticState
 
 __all__ = [
     "FileCandidate",
@@ -104,6 +105,9 @@ class FileQualification:
     delivery_id: int | None
     target_file_id: int | None
     reason: str | None
+    error_code: int | None = None
+    error_details: Mapping | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
