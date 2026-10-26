@@ -19,6 +19,7 @@ from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 from types import SimpleNamespace
 from typing import Any, Callable
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 
 from camctl.capture.files import FileChecksumSave
 from camctl.capture.media_facts import probe_document, saved_source_probe
@@ -82,7 +83,7 @@ from camctl.outputs.read_attempts import (
     retry_read_business, run_owned_read, save_read_result, read_failure_details,
 )
 from camctl.outputs.slots import SlotOutcome, SlotRequest
-from camctl.persistence.models import DbOutcomeKind as _DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import db_failure, db_outcome_errors, DbOutcomeKind as _DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -190,10 +191,15 @@ class RecordingInputCopies:
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
     async def qualify(self, candidate: FileCandidate) -> SaveReceipt:
+        from camctl.outputs.diagnostics import record_qualification
+
         key = new_operation_key()
-        return self._receipt(await self.database.write(
+        receipt = self._receipt(await self.database.write(
             lambda owned: self.repository.grant_file(candidate, key, owned),
             key=key, description="内部输入资格"))
+        if receipt.disposition is SaveDisposition.SAVED:
+            record_qualification(receipt.value, candidate)
+        return receipt
 
     async def copy_state(self, copy_id: int):
         return await self.database.read(
@@ -238,6 +244,7 @@ class PendingMediaRequest:
     action_id: int | None
     file_ids: tuple[int, ...]
     save_error: BaseException | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 def _media_request_values(command):
@@ -277,9 +284,14 @@ class CaptureProcessingSaves:
     def _commit(outcome) -> SaveReceipt:
         if outcome.kind is _DbOutcomeKind.COMPLETED:
             return SaveReceipt(SaveDisposition.SAVED, value=outcome.value)
+        errors = db_outcome_errors(outcome)
+        error = (errors[0] if len(errors) == 1 else
+            db_failure(ConsistencyError, "原媒体申请保存未可靠完成", outcome)) if errors else None
+        if error is not None and not isinstance(error, Exception):
+            raise error
         if outcome.kind is _DbOutcomeKind.ROLLED_BACK:
-            return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
-        return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
+            return SaveReceipt(SaveDisposition.REJECTED, error=error)
+        return SaveReceipt(SaveDisposition.UNKNOWN, error=error)
 
     async def save_check_result(self, command):
         return await self._save(MediaSaveStage.CHECK, command)
@@ -312,6 +324,40 @@ class CaptureProcessingSaves:
                 or not json_equal(_media_request_values(command), _media_request_values(held.command))):
             raise ConsistencyError("尚未保存的原媒体申请不能由后续申请替换")
         held = await self._resolve_owner(held)
+        actual = held.command
+        if isinstance(actual, CheckResultSave) and (actual.media.error is not None or actual.media.issues):
+            tool = None if actual.source_probe is None else actual.source_probe.tool_diagnostics
+            if tool is None or not tool.control_only or actual.media.issues:
+                record_error(actual.media.error or actual.media.issues[0], stage="capture.media_check",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"issues": actual.media.issues, "source_probe": actual.source_probe},
+                    state=held.diagnostic)
+        elif isinstance(actual, RepairResultSave) and actual.error is not None:
+            tool = (actual.failure_probe.tool_diagnostics if actual.failure_probe is not None else
+                    actual.artifact.tool_diagnostics if actual.artifact is not None else None)
+            artifact = actual.artifact
+            control = tool is not None and tool.control_only
+            # 原输入探测已由 CHECK 或 START 消费；这里仅从保存事实派生修复失败。
+            # 缺少新工具事实的旧历史仍保留原消费行为。
+            source_failure = (artifact is None and actual.failure_probe is not None
+                and actual.failure_probe.error is not None and tool is not None)
+            if artifact is not None:
+                control |= artifact.postprocessing_stopped
+                if (artifact.observation.error is not None
+                        or artifact.checksum is not None and artifact.checksum.error is not None
+                        or artifact.synchronization is not None and artifact.synchronization.error is not None):
+                    control = False
+            if not control and not source_failure:
+                record_error(actual.error, stage="capture.media_repair",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"artifact": artifact, "failure_probe": actual.failure_probe},
+                    state=held.diagnostic)
+        elif isinstance(actual, RepairStart) and actual.source_probe is not None and actual.source_probe.error is not None:
+            probe = actual.source_probe
+            if probe.tool_diagnostics is None or not probe.tool_diagnostics.control_only:
+                record_error(probe.error, stage="capture.media_repair_probe",
+                    context={"action_id": held.action_id, "processing_id": actual.processing_id},
+                    details={"source_probe": probe}, state=held.diagnostic)
         try:
             outcome = await self.database.write(
                 lambda owned: getattr(self.repository, stage.value)(held.command, held.key, owned),
@@ -360,7 +406,7 @@ async def resume_media_saves(database, pending, executor=None, *, action_id=None
         async def save_original(_control=None):
             receipt = await saves._save(held.stage, held.command)
             if receipt.disposition is not SaveDisposition.SAVED:
-                raise ConsistencyError(f"原媒体结果未可靠保存: {receipt.error}") from receipt.error
+                raise db_failure(ConsistencyError, f"原媒体结果未可靠保存: {receipt.error}", receipt)
             return receipt
 
         if held.file_ids:
@@ -597,7 +643,9 @@ async def run_recording_media(
             sessions.for_attempt(ticket, idle_timeout_s=flow.read_idle_timeout_s, control=control)))
         step = await obtain_recording_input(current)
         if ticket is not None:
-            await _finish_internal_read(flow, ticket, step)
+            await _finish_internal_read(flow, ticket, step, diagnostic_context={
+                "action_id": action_id, "processing_id": processing_id,
+                "source_device_file_id": source_device_file_id})
         return step
 
     input_step = await run_owned_read(flow, copy_id, read_and_save) if ticket is not None else await read_and_save(None)
@@ -660,7 +708,10 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     async def complete_and_save(_control):
         step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
-        await _finish_internal_read(flow, held.ticket, step)
+        await _finish_internal_read(flow, held.ticket, step, diagnostic_context={
+            "action_id": context.action_id, "processing_id": context.processing_id,
+            "inspection_id": context.inspection_id,
+            "source_device_file_id": context.source_device_file_id})
 
     await run_owned_read(flow, copy_id, complete_and_save)
 
@@ -674,12 +725,13 @@ def _read_dispatched(flow, copy_id):
 
 
 async def _finish_internal_read(flow: MediaFlow, ticket, step: InputStep, *,
-                          max_attempts: int | None = None) -> None:
+                          max_attempts: int | None = None, diagnostic_context=None) -> None:
     """连接已经关闭后保存读取结果；重拷继续原尝试。"""
-    await settle_required(_finish_internal_read_result(flow, ticket, step, max_attempts=max_attempts))
+    await settle_required(_finish_internal_read_result(flow, ticket, step,
+        max_attempts=max_attempts, diagnostic_context=diagnostic_context))
 
 
-async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
+async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diagnostic_context=None):
     from camctl.outputs.read_attempts import require_preparation_settled
 
     if step.phase is InputPhase.READ_NOT_STARTED:
@@ -716,7 +768,7 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     if (step.phase is not InputPhase.INPUT_READY and not step.source_failed
             and not checksum_failed and not verification_failed):
-        raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}")
+        raise ConsistencyError(f"内部读取的本地或保存前提未完成，保留原尝试: {step.phase.value}: {step.error}") from step.error
     succeeded = (step.phase is InputPhase.INPUT_READY
                  or checksum_failed or verification_failed)
     # 原 ticket 的连续编号已由意图／恢复事务核实，实际返回后先持有结果。
@@ -738,7 +790,10 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts):
         run_finish = None
     pending = hold_read_result(flow, AttemptFinish(
         ticket, validate_outcome(ticket, outcome, flow.evidence), flow.occurred_at(),
-        retry_wait=not succeeded and not exhausted, run_finish=run_finish))
+        retry_wait=not succeeded and not exhausted, run_finish=run_finish),
+        context=diagnostic_context,
+        diagnostic_error=step.error if checksum_failed or verification_failed else None,
+        diagnostic_stage=step.phase.value)
     await _save_internal_read_and_settle(flow, pending)
 
 

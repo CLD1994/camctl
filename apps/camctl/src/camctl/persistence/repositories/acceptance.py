@@ -282,7 +282,10 @@ class ProcessInputCommand:
                     evidence={"input_key": uuid.uuid4().hex},
                 )
             )
-        return self._finalize(scope, templates, replace(result, diagnostic_id=diagnostic_id))
+        diagnostics = (() if ack.error_entry is None else ({"error": ack.error_entry,
+                       "context": {"plan_id": plan_id, "request_id": request_id}},))
+        return self._finalize(scope, templates, replace(result, diagnostic_id=diagnostic_id,
+                                                      diagnostics=diagnostics))
 
     def _diagnostic_row(
         self, connection, errors: list, request_id: int | None, plan_id: int | None
@@ -348,6 +351,8 @@ class ProcessInputCommand:
             ack_disposition=self._ack.disposition if self._ack else AckDisposition.NOT_PROVIDED,
             ack_watermark=self._ack.watermark_after if self._ack else 0,
             diagnostic_id=diagnostic_id,
+            diagnostics=tuple({"error": error, "context": {"request_id": request_id,
+                                  "diagnostic_id": diagnostic_id}} for error in errors),
         )
         return self._finalize(scope, templates, result)
 
@@ -377,8 +382,17 @@ class ProcessInputCommand:
         dep_id = self._next_id(connection, "action_dependencies")
         link_id = self._next_id(connection, "auto_preview_links")
 
+        diagnostics = []
         for action in prepared.actions:
-            rows = [self._actions_row(action, plan_id)]
+            action_row = self._actions_row(action, plan_id)
+            rows = [action_row]
+            if not action.ok:
+                values = action_row.after.values
+                code, spec = registered_error_spec("action_error_id", values["error_code"])
+                diagnostics.append({"error": {"code": code, "stage": spec["stage"],
+                                              "details": values["error_details_json"]},
+                                    "context": {"plan_id": plan_id, "action_id": action.action_id,
+                                                "device_id": action.device_id}})
             if action.auto_preview_source is not None:
                 link_values = {
                     "obtain_action_id": action.action_id,
@@ -457,6 +471,8 @@ class ProcessInputCommand:
             ack_disposition=ack.disposition,
             ack_watermark=ack.watermark_after,
             diagnostic_id=diagnostic_id,
+            diagnostics=tuple(diagnostics) + (() if ack.error_entry is None else
+                        ({"error": ack.error_entry, "context": {"plan_id": plan_id}},)),
         )
         return self._finalize(scope, templates, result)
 

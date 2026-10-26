@@ -1,4 +1,4 @@
-"""L6 有序关闭与一次丢弃摘要的单元测试。
+"""L6 有序关闭与一次丢弃摘要的组件集成测试。
 
 关闭次序契约：丢弃计数在生产结束后即为最终值，摘要随停止标记
 交给监听线程在消化完已接纳记录后写出（不经接纳队列）；级别过滤
@@ -27,11 +27,13 @@ class ProbeWriter:
         self.entries: list[LogRecord] = []
         self.thread_ids: list[int] = []
         self.lock = threading.Lock()
+        self.entered = threading.Event()
         self.gate = threading.Event()
         self.gate.set()
         self.fail_messages: set[str] = set()
 
     def __call__(self, record: LogRecord) -> bool:
+        self.entered.set()
         self.gate.wait()
         with self.lock:
             if record.message in self.fail_messages:
@@ -171,6 +173,7 @@ class TestStopMarkerUnderPressure:
         channel.slog(LogRecord(level=LogLevel.WARNING, message="overflow"))
         assert channel.counters.warning_dropped == 1
         channel.start()
+        assert await asyncio.to_thread(writer.entered.wait, 5)
         channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
         assert channel.counters.warning_dropped == 1
 
@@ -191,8 +194,8 @@ class TestStopMarkerUnderPressure:
         assert channel.listener_alive is False
         assert len(_summary_entries(writer)) == 1
 
-    async def test_marker_never_fits_reports_unstopped(self) -> None:
-        """标记无法入队时如实报告未停止，不写摘要、不永久阻塞。"""
+    async def test_short_marker_budget_preserves_pending_records(self) -> None:
+        """正常关闭等待实际消费，不因停止标记预算而丢弃记录。"""
         writer = ProbeWriter()
         writer.gate.clear()
         channel, runtime = _channel_and_runtime(
@@ -202,15 +205,15 @@ class TestStopMarkerUnderPressure:
             channel.slog(LogRecord(level=LogLevel.WARNING, message=f"w{index}"))
         channel.slog(LogRecord(level=LogLevel.WARNING, message="overflow"))
         channel.start()
+        assert await asyncio.to_thread(writer.entered.wait, 5)
         channel.slog(LogRecord(level=LogLevel.WARNING, message="backfill"))
 
-        result = await close_logging(runtime, stop_timeout_s=0.5)
-        assert result.listener_stopped is False
-        assert result.summary_written is False
-        assert _summary_entries(writer) == []
-
-        # 收尾：放行消费者并关闭队列，监听线程经关闭结果退出。
+        closing = asyncio.create_task(close_logging(runtime, stop_timeout_s=0.01))
+        await asyncio.sleep(0.03)
+        assert not closing.done()
         writer.gate.set()
-        channel.async_close()
-        await asyncio.sleep(0.2)
+        result = await closing
+        assert result.listener_stopped is True
+        assert result.summary_written is True
+        assert "backfill" in writer.messages
         assert channel.listener_alive is False

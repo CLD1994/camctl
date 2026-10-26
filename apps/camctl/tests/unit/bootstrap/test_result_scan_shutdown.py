@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -12,6 +13,7 @@ from camctl.bootstrap.background_flow import BackgroundFlow
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.capture.result_scans import PendingResultScan
 from camctl.session.outcome import SessionOutcome
+from camctl.logging_runtime.service import LogChannel
 
 pytestmark = pytest.mark.asyncio
 
@@ -26,7 +28,8 @@ def _world(mocker):
     events = []
     deps = lifecycle.RuntimeDeps(CommandMode.SUBMIT, load_config({}, ConfigDefaults()),
         Path("/state.db"), Path("/session.lock"), Path("/admission.lock"), None)
-    deps.log_runtime = object()
+    deps.log_runtime = SimpleNamespace(channel=create_autospec(LogChannel, instance=True, spec_set=True))
+    mocker.patch("camctl.logging_runtime.standard_logging.install_standard_logging", autospec=True)
     scan = create_autospec(_ClosableScan, instance=True, spec_set=True)
     scan.in_call = False
     scan.close.side_effect = lambda: events.append("scan")
@@ -137,4 +140,4 @@ async def test_failure_diagnostic_wait_cancellation_still_closes_cache_and_share
     assert caught.value.args == ("diagnostic wait canceled",)
     scan.close.assert_called_once()
     close_log.assert_awaited_once()
-    assert events == ["diagnostic", "scan", "logs"]
+    assert events == ["scan", "diagnostic", "logs"]

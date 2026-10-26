@@ -13,12 +13,13 @@ from __future__ import annotations
 import hashlib
 from contextlib import closing
 from decimal import Decimal
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
 
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
+from camctl.logging_runtime.diagnostics import DiagnosticState
 from camctl.history.decoding import decode_event_row
 from camctl.contracts.json_values import is_json_integer, json_equal, parse_exact_json
 from camctl.contracts.history_values import HistoryBoundary
@@ -321,6 +322,7 @@ class ResolveSourcesOutcome:
     source_plan_id: int | None = None
     error_code: int | None = None
     error_details: dict[str, Any] | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -2151,10 +2153,12 @@ class _GrantFileCommand:
                 delivery_id=None,
                 target_file_id=None,
                 reason=f"error_code={error_code}",
+                error_code=error_code, error_details=details,
             ),
         )
 
     def _wait_final(self, error_code: int) -> CommandPlan:
+        item = self._state["obtain_items"].get(self._command.item_id)
         return CommandPlan(
             events=(),
             owners=self._owners,
@@ -2167,6 +2171,8 @@ class _GrantFileCommand:
                 delivery_id=None,
                 target_file_id=None,
                 reason=f"error_code={error_code}",
+                error_code=error_code,
+                error_details=_decoded(item["error_details_json"]) if item is not None else {},
             ),
         )
 
@@ -7820,7 +7826,10 @@ class _FixCleanupTargetsCommand:
             events=tuple(events), owners=self._owners, state_rows=self._state,
             result=CleanupTargetsSaved(
                 CleanupTargetsDisposition.SAVED,
-                tuple(row_id for row_id, _ in members + terminal)))
+                tuple(row_id for row_id, _ in members + terminal),
+                tuple((row_id, ErrorValue("output_not_found", "output_selection",
+                                         {"requested_output_id": str(identity)}))
+                      for row_id, identity in terminal)))
 
     def _scope_targets(self, connection) -> tuple[int, ...] | None:
         """范围清理按固定来源枚举产物；来源未就绪时返回 None 表示等待。
@@ -7934,7 +7943,8 @@ class _FixCleanupTargetsCommand:
             row["after"]["values"]["requested_output_id"]
             for event in saved
             for row in event["body"]["rows"]
-            if row["table"] == "cleanup_items"}
+            if row["table"] == "cleanup_items"
+            and "requested_output_id" in row["after"]["values"]}
         expected = _explicit_cleanup_request(action)
         if expected is None:
             scope = self._scope_targets(connection)
@@ -7946,7 +7956,12 @@ class _FixCleanupTargetsCommand:
             read_only=True,
             result=CleanupTargetsSaved(
                 CleanupTargetsDisposition.ALREADY,
-                _saved_member_ids(connection, command.action_id)))
+                _saved_member_ids(connection, command.action_id),
+                tuple((row["id"], ErrorValue("output_not_found", "output_selection",
+                          row["after"]["values"]["error_details_json"]))
+                      for event in saved for row in event["body"]["rows"]
+                      if row["table"] == "cleanup_items"
+                      and row["after"]["values"].get("error_code") == _CLEANUP_ITEM_NOT_FOUND)))
 
 
 def _explicit_cleanup_request(action) -> tuple[int, ...] | None:

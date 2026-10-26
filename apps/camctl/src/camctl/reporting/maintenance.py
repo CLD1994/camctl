@@ -12,6 +12,8 @@ import enum
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from camctl.logging_runtime.diagnostics import record_error
+
 __all__ = [
     "MaintenanceLimits",
     "ReportMaintenanceContext",
@@ -91,9 +93,11 @@ async def maintain_reports(
         return ReportMaintenanceResult(ReportMaintenanceOutcome.NO_PENDING_REPORT)
     try:
         payload = await context.ports.generate(job=None)
-    except Exception:
+    except Exception as error:
+        record_error(error, stage="report_generate")
         return ReportMaintenanceResult(ReportMaintenanceOutcome.GENERATION_FAILED)
     published = await context.ports.publish(report_id=0, payload=payload)
     if not published:
+        record_error(RuntimeError("报告发布返回失败"), stage="report_publish")
         return ReportMaintenanceResult(ReportMaintenanceOutcome.GENERATION_FAILED)
     return ReportMaintenanceResult(ReportMaintenanceOutcome.PUBLISHED)

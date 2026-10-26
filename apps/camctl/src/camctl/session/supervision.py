@@ -78,6 +78,7 @@ class TaskFailure:
 
     record: TaskRecord
     error: str
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,7 @@ class Supervisor:
                     await asyncio.shield(_consume(owner, task))
                 except Exception as error:  # 接手异常保留诊断，不吞掉。
                     failed.append(
-                        TaskFailure(record=record, error=f"{type(error).__name__}: {error}")
+                        TaskFailure(record=record, error=f"{type(error).__name__}: {error}", exception=error)
                     )
                 else:
                     settled.append(record)

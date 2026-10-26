@@ -35,8 +35,10 @@ from camctl.cancellation.rules import (
     load_eligibility_inputs,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.logging_runtime.diagnostics import record_error
+from camctl.operations.models import ErrorValue
 from camctl.persistence.business import BusinessDatabase, settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.persistence.transaction import TransactionError
 
 __all__ = [
@@ -117,7 +119,7 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                 await _save_target(runtime, target_id, RecordCancelResult(
                     item_id,occurred,code='task_cancel_unsupported',
                     details={'action_instance_id':str(target_id)}),
-                    action_type=loaded.action["type"])
+                    action_type=loaded.action["type"], origin_action_id=command.origin_action_id)
             elif eligibility is CancelEligibility.UNVERIFIED:
                 raise ConsistencyError(
                     f"目标取消事实不可靠，先核实再施加取消: {target_id}")
@@ -158,7 +160,8 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
                 if outcome.failed:
                     await _save_target(runtime, target_id, RecordCancelResult(
                         item_id,runtime.occurred_at(),code='target_cleanup_failed',
-                        details={'action_instance_id':str(target_id)}))
+                        details={'action_instance_id':str(target_id)}),
+                        origin_action_id=command.origin_action_id)
                 else:
                     basis = (
                         CancelOutcomeChoice.CANCELED
@@ -181,9 +184,17 @@ async def apply_cancel(command: ApplyCancel, runtime: CancellationRuntime) -> Ca
     return CancelProgress(items=tuple(progress))
 
 
-async def _save_target(runtime, target_id, request, *, motor_permit=None, action_type=None):
+async def _save_target(runtime, target_id, request, *, motor_permit=None, action_type=None,
+                       origin_action_id=None):
     """保留本次原输入与原键；电机取消结果未知时核实后结束会话。"""
     database = runtime.database
+    if isinstance(request, RecordCancelResult) and request.code is not None:
+        record_error(ErrorValue(request.code, "execution", request.details),
+                     stage="cancel_target",
+                     context={"database_id": database.metadata.instance_id,
+                              "origin_action_id": origin_action_id,
+                              "target_action_id": target_id, "item_id": request.item_id},
+                     state=request.diagnostic_state)
     if action_type is None:
         row = await database.read(
             lambda owned: _fetchone(
@@ -242,7 +253,7 @@ async def _save_target(runtime, target_id, request, *, motor_permit=None, action
 
 def _completed(outcome) -> None:
     if outcome.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"取消生效事务未提交: {outcome.error}")
+        raise db_failure(ConsistencyError, f"取消生效事务未提交: {outcome.error}", outcome)
 
 
 @dataclass(frozen=True)

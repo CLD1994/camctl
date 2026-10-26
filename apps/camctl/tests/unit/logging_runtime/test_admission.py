@@ -55,7 +55,8 @@ class TestAdmissionKind:
     def test_at_or_above_high_keeps_warning_error_only(self, level: LogLevel) -> None:
         for queue in (H, H + 1, Q_CAP):
             decision = decide_admission(_input(level=level, queue=queue))
-            expected = "accepted" if level in (LogLevel.WARNING, LogLevel.ERROR) else "dropped"
+            expected = ("waiting" if level is LogLevel.ERROR else "dropped") if queue == Q_CAP else (
+                "accepted" if level in (LogLevel.WARNING, LogLevel.ERROR) else "dropped")
             assert decision.kind.value == expected, (level, queue)
 
     def test_middle_zone_debug_dropped(self) -> None:

@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 import asyncio
 import json
 from contextlib import closing
@@ -399,7 +401,7 @@ async def _begin_query_attempt(
             _save_options = dict()
             finished = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
             if finished.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"查询预算耗尽的结果未保存: {finished.error}")
+                raise db_failure(ConsistencyError, f"查询预算耗尽的结果未保存: {finished.error}", finished)
             if on_progress is not None:
                 on_progress()
         return None
@@ -442,7 +444,7 @@ async def _advance_winddown(
         _save_options = dict()
         result = (await runtime.database.write(lambda owned: runtime.operations.finish_stale_runs(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if result.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"未派发残留收场的结束事实未保存: {result.error}")
+            raise db_failure(ConsistencyError, f"未派发残留收场的结束事实未保存: {result.error}", result)
         if on_progress is not None:
             on_progress()
         return

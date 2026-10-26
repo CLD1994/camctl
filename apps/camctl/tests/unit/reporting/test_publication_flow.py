@@ -373,7 +373,7 @@ def test_write_failure_skips_store(monkeypatch):
 def test_prepare_rollback_stops_before_move(monkeypatch):
     session, files = FakeSession(), FileFake(monkeypatch)
     session.responses["prepare"] = DbOutcome(
-        kind=DbOutcomeKind.ROLLED_BACK, error="guard")
+        kind=DbOutcomeKind.ROLLED_BACK, error=RuntimeError("guard"))
     result = _deliver(session, files)
     assert result.outcome is publication.DeliveryOutcome.STORE_FAILED
     assert not files.moved
@@ -382,7 +382,7 @@ def test_prepare_rollback_stops_before_move(monkeypatch):
 def test_intent_unknown_stops_before_move(monkeypatch):
     session, files = FakeSession(), FileFake(monkeypatch)
     session.responses["record_intent"] = DbOutcome(
-        kind=DbOutcomeKind.UNKNOWN, error="unknown")
+        kind=DbOutcomeKind.UNKNOWN, error=RuntimeError("unknown"))
     result = _deliver(session, files)
     assert result.outcome is publication.DeliveryOutcome.UNKNOWN
     assert not files.moved
@@ -413,7 +413,7 @@ def test_move_unknown_keeps_result_uncertain(monkeypatch):
 def test_save_publication_rollback_reports_store_failure(monkeypatch):
     session, files = FakeSession(), FileFake(monkeypatch)
     session.responses["save_publication"] = DbOutcome(
-        kind=DbOutcomeKind.ROLLED_BACK, error="guard")
+        kind=DbOutcomeKind.ROLLED_BACK, error=RuntimeError("guard"))
     result = _deliver(session, files)
     assert result.outcome is publication.DeliveryOutcome.STORE_FAILED
 
@@ -421,7 +421,7 @@ def test_save_publication_rollback_reports_store_failure(monkeypatch):
 def test_save_publication_unknown_reports_uncertain(monkeypatch):
     session, files = FakeSession(), FileFake(monkeypatch)
     session.responses["save_publication"] = DbOutcome(
-        kind=DbOutcomeKind.UNKNOWN, error="unknown")
+        kind=DbOutcomeKind.UNKNOWN, error=RuntimeError("unknown"))
     result = _deliver(session, files)
     assert result.outcome is publication.DeliveryOutcome.UNKNOWN
 
@@ -437,7 +437,7 @@ def test_local_settlement_follows_publication(monkeypatch):
 def test_local_settlement_failure_keeps_publication(monkeypatch):
     session, files = FakeSession(), FileFake(monkeypatch)
     session.responses["settle_local"] = DbOutcome(
-        kind=DbOutcomeKind.ROLLED_BACK, error="conflict")
+        kind=DbOutcomeKind.ROLLED_BACK, error=RuntimeError("conflict"))
     result = _deliver(session, files, local_actions=(7,))
     assert result.outcome is publication.DeliveryOutcome.PUBLISHED
     assert result.error is not None

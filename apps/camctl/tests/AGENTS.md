@@ -50,6 +50,7 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 - **集成测试的守卫要显式注册。** 事件守卫（`register_*_guards()`）不经 import 链自动触发。新文件按所在目录的惯例补齐：outputs 侧常见 `register_operation_guards()` + `register_capture_guards()`；capture 侧常见 `register_outputs_guards()`。漏注册时写入类用例会以"未接入具名校验"失败。参考同目录既有测试文件的开头。
 - **单元测试不启动真实线程或子进程**，不访问真实文件系统；线程、事件循环与进程组合放集成测试。
+- **错误诊断验证覆盖实际结果消费者。** 业务替身中的原错误应能到达公共诊断输出；真实日志通道、文件和子进程按集成测试验证。导入业务模块会读取真实包资源时，该组合也归入集成测试，不能只根据测试函数体没有 I/O 分类。
 - **测试目录带 `__init__.py`**，同目录模块（如 fixtures）靠 pytest 的 prepend 导入。
 - **替身受真实接口约束**（stub/fake/mock 按真实协作方的契约编写），具体要求见[共享测试规则](../../../.agents/rules/testing.md)。
 

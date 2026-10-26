@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 from contextlib import closing
 from typing import Any, Awaitable, Callable
 
@@ -365,7 +367,7 @@ class TargetSettlement:
         outcome = await settle_origin_cancel(
             OriginSettle(origin_action_id=target_action_id), self._runtime())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ValueError(f"发起者收场未提交: {outcome.error}")
+            raise db_failure(ValueError, f"发起者收场未提交: {outcome.error}", outcome)
         return SettlementOutcome(complete=True)
 
     async def _pending_withdrawal_items(

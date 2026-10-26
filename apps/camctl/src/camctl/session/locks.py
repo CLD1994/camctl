@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Protocol, cast
+from camctl.operations.error_diagnostics import attach_diagnostic_facts
 
 
 class LockOperation(Enum):
@@ -75,6 +76,8 @@ class LockError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.facts = facts
+        if facts is not None:
+            attach_diagnostic_facts(self, {"lock": _diagnostic_facts(facts)})
 
 
 class SessionLockConflictError(LockError):
@@ -100,6 +103,17 @@ def _attach_lock_facts(error: BaseException, facts: _LockErrorFacts) -> None:
     if isinstance(error, LockError):
         error.facts = facts
     setattr(error, _LOCK_FACTS_ATTRIBUTE, facts)
+    attach_diagnostic_facts(error, {"lock": _diagnostic_facts(facts)})
+
+
+def _diagnostic_facts(facts: _LockErrorFacts) -> dict:
+    """锁模块定义自身事实字段，公共异常编码不依赖锁实现。"""
+    return {"operation": facts.operation.value, "path": str(facts.path),
+            "original_error": facts.original_error,
+            "lock_result": facts.lock_result.value,
+            "unlock_result": facts.unlock_result.value,
+            "close_result": facts.close_result.value,
+            "secondary_errors": tuple(_diagnostic_facts(item) for item in facts.secondary_errors)}
 
 
 def _facts(

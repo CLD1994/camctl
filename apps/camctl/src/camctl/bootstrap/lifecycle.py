@@ -406,13 +406,12 @@ def _log_wiring(
 
     stderr_failed = False
 
-    def report_writer_failure(message: str) -> None:
+    def report_writer_failure(message: str) -> bool:
         nonlocal stderr_failed
         if on_stderr_diagnostic is not None:
-            on_stderr_diagnostic(message)
-            return
+            return on_stderr_diagnostic(message) is not False
         if stderr_failed:
-            return
+            return False
         import sys
 
         try:
@@ -420,6 +419,8 @@ def _log_wiring(
             sys.stderr.flush()
         except Exception:
             stderr_failed = True
+            return False
+        return True
 
     channel = LogChannel(
         capacity=log_config.queue_capacity,
@@ -428,6 +429,7 @@ def _log_wiring(
         level=level,
         sample_probability=float(log_config.info_sample_probability),
         writer=writer,
+        fallback=report_writer_failure,
     )
     channel.start()
     return LogRuntime(
@@ -475,9 +477,14 @@ async def _emit_log_diagnostic(
         try:
             result = await deps.log_runtime.channel.deliver_important(
                 LogRecord(level=LogLevel.ERROR, message=message))
-            if result.delivered is True:
+            if result.delivered is True or result.fallback_written is True:
                 return
         except Exception as error:
+            from camctl.logging_runtime.service import admission_result_for
+
+            admission = admission_result_for(error)
+            if admission is not None and admission.fallback_written is True:
+                return
             # deliver_important 等待监听线程凭据，异常代表文件通道不
             # 可用；不能仅凭 alog 入队结果宣称诊断已写出。
             message += f"\n日志诊断写入异常: {_format_session_exception(error)}"
@@ -497,10 +504,10 @@ def _mark_log_path_unsafe(deps: RuntimeDeps) -> None:
         ChannelError("共享文件日志 I/O 或协调失败"))
 
 
-def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
+def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> bool:
     """stderr 失败后停止重复尝试，且不写入 stdout。"""
     if deps.stderr_diagnostic_failed:
-        return
+        return False
     import sys
 
     try:
@@ -508,6 +515,8 @@ def _write_stderr_diagnostic(deps: RuntimeDeps, message: str) -> None:
         sys.stderr.flush()
     except Exception:
         deps.stderr_diagnostic_failed = True
+        return False
+    return True
 
 
 def _attach_runtime_close_note(
@@ -535,10 +544,24 @@ async def _close_log_runtime(
     primary_error: BaseException | None = None,
 ) -> None:
     from camctl.logging_runtime.lifecycle import close_logging
+    from camctl.logging_runtime.diagnostics import flush_diagnostics
 
+    diagnostic_control = None
+    try:
+        await flush_diagnostics()
+    except Exception as error:
+        _write_stderr_diagnostic(deps, "业务错误诊断交接失败: " + _format_session_exception(error))
+    except BaseException as error:
+        # 已进入日志收场时必要业务已经结束；交接完成后仍须关闭组件，
+        # 最后继续交付原控制对象。
+        diagnostic_control = error
     try:
         result = await close_logging(deps.log_runtime)
     except BaseException as error:
+        if diagnostic_control is not None:
+            _attach_runtime_close_note(diagnostic_control, "后续日志关闭异常", error)
+            _write_stderr_diagnostic(deps, "日志关闭失败: " + _format_session_exception(error))
+            raise diagnostic_control
         notes = "; ".join(tuple(getattr(error, "__notes__", ())))
         diagnostic = (
             "共享日志关闭诊断：stage=log_close; outcome=unknown; "
@@ -569,6 +592,8 @@ async def _close_log_runtime(
             note = f"后续日志关闭错误: {result.close_error}"
             if note not in tuple(getattr(primary_error, "__notes__", ())):
                 primary_error.add_note(note)
+    if diagnostic_control is not None:
+        raise diagnostic_control
 
 
 async def _on_report_recovered(
@@ -711,11 +736,14 @@ def _failure_log_wiring(deps: RuntimeDeps):
             )
             channel_box["channel"] = channel
             deps.failure_channel = channel
+        from camctl.logging_runtime.diagnostics import diagnostic_record_for, record_error
+
+        state = record_error(error, stage="report", context={"command": deps.mode.value})
+        trigger = diagnostic_record_for(state)
+        if trigger is None:
+            trigger = LogRecord(LogLevel.ERROR, "报告处理失败: " + _format_session_exception(error))
         return CopyRequest(
-            trigger=LogRecord(
-                level=LogLevel.ERROR,
-                message=f"报告处理失败: {type(error).__name__}: {error}",
-            ),
+            trigger=trigger,
             staging_root=staging,
             ready_dir=Path(deps.config.paths.ready).expanduser(),
             channel=channel,
@@ -964,6 +992,39 @@ async def execute_command(
     wake: Any = None,
     poll_interval_s: float | None = None,
 ) -> SessionOutcome:
+    """为本命令及原业务子任务装配共同诊断目标和第三方路由。"""
+    from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
+    from camctl.logging_runtime.standard_logging import install_standard_logging
+
+    channel = None if deps.log_runtime is None else deps.log_runtime.channel
+    fallback = lambda message: _write_stderr_diagnostic(deps, message)
+    installation = None
+    with error_diagnostics_context(channel, fallback, background=True):
+        try:
+            if channel is not None:
+                installation = install_standard_logging(channel, fallback)
+            return await _execute_command(
+                deps, source, flows=flows, restricted_flows=restricted_flows,
+                wake=wake, poll_interval_s=poll_interval_s,
+            )
+        finally:
+            try:
+                # 无文件日志或装配尚未进入正常收场的路径也交付原诊断。
+                await flush_diagnostics()
+            finally:
+                if installation is not None:
+                    installation.close()
+
+
+async def _execute_command(
+    deps: RuntimeDeps,
+    source: ParsedInput | InputDiagnostic | None,
+    *,
+    flows: Mapping[str, Any] | None = None,
+    restricted_flows: Mapping[str, Any] | None = None,
+    wake: Any = None,
+    poll_interval_s: float | None = None,
+) -> SessionOutcome:
     """执行一次 run/submit 会话；调用方负责运行事件循环。
 
     flows、restricted_flows、wake 与 poll_interval_s 是业务流程装配
@@ -1199,14 +1260,6 @@ async def execute_command(
         outcome = await run_session(context, source)
     except BaseException as error:
         primary_error = error
-        try:
-            await _emit_session_error(deps, _format_session_exception(error))
-        except BaseException as diagnostic_error:
-            if isinstance(error, Exception) and not isinstance(diagnostic_error, Exception):
-                _attach_session_diagnostic_error(diagnostic_error, "此前会话异常", error)
-                primary_error = diagnostic_error
-                raise
-            _attach_session_diagnostic_error(error, "会话失败诊断异常", diagnostic_error)
         raise
     finally:
         selected_control = (
@@ -1234,6 +1287,10 @@ async def execute_command(
             if id(error) not in seen_cleanup_errors:
                 seen_cleanup_errors.add(id(error))
                 cleanup_errors.append((label, error))
+                if isinstance(error, Exception):
+                    from camctl.logging_runtime.diagnostics import record_error
+
+                    record_error(error, stage="shutdown", context={"resource": label})
             if isinstance(error, Exception):
                 if selected_control is not None:
                     attach_cleanup_error(selected_control, label, error)
@@ -1260,14 +1317,6 @@ async def execute_command(
             else:
                 attach_cleanup_error(selected_control, label, error)
 
-        # 会话失败结论先于监督方收场与日志关闭记录。
-        if outcome is not None and not outcome.succeeded:
-            try:
-                await _emit_session_error(
-                    deps, _failed_outcome_message(deps, outcome)
-                )
-            except BaseException as error:
-                remember_cleanup_error("会话失败诊断异常", error)
         async def stop_worker(worker):
             nonlocal outcome
             if worker is None:
@@ -1276,11 +1325,13 @@ async def execute_command(
             if stopped.state_failure is not None:
                 if outcome is not None:
                     outcome = _shutdown_state_outcome(outcome, stopped.state_failure)
-                await _emit_session_error(deps, stopped.state_failure.error_message)
+                from camctl.logging_runtime.diagnostics import record_error
+                record_error(_worker_failure_details(stopped.state_failure), stage="report_shutdown")
             elif stopped.configuration_failure is not None:
                 if outcome is not None:
                     outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
-                await _emit_session_error(deps, stopped.configuration_failure.error_message)
+                from camctl.logging_runtime.diagnostics import record_error
+                record_error(_worker_failure_details(stopped.configuration_failure), stage="report_shutdown")
 
         for worker in (supervisor, restricted_supervisor):
             try:
@@ -1315,6 +1366,16 @@ async def execute_command(
                         scan.close()
                     except BaseException as error:
                         remember_cleanup_error("结果读取缓存关闭异常", error)
+        # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
+        try:
+            if primary_error is not None:
+                from camctl.logging_runtime.diagnostics import diagnostic_state_for
+                if diagnostic_state_for(primary_error) is None:
+                    await _emit_session_error(deps, _format_session_exception(primary_error))
+            if outcome is not None and not outcome.succeeded:
+                await _emit_session_error(deps, _failed_outcome_message(deps, outcome))
+        except BaseException as error:
+            remember_cleanup_error("会话失败诊断异常", error)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(
@@ -1412,12 +1473,18 @@ def _emergency_settlement_of(deps: RuntimeDeps):
     return settle
 
 
+def _worker_failure_details(failure: ResultFailureMessage) -> dict:
+    """消费子进程返回的完整有限诊断，保留降级通道与容量事实。"""
+    return {**vars(failure), "error_kind": failure.error_kind.value}
+
+
 def _shutdown_state_outcome(
     outcome: SessionOutcome, failure: ResultFailureMessage,
 ) -> SessionOutcome:
     """收场的状态库错误主导普通报告错误，其他已有致命错误保持并附加诊断。"""
     details = {"stage": "shutdown",
-               "message": f"{failure.error_code}: {failure.error_message}"}
+               "message": f"{failure.error_code}: {failure.error_message}",
+               "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
     previous = dict(outcome.details)
@@ -1433,7 +1500,8 @@ def _shutdown_configuration_outcome(
     outcome: SessionOutcome, failure: ResultFailureMessage,
 ) -> SessionOutcome:
     """配置前提错误主导普通报告错误，保留已有致命主错误及诊断。"""
-    details = {"stage": "shutdown", "message": failure.error_message}
+    details = {"stage": "shutdown", "message": failure.error_message,
+               "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
     previous = dict(outcome.details)

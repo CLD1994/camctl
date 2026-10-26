@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 from dataclasses import dataclass
 from typing import AsyncIterable, Awaitable, Callable, Iterable
 
@@ -167,7 +169,7 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                 continue
             if outcome.kind is DbOutcomeKind.UNKNOWN:
                 return False
-            raise ConsistencyError(f"Action6 原检查结果重送被拒绝: {outcome.error}")
+            raise db_failure(ConsistencyError, f"Action6 原检查结果重送被拒绝: {outcome.error}", outcome)
 
     batch_size = _inspection_batch_size(flow)
     after_inspection_id = 0
@@ -206,7 +208,7 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                 continue
             if outcome.kind is DbOutcomeKind.UNKNOWN:
                 return False
-            raise ConsistencyError(f"Action6 未结束检查收场被拒绝: {outcome.error}")
+            raise db_failure(ConsistencyError, f"Action6 未结束检查收场被拒绝: {outcome.error}", outcome)
         after_inspection_id = rows[-1][0]
     slot_flow = flow if flow is not None else SimpleNamespace(
         database=runtime.database, pending_read_business=runtime.pending_read_business,

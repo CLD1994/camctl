@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 import asyncio
 from contextlib import closing
 from dataclasses import dataclass, field, replace
@@ -24,8 +26,9 @@ from camctl.contracts.values import (
 from camctl.contracts.workflow_errors import (
     registered_error, validate_error_details,
 )
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 
@@ -423,6 +426,7 @@ class PendingWorkFileResult:
     outcome: WorkFileSingleOutcome
     detail: str | None
     scan: CleanupScan | None = None
+    diagnostic_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -507,7 +511,7 @@ def _require_completed(outcome, stage: str) -> None:
     """仓储结果不是完成时按数据库错误保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return
-    raise WorkFileCleanupError(stage, str(outcome.error))
+    raise db_failure(lambda detail: WorkFileCleanupError(stage, detail), str(outcome.error), outcome)
 
 
 def _delete_failure(facts: WorkFileFacts) -> WorkFileFailure:
@@ -527,6 +531,7 @@ async def _save_result(
     facts: WorkFileFacts, outcome: WorkFileOutcome,
     failure: WorkFileFailure | None, context: WorkFileContext,
     *, advance_cursor: bool, detail: str | None = None,
+    exception: BaseException | None = None, stage: str = "work_file_cleanup",
 ) -> None:
     """保存清理结果；与游标推进同一事务提交。"""
     request = CleanupResultSave(
@@ -539,6 +544,12 @@ async def _save_result(
                  else WorkFileSingleOutcome.DELETED), detail=detail,
         scan=context.history.scan if advance_cursor else None)
     context.pending_results[facts.file_id] = pending
+    if exception is not None:
+        record_error(exception, stage=stage, state=pending.diagnostic_state,
+                     context={"file_id": facts.file_id,
+                              "action_id": facts.owner_action_id,
+                              "delivery_id": facts.owner_delivery_id},
+                     details={"failure": failure, "relative_path": facts.relative_path})
     await _save_pending_result(pending, context)
 
 
@@ -595,7 +606,8 @@ async def _perform_deletion(
     if isinstance(observation, OSError):
         await _save_result(
             facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
-            advance_cursor=advance_cursor, detail=str(observation))
+            advance_cursor=advance_cursor, detail=str(observation),
+            exception=observation, stage="work_file_query")
         return WorkFileSingleOutcome.FAILED, str(observation), True
     if observation is False:
         await _save_result(
@@ -607,7 +619,8 @@ async def _perform_deletion(
     except OSError as failure:
         await _save_result(
             facts, WorkFileOutcome.FAILED, _delete_failure(facts), context,
-            advance_cursor=advance_cursor, detail=str(failure))
+            advance_cursor=advance_cursor, detail=str(failure),
+            exception=failure, stage="work_file_delete")
         return WorkFileSingleOutcome.FAILED, str(failure), True
     await _save_result(
         facts, WorkFileOutcome.COMPLETED, None, context,

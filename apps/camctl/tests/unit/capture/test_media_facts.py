@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from camctl.capture.media_facts import probe_document, read_probe
-from camctl.host_files.media import MediaProbe, MediaStream
+from camctl.host_files.media import MediaProbe, MediaStream, MediaToolResult
 
 
 def test_probe_document_round_trips_actual_video_metrics() -> None:
@@ -43,6 +43,30 @@ def test_read_probe_preserves_older_media_fact_documents() -> None:
 
     assert probe.streams[0].frame_count is None
     assert probe.streams[0].fps is None
+    assert probe.tool_diagnostics is None
+
+
+@pytest.mark.parametrize("control", [True, False])
+def test_probe_document_keeps_only_explicit_tool_control_fact(control) -> None:
+    original = MediaProbe(None, "tool_failed: original", tool_diagnostics=
+        MediaToolResult(control_stopped=control))
+
+    document = probe_document(original)
+    restored = read_probe(document)
+
+    assert document == {"duration_s": None, "error": original.error,
+        "format_name": None, "streams": [], "tool_control": control}
+    assert restored.tool_diagnostics.control_only is control
+    assert restored.tool_diagnostics.outcome is None
+    assert restored.tool_diagnostics.exception is None
+
+
+@pytest.mark.parametrize("control", [None, 0, 1, "true", []])
+def test_read_probe_rejects_non_boolean_tool_control(control) -> None:
+    document = probe_document(MediaProbe(None, "tool_failed: original"))
+    document["tool_control"] = control
+    with pytest.raises(ValueError):
+        read_probe(document)
 
 
 @pytest.mark.parametrize("frame_count", [True, -1, Decimal("2"), "2.5"])

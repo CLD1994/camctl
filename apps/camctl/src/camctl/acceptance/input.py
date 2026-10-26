@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
@@ -59,6 +59,7 @@ class InputRead:
     payload: bytes | None
     stage: InputStage | None
     detail: str | None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
     @property
     def failed(self) -> bool:
@@ -81,6 +82,7 @@ class InputDiagnostic:
     stage: InputStage
     detail: str
     request_id: None = None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 async def read_input(path: str, reader: InputFileReader) -> InputRead:
@@ -89,7 +91,7 @@ async def read_input(path: str, reader: InputFileReader) -> InputRead:
         payload = reader.read(path)
     except InputReadFailure as error:
         return InputRead(
-            path=path, payload=None, stage=error.stage, detail=str(error)
+            path=path, payload=None, stage=error.stage, detail=str(error), exception=error
         )
     return InputRead(path=path, payload=payload, stage=None, detail=None)
 
@@ -102,7 +104,7 @@ def parse_input(read: InputRead) -> ParsedInput | InputDiagnostic:
     """
     if read.payload is None:
         assert read.stage is not None and read.detail is not None
-        return InputDiagnostic(path=read.path, stage=read.stage, detail=read.detail)
+        return InputDiagnostic(path=read.path, stage=read.stage, detail=read.detail, exception=read.exception)
     try:
         text = read.payload.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -110,6 +112,7 @@ def parse_input(read: InputRead) -> ParsedInput | InputDiagnostic:
             path=read.path,
             stage=InputStage.DECODE,
             detail=f"输入不是有效的 UTF-8 文本: {error}",
+            exception=error,
         )
     try:
         document = parse_exact_json(text)
@@ -118,6 +121,7 @@ def parse_input(read: InputRead) -> ParsedInput | InputDiagnostic:
             path=read.path,
             stage=InputStage.PARSE,
             detail=str(error),
+            exception=error,
         )
     return ParsedInput(path=read.path, document=document)
 

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, Mapping
 
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.ports import InputHandoff, StaticActionCatalog
 from camctl.contracts.values import OperationKey
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_failure, db_outcome_for
 
 __all__ = [
     "AcceptanceContext",
@@ -61,6 +61,7 @@ class AcceptanceResult:
     diagnostic_id: int | None = None
     #: submit 的事务内接管结果；run 的输入受理不计算该字段。
     needs_run: bool | None = None
+    diagnostics: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,17 +119,34 @@ async def accept_input(
         occurred_at=occurred_at,
         submit_handoff=context.submit_handoff,
     )
-    outcome = await database.write(
-        lambda owned: context.repository.process_input(command, key, owned),
-        key=key,
-        description="输入处理",
-    )
+    from camctl.logging_runtime.diagnostics import record_error
+
+    if isinstance(source, InputDiagnostic):
+        record_error(source.exception or {"message": source.detail}, stage="input_" + source.stage.value,
+                     context={"path": source.path, "operation_key": key})
+    def record_result_diagnostics(result):
+        if not isinstance(source, InputDiagnostic):
+            for diagnostic in result.diagnostics:
+                record_error(diagnostic["error"], stage="admission",
+                             context={"operation_key": key, "input_path": source.path,
+                                      **diagnostic.get("context", {})})
+
+    try:
+        outcome = await database.write(
+            lambda owned: context.repository.process_input(command, key, owned),
+            key=key,
+            description="输入处理",
+        )
+    except BaseException as error:
+        actual = db_outcome_for(error)
+        if (actual is not None and actual.kind is DbOutcomeKind.COMPLETED
+                and isinstance(actual.value, AcceptanceResult)):
+            record_result_diagnostics(actual.value)
+        raise
     if outcome.kind is DbOutcomeKind.COMPLETED:
+        record_result_diagnostics(outcome.value)
         return outcome.value
-    error = AcceptanceStateError(
-        f"输入处理未完成（{outcome.kind.value}）: {outcome.error}"
-    )
+    error = db_failure(AcceptanceStateError,
+        f"输入处理未完成（{outcome.kind.value}）: {outcome.error}", outcome)
     error.outcome_kind = outcome.kind
-    if outcome.error is None:
-        raise error
-    raise error from outcome.error
+    raise error

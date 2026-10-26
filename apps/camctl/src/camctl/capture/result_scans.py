@@ -15,9 +15,11 @@ from camctl.devices.recording_completion import completed_file_wait_source
 from camctl.operations.models import AttemptTicket, ValidatedOutcome
 from camctl.operations.owned_calls import check_call_interruption
 from camctl.operations.validation import validate_outcome
+from camctl.operations.tool_diagnostics import DiagnosticsValidationError
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.logging_runtime.performance import measure_performance
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 
 
 @dataclass
@@ -41,6 +43,8 @@ class PendingResultScan:
     interrupted: bool = False
     #: 本轮主机不再读取；实际扫描是否完整仍由可靠末页单独表达。
     finished: bool = False
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    validation_diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     reading_context: ResultReadingContext = field(init=False)
 
     def __post_init__(self):
@@ -63,7 +67,7 @@ async def resume_result_page_saves(database, *, pending_scans, repository):
                 attempt_no=pending.ticket.attempt_id, page_no=pending.saves.pending.request.page_no):
             receipt = (await pending.saves.resume_save(repository, database))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}")
+            raise db_failure(ConsistencyError, f"原结果页保存尚未可靠完成（{receipt.kind.value}）: {receipt.error}", receipt)
 
 
 async def advance_result_scan(pending: PendingResultScan, *, runtime,
@@ -100,7 +104,16 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
             occurred_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
             if not isinstance(page, ResultPage):
                 raise ConsistencyError("分页端口未返回完整实际 ResultPage")
-            validated = validate_outcome(pending.ticket, page.outcome, runtime.evidence)
+            record_call_outcome(page.outcome, ticket=pending.ticket,
+                context={"stage": "capture.result_page", "page_no": pending.page_no},
+                state=pending.diagnostic)
+            try:
+                validated = validate_outcome(pending.ticket, page.outcome, runtime.evidence)
+            except DiagnosticsValidationError as error:
+                record_error(error, stage="capture.result_page_validation",
+                    context={"ticket": pending.ticket, "page_no": pending.page_no},
+                    details={"outcome": page.outcome}, state=pending.validation_diagnostic)
+                raise
             request = ResultPageSave(pending.ticket, pending.page_no, pending.cursor, validated, occurred_at)
             pending.saves.begin(request)
             pending.returned_ns = returned_ns
@@ -124,6 +137,9 @@ async def _accept_saved_page(pending, runtime, page_qualified):
 
 async def _apply_saved_page(pending, runtime, page_qualified, held):
     original = held.request
+    record_call_outcome(original.outcome.outcome, ticket=original.ticket,
+        context={"stage": "capture.result_page", "page_no": original.page_no},
+        state=pending.diagnostic)
     delivery_error = None
     try:
         with measure_performance("result_page_save", run_id=pending.ticket.run_id,
@@ -135,7 +151,7 @@ async def _apply_saved_page(pending, runtime, page_qualified, held):
             raise
         delivery_error = error
     if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}")
+        raise db_failure(ConsistencyError, f"原结果页保存未完成（{receipt.kind.value}）: {receipt.error}", receipt)
     page = page_from_outcome(original.ticket, original.outcome.outcome, cursor=original.cursor)
     # 所有读取完成后一次交接该页；读取失败仍保留原response供下次恢复。
     saved = SavedResultPage(pending.saves.pending.response, page, original.occurred_at)

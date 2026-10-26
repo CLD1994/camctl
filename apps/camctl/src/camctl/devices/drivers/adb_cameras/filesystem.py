@@ -41,11 +41,15 @@ MAX_METADATA_BATCH_SIZE = 128
 def _error(raw, operation, reason):
     details: dict[str, Any] = {"reason": reason}
     if raw is not None:
-        details.update(transport_error=raw.error, output_failure=raw.output_failure)
+        details.update(transport_error=raw.error, output_failure=raw.output_failure,
+            used_grace_s=raw.used_grace_s,
+            signal_failures=[{"stage": failure.stage.value, "message": failure.message}
+                             for failure in raw.signal_failures])
         if raw.exit is not None:
             details.update(local_exit_code=raw.exit.exit_code, local_signal=raw.exit.signal)
         if raw.stderr is not None:
-            details["stderr"] = raw.stderr.decode("utf-8", "replace")
+            details["stderr"] = raw.stderr.decode("utf-8", "backslashreplace")
+            details["stderr_hex"] = raw.stderr.hex()
     return ErrorValue(f"adb_{operation}_failed", "device_file_access", details)
 
 
@@ -378,6 +382,7 @@ class FileAccessRead:
     outcome: RawToolOutcome | None
     value: int | str | bool | None
     error: ErrorValue | None
+    failure: BaseException | None = None
 
 
 class AdbFilesystem:
@@ -424,13 +429,13 @@ class AdbFilesystem:
         try:
             raw = await self._run(script_for(path), timeout_s, stop)
         except ToolStartError as error:
-            return FileAccessRead(None, None, _error(None, operation, str(error)))
+            return FileAccessRead(None, None, _error(None, operation, str(error)), error)
         if not _returned(raw):
             return FileAccessRead(raw, None, _error(raw, operation, "call_failed"))
         try:
             return FileAccessRead(raw, decode(raw.output), None)
         except ValueError as error:
-            return FileAccessRead(raw, None, _error(raw, operation, str(error)))
+            return FileAccessRead(raw, None, _error(raw, operation, str(error)), error)
 
     async def metadata(self, identity, *, timeout_s, stop):
         def decode(data):

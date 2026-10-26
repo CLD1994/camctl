@@ -10,11 +10,11 @@ from contextlib import closing
 from decimal import Decimal
 from typing import Any, Mapping
 
-from camctl.host_files.media import MediaProbe, MediaStream
+from camctl.host_files.media import MediaProbe, MediaStream, MediaToolResult
 
 
 def probe_document(probe: MediaProbe) -> dict[str, Any]:
-    return {
+    document = {
         "duration_s": probe.duration_s, "error": probe.error,
         "format_name": probe.format_name,
         "streams": [{
@@ -24,6 +24,9 @@ def probe_document(probe: MediaProbe) -> dict[str, Any]:
             "frame_count": s.frame_count, "fps": s.fps,
         } for s in probe.streams],
     }
+    if probe.tool_diagnostics is not None:
+        document["tool_control"] = probe.tool_diagnostics.control_only
+    return document
 
 
 def read_probe(document: Mapping[str, Any]) -> MediaProbe:
@@ -60,9 +63,13 @@ def read_probe(document: Mapping[str, Any]) -> MediaProbe:
             raise ValueError("探测帧率必须为正有限数")
         return value
 
-    if not isinstance(document, Mapping) or set(document) != {
-            "duration_s", "error", "format_name", "streams"}:
+    required = {"duration_s", "error", "format_name", "streams"}
+    if (not isinstance(document, Mapping) or not required <= set(document)
+            or not set(document) <= required | {"tool_control"}):
         raise ValueError("原探测事实结构不完整")
+    control = document.get("tool_control")
+    if "tool_control" in document and type(control) is not bool:
+        raise ValueError("原工具停止事实必须为布尔值")
     if not isinstance(document["streams"], list):
         raise ValueError("逐流事实必须是列表")
     streams = []
@@ -83,7 +90,8 @@ def read_probe(document: Mapping[str, Any]) -> MediaProbe:
             seconds(s["duration_s"]), s["attached_pic"],
             integer(s.get("frame_count"), 0), fps(s.get("fps"))))
     return MediaProbe(seconds(document["duration_s"]), text(document["error"]),
-        tuple(streams), text(document["format_name"]))
+        tuple(streams), text(document["format_name"]),
+        tool_diagnostics=None if control is None else MediaToolResult(control_stopped=control))
 
 
 def osv_streams(probe: MediaProbe) -> tuple[MediaStream, ...]:

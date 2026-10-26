@@ -12,15 +12,17 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 from camctl.persistence.business import BusinessDatabase, settle_required
-from camctl.persistence.models import db_outcome_for
+from camctl.persistence.models import db_outcome_for, db_failure
 
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failure_details
@@ -29,12 +31,14 @@ from camctl.devices.ports import DeviceCallResult
 from camctl.host_files.models import FileRef
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, RetryWaitGate, RunOutcome, StaleRunFinish)
-from camctl.operations.models import AttemptTicket
+from camctl.operations.models import AttemptTicket, ErrorValue
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 from camctl.operations.recovery import RecoveryBoundary, RecoveryDiagnostic
 from camctl.outputs.cleanup_round import (CleanupConsumption, record_consumption, handed_off_this_round, operation_runtime, operation_supported)
 from camctl.operations.owned_calls import (
     owned_tool_call, check_call_interruption, current_call_scope)
 from camctl.operations.validation import OutcomeValidationError
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.outputs.cleanup_ownership import (
     CleanupSaveNotApplicable, PendingCleanupSave, save_cleanup_request,
     verify_cleanup_transaction)
@@ -127,6 +131,7 @@ class CleanupTargetsSaved:
 
     disposition: CleanupTargetsDisposition
     item_ids: tuple[int, ...]
+    failures: tuple[tuple[int, ErrorValue], ...] = ()
 
 
 class CleanupItemDisposition(Enum):
@@ -419,7 +424,7 @@ class LocalArtifactRequest:
         return self.file_ref.relative_path
 
 
-class LocalArtifactTaskFailure(RuntimeError):
+class LocalArtifactTaskFailure(DiagnosticError, RuntimeError):
     """任务实际结果已取回，但执行器监督交接自身发生错误。"""
 
     def __init__(
@@ -428,18 +433,30 @@ class LocalArtifactTaskFailure(RuntimeError):
             message: str | None = None):
         rendered = (message if supervision_diagnostic is None else
                     supervision_diagnostic.render())
-        super().__init__(rendered or "主机文件等待取消，原 completion 已取回")
+        super().__init__(rendered or "主机文件等待取消，原 completion 已取回",
+                         diagnostic_details={"supervision": None if supervision_diagnostic is None
+                             else exception_diagnostic(supervision_diagnostic.exception),
+                             "supervision_facts": [] if supervision_diagnostic is None else
+                                 [asdict(fact) for fact in supervision_diagnostic.facts]})
         self.actual = actual
         self.supervision_diagnostic = supervision_diagnostic
 
 
 def _raise_supervision_with_error(
         pending, prior: BaseException, context: str) -> None:
-    """保存仍不可靠时同时交付原数据库问题和纯数据监督诊断。"""
+    """保存仍不可靠时同时交付原数据库问题和原监督错误。"""
     diagnostic = pending.supervision_diagnostic
     if diagnostic is None or pending.supervision_diagnostic_delivered:
         return
-    supervision_error = RuntimeError(diagnostic.render())
+    supervision_error = diagnostic.exception or RuntimeError(diagnostic.render())
+    if not isinstance(prior, Exception):
+        note = "清理监督次级错误: " + json.dumps({
+            "context": context, "error": exception_diagnostic(supervision_error),
+            "facts": [asdict(fact) for fact in diagnostic.facts],
+        }, ensure_ascii=False, separators=(",", ":"))
+        if note not in tuple(getattr(prior, "__notes__", ())):
+            prior.add_note(note)
+        raise prior
     combined = BaseExceptionGroup(
         "清理结果保存与文件任务监督均有故障",
         [prior, supervision_error])
@@ -453,9 +470,14 @@ def _deliver_supervision(pending, operation: str) -> None:
     if diagnostic is None or pending.supervision_diagnostic_delivered:
         return
     pending.supervision_diagnostic_delivered = True
-    raise ConsistencyError(
+    error = ConsistencyError(
         f"{operation}实际结果已可靠保存，文件任务监督交接失败: "
-        f"{diagnostic.render()}") from RuntimeError(diagnostic.render())
+        f"{diagnostic.render()}")
+    error.__cause__ = diagnostic.exception or RuntimeError(diagnostic.render())
+    record_error(error, stage=f"cleanup_{pending.ticket.operation}_supervision",
+                 state=pending.diagnostic_state,
+                 context={"database_id": pending.database_id, "cleanup_item_id": pending.item_id})
+    raise error
 
 
 class LocalArtifactTargetError(ConsistencyError):
@@ -477,6 +499,7 @@ class CleanupStep:
     phase: str
     detail: str | None = None
     diagnostic: str | None = None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 class CleanupQueryConsumer(Enum):
@@ -502,6 +525,7 @@ class PendingCleanupMember:
     request: FinishCleanupItem | CancelCleanupItem | FailCleanupItem
     key: OperationKey
     saved: bool = False
+    diagnostic_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -537,9 +561,10 @@ class CleanupSupervisionFault:
 
 @dataclass(frozen=True)
 class CleanupSupervisionDiagnostic:
-    """本次文件结果交接的有界故障集合；不持有运行时异常或任务。"""
+    """本次文件结果交接的故障事实和原异常图，不持有任务。"""
 
     facts: tuple[CleanupSupervisionFault, ...]
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
     def render(self) -> str:
         rendered = []
@@ -587,6 +612,9 @@ class PendingCleanupQuery:
     query_unsupported: bool = False
     supervision_diagnostic: CleanupSupervisionDiagnostic | None = None
     supervision_diagnostic_delivered: bool = False
+    diagnostic_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    diagnostic_exception: BaseException | None = field(default=None, compare=False, repr=False)
+    validation_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass
@@ -627,6 +655,9 @@ class PendingCleanupDelete:
     delete_unsupported: bool = False
     supervision_diagnostic: CleanupSupervisionDiagnostic | None = None
     supervision_diagnostic_delivered: bool = False
+    diagnostic_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    diagnostic_exception: BaseException | None = field(default=None, compare=False, repr=False)
+    validation_state: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass
@@ -1138,7 +1169,7 @@ async def _finish_binding_failure(runtime, item_id, *, canceled=False, binding_r
     if isinstance(saved.value, CleanupSaveNotApplicable):
         return CleanupStep("cancel_pending")
     if saved.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"清理绑定失败事务未完成（{saved.kind.value}）: {saved.error}")
+        raise db_failure(ConsistencyError, f"清理绑定失败事务未完成（{saved.kind.value}）: {saved.error}", saved)
     runtime.retry_gate.cleared(f"delete/{item_id}")
     runtime.retry_gate.cleared(f"exists/{item_id}")
     return CleanupStep("canceled" if canceled else "failed", "device_binding_unavailable")
@@ -1323,6 +1354,42 @@ def _legacy_error(actual, operation):
     return ErrorValue(actual.error["code"], actual.error.get("stage", operation), actual.error.get("details", {}))
 
 
+def _record_cleanup_actual(pending) -> None:
+    """由原结果拥有者准备诊断；取消未派发是正常控制分支。"""
+    actual = pending.actual
+    error = actual.outcome.error if actual.outcome is not None else actual.error
+    code = (error.code if isinstance(error, ErrorValue) else
+            error.get("code") if isinstance(error, Mapping) else None)
+    if (error is None or code == "canceled_before_dispatch") and pending.diagnostic_exception is None:
+        return
+    context = {"database_id": pending.database_id, "cleanup_item_id": pending.item_id}
+    if actual.outcome is not None:
+        record_call_outcome(actual.outcome, ticket=pending.ticket,
+                            run_error=pending.diagnostic_exception,
+                            context=context, state=pending.diagnostic_state)
+    else:
+        stage = (error.stage if isinstance(error, ErrorValue) else
+                 error.get("stage", pending.ticket.operation) if isinstance(error, Mapping)
+                 else pending.ticket.operation)
+        record_error(error or pending.diagnostic_exception, stage=stage, context=context,
+                     state=pending.diagnostic_state,
+                     details={"ticket": pending.ticket, "observations": actual.observations,
+                              "exception": pending.diagnostic_exception})
+
+
+def _raise_cleanup_validation(pending, original: BaseException | None = None) -> None:
+    diagnostic = pending.validation_diagnostic
+    error = OutcomeValidationError(diagnostic.message)
+    stage = f"cleanup_{pending.ticket.operation}_validation"
+    state = record_error(original or error, stage=stage, state=pending.validation_state,
+                         context={"database_id": pending.database_id,
+                                  "cleanup_item_id": pending.item_id},
+                         details={"ticket": pending.ticket, "actual": pending.actual})
+    # 原错误已由同一诊断持有，外层继续传播原有校验异常类型。
+    record_error(error, stage=stage, state=state)
+    raise error from None
+
+
 async def _save_delete_return(runtime, pending):
     from camctl.operations.attempts import FinishAttemptResult, FinishDisposition, RunStatus
     from camctl.operations.models import (
@@ -1336,6 +1403,7 @@ async def _save_delete_return(runtime, pending):
             or pending.ticket.target_id != str(pending.item_id)
             or pending.ticket.responsibility_key != f"delete/{pending.item_id}"):
         raise ConsistencyError("原删除返回不属于本次数据库或原成员票据")
+    _record_cleanup_actual(pending)
     original = _matching_cleanup_intent(runtime, pending.item_id, pending.ticket,
         pending.consumer if isinstance(pending, PendingCleanupQuery) else None)
     if pending.occurred_at is None:
@@ -1343,7 +1411,7 @@ async def _save_delete_return(runtime, pending):
     if pending.returned_ns is None:
         pending.returned_ns = runtime.monotonic_ns()
     if pending.validation_diagnostic is not None:
-        raise OutcomeValidationError(pending.validation_diagnostic.message)
+        _raise_cleanup_validation(pending)
     if pending.finish is None:
         retry_config = await _original_cleanup_config(runtime, pending.item_id, pending.ticket, original)
         try:
@@ -1360,10 +1428,11 @@ async def _save_delete_return(runtime, pending):
                 retry_wait=(present is not False and retry_config.retry_interval_s is not None),
                 recovery_max_event_id=pending.recovery_max_event_id)
         except (ValueError, TypeError, KeyError, AttributeError) as error:
+            original_error = error
             if not isinstance(error, OutcomeValidationError):
                 error = OutcomeValidationError(f"原调用返回无法按契约解释: {error}")
             pending.validation_diagnostic = CleanupValidationDiagnostic(type(error).__name__, str(error))
-            raise OutcomeValidationError(pending.validation_diagnostic.message) from None
+            _raise_cleanup_validation(pending, original_error)
     if not pending.saved:
         async def apply_completed(saved):
             value = saved.value
@@ -1389,7 +1458,11 @@ async def _save_delete_return(runtime, pending):
         if not isinstance(saved, DbOutcome):
             raise ConsistencyError("删除结束未返回合法数据库回执")
         if saved.kind is not DbOutcomeKind.COMPLETED:
-            return CleanupStep("finish_rejected", str(saved.error))
+            error = db_failure(ConsistencyError,
+                f"删除原实际结果未可靠保存（{saved.kind.value}），清理成员={pending.item_id}", saved)
+            if not isinstance(error, Exception):
+                raise error
+            return CleanupStep("finish_rejected", str(saved.error), exception=error)
         await apply_completed(saved)
     return None
 
@@ -1505,6 +1578,7 @@ async def _delete_once(runtime, item_id, action_id, output_id):
     from camctl.operations.models import SettlementBasis
     from camctl.persistence.models import DbOutcomeKind
     supervision_diagnostic = None
+    diagnostic_exception = None
     pending = runtime.pending_deletes.get(item_id)
     if pending is not None:
         supervision_diagnostic = pending.supervision_diagnostic
@@ -1567,7 +1641,7 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                 port, call_request, local_call = await _prepare_cleanup_call(
                     runtime, item_id, intent.ticket, 'delete')
             except LocalArtifactTargetError as error:
-                local_target_error = error
+                diagnostic_exception = local_target_error = error
             can_dispatch = (local_target_error is None and await _read_cleanup(
                 runtime, lambda connection: _cleanup_dispatch_allowed(
                     connection, item_id, intent.ticket)))
@@ -1591,7 +1665,10 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
                         supervision_diagnostic = error.supervision_diagnostic
+                        if supervision_diagnostic is not None:
+                            diagnostic_exception = error
                     except LocalArtifactTargetError as error:
+                        diagnostic_exception = error
                         from camctl.operations.models import ErrorValue
                         actual = _not_dispatched("delete", ErrorValue(
                             "file_delete_failed", "delete", {
@@ -1604,7 +1681,8 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                     runtime.active_calls.discard(identity)
         pending = PendingCleanupDelete(runtime.database.metadata.instance_id, item_id, intent.ticket,
             actual, evidence, None, None, new_operation_key(),
-            supervision_diagnostic=supervision_diagnostic)
+            supervision_diagnostic=supervision_diagnostic,
+            diagnostic_exception=diagnostic_exception)
         runtime.pending_deletes[item_id] = pending
         pending.binding_failure = binding_failure
         pending.delete_unsupported = delete_unsupported
@@ -1618,7 +1696,7 @@ async def _delete_once(runtime, item_id, action_id, output_id):
         raise
     if rejected is not None:
         _raise_supervision_with_error(
-            pending, ConsistencyError(
+            pending, rejected.exception or ConsistencyError(
                 f"删除原实际结果未可靠保存: {rejected.phase} {rejected.detail}"),
             "删除原实际结果尚未可靠保存")
         return rejected
@@ -1821,6 +1899,7 @@ async def _run_query(
                 or pending.item_id != item_id or pending.consumer is not consumer):
             raise ConsistencyError("原查询持有责任与本次数据库或票据不对应")
     else:
+        diagnostic_exception = None
         intent = runtime.pending_intents.get(item_id)
         if intent is not None:
             if (intent.database_id != database_id or intent.ticket != ticket
@@ -1856,7 +1935,7 @@ async def _run_query(
                 port, call_request, local_call = await _prepare_cleanup_call(
                     runtime, item_id, ticket, 'query')
             except LocalArtifactTargetError as error:
-                local_target_error = error
+                diagnostic_exception = local_target_error = error
             can_dispatch = (local_target_error is None and await _read_cleanup(
                 runtime, lambda connection: _cleanup_dispatch_allowed(
                     connection, item_id, ticket)))
@@ -1880,7 +1959,10 @@ async def _run_query(
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
                         supervision_diagnostic = error.supervision_diagnostic
+                        if supervision_diagnostic is not None:
+                            diagnostic_exception = error
                     except LocalArtifactTargetError as error:
+                        diagnostic_exception = error
                         from camctl.operations.models import ErrorValue
                         actual = _not_dispatched("query", ErrorValue(
                             "file_delete_failed", "query", {"reason": str(error)}))
@@ -1895,7 +1977,8 @@ async def _run_query(
             ticket=ticket, actual=actual, evidence=evidence,
             occurred_at=None, returned_ns=None,
             key=new_operation_key(),
-            supervision_diagnostic=supervision_diagnostic)
+            supervision_diagnostic=supervision_diagnostic,
+            diagnostic_exception=diagnostic_exception)
         # 原返回先于验证和首次结果写入进入会话责任。
         runtime.pending_queries[identity] = pending
         pending.binding_failure = binding_failure
@@ -1911,6 +1994,8 @@ async def _save_query_return(runtime, pending):
     from camctl.operations.attempts import FinishAttemptResult, FinishDisposition, RunStatus
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     item_id = pending.item_id
+    if pending.phase is not CleanupQueryPhase.SAVED:
+        _record_cleanup_actual(pending)
     original = _matching_cleanup_intent(runtime, pending.item_id, pending.ticket,
         pending.consumer if isinstance(pending, PendingCleanupQuery) else None)
     if pending.occurred_at is None:
@@ -1919,19 +2004,19 @@ async def _save_query_return(runtime, pending):
         pending.returned_ns = runtime.monotonic_ns()
     try:
         if pending.validation_diagnostic is not None:
-            raise OutcomeValidationError(pending.validation_diagnostic.message)
+            _raise_cleanup_validation(pending)
         if pending.finish is None and pending.phase is not CleanupQueryPhase.SAVED:
             retry_config = await _original_cleanup_config(runtime, pending.item_id, pending.ticket, original)
             try:
                 pending.finish = _prepare_query_finish(
                     pending, retry_wait=retry_config.retry_interval_s is not None)
             except (ValueError, TypeError, KeyError, AttributeError) as error:
+                original_error = error
                 if not isinstance(error, OutcomeValidationError):
                     error = OutcomeValidationError(f"原调用返回无法按契约解释: {error}")
                 pending.validation_diagnostic = CleanupValidationDiagnostic(
                     type(error).__name__, str(error))
-                raise OutcomeValidationError(
-                    pending.validation_diagnostic.message) from None
+                _raise_cleanup_validation(pending, original_error)
             pending.phase = CleanupQueryPhase.PREPARED
         if pending.phase is not CleanupQueryPhase.SAVED:
             async def apply_completed(saved):
@@ -2102,6 +2187,10 @@ async def _consume_saved_query(runtime: CleanupRuntime, pending: PendingCleanupQ
         phase, detail = "canceled", code
         save = runtime.outputs.cancel_cleanup_item
         rejected_phase = "cancel_rejected"
+    if error is not None:
+        record_error(replace(error, details=member.request.details or {}),
+                     stage=error.stage, state=member.diagnostic_state,
+                     context={"database_id": pending.database_id, "cleanup_item_id": item_id})
     if not member.saved:
         def apply_completed(saved):
             if (not isinstance(saved.value, CleanupItemSaved)
@@ -2364,7 +2453,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             saved = await save_cleanup_request(runtime, method, pending.request, action=True)
             from camctl.persistence.models import DbOutcomeKind
             if saved.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"原清理动作申请续接未完成: {method} {saved.error}")
+                raise db_failure(ConsistencyError, f"原清理动作申请续接未完成: {method} {saved.error}", saved)
             wakeup_required = True
     recovered = {pending.item_id for pending in runtime.pending_queries.values()}
     recovered.update(runtime.pending_companions)
@@ -2380,7 +2469,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             step = await delete_source_file(local, item_id)
             wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                raise ConsistencyError(
+                raise step.exception or ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
         from camctl.outputs.cleanup_discovery import cleanup_item_batches
         async for batch in cleanup_item_batches(runtime.database, batch_size=runtime.discovery_batch_size):
@@ -2390,7 +2479,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
                 step = await delete_source_file(local, item_id)
                 wakeup_required = True
                 if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                    raise ConsistencyError(
+                    raise step.exception or ConsistencyError(
                         f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     finally:
         runtime.last_recovery_diagnostic = local.last_recovery_diagnostic
@@ -2407,7 +2496,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
             step = await delete_source_file(runtime, item_id)
             wakeup_required = True
             if step is not None and step.phase in _MEMBER_ERROR_PHASES:
-                raise ConsistencyError(
+                raise step.exception or ConsistencyError(
                     f"原清理结果续接未完成: {item_id} {step.phase} {step.detail}")
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)

@@ -9,6 +9,7 @@ from camctl.capture.files import (
     PairResultFilesSave,
 )
 from camctl.capture.media import RecordingFailure
+from camctl.capture.diagnostics import preparation_failure_diagnostic
 from camctl.capture.models import ActivityReleaseSave
 from camctl.capture.segment_errors import segment_error_header
 from camctl.capture.segment_finish import FinishSegmentRecording
@@ -30,13 +31,14 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.capture_timing import CaptureTiming
 from camctl.devices.recording_completion import is_completed_file_wait
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.persistence.transaction import row_facts
 from camctl.logging_runtime.performance import measure_performance
 from camctl.logging_runtime.transaction_timing import db_operation_context
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class PendingSegmentWrite:
     args: tuple
     key: str
     save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 async def resume_segment_writes(database, pending_writes, action_id=None):
@@ -69,6 +72,15 @@ async def _save(runtime, action_id, repository, method, *args):
 
 
 async def _write_segment_request(database, pending_writes, action_id, pending):
+    if pending.method == "finish_segment_recording" and isinstance(pending.args[0], FinishSegmentRecording):
+        request = pending.args[0]
+        if request.failure is not None:
+            record_error(request.failure, stage="capture.segment_completion",
+                context={"action_id": action_id, "activity_id": request.activity_id,
+                         "run_id": request.run_id}, state=pending.diagnostic)
+    elif pending.method == "finish_stale_runs" and pending.args[0].error is not None:
+        record_error(pending.args[0].error, stage="capture.segment_close",
+            context={"action_id": action_id}, state=pending.diagnostic)
     try:
         receipt = await database.write(
             lambda owned: getattr(pending.repository, pending.method)(*pending.args, pending.key, owned),
@@ -82,7 +94,7 @@ async def _write_segment_request(database, pending_writes, action_id, pending):
     if receipt.kind is not DbOutcomeKind.COMPLETED:
         if receipt.kind is DbOutcomeKind.ROLLED_BACK and pending_writes.get(action_id) is pending:
             del pending_writes[action_id]
-        raise ConsistencyError(f"原分段保存尚未可靠完成: {receipt.error}")
+        raise db_failure(ConsistencyError, f"原分段保存尚未可靠完成: {receipt.error}", receipt)
     if pending_writes.get(action_id) is pending:
         del pending_writes[action_id]
     return receipt.value
@@ -92,6 +104,10 @@ async def _save_segment_request(runtime, action_id, repository, method, args):
     if action_id in runtime.pending_segment_writes:
         raise ConsistencyError("须先核实原分段申请，不能替换未决保存")
     pending = PendingSegmentWrite(repository, method, args, new_operation_key())
+    if method == "finish_segment_recording" and isinstance(args[0], FinishSegmentRecording):
+        diagnostic = preparation_failure_diagnostic(runtime, action_id, args[0].failure)
+        if diagnostic is not None:
+            pending = replace(pending, diagnostic=diagnostic)
     runtime.pending_segment_writes[action_id] = pending
     with measure_performance("segment_save", action_id=action_id,
                              method=method, resumed=False), db_operation_context(

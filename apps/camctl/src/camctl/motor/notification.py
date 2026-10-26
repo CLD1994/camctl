@@ -5,7 +5,7 @@ import errno
 import json
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
@@ -26,6 +26,7 @@ class NotificationWriteResult:
     written_bytes: int = 0
     reason: str | None = None
     errno: int | None = None
+    exception: BaseException | None = field(default=None, compare=False, repr=False)
 
 
 def encode_motor_notification(action_id: ObjectId, position: int) -> bytes:
@@ -46,13 +47,15 @@ class NotificationWriter:
     def __init__(self, fd: int | None, *, pipe_buf: int = 0,
                  write: Callable = os.write, close: Callable = os.close,
                  unavailable_reason: str = "not_connected",
-                 error_number: int | None = None):
+                 error_number: int | None = None,
+                 exception: BaseException | None = None):
         self._fd = fd
         self._pipe_buf = pipe_buf
         self._write = write
         self._close = close
         self._unavailable_reason = unavailable_reason
         self._error_number = error_number
+        self._exception = exception
 
     @property
     def available(self) -> bool:
@@ -64,7 +67,7 @@ class NotificationWriter:
             raise ValueError("有效通知管道没有不可用结论")
         return NotificationWriteResult(
             WriteKind.UNAVAILABLE, reason=self._unavailable_reason,
-            errno=self._error_number)
+            errno=self._error_number, exception=self._exception)
 
     def send(self, message: bytes) -> NotificationWriteResult:
         if self._fd is None:
@@ -79,11 +82,15 @@ class NotificationWriter:
                       else "broken_pipe" if error.errno == errno.EPIPE
                       else "os_error")
             return NotificationWriteResult(
-                WriteKind.FAILED, reason=reason, errno=error.errno)
+                WriteKind.FAILED, reason=reason, errno=error.errno, exception=error)
         if written == len(message):
             return NotificationWriteResult(WriteKind.WRITTEN, written_bytes=written)
         self._unavailable_reason = "disabled_after_partial_write"
-        self.close()
+        try:
+            self.close()
+        except OSError as error:
+            error.add_note(f"通知短写后关闭失败: written_bytes={written}, message_bytes={len(message)}")
+            raise
         return NotificationWriteResult(
             WriteKind.PARTIAL, written_bytes=written, reason="short_write")
 
@@ -127,5 +134,5 @@ def open_notification_writer(fd: int | None) -> NotificationWriter:
             if close_error.errno != errno.EBADF:
                 raise
         return NotificationWriter(None, unavailable_reason="invalid_descriptor",
-                                  error_number=number)
+                                  error_number=number, exception=error)
     return NotificationWriter(fd, pipe_buf=pipe_buf)

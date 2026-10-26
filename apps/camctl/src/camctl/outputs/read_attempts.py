@@ -15,10 +15,13 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.operations.error_diagnostics import exception_diagnostic
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_for
 from camctl.persistence.business import SharedSave, settle_required
 from camctl.outputs.database_reads import read_one
 from camctl.devices.evidence import EvidenceError
+from camctl.logging_runtime.diagnostics import (
+    DiagnosticState, diagnostic_state_for, record_call_outcome, record_error,
+)
 
 
 def read_failure_details(step) -> dict:
@@ -186,6 +189,7 @@ class PendingReadResult:
     settlement: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     business_saves: dict[tuple[int, str], "PendingReadBusiness"] = field(
         default_factory=dict, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -320,6 +324,7 @@ class PendingReadBusiness:
     key: OperationKey
     on_completed: Callable[[Any], None] | None = None
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 async def retry_read_business(runtime):
@@ -344,6 +349,7 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
 
 
 async def _save_pending_read_business(runtime, identity, pending, *, retry=False):
+    _record_read_business_error(pending)
     # 已完成的控制错误也属于原回执；只有仍未收场的业务责任可以重新核实。
     if retry and runtime.pending_read_business.get(identity) is pending:
         pending.shared.retry_failed()
@@ -367,10 +373,31 @@ async def _save_pending_read_business(runtime, identity, pending, *, retry=False
                 apply_completed(actual)
             raise
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原读取业务结果未可靠保存（{receipt.kind.value}）: {receipt.error}")
+            raise db_failure(ConsistencyError,
+                f"原读取业务结果未可靠保存（{receipt.kind.value}）: {receipt.error}", receipt)
         apply_completed(receipt)
         return receipt
     return await pending.shared.run(save_and_apply)
+
+
+def _record_read_business_error(pending):
+    """原绑定失败随完整业务申请持有，不依赖保存成功或恢复作用域。"""
+    from camctl.devices.bindings import binding_failure_details
+    from camctl.persistence.repositories.outputs import FailReadBinding
+    from camctl.persistence.repositories.capture import FinishBindingFailure
+
+    request = pending.request
+    if isinstance(request, FailReadBinding):
+        error = ErrorValue("device_binding_unavailable", "execution",
+                           binding_failure_details(request.binding_result))
+        context = {"copy_id": request.copy_id,
+                   "source_device_file_id": request.source_device_file_id}
+    elif isinstance(request, FinishBindingFailure):
+        error = ErrorValue(request.failure.code, "execution", request.failure.details)
+        context = {"action_id": request.action_id}
+    else:
+        return
+    record_error(error, stage=error.stage, context=context, state=pending.diagnostic)
 
 
 async def save_prepared_read_business(runtime, copy_id, operation, pending, *, retry=False):
@@ -421,6 +448,26 @@ class PendingStoppedRead:
     key: OperationKey
     result_save: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     settlement: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+
+
+def controlled_read_stop(step):
+    """明确停止通知可作控制分支；同次实际写入、同步或关闭错误仍是错误。"""
+    from camctl.outputs.copy import CopySegmentError
+    from camctl.host_files.segments import SegmentFailure
+
+    if (step.source_failed or step.read_end is None or step.read_end.error != "stopped"
+            or not step.stop_requested):
+        return False
+    error = step.error
+    if error is None or (type(error) is RuntimeError and error.args == ("stopped",)):
+        return True
+    if isinstance(error, CopySegmentError):
+        result = error.result
+        return ((result is None and error.detail == "stopped") or
+                (result is not None and result.error is SegmentFailure.STOPPED
+                 and result.failure is None and result.source_close_error is None))
+    return False
 
 
 def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
@@ -430,7 +477,13 @@ def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
     identity = (ticket.run_id, ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存观察，不能覆盖")
-    pending = PendingStoppedRead(ticket, step, evidence, occurred_at, new_operation_key())
+    diagnostic = diagnostic_state_for(step.error) or DiagnosticState()
+    if step.error is not None and not controlled_read_stop(step):
+        record_error(step.error, stage=step.phase.value,
+            context={"run_id": ticket.run_id, "attempt_id": ticket.attempt_id,
+                     "copy_id": int(ticket.target_id)}, state=diagnostic)
+    pending = PendingStoppedRead(ticket, step, evidence, occurred_at, new_operation_key(),
+                                diagnostic=diagnostic)
     runtime.pending_read_results[identity] = pending
     return pending
 
@@ -451,18 +504,35 @@ async def _prepare_stopped_read(runtime, pending):
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     prepared = PendingReadResult(AttemptFinish(ticket, validate_outcome(ticket, outcome, pending.evidence),
         pending.occurred_at, run_finish=RunFinish(RunOutcome.CANCELED)), pending.key,
-        result_save=pending.result_save, settlement=pending.settlement)
+        result_save=pending.result_save, settlement=pending.settlement, diagnostic=pending.diagnostic)
     runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)] = prepared
     return prepared
 
 
-def hold_read_result(runtime, finish, *, business=None, key=None):
+def hold_read_result(runtime, finish, *, business=None, key=None,
+                     context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False):
     identity = (finish.ticket.run_id, finish.ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存结果，不能覆盖")
-    pending = PendingReadResult(finish, new_operation_key() if key is None else key, business)
+    diagnostic = (business.diagnostic if business is not None else
+                  diagnostic_state_for(diagnostic_error) or DiagnosticState())
+    pending = PendingReadResult(finish, new_operation_key() if key is None else key, business,
+        diagnostic=diagnostic)
     runtime.pending_read_ends.pop(int(finish.ticket.target_id), None)
     runtime.pending_read_results[identity] = pending
+    details = {"copy_id": int(finish.ticket.target_id), **(context or {})}
+    if suppress_diagnostic:
+        return pending
+    if diagnostic_error is not None:
+        record_error(diagnostic_error, stage=diagnostic_stage, context={**details,
+            "run_id": finish.ticket.run_id, "attempt_id": finish.ticket.attempt_id},
+            state=pending.diagnostic)
+    elif finish.outcome.outcome.settlement.basis is not SettlementBasis.NOT_DISPATCHED:
+        outcome = finish.outcome.outcome
+        if outcome.error is None or outcome.error.code != "read_stopped":
+            record_call_outcome(outcome, ticket=finish.ticket,
+                run_error=None if finish.run_finish is None else finish.run_finish.error,
+                context=details, state=pending.diagnostic)
     return pending
 
 
@@ -480,7 +550,8 @@ async def save_read_result(runtime, pending, *, retry=False):
         outcome = await runtime.database.write(
             lambda owned: runtime.operations.finish_attempt(prepared.finish, prepared.key, owned), key=prepared.key)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}")
+            raise db_failure(ConsistencyError,
+                f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}", outcome)
         return prepared
 
     return await pending.result_save.run(save)

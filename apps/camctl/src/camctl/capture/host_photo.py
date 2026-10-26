@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from camctl.persistence.models import db_failure
+
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
@@ -112,7 +114,7 @@ async def _request_result(runtime, repository, pending: PendingHostPhotoRequest,
                     f"原主机拍摄文件申请回执仍未知，原request/key继续保留: {verified.error}"
                 )
             if verified.kind not in (DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.NOT_EXECUTED):
-                raise ConsistencyError(f"原主机拍摄文件申请核实未完成: {verified.error}")
+                raise db_failure(ConsistencyError, f"原主机拍摄文件申请核实未完成: {verified.error}", verified)
     raise ConsistencyError(f"原主机拍摄文件申请未可靠保存，原请求继续保留: {error}")
 
 
@@ -298,7 +300,7 @@ async def _finish_not_started(runtime, action_id: int, action) -> bool:
         _save_options = dict()
         receipt = (await runtime.database.write(lambda owned: runtime.scheduling.expire_action(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"主机单张启动窗口过期事务未完成: {receipt.error}")
+            raise db_failure(ConsistencyError, f"主机单张启动窗口过期事务未完成: {receipt.error}", receipt)
         return True
     return False
 
@@ -453,7 +455,7 @@ async def advance_host_photo(runtime, action_id: int) -> None:
             _save_options = dict()
             receipt = (await runtime.database.write(lambda owned: runtime.scheduling.expire_action(*_save_inputs, owned, **_save_options), key=_save_inputs[-1], description="保存拍摄业务事实"))
             if receipt.kind is not DbOutcomeKind.COMPLETED:
-                raise ConsistencyError(f"主机单张过期事务未完成: {receipt.error}")
+                raise db_failure(ConsistencyError, f"主机单张过期事务未完成: {receipt.error}", receipt)
             return
         if getattr(runtime, "capture_preparation_supported", False) is True:
             prepared = await _baseline_before_control(runtime, action)

@@ -110,7 +110,7 @@ class TestOrderedClose:
             return True
 
         channel = LogChannel(
-            capacity=8, low_watermark=8, high_watermark=9,
+            capacity=8, low_watermark=6, high_watermark=7,
             level=LogLevel.DEBUG, writer=writer,
         )
         channel.start()

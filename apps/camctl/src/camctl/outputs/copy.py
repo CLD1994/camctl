@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
 
@@ -25,6 +25,8 @@ from camctl.contracts.values import (
 )
 from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.operations.models import ErrorValue
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
     sync_target,
@@ -37,13 +39,14 @@ from camctl.host_files.segments import (
     DEFAULT_CHUNK_SIZE_BYTES, SegmentFailure, SegmentResult, SegmentSpec,
     transfer_segment,
 )
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 
 if TYPE_CHECKING:
     from camctl.persistence.repositories.outputs import OutputsRepository
     from camctl.persistence.business import BusinessDatabase
+    from camctl.operations.process import RawToolOutcome
 
 _ATTEMPT_STATUS = enum_for("operation_attempts.status")
 _VERIFICATION = enum_for("file_copies.verification_state")
@@ -931,6 +934,9 @@ class SourceDigest:
 
     digest: str | None = None
     error: object | None = None
+    raw_outcome: RawToolOutcome | None = None
+    diagnostic_error: object | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         _require_digest("digest", self.digest)
@@ -956,6 +962,7 @@ class CompletionContext:
     max_recopies: int = 1
     key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 class CompletionPhase(Enum):
@@ -1007,10 +1014,8 @@ def _require_completed(outcome, stage_failed: str, stage_unknown: str) -> None:
     """仓储结果不是完成时按分区保留阶段诊断。"""
     if outcome.kind is DbOutcomeKind.COMPLETED:
         return
-    raise CopyCompletionError(
-        stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed,
-        str(outcome.error),
-    )
+    stage = stage_unknown if outcome.kind is DbOutcomeKind.UNKNOWN else stage_failed
+    raise db_failure(lambda message: CopyCompletionError(stage, message), str(outcome.error), outcome)
 
 
 async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionStep:
@@ -1058,13 +1063,20 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
     hashed = await asyncio.to_thread(hash_target, ref, context.roots)
     if hashed.error is not None or hashed.digest is None:
         raise CopyCompletionError("host_digest_failed", hashed.error or "未知失败")
-    source_sha256, source_error = facts.source_sha256, None
+    source_sha256, source_error, source_diagnostic = facts.source_sha256, None, None
     if source_sha256 is None \
             and facts.source_support is SourceChecksumSupport.SUPPORTED:
         if context.digest is None:
             raise CopyCompletionError(
                 "digest_reader_missing", "支持源端校验但未提供源摘要端口")
         fetched = await context.digest.read_digest()
+        if fetched.error is not None or fetched.diagnostic_error is not None:
+            source_diagnostic = record_error(
+                fetched.error if fetched.error is not None else fetched.diagnostic_error,
+                stage="source_verification",
+                context={"copy_id": copy_id, "path": str(ref.root / ref.relative_path)},
+                details={"raw_outcome": fetched.raw_outcome, "exception": fetched.diagnostic_error},
+                state=fetched.diagnostic)
         if fetched.digest is None:
             source_error = fetched.error
         else:
@@ -1112,7 +1124,10 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
             _owner_stage(outcome.value.reason), "发起责任不再执行")
     _require_completed(outcome, "verification_save_failed", "verification_save_unknown")
     if save_state == int(_VERIFICATION.FAILED):
-        raise CopyCompletionError("verification_failed", str(decision.error))
+        error = CopyCompletionError("verification_failed", str(decision.error))
+        if source_diagnostic is not None:
+            record_error(error, stage="source_verification", state=source_diagnostic)
+        raise error
     return await _save_prepared(copy_id, context, hashed.digest)
 
 
@@ -1129,6 +1144,15 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         target_sha256=target_sha256, max_recopies=context.max_recopies,
         occurred_at=context.occurred_at,
     )
+    exhausted = (RecopyExhausted(context.max_recopies, facts.recopies_used)
+                 if facts.recopies_used >= context.max_recopies else None)
+    record_error(exhausted if exhausted is not None else
+        ErrorValue("checksum_mismatch", "checksum_verification", {
+            "source_sha256": source_sha256, "target_sha256": target_sha256}),
+        stage="checksum_exhausted" if exhausted is not None else "checksum_verification",
+        context={"copy_id": copy_id, "copy_round": facts.round,
+                 "max_recopies": context.max_recopies, "recopies_used": facts.recopies_used},
+        state=context.diagnostic)
     outcome = await context.database.write(
         lambda owned: context.repository.register_recopy(request, key, owned),
         key=key, description="拷贝重拷登记")
@@ -1138,7 +1162,10 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
     if result.disposition is RecopyDisposition.SKIPPED:
         raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
     if result.disposition is RecopyDisposition.EXHAUSTED:
-        raise RecopyExhausted(context.max_recopies, facts.recopies_used)
+        error = exhausted or RecopyExhausted(context.max_recopies, facts.recopies_used)
+        record_error(error, stage="checksum_exhausted", state=context.diagnostic,
+                     context={"copy_id": copy_id})
+        raise error
     return CompletionStep(phase=CompletionPhase.RECOPY_REGISTERED, recopy=result)
 
 

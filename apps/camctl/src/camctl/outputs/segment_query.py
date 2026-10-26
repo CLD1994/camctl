@@ -1,6 +1,8 @@
 """分段来源显式未知项的唯一 QUERY v2 与原结果接手。"""
 
 from contextlib import closing
+
+from camctl.persistence.models import db_failure
 from dataclasses import dataclass
 
 from camctl.capture.files import FilePresenceSave
@@ -172,7 +174,7 @@ async def _save(runtime, pending, save, request):
         if receipt.kind is not DbOutcomeKind.COMPLETED:
             if receipt.kind is DbOutcomeKind.ROLLED_BACK:
                 pending.business = None
-            raise ConsistencyError(f"原显式查询业务保存尚未可靠完成: {receipt.error}")
+            raise db_failure(ConsistencyError, f"原显式查询业务保存尚未可靠完成: {receipt.error}", receipt)
         pending.business = None
 
     await settle_required(save_and_apply())
@@ -219,7 +221,7 @@ async def _save_result(runtime, pending):
             lambda owned: runtime.operations.finish_attempt(request, key, owned),
             key=key, description="QUERY v2原实际结果保存")
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"QUERY v2 原实际结果尚未可靠保存: {receipt.error}")
+            raise db_failure(ConsistencyError, f"QUERY v2 原实际结果尚未可靠保存: {receipt.error}", receipt)
         pending.finish = None
         pending.finish_key = None
         pending.intent = None
@@ -238,7 +240,7 @@ async def _begin(runtime, pending):
             lambda owned: runtime.operations.begin_attempt(request, key, owned),
             key=key, description="QUERY v2原意图保存")
         if receipt.kind is not DbOutcomeKind.COMPLETED:
-            raise ConsistencyError(f"QUERY v2 原意图尚未可靠保存: {receipt.error}")
+            raise db_failure(ConsistencyError, f"QUERY v2 原意图尚未可靠保存: {receipt.error}", receipt)
         if receipt.value.disposition is BeginDisposition.GRANTED:
             pending.ticket = receipt.value.ticket
         return receipt.value

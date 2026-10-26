@@ -24,9 +24,11 @@ from camctl.operations.models import (
     EvidenceValue, Settlement, SettlementBasis,
 )
 from camctl.operations.owned_calls import owned_tool_call
+from camctl.operations.diagnostic_controls import is_capture_control_error
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.business import SharedSave, settle_required
-from camctl.persistence.models import DbOutcomeKind, db_outcome_for
+from camctl.persistence.models import db_failure, DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import row_facts
 
@@ -56,6 +58,7 @@ class PendingPreparation:
     result_save: SharedSave = field(default_factory=SharedSave)
     canceled_before_dispatch_at: int | None = None
     wakeup_pending: bool = False
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
 @dataclass
@@ -87,7 +90,7 @@ class RuntimePreparationCache:
 
 def _completed(receipt, message):
     if receipt.kind is not DbOutcomeKind.COMPLETED:
-        raise ConsistencyError(f"{message}，原完整申请仍持有: {receipt.error}")
+        raise db_failure(ConsistencyError, f"{message}，原完整申请仍持有: {receipt.error}", receipt)
     return receipt.value
 
 
@@ -131,9 +134,16 @@ async def _save_owner(owner, database, operations, *, retry=False):
             actual = owner.actual
             if actual.outcome is None:
                 raise ConsistencyError("设置准备没有交回完整的实际控制结果")
-            if actual.diagnostics_check is not None:
-                actual.diagnostics_check(actual.outcome)
-            validated = validate_outcome(owner.ticket, actual.outcome, owner.evidence)
+            try:
+                if actual.diagnostics_check is not None:
+                    actual.diagnostics_check(actual.outcome)
+                validated = validate_outcome(owner.ticket, actual.outcome, owner.evidence)
+            except Exception as error:
+                record_error(error, stage="capture.preparation_validation",
+                    context={"action_id": owner.action_id, "activity_id": owner.activity_id,
+                             "ticket": owner.ticket},
+                    details={"outcome": actual.outcome}, state=owner.diagnostic)
+                raise
             owner.successful = (actual.outcome.status is AttemptStatus.SUCCEEDED
                                 and actual.outcome.effect is EffectState.CONFIRMED
                                 and actual.outcome.error is None
@@ -146,6 +156,15 @@ async def _save_owner(owner, database, operations, *, retry=False):
                              actual.outcome.error or ErrorValue("device_error", "device")))
             owner.finish = AttemptFinish(owner.ticket, validated, owner.returned_at, run_finish=end)
         if owner.finish is not None and not owner.saved:
+            if isinstance(owner.finish, AttemptFinish) and not (
+                    owner.canceled_before_dispatch_at is not None and not owner.entered):
+                run_error = None if owner.finish.run_finish is None else owner.finish.run_finish.error
+                if (not is_capture_control_error(owner.finish.outcome.outcome.error)
+                        or run_error is not None and not is_capture_control_error(run_error)):
+                    record_call_outcome(owner.finish.outcome.outcome, ticket=owner.ticket,
+                        run_error=run_error,
+                        context={"stage": "capture.preparation", "action_id": owner.action_id,
+                                 "activity_id": owner.activity_id}, state=owner.diagnostic)
             _completed(await save(lambda owned: operations.finish_attempt(owner.finish, owner.result_key, owned), key=owner.result_key),
                        "设置准备结果未可靠保存")
             owner.saved = True

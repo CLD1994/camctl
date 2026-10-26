@@ -189,19 +189,43 @@ def main(
     try:
         command = parse_command(list(sys.argv[1:] if argv is None else argv))
     except CommandLineError as error:
-        print(f"camctl: {error}", file=err)
+        _diagnose_error(err, "camctl: 命令解析失败", error)
         return 1
-    if command.kind is CommandKind.VERSION:
-        out.write(VERSION + "\n")
-        return 0
-    if command.kind is CommandKind.DESCRIBE:
-        return _run_describe(command, out, err)
-    if command.kind is CommandKind.INIT:
-        return _run_init(command, out, err)
-    if command.kind in (CommandKind.RUN, CommandKind.SUBMIT):
-        return _run_session_command(command, out, err)
-    print(f"camctl: 未知的命令 {command.kind}", file=err)
+    except BaseException as error:
+        _diagnose_error(err, "camctl: 命令解析异常", error)
+        raise
+    try:
+        if command.kind is CommandKind.VERSION:
+            out.write(VERSION + "\n")
+            return 0
+        if command.kind is CommandKind.DESCRIBE:
+            return _run_describe(command, out, err)
+        if command.kind is CommandKind.INIT:
+            return _run_init(command, out, err)
+        if command.kind in (CommandKind.RUN, CommandKind.SUBMIT):
+            return _run_session_command(command, out, err)
+        raise CommandLineError(f"未知的命令 {command.kind}")
+    except BaseException as error:
+        # 包括协作者启动前及资源关闭后的错误；此处已没有可用日志拥有者。
+        _diagnose_error(err, f"camctl {command.kind.value}: 命令失败", error)
+        if not isinstance(error, Exception):
+            raise
     return 1
+
+
+def _diagnose_error(err: TextIO, stage: str, error: BaseException) -> None:
+    """初始化前及日志关闭后直接保留完整异常图，不污染 stdout。"""
+    from camctl.operations.error_diagnostics import exception_diagnostic
+
+    if getattr(error, "_camctl_cli_diagnostic_attempted", False):
+        return
+    error._camctl_cli_diagnostic_attempted = True
+    try:
+        encoded = json.dumps(exception_diagnostic(error), ensure_ascii=False, separators=(",", ":"))
+        print(f"{stage}: {type(error).__name__}: {error}\n异常诊断: {encoded}", file=err)
+    except Exception as diagnostic_error:
+        encoded = json.dumps(exception_diagnostic(diagnostic_error), ensure_ascii=False, separators=(",", ":"))
+        error.add_note(f"stderr 诊断写入失败: {encoded}")
 
 
 def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
@@ -233,8 +257,7 @@ def _run_session_command(command: Command, out: TextIO, err: TextIO) -> int:
                     selected, "通知管道关闭后的其他错误",
                     primary_error if selected is close_error else close_error)
                 try:
-                    print(f"通知管道关闭诊断: {type(close_error).__name__}: "
-                          f"{close_error}", file=err)
+                    _diagnose_error(err, "通知管道关闭诊断", close_error)
                 except BaseException as diagnostic_error:
                     if (isinstance(selected, Exception)
                             and not isinstance(diagnostic_error, Exception)):
@@ -266,7 +289,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
         from camctl.devices.drivers.builtin import register_builtin_drivers
         register_builtin_drivers(config)
     except (ConfigError, RuleError, OSError) as error:
-        print(f"camctl {command.kind.value}: {error}", file=err)
+        _diagnose_error(err, f"camctl {command.kind.value}: 配置加载失败", error)
         return 1
 
     source = None
@@ -285,7 +308,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
                                else RecoveryBoundary.UNCONFIRMED),
         )
     except (FileNotFoundError, OSError, RuleError) as error:
-        print(f"camctl {command.kind.value}: {error}", file=err)
+        _diagnose_error(err, f"camctl {command.kind.value}: 运行时装配失败", error)
         return 1
 
     try:
@@ -296,7 +319,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
             outcome = asyncio.run(execute_command(deps, source))
     except BaseException as error:  # 装配后异常也须先释放 CLI 所有资源。
         from camctl.bootstrap.lifecycle import (
-            _attach_session_diagnostic_error, _format_session_exception,
+            _attach_session_diagnostic_error,
         )
 
         selected_error = error
@@ -309,7 +332,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
             else:
                 _attach_session_diagnostic_error(error, "命令资源关闭异常", close_error)
         try:
-            print(f"camctl {command.kind.value}: 会话错误: {_format_session_exception(selected_error)}", file=err)
+            _diagnose_error(err, f"camctl {command.kind.value}: 会话错误", selected_error)
         except BaseException as diagnostic_error:
             if isinstance(selected_error, Exception) and not isinstance(diagnostic_error, Exception):
                 _attach_session_diagnostic_error(diagnostic_error, "此前命令异常", selected_error)
@@ -327,7 +350,7 @@ def _execute_session_command(command: Command, out: TextIO, err: TextIO,
             requires_needs_run=command.kind is CommandKind.SUBMIT,
         ).decode("utf-8")
     except ResultChannelError as error:
-        print(f"camctl {command.kind.value}: 结果不符合命令契约: {error}", file=err)
+        _diagnose_error(err, f"camctl {command.kind.value}: 结果不符合命令契约", error)
         return 1
     out.write(payload)
     return 0 if outcome.succeeded else 1
@@ -353,7 +376,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         document = describe(config, catalog)
         payload = encode_describe_document(document).decode("utf-8")
     except (ConfigError, RuleError, SchemaRuleError, SchemaValidationError, OSError) as error:
-        print(f"camctl describe: {error}", file=err)
+        _diagnose_error(err, "camctl describe: 能力说明导出失败", error)
         return 1
     out.write(payload)
     return 0
@@ -364,7 +387,6 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
     from camctl.persistence.initialization import (
         InitOutcome,
-        initialization_error_descriptions,
         initialize_state,
     )
 
@@ -375,23 +397,13 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
             upgrade_software_recovery=command.upgrade_software_recovery,
             upgrade_capture_preparation=command.upgrade_capture_preparation)
     except (ConfigError, OSError) as error:
-        print(f"camctl init: {error}", file=err)
+        _diagnose_error(err, "camctl init: 初始化失败", error)
         return 1
     if result.outcome is InitOutcome.FAILED:
-        detail = result.detail
-        descriptions: list[str] = []
-        for error in result.secondary_errors:
-            descriptions.extend(initialization_error_descriptions(error))
-        if result.error is not None:
-            descriptions.extend(
-                initialization_error_descriptions(
-                    result.error,
-                    include_primary=False,
-                )
-            )
-        if descriptions:
-            detail = f"{detail}；后续收场错误: {'；'.join(descriptions)}"
-        print(f"camctl init: {detail}", file=err)
+        errors = (() if result.error is None else (result.error,)) + result.secondary_errors
+        error = (BaseExceptionGroup(result.detail, errors) if len(errors) > 1
+                 else errors[0] if errors else RuntimeError(result.detail))
+        _diagnose_error(err, f"camctl init: {result.detail}", error)
         return 1
     # init 的 stdout 保持为空。
     return 0

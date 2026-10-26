@@ -21,6 +21,7 @@ from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros, parse
 from camctl.outputs.catalog import OutputKind
 from camctl.outputs.definitions import SelectionMode
 from camctl.contracts.workflow_errors import action_error_id, item_error_id
+from camctl.logging_runtime.diagnostics import DiagnosticState
 
 __all__ = [
     "ActionFacts",
@@ -436,6 +437,7 @@ class SelectionSnapshot:
     is_fixed: bool
     items: tuple[SelectedItem, ...] = ()
     source_error_code: int | None = None
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
     @property
     def selected_output_ids(self) -> tuple[int, ...]:

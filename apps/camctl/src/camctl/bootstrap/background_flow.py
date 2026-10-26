@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.logging_runtime.diagnostics import diagnostic_scope
 
 
 class FlowWakeup(Enum):
@@ -31,6 +32,7 @@ class BackgroundFlow:
         self._flow = flow
         self._task: asyncio.Task | None = None
         self._stopping = False
+        self._last_context = None
 
     @property
     def unconsumed_task(self):
@@ -68,8 +70,10 @@ class BackgroundFlow:
             raise error
 
     async def _run(self, context):
+        self._last_context = context
         try:
-            result = await self._flow(context)
+            async with diagnostic_scope():
+                result = await self._flow(context)
             return _FlowResult(wakeup_required=result is not FlowWakeup.IDLE)
         except BaseException as error:
             # shield 不传递内部取消异常；把原异常作为结果保存到消费时。
@@ -116,6 +120,12 @@ class BackgroundFlow:
         # 外部等待取消时不消费，即使原任务已经完成也保留未交付结果。
         if self._task is task:
             self._consume()
+
+    async def settle_diagnostics(self):
+        """必要业务结束后消费原结果的有限诊断回执，不重启业务。"""
+        callback = getattr(self._flow, "settle_diagnostics", None)
+        if callback is not None and self._last_context is not None:
+            await callback(self._last_context)
 
 
 class ReportBackgroundFlow(BackgroundFlow):
@@ -216,6 +226,18 @@ class CombinedLocalWork:
 
     async def settle(self):
         await self._settle(excluded_owner=None)
+
+    async def settle_diagnostics(self):
+        """所有普通责任结束后，逐个交接已有结果的诊断回执。"""
+        from camctl.logging_runtime.diagnostics import record_error
+
+        for owner in self._owners:
+            callback = getattr(owner, "settle_diagnostics", None)
+            if callback is not None:
+                try:
+                    await callback()
+                except Exception as error:
+                    record_error(error, stage="diagnostic_result_handoff")
 
     async def settle_excluding(self, excluded_owner):
         """在既有 owner 顺序中收场，但暂不消费指定 owner。"""

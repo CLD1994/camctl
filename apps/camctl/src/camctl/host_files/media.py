@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 
 from camctl.contracts.json_values import parse_exact_json
@@ -36,6 +36,7 @@ from camctl.operations.process import (
 
 __all__ = [
     "MediaArtifact",
+    "MediaToolResult",
     "MediaProbe",
     "MediaStream",
     "ProbeRequest",
@@ -80,6 +81,33 @@ class MediaStream:
 
 
 @dataclass(frozen=True)
+class MediaToolResult:
+    """同一次工具执行的原返回、原启动异常或明确未启动停止。"""
+
+    outcome: RawToolOutcome | None = None
+    exception: BaseException | None = None
+    stopped_before_start: bool = False
+    control_stopped: bool | None = None
+
+    @property
+    def control_only(self) -> bool:
+        if self.exception is not None:
+            return False
+        if self.outcome is not None and (self.outcome.signal_failures or self.outcome.output_failure is not None):
+            return False
+        if self.stopped_before_start:
+            return True
+        if self.control_stopped is not None:
+            return self.control_stopped
+        return (self.outcome is not None and self.outcome.error == "cancelled"
+            and not self.outcome.signal_failures and self.outcome.output_failure is None)
+
+    def __deepcopy__(self, memo):
+        # 原异常的原因关系与身份属于已结束的同一次执行，不重新构造。
+        return self
+
+
+@dataclass(frozen=True)
 class MediaProbe:
     """ffprobe 取得的容器与逐流事实；时长保持全精度。"""
 
@@ -87,6 +115,7 @@ class MediaProbe:
     error: str | None
     streams: tuple[MediaStream, ...] = ()
     format_name: str | None = None
+    tool_diagnostics: MediaToolResult | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -113,6 +142,10 @@ class MediaArtifact:
     checksum: HashResult | None = None
     synchronization: SyncResult | None = None
     postprocessing_stopped: bool = False
+    tool_diagnostics: MediaToolResult | None = field(default=None, compare=False, repr=False)
+
+    def __deepcopy__(self, memo):
+        return self
 
     @property
     def exists(self) -> bool | None:
@@ -376,17 +409,25 @@ async def _probe(
            "stream_disposition=attached_pic",
            "-of", "json", str(host.path))
     )
-    outcome = await _run_tool(argv, control)
-    if isinstance(outcome, str):
-        return MediaProbe(duration_s=None, error=outcome)
+    execution = await _run_tool(argv, control)
+
+    def probe_result(*, exception=None, **values):
+        return MediaProbe(**values, tool_diagnostics=execution if exception is None
+                          else replace(execution, exception=exception))
+
+    if execution.stopped_before_start:
+        return probe_result(duration_s=None, error="tool_cancelled: 工具尚未启动，停止请求已生效")
+    if execution.exception is not None:
+        return probe_result(duration_s=None, error=f"tool_unavailable: {execution.exception}")
+    outcome = execution.outcome
     if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
-        return MediaProbe(duration_s=None, error=_tool_failure("tool_failed", outcome))
+        return probe_result(duration_s=None, error=_tool_failure("tool_failed", outcome))
     try:
         payload = parse_exact_json((outcome.output or b"").decode("utf-8"))
-    except (ValueError, InvalidOperation):
-        return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
+    except (ValueError, InvalidOperation) as error:
+        return probe_result(duration_s=None, error="invalid_structure: 输出不是预期结构", exception=error)
     if not isinstance(payload, dict) or not isinstance(payload.get("format"), dict):
-        return MediaProbe(duration_s=None, error="invalid_structure: 输出不是预期结构")
+        return probe_result(duration_s=None, error="invalid_structure: 输出不是预期结构")
     format_facts = payload["format"]
     try:
         format_name = None
@@ -396,18 +437,18 @@ async def _probe(
                 raise ValueError("format_name 不是非空字符串")
         if "duration" not in format_facts and "streams" not in payload:
             # 保留原单文件检查对旧版最小 ffprobe 输出的错误分类。
-            return MediaProbe(
+            return probe_result(
                 duration_s=None,
                 error="missing_duration: 缺少时长字段",
                 format_name=format_name,
             )
         streams = _parse_streams(payload.get("streams"))
     except ValueError as error:
-        return MediaProbe(
-            duration_s=None, error=f"invalid_structure: {error}"
+        return probe_result(
+            duration_s=None, error=f"invalid_structure: {error}", exception=error,
         )
     if "duration" not in format_facts:
-        return MediaProbe(
+        return probe_result(
             duration_s=None,
             error="missing_duration: 缺少时长字段",
             streams=streams,
@@ -416,17 +457,17 @@ async def _probe(
     try:
         duration = _media_duration(format_facts["duration"])
     except ValueError as error:
-        return MediaProbe(
-            duration_s=None, error=f"invalid_structure: {error}"
+        return probe_result(
+            duration_s=None, error=f"invalid_structure: {error}", exception=error,
         )
     if not any(stream.codec_type == "video" for stream in streams):
-        return MediaProbe(
+        return probe_result(
             duration_s=None,
             error="no_video_stream: 容器没有视频流",
             streams=streams,
             format_name=format_name,
         )
-    return MediaProbe(
+    return probe_result(
         duration_s=duration,
         error=None,
         streams=streams,
@@ -508,17 +549,23 @@ async def _repair(
 
 
 def _collect_artifact(
-    outcome: RawToolOutcome | str, output: FileRef, roots: BoundDirectories,
+    execution: MediaToolResult, output: FileRef, roots: BoundDirectories,
     stop: threading.Event,
 ) -> MediaArtifact:
     observation = observe_file(output, roots)
-    if isinstance(outcome, str):
-        return MediaArtifact(tool_error=outcome, observation=observation)
+    if execution.stopped_before_start:
+        return MediaArtifact(tool_error="tool_cancelled: 工具尚未启动，停止请求已生效",
+            observation=observation, tool_diagnostics=execution)
+    if execution.exception is not None:
+        return MediaArtifact(tool_error=f"tool_unavailable: {execution.exception}",
+            observation=observation, tool_diagnostics=execution)
+    outcome = execution.outcome
     if outcome.error is not None or outcome.exit is None or outcome.exit.exit_code != 0:
         return MediaArtifact(
             tool_error=_tool_failure("tool_failed", outcome), observation=observation,
+            tool_diagnostics=execution,
         )
-    artifact = MediaArtifact(tool_error=None, observation=observation)
+    artifact = MediaArtifact(tool_error=None, observation=observation, tool_diagnostics=execution)
     if artifact._file_error is not None:
         return artifact
     if stop.is_set():
@@ -533,16 +580,16 @@ def _collect_artifact(
 
 async def _run_tool(
     argv: tuple[str, ...], control: AsyncFileControl
-) -> RawToolOutcome | str:
+) -> MediaToolResult:
     if control.stop_requested:
-        return "tool_cancelled: 工具尚未启动，停止请求已生效"
+        return MediaToolResult(stopped_before_start=True)
     spec = ToolSpec(
         argv=argv, timeout_s=None, terminate_grace_s=_MEDIA_TERMINATE_GRACE_S
     )
     try:
-        return await _execute_tool(spec, stop=control)
+        return MediaToolResult(outcome=await _execute_tool(spec, stop=control))
     except ToolStartError as error:
-        return f"tool_unavailable: {error}"
+        return MediaToolResult(exception=error)
 
 
 def _tool_failure(kind: str, outcome: RawToolOutcome) -> str:

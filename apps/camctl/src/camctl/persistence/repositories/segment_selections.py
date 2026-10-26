@@ -12,6 +12,8 @@ from camctl.contracts.history_values import HistoryBoundary, TransactionRange
 from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.contracts.workflow_errors import item_error_id
+from camctl.contracts.pages import Page
+from camctl.outputs.diagnostics import registered_result_error
 from camctl.devices.tasks import CaptureResultPolicy
 from camctl.history.events import business_columns, load_event_registry
 from camctl.history.reads import PlanReadScope, ReadCoverage
@@ -55,6 +57,44 @@ class FixSegmentSelection:
     def __post_init__(self):
         ObjectId(self.selection_id)
         UtcMicros(self.occurred_at)
+
+
+@dataclass(frozen=True)
+class SegmentSelectionDiagnosticRef:
+    """本次选择已提交的原操作键和固定事务范围，不指向当前选择状态。"""
+
+    operation_key: OperationKey
+    transaction: TransactionRange
+    selection_id: int
+    action_id: int
+
+
+@dataclass(frozen=True)
+class SegmentSelectionSaved:
+    count: int
+    diagnostic_ref: SegmentSelectionDiagnosticRef
+
+
+def read_original_selection_error_page(ref, cursor, owned):
+    """只交付原事务的一页错误回执；不读取当前选择或重算来源依据。"""
+    page = read_saved_transaction_page(owned.connection, ref.operation_key, ref.transaction,
+                                       cursor=cursor, limit=1)
+    failures = []
+    for event in page.items:
+        for row in event.rows:
+            values = row.after.values
+            code = values.get("error_code")
+            if code is None:
+                continue
+            if row.table == "obtain_items":
+                registry = "item_error_ids.obtain_items"
+            elif row.table == "obtain_source_selections":
+                registry = "item_error_ids.obtain_source_selections"
+            else:
+                continue
+            failures.append({"table": row.table, "id": row.row_id,
+                "error": registered_result_error(registry, code, values.get("error_details_json"))})
+    return Page(tuple(failures), page.next_cursor)
 
 
 @dataclass(frozen=True)
@@ -551,7 +591,9 @@ class _Command:
                     if row.table == "obtain_items"
                 ),
             )
-            return CommandPlan((), {}, {}, q["count"], True)
+            result = SegmentSelectionSaved(q["count"], SegmentSelectionDiagnosticRef(
+                self.key, transaction, self.request.selection_id, q["owner"]["id"]))
+            return CommandPlan((), {}, {}, result, True)
         q = qualify(db, self.request)
         if q is None:
             return CommandPlan((), {}, {}, None, True)
@@ -559,10 +601,12 @@ class _Command:
         transaction = TransactionRange(
             allocation.txn_id, allocation.first_event_id, allocation.last_event_id
         )
+        result = SegmentSelectionSaved(q["count"], SegmentSelectionDiagnosticRef(
+            self.key, transaction, self.request.selection_id, q["owner"]["id"]))
         return BoundedCommandPlan(
             canonical(db, q, transaction),
             lambda event, txn: context(db, event, txn, q),
-            q["count"],
+            result,
             lambda db: None,
         )
 
