@@ -16,6 +16,8 @@ Action6 将关闭延时摄影熄屏省电和两路屏幕实时画面的设置纳
 
 两路实时画面设置的扩展在 Linux 开发容器、Python 3.11.17 下，使用下述相同四个测试文件执行定向单元验证，**130 项通过，1.57 秒，退出 0**。六条会话设置均覆盖返回文字忽略、原输出保留、同会话缓存、新会话重发、真实调用故障和软件恢复；码率及 OSMO 继续核对自己的输出规则。拆分预算中的两条实时画面接受用例在生产修改前失败，省电设置对照用例通过。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-liveview-output-20261026/`。本项未运行集成测试或真实设备验证。
 
+提交 `aac523d8` 已更新到现有真机验证安装。331 个生产 Python 文件及 27 项资源在提交归档、wheel 和安装副本中逐字节一致，主代理另行核对核心命令文件与当前源码一致；安装后的隔离导入检查确认两路实时画面命令均使用临时输出处理。5375 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，依赖版本与主机 ADB 路由保留。host 和 camctl 保持停止，客户端继续运行；本次安装未执行数据库或设备命令。完整收据和旧 wheel、状态库、配置备份位于 `.local/deployments/20261026-action6-liveview-output/`。
+
 Linux 开发容器、Python 3.11.17 下，执行 `PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_action6_session_settings.py apps/camctl/tests/unit/devices/test_session_setup_budget.py apps/camctl/tests/unit/devices/test_osmo360ii_session_settings.py apps/camctl/tests/unit/devices/test_camera_power_session_settings.py -q --tb=short`，**113 项通过，1.45 秒，退出 0**。覆盖普通录像、原生延时、独立准备、软件恢复、原输出保存、会话缓存、调用失败以及 OSMO 的严格输出检查。使用正式驱动与受接口约束的传输替身；更新后的省电设置接受用例在生产修改前失败。命令、解释器、源码摘要、日志及退出码保存在 `.local/verification/action6-lapse-lock-20261026/`。本项未运行集成测试或真实设备验证。
 
 提交 `c4301d4e` 已安装到 `/home/cld/.camctl/manual-validation-20261026`，安装解释器为 Python 3.11.17、SQLite 3.53.1。331 个生产 Python 文件及 27 项权威资源在提交归档、wheel 和实际安装中逐字节一致；包内另一个 Python 文件为资源示例脚本，随资源共同核对。主代理另行核对核心命令文件与当前源码一致，安装后的隔离导入及临时输出处理检查通过，依赖版本保留。5369 个现有配置、业务数据、日志、host 和客户端文件的部署前后摘要一致，主机 ADB 路由保留。安装完成时 host 和 camctl 均已停止；交付记录整理期间观察到 host 启动，保留该运行状态，进程观察另存于部署目录的 `final-processes.json`。旧 wheel、状态库与配置备份及完整收据位于 `.local/deployments/20261026-action6-lapse-lock/`，安装过程未执行数据库或设备命令。
