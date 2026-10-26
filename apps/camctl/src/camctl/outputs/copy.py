@@ -26,6 +26,8 @@ from camctl.contracts.values import (
 from camctl.devices.read_session import ReadChunk, ReadEnd
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import log_context
+from camctl.logging_runtime.models import LogLevel
 from camctl.operations.models import ErrorValue
 from camctl.host_files.io import (
     LocalSourceReader as LocalCopySource, PositionedWriter, hash_target, prepare_target,
@@ -536,15 +538,18 @@ async def copy_next_segment(copy_id: int, context: SegmentContext) -> SegmentSte
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_segment",
-        lambda control: _copy_next_segment(copy_id, context, facts, control))
+        lambda control: _copy_next_segment(copy_id, context, facts, control), copy_id=copy_id)
 
 
-async def _owned_copy_operation(context, file_id: int, stage: str, body):
+async def _owned_copy_operation(context, file_id: int, stage: str, body, *, copy_id: int,
+                                level: LogLevel | None = LogLevel.INFO):
     """拷贝实际操作与原保存在同一文件资格内完成。"""
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
-    return await executor.run_owned_async_file_task(AsyncFileTask(
-        FileTaskId(f"{stage}/{file_id}/{new_operation_key()}"), (file_id,),
-        stage, "副本实际操作及原结果保存", body, resources=("state_db",)))
+    with log_context(copy_id=copy_id):
+        return await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"{stage}/{file_id}/{new_operation_key()}"), (file_id,),
+            stage, "副本实际操作及原结果保存", body, resources=("state_db",),
+            log_level=LogLevel.DEBUG if stage == "copy_segment" else level))
 
 
 async def _copy_next_segment(copy_id, context, facts, control) -> SegmentStep:
@@ -628,7 +633,7 @@ async def prepare_copy(copy_id: int, context: CopyContext) -> CopyStep:
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_prepare",
-        lambda _control: _prepare_copy(copy_id, context, facts))
+        lambda _control: _prepare_copy(copy_id, context, facts), copy_id=copy_id)
 
 
 async def _prepare_copy(copy_id, context, facts) -> CopyStep:
@@ -1030,7 +1035,9 @@ async def complete_copy(copy_id: int, context: CompletionContext) -> CompletionS
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
     return await _owned_copy_operation(context, facts.target.file_id, "copy_complete",
-        lambda _control: _complete_copy(copy_id, context, facts))
+        lambda _control: _complete_copy(copy_id, context, facts), copy_id=copy_id,
+        level=None if facts.verification_state in (
+            int(_VERIFICATION.MATCHED), int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE)) else LogLevel.INFO)
 
 
 async def _complete_copy(copy_id, context, facts) -> CompletionStep:

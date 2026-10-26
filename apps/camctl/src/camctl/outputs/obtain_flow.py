@@ -65,13 +65,14 @@ from camctl.outputs.sources import (
 from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_for
 from camctl.persistence.business import settle_required
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.outputs.database_reads import read_one
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import (
     FailReadBinding, FailReadDelivery, FinishObtain, FixSelection,
     OutputsRepository, ReadSourceFallback,
-    ResolveSources, StartObtainAction, load_obtain_facts,
+    ResolveSources, StartObtainAction, ObtainStartDisposition, ObtainFinishDisposition, load_obtain_facts,
     load_selection_facts, read_source_fallback_key)
 
 __all__ = [
@@ -262,6 +263,9 @@ async def _start_due(runtime: ObtainRuntime, now: int) -> None:
             raise db_failure(ConsistencyError,
                 f"取回开始事务未完成（{outcome.kind.value}）:"
                 f" {outcome.error}", outcome)
+        if outcome.value.disposition is ObtainStartDisposition.SAVED:
+            record_event("obtain.action", event="started", action_id=action_id,
+                         database_id=runtime.database.metadata.instance_id)
 
 
 def _action_facts(connection, action_id: int) -> dict:
@@ -585,6 +589,11 @@ async def _publish_and_finish(
         raise db_failure(ConsistencyError,
             f"取回完成事务未完成（{outcome.kind.value}）:"
             f" {outcome.error}", outcome)
+    if outcome.value.disposition is ObtainFinishDisposition.SAVED:
+        record_event("obtain.action", action_id=action_id,
+                     database_id=runtime.database.metadata.instance_id,
+                     action_status=outcome.value.action_status,
+                     prepared=outcome.value.prepared, failed=outcome.value.failed)
     return len(deliveries)
 
 
@@ -604,9 +613,11 @@ def _prepared_deliveries(connection, action_id: int, *, limit: int) -> list[int]
 async def _publish_delivery(
         runtime: ObtainRuntime, delivery_id: int, now: int) -> None:
     """发布一份准备完成的交付；终局失败按已保存事实保留。"""
-    result = await publish_delivery(delivery_id, DeliveryContext(
-        repository=runtime.outputs, database=runtime.database,
-        directories=runtime.directories, occurred_at=now, executor=runtime.file_executor))
+    with measure_stage("obtain.publication", delivery_id=delivery_id,
+                       database_id=runtime.database.metadata.instance_id):
+        result = await publish_delivery(delivery_id, DeliveryContext(
+            repository=runtime.outputs, database=runtime.database,
+            directories=runtime.directories, occurred_at=now, executor=runtime.file_executor))
     if result.phase not in (
             DeliveryPhase.PUBLISHED, DeliveryPhase.FAILED_FINAL,
             DeliveryPhase.NOT_ACTIVE):

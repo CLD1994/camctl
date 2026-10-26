@@ -33,6 +33,7 @@ from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, RetryWaitGate, RunOutcome, StaleRunFinish)
 from camctl.operations.models import AttemptTicket, ErrorValue
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome, record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.operations.recovery import RecoveryBoundary, RecoveryDiagnostic
 from camctl.outputs.cleanup_round import (CleanupConsumption, record_consumption, handed_off_this_round, operation_runtime, operation_supported)
 from camctl.operations.owned_calls import (
@@ -1661,7 +1662,10 @@ async def _delete_once(runtime, item_id, action_id, output_id):
                 evidence = runtime.evidence
                 try:
                     try:
-                        actual = await port.delete(call_request)
+                        with measure_stage("cleanup.delete", database_id=runtime.database.metadata.instance_id,
+                                action_id=action_id, output_id=output_id, cleanup_item_id=item_id,
+                                run_id=intent.ticket.run_id, attempt_id=intent.ticket.attempt_id):
+                            actual = await port.delete(call_request)
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
                         supervision_diagnostic = error.supervision_diagnostic
@@ -1955,7 +1959,10 @@ async def _run_query(
                 evidence = runtime.evidence
                 try:
                     try:
-                        actual = await port.query_file(call_request)
+                        with measure_stage("cleanup.query", database_id=database_id,
+                                cleanup_item_id=item_id,
+                                run_id=ticket.run_id, attempt_id=ticket.attempt_id):
+                            actual = await port.query_file(call_request)
                     except LocalArtifactTaskFailure as error:
                         actual = error.actual
                         supervision_diagnostic = error.supervision_diagnostic
@@ -2521,6 +2528,9 @@ async def _start_due(runtime: CleanupRuntime, now: int) -> bool:
                 raise ConsistencyError(
                     f"清理开始事务未完成（{outcome.kind.value}）: {outcome.error}")
             wakeup_required |= outcome.value.disposition is CleanupStartDisposition.SAVED
+            if outcome.value.disposition is CleanupStartDisposition.SAVED:
+                record_event("cleanup.action", event="started", action_id=action_id,
+                             database_id=runtime.database.metadata.instance_id)
 
 
 async def _running_cleanup_actions(runtime: CleanupRuntime):
@@ -2570,6 +2580,10 @@ async def _advance_cleanup_action(
         raise ConsistencyError(
             f"清理汇总事务未完成（{outcome.kind.value}）:"
             f" {outcome.error}")
+    if outcome.value.disposition is CleanupActionDisposition.SAVED:
+        record_event("cleanup.action", action_id=action_id,
+                     database_id=runtime.database.metadata.instance_id,
+                     action_status=outcome.value.action_status)
 
 
 async def _resolve_cleanup_sources(runtime: CleanupRuntime, action_id: int,

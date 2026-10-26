@@ -7,6 +7,10 @@ close_runtime 兜底关闭且不补写摘要。
 
 from __future__ import annotations
 
+import json
+import os
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -35,6 +39,31 @@ def _log_text(home: Path) -> str:
 
 
 class TestSessionLogging:
+    async def test_submit_info_stages_are_written_before_channel_closes(self, tmp_path: Path) -> None:
+        cfg = _config_for(tmp_path)
+        cfg = replace(cfg, log=replace(cfg.log, level="INFO"))
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        deps = build_runtime(CommandMode.SUBMIT, cfg,
+            catalog=RecordingCatalog(), notifier=RecordingNotifier())
+        try:
+            outcome = await execute_command(deps, await _parsed(tmp_path, _plan_body()))
+            assert outcome.succeeded
+            assert not deps.log_runtime.channel.listener_alive
+            records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+            important = [record for record in records if record["stage"] in (
+                "command", "session", "session.cleanup")]
+            assert [(record["stage"], record["event"]) for record in important] == [
+                ("command", "started"), ("session", "started"), ("session", "returned"),
+                ("session.cleanup", "started"), ("session.cleanup", "returned"),
+                ("command", "result")]
+            assert all(record["level"] == "INFO" and record["pid"] == os.getpid()
+                and record["session_key"] == deps.session_key for record in important)
+            assert all(datetime.fromisoformat(record["logged_at_utc"]).utcoffset().total_seconds() == 0
+                for record in important)
+            assert not any(record.get("event") == "timing" for record in records)
+        finally:
+            close_runtime(deps)
+
     async def test_run_failure_error_recorded_and_logging_closed(
         self, tmp_path: Path,
     ) -> None:

@@ -37,6 +37,7 @@ from camctl.reporting.messages import (
 from camctl.reporting.maintenance import MaintenanceLimits
 from camctl.reporting.worker import worker_main
 from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.operations.error_diagnostics import DiagnosticError
 
 __all__ = [
@@ -173,6 +174,7 @@ class WorkerSupervisor:
         self._retirement_protocol_detail = ""
         self._retirement_protocol_error = None
         process, parent_end, child_end = self._spawn()
+        record_event("report.worker", event="started", **_worker_fields(process))
         # 父进程不使用子进程端：spawn 传递后立即关闭本地引用。
         child_end.close()
         communicator = WorkerCommunicator(parent_end)
@@ -200,6 +202,7 @@ class WorkerSupervisor:
                 return WorkerStartup(ready=False, detail="启动期间已请求停止", stopped=True)
             if isinstance(event, MessageEvent):
                 if isinstance(event.message, ReadyMessage) and self._process.is_alive():
+                    record_event("report.worker", event="ready", **_worker_fields(process))
                     return WorkerStartup(ready=True)
                 if isinstance(event.message, StartupFailedMessage):
                     failure = event.message
@@ -362,6 +365,12 @@ class WorkerSupervisor:
         return await asyncio.shield(self._retirement_task)
 
     async def _retire_current(self) -> WorkerShutdown:
+        if self._process is None and self._communicator is None:
+            return await self._retire_current_observed()
+        with measure_stage("report.worker_stop", **_worker_fields(self._process)):
+            return await self._retire_current_observed()
+
+    async def _retire_current_observed(self) -> WorkerShutdown:
         """实际退出后关闭通信，并逐条读取到终端以保存有效 STATE。"""
         process, communicator = self._process, self._communicator
         job = self._active_job
@@ -448,6 +457,8 @@ class WorkerSupervisor:
         self._process = None
         self._communicator = None
         self._active_job = None
+        record_event("report.worker", event="exited", **_worker_fields(process),
+                     exit_code=getattr(process, "exitcode", None), forced=forced)
         return WorkerShutdown(
             exitcode=getattr(process, "exitcode", None), forced=forced,
             state_failure=state_failure, configuration_failure=configuration_failure)
@@ -462,3 +473,8 @@ class WorkerSupervisor:
             if self._clock() >= deadline:
                 return False
             await asyncio.sleep(_JOIN_POLL_SECONDS)
+
+
+def _worker_fields(process) -> dict:
+    pid = getattr(process, "pid", None)
+    return {} if pid is None else {"worker_pid": pid}

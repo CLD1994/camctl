@@ -32,6 +32,7 @@ from camctl.outputs.copy import CopyTargetRef
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.session.supervision import Supervisor
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
+from camctl.logging_runtime.events import log_context
 from camctl.operations.models import ErrorValue
 
 if TYPE_CHECKING:
@@ -600,10 +601,11 @@ async def publish_delivery(
         lambda owned: context.repository.load_delivery_state(delivery_id, owned),
         description="交付发布状态读取")
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
-    return await executor.run_owned_async_file_task(AsyncFileTask(
-        FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
-        "delivery_publication", "副本发布及实际结果保存",
-        lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
+    with log_context(delivery_id=delivery_id):
+        return await executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
+            "delivery_publication", "副本发布及实际结果保存",
+            lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
 
 
 def _record_location_errors(delivery_id, decision) -> None:

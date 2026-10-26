@@ -30,6 +30,7 @@ from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind, db_failure
 from camctl.persistence.business import settle_required
 from camctl.persistence.repositories.scheduling import (
@@ -578,7 +579,9 @@ def cancel_flow(
     pending_origin_settlements = {}
 
     async def flow(context: Any) -> None:
-        from camctl.cancellation.models import CancelStartDisposition, FinishCancelAction, StartCancelAction
+        from camctl.cancellation.models import (
+            CancelActionDisposition, CancelStartDisposition, FinishCancelAction, StartCancelAction,
+        )
         from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
         from camctl.cancellation.rules import CancellationStatus, summarize_cancel
         from camctl.cancellation.settlement import TargetSettlement
@@ -641,6 +644,9 @@ def cancel_flow(
                             f"取消动作开始事务未完成（{started.kind.value}）: {started.error}", started)
                     if started.value.disposition is CancelStartDisposition.REJECTED:
                         continue
+                    if started.value.disposition is CancelStartDisposition.SAVED:
+                        record_event("cancel.action", event="started",
+                            database_id=database.metadata.instance_id, action_id=action_id)
                 item_ids = await _resolve_and_fix(database, repository, action_id, spec_json,
                     occurred, motor_permits, start_entries)
                 if item_ids is None:
@@ -654,6 +660,11 @@ def cancel_flow(
             if finished.kind is not DbOutcomeKind.COMPLETED:
                 raise db_failure(StateDbFailure,
                     f"取消动作终态事务未完成（{finished.kind.value}）: {finished.error}", finished)
+            if finished.value.disposition is CancelActionDisposition.SAVED:
+                record_event("cancel.action", event="result",
+                    database_id=database.metadata.instance_id, action_id=action_id,
+                    action_status=finished.value.action_status,
+                    succeeded=finished.value.succeeded, failed=finished.value.failed)
     return flow
 
 
@@ -662,7 +673,9 @@ async def _resolve_and_fix(
         occurred: Callable[[], int], motor_permits: dict | None = None, start_entries=None,
 ) -> tuple[int, ...] | None:
     """只向数据库操作交付本次已经取得的有限许可事实。"""
-    from camctl.cancellation.models import FixCancelTargets, ResolvedTargets, TargetFacts, CancelTargetError
+    from camctl.cancellation.models import (
+        CancelTargetsDisposition, FixCancelTargets, ResolvedTargets, TargetFacts, CancelTargetError,
+    )
     from camctl.cancellation.rules import (
         current_eligibility_facts, decide_cancel_eligibility,
         load_eligibility_inputs, may_link_auto_preview,
@@ -728,6 +741,10 @@ async def _resolve_and_fix(
     saved = await _fix_cancel_request(database, repository, request, key, start_entries)
     if saved.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(StateDbFailure, f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}", saved)
+    if saved.value.disposition is CancelTargetsDisposition.SAVED:
+        record_event("cancel.targets", event="fixed",
+            database_id=database.metadata.instance_id, action_id=action_id,
+            item_ids=saved.value.item_ids)
     return saved.value.item_ids
 
 
@@ -1018,6 +1035,8 @@ def report_flow(
                     raise db_failure(StateDbFailure,
                         f"发布恢复事务未完成（{outcome.kind.value}）:"
                         f" {outcome.error}", outcome)
+                record_event("report.publish", event="recovered", report_id=report_id,
+                    database_id=business.metadata.instance_id)
                 await _settle_covered_local_syncs(business, now_us)
                 return None
 
@@ -1048,7 +1067,12 @@ def report_flow(
             busy_timeout_ms=database.busy_timeout_ms,
         )
         try:
-            generation = await supervisor.generate(job)
+            with measure_stage("report.generate", report_id=report_id, job_id=job_id,
+                    database_id=business.metadata.instance_id):
+                generation = await supervisor.generate(job)
+            record_event("report.generate", event="result", report_id=report_id,
+                job_id=job_id, database_id=business.metadata.instance_id,
+                generation_kind=generation.kind.value)
         except prerequisite_errors:
             raise
         except state_errors as error:
@@ -1091,15 +1115,20 @@ def report_flow(
             raise StateDbFailure(
                 f"报告 {report_id} 的生成文件名与身份不符: {success.path}")
         try:
-            delivery = await deliver_staged_report(
-                report_id,
-                StagedReport(name=Path(success.path).name,
-                             size_bytes=success.size_bytes, sha256=success.sha256),
-                HandoffDirectories(staging, ready),
-                DbPublicationSession(business, occurred_at=clock),
-                local_actions=local_actions,
-                context={"database_id": business.metadata.instance_id},
-            )
+            with measure_stage("report.publish", report_id=report_id, job_id=job_id,
+                    database_id=business.metadata.instance_id):
+                delivery = await deliver_staged_report(
+                    report_id,
+                    StagedReport(name=Path(success.path).name,
+                                 size_bytes=success.size_bytes, sha256=success.sha256),
+                    HandoffDirectories(staging, ready),
+                    DbPublicationSession(business, occurred_at=clock),
+                    local_actions=local_actions,
+                    context={"database_id": business.metadata.instance_id},
+                )
+            record_event("report.publish", event="result", report_id=report_id,
+                job_id=job_id, database_id=business.metadata.instance_id,
+                publication_outcome=delivery.outcome.value)
         except prerequisite_errors:
             raise
         except state_errors as error:

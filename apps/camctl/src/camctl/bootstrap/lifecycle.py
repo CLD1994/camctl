@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from camctl.devices.start_entry import StartEntryCoordinator
 
+import asyncio
 import os
 import stat
 import json
@@ -50,6 +51,7 @@ from camctl.session.service import (
 )
 from camctl.session.work import WorkFacts
 from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.logging_runtime.events import event_logging, log_context, measure_stage, record_event
 
 __all__ = ["RuntimeDeps", "build_runtime", "close_runtime", "execute_command"]
 
@@ -999,14 +1001,28 @@ async def execute_command(
     channel = None if deps.log_runtime is None else deps.log_runtime.channel
     fallback = lambda message: _write_stderr_diagnostic(deps, message)
     installation = None
-    with error_diagnostics_context(channel, fallback, background=True):
+    command_settled = False
+
+    def finish_command(*, event="result", **fields):
+        nonlocal command_settled
+        if not command_settled:
+            command_settled = True
+            record_event("command", event=event, **fields)
+
+    with error_diagnostics_context(channel, fallback, background=True), event_logging(channel), log_context(
+            command_name=deps.mode.value, session_key=deps.session_key):
         try:
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
+            record_event("command", event="started")
             return await _execute_command(
                 deps, source, flows=flows, restricted_flows=restricted_flows,
-                wake=wake, poll_interval_s=poll_interval_s,
+                wake=wake, poll_interval_s=poll_interval_s, finish_command=finish_command,
             )
+        except BaseException as error:
+            finish_command(event="cancelled" if isinstance(error, asyncio.CancelledError) else "raised",
+                           exception_type=type(error).__name__)
+            raise
         finally:
             try:
                 # 无文件日志或装配尚未进入正常收场的路径也交付原诊断。
@@ -1024,6 +1040,7 @@ async def _execute_command(
     restricted_flows: Mapping[str, Any] | None = None,
     wake: Any = None,
     poll_interval_s: float | None = None,
+    finish_command: Callable[..., None],
 ) -> SessionOutcome:
     """执行一次 run/submit 会话；调用方负责运行事件循环。
 
@@ -1043,6 +1060,7 @@ async def _execute_command(
         and deps.state_db_regular is True
     )
     if deps.startup_error is not None and not minimal_bad_database_run:
+        finish_command(succeeded=False, reason=deps.startup_error.reason)
         if deps.log_runtime is not None:
             try:
                 await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error))
@@ -1257,11 +1275,13 @@ async def _execute_command(
     outcome: SessionOutcome | None = None
     primary_error: BaseException | None = None
     try:
-        outcome = await run_session(context, source)
+        with measure_stage("session"):
+            outcome = await run_session(context, source)
     except BaseException as error:
         primary_error = error
         raise
     finally:
+        record_event("session.cleanup", event="started")
         selected_control = (
             primary_error
             if primary_error is not None and not isinstance(primary_error, Exception)
@@ -1376,6 +1396,14 @@ async def _execute_command(
                 await _emit_session_error(deps, _failed_outcome_message(deps, outcome))
         except BaseException as error:
             remember_cleanup_error("会话失败诊断异常", error)
+        record_event("session.cleanup", cleanup_error_count=len(cleanup_errors))
+        command_error = selected_control or primary_error or (
+            cleanup_errors[0][1] if cleanup_errors else None)
+        if command_error is not None:
+            finish_command(event=("cancelled" if isinstance(command_error, asyncio.CancelledError)
+                         else "raised"), exception_type=type(command_error).__name__)
+        elif outcome is not None:
+            finish_command(succeeded=outcome.succeeded, reason=outcome.reason)
         if deps.log_runtime is not None:
             try:
                 await _close_log_runtime(

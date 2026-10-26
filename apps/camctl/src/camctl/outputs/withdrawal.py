@@ -15,6 +15,7 @@ from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
 from camctl.persistence.business import settle_required
 from camctl.persistence.models import DbOutcomeKind
+from camctl.logging_runtime.models import LogLevel
 
 if TYPE_CHECKING:
     from camctl.persistence.business import BusinessDatabase
@@ -156,7 +157,9 @@ async def withdraw_delivery(delivery_id: int, context: WithdrawalContext) -> boo
 
     await context.executor.run_owned_async_file_task(AsyncFileTask(
         FileTaskId(f"withdrawal/{delivery_id}/{new_operation_key()}"), (identity[5],),
-        "delivery_withdrawal", "交付撤回实际结果及原事务保存", body, resources=("state_db",)))
+        "delivery_withdrawal", "交付撤回实际结果及原事务保存", body, resources=("state_db",),
+        log_level=None if pending is not None or identity[3] not in (
+            int(_WITHDRAWAL.NOT_REQUESTED), int(_WITHDRAWAL.PENDING)) else LogLevel.INFO))
     return True
 
 

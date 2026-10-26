@@ -11,10 +11,13 @@ from __future__ import annotations
 import asyncio
 import enum
 import threading
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Protocol
+
+from camctl.logging_runtime.events import measure_stage
+from camctl.logging_runtime.models import LogLevel
 
 from camctl.session.supervision import (
     OwnedTask,
@@ -67,6 +70,7 @@ class FileTask:
     business: str
     body: TaskBody
     resources: tuple[str, ...] = ()
+    log_level: LogLevel | None = LogLevel.INFO
 
     def __post_init__(self) -> None:
         if type(self.file_id) is not int or self.file_id <= 0:
@@ -89,6 +93,7 @@ class AsyncFileTask:
     business: str
     body: Callable[["AsyncFileControl"], Awaitable[Any]]
     resources: tuple[str, ...] = ()
+    log_level: LogLevel | None = LogLevel.INFO
 
     def __post_init__(self) -> None:
         if (not isinstance(self.file_ids, tuple) or not self.file_ids
@@ -219,6 +224,7 @@ class _TaskState:
 
     def __init__(self, task: FileTask | AsyncFileTask) -> None:
         self.task = task
+        self.log_context = copy_context()
         self.stage = _TaskStage.QUEUED
         self.stop_event = threading.Event()
         self.loop = asyncio.get_running_loop()
@@ -263,7 +269,7 @@ class FileTaskExecutor:
             raise FileTaskError("撤回 completion 接手方必须能保留原文件任务 handle")
         state = self._admit(task)
         return await self._wait_for_execution(
-            state, owner, lambda: self._runner(lambda: self._execute(state)),
+            state, owner, lambda: self._runner(lambda: state.log_context.run(self._execute, state)),
             handoff_withdrawn=handoff_withdrawn,
         )
 
@@ -279,7 +285,8 @@ class FileTaskExecutor:
         if (scope is not None and scope[0] is self and scope[3] is asyncio.current_task()
                 and set(task.file_ids) <= set(scope[1])):
             try:
-                value = await task.body(scope[2])
+                with _measure_file_task(task):
+                    value = await task.body(scope[2])
                 return FileTaskResult(task.task_id, ran=True, value=value)
             except Exception as error:
                 return FileTaskResult(task.task_id, ran=True,
@@ -297,20 +304,22 @@ class FileTaskExecutor:
         scope = _owned_scope.get()
         if (scope is not None and scope[0] is self and scope[3] is asyncio.current_task()
                 and set(task.file_ids) <= set(scope[1])):
-            return await task.body(scope[2])
+            with _measure_file_task(task):
+                return await task.body(scope[2])
         owner = _OwnedFileResult()
 
         async def body(control: AsyncFileControl) -> _OwnedFileOutcome:
             token = _owned_scope.set((self, task.file_ids, control, asyncio.current_task()))
             try:
-                return _OwnedFileOutcome(value=await task.body(control))
+                with _measure_file_task(task):
+                    return _OwnedFileOutcome(value=await task.body(control))
             except BaseException as error:
                 return _OwnedFileOutcome(error=error)
             finally:
                 _owned_scope.reset(token)
 
         try:
-            result = await self.run_async_file_task(replace(task, body=body), owner)
+            result = await self.run_async_file_task(replace(task, body=body, log_level=None), owner)
         except BaseException as interrupted:
             if not owner.handed_over:
                 raise
@@ -417,7 +426,8 @@ class FileTaskExecutor:
             return state.completion.result()
         task = state.task
         try:
-            value = task.body(state.stop_event)
+            with _measure_file_task(task):
+                value = task.body(state.stop_event)
             result = FileTaskResult(task_id=task.task_id, ran=True, value=value)
         except asyncio.CancelledError as error:
             # 执行体已经退出；先保存实际失败，再传播取消并交接结果。
@@ -439,7 +449,8 @@ class FileTaskExecutor:
         if not self._begin(state):
             return state.completion.result()
         try:
-            value = await state.task.body(AsyncFileControl(state))
+            with _measure_file_task(state.task):
+                value = await state.task.body(AsyncFileControl(state))
             result = FileTaskResult(state.task.task_id, ran=True, value=value)
         except asyncio.CancelledError as error:
             self._finish(state, FileTaskResult(
@@ -523,6 +534,11 @@ class FileTaskExecutor:
                 pending=handle,
             ),
         )
+
+
+def _measure_file_task(task: FileTask | AsyncFileTask):
+    return measure_stage("file_task", level=task.log_level,
+        file_task_id=task.task_id.value, file_ids=task.file_ids, file_stage=task.stage)
 
 
 def _withdrawn_result(state: _TaskState) -> FileTaskResult:
