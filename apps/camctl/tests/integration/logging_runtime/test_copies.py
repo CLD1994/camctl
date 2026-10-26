@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 import threading
@@ -148,7 +149,9 @@ class TestLockedCopy:
         assert not errors
         # 锁保证：副本是某一时刻的完整文件，任何行都不会缺尾。
         for line in copied.splitlines():
-            assert line.startswith(("churn-", _TRIGGER, "camctl"))
+            record = json.loads(line)
+            assert record["message"].startswith(("churn-", _TRIGGER, "camctl"))
+            assert record["level"] in ("INFO", "ERROR")
         channel.close()
 
     @pytest.mark.parametrize(("target_error_type", "source_error_type", "kind"), [

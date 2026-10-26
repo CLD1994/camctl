@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 
 import pytest
@@ -222,11 +223,11 @@ async def test_sync_error_falls_back_once_when_full_or_disabled(failed_before):
     result = channel.slog(record)
     assert result.decision.kind is AdmissionKind.FALLBACK_STDERR
     assert result.fallback_written
-    assert fallback == ["complete error"]
+    assert [json.loads(entry)["message"] for entry in fallback] == ["complete error"]
     assert channel.counters.error_dropped == 0
     await finish(channel)
     assert "complete error" not in [entry.message for entry in written]
-    assert fallback == ["complete error"]
+    assert [json.loads(entry)["message"] for entry in fallback] == ["complete error"]
 
 
 async def test_accepted_standard_error_and_disabled_queue_retain_complete_diagnostics():
@@ -273,7 +274,7 @@ async def test_failed_stderr_is_not_retried_or_logged_recursively():
     first = channel.slog(LogRecord(LogLevel.ERROR, "first", LogSource.SYNC))
     second = channel.slog(LogRecord(LogLevel.ERROR, "second", LogSource.SYNC))
     assert not first.fallback_written and not second.fallback_written
-    assert attempts == ["first"]
+    assert [json.loads(entry)["message"] for entry in attempts] == ["first"]
     await finish(channel)
 
 
@@ -295,7 +296,7 @@ async def test_important_receipt_exposes_single_stderr_handoff(raises):
             result = admission_result_for(error)
         assert result.delivered is False
         assert result.fallback_written
-        assert fallback == ["important error"]
+        assert [json.loads(entry)["message"] for entry in fallback] == ["important error"]
     finally:
         await finish(channel)
-    assert fallback == ["important error"]
+    assert [json.loads(entry)["message"] for entry in fallback] == ["important error"]

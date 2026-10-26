@@ -91,7 +91,10 @@ async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp
                 await asyncio.gather(task, return_exceptions=True)
             await close_logging(runtime)
     text = (tmp_path / "camctl.log").read_text(encoding="utf-8")
-    payloads = [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+    records = [json.loads(line) for line in text.splitlines()]
+    assert [record["message"] for record in records if record["stage"] == "runtime"] == [
+        "hold-consumer", "backlog-0", "backlog-1", "backlog-2"]
+    payloads = [record for record in records if record["stage"] == "read"]
     assert len(payloads) == 1
     assert payloads[0]["error"]["message"] == "device-read-failed"
     assert payloads[0]["details"] == {"stderr_hex": "6b6e6f776eff", "stderr_text": "known\\xff"}

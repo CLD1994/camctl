@@ -1,5 +1,6 @@
 """CLH 协调释放错误不得覆盖已经完成的日志副本事实。"""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def test_copy_preserves_unlock_and_handler_close_errors(
         LogRecord(level=LogLevel.ERROR, message="trigger"), destination)
 
     assert copy_error is None
-    assert destination.read_bytes().endswith(b"trigger\n")
+    assert json.loads(destination.read_text(encoding="utf-8").splitlines()[-1])["message"] == "trigger"
     assert write_result.appended is True
     assert write_result.copy_handles_closed is True
     assert "unlock lost" in write_result.coordination_error
@@ -72,7 +73,7 @@ def test_rotation_failure_retains_real_copy_success(
     assert write_result.rotation_error is not None
     assert "rotation denied" in write_result.rotation_error
     assert copy_error is None
-    assert destination.read_bytes().endswith(b"trigger\n")
+    assert json.loads(destination.read_text(encoding="utf-8").splitlines()[-1])["message"] == "trigger"
     assert channel.disabled is False
     later = channel.write_record(
         LogRecord(level=LogLevel.ERROR, message="after rotation failure"))
@@ -176,7 +177,7 @@ def test_copy_format_failure_does_not_disable_file_channel(
     assert succeeded.appended is True
     assert succeeded.copy_handles_closed is True
     assert copy_error is None
-    assert destination.read_bytes().endswith(b"later\n")
+    assert json.loads(destination.read_text(encoding="utf-8").splitlines()[-1])["message"] == "later"
     assert channel.disabled is False
     channel.close()
 
