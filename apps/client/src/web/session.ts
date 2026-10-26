@@ -56,6 +56,7 @@ export type DraftSaveStatus =
   | "deleted";
 export { sameContent } from "../shared/automatic-previews";
 type ExportState = "editable" | "exporting" | "unknown" | "exported";
+type SaveMode = "explicit" | "automatic";
 interface PendingWrite {
   revision: number;
   content: DraftContent;
@@ -149,6 +150,7 @@ interface SelectionOperation {
   written?: Draft;
   phase: "unknown" | "confirmation" | "acceptance";
 }
+export const DRAFT_SAVE_DELAY_MS = 1000;
 export class DraftSession {
   readonly draft: Draft;
   content: DraftContent;
@@ -173,6 +175,9 @@ export class DraftSession {
   private exportSnapshot?: { revision: number; content: DraftContent };
   private running?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
+  get autoSaveScheduled() {
+    return this.timer !== undefined;
+  }
   private deletionFailure = "";
   private capabilities?: CapabilityState;
   private appendView?: (transition: VerifiedAppend) => () => void;
@@ -1402,35 +1407,41 @@ export class DraftSession {
   schedule() {
     this.cancelScheduledSave();
     if (this.canSave && !this.hasConfirmedCurrentInput() && !this.pendingWrite && !this.automaticSaveBlocked) {
-      // 旧尝试失败不能重置期间新输入的编辑时刻。
-      const delay =
-        this.failedWrite?.reason === "save" &&
-        this.failedWrite.version !== this.version
-          ? Math.max(0, this.lastEditAt + 450 - Date.now())
-          : 450;
+      // 重复观察和在途请求结束都不能重置最后一次实际输入的等待窗口。
+      const delay = this.lastEditAt
+        ? Math.max(0, this.lastEditAt + DRAFT_SAVE_DELAY_MS - Date.now())
+        : DRAFT_SAVE_DELAY_MS;
       const generation = this.editGeneration;
       this.timer = setTimeout(() => {
         if (generation !== this.editGeneration) return;
         this.timer = undefined;
-        void this.flush().catch(() => {});
+        void this.flush("automatic").catch(() => {});
       }, delay);
     }
   }
-  async flush(): Promise<void> {
+  async flush(mode: SaveMode = "explicit"): Promise<void> {
     this.cancelScheduledSave();
     if (this.copyLocked) throw Error("请先完成或核实另存操作");
     if (this.selectionOperation) throw Error("请先处理所选操作的待决定责任");
-    if (this.running) return this.running;
+    if (this.running) {
+      await this.running;
+      if (mode === "explicit") return this.flush();
+      return;
+    }
     if (this.wholeAcceptance) throw Error("保存已经证明，请先重试完整接纳");
     if (!this.canEdit && !this.pendingWrite)
       throw new Error("请先核实草稿的操作状态");
     if (!this.pendingWrite && !this.canSave && !this.retryableRejected)
       throw Error("请先核实后端记录并完成完整版本选择");
-    this.running = this.saveLoop();
+    this.running = this.saveLoop(mode);
     try {
       await this.running;
     } finally {
       this.running = undefined;
+      if (mode === "automatic" && !this.hasConfirmedCurrentInput()) {
+        this.schedule();
+        this.changed();
+      }
     }
   }
   private async verifyWrite(
@@ -1565,7 +1576,7 @@ export class DraftSession {
       },
     );
   }
-  private async saveLoop() {
+  private async saveLoop(mode: SaveMode) {
     this.error = "";
     this.saving = true;
     this.changed();
@@ -1595,6 +1606,11 @@ export class DraftSession {
         this.retryableRejected = false;
         await this.sendWrite(pending);
         this.changed();
+        if (
+          mode === "automatic" &&
+          this.lastEditAt + DRAFT_SAVE_DELAY_MS > Date.now()
+        )
+          break;
       }
     } catch (error) {
       if (!this.hasConfirmedCurrentInput())

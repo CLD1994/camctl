@@ -69,6 +69,8 @@ async function setup(content: DraftContent, capabilities?: Capabilities) {
   const draft = app.createDraft(content);
   await page.reload();
   await page.getByTestId("draft-open-button").click();
+  await check(page.getByTestId("validation-issues")).toHaveCount(0);
+  await page.getByTestId("export-button").click();
   return { app, page, draft };
 }
 
@@ -737,7 +739,7 @@ it.each(["bad", "/actions/~2bad", ""])(
       pending: { [path]: { kind: "json", text: "[" } },
     });
     const before = app.draft(draft.id);
-    await check(page.getByTestId("save-status")).toBeVisible();
+    await check(page.getByTestId("save-status")).toContainText("已保存");
     await page
       .getByTestId("validation-issues")
       .getByRole("button", { name: /输入尚未完成/ })

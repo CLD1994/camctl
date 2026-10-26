@@ -1,18 +1,18 @@
 import { expect, it, vi, afterEach } from "vitest";
-import { DraftSession } from "../../src/web/session";
+import { DraftSession, DRAFT_SAVE_DELAY_MS } from "../../src/web/session";
 import { HttpError } from "../../src/web/api";
 import type { Draft, DraftContent } from "../../src/server/models";
 const draft = (revision: number, name: string): Draft => ({id: "d", revision, content: {text: JSON.stringify({name, actions: []}, null, 2)}, createdAt: "2026-10-12 00:00:00", updatedAt: "2026-10-12 00:00:01"});
 afterEach(() => vi.useRealTimers());
 
 // 编辑代次不等于尚未保存的完整输入；恢复基线时错误发送PUT将违反此用例。
-it("恢复已确认完整基线后450毫秒不再写相同内容且保存事实成立", async () => {
+it("恢复已确认完整基线后等待窗口不再写相同内容且保存事实成立", async () => {
   vi.useFakeTimers(); let writes = 0;
   const base = draft(1, "base");
   const session = new DraftSession(base, {save: async () => {writes++; return draft(2, "base");}, read: async () => base}, () => {});
   session.edit(draft(1, "temporary").content); session.schedule();
   session.edit(base.content); session.schedule();
-  await vi.advanceTimersByTimeAsync(449); expect(writes).toBe(0);
+  await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1); expect(writes).toBe(0);
   await vi.advanceTimersByTimeAsync(1); expect(writes).toBe(0);
   expect(session.saved).toBe(true); expect(session.revision).toBe(1);
 });
@@ -39,16 +39,16 @@ it.each(parts)("只修改并恢复%s，保存事实按完整内容成立而非�
   session.edit(base.content); session.schedule();
   expect(session.version).toBe(2); expect(session.confirmedVersion).toBe(0);
   expect(session.saved).toBe(true); expect(session.saveStatus).toBe("saved"); expect(session.needsLeaveWarning).toBe(false);
-  await vi.advanceTimersByTimeAsync(450); await session.flush(); expect(writes).toBe(0);
+  await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS); await session.flush(); expect(writes).toBe(0);
 });
-it("Number投影相同但token不同仍是未保存输入并在450毫秒尝试写入", async () => {
+it("Number投影相同但token不同仍是未保存输入并在等待窗口尝试写入", async () => {
   vi.useFakeTimers(); let writes = 0;
   const base = {...draft(1,"base"),content:{text:'{"name":"base","n":1.0000000000000001,"actions":[]}'}};
   const session = new DraftSession(base,{save:async () => {writes++; throw new HttpError("rejected","拒绝",[],400);},read:async () => base},() => {});
   session.edit({text:'{"name":"base","n":1.00000000000000001,"actions":[]}'}); session.schedule();
   expect(Number("1.0000000000000001")).toBe(Number("1.00000000000000001"));
   expect(session.saved).toBe(false); expect(session.needsLeaveWarning).toBe(true);
-  await vi.advanceTimersByTimeAsync(449); expect(writes).toBe(0);
+  await vi.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS - 1); expect(writes).toBe(0);
   await vi.advanceTimersByTimeAsync(1); expect(writes).toBe(1);
 });
 it.each(["unavailable","invalid"] as const)("恢复B不授权%s观察接纳或保存", kind => {

@@ -342,6 +342,18 @@ fieldset {
   flex-wrap: wrap;
   align-items: flex-start;
 }
+.record-pagination {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.record-pagination .button-row {
+  justify-content: space-between;
+}
 .save-feedback {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 9rem;

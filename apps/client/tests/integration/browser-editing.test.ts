@@ -887,14 +887,11 @@ it.each([undefined, {}])(
     await page.reload();
     await page.getByTestId("draft-open-button").click();
     await check(page.getByLabel("报告范围")).toHaveAttribute("data-value", "");
+    await check(page.getByTestId("validation-issues")).toHaveCount(0);
+    await page.getByTestId("export-button").click();
     await check(page.getByTestId("validation-issues")).toContainText(
       "invalid_params",
     );
-    const rejected = page.waitForResponse((response) =>
-      response.url().endsWith(`/drafts/${draft.id}/export`),
-    );
-    await page.getByTestId("export-button").click();
-    expect((await rejected).status()).toBe(400);
     await check(page.getByTestId("download-request-button")).toHaveCount(0);
     expect(app.store.all("requests")).toEqual([]);
     expect(JSON.parse(app.draft(draft.id).content.text).actions[0]).toEqual(
@@ -1420,6 +1417,7 @@ it("未完成参数JSON切换视图和刷新后仍可修正", async () => {
   await page.getByTestId("draft-open-button").first().click();
   await check(page.getByLabel("参数 JSON 文本")).toHaveValue('{"type":');
   await page.getByLabel("参数 JSON 文本").fill('{"type":"removed"}');
+  await page.getByTestId("export-button").click();
   await check(page.getByTestId("validation-issues")).toContainText(
     "params.type",
   );
@@ -1835,6 +1833,7 @@ it("手动取回的精确列表与筛选转换须明确选择，原非法组合�
   await page.reload();
   await page.getByTestId("draft-open-button").click();
   const before = app.draft(draft.id);
+  await page.getByTestId("export-button").click();
   const issues = page.getByTestId("validation-issues");
   const combination = issues.getByRole("button", { name: /取回.*动作参数/ });
   await check(combination).toContainText(/筛选.*产物列表.*不能同时/);
