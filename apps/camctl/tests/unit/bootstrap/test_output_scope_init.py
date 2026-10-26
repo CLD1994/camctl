@@ -1,9 +1,11 @@
 """输出范围升级使用显式初始化选项和原目录绑定。"""
 
+from contextlib import nullcontext
 from io import StringIO
 from itertools import combinations
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -12,6 +14,14 @@ from camctl import cli
 from camctl.bootstrap import application
 from camctl.persistence import initialization, output_scope_upgrade
 from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, StateDatabaseError
+
+
+@pytest.fixture(autouse=True)
+def isolate_one_shot_logging(monkeypatch):
+    from camctl.logging_runtime import one_shot
+
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
 
 
 def test_init_parses_output_scope_as_an_explicit_option():
@@ -40,7 +50,7 @@ def test_programmatic_init_rejects_combined_upgrades_before_access(monkeypatch, 
 
 
 def test_init_cli_forwards_output_scope_option_and_keeps_stdout_empty(monkeypatch):
-    config, state_db = object(), Path("/state/state.db")
+    config, state_db = SimpleNamespace(log=object()), Path("/state/state.db")
     adapter = create_autospec(application.ConfigAdapter, instance=True, spec_set=True)
     adapter.load.return_value = config
     adapter.state_db_path.return_value = state_db

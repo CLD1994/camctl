@@ -1,5 +1,6 @@
 """拍摄准备升级通过显式 init 接入，普通初始化保持验证语义。"""
 
+from contextlib import nullcontext
 from io import StringIO
 from pathlib import Path
 import sqlite3
@@ -15,6 +16,14 @@ from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection, StateD
 from camctl.session.locks import SessionLease
 
 
+@pytest.fixture(autouse=True)
+def isolate_one_shot_logging(monkeypatch):
+    from camctl.logging_runtime import one_shot
+
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
+
+
 def test_init_parses_capture_preparation_upgrade_as_explicit_option():
     assert cli.parse_command(["init", "--upgrade-capture-preparation"]) == cli.Command(
         cli.CommandKind.INIT, None, None, upgrade_capture_preparation=True,
@@ -28,7 +37,7 @@ def test_two_upgrade_options_are_mutually_exclusive():
 
 
 def test_init_cli_forwards_explicit_option_and_keeps_output_contract(monkeypatch):
-    config, state_db = object(), Path("/state/state.db")
+    config, state_db = SimpleNamespace(log=object()), Path("/state/state.db")
     adapter = create_autospec(application.ConfigAdapter, instance=True, spec_set=True)
     adapter.load.return_value = config
     adapter.state_db_path.return_value = state_db

@@ -219,15 +219,30 @@ def main(
 def _diagnose_error(err: TextIO, stage: str, error: BaseException) -> None:
     """初始化前及日志关闭后直接保留完整异常图，不污染 stdout。"""
     from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
 
     if getattr(error, "_camctl_cli_diagnostic_attempted", False):
         return
     error._camctl_cli_diagnostic_attempted = True
+    payload = {"stage": "cli", "message": stage}
     try:
-        encoded = json.dumps(exception_diagnostic(error), ensure_ascii=False, separators=(",", ":"))
-        print(f"{stage}: {type(error).__name__}: {error}\n异常诊断: {encoded}", file=err)
+        payload["exception"] = exception_diagnostic(error)
+        encoded = encode_record(LogLevel.ERROR, payload)
+    except Exception as format_error:
+        payload["exception"] = exception_diagnostic(error, include_message=False)
+        payload["format_error"] = exception_diagnostic(format_error, include_message=False)
+        try:
+            encoded = encode_record(LogLevel.ERROR, payload)
+        except Exception:
+            encoded = repr(payload)
+    try:
+        print(encoded, file=err)
     except Exception as diagnostic_error:
-        encoded = json.dumps(exception_diagnostic(diagnostic_error), ensure_ascii=False, separators=(",", ":"))
+        try:
+            encoded = json.dumps(exception_diagnostic(diagnostic_error), ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            encoded = repr(exception_diagnostic(diagnostic_error, include_message=False))
         error.add_note(f"stderr 诊断写入失败: {encoded}")
 
 
@@ -367,6 +382,8 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         describe,
     )
     from camctl.bootstrap.config import ConfigError
+    from camctl.logging_runtime.one_shot import stderr_logging
+    from camctl.logging_runtime.events import measure_stage
 
     try:
         from camctl.devices.catalog import build_catalog, default_driver_definitions
@@ -374,10 +391,13 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        register_builtin_drivers(config)
-        catalog = build_catalog(config, default_driver_definitions())
-        document = describe(config, catalog)
-        payload = encode_describe_document(document).decode("utf-8")
+        with stderr_logging(config.log, err, command_name="describe",
+                on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            with measure_stage("describe"):
+                register_builtin_drivers(config)
+                catalog = build_catalog(config, default_driver_definitions())
+                document = describe(config, catalog)
+                payload = encode_describe_document(document).decode("utf-8")
     except (ConfigError, RuleError, SchemaRuleError, SchemaValidationError, OSError) as error:
         _diagnose_error(err, "camctl describe: 能力说明导出失败", error)
         return 1
@@ -388,6 +408,8 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
 def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.application import ConfigAdapter
     from camctl.bootstrap.config import ConfigError
+    from camctl.logging_runtime.one_shot import stderr_logging
+    from camctl.logging_runtime.events import measure_stage, record_event
     from camctl.persistence.initialization import (
         InitOutcome,
         initialize_state,
@@ -396,10 +418,14 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     try:
         adapter = ConfigAdapter(home=Path.home())
         config = adapter.load(_config_arg(command))
-        result = initialize_state(config, adapter.state_db_path(config),
-            upgrade_software_recovery=command.upgrade_software_recovery,
-            upgrade_capture_preparation=command.upgrade_capture_preparation,
-            upgrade_output_scope=command.upgrade_output_scope)
+        with stderr_logging(config.log, err, command_name="init",
+                on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            with measure_stage("initialization"):
+                result = initialize_state(config, adapter.state_db_path(config),
+                    upgrade_software_recovery=command.upgrade_software_recovery,
+                    upgrade_capture_preparation=command.upgrade_capture_preparation,
+                    upgrade_output_scope=command.upgrade_output_scope)
+            record_event("initialization", event="result", outcome=result.outcome.value)
     except (ConfigError, OSError) as error:
         _diagnose_error(err, "camctl init: 初始化失败", error)
         return 1

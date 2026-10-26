@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
@@ -22,6 +24,14 @@ from camctl.cli import (
     parse_command,
 )
 from camctl.session.outcome import SessionOutcome
+
+
+@pytest.fixture(autouse=True)
+def isolate_one_shot_logging(monkeypatch):
+    from camctl.logging_runtime import one_shot
+
+    monkeypatch.setattr(one_shot, "stderr_logging", create_autospec(
+        one_shot.stderr_logging, return_value=nullcontext()))
 
 
 @pytest.fixture(autouse=True)
@@ -157,7 +167,7 @@ def test_describe_schema_error_returns_diagnostic(monkeypatch, error_kind) -> No
 
     failure = (SchemaRuleError if error_kind == "rule" else SchemaValidationError)("schema-case-17")
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: cls("/unused")))
-    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: object())
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: SimpleNamespace(log=object()))
     monkeypatch.setattr(catalog, "build_catalog", lambda *args: object())
     monkeypatch.setattr(catalog, "default_driver_definitions", lambda: {})
     monkeypatch.setattr(application, "describe", lambda *args: {"devices": []})
@@ -178,7 +188,7 @@ def test_describe_catalog_rule_error_returns_diagnostic(monkeypatch):
     from camctl.devices import catalog
     from camctl.acceptance.schema import RuleError
     monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls:cls("/unused")))
-    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args:object())
+    monkeypatch.setattr(application.ConfigAdapter, "load", lambda *args: SimpleNamespace(log=object()))
     def fail(*args):
         raise RuleError("驱动未部署 driver-case-17")
     monkeypatch.setattr(catalog, "build_catalog", fail)
