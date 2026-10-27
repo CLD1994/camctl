@@ -2558,9 +2558,11 @@ class _SlotChangeCommand:
             and self._is_source_fallback_retry(scope.connection, copy, run))
         if run["retry_wait_required"] == 1 and not retrying_source_fallback:
             return self._decision(SlotOutcome.WAIT, "retry_wait")
-        from camctl.scheduling.resources import current_preparation_holder
+        from camctl.scheduling.resources import current_preparation_holder, device_start_in_flight
         if current_preparation_holder(scope.connection, device_id) is not None:
             return self._decision(SlotOutcome.WAIT, "preparation_held")
+        if device_start_in_flight(scope.connection, device_id):
+            return self._decision(SlotOutcome.WAIT, "device_busy")
         if holder is not None:
             return self._decision(SlotOutcome.WAIT, "device_busy")
         eligible, reason = self._first_candidate(
@@ -7067,6 +7069,10 @@ def _read_slot_guard(event, context) -> None:
                 raise EventValidationError("授予必须从空闲机会开始")
             if after_slot != binding[0]:
                 raise EventValidationError("授予的设备必须等于原来源设备绑定")
+            from .preparation import PreparationReads
+            if (type(context.preparation_reads) is not PreparationReads
+                    or context.preparation_reads.device_start_in_flight(binding[0])):
+                raise EventValidationError("读取机会授予缺少同设备启动收场依据")
             if run["status"] in _RUN_TERMINAL:
                 raise EventValidationError("读取责任已结束，不能再授予机会")
             if run["retry_wait_required"] != 0:
