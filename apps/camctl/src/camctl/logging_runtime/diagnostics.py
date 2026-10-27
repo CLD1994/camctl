@@ -8,11 +8,12 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from decimal import Decimal
 from enum import Enum
 import json
 from os import PathLike
+import sys
 import traceback
 
 from camctl.logging_runtime.admission import AdmissionKind
@@ -30,6 +31,7 @@ __all__ = [
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
     "diagnostic_record_for", "acknowledge_diagnostic",
     "DiagnosticReservation", "reserve_diagnostic", "adopt_diagnostic", "release_diagnostic",
+    "prepare_log_diagnostic", "admit_diagnostic", "diagnostic_snapshot",
 ]
 
 
@@ -50,6 +52,8 @@ class DiagnosticState:
     _target: _Target | None = field(default=None, init=False, repr=False)
     _owner: _Owner | None = field(default=None, init=False, repr=False)
     _admitting: bool = field(default=False, init=False, repr=False)
+    _copy_owned: bool = field(default=False, init=False, repr=False)
+    _changed: asyncio.Future | None = field(default=None, init=False, repr=False)
 
 
 @dataclass
@@ -208,10 +212,102 @@ def diagnostic_record_for(state: DiagnosticState) -> LogRecord | None:
     return state._record
 
 
+def prepare_log_diagnostic(
+    record: LogRecord,
+    *,
+    error: BaseException | None = None,
+    state: DiagnosticState | None = None,
+    channel: LogChannel | None = None,
+    fallback: Callable[[str], object] | None = None,
+) -> DiagnosticState:
+    """登记已冻结的通用日志；原异常身份与首次记录优先于新的调用。"""
+    original = diagnostic_state_for(error)
+    state = original if original is not None else state if state is not None else DiagnosticState()
+    if state.status is DiagnosticStatus.NEW:
+        target = _target.get()
+        if target is None:
+            selected_fallback = fallback if fallback is not None else record.fallback
+            target = _Target(channel, selected_fallback if selected_fallback is not None else _stderr)
+        state._record = replace(record, fallback=target.fallback)
+        state._target = target
+        state.status = DiagnosticStatus.HELD
+        if error is not None:
+            error._camctl_diagnostic_state = state
+        if target.closed or target.finished:
+            _final_fallback(state, target)
+        else:
+            scope = _scope.get()
+            owner = (scope.owner if scope is not None and scope.target is target
+                     and not scope.owner.closed else target.root)
+            _enqueue(owner, state)
+            if owner is target.root:
+                _notify(target)
+    if error is not None:
+        error._camctl_diagnostic_state = state
+    return state
+
+
+async def admit_diagnostic(state: DiagnosticState) -> DiagnosticState:
+    """仅交接本条；已有接纳者和实际副本拥有者继续持有原记录。"""
+    if state.status is DiagnosticStatus.NEW:
+        raise ValueError("诊断尚未准备，不能执行接纳")
+    first_cancel = None
+    while state.status is DiagnosticStatus.HELD:
+        if state._admitting or state._copy_owned:
+            if state._changed is None:
+                state._changed = asyncio.get_running_loop().create_future()
+            try:
+                # shield 已有 Future，不创建任务；取消不能撤销共有通知。
+                await asyncio.shield(state._changed)
+            except asyncio.CancelledError as error:
+                if first_cancel is None:
+                    first_cancel = error
+            continue
+        target, owner = state._target, state._owner
+        assert target is not None and owner is not None
+        owner.pending.remove(state)
+        state._owner = None
+        try:
+            await _admit_one(state, target)
+        except asyncio.CancelledError as error:
+            if first_cancel is None:
+                first_cancel = error
+        finally:
+            if state.status is DiagnosticStatus.HELD:
+                retained_owner = owner if not owner.closed else target.root
+                _enqueue(retained_owner, state)
+                if retained_owner is target.root:
+                    _notify(target)
+    if first_cancel is not None:
+        raise first_cancel
+    return state
+
+
+def diagnostic_snapshot(value, *, structured: bool = True):
+    """复用诊断快照规则，保留原错误字节并排除媒体 stdout。"""
+    return _document(value, structured=structured)
+
+
+def _stderr(message: str) -> None:
+    sys.stderr.write(message.rstrip("\n") + "\n")
+    sys.stderr.flush()
+
+
+def _state_changed(state: DiagnosticState) -> None:
+    changed, state._changed = state._changed, None
+    if changed is not None and not changed.done():
+        changed.set_result(None)
+
+
+def _complete(state: DiagnosticState, status: DiagnosticStatus) -> None:
+    state.status = status
+    _state_changed(state)
+
+
 def acknowledge_diagnostic(state: DiagnosticState) -> None:
     """副本拥有者取得实际追加成功凭据后交接原记录，不推断写入结果。"""
     if state.status is DiagnosticStatus.HELD:
-        state.status = DiagnosticStatus.ADMITTED
+        _complete(state, DiagnosticStatus.ADMITTED)
 
 
 def reserve_diagnostic(state: DiagnosticState | None) -> DiagnosticReservation | None:
@@ -223,6 +319,7 @@ def reserve_diagnostic(state: DiagnosticState | None) -> DiagnosticReservation |
         return None
     state._owner.pending.remove(state)
     state._owner = None
+    state._copy_owned = True
     reservation = DiagnosticReservation(state, target)
     target.reservations.append(reservation)
     return reservation
@@ -254,10 +351,11 @@ def release_diagnostic(reservation: DiagnosticReservation | None) -> None:
     target.reservations.remove(reservation)
     reservation._status = _ReservationStatus.RELEASED
     state = reservation.state
+    state._copy_owned = False
     if state.status is not DiagnosticStatus.HELD:
         return
     if target.closed or target.finished:
-        _fallback(state, target)
+        _final_fallback(state, target)
     else:
         _enqueue(target.root, state)
         _notify(target)
@@ -324,7 +422,7 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     state._target = target
     state.status = DiagnosticStatus.HELD
     if target.background and (target.finished or target.closed):
-        _fallback(state, target)
+        _final_fallback(state, target)
         return state
     scope = _scope.get()
     owner = (scope.owner if scope is not None and scope.target is target
@@ -418,7 +516,7 @@ def _retain_at_root(owner: _Owner, target: _Target) -> None:
         late = target.background and (target.finished or target.closed)
         if state.status is DiagnosticStatus.HELD:
             if late:
-                _fallback(state, target)
+                _final_fallback(state, target)
         _pop_pending(owner)
         if state.status is DiagnosticStatus.HELD and not late:
             _enqueue(target.root, state)
@@ -428,11 +526,13 @@ def _retain_at_root(owner: _Owner, target: _Target) -> None:
 def _enqueue(owner: _Owner, state: DiagnosticState) -> None:
     state._owner = owner
     owner.pending.append(state)
+    _state_changed(state)
 
 
 def _pop_pending(owner: _Owner) -> DiagnosticState:
     state = owner.pending.popleft()
     state._owner = None
+    state._copy_owned = False
     return state
 
 
@@ -472,7 +572,7 @@ def _fallback_remaining(target: _Target) -> None:
         except BaseException as error:
             _remember_serve_error(target, error)
             # stderr 控制错误由 flush 外传，该诊断不再递归投递。
-            state.status = DiagnosticStatus.FALLBACK
+            _complete(state, DiagnosticStatus.FALLBACK)
 
 
 async def _finish_background(target: _Target) -> None:
@@ -516,33 +616,45 @@ async def _drain(owner: _Owner, target: _Target) -> None:
         if state.status is not DiagnosticStatus.HELD:
             _pop_pending(owner)
             continue
-        record = state._record
-        assert record is not None
+        try:
+            await _admit_one(state, target)
+        except BaseException:
+            if state.status is not DiagnosticStatus.HELD:
+                _pop_pending(owner)
+            raise
+        _pop_pending(owner)
+
+
+async def _admit_one(state: DiagnosticState, target: _Target) -> None:
+    record = state._record
+    assert record is not None
+    state._admitting = True
+    try:
+        if target.closed or target.finished:
+            _final_fallback(state, target)
+            return
         if target.channel is None or state._fallback_only:
             _fallback(state, target)
-        else:
-            state._admitting = True
-            try:
-                result = await target.channel.alog(record)
-            except Exception:
+            return
+        try:
+            result = await target.channel.alog(record)
+        except Exception:
+            _fallback(state, target)
+        except BaseException as error:
+            result = admission_result_for(error)
+            if result is not None and result.decision.kind is AdmissionKind.ACCEPTED:
+                _complete(state, DiagnosticStatus.ADMITTED)
+            elif result is not None and result.decision.kind is AdmissionKind.CHANNEL_FAILED:
                 _fallback(state, target)
-            except BaseException as error:
-                result = admission_result_for(error)
-                if result is not None and result.decision.kind is AdmissionKind.ACCEPTED:
-                    state.status = DiagnosticStatus.ADMITTED
-                    _pop_pending(owner)
-                elif result is not None and result.decision.kind is AdmissionKind.CHANNEL_FAILED:
-                    _fallback(state, target)
-                    _pop_pending(owner)
-                raise
+            raise
+        else:
+            if result.decision.kind is AdmissionKind.ACCEPTED:
+                _complete(state, DiagnosticStatus.ADMITTED)
             else:
-                if result.decision.kind is AdmissionKind.ACCEPTED:
-                    state.status = DiagnosticStatus.ADMITTED
-                else:
-                    _fallback(state, target)
-            finally:
-                state._admitting = False
-        _pop_pending(owner)
+                _fallback(state, target)
+    finally:
+        state._admitting = False
+        _state_changed(state)
 
 
 def _fallback(state: DiagnosticState, target: _Target) -> None:
@@ -552,4 +664,13 @@ def _fallback(state: DiagnosticState, target: _Target) -> None:
     except Exception:
         # stderr 本身已经失效，不递归诊断或反复写入，也不影响业务结果。
         pass
-    state.status = DiagnosticStatus.FALLBACK
+    _complete(state, DiagnosticStatus.FALLBACK)
+
+
+def _final_fallback(state: DiagnosticState, target: _Target) -> None:
+    """目标已结束时完成最后一次交付；控制异常仍传播，不留下孤立责任。"""
+    try:
+        _fallback(state, target)
+    finally:
+        if state.status is DiagnosticStatus.HELD:
+            _complete(state, DiagnosticStatus.FALLBACK)

@@ -10,8 +10,8 @@ import pytest
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.diagnostics import (
-    DiagnosticStatus, diagnostic_scope, error_diagnostics_context,
-    flush_diagnostics, record_error,
+    DiagnosticStatus, admit_diagnostic, diagnostic_scope, error_diagnostics_context,
+    flush_diagnostics, prepare_log_diagnostic, record_error,
 )
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
@@ -242,5 +242,42 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
             await close_logging(runtime)
     text = (tmp_path / "camctl.log").read_text(encoding="utf-8")
     assert all(text.count(f"device-round-{number}") == 1 for number in range(2))
+    assert not fallback
+    assert not channel.listener_alive
+
+
+async def test_single_waiter_joins_full_queue_admission_and_preserves_repeated_cancellation(tmp_path):
+    channel, writer, runtime = await full_channel(tmp_path)
+    fallback = []
+    waiter = None
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        error = ValueError("joined-original-error")
+        state = record_error(error, stage="joined")
+        try:
+            await asyncio.sleep(0)
+            assert state.status is DiagnosticStatus.HELD
+            duplicate = prepare_log_diagnostic(LogRecord(LogLevel.ERROR, "replacement"), error=error)
+            assert duplicate is state
+            waiter = asyncio.create_task(admit_diagnostic(duplicate))
+            await asyncio.sleep(0)
+            waiter.cancel("first waiter cancel")
+            await asyncio.sleep(0)
+            waiter.cancel("repeat waiter cancel")
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            writer.release.set()
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await asyncio.wait_for(waiter, 5)
+            assert raised.value.args == ("first waiter cancel",)
+            assert state.status is DiagnosticStatus.ADMITTED
+        finally:
+            writer.release.set()
+            if waiter is not None and not waiter.done():
+                await asyncio.gather(waiter, return_exceptions=True)
+            await flush_diagnostics()
+            await close_logging(runtime)
+    records = [json.loads(line) for line in (tmp_path / "camctl.log").read_text().splitlines()]
+    assert len([record for record in records if record.get("stage") == "joined"]) == 1
+    assert "replacement" not in (tmp_path / "camctl.log").read_text()
     assert not fallback
     assert not channel.listener_alive
