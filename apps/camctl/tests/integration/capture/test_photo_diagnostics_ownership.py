@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from camctl.capture.handlers import _control_call
+from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
 from camctl.devices.ports import DeviceCallResult
@@ -34,6 +34,8 @@ async def test_actual_return_validation_preserves_original_request(tmp_path, mon
     validate = tool_diagnostics.validate_diagnostics
     def failing(value):
         nonlocal checks
+        if len(transport.calls) < 9:
+            return validate(value)
         checks += 1
         if checks == 1:
             raise ValueError("一次临时诊断校验故障")
@@ -59,27 +61,27 @@ async def test_actual_return_validation_preserves_original_request(tmp_path, mon
     monkeypatch.setattr(driver, "control", returned)
     try:
         with pytest.raises(ConsistencyError):
-            await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
+            await capture_handler("camera_take_photo")(1, runtime)
         assert len(transport.calls) == 9
         pending, = runtime.pending_start_results.values()
         assert not pending.validated
         assert pending.finish.outcome.outcome is actual
         ticket, key = pending.finish.ticket, pending.key
         occurred_at, returned_ns = pending.finish.occurred_at, pending.returned_ns
-        assert [c.stdout.data for c in actual.diagnostics.calls] == [r.output for r in transport.outcomes]
-        assert owned.connection.execute("SELECT result_json,error_json FROM operation_attempts").fetchone() == (None, None)
+        assert [c.stdout.data for c in actual.diagnostics.calls] == [transport.outcomes[-1].output]
+        assert owned.connection.execute("SELECT a.result_json,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone() == (None, None)
         runtime.wall_us = lambda: occurred_at + 99
         runtime.monotonic_ns = lambda: returned_ns + 99
         if fault == "temporary":
             assert checks == 1
-            assert await runtime.recover_attempt(ticket)
+            await capture_handler("camera_take_photo")(1, runtime)
             assert checks >= 3  # 显式接手校验、编码及事务守卫解码
             assert not runtime.pending_start_results
-            saved, = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
+            saved, = owned.connection.execute("SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone()
             assert actual.diagnostics.calls[-1].stdout.data.hex() in saved
         else:
             with pytest.raises(ConsistencyError):
-                await runtime.recover_attempt(ticket)
+                await capture_handler("camera_take_photo")(1, runtime)
             held, = runtime.pending_start_results.values()
             assert held.key == key
             assert held.finish.outcome.outcome is actual
@@ -99,6 +101,8 @@ async def test_driver_prefix_failure_hands_original_bytes_to_owner(tmp_path, mon
     from camctl.devices.ports import DeviceCallResult
     from_outcome = DeviceCallResult.from_outcome
     def intercept(outcome, *, diagnostics_check=None):
+        if not any(item.type == "photo_taken" for item in outcome.observations):
+            return from_outcome(outcome, diagnostics_check=diagnostics_check)
         def check(original):
             pending, = runtime.pending_start_results.values()
             assert pending.finish.outcome.outcome is original
@@ -108,27 +112,27 @@ async def test_driver_prefix_failure_hands_original_bytes_to_owner(tmp_path, mon
         return from_outcome(outcome, diagnostics_check=check)
     monkeypatch.setattr(DeviceCallResult, "from_outcome", intercept)
     monkeypatch.setattr(module, "ToolCallOutput", lambda index, name, stdout, stderr:
-                        construct(index, "wrong-prefix", stdout, stderr))
+                        construct(index, "wrong-prefix" if name == "capture" else name, stdout, stderr))
     try:
         with pytest.raises(ConsistencyError, match="诊断校验失败"):
-            await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
+            await capture_handler("camera_take_photo")(1, runtime)
         pending, = runtime.pending_start_results.values()
         assert not pending.validated
         actual = pending.finish.outcome.outcome
         assert len(transport.calls) == 9
         assert actual.observations[0].type == "photo_taken"
-        assert [c.stdout.data for c in actual.diagnostics.calls] == [r.output for r in transport.outcomes]
+        assert [c.stdout.data for c in actual.diagnostics.calls] == [transport.outcomes[-1].output]
         key = pending.key
         assert entered == [key]
         frozen_check = pending.diagnostics_check
         with pytest.raises(ConsistencyError, match="诊断校验失败"):
-            await runtime.recover_attempt(pending.finish.ticket)
+            await capture_handler("camera_take_photo")(1, runtime)
         held, = runtime.pending_start_results.values()
         assert held.key == key
         assert held.diagnostics_check is frozen_check
         assert held.finish.outcome.outcome is actual
         assert entered == [key, key]
-        assert owned.connection.execute("SELECT result_json,error_json FROM operation_attempts").fetchone() == (None, None)
+        assert owned.connection.execute("SELECT a.result_json,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone() == (None, None)
         assert len(transport.calls) == 9
     finally:
         await runtime.database.close()
@@ -138,7 +142,10 @@ async def test_driver_prefix_failure_hands_original_bytes_to_owner(tmp_path, mon
 async def test_driver_diagnostic_validation_only_runs_after_owner_holds_result(tmp_path, monkeypatch):
     cfg, owned, driver, runtime, clock, transport = await _actual_world(tmp_path)
     checked = []
+    validate = tool_diagnostics.validate_diagnostics
     def failing(value):
+        if len(transport.calls) < 9:
+            return validate(value)
         pending, = runtime.pending_start_results.values()
         assert pending.finish.outcome.outcome.diagnostics is value
         checked.append(value)
@@ -146,7 +153,7 @@ async def test_driver_diagnostic_validation_only_runs_after_owner_holds_result(t
     monkeypatch.setattr(tool_diagnostics, "validate_diagnostics", failing)
     try:
         with pytest.raises(ConsistencyError):
-            await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
+            await capture_handler("camera_take_photo")(1, runtime)
         assert len(checked) == 1
         pending, = runtime.pending_start_results.values()
         assert pending.finish.outcome.outcome.diagnostics is checked[0]
@@ -166,10 +173,9 @@ async def test_general_invalid_observation_keeps_existing_rejection(tmp_path, mo
         return DeviceCallResult.from_outcome(actual, diagnostics_check=result.diagnostics_check)
     monkeypatch.setattr(driver, "control", returned)
     try:
-        result = await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
-        assert result.detail == "invalid_device_result"
+        await capture_handler("camera_take_photo")(1, runtime)
         assert not runtime.pending_start_results
-        saved, error = owned.connection.execute("SELECT result_json,error_json FROM operation_attempts").fetchone()
+        saved, error = owned.connection.execute("SELECT a.result_json,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone()
         import json
         assert json.loads(saved)["observations"] == []
         assert json.loads(error)["code"] == "invalid_device_result"
@@ -185,6 +191,8 @@ async def test_temporary_frozen_prefix_check_resumes_same_original_without_repla
     factory = DeviceCallResult.from_outcome
     checked = []
     def intercept(outcome, *, diagnostics_check=None):
+        if not any(item.type == "photo_taken" for item in outcome.observations):
+            return factory(outcome, diagnostics_check=diagnostics_check)
         def check(original):
             pending, = runtime.pending_start_results.values()
             assert pending.finish.outcome.outcome is original
@@ -196,7 +204,7 @@ async def test_temporary_frozen_prefix_check_resumes_same_original_without_repla
     monkeypatch.setattr(DeviceCallResult, "from_outcome", intercept)
     try:
         with pytest.raises(ConsistencyError):
-            await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
+            await capture_handler("camera_take_photo")(1, runtime)
         pending, = runtime.pending_start_results.values()
         ticket, key, actual = pending.finish.ticket, pending.key, pending.finish.outcome.outcome
         assert checked == [(key, actual)]
@@ -204,7 +212,7 @@ async def test_temporary_frozen_prefix_check_resumes_same_original_without_repla
         def forbidden(_settings):
             raise AssertionError("原申请接手不得重新规划命令")
         monkeypatch.setattr(module, "photo_start_commands", forbidden)
-        assert await runtime.recover_attempt(ticket)
+        await capture_handler("camera_take_photo")(1, runtime)
         assert checked == [(key, actual), (key, actual)]
         assert len(transport.calls) == 9
         assert not runtime.pending_start_results
@@ -238,7 +246,7 @@ async def test_actual_failed_capture_error_survives_bad_diagnostic_index(tmp_pat
     monkeypatch.setattr(driver, "control", returned)
     try:
         with pytest.raises(ConsistencyError):
-            await _control_call(runtime, await runtime.action(1), "take_photo", "photo_taken")
+            await capture_handler("camera_take_photo")(1, runtime)
         held, = runtime.pending_start_results.values()
         assert held.finish.outcome.outcome is actual
         assert actual.status is AttemptStatus.FAILED
@@ -247,7 +255,7 @@ async def test_actual_failed_capture_error_survives_bad_diagnostic_index(tmp_pat
         assert actual.error.details["step"] == "capture"
         assert actual.call_info.local_exit_code == 7
         assert actual.diagnostics.calls[-1].stdout.data == transport.outcomes[-1].output
-        assert owned.connection.execute("SELECT result_json,error_json FROM operation_attempts").fetchone() == (None, None)
+        assert owned.connection.execute("SELECT a.result_json,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='start/1'").fetchone() == (None, None)
         assert len(transport.calls) == 9
     finally:
         await runtime.database.close()

@@ -969,8 +969,8 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
         owned.connection.close()
 
 
-@pytest.mark.parametrize("verifier_failure", ["missing", "raises"])
-async def test_unknown_host_photo_receipt_without_verifier_retains_request(
+@pytest.mark.parametrize("verifier_failure", ["unknown", "raises"])
+async def test_unknown_host_photo_receipt_with_failed_verification_retains_request(
     tmp_path, verifier_failure,
 ):
     _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
@@ -991,33 +991,33 @@ async def test_unknown_host_photo_receipt_without_verifier_retains_request(
             self.saved.append((request, key))
             receipt = real.save_host_photo_complete(request, key, current_owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            current_owned.connection.execute("BEGIN").close()
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+            if len(self.saved) == 1:
+                current_owned.connection.execute("BEGIN").close()
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+            return receipt
 
         def verify_operation(self, request, key, verifier):
             self.verified.append((request, key))
             self.verifier_connections.append(verifier.connection)
             if verifier_failure == "raises":
                 raise OSError("测试仓储核实错误")
-            return real.verify_operation(request, key, verifier)
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("核实仍未知"))
 
     uncertain = UnknownCommittedReceipt()
     runtime.host_capture = uncertain
-    if verifier_failure == "missing":
-        uncertain.verify_operation = None
     try:
-        expected_error = TypeError if verifier_failure == "missing" else OSError
+        expected_error = ConsistencyError if verifier_failure == "unknown" else OSError
         with pytest.raises(expected_error):
             await capture_handler("camera_take_photo")(1, runtime)
 
         assert len(driver.requests) == 1
         assert len(uncertain.saved) == 1
         assert owned.connection.in_transaction is False
-        assert len(uncertain.verified) == (0 if verifier_failure == "missing" else 1)
-        assert 1 in runtime.pending_host_photo_completions
-        if verifier_failure == "raises":
-            assert await runtime.database.read(
-                lambda current: current.connection is uncertain.verifier_connections[0])
+        assert uncertain.verified == uncertain.saved
+        pending = runtime.pending_host_photo_completions[1]
+        assert (pending.request, pending.key) == uncertain.saved[0]
+        assert await runtime.database.read(
+            lambda current: current.connection is uncertain.verifier_connections[0])
         assert owned.connection.execute(
             "SELECT size_bytes,sha256 FROM intermediate_files WHERE owner_action_id=1 ORDER BY purpose"
         ).fetchall() == [
@@ -1025,6 +1025,12 @@ async def test_unknown_host_photo_receipt_without_verifier_retains_request(
             (len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest()),
         ]
         assert _saved_output_rows(owned) == []
+        await capture_handler("camera_take_photo")(1, runtime)
+        assert len(driver.requests) == 1
+        assert uncertain.saved == [uncertain.saved[0], uncertain.saved[0]]
+        assert 1 not in runtime.pending_host_photo_completions
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert len(_saved_output_rows(owned)) == 2
     finally:
         await runtime.database.close()
         owned.connection.close()
