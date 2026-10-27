@@ -8,6 +8,7 @@ import random
 import sys
 import threading
 from collections import deque
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from os import getpid
 from typing import Callable
@@ -92,6 +93,7 @@ class _QueuedRecord:
     fallback_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     admission: AdmissionResult | None = None
     failure: ChannelError | None = None
+    failure_deferred: bool = False
 
 
 class _Rejected(Exception):
@@ -110,6 +112,10 @@ class _AdmissionQueue(janus.Queue):
         self.overflow: deque[_QueuedRecord] = deque()
         self.admission_notifications: deque[_QueuedRecord] = deque()
         self.inflight: _QueuedRecord | None = None
+        self.failed_pending: deque[_QueuedRecord] = deque()
+        self.failure_active = False
+        self.failure_draining = False
+        self.failure_done: Future | None = None
 
     def admit(self, item, *, allow_overflow=True):
         """登记与取出补位共用 Janus 接纳锁，后来者不能抢占空位。"""
@@ -119,6 +125,10 @@ class _AdmissionQueue(janus.Queue):
                 kind = AdmissionKind.FILTERED_OUT
             elif self._is_shutdown:
                 kind = AdmissionKind.CHANNEL_FAILED
+                if (allow_overflow and self.failure_active and record.level is LogLevel.ERROR
+                        and record.source is LogSource.COROUTINE):
+                    item.failure_deferred = True
+                    self.failed_pending.append(item)
             elif self._qsize() >= self.maxsize:
                 if record.level is LogLevel.ERROR:
                     kind = (AdmissionKind.WAITING if (allow_overflow and record.source is LogSource.COROUTINE)
@@ -218,6 +228,7 @@ class LogChannel:
         self._listener_started = False
         self._summary_written = False
         self._stop_marker_done = False
+        self._consumer_control: BaseException | None = None
 
     def _result(self, kind, record):
         return AdmissionResult(AdmissionDecision(kind, record.level), self._queue.sync_q.qsize())
@@ -257,6 +268,9 @@ class LogChannel:
             with self._lock:
                 self._counters = record_drop(self._counters, result.decision)
         entry.receipt.complete_admission(result)
+        if entry.failure_deferred:
+            entry.failure = self._channel_error
+            return
         if result.decision.kind is not AdmissionKind.ACCEPTED:
             fallback_written = False
             try:
@@ -335,6 +349,10 @@ class LogChannel:
     async def join(self) -> None:
         """等待原队列及满载重要日志全部完成实际消费记账。"""
         await self._queue.async_q.join()
+        with self._queue._sync_mutex:
+            failure_done = self._queue.failure_done
+        if failure_done is not None:
+            await asyncio.shield(asyncio.wrap_future(failure_done))
 
     async def deliver_important(self, record: LogRecord) -> AdmissionResult:
         """保留特殊交付的取消、异常和独立实际写入凭据。"""
@@ -374,29 +392,64 @@ class LogChannel:
         """结算未开始写出的责任；正在写入项保留 writer 的实际事实。"""
         with self._queue._sync_mutex:
             self._channel_failed = True
-            self._channel_error = error
+            if self._channel_error is None:
+                self._channel_error = error
             self._queue._is_shutdown = True
             entries = [entry for entry in self._queue._queue
                        if isinstance(entry, _QueuedRecord)]
             entries.extend(self._queue.overflow)
             self._queue.overflow.clear()
+            entries = [entry for entry in entries if entry.receipt.write_result is None]
+            inflight = self._queue.inflight is not None
+            if (entries or inflight) and not self._queue.failure_active:
+                self._queue.failure_active = True
+                self._queue.failure_done = Future()
             for entry in entries:
-                entry.failure = error
+                if entry.failure is None:
+                    entry.failure = self._channel_error
                 if not entry.enqueued:
                     entry.admission = AdmissionResult(
                         AdmissionDecision(AdmissionKind.CHANNEL_FAILED, entry.record.level),
                         self._queue._qsize())
+                if not entry.failure_deferred:
+                    entry.failure_deferred = True
+                    self._queue.failed_pending.append(entry)
         self._queue.shutdown(immediate=False)
         self._queue.publish_admissions()
-        control = None
         for entry in entries:
+            entry.receipt.complete_admission(entry.admission)
+        if not inflight:
+            self._drain_failed_entries()
+
+    def _drain_failed_entries(self, *, propagate=True):
+        with self._queue._sync_mutex:
+            if not self._queue.failure_active or self._queue.failure_draining:
+                return
+            self._queue.failure_draining = True
+        control = None
+        while True:
+            with self._queue._sync_mutex:
+                if not self._queue.failed_pending:
+                    self._queue.failure_draining = False
+                    self._queue.failure_active = False
+                    done = self._queue.failure_done
+                    break
+                entry = self._queue.failed_pending.popleft()
             try:
                 self._complete_entry(entry, written=False)
             except BaseException as error:
                 if control is None:
                     control = error
+                if not propagate:
+                    self._remember_consumer_control(error)
+        done.set_result(None)
         if control is not None:
-            raise control.with_traceback(control.__traceback__)
+            if propagate:
+                raise control.with_traceback(control.__traceback__)
+
+    def _remember_consumer_control(self, error):
+        if not isinstance(error, Exception) and self._consumer_control is None:
+            self._consumer_control = error
 
     def pending_count(self) -> int:
         with self._pending_lock:
@@ -412,6 +465,7 @@ class LogChannel:
             try:
                 entry = self._queue.sync_q.get()
             except janus.SyncQueueShutDown:
+                self._drain_failed_entries(propagate=False)
                 self._stop_marker_done = True
                 break
             try:
@@ -419,8 +473,9 @@ class LogChannel:
                     if entry.summary is not None and not self._channel_failed:
                         try:
                             self._summary_written = bool(self._writer(entry.summary))
-                        except Exception:
+                        except BaseException as error:
                             self._summary_written = False
+                            self._remember_consumer_control(error)
                     self._stop_marker_done = True
                     break
                 self._queue.publish_admissions()
@@ -429,14 +484,23 @@ class LogChannel:
                 if not self._channel_failed:
                     try:
                         written = self._writer(entry.record)
-                    except Exception as error:
-                        failure = ChannelError(f"日志写入失败: {error}")
+                    except BaseException as error:
+                        self._remember_consumer_control(error)
+                        failure = ChannelError("日志写入失败")
+                        failure.__cause__ = error
                         entry.failure = failure
-                        self._fallback_entry(entry)
-                        self.disable_channel(failure)
+                        try:
+                            self.disable_channel(failure)
+                        except BaseException as control:
+                            self._remember_consumer_control(control)
                 if not written and self._channel_failed:
                     entry.failure = self._channel_error
-                self._complete_entry(entry, written=written)
+                if not entry.failure_deferred:
+                    try:
+                        self._complete_entry(entry, written=written)
+                    except BaseException as error:
+                        self._remember_consumer_control(error)
+                self._drain_failed_entries(propagate=False)
             finally:
                 with self._queue._sync_mutex:
                     if self._queue.inflight is entry:
@@ -530,6 +594,12 @@ class LogChannel:
 
     async def await_closed(self):
         await self._queue.wait_closed()
+        with self._queue._sync_mutex:
+            failure_done = self._queue.failure_done
+        if failure_done is not None:
+            await asyncio.shield(asyncio.wrap_future(failure_done))
+        if self._consumer_control is not None:
+            raise self._consumer_control.with_traceback(self._consumer_control.__traceback__)
 
 
 def _level_rank(level):

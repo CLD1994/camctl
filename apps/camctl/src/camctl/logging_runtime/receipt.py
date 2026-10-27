@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from concurrent.futures import Future
+from concurrent.futures import Future, InvalidStateError
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
@@ -30,14 +30,18 @@ class LogReceipt:
             return True
 
     def complete_admission(self, result: AdmissionResult) -> None:
-        with self._lock:
-            if not self._admission.done():
-                self._admission.set_result(result)
+        self._complete(self._admission, result)
 
     def complete_write(self, result: AdmissionResult) -> None:
-        with self._lock:
-            if not self._write.done():
-                self._write.set_result(result)
+        self._complete(self._write, result)
+
+    @staticmethod
+    def _complete(future, result):
+        # Future 在自己的锁内选定唯一事实，并在释放该锁后调用回调。
+        try:
+            future.set_result(result)
+        except InvalidStateError:
+            pass
 
     @property
     def admission_result(self) -> AdmissionResult | None:
