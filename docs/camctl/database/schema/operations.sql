@@ -207,6 +207,7 @@ CREATE TABLE device_activities (
 ) STRICT;
 CREATE INDEX activities_occupancy ON device_activities(action_id, id) WHERE occupancy_state = 1;
 CREATE INDEX activities_held_resource ON device_activities(resource_key, id) WHERE occupancy_state = 1;
+CREATE INDEX activities_resource ON device_activities(resource_key, id) WHERE resource_key IS NOT NULL;
 
 CREATE TABLE baseline_read_calls (
     id INTEGER PRIMARY KEY CHECK (id > 0),

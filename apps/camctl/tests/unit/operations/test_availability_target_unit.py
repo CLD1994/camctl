@@ -74,3 +74,65 @@ def test_inapplicable_target_is_rejected(target_rules, facts, part, field, value
     {"check": check, "activity": activity, "action": action}[part][field] = value
     with pytest.raises(ValueError):
         target_rules.require_target_facts(check, activity, action)
+
+
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = rows
+        self.closed = False
+
+    def fetchmany(self, limit):
+        return self.rows[:limit]
+
+    def close(self):
+        self.closed = True
+
+
+class _PagedConnection:
+    def __init__(self, rows):
+        self.rows = rows
+        self.cursors = []
+        self.calls = []
+
+    def execute(self, sql, args):
+        self.calls.append((sql, args))
+        after = args[1] if "FROM actions a" in sql else args[2]
+        cursor = _Cursor([row for row in self.rows if row[0] > after])
+        self.cursors.append(cursor)
+        return cursor
+
+
+def test_physical_held_read_uses_keyset_pages_and_closes_cursor(target_rules):
+    connection = _PagedConnection([(1,), (4,), (7,), (9,), (11,)])
+    pages = target_rules.iter_held_activity_ids(connection, "resource", batch_size=2)
+    assert next(pages) == (1, 4)
+    assert connection.cursors[-1].closed
+    assert list(pages) == [(7, 9), (11,)]
+    assert [call[1] for call in connection.calls] == [
+        ("resource", 1, 0, 2), ("resource", 1, 4, 2), ("resource", 1, 9, 2)]
+    assert all(cursor.closed for cursor in connection.cursors)
+
+
+def test_logical_held_read_keeps_action_order_and_does_not_filter_terminal_actions(target_rules):
+    connection = _PagedConnection([(3, 10), (5, 8), (9, 12)])
+    assert list(target_rules.iter_logical_held_activities(connection, "hb0", batch_size=2)) == [
+        ((3, 10), (5, 8)), ((9, 12),)]
+    assert [call[1] for call in connection.calls] == [("hb0", 0, 1, 2), ("hb0", 5, 1, 2)]
+    assert all("a.status" not in sql for sql, _ in connection.calls)
+    assert all(cursor.closed for cursor in connection.cursors)
+
+
+@pytest.mark.parametrize("batch", [0, 129, True, 1.0])
+def test_target_reads_reject_invalid_batch_size(target_rules, batch):
+    connection = _PagedConnection([])
+    for reader in (target_rules.iter_held_activity_ids, target_rules.iter_logical_held_activities):
+        with pytest.raises(ValueError):
+            list(reader(connection, "identity", batch_size=batch))
+    assert not connection.calls
+
+
+def test_target_reads_reject_nonincreasing_database_rows(target_rules):
+    connection = _PagedConnection([(4,), (4,)])
+    with pytest.raises(ValueError):
+        list(target_rules.iter_held_activity_ids(connection, "resource", batch_size=2))
+    assert connection.cursors[0].closed
