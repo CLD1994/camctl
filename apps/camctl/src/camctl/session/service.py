@@ -1498,7 +1498,7 @@ async def _trigger_failure_log_owned(
 
             state = diagnostic_state_for(error)
             if state is not None:
-                acknowledge_diagnostic(state)
+                acknowledge_diagnostic(state, write_result.completion)
         if (write_result is None
                 or not write_result.disables_file_logging):
             return False
@@ -1574,6 +1574,7 @@ def _failure_copy_exception(
     if write_result is not None:
         facts = [
             f"appended={write_result.appended}",
+            f"durable={write_result.durable}",
             f"disables_file_logging={write_result.disables_file_logging}",
         ]
         if write_result.failure_stage is not None:
@@ -1581,6 +1582,7 @@ def _failure_copy_exception(
         for label, value in (
                 ("rotation_error", write_result.rotation_error),
                 ("append_error", write_result.append_error),
+                ("sync_error", write_result.sync_error),
                 ("coordination_error", write_result.coordination_error),
                 ("close_error", write_result.close_error)):
             if value is not None:
@@ -1659,12 +1661,23 @@ def _copy_receipt_diagnostic(
             )
     write_result = receipt.write_result
     if write_result is not None:
+        write_issues = (
+            write_result.failure_stage is not None
+            or any(detail is not None for detail in (
+                write_result.rotation_error, write_result.append_error,
+                write_result.sync_error, write_result.coordination_error,
+                write_result.close_error))
+        )
+        if write_issues:
+            issues.append(
+                f"copy_write: appended={write_result.appended}; durable={write_result.durable}")
         if write_result.failure_stage is not None:
             issues.append(
                 f"copy_write_stage={write_result.failure_stage.value}")
         for label, detail in (
                 ("rotation_error", write_result.rotation_error),
                 ("append_error", write_result.append_error),
+                ("sync_error", write_result.sync_error),
                 ("coordination_error", write_result.coordination_error),
                 ("close_error", write_result.close_error)):
             if detail is not None:
@@ -1746,6 +1759,7 @@ def _legacy_error_is_stage_duplicate(
         expected = "; ".join(part for part in (
             receipt.copy_error,
             write_result.append_error if write_result is not None else None,
+            write_result.sync_error if write_result is not None else None,
             receipt.cleanup_error,
         ) if part)
         return bool(expected) and legacy_error == expected

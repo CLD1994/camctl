@@ -7,7 +7,7 @@ import threading
 
 from camctl.logging_runtime.events import event_logging, log_context
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.service import LogChannel
 from camctl.logging_runtime.standard_logging import install_standard_logging
 from camctl.operations.error_diagnostics import exception_diagnostic
@@ -33,7 +33,7 @@ class _StderrWriter:
             return True
 
     def __call__(self, record):
-        return self.write(record.rendered_message())
+        return LogWriteResult(appended=False, fallback_written=self.write(record.rendered_message()))
 
 
 @contextmanager

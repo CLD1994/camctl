@@ -347,16 +347,16 @@ def _log_wiring(
 ):
     """业务日志链装配：文件通道、接纳通道与关闭运行时。
 
-    追加失败经 ChannelWriteError 交给接纳通道按通道故障禁用；轮换
+    追加或持久化失败按通道故障禁用；轮换
     失败但仍追加成功时通道继续。监听线程在此启动，收场由
     execute_command 的 close_logging 完成。
     """
     from camctl.logging_runtime.clh_adapter import (
-        ChannelWriteError, FileChannel, WriteFailureStage,
+        FileChannel, WriteFailureStage,
     )
     from camctl.logging_runtime.lifecycle import LogRuntime
     from camctl.logging_runtime.models import LogLevel
-    from camctl.logging_runtime.service import LogChannel
+    from camctl.logging_runtime.service import ChannelError, LogChannel
 
     log_config = config.log
     # 配置层以大写名称校验级别；日志运行时枚举以小写值为键。
@@ -371,40 +371,48 @@ def _log_wiring(
     def writer(record):
         nonlocal rotation_warning_reported
         result = file_channel.write_record(record)
-        failure_stage = result.failure_stage
-        details = tuple(
-            f"{label}={detail}" for label, detail in (
-                ("append_error", result.append_error),
-                ("coordination_error", result.coordination_error),
-                ("close_error", result.close_error),
-                ("rotation_error", result.rotation_error),
-            ) if detail is not None
-        )
-        if failure_stage is WriteFailureStage.FORMAT:
-            report_writer_failure(
-                f"普通日志写入诊断：stage=format; appended=false; "
-                + "; ".join(details))
-            return False
-        if result.disables_file_logging:
-            stage = failure_stage.value if failure_stage is not None else "unknown"
-            report_writer_failure(
-                f"普通日志写入诊断：stage={stage}; "
-                f"appended={str(result.appended).lower()}; "
-                + "; ".join(details))
-            if on_file_failure is None:
-                raise ChannelWriteError(
-                    result.append_error or result.coordination_error
-                    or "共享文件日志通道失效")
-            on_file_failure()
-            return result.appended
-        if result.rotation_error is not None:
-            if not rotation_warning_reported:
-                rotation_warning_reported = True
+        try:
+            failure_stage = result.failure_stage
+            details = tuple(
+                f"{label}={detail}" for label, detail in (
+                    ("append_error", result.append_error),
+                    ("sync_error", result.sync_error),
+                    ("coordination_error", result.coordination_error),
+                    ("close_error", result.close_error),
+                    ("rotation_error", result.rotation_error),
+                ) if detail is not None
+            )
+            if failure_stage is WriteFailureStage.FORMAT:
                 report_writer_failure(
-                    "普通日志写入诊断：stage=rotation; "
+                    "普通日志写入诊断：stage=format; appended=false; durable=false; "
+                    + "; ".join(details))
+                return result.completion
+            if result.disables_file_logging:
+                stage = failure_stage.value if failure_stage is not None else "unknown"
+                report_writer_failure(
+                    f"普通日志写入诊断：stage={stage}; "
                     f"appended={str(result.appended).lower()}; "
-                    f"rotation_error={result.rotation_error}")
-        return result.appended
+                    f"durable={str(result.durable).lower()}; "
+                    + "; ".join(details))
+                if on_file_failure is None:
+                    channel.disable_channel(ChannelError(
+                        result.append_error or result.sync_error or result.coordination_error
+                        or "共享文件日志通道失效"))
+                else:
+                    on_file_failure()
+                return result.completion
+            if result.rotation_error is not None:
+                if not rotation_warning_reported:
+                    rotation_warning_reported = True
+                    report_writer_failure(
+                        "普通日志写入诊断：stage=rotation; "
+                        f"appended={str(result.appended).lower()}; "
+                        f"durable={str(result.durable).lower()}; "
+                        f"rotation_error={result.rotation_error}")
+            return result.completion
+        except BaseException as error:
+            error.write_result = result
+            raise
 
     stderr_failed = False
 

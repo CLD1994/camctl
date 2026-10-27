@@ -39,7 +39,8 @@ class MemoryWriter:
     def write(self):
         record, receipt = self.records[-1], self.receipts[-1]
         receipt.complete_write(AdmissionResult(
-            AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0, delivered=True))
+            AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0, delivered=True,
+            appended=True, durable=record.level is LogLevel.ERROR))
 
 
 async def test_old_admission_then_new_submit_returns_original_pending_write_fact():
@@ -152,6 +153,8 @@ async def test_fallback_receipt_separates_file_write_from_stderr_fact(fallback_r
         result = await receipt
     assert result.delivered is False
     assert result.fallback_written is (fallback_result is not False)
+    assert result.appended is False
+    assert result.durable is False
     assert len(messages) == 1
     assert diagnostics.submit_diagnostic(state) is receipt
 
@@ -189,6 +192,7 @@ async def test_late_scope_control_settles_every_shared_receipt_before_propagatio
     results = [await receipt for receipt in receipts]
     assert [result.delivered for result in results] == [False, False]
     assert [result.fallback_written for result in results] == [False, True]
+    assert all(result.appended is False and result.durable is False for result in results)
     assert messages == ["first", "second"]
 
 
@@ -215,4 +219,6 @@ async def test_late_original_error_binds_receipt_before_fallback_control(call_ou
         assert diagnostics.record_error(original, stage="outer") is state
         assert (await receipt).delivered is False
         assert (await receipt).fallback_written is False
+        assert (await receipt).appended is False
+        assert (await receipt).durable is False
     assert len(messages) == 1

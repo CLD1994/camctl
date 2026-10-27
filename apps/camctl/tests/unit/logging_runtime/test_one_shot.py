@@ -10,6 +10,8 @@ import pytest
 from camctl.logging_runtime import one_shot
 from camctl.logging_runtime.lifecycle import CloseResult
 from camctl.logging_runtime.service import LogChannel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
+from camctl.logging_runtime.service import LogRecord
 from camctl.logging_runtime.standard_logging import StandardLoggingInstallation
 
 
@@ -37,6 +39,18 @@ def test_ordinary_close_failure_preserves_business_result(world):
             on_error=lambda stage, error: diagnostics.append(error)):
         values.append(7)
     assert values == [7] and diagnostics == [original]
+    close.assert_awaited_once()
+
+
+def test_stderr_writer_reports_only_stderr_fact_once(world):
+    config, channel, factory, close, diagnostics = world
+    stream = StringIO()
+    with one_shot.stderr_logging(config, stream, command_name="describe", on_error=Mock()):
+        writer = factory.call_args.kwargs["writer"]
+        result = writer(LogRecord(LogLevel.ERROR, "stderr-only"))
+    assert result == LogWriteResult(appended=False, durable=False, fallback_written=True)
+    assert result.delivered_for(LogLevel.ERROR) is False
+    assert stream.getvalue().count("stderr-only") == 1
     close.assert_awaited_once()
 
 

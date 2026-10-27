@@ -17,7 +17,7 @@ import sys
 import traceback
 
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult, LogChannel, LogRecord, admission_result_for
 from camctl.logging_runtime.formatting import log_metadata
@@ -384,14 +384,21 @@ def _admission_completed(state: DiagnosticState, result: AdmissionResult) -> Non
                   DiagnosticStatus.FALLBACK)
 
 
-def acknowledge_diagnostic(state: DiagnosticState) -> None:
+def acknowledge_diagnostic(state: DiagnosticState, completion: LogWriteResult | None = None) -> None:
     """副本拥有者取得实际追加成功凭据后交接原记录，不推断写入结果。"""
+    if completion is not None and not completion.appended:
+        return
     if state.status is not DiagnosticStatus.NEW:
         receipt = _receipt_for(state)
         assert state._record is not None
+        if completion is None:
+            # 原无参接口表示调用方已经取得本级别完成凭据。
+            completion = LogWriteResult(appended=True, durable=state._record.level is LogLevel.ERROR)
         result = AdmissionResult(
             AdmissionDecision(AdmissionKind.ACCEPTED, state._record.level),
-            None, delivered=True,
+            None, delivered=completion.delivered_for(state._record.level),
+            fallback_written=completion.fallback_written,
+            appended=completion.appended, durable=completion.durable,
         )
         receipt.complete_admission(result)
         receipt.complete_write(result)
@@ -399,7 +406,7 @@ def acknowledge_diagnostic(state: DiagnosticState) -> None:
         _complete(state, DiagnosticStatus.ADMITTED)
 
 
-def acknowledge_diagnostic_record(record: LogRecord) -> None:
+def acknowledge_diagnostic_record(record: LogRecord, completion: LogWriteResult | None = None) -> None:
     """副本取得实际追加凭据后，结算当前目标持有的同一条原记录。"""
     target = _target.get()
     if target is None:
@@ -411,11 +418,11 @@ def acknowledge_diagnostic_record(record: LogRecord) -> None:
     for owner in owners:
         for state in owner.pending:
             if state._record is record:
-                acknowledge_diagnostic(state)
+                acknowledge_diagnostic(state, completion)
                 return
     for reservation in target.reservations:
         if reservation.state._record is record:
-            acknowledge_diagnostic(reservation.state)
+            acknowledge_diagnostic(reservation.state, completion)
             return
 
 

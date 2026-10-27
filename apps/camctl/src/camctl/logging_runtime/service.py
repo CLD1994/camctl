@@ -19,7 +19,7 @@ from camctl.logging_runtime.admission import (
     AdmissionDecision, AdmissionInput, AdmissionKind, DropCounters, LogSource,
     decide_admission, record_drop,
 )
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.formatting import encode_record, utc_now
 from camctl.logging_runtime.receipt import LogReceipt
 
@@ -53,6 +53,8 @@ class AdmissionResult:
     queue_depth: int | None
     delivered: bool | None = None
     fallback_written: bool = False
+    appended: bool = False
+    durable: bool = False
 
 
 def admission_result_for(error: BaseException) -> AdmissionResult | None:
@@ -200,7 +202,7 @@ class LogChannel:
 
     def __init__(self, *, capacity: int, low_watermark: int, high_watermark: int,
                  level: LogLevel = LogLevel.WARNING, sample_probability: float = 0.1,
-                 writer: Callable[[LogRecord], bool], random_source=None,
+                 writer: Callable[[LogRecord], bool | LogWriteResult], random_source=None,
                  fallback: Callable[[str], bool | None] | None = None) -> None:
         if not 0 < low_watermark < high_watermark < capacity:
             raise ValueError("日志水位必须满足 0 < low < high < capacity")
@@ -472,7 +474,9 @@ class LogChannel:
                 if isinstance(entry, _StopMarker):
                     if entry.summary is not None and not self._channel_failed:
                         try:
-                            self._summary_written = bool(self._writer(entry.summary))
+                            completion = _write_completion(self._writer(entry.summary), entry.summary.level)
+                            self._summary_written = (completion.delivered_for(entry.summary.level)
+                                                     or completion.fallback_written)
                         except BaseException as error:
                             self._summary_written = False
                             self._remember_consumer_control(error)
@@ -480,11 +484,14 @@ class LogChannel:
                     break
                 self._queue.publish_admissions()
                 entry.receipt.complete_admission(entry.admission)
-                written = False
+                written = LogWriteResult(appended=False)
                 if not self._channel_failed:
                     try:
-                        written = self._writer(entry.record)
+                        written = _write_completion(self._writer(entry.record), entry.record.level)
                     except BaseException as error:
+                        write_result = getattr(error, "write_result", None)
+                        if write_result is not None:
+                            written = write_result.completion
                         self._remember_consumer_control(error)
                         failure = ChannelError("日志写入失败")
                         failure.__cause__ = error
@@ -493,7 +500,7 @@ class LogChannel:
                             self.disable_channel(failure)
                         except BaseException as control:
                             self._remember_consumer_control(control)
-                if not written and self._channel_failed:
+                if not written.delivered_for(entry.record.level) and self._channel_failed:
                     entry.failure = self._channel_error
                 if not entry.failure_deferred:
                     try:
@@ -510,17 +517,21 @@ class LogChannel:
     def _complete_entry(self, entry, *, written):
         admission = entry.admission
         entry.receipt.complete_admission(admission)
-        fallback_written = False
+        completion = _write_completion(written, entry.record.level)
+        delivered = completion.delivered_for(entry.record.level)
+        fallback_written = completion.fallback_written
         try:
-            if not written:
+            if not delivered and not fallback_written:
                 fallback_written = self._fallback_entry(entry)
         except BaseException as error:
             _attach_admission(error, AdmissionResult(
-                admission.decision, admission.queue_depth, delivered=False))
+                admission.decision, admission.queue_depth, delivered=False,
+                appended=completion.appended, durable=completion.durable))
             raise
         finally:
             entry.receipt.complete_write(AdmissionResult(
-                admission.decision, admission.queue_depth, bool(written), fallback_written))
+                admission.decision, admission.queue_depth, delivered, fallback_written,
+                appended=completion.appended, durable=completion.durable))
             with self._pending_lock:
                 self._pending.pop(entry.pending_id, None)
 
@@ -604,6 +615,13 @@ class LogChannel:
 
 def _level_rank(level):
     return {LogLevel.DEBUG: 0, LogLevel.INFO: 1, LogLevel.WARNING: 2, LogLevel.ERROR: 3}[level]
+
+
+def _write_completion(result: bool | LogWriteResult, level: LogLevel) -> LogWriteResult:
+    if isinstance(result, LogWriteResult):
+        return result
+    # 既有 bool writer 的 True 已表示满足本级别要求；实际文件 writer 交付完整事实。
+    return LogWriteResult(appended=bool(result), durable=bool(result) and level is LogLevel.ERROR)
 
 
 def _write_stderr(message):

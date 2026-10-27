@@ -1086,7 +1086,7 @@ async def deliver_failure_copy(
         if result.appended is True:
             from camctl.logging_runtime.diagnostics import acknowledge_diagnostic_record
 
-            acknowledge_diagnostic_record(request.trigger)
+            acknowledge_diagnostic_record(request.trigger, result.completion)
         if on_write_result is None:
             return
         try:
@@ -1165,12 +1165,13 @@ async def deliver_failure_copy(
     close_diagnostics = _copy_close_diagnostics(facts.write_result)
     if not _copy_handles_confirmed(facts.write_result):
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             *close_diagnostics) if part)
         return facts.receipt(CopyOutcome.COPY_UNKNOWN, error=error)
-    if not facts.write_result.appended or facts.copy_error is not None:
+    if (not facts.write_result.completion.delivered_for(request.trigger.level)
+            or facts.copy_error is not None):
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             *close_diagnostics) if part)
         await _cleanup_staging_once(
             facts, request, destination,
@@ -1180,7 +1181,7 @@ async def deliver_failure_copy(
             receipt_error=error,
         )
         error = "; ".join(part for part in (
-            facts.copy_error, facts.write_result.append_error,
+            facts.copy_error, facts.write_result.append_error, facts.write_result.sync_error,
             facts.cleanup_error) if part)
         return facts.receipt(CopyOutcome.COPY_FAILED, error=error)
 
