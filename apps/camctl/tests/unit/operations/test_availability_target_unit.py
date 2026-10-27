@@ -23,6 +23,10 @@ def target_rules(monkeypatch):
         "device_activities.occupancy_state": SimpleNamespace(HELD=1),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
+        "operation_attempts.status": SimpleNamespace(RUNNING=1),
+        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
+        "operation_runs.kind": SimpleNamespace(QUERY_ACTIVITY=6),
+        "operation_runs.query_purpose": SimpleNamespace(START_CONFIRMATION=2),
     }
     monkeypatch.setattr(enums, "enum_for", lambda column: members[column])
     source = find_spec("camctl.persistence.repositories.availability_target")
@@ -38,7 +42,7 @@ def facts(target_rules):
     check = {"action_id": 12, "device_id": "hb0", "driver_id": "hasselblad_cfv100c",
              "expected_identity_json": {"serial": "CAMERA-1", "product_id": 10},
              "resource_key": identity.resource_key}
-    activity = {"action_id": 7, "activity_state": 1, "occupancy_state": 1,
+    activity = {"id": 25, "action_id": 7, "activity_state": 1, "occupancy_state": 1,
                 "ownership_mode": 1, "dispatch_state": 2, "availability_release_attempt_id": None,
                 "expected_identity_json": {"serial": "CAMERA-1", "product_id": 10},
                 "resource_key": identity.resource_key}
@@ -76,6 +80,18 @@ def test_inapplicable_target_is_rejected(target_rules, facts, part, field, value
         target_rules.require_target_facts(check, activity, action)
 
 
+@pytest.mark.parametrize("part,field", [
+    ("check", "action_id"), ("check", "device_id"), ("check", "resource_key"),
+    ("activity", "id"), ("activity", "availability_release_attempt_id"),
+    ("activity", "expected_identity_json"), ("action", "execution_spec_json"),
+])
+def test_target_requires_original_fields_even_when_their_value_may_be_null(target_rules, facts, part, field):
+    check, activity, action = deepcopy(facts)
+    del {"check": check, "activity": activity, "action": action}[part][field]
+    with pytest.raises(ValueError):
+        target_rules.require_target_facts(check, activity, action)
+
+
 class _Cursor:
     def __init__(self, rows):
         self.rows = rows
@@ -86,6 +102,9 @@ class _Cursor:
 
     def close(self):
         self.closed = True
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
 
 class _PagedConnection:
@@ -136,3 +155,66 @@ def test_target_reads_reject_nonincreasing_database_rows(target_rules):
     with pytest.raises(ValueError):
         list(target_rules.iter_held_activity_ids(connection, "resource", batch_size=2))
     assert connection.cursors[0].closed
+
+
+class _CreationConnection(_PagedConnection):
+    def __init__(self, activity_id, fault=None):
+        super().__init__([])
+        self.activity_id = activity_id
+        self.fault = fault
+
+    def execute(self, sql, args):
+        self.calls.append((sql, args))
+        if "FROM actions a" in sql:
+            rows = [(7, self.activity_id)] if args[1] == 0 else []
+        elif "FROM device_activities WHERE" in sql:
+            rows = [(self.activity_id,)] if args[2] == 0 else []
+        elif "FROM operation_attempts" in sql:
+            rows = [(1,)] if self.fault == ("photo" if "json_each" in sql else "in_flight") else []
+        elif "FROM operation_runs WHERE" in sql:
+            rows = [(1,)] if self.fault == "confirmation" else []
+        elif "FROM device_availability_targets" in sql:
+            rows = [(1,)] if self.fault == "existing" else []
+        else:
+            raise AssertionError(sql)
+        cursor = _Cursor(rows)
+        self.cursors.append(cursor)
+        return cursor
+
+
+@pytest.fixture
+def creation_facts(facts, monkeypatch):
+    check, activity, action = deepcopy(facts)
+    activity["id"] = 25
+    rows = {("device_activities", 25): activity, ("actions", 7): action}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    capture_facts = ModuleType("camctl.persistence.repositories.capture_facts")
+    capture_facts.load_start_facts = lambda connection, action: SimpleNamespace(
+        activity=activity, run={"id": 31, "status": 4}, attempts_used=1, not_started=False, preparation_resolved=True)
+    monkeypatch.setitem(sys.modules, capture_facts.__name__, capture_facts)
+    return check, activity
+
+
+def test_creation_targets_read_original_facts(target_rules, creation_facts):
+    check, _ = creation_facts
+    connection = _CreationConnection(25)
+    assert list(target_rules.iter_creation_targets(connection, check, batch_size=2)) == [(25,)]
+    assert all(cursor.closed for cursor in connection.cursors)
+
+
+@pytest.mark.parametrize("fault", ["in_flight", "confirmation", "photo", "existing"])
+def test_creation_targets_reject_unsettled_or_existing_responsibility(target_rules, creation_facts, fault):
+    check, _ = creation_facts
+    connection = _CreationConnection(25, fault)
+    with pytest.raises(ValueError):
+        list(target_rules.iter_creation_targets(connection, check, batch_size=2))
+    assert all(cursor.closed for cursor in connection.cursors)
+
+
+def test_creation_targets_reject_logical_identity_mismatch(target_rules, creation_facts):
+    check, activity = creation_facts
+    activity["resource_key"] = "other"
+    with pytest.raises(ValueError):
+        list(target_rules.iter_creation_targets(_CreationConnection(25), check, batch_size=2))

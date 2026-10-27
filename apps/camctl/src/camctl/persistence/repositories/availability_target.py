@@ -64,8 +64,16 @@ def iter_logical_held_activities(connection, device_id: str, *, batch_size: int 
 
 def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> None:
     """核对一项仍持有限制的旧活动，不判断调用收场或目标集合完整性。"""
+    if (not {"action_id", "device_id", "driver_id", "expected_identity_json", "resource_key"} <= check.keys()
+            or not {"id", "action_id", "activity_state", "occupancy_state", "ownership_mode",
+                    "dispatch_state", "availability_release_attempt_id", "expected_identity_json",
+                    "resource_key"} <= activity.keys()
+            or not {"id", "type", "status", "execution_started", "device_id", "driver_id",
+                    "execution_spec_json"} <= action.keys()):
+        raise ValueError("检查或旧活动缺少必要的固定事实")
     try:
         ObjectId(check["action_id"])
+        ObjectId(activity["id"])
         ObjectId(activity["action_id"])
         ObjectId(action["id"])
     except (KeyError, TypeError, ValueError) as error:
@@ -74,6 +82,8 @@ def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> 
             or any(type(activity.get(name)) is not int for name in
                    ("activity_state", "occupancy_state", "ownership_mode", "dispatch_state"))):
         raise ValueError("旧活动状态必须是有效整数")
+    if not isinstance(check["device_id"], str) or not check["device_id"]:
+        raise ValueError("检查缺少有效逻辑设备身份")
     action_status = enum_for("actions.status")
     activity_state = enum_for("device_activities.activity_state")
     occupancy = enum_for("device_activities.occupancy_state")
@@ -103,3 +113,69 @@ def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> 
             or check.get("resource_key") != identity.resource_key
             or activity.get("resource_key") != identity.resource_key):
         raise ValueError("检查与旧活动的固定机身身份不一致")
+
+
+def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
+    """从原写事务读取检查的完整旧目标；结果不授予设备执行资格。"""
+    from camctl.persistence.transaction import row_facts
+    from .capture_facts import load_start_facts
+
+    for page in iter_logical_held_activities(connection, check["device_id"], batch_size=batch_size):
+        for action_id, activity_id in page:
+            activity = row_facts(connection, "device_activities", activity_id)
+            if (activity is None or activity.get("action_id") != action_id
+                    or activity.get("resource_key") != check["resource_key"]):
+                raise ValueError("逻辑设备存在未固定或不匹配的旧活动身份")
+
+    running = int(enum_for("operation_attempts.status").RUNNING)
+    statuses = enum_for("operation_runs.status")
+    kinds = enum_for("operation_runs.kind")
+    purposes = enum_for("operation_runs.query_purpose")
+    seen = False
+    for page in iter_held_activity_ids(connection, check["resource_key"], batch_size=batch_size):
+        for activity_id in page:
+            activity = row_facts(connection, "device_activities", activity_id)
+            action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
+            if activity is None or action is None:
+                raise ValueError("旧活动缺少实际动作或活动事实")
+            require_target_facts(check, activity, action)
+            with closing(connection.execute(
+                "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+                " WHERE r.activity_id=? AND (t.status=? OR t.result_event_id IS NULL) LIMIT 1",
+                (activity_id, running),
+            )) as cursor:
+                if cursor.fetchone() is not None:
+                    raise ValueError("旧活动存在尚未保存结果的实际尝试")
+            start = load_start_facts(connection, action)
+            if (start.activity is None or start.activity.get("id") != activity_id
+                    or start.run is None or type(start.attempts_used) is not int or start.attempts_used < 1
+                    or type(start.run.get("status")) is not int
+                    or start.run.get("status") in (int(statuses.PENDING), int(statuses.ACTIVE))
+                    or start.not_started or not start.preparation_resolved):
+                raise ValueError("旧活动的 START 或准备责任尚未形成适用收场")
+            with closing(connection.execute(
+                "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? AND query_purpose=?"
+                " AND status IN (?,?) LIMIT 1",
+                (action["id"], int(kinds.QUERY_ACTIVITY), int(purposes.START_CONFIRMATION),
+                 int(statuses.PENDING), int(statuses.ACTIVE)),
+            )) as cursor:
+                if cursor.fetchone() is not None:
+                    raise ValueError("旧活动的 START 核实责任尚未终结")
+            with closing(connection.execute(
+                "SELECT 1 FROM operation_attempts t, json_each(t.result_json,'$.observations') observation"
+                " WHERE t.run_id=? AND t.result_event_id IS NOT NULL"
+                " AND json_extract(observation.value,'$.type')='photo_taken' LIMIT 1",
+                (start.run["id"],),
+            )) as cursor:
+                if cursor.fetchone() is not None:
+                    raise ValueError("旧活动已有可靠照片结果，必须沿原文件责任处理")
+            with closing(connection.execute(
+                "SELECT 1 FROM device_availability_targets WHERE action_id=? AND activity_id=? LIMIT 1",
+                (check["action_id"], activity_id),
+            )) as cursor:
+                if cursor.fetchone() is not None:
+                    raise ValueError("触发动作已有该活动的检查责任，必须复用")
+        seen = True
+        yield page
+    if not seen:
+        raise ValueError("没有仍持有限制的检查目标")
