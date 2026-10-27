@@ -59,7 +59,7 @@ _SAVED_LINE = re.compile(r"saved (.+) \(([0-9]+) bytes\)")
 _CAMERA_FILE_LINE = re.compile(r"camera file: (.+)")
 _UNREPORTED_CAMERA_FILE_LINE = "capture: camera filename was not reported"
 _NON_LF_LINE_SEPARATORS = frozenset("\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
-_DOCTOR_RESULT_MARKER = re.compile(r"doctor|\b(?:pass|fail)\b", re.IGNORECASE)
+_DOCTOR_CHECK_LINE = re.compile(r"\[(OK|FAIL)\] [^:\s][^:\r\n]*: \S[^\r\n]*")
 
 
 def _decode(output: bytes, command: str) -> str:
@@ -127,12 +127,24 @@ def parse_serial(output: bytes) -> str:
 
 
 def doctor_passed(output: bytes, stderr: bytes) -> bool:
-    """只有唯一的规范 PASS 且双流没有其他结果标记时才能确认。"""
+    """按已观察的结构化检查行及明确结果分类；未知内容不能确认。"""
     lines = _lines(_decode(output, "doctor"))
-    error_lines = _lines(_decode(stderr, "doctor stderr"))
-    result_lines = [line for line in lines if _DOCTOR_RESULT_MARKER.search(line)]
-    return (result_lines == ["doctor: PASS"]
-            and not any(_DOCTOR_RESULT_MARKER.search(line) for line in error_lines))
+    _lines(_decode(stderr, "doctor stderr"))
+    if stderr:
+        raise CliParseError("doctor stderr 包含未知输出")
+    results = []
+    failed = False
+    for line in lines:
+        if line in ("doctor: PASS", "doctor: FAIL"):
+            results.append(line)
+            continue
+        check = _DOCTOR_CHECK_LINE.fullmatch(line)
+        if check is None or any(unicodedata.category(character) == "Cc" for character in line):
+            raise CliParseError("doctor 输出包含无法识别的检查行")
+        failed |= check.group(1) == "FAIL"
+    if results == ["doctor: PASS"] and lines[-1] != "doctor: PASS":
+        raise CliParseError("doctor PASS 之后包含未知输出")
+    return not failed and results == ["doctor: PASS"]
 
 
 def _canonical_absolute_directory(value: str) -> PurePosixPath:

@@ -35,7 +35,7 @@ class Transport:
         result = self.overrides.get(spec.argv[3], {
             "list": outcome(b"vid=0x2756 pid=0x000a  bus=  1 addr= 23\n"),
             "info": outcome(b"serial : CAMERA-1\n"),
-            "doctor": outcome(b"doctor: PASS\n", stderr=b"warning\n"),
+            "doctor": outcome(b"doctor: PASS\n"),
         }[spec.argv[3]])
         if isinstance(result, BaseException):
             raise result
@@ -66,7 +66,7 @@ async def test_shared_deadline_and_full_facts():
     assert result.expected_product_id == 10
     assert [call.name for call in result.calls] == ["list", "info", "doctor"]
     assert [call.returned_monotonic_ns for call in result.calls] == [1_000_000_000, 2_000_000_000, 3_000_000_000]
-    assert result.calls[-1].outcome.stderr == b"warning\n"
+    assert result.calls[-1].outcome.stderr == b""
     assert [call.timeout_s for call in transport.calls] == [Decimal(5), Decimal(4), Decimal(3)]
     assert all(call.argv[:3] == ("/opt/hb_cli", "--pid", "0x000a") for call in transport.calls)
 
@@ -87,7 +87,7 @@ async def test_result_converts_to_registered_check_evidence_and_diagnostics():
     assert all(step["exit"] == {"exit_code": 0, "signal": None} for step in data["steps"])
     assert all(step["error"] is None for step in data["steps"])
     encoded = result_document(outcome)
-    assert bytes.fromhex(encoded["diagnostics"]["calls"][-1]["stderr"]["hex"]) == b"warning\n"
+    assert bytes.fromhex(encoded["diagnostics"]["calls"][-1]["stdout"]["hex"]) == b"doctor: PASS\n"
 
 
 @pytest.mark.asyncio
@@ -162,14 +162,23 @@ async def test_unsettled_result_cannot_be_presented_as_settled_outcome():
     ({"list": outcome(b"broken\n")}, "invalid_response", "list"),
     ({"info": outcome(b"serial : DIFFERENT\n")}, "serial_mismatch", "info"),
     ({"doctor": outcome(b"doctor: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"not doctor: PASS\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"not doctor: PASS\n")}, "invalid_response", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\ndoctor: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"doctor: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\n doctor: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"\tdoctor: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\ndoctor : FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\nDOCTOR: FAIL\n")}, "doctor_not_passed", "doctor"),
-    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"doctor: FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n doctor: FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"\tdoctor: FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\ndoctor : FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\nDOCTOR: FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"FAIL\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\nFAILED\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\nUSB connection failure\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"USB connection failed\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"[FAIL] camera USB: unavailable\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"[FAIL] camera USB: unavailable\ndoctor: PASS\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"unrecognized information\ndoctor: PASS\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"warning\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"[OK] unstructured\ndoctor: PASS\n")}, "invalid_response", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n[OK] system: Linux aarch64\n")}, "invalid_response", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\n", stderr=b"\xff")}, "invalid_response", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\n\xff")}, "invalid_response", "doctor"),
 ])
@@ -181,10 +190,26 @@ async def test_rejects_identity_and_doctor_failures(overrides, reason, last):
 
 
 @pytest.mark.asyncio
-async def test_doctor_allows_non_result_information_but_keeps_both_streams():
-    raw = outcome(b"USB connected\ndoctor: PASS\n", stderr=b"warning\n")
+async def test_doctor_accepts_observed_check_lines_and_keeps_both_streams():
+    raw = outcome(b"[OK] system: Linux aarch64\n"
+                  b"[OK] runtime: executable and linked libraries loaded\n"
+                  b"[OK] camera USB: 2756:000a, interface 3 claimed\n"
+                  b"[OK] USB reader: control channel active\n"
+                  b"[OK] tether accept: I2,1,1\n"
+                  b"[OK] image formats: RAW/JPEG advertised\n"
+                  b"[OK] capture session: I2,1,0\n"
+                  b"[OK] command test: firmware v4.1.0\n"
+                  b"doctor: PASS\n")
     result = await check(driver(Transport({"doctor": raw})))
     assert result.available
+    assert result.calls[-1].outcome is raw
+
+
+@pytest.mark.asyncio
+async def test_doctor_preserves_unrecognized_output_on_failure():
+    raw = outcome(b"USB connected\ndoctor: PASS\n", stderr=b"warning\n")
+    result = await check(driver(Transport({"doctor": raw})))
+    assert not result.available and result.reason == "invalid_response"
     assert result.calls[-1].outcome is raw
 
 
@@ -271,7 +296,7 @@ async def test_real_process_pass_requires_zero_exit_and_keeps_streams(tmp_path, 
         "elif sys.argv[3] == 'info': print('serial : CAMERA-1')\n"
         "elif sys.argv[3] == 'doctor':\n"
         "    print('doctor: PASS')\n"
-        "    print('diagnostic', file=sys.stderr)\n"
+        f"    if {exit_code}: print('diagnostic', file=sys.stderr)\n"
         f"    sys.exit({exit_code})\n", encoding="utf-8")
     executable.chmod(0o700)
     device = {"kind": "camera", "driver": DRIVER_ID,
@@ -283,7 +308,8 @@ async def test_real_process_pass_requires_zero_exit_and_keeps_streams(tmp_path, 
     assert [call.name for call in result.calls] == ["list", "info", "doctor"]
     raw = result.calls[-1].outcome
     assert raw.exit.exit_code == exit_code
-    assert raw.output == b"doctor: PASS\n" and raw.stderr == b"diagnostic\n"
+    assert raw.output == b"doctor: PASS\n"
+    assert raw.stderr == (b"diagnostic\n" if exit_code else b"")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="受管脚本使用 POSIX 信号")
