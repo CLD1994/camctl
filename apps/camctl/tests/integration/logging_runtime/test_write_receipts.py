@@ -528,7 +528,9 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
                     elif sync_failure:
                         assert copied.write_result.appended is True
                         assert copied.write_result.durable is False
-                        assert copied.write_result.sync_error is not None
+                        original_sync_error = f"controlled original {probe.fail} sync failure"
+                        assert original_sync_error in copied.write_result.sync_error
+                        assert original_sync_error in copied.error
                         observed = await completed(waiter)
                         assert observed.delivered is False and observed.appended is True
                         assert observed.durable is False
@@ -543,7 +545,7 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
             successful = copy_result != "unwritten" and not sync_failure
             assert result.delivered is successful and result.durable is successful
             assert result.appended is (copy_result != "unwritten")
-            assert result.fallback_written is (not successful)
+            assert result.fallback_written is (copy_result == "unwritten")
             if successful:
                 assert state.status is DiagnosticStatus.ADMITTED
             assert await receipt_result(receipt) == result
@@ -559,7 +561,7 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
     assert len(records) == 1
     assert records[0]["stage"] == "report-generation"
     assert records[0]["error"]["message"] == "original-report-error"
-    assert len(world.fallback) == int(copy_result == "unwritten" or sync_failure)
+    assert len(world.fallback) == int(copy_result == "unwritten")
     if sync_failure:
         assert probe.events.count((probe.fail, "started")) == 1
         assert not list(ready.iterdir())
