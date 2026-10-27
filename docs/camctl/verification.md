@@ -2,6 +2,25 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 通用日志入口验证（2026-10-27）
+
+[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)提供 `get_logger` 的统一 await 调用及 `get_sync_logger` 的低级别同步调用；[使用示例](logging-runtime.md#日志异步投递入口与有界队列)说明入口和原错误责任的关系。生产命令开始记录及快照维护默认警告已使用通用入口，文件拥有者的真实工作线程沿每次调用复制上下文。
+
+最终组合源码为 `c2ac8ea93718508998120117346d8766044ff7ea`，在 Linux 开发容器、Python 3.11.17、SQLite 3.53.1 下验证。工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`；显式使用本工作区的源码与测试路径，清除不应传入子进程的计时和 Python 环境变量。同一工作区的集成 pytest 按目录顺序执行。
+
+| 命令范围，统一使用 `python -m pytest <范围> -q --tb=short` | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9658 项通过、1 项跳过、2 条既有 asyncio 标记警告；退出 0。 |
+| `apps/camctl/tests/integration/logging_runtime` | 157 项通过、1 条既有 asyncio 标记警告；退出 0。 |
+| `apps/camctl/tests/integration/bootstrap/` 中的 `test_logging_composition.py`、`test_one_shot_logging.py`、`test_cli_error_diagnostics.py` | 18 项通过；退出 0。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过；退出 0。 |
+
+177 项定向集成覆盖真实有界队列、文件和 stderr、工作线程、CLI 与数据库入口，包含 9 项新增通用 Logger 组合。观测覆盖同一模块 Logger 的并发隔离、调用时冻结及源位置、满载时低级别立即返回、重要日志重复取消时仍只交接一次、独立必要停止继续推进、原异常向外层传播去重、正在交接及日志副本预留／接管的所有权、通道禁用与有序关闭。消息及异常格式化失败仍沿共同快照过滤媒体 stdout，并保留可取得的 stderr 与错误事实。
+
+文件线程缺失上下文、消息格式失败提前转为 repr 导致媒体进入日志、以及已结束目标的多条诊断在首条控制异常后留下等待者，均先用反例复现，再修复并复验。独立审查另以公共消费者内存探针核对实际 JSON、异常状态和原控制异常；已报告问题均已闭合。
+
+完整命令、UTC、源码身份、环境、退出码和日志保存在 `.local/verification/generic-logger/final/`，分域原始记录及红绿证据归档于同级 `agents/`。上述结果不代表全部组件集成回归或真实设备验收；本次没有更新真机验证安装，也没有执行新的相机拍摄。
+
 [设计入口](README.md) · [实现总览](implementation.md)
 
 本页定义 camctl 实现的测试分工和跨职责验证要求。各业务专题中的决策表及验收场景仍须逐项落实。具体阶段与门禁见[第一版实施路线图](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md)，接口、测试文件、失败用例和执行步骤见其引用的[模块计划](../superpowers/plans/2026-09-30-camctl-implementation-roadmap.md#模块计划与任务入口)及[跨组件集成计划](../superpowers/plans/2026-09-30-camctl-integration.md)。进入代码实施前核对所需前置交付和实际代码。
