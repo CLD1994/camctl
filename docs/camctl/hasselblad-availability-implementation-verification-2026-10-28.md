@@ -12,6 +12,18 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 
 命令退出码为 0，六个测试通过，原始输出位于 `/tmp/camctl-h1-release-final.log`。该提交已集成为 `afbe3109`。测试使用真实业务数据库与正式会话工厂，保留可靠无效果释放、未知结果保留、降低预算、输出范围限制以及在途调用收场的原有分区。该结果不证明哈苏原责任恢复、报告生成或后续可用性检查；这些项目仍需按计划验证。
 
+在同一工作区的提交 `61f5ece2` 上执行下列命令，退出码为 0，11 项通过；原始输出位于 `/tmp/camctl-h1-focus-4.log`，集成提交为 `d47367fb`。
+
+```bash
+apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/test_hasselblad_start_recovery.py -q --tb=short
+```
+
+该测试通过真实业务数据库和会话工厂覆盖相对调焦后的原调用中断、可靠和缺失的恢复边界、同会话调用仍在执行、已保存结果、提交回执未知及原操作键。它不代替安装版故障门与新检查的联合验证。
+
+在独立工作区 `/tmp/camctl-h1-reporting` 的提交 `e0a9c8ee` 上，使用 CPython 3.11.17 执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_emergency_error_generation.py -q --tb=short`，退出码为 0，六项通过；前台输出未单独保存。集成提交为 `7fed2961`。该范围验证应急错误报告的三种活动状态、原动作错误和固定报告字节，不证明哈苏新检查报告。
+
+同一工作区的完整 reporting 目录另有一次失败：204 项通过、285 项失败、10 项错误，原始日志 `/tmp/camctl-h1-reporting-full.log` 的 SHA-256 为 `e0dab6096747e94cc3a38dfca0627bc01d26a8503d5b65def41f87dfc98aa2c8`。失败均在旧测试装配阶段，分别涉及旧 `accept_input` 调用、将连接直接交给异步数据库接口、旧 `CaptureRuntime` 和旧 `ObtainRuntime` 装配；这些用例尚未验证目标报告行为，正在迁移。
+
 ## H2：固定身份和证据类别
 
 2026-10-28，在独立工作区 `/tmp/camctl-h2-availability-storage-20261028`，使用 CPython 3.11.17 执行：
