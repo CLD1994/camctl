@@ -206,6 +206,7 @@ CREATE TABLE device_activities (
         OR COALESCE(completion_basis = 3, 0) OR availability_release_attempt_id IS NOT NULL)
 ) STRICT;
 CREATE INDEX activities_occupancy ON device_activities(action_id, id) WHERE occupancy_state = 1;
+CREATE INDEX activities_held_resource ON device_activities(resource_key, id) WHERE occupancy_state = 1;
 
 CREATE TABLE baseline_read_calls (
     id INTEGER PRIMARY KEY CHECK (id > 0),
