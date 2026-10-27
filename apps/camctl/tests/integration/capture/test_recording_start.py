@@ -96,7 +96,7 @@ class StoreAdapter:
         self._operations = operations
         self._owned = owned
 
-    def grant(self, request) -> GrantDecision:
+    async def grant(self, request) -> GrantDecision:
         grant_request = GrantRequest(
             device_id=request.device_id,
             action_id=request.action_id,
@@ -115,7 +115,7 @@ class StoreAdapter:
             return GrantDecision(outcome="rejected", reason=result.reason)
         return GrantDecision(outcome="granted", ticket=result.ticket)
 
-    def finish(self, ticket, outcome: CallOutcome) -> None:
+    async def finish(self, ticket, outcome: CallOutcome) -> None:
         attempt = AttemptFinish(
             ticket=ticket,
             outcome=_validated(ticket, outcome),
@@ -126,7 +126,7 @@ class StoreAdapter:
         )
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
-    def finish_prevented(self, ticket, reason: str) -> None:
+    async def finish_prevented(self, ticket, reason: str) -> None:
         outcome = CallOutcome(
             status=AttemptStatus.FAILED,
             error=ErrorValue(code=reason, stage="dispatch"),
@@ -137,7 +137,7 @@ class StoreAdapter:
             ),
             observations=(),
         )
-        self.finish(ticket, outcome)
+        await self.finish(ticket, outcome)
 
 
 def _validated(ticket, outcome: CallOutcome):
