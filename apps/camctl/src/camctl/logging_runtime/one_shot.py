@@ -59,7 +59,7 @@ def stderr_logging(log_config, err, *, command_name, on_error):
         except Exception as error:
             failures.append(error)
             channel = None
-        with event_logging(channel), log_context(command_name=command_name):
+        with event_logging(channel, fallback=writer.write), log_context(command_name=command_name):
             yield
     except BaseException as error:
         primary = error

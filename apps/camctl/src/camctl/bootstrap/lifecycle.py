@@ -1009,7 +1009,7 @@ async def execute_command(
             command_settled = True
             record_event("command", event=event, **fields)
 
-    with error_diagnostics_context(channel, fallback, background=True), event_logging(channel), log_context(
+    with error_diagnostics_context(channel, fallback, background=True), event_logging(channel, fallback=fallback), log_context(
             command_name=deps.mode.value, session_key=deps.session_key):
         try:
             if channel is not None:

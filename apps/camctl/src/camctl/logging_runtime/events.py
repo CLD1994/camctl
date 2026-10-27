@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from time import monotonic_ns
 
 from camctl.logging_runtime.formatting import encode_record
@@ -11,6 +12,19 @@ from camctl.logging_runtime.service import LogRecord
 
 _channel = ContextVar("camctl_event_channel", default=None)
 _fields = ContextVar("camctl_event_fields", default={})
+_fallback = ContextVar("camctl_event_fallback", default=None)
+
+
+@dataclass(frozen=True)
+class LoggingContext:
+    channel: object
+    fields: dict
+    fallback: object
+
+
+def current_logging_context() -> LoggingContext:
+    """取得调用所在任务的绑定；字段字典由调用方独立持有。"""
+    return LoggingContext(_channel.get(), dict(_fields.get()), _fallback.get())
 
 
 def logging_enabled() -> bool:
@@ -18,11 +32,13 @@ def logging_enabled() -> bool:
 
 
 @contextmanager
-def event_logging(channel):
+def event_logging(channel, *, fallback=None):
     token = _channel.set(channel)
+    fallback_token = _fallback.set(fallback)
     try:
         yield
     finally:
+        _fallback.reset(fallback_token)
         _channel.reset(token)
 
 
@@ -51,7 +67,7 @@ def record_event(stage: str, *, event: str = "returned", level=LogLevel.INFO, **
 @contextmanager
 def measure_stage(stage: str, *, level: LogLevel | None = LogLevel.INFO, **fields):
     """记录实际执行体的起止；返回不表示设备或业务已经成功。"""
-    with log_context(**fields):
+    with log_context(stage=stage, **fields):
         if level is None or not logging_enabled():
             yield
             return

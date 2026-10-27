@@ -118,3 +118,22 @@ def test_plain_record_freezes_metadata_and_preserves_original_message(monkeypatc
 def test_already_structured_diagnostic_is_not_wrapped_again():
     message = '{"level":"ERROR","stage":"device","error":{"code":"E"}}'
     assert LogRecord(LogLevel.ERROR, message, structured=True).rendered_message() == message
+
+
+def test_context_snapshot_copies_fields_and_restores_channel_and_fallback():
+    outer, inner, fallback = channel_stub(), channel_stub(), []
+    with events.event_logging(outer, fallback=fallback.append), events.log_context(action_id=7):
+        snapshot = events.current_logging_context()
+        snapshot.fields["action_id"] = 99
+        assert events.current_logging_context().fields == {"action_id": 7}
+        assert snapshot.channel is outer and snapshot.fallback == fallback.append
+        with events.event_logging(inner), events.measure_stage("work", level=None):
+            nested = events.current_logging_context()
+            assert nested.channel is inner and nested.fallback is None
+            assert nested.fields == {"action_id": 7, "stage": "work"}
+        restored = events.current_logging_context()
+        assert restored.channel is outer and restored.fallback == fallback.append
+        assert restored.fields == {"action_id": 7}
+    assert events.current_logging_context().channel is None
+    assert events.current_logging_context().fallback is None
+    assert events.current_logging_context().fields == {}
