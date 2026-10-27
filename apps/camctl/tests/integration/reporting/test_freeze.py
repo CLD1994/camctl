@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from camctl.acceptance.input import parse_input, read_input
-from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
@@ -29,6 +29,7 @@ from camctl.history.validators import EventValidationError
 
 from ..acceptance.test_acceptance import Catalog
 from ..acceptance.test_atomicity import _process
+from ..acceptance_fixtures import accept_with_database
 from ..persistence.test_runtime import _create_valid_database
 from ..persistence.test_transactions import FailingConnection
 
@@ -53,7 +54,7 @@ class _Reader:
 async def _submit(owned, tmp_path, request_id):
     target = tmp_path / f"plan-{request_id}.json"
     target.write_text(json.dumps(_plan_body(request_id)), encoding="utf-8")
-    result = await accept_input(
+    result = await accept_with_database(
         parse_input(await read_input(str(target), _Reader())),
         AcceptanceContext(mode=CommandMode.RUN, catalog=Catalog(), repository=AcceptanceRepository(),
                           clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})()),

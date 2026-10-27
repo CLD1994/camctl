@@ -16,7 +16,7 @@ import pytest
 
 from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.ports import ParameterDefinition
-from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
@@ -57,6 +57,7 @@ from ..capture.test_capture_contract import (
     _PAGE_EVIDENCE,
     _entry,
 )
+from ..acceptance_fixtures import accept_with_database
 from ..persistence.test_runtime import _create_valid_database
 
 register_acceptance_guards()
@@ -130,7 +131,7 @@ async def _submit(owned, tmp_path, request_id: str, scheduled_at: str | None = N
     body = _plan_body(request_id, scheduled_at or _past_schedule())
     target = tmp_path / f"plan-{request_id}.json"
     target.write_text(json.dumps(body), encoding="utf-8")
-    result = await accept_input(
+    result = await accept_with_database(
         parse_input(await read_input(str(target), _Reader())),
         AcceptanceContext(
             mode=CommandMode.RUN,
@@ -147,7 +148,7 @@ async def _submit(owned, tmp_path, request_id: str, scheduled_at: str | None = N
 async def _submit_diagnostic(owned, tmp_path, name: str):
     target = tmp_path / f"{name}.json"
     target.write_text(json.dumps({"request_id": f"bad-{name}", "plan": {}}), encoding="utf-8")
-    await accept_input(
+    await accept_with_database(
         parse_input(await read_input(str(target), _Reader())),
         AcceptanceContext(
             mode=CommandMode.RUN,
