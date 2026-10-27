@@ -666,10 +666,11 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     deferred_waits = {}
     # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
     for item in page.items:
-        if not item.held and item.attempts_used == 0:
-            continue
         assembly = runtime.devices.get(item.device_id)
         if assembly is None:
+            continue
+        if (not item.held and (item.attempts_used == 0
+                or (item.retry_wait_required == 0 and item.attempts_used < assembly.max_read_attempts))):
             continue
         run = await read_one(runtime.database,
             "SELECT r.id,a.id,r.attempts_used,r.retry_wait_required,a.status,a.result_json,a.result_event_id FROM operation_runs r"
@@ -748,8 +749,8 @@ async def _complete_read_wait(runtime, copy_id, run_id, attempt_id):
 
 async def _advance_read(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
-        copy_id: int, now: int) -> None:
-    """在读取机会与尝试预算内推进一份交付拷贝到准备完成。"""
+        copy_id: int, now: int) -> bool:
+    """推进一份拷贝；返回是否取得读取尝试。"""
     def inputs(owned):
         facts = _read_facts(owned.connection, copy_id)
         if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
@@ -761,21 +762,21 @@ async def _advance_read(
             return facts, cursor.fetchone()
     facts, saved_binding = await runtime.database.read(inputs)
     if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
-        return
+        return False
     if saved_binding is None:
         raise ConsistencyError(f"读取源文件的原绑定缺失: {facts['source_device_file_id']}")
     if assembly.binding != DeviceBinding(*saved_binding):
         # 本次设备标识相同仍可能更换驱动；实际意图和调用只采用原绑定。
-        return
+        return False
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
-        return
+        return False
     slot = await _save_repository(runtime, runtime.outputs.grant_read_slot, SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()), new_operation_key())
     if slot.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(ConsistencyError,
             f"读取机会事务未完成（{slot.kind.value}）: {slot.error}", slot)
     if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
-        return
+        return False
     ticket = await _begin_read_attempt(runtime, assembly, facts, now)
     if ticket is None:
         return False

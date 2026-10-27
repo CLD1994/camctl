@@ -55,7 +55,7 @@ class RetryWakeupTests(unittest.TestCase):
     def test_discovery_returns_attempt_count_in_candidate_page(self):
         source = SOURCE / "outputs" / "read_discovery.py"
         class Cursor:
-            def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1)]
+            def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1, 1)]
             def close(self): pass
         class Connection:
             query = None
@@ -69,12 +69,14 @@ class RetryWakeupTests(unittest.TestCase):
             "database_identity": lambda connection: "db", "validate_read_basis": lambda *args: None,
             "_READ_COPY_ELIGIBLE": "eligible", "_READ_FROM": " FROM file_copies fc",
             "closing": __import__("contextlib").closing,
-            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-1], key=(0, 0, 0, 0, 0)),
+            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-2], retry_wait_required=row[-1], key=(0, 0, 0, 0, 0)),
             "Page": lambda items, position: SimpleNamespace(items=items),
         })
         page = discover(connection, scope, limit=100)
         self.assertIn("r.attempts_used", connection.query)
+        self.assertIn("r.retry_wait_required", connection.query)
         self.assertEqual(page.items[0].attempts_used, 1)
+        self.assertEqual(page.items[0].retry_wait_required, 1)
 
 
 class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
@@ -115,6 +117,34 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_wait_candidates_with_budget_do_not_issue_retry_queries(self):
+        candidates = tuple(SimpleNamespace(held=False, copy_id=i, device_id="camera", attempts_used=1,
+                                           retry_wait_required=0) for i in range(1, 101))
+        assembly = SimpleNamespace(capture_read_parallel=False, max_read_attempts=3)
+        async def reads(database, kind, now): return SimpleNamespace(items=candidates)
+        async def read_one(*args): self.fail("间隔已完成且预算有余时不能逐项查询重试")
+        class Database:
+            count = 0
+            async def read(self, operation):
+                self.count += 1
+                return operation(SimpleNamespace(connection=None))
+        database = Database()
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=database,
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None)
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "plan_device_work": lambda *args, **kwargs: (),
+        })
+        await advance(runtime, 10)
+        self.assertEqual(database.count, 1)
+
+    async def test_advance_read_returns_false_when_delivery_is_terminal(self):
+        class Database:
+            async def read(self, operation): return operation(SimpleNamespace(connection=None))
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_read", {
+            "_read_facts": lambda connection, copy_id: None, "_VERIFICATION_DONE": (),
+        })
+        self.assertIs(await advance(SimpleNamespace(database=Database()), object(), 7, 10), False)
+
     async def test_first_read_candidates_do_not_issue_individual_retry_queries(self):
         candidates = tuple(SimpleNamespace(held=False, copy_id=i, device_id="camera", attempts_used=0)
                            for i in range(1, 101))
@@ -137,7 +167,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selected_ready_read_keeps_wait_for_intent_transaction(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -169,7 +199,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selected_read_that_loses_opportunity_completes_wait(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -202,7 +232,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_starts_wait_before_capture_selection(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -234,7 +264,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_unproven_candidate_does_not_start_wait(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -278,7 +308,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_completes_wait_while_capture_blocks(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -311,7 +341,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_exhausts_after_wait_was_cleared(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=1, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 0, 3, "{}", 101)

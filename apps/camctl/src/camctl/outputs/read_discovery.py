@@ -182,6 +182,7 @@ class ReadCandidate:
     source_file_id: int | None
     held: bool
     attempts_used: int = 0
+    retry_wait_required: int = 0
 
     def __post_init__(self):
         for identity in (self.copy_id, self.action_id, self.plan_id):
@@ -229,7 +230,7 @@ def read_candidates(connection, scope, cursor=None, *, limit):
     parameters.append(limit)
     with closing(connection.execute(
         "SELECT fc.id,a.id,a.scheduled_at,a.plan_id,a.input_index,ob.device_id,ob.driver_id,"
-        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL,r.attempts_used" + _READ_FROM
+        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL,r.attempts_used,r.retry_wait_required" + _READ_FROM
         + " WHERE " + condition + " ORDER BY " + key_sql + " LIMIT ?", parameters,
     )) as result:
         items = tuple(ReadCandidate(*row) for row in result.fetchall())
