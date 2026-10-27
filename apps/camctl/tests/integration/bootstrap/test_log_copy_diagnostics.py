@@ -1035,21 +1035,27 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         "helper_create": 0, "copy": 0,
     }
     original_open = concurrent_log_handler._open
-    original_append = concurrent_log_handler.ConcurrentRotatingFileHandler.do_write
     original_file_channel_init = FileChannel.__init__
     original_copy = FileChannel.copy_with_write
+
+    class CountedPrimaryStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def write(self, message):
+            attempts["append"] += 1
+            return self.stream.write(message)
 
     def fail_first_primary_open(file, *args, **kwargs):
         if str(file) == primary_path:
             attempts["open"] += 1
             if attempts["open"] == 1:
                 raise OSError("controlled prior ordinary log open failure")
+            return CountedPrimaryStream(original_open(file, *args, **kwargs))
         return original_open(file, *args, **kwargs)
-
-    def count_primary_append(handler, message):
-        if handler.baseFilename == primary_path:
-            attempts["append"] += 1
-        return original_append(handler, message)
 
     def count_helper_create(channel, *args, **kwargs):
         attempts["helper_create"] += 1
@@ -1060,9 +1066,6 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         return original_copy(channel, record, destination)
 
     monkeypatch.setattr(concurrent_log_handler, "_open", fail_first_primary_open)
-    monkeypatch.setattr(
-        concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "do_write", count_primary_append)
     monkeypatch.setattr(FileChannel, "__init__", count_helper_create)
     monkeypatch.setattr(FileChannel, "copy_with_write", count_copy)
 

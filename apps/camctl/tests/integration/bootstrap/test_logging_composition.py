@@ -25,7 +25,8 @@ from camctl.bootstrap.lifecycle import (
     build_runtime, close_runtime, execute_command,
 )
 from camctl.logging_runtime.lifecycle import close_logging
-from camctl.logging_runtime.models import LogLevel, LogWriteResult
+from camctl.logging_runtime.clh_adapter import WriteResult
+from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from integration.logging_runtime.sync_support import FileSyncProbe
@@ -236,7 +237,7 @@ async def test_runtime_writer_keeps_original_control_when_write_facts_are_read_o
     class ReadOnlyControl(asyncio.CancelledError):
         @property
         def write_result(self):
-            return LogWriteResult(appended=True, durable=False)
+            return WriteResult(appended=True, rotated=False, durable=False)
 
     original = ReadOnlyControl("original stderr control")
 
