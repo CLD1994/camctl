@@ -272,7 +272,11 @@ def _write_result_from_exception(failure: BaseException):
     """只读取原异常上由 FileChannel 写入的 typed 结果事实。"""
     from camctl.logging_runtime.clh_adapter import WriteResult
 
-    result = getattr(failure, "write_result", None)
+    try:
+        result = getattr(failure, "write_result", None)
+    except BaseException:
+        # 附属事实不可读时仍交付原异常，异常组的其他成员可以提供可靠事实。
+        result = None
     if isinstance(result, WriteResult):
         return result
     if isinstance(failure, BaseExceptionGroup):
@@ -859,7 +863,10 @@ class _CopyDeliveryFacts:
 
 def _copy_receipt_from_exception(failure: BaseException) -> CopyReceipt | None:
     """只接受原异常或异常组上明确交付的不可变回执。"""
-    receipt = getattr(failure, "copy_receipt", None)
+    try:
+        receipt = getattr(failure, "copy_receipt", None)
+    except BaseException:
+        receipt = None
     if isinstance(receipt, CopyReceipt):
         return receipt
     if isinstance(failure, BaseExceptionGroup):
@@ -876,11 +883,14 @@ def _attach_copy_receipt(
     """把统一阶段事实附在实际传播的同一个异常对象上。"""
     try:
         setattr(failure, "copy_receipt", receipt)
-    except (AttributeError, TypeError):
-        _add_exception_note(
-            failure,
-            "camctl_copy_receipt_unavailable: 副本阶段事实已形成但无法附加",
-        )
+    except BaseException:
+        try:
+            _add_exception_note(
+                failure,
+                "camctl_copy_receipt_unavailable: 副本阶段事实已形成但无法附加",
+            )
+        except BaseException:
+            pass  # 附属说明不能替换正在传播的原异常。
 
 
 class _LoggingOperationStopped(Exception):
