@@ -16,9 +16,10 @@ from os import PathLike
 import sys
 import traceback
 
-from camctl.logging_runtime.admission import AdmissionKind
+from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime.service import LogChannel, LogRecord, admission_result_for
+from camctl.logging_runtime.receipt import LogReceipt
+from camctl.logging_runtime.service import AdmissionResult, LogChannel, LogRecord, admission_result_for
 from camctl.logging_runtime.formatting import log_metadata
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
 from camctl.operations.models import CallOutcome, ErrorValue
@@ -29,9 +30,9 @@ from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, enco
 __all__ = [
     "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome",
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
-    "diagnostic_record_for", "acknowledge_diagnostic",
+    "diagnostic_record_for", "acknowledge_diagnostic", "acknowledge_diagnostic_record",
     "DiagnosticReservation", "reserve_diagnostic", "adopt_diagnostic", "release_diagnostic",
-    "prepare_log_diagnostic", "admit_diagnostic", "diagnostic_snapshot",
+    "prepare_log_diagnostic", "submit_diagnostic", "admit_diagnostic", "diagnostic_snapshot",
 ]
 
 
@@ -54,6 +55,9 @@ class DiagnosticState:
     _admitting: bool = field(default=False, init=False, repr=False)
     _copy_owned: bool = field(default=False, init=False, repr=False)
     _changed: asyncio.Future | None = field(default=None, init=False, repr=False)
+    _receipt: LogReceipt | None = field(default=None, init=False, repr=False)
+    _submitted: bool = field(default=False, init=False, repr=False)
+    _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
 
 
 @dataclass
@@ -244,6 +248,7 @@ def prepare_log_diagnostic(
         state._record = replace(record, fallback=target.fallback)
         state._target = target
         state.status = DiagnosticStatus.HELD
+        _receipt_for(state)
         if error is not None:
             error._camctl_diagnostic_state = state
         if target.closed or target.finished:
@@ -260,10 +265,34 @@ def prepare_log_diagnostic(
     return state
 
 
+def submit_diagnostic(state: DiagnosticState) -> LogReceipt:
+    """同步交接本条并取得原写入回执；副本拥有者继续持有原记录。"""
+    if state.status is DiagnosticStatus.NEW:
+        raise ValueError("诊断尚未准备，不能执行提交")
+    receipt = _receipt_for(state)
+    if (state.status is not DiagnosticStatus.HELD or state._admitting
+            or state._copy_owned or state._submitted):
+        return receipt
+    target, owner = state._target, state._owner
+    assert target is not None and owner is not None
+    owner.pending.remove(state)
+    state._owner = None
+    try:
+        _submit_one(state, target)
+    finally:
+        if state.status is DiagnosticStatus.HELD and not state._submitted:
+            retained_owner = owner if not owner.closed else target.root
+            _enqueue(retained_owner, state)
+            if retained_owner is target.root:
+                _notify(target)
+    return receipt
+
+
 async def admit_diagnostic(state: DiagnosticState) -> DiagnosticState:
     """仅交接本条；已有接纳者和实际副本拥有者继续持有原记录。"""
     if state.status is DiagnosticStatus.NEW:
         raise ValueError("诊断尚未准备，不能执行接纳")
+    _receipt_for(state)
     first_cancel = None
     while state.status is DiagnosticStatus.HELD:
         if state._admitting or state._copy_owned:
@@ -317,10 +346,77 @@ def _complete(state: DiagnosticState, status: DiagnosticStatus) -> None:
     _state_changed(state)
 
 
+def _receipt_for(state: DiagnosticState) -> LogReceipt:
+    try:
+        state._loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    if state._receipt is None:
+        receipt = state._receipt = LogReceipt()
+
+        def admission_completed(result: AdmissionResult) -> None:
+            loop = state._loop
+            if loop is None or loop.is_closed():
+                # 没有存活的事件循环时也保留原身份终态，不能触碰旧 Future。
+                state.status = (DiagnosticStatus.ADMITTED if
+                                result.decision.kind is AdmissionKind.ACCEPTED else
+                                DiagnosticStatus.FALLBACK)
+                state._admitting = False
+                return
+            try:
+                current = asyncio.get_running_loop()
+            except RuntimeError:
+                current = None
+            if current is loop:
+                _admission_completed(state, result)
+            else:
+                loop.call_soon_threadsafe(_admission_completed, state, result)
+
+        receipt.add_admission_callback(admission_completed)
+    return state._receipt
+
+
+def _admission_completed(state: DiagnosticState, result: AdmissionResult) -> None:
+    state._admitting = False
+    if state.status is DiagnosticStatus.HELD:
+        _complete(state, DiagnosticStatus.ADMITTED if
+                  result.decision.kind is AdmissionKind.ACCEPTED else
+                  DiagnosticStatus.FALLBACK)
+
+
 def acknowledge_diagnostic(state: DiagnosticState) -> None:
     """副本拥有者取得实际追加成功凭据后交接原记录，不推断写入结果。"""
+    if state.status is not DiagnosticStatus.NEW:
+        receipt = _receipt_for(state)
+        assert state._record is not None
+        result = AdmissionResult(
+            AdmissionDecision(AdmissionKind.ACCEPTED, state._record.level),
+            None, delivered=True,
+        )
+        receipt.complete_admission(result)
+        receipt.complete_write(result)
     if state.status is DiagnosticStatus.HELD:
         _complete(state, DiagnosticStatus.ADMITTED)
+
+
+def acknowledge_diagnostic_record(record: LogRecord) -> None:
+    """副本取得实际追加凭据后，结算当前目标持有的同一条原记录。"""
+    target = _target.get()
+    if target is None:
+        return
+    scope = _scope.get()
+    owners = [target.root]
+    if scope is not None and scope.target is target:
+        owners.insert(0, scope.owner)
+    for owner in owners:
+        for state in owner.pending:
+            if state._record is record:
+                acknowledge_diagnostic(state)
+                return
+    for reservation in target.reservations:
+        if reservation.state._record is record:
+            acknowledge_diagnostic(reservation.state)
+            return
 
 
 def reserve_diagnostic(state: DiagnosticState | None) -> DiagnosticReservation | None:
@@ -434,6 +530,11 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback, structured=True)
     state._target = target
     state.status = DiagnosticStatus.HELD
+    _receipt_for(state)
+    # 最后的 stderr 交付可以抛出控制异常；原异常在这之前即持有去重身份。
+    for original in (payload["error"], payload.get("run_error")):
+        if isinstance(original, BaseException):
+            original._camctl_diagnostic_state = state
     if target.background and (target.finished or target.closed):
         _final_fallback(state, target)
         return state
@@ -594,12 +695,15 @@ def _fallback_remaining(target: _Target) -> None:
         state = _pop_pending(target.root)
         if state.status is not DiagnosticStatus.HELD:
             continue
+        if state._submitted:
+            # 原通道已经持有此条；不能再以 stderr 冒充它的实际写入结果。
+            continue
         try:
             _fallback(state, target)
         except BaseException as error:
             _remember_serve_error(target, error)
             # stderr 控制错误由 flush 外传，该诊断不再递归投递。
-            _complete(state, DiagnosticStatus.FALLBACK)
+            _settle_fallback(state, written=False)
 
 
 async def _finish_background(target: _Target) -> None:
@@ -653,44 +757,95 @@ async def _drain(owner: _Owner, target: _Target) -> None:
 
 
 async def _admit_one(state: DiagnosticState, target: _Target) -> None:
+    receipt = _receipt_for(state)
+    try:
+        if not state._submitted:
+            _submit_one(state, target)
+        first_cancel = None
+        while True:
+            try:
+                result = await receipt.wait_admission()
+                break
+            except asyncio.CancelledError as error:
+                # 旧诊断交接仍保护到接纳完成；通用回执的观察者可独立取消。
+                if first_cancel is None:
+                    first_cancel = error
+        if first_cancel is not None:
+            raise first_cancel
+    except BaseException as error:
+        result = receipt.admission_result or admission_result_for(error)
+        if result is not None:
+            receipt.complete_admission(result)
+            _admission_completed(state, result)
+        elif not isinstance(error, asyncio.CancelledError) or not state._submitted:
+            state._submitted = False
+            state._admitting = False
+        raise
+    else:
+        _admission_completed(state, result)
+    finally:
+        _state_changed(state)
+
+
+def _submit_one(state: DiagnosticState, target: _Target) -> None:
     record = state._record
     assert record is not None
+    receipt = _receipt_for(state)
+    state._submitted = True
     state._admitting = True
     try:
         if target.closed or target.finished:
+            state._submitted = False
+            state._admitting = False
             _final_fallback(state, target)
             return
         if target.channel is None or state._fallback_only:
+            state._submitted = False
+            state._admitting = False
             _fallback(state, target)
             return
         try:
-            result = await target.channel.alog(record)
+            submitted = target.channel.submit(record, receipt=receipt)
+            if submitted is not receipt:
+                raise RuntimeError("日志通道必须保留传入的原诊断回执")
         except Exception:
             _fallback(state, target)
         except BaseException as error:
-            result = admission_result_for(error)
-            if result is not None and result.decision.kind is AdmissionKind.ACCEPTED:
-                _complete(state, DiagnosticStatus.ADMITTED)
-            elif result is not None and result.decision.kind is AdmissionKind.CHANNEL_FAILED:
-                _fallback(state, target)
+            result = receipt.admission_result or admission_result_for(error)
+            if result is not None:
+                receipt.complete_admission(result)
+                _admission_completed(state, result)
+            else:
+                state._submitted = False
+                state._admitting = False
             raise
         else:
-            if result.decision.kind is AdmissionKind.ACCEPTED:
-                _complete(state, DiagnosticStatus.ADMITTED)
-            else:
-                _fallback(state, target)
+            if receipt.admission_result is not None:
+                _admission_completed(state, receipt.admission_result)
     finally:
-        state._admitting = False
         _state_changed(state)
 
 
 def _fallback(state: DiagnosticState, target: _Target) -> None:
     assert state._record is not None
+    written = False
     try:
-        target.fallback(state._record.message)
+        written = target.fallback(state._record.message) is not False
     except Exception:
         # stderr 本身已经失效，不递归诊断或反复写入，也不影响业务结果。
         pass
+    _settle_fallback(state, written=written)
+
+
+def _settle_fallback(state: DiagnosticState, *, written: bool) -> None:
+    assert state._record is not None
+    receipt = _receipt_for(state)
+    result = AdmissionResult(
+        AdmissionDecision(AdmissionKind.FALLBACK_STDERR, state._record.level),
+        None, delivered=False, fallback_written=written,
+    )
+    receipt.complete_admission(result)
+    receipt.complete_write(result)
     _complete(state, DiagnosticStatus.FALLBACK)
 
 
@@ -700,4 +855,4 @@ def _final_fallback(state: DiagnosticState, target: _Target) -> None:
         _fallback(state, target)
     finally:
         if state.status is DiagnosticStatus.HELD:
-            _complete(state, DiagnosticStatus.FALLBACK)
+            _settle_fallback(state, written=False)

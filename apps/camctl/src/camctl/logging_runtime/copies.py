@@ -1080,9 +1080,15 @@ async def deliver_failure_copy(
         result: WriteResult, primary: BaseException | None = None,
     ) -> None:
         nonlocal write_result_notified
-        if on_write_result is None or write_result_notified:
+        if write_result_notified:
             return
         write_result_notified = True
+        if result.appended is True:
+            from camctl.logging_runtime.diagnostics import acknowledge_diagnostic_record
+
+            acknowledge_diagnostic_record(request.trigger)
+        if on_write_result is None:
+            return
         try:
             on_write_result(result)
         except BaseException as callback_error:

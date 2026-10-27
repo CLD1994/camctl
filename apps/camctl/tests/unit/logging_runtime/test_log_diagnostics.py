@@ -9,6 +9,7 @@ import pytest
 from camctl.logging_runtime import diagnostics
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult, LogRecord
 from camctl.operations.process import LocalExit, RawToolOutcome
 
@@ -20,21 +21,48 @@ class MemoryChannel:
         self.kind = kind
         self.records = []
 
-    async def alog(self, record):
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
         self.records.append(record)
-        return AdmissionResult(AdmissionDecision(self.kind, record.level), 0)
+        self.complete(record, receipt)
+        return receipt
+
+    def complete(self, record, receipt):
+        fallback_written = False
+        if self.kind is AdmissionKind.CHANNEL_FAILED and record.fallback is not None:
+            fallback_written = record.fallback(record.message) is not False
+        result = AdmissionResult(AdmissionDecision(self.kind, record.level), 0,
+                                 fallback_written=fallback_written)
+        receipt.complete_admission(result)
+        receipt.complete_write(AdmissionResult(
+            result.decision, result.queue_depth,
+            delivered=self.kind is AdmissionKind.ACCEPTED,
+            fallback_written=fallback_written,
+        ))
 
 
 class GatedChannel(MemoryChannel):
     def __init__(self, kind=AdmissionKind.ACCEPTED):
         super().__init__(kind)
         self.entered = asyncio.Event()
-        self.release = asyncio.Event()
+        self.released = False
+        self.pending = []
 
-    async def alog(self, record):
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
+        self.records.append(record)
         self.entered.set()
-        await self.release.wait()
-        return await super().alog(record)
+        if self.released:
+            self.complete(record, receipt)
+        else:
+            self.pending.append((record, receipt))
+        return receipt
+
+    def release_admission(self):
+        self.released = True
+        for record, receipt in self.pending:
+            self.complete(record, receipt)
+        self.pending.clear()
 
 
 def prepared(message="original", *, fallback=None):
@@ -48,6 +76,19 @@ async def test_public_snapshot_retains_tool_stderr_without_media_stdout():
     assert snapshot["tool"]["output"] == {"byte_count": 12}
     assert snapshot["tool"]["stderr"] == {"hex": "70726f626c656dff", "text": "problem\\xff"}
     assert "MEDIA-SECRET" not in json.dumps(snapshot)
+
+
+async def test_submit_without_waiting_retains_one_receipt_and_submits_first_record():
+    channel = MemoryChannel()
+    error = ValueError("first-error")
+    state = diagnostics.prepare_log_diagnostic(prepared(), error=error, channel=channel)
+    with patch("asyncio.create_task", side_effect=AssertionError("不能新建逐条任务")):
+        receipt = diagnostics.submit_diagnostic(state)
+        assert channel.records == [diagnostics.diagnostic_record_for(state)]
+        assert diagnostics.submit_diagnostic(state) is receipt
+        assert diagnostics.prepare_log_diagnostic(prepared("later"), error=error) is state
+        assert (await receipt).delivered is True
+    assert len(channel.records) == 1
 
 
 async def test_prepared_log_has_exception_identity_before_admission_without_new_task():
@@ -142,7 +183,7 @@ async def test_existing_background_admission_is_awaited_without_resending():
         waiter = asyncio.create_task(diagnostics.admit_diagnostic(state))
         await asyncio.sleep(0)
         assert not waiter.done()
-        channel.release.set()
+        channel.release_admission()
         assert await waiter is state
         await diagnostics.flush_diagnostics()
     assert len(channel.records) == 1
@@ -160,7 +201,7 @@ async def test_waiting_on_other_admitter_preserves_first_repeated_cancellation()
     waiter.cancel("repeat")
     await asyncio.sleep(0)
     assert not waiter.done()
-    channel.release.set()
+    channel.release_admission()
     assert await owner is state
     with pytest.raises(asyncio.CancelledError) as raised:
         await waiter
@@ -219,11 +260,11 @@ async def test_direct_admission_retries_unconfirmed_cancellation_then_propagates
     class CancelledChannel(MemoryChannel):
         cancelled = False
 
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             if not self.cancelled:
                 self.cancelled = True
                 raise original
-            return await super().alog(record)
+            return super().submit(record, receipt=receipt)
 
     channel = CancelledChannel()
     state = diagnostics.prepare_log_diagnostic(prepared(), channel=channel)
@@ -234,17 +275,22 @@ async def test_direct_admission_retries_unconfirmed_cancellation_then_propagates
     assert len(channel.records) == 1
 
 
-@pytest.mark.parametrize("kind", [AdmissionKind.CHANNEL_FAILED, AdmissionKind.FILTERED_OUT])
-async def test_failed_admission_notifies_other_waiter_and_falls_back_once(kind):
+@pytest.mark.parametrize("fallback_result", [None, False])
+async def test_failed_admission_notifies_other_waiter_and_falls_back_once(fallback_result):
     fallback = []
-    channel = GatedChannel(kind)
-    state = diagnostics.prepare_log_diagnostic(prepared(), channel=channel, fallback=fallback.append)
+
+    def write_fallback(message):
+        fallback.append(message)
+        return fallback_result
+
+    channel = GatedChannel(AdmissionKind.CHANNEL_FAILED)
+    state = diagnostics.prepare_log_diagnostic(prepared(), channel=channel, fallback=write_fallback)
     owner = asyncio.create_task(diagnostics.admit_diagnostic(state))
     await channel.entered.wait()
     waiter = asyncio.create_task(diagnostics.admit_diagnostic(state))
     await asyncio.sleep(0)
     assert not waiter.done()
-    channel.release.set()
+    channel.release_admission()
     assert await owner is await waiter is state
     assert state.status is diagnostics.DiagnosticStatus.FALLBACK
     assert len(channel.records) == len(fallback) == 1
@@ -276,17 +322,34 @@ async def test_direct_admission_after_command_finished_preserves_late_scope_fall
 
 async def test_scope_control_without_admission_receipt_hands_original_to_waiter():
     original = SystemExit("admission control")
+    release = asyncio.Event()
 
-    class ControlledChannel(GatedChannel):
+    class ControlledReceipt(LogReceipt):
         controlled = False
 
-        async def alog(self, record):
+        async def wait_admission(self):
             if not self.controlled:
                 self.controlled = True
-                self.entered.set()
-                await self.release.wait()
+                await release.wait()
                 raise original
-            return await super().alog(record)
+            return await super().wait_admission()
+
+    class ControlledChannel(MemoryChannel):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.receipt = None
+
+        def submit(self, record, *, receipt=None):
+            if self.receipt is None:
+                self.receipt = receipt
+                self.records.append(record)
+                self.entered.set()
+            else:
+                assert receipt is self.receipt
+                assert self.records == [record]
+                self.complete(record, receipt)
+            return receipt
 
     channel = ControlledChannel()
     states = []
@@ -297,16 +360,17 @@ async def test_scope_control_without_admission_receipt_hands_original_to_waiter(
                 states.append(diagnostics.record_error(ValueError("original"), stage="read"))
         return raised.value
 
-    with diagnostics.error_diagnostics_context(channel, lambda text: pytest.fail(text)):
-        owner = asyncio.create_task(original_owner())
-        await channel.entered.wait()
-        waiter = asyncio.create_task(diagnostics.admit_diagnostic(states[0]))
-        await asyncio.sleep(0)
-        assert not waiter.done()
-        channel.release.set()
-        assert await owner is original
-        assert await waiter is states[0]
-        await diagnostics.flush_diagnostics()
+    with patch("camctl.logging_runtime.diagnostics.LogReceipt", ControlledReceipt):
+        with diagnostics.error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+            owner = asyncio.create_task(original_owner())
+            await channel.entered.wait()
+            waiter = asyncio.create_task(diagnostics.admit_diagnostic(states[0]))
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            release.set()
+            assert await owner is original
+            assert await waiter is states[0]
+            await diagnostics.flush_diagnostics()
     assert states[0].status is diagnostics.DiagnosticStatus.ADMITTED
     assert len(channel.records) == 1
 
@@ -338,7 +402,7 @@ async def test_finished_target_reservation_fallback_control_settles_original_wai
     serve_control = SystemExit("admission control")
 
     class ControlledChannel(MemoryChannel):
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             raise serve_control
 
     def fallback(message):
@@ -419,7 +483,7 @@ async def test_finished_flush_control_releases_all_reservations_and_finishes_tar
     calls = []
 
     class ControlledChannel(MemoryChannel):
-        async def alog(self, record):
+        def submit(self, record, *, receipt=None):
             raise serve_control
 
     def fallback(message):

@@ -12,6 +12,7 @@ from camctl.logging_runtime.diagnostics import (
     reserve_diagnostic,
 )
 from camctl.logging_runtime.ownership import LoggingOwner
+from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult
 from camctl.session.supervision import Supervisor
 
@@ -22,9 +23,13 @@ class MemoryChannel:
     def __init__(self):
         self.records = []
 
-    async def alog(self, record):
+    def submit(self, record, *, receipt=None):
+        receipt = receipt if receipt is not None else LogReceipt()
         self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+        result = AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+        receipt.complete_admission(result)
+        receipt.complete_write(AdmissionResult(result.decision, 0, delivered=True))
+        return receipt
 
 
 @pytest.mark.parametrize("copy_result", ["written", "suppressed", "failed"])
