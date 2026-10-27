@@ -100,6 +100,31 @@ class RetryWaitReads:
             raise ConsistencyError("等待完成事件与原尝试不符")
         return True
 
+    def source_fallback(self, run_id):
+        """只承认已保存的原本地失败及同一拷贝换源事实。"""
+        from .operations import _load_row
+        from .outputs import _has_source_fallback_retry_proof
+
+        run = _load_row(self.connection, "operation_runs", run_id)
+        if run is None or run.get("copy_id") is None:
+            return False
+        copy = _load_row(self.connection, "file_copies", run["copy_id"])
+        last = self.last_attempt(run_id, run["attempts_used"])
+        if (copy is None or copy.get("slot_device_id") is not None
+                or copy.get("source_device_file_id") is None
+                or copy.get("source_intermediate_file_id") is not None or last is None
+                or last[1] != int(enum_for("operation_attempts.status").FAILED)):
+            return False
+        attempt = _load_row(self.connection, "operation_attempts", last[0])
+        if attempt is None or attempt.get("intent_event_id") is None:
+            return False
+        error = attempt.get("error_json")
+        if not isinstance(error, dict) or error.get("code") != "local_read_failed" or error.get("stage") != "source_read":
+            return False
+        details = error.get("details")
+        return (isinstance(details, dict) and details.get("source_failed") is True
+                and _has_source_fallback_retry_proof(self.connection, copy, attempt))
+
     def read_eligible(self, run_id, occurred_at):
         from camctl.outputs.read_discovery import read_copy_dispatch_eligible
         from camctl.persistence.repositories.outputs import _read_is_due, _read_owner_eligible
@@ -135,6 +160,7 @@ class RetryWaitReads:
         if type(source_dependency) is not int or source_dependency not in (0, 1):
             raise ConsistencyError("读取交付状态或来源保护无法解释")
         return (_read_owner_eligible(action) and _read_is_due(action, occurred_at)
-                and slot is not None and completion == int(enum_for("device_files.completion_state").COMPLETE)
+                and (slot is not None or self.source_fallback(run_id))
+                and completion == int(enum_for("device_files.completion_state").COMPLETE)
                 and delivery_status in (int(delivery.PENDING), int(delivery.PREPARING))
                 and source_dependency == 1 and read_copy_dispatch_eligible(self.connection, copy_id))

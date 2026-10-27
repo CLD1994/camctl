@@ -6961,22 +6961,29 @@ def _slot_run(context, copy_id: int) -> dict[str, Any]:
 def _has_source_fallback_retry_proof(connection, copy, attempt) -> bool:
     """核实原失败尝试已有指向同一拷贝和设备文件的换源事件。"""
     if (connection is None or not is_json_integer(attempt.get("id"))
+            or not is_json_integer(attempt.get("result_event_id"))
             or not is_json_integer(copy.get("id"))
             or not is_json_integer(copy.get("source_device_file_id"))):
         return False
+    from camctl.persistence.retry_wait_structure import verify_retry_wait_index
+    try:
+        verify_retry_wait_index(connection, "history_events_row")
+    except ValueError as error:
+        raise ConsistencyError(str(error)) from error
     with closing(connection.execute(
-        "SELECT 1 FROM history_events e, json_each(e.body_json,'$.rows') r"
-        " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+        "SELECT 1 FROM history_events e"
+        " WHERE e.event_type=? AND json_extract(e.body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(e.body_json,'$.rows[0].id')=? AND e.id>?"
+        " AND json_extract(e.body_json,'$.reason')=?"
         " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
-        " AND json_extract(r.value,'$.table')='file_copies'"
-        " AND json_extract(r.value,'$.id')=?"
-        " AND json_extract(r.value,'$.before.values.source_device_file_id') IS NULL"
-        " AND json_extract(r.value,'$.before.values.source_intermediate_file_id') IS NOT NULL"
-        " AND json_extract(r.value,'$.after.values.source_device_file_id')=?"
-        " AND json_extract(r.value,'$.after.values.source_intermediate_file_id') IS NULL"
+        " AND json_array_length(e.body_json,'$.rows')=1"
+        " AND json_extract(e.body_json,'$.rows[0].before.values.source_device_file_id') IS NULL"
+        " AND json_extract(e.body_json,'$.rows[0].before.values.source_intermediate_file_id') IS NOT NULL"
+        " AND json_extract(e.body_json,'$.rows[0].after.values.source_device_file_id')=?"
+        " AND json_extract(e.body_json,'$.rows[0].after.values.source_intermediate_file_id') IS NULL"
         " LIMIT 1",
-        (_COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON,
-         attempt["id"], copy["id"], copy["source_device_file_id"]),
+        (_COPY_CHANGED_EVENT, copy["id"], attempt["result_event_id"], _COPY_SOURCE_FALLBACK_REASON,
+         attempt["id"], copy["source_device_file_id"]),
     )) as cursor:
         return cursor.fetchone() is not None
 

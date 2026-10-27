@@ -665,8 +665,6 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 runtime.retry_gate.cleared(f"read/{copy_id}")
     # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
     for item in page.items:
-        if not item.held:
-            continue
         assembly = runtime.devices.get(item.device_id)
         if assembly is None:
             continue
@@ -684,6 +682,14 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             continue
         if attempt_status == int(_ATTEMPT_STATUS.SUCCEEDED):
             continue
+        if not item.held:
+            if waiting != 1 and attempts_used < assembly.max_read_attempts:
+                continue
+            from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+            eligible = await runtime.database.read(
+                lambda owned: RetryWaitReads(owned.connection).read_eligible(run_id, runtime.occurred_at()))
+            if not eligible:
+                continue
         from camctl.outputs.read_attempts import save_read_business
         if attempts_used >= assembly.max_read_attempts:
             facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, item.copy_id))

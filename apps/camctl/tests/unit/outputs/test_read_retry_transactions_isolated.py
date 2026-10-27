@@ -162,6 +162,77 @@ class RetryReadFactsTests(unittest.TestCase):
         with patch.dict(sys.modules, modules):
             self.assertTrue(module.RetryWaitReads(Connection(owner=owner)).read_eligible(7, 20))
 
+    def test_slotless_fallback_requires_proven_original_switch(self):
+        module, modules = load_reads()
+        owner = (2, 0, 10, 9, None, 2, 1, 3, "camera", "driver", "camera", "driver")
+        with patch.dict(sys.modules, modules):
+            reads = module.RetryWaitReads(Connection(owner=owner))
+            reads.source_fallback = lambda run_id: False
+            self.assertFalse(reads.read_eligible(7, 20))
+            reads.source_fallback = lambda run_id: True
+            self.assertTrue(reads.read_eligible(7, 20))
+
+    def test_cancelled_slotless_fallback_cannot_complete_wait(self):
+        module, modules = load_reads()
+        owner = (2, 1, 10, 9, None, 2, 1, 3, "camera", "driver", "camera", "driver")
+        with patch.dict(sys.modules, modules):
+            reads = module.RetryWaitReads(Connection(owner=owner))
+            reads.source_fallback = lambda run_id: True
+            self.assertFalse(reads.read_eligible(7, 20))
+
+    def test_fallback_requires_matching_failure_and_switch_event(self):
+        module, modules = load_reads()
+        run = {"copy_id": 9, "attempts_used": 1, "retry_wait_required": 1}
+        copy = {"slot_device_id": None, "source_device_file_id": 15, "source_intermediate_file_id": None}
+        attempt = {"intent_event_id": 99, "error_json": {"code": "local_read_failed", "stage": "source_read",
+                   "details": {"source_failed": True}}}
+        modules["camctl.persistence.repositories.operations"]._load_row = lambda connection, table, identity: {
+            "operation_runs": run, "file_copies": copy, "operation_attempts": attempt}[table]
+        modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda connection, copy, attempt: True
+        with patch.dict(sys.modules, modules):
+            reads = module.RetryWaitReads(Connection())
+            self.assertTrue(reads.source_fallback(7))
+            modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: False
+            self.assertFalse(reads.source_fallback(7))
+            modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: True
+            attempt["error_json"]["details"]["source_failed"] = False
+            self.assertFalse(reads.source_fallback(7))
+
+    def test_fallback_does_not_accept_unsettled_original_call(self):
+        module, modules = load_reads()
+        modules["camctl.persistence.repositories.operations"]._load_row = lambda connection, table, identity: {
+            "operation_runs": {"copy_id": 9, "attempts_used": 1},
+            "file_copies": {"slot_device_id": None, "source_device_file_id": 15, "source_intermediate_file_id": None}}[table]
+        modules["camctl.persistence.repositories.outputs"]._has_source_fallback_retry_proof = lambda *args: True
+        with patch.dict(sys.modules, modules):
+            self.assertFalse(module.RetryWaitReads(Connection(running=True)).source_fallback(7))
+
+    def test_fallback_proof_queries_exact_copy_attempt_and_source(self):
+        source = SOURCE / "persistence" / "repositories" / "outputs.py"
+        tree = ast.parse(source.read_text())
+        function = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_has_source_fallback_retry_proof")
+        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+                                    function], type_ignores=[])
+        structure = ModuleType("camctl.persistence.retry_wait_structure")
+        structure.verify_retry_wait_index = lambda connection, name: None
+        namespace = {"closing": __import__("contextlib").closing,
+            "is_json_integer": lambda value: type(value) is int, "_COPY_CHANGED_EVENT": 22,
+            "_COPY_SOURCE_FALLBACK_REASON": 8, "ConsistencyError": ValueError}
+        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        class ProofConnection:
+            def __init__(self, exists): self.exists, self.parameters = exists, None
+            def execute(self, query, parameters):
+                self.parameters = parameters
+                return Cursor([(1,)] if self.exists else [])
+        copy = {"id": 9, "source_device_file_id": 15}
+        attempt = {"id": 12, "result_event_id": 101}
+        with patch.dict(sys.modules, {structure.__name__: structure}):
+            connection = ProofConnection(True)
+            self.assertTrue(namespace["_has_source_fallback_retry_proof"](connection, copy, attempt))
+            self.assertEqual(connection.parameters, (22, 9, 101, 8, 12, 15))
+            self.assertFalse(namespace["_has_source_fallback_retry_proof"](ProofConnection(False), copy, attempt))
+
     def test_changed_source_binding_is_consistency_error(self):
         module, modules = load_reads()
         owner = (2, 0, 10, 9, "camera", 2, 1, 3, "camera", "driver", "other", "driver")
