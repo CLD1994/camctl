@@ -53,7 +53,7 @@ async def focus_world(tmp_path, databases):
         photo_focus={'mode':'MF','relative_move':5},
         driver_factory=lambda cfg: HasselbladDriver(cfg.devices,
             BoundDirectories(Path(cfg.paths.staging)),transport=transport,monotonic_ns=lambda:1))
-    runtime.close()
+    await runtime.database.close()
     runtime = await resume(cfg,owned,driver,clock,databases,
                            boundary=RecoveryBoundary.UNCONFIRMED)
     return transport,cfg,owned,driver,runtime,clock
@@ -167,7 +167,7 @@ async def test_recovery_does_not_end_control_still_executing_in_same_session(tmp
     cfg,owned,driver,runtime,clock = await _world(tmp_path,driver_factory=lambda cfg:HasselbladDriver(
         cfg.devices,BoundDirectories(Path(cfg.paths.staging)),transport=transport,monotonic_ns=lambda:1),
         photo_focus={'mode':'MF','relative_move':5})
-    runtime.close()
+    await runtime.database.close()
     runtime = await resume(cfg,owned,driver,clock,databases,boundary=RecoveryBoundary.UNCONFIRMED)
     task = asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
     try:

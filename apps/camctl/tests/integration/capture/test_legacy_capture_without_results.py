@@ -68,6 +68,7 @@ async def test_legacy_photo_saves_binding_failure_before_missing_result_capabili
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM operation_runs WHERE action_id=1").fetchone() == (0,)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 

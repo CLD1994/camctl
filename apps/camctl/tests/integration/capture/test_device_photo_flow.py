@@ -10,6 +10,7 @@ from camctl.bootstrap.work_file_assembly import WorkFileRuntime
 from camctl.capture.handlers import capture_handler
 from camctl.outputs.work_files import WorkFileLimits
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.business import BusinessDatabase
 from .test_host_photo_flow import _world, _ORIGINAL, _PREVIEW, _NOW
 
 pytestmark = pytest.mark.asyncio
@@ -35,8 +36,8 @@ async def test_device_photo_registers_pair_and_reclaims_host_copies(tmp_path):
         paths = [Path(cfg.paths.staging) / r[0] for r in owned.connection.execute("SELECT relative_path FROM intermediate_files WHERE owner_action_id=1")]
         assert len(paths) == 2 and all(p.is_file() for p in paths)
         maintenance = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 10))
-        maintenance.initialize(owned)
-        context = SimpleNamespace(open_connection=lambda: open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()), clock=SimpleNamespace(utc_micros=lambda: _NOW))
+        await maintenance.initialize(runtime.database)
+        context = SimpleNamespace(database=runtime.database, clock=SimpleNamespace(utc_micros=lambda: _NOW))
         await maintenance.flow(context)
         await maintenance.settle()
         assert all(not p.exists() for p in paths)
@@ -44,6 +45,7 @@ async def test_device_photo_registers_pair_and_reclaims_host_copies(tmp_path):
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(driver.requests) == 1
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 @pytest.mark.parametrize("binding",["match","missing","changed"])
@@ -75,8 +77,8 @@ async def test_device_cleanup_without_capability_fails_each_item_without_attempt
         if binding == "changed":
             devices = {"cam-1": {"kind":"camera", "driver":"other"}}
             entry = replace(entry, driver_id="other")
-        cleanup = session_cleanup_assembly(devices=devices, drivers=DriverRegistry((entry,)),
-            max_delete_attempts=2,max_query_attempts=2,staging=Path(cfg.paths.staging),occurred_at=lambda:_NOW)(owned)
+        cleanup = await session_cleanup_assembly(devices=devices, drivers=DriverRegistry((entry,)),
+            max_delete_attempts=2,max_query_attempts=2,staging=Path(cfg.paths.staging),occurred_at=lambda:_NOW)(runtime.database)
         for _ in range(5):
             await advance_cleanup(cleanup)
         rows = owned.connection.execute("SELECT status,error_details_json FROM cleanup_items ORDER BY id").fetchall()
@@ -89,6 +91,7 @@ async def test_device_cleanup_without_capability_fails_each_item_without_attempt
         assert owned.connection.execute("SELECT presence_state FROM device_files ORDER BY id").fetchall() == [(2,),(2,)]
         assert owned.connection.execute("SELECT status FROM actions WHERE id=2").fetchone() == (4,)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 @pytest.mark.parametrize("first,current", [("device","host"),("host","device")])
@@ -96,11 +99,11 @@ async def test_original_storage_controls_full_capture_after_config_change(tmp_pa
     from camctl.bootstrap.capture_assembly import session_capture_assembly
     from camctl.devices.drivers.registry import DriverRegistry
     from .test_host_photo_flow import _config, _entry
-    cfg, owned, driver, _, _ = await _world(tmp_path, storage=first)
+    cfg, owned, driver, runtime, _ = await _world(tmp_path, storage=first)
     try:
         changed = _config(tmp_path,storage=current)
-        runtime = session_capture_assembly(devices=changed.devices,drivers=DriverRegistry((_entry(driver),)),
-            staging=Path(cfg.paths.staging),wait_config=lambda _:None,wall_us=lambda:_NOW)(owned,"cam-1")
+        runtime = await session_capture_assembly(devices=changed.devices,drivers=DriverRegistry((_entry(driver),)),
+            staging=Path(cfg.paths.staging),wait_config=lambda _:None,wall_us=lambda:_NOW)(runtime.database,"cam-1")
         await capture_handler("camera_take_photo")(1,runtime)
         assert len(driver.requests) == 1
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
@@ -108,6 +111,7 @@ async def test_original_storage_controls_full_capture_after_config_change(tmp_pa
         assert len(rows) == 2
         assert all((row[0] is not None) == (first == "device") for row in rows)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 @pytest.mark.parametrize("interruption", ["archive","checksum","finish"])
@@ -158,6 +162,7 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
             same=[call for call in saved_calls if call[0].__class__ is first[0].__class__ and getattr(call[0],"file_id",None)==getattr(first[0],"file_id",None)]
             assert all(call==first for call in same)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 async def test_cancel_after_reliable_photo_is_rejected_and_retains_device_pair(tmp_path, monkeypatch):
@@ -180,6 +185,7 @@ async def test_cancel_after_reliable_photo_is_rejected_and_retains_device_pair(t
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 async def test_unknown_device_capture_retains_workspace_and_never_restarts(tmp_path):
@@ -194,12 +200,13 @@ async def test_unknown_device_capture_retains_workspace_and_never_restarts(tmp_p
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(4,)
         assert list((Path(cfg.paths.staging)/"capture-work").rglob("*.3fr"))
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
-async def _maintain(cfg, owned):
+async def _maintain(cfg, database):
     maintenance=WorkFileRuntime(staging=Path(cfg.paths.staging),limits=WorkFileLimits(32,10))
-    maintenance.initialize(owned)
-    context=SimpleNamespace(open_connection=lambda:open_existing(Path(cfg.paths.state_db),DbOpenMode.EXISTING_RW,DbConfig()),clock=SimpleNamespace(utc_micros=lambda:_NOW))
+    await maintenance.initialize(database)
+    context=SimpleNamespace(database=database,clock=SimpleNamespace(utc_micros=lambda:_NOW))
     await maintenance.flow(context)
     await maintenance.settle()
 
@@ -225,7 +232,7 @@ async def test_device_terminal_replay_after_cleanup_preserves_report_and_history
         snapshot={(entity,i):history.restore_entity(entity,i,boundary)
                   for entity in ("action","device_file","intermediate_file","output")
                   for i in ((1,) if entity=="action" else (1,2))}
-        await _maintain(cfg,owned)
+        await _maintain(cfg, runtime.database)
         request,key=saved[0]
         before=owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
         for replay_key in (key,new_operation_key()):
@@ -247,6 +254,7 @@ async def test_device_terminal_replay_after_cleanup_preserves_report_and_history
             assert pair[kind]["checksum"]=={"status":"available","sha256":hashlib.sha256(content).hexdigest()}
             assert pair[kind]["size"]==len(content)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -261,17 +269,18 @@ async def test_failed_host_copy_cleanup_retries_on_next_maintenance(tmp_path,mon
                 raise PermissionError("主机副本删除被拒绝")
             return remove(path)
         monkeypatch.setattr(work_files,"_remove_work_file",denied)
-        await _maintain(cfg,owned)
+        await _maintain(cfg, runtime.database)
         rows=owned.connection.execute("SELECT cleanup_state,last_error_json,relative_path FROM intermediate_files ORDER BY id").fetchall()
         assert rows[0][0]==5 and rows[0][1] is not None
         assert (Path(cfg.paths.staging)/rows[0][2]).is_file()
         assert rows[1][0]==4
         monkeypatch.setattr(work_files,"_remove_work_file",remove)
-        await _maintain(cfg,owned)
+        await _maintain(cfg, runtime.database)
         assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall()==[(4,),(4,)]
         assert not (Path(cfg.paths.staging)/rows[0][2]).exists()
         assert owned.connection.execute("SELECT availability FROM outputs ORDER BY id").fetchall()==[(1,),(1,)]
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -320,12 +329,14 @@ async def test_device_success_requires_complete_matching_device_pair(tmp_path,mo
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(0,)
         assert owned.connection.execute("SELECT retention_state FROM intermediate_files").fetchall()==[(1,),(1,)]
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 @pytest.mark.parametrize("after_checksum",[False,True])
 async def test_restart_without_configured_camera_finishes_original_registration(tmp_path,monkeypatch,after_checksum):
     from camctl.bootstrap.capture_assembly import session_capture_assembly
     from camctl.capture import host_photo
+    from camctl.contracts.values import ConsistencyError
     from camctl.devices.drivers.registry import DriverRegistry
     from camctl.persistence.models import DbOutcomeKind
     cfg,owned,driver,runtime,_=await _world(tmp_path,storage="device")
@@ -343,23 +354,29 @@ async def test_restart_without_configured_camera_finishes_original_registration(
             raise OSError("归档后会话中断")
         monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
     try:
-        with pytest.raises(OSError):
+        with pytest.raises(ConsistencyError if after_checksum else OSError) as interrupted_error:
             await capture_handler("camera_take_photo")(1,runtime)
+        if after_checksum:
+            assert isinstance(interrupted_error.value.__cause__, OSError)
         if not after_checksum:
             monkeypatch.setattr(host_photo,"archive_capture_file",original)
+        await runtime.database.close()
         owned.connection.close()
         owned=open_existing(Path(cfg.paths.state_db),DbOpenMode.EXISTING_RW,DbConfig())
-        resumed=session_capture_assembly(devices={},drivers=DriverRegistry(()),
-            staging=Path(cfg.paths.staging),wait_config=lambda _:None,wall_us=lambda:_NOW)(owned,"cam-1")
+        database = await BusinessDatabase.open(lambda: open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
+        runtime = await session_capture_assembly(devices={},drivers=DriverRegistry(()),
+            staging=Path(cfg.paths.staging),wait_config=lambda _:None,wall_us=lambda:_NOW)(database,"cam-1")
+        resumed = runtime
         await capture_handler("camera_take_photo")(1,resumed)
         assert resumed.driver is None
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone()==(2,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
         assert len(driver.requests)==1
-        await _maintain(cfg,owned)
+        await _maintain(cfg, runtime.database)
         assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files").fetchall()==[(4,),(4,)]
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 async def test_cleanup_continues_from_unsupported_device_to_local_host_sources(tmp_path):
@@ -389,15 +406,16 @@ async def test_cleanup_continues_from_unsupported_device_to_local_host_sources(t
         assert accepted.kind is DbOutcomeKind.COMPLETED,accepted.error
         work_files = WorkFileRuntime(
             staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 10))
-        cleanup=session_cleanup_assembly(devices=cfg.devices,drivers=DriverRegistry((_entry(driver),)),
+        cleanup=await session_cleanup_assembly(devices=cfg.devices,drivers=DriverRegistry((_entry(driver),)),
             max_delete_attempts=2,max_query_attempts=2,staging=Path(cfg.paths.staging),
-            file_executor=work_files.executor, occurred_at=lambda:_NOW)(owned)
+            file_executor=work_files.executor, occurred_at=lambda:_NOW)(runtime.database)
         await advance_cleanup(cleanup)
         assert owned.connection.execute("SELECT status FROM cleanup_items ORDER BY id").fetchall()==[(5,),(5,),(4,),(4,)]
         assert all(not (Path(cfg.paths.staging)/r[0]).exists() for r in before)
         assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE cleanup_item_id IN (1,2)").fetchone()==(0,)
         assert owned.connection.execute("SELECT presence_state FROM device_files").fetchall()==[(2,),(2,)]
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -443,6 +461,7 @@ async def test_event_guards_reject_partial_device_pair(tmp_path, entry):
         with pytest.raises(EventValidationError, match="原图.*预览|两份"):
             guard(SimpleNamespace(rows=(row,), event_type=None, evidence={}), Context())
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -502,6 +521,7 @@ async def test_device_source_uses_camera_basename_and_full_locator(tmp_path, cap
         assert transport.downloads == [("original", camera_name), ("thumbnail", camera_name)]
         assert len(captured_driver.requests) == 1
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -528,10 +548,13 @@ async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, mon
         pair_before = owned.connection.execute("SELECT id,purpose,relative_path FROM intermediate_files ORDER BY id").fetchall()
         start_before = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
         monkeypatch.setattr(host_photo, "archive_capture_file", archive)
+        await runtime.database.close()
         owned.connection.close()
         owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = session_capture_assembly(devices={}, drivers=DriverRegistry(()),
-            staging=Path(cfg.paths.staging), wait_config=lambda _: None, wall_us=lambda: _NOW)(owned, "cam-1")
+        database = await BusinessDatabase.open(lambda: open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
+        runtime = await session_capture_assembly(devices={}, drivers=DriverRegistry(()),
+            staging=Path(cfg.paths.staging), wait_config=lambda _: None, wall_us=lambda: _NOW)(database, "cam-1")
+        resumed = runtime
         await capture_handler("camera_take_photo")(1, resumed)
         assert owned.connection.execute("SELECT id,purpose,relative_path FROM intermediate_files ORDER BY id").fetchall() == pair_before
         assert owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone() == start_before
@@ -554,6 +577,7 @@ async def test_photo_recovery_uses_saved_format_and_camera_locator(tmp_path, mon
         assert history.restore_entity("action", 1, boundary) == at_boundary
         assert len(driver.requests) == 1
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -583,7 +607,7 @@ async def test_device_photo_original_file_requests_remain_verifiable_after_copy_
                 request_reason = {"CREATE": 1, "HOST_PHOTO_COMPLETE": 2}[branch]
                 original_requests.append((parse_host_photo_request(raw, reason=request_reason), key))
         assert len(original_requests) == 2
-        await _advance_photo_copy_cleanup(cfg, owned, cleanup_state)
+        await _advance_photo_copy_cleanup(cfg, owned, runtime.database, cleanup_state)
         expected_cleanup = {"pending": 2, "running": 3, "completed": 4, "failed": 5, "unknown": 6}[cleanup_state]
         assert owned.connection.execute("SELECT retention_state,cleanup_state FROM intermediate_files").fetchall() == [(2, expected_cleanup)] * 2
         verification = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
@@ -607,10 +631,11 @@ async def test_device_photo_original_file_requests_remain_verifiable_after_copy_
     finally:
         if verification is not None:
             verification.connection.close()
+        await runtime.database.close()
         owned.connection.close()
 
 
-async def _advance_photo_copy_cleanup(cfg, owned, cleanup_state):
+async def _advance_photo_copy_cleanup(cfg, owned, database, cleanup_state):
     from dataclasses import replace
     from camctl.contracts.values import new_operation_key
     from camctl.outputs.work_files import (
@@ -621,7 +646,7 @@ async def _advance_photo_copy_cleanup(cfg, owned, cleanup_state):
     from camctl.persistence.transaction import commit_operation
 
     if cleanup_state == "completed":
-        await _maintain(cfg, owned)
+        await _maintain(cfg, database)
         return
     repository = OutputsRepository()
     file_ids = [row[0] for row in owned.connection.execute("SELECT id FROM intermediate_files ORDER BY id")]
@@ -678,7 +703,7 @@ async def test_photo_original_requests_reject_released_copies_without_registered
                 failure=RecordingFailure("capture_failed", {"activity_id": "1", "reason": "invalid_outputs"})),
                 new_operation_key(), owned)
             assert failed.kind is DbOutcomeKind.COMPLETED, failed.error
-            await _advance_photo_copy_cleanup(cfg, owned, "pending")
+            await _advance_photo_copy_cleanup(cfg, owned, runtime.database, "pending")
         else:
             from camctl.outputs.work_files import RetentionRelease
             from camctl.persistence.repositories.outputs import OutputsRepository
@@ -706,4 +731,5 @@ async def test_photo_original_requests_reject_released_copies_without_registered
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
         assert len(driver.requests) == 1
     finally:
+        await runtime.database.close()
         owned.connection.close()
