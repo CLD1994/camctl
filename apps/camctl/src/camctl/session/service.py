@@ -1661,16 +1661,6 @@ def _copy_receipt_diagnostic(
             )
     write_result = receipt.write_result
     if write_result is not None:
-        write_issues = (
-            write_result.failure_stage is not None
-            or any(detail is not None for detail in (
-                write_result.rotation_error, write_result.append_error,
-                write_result.sync_error, write_result.coordination_error,
-                write_result.close_error))
-        )
-        if write_issues:
-            issues.append(
-                f"copy_write: appended={write_result.appended}; durable={write_result.durable}")
         if write_result.failure_stage is not None:
             issues.append(
                 f"copy_write_stage={write_result.failure_stage.value}")
@@ -1712,6 +1702,9 @@ def _copy_receipt_diagnostic(
             f"error={legacy_error or 'none'}")
     if not issues:
         return None, False
+    if write_result is not None:
+        issues.insert(0,
+            f"copy_write: appended={write_result.appended}; durable={write_result.durable}")
     if receipt.file_stage is not None:
         issues.append(f"file_stage={receipt.file_stage.value}")
     if receipt.copy_location is not None:

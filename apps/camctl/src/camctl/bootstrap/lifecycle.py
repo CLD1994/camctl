@@ -411,7 +411,11 @@ def _log_wiring(
                         f"rotation_error={result.rotation_error}")
             return result.completion
         except BaseException as error:
-            error.write_result = result
+            try:
+                error.write_result = result
+            except BaseException:
+                # 附加写入事实失败不能替换原控制异常。
+                pass
             raise
 
     stderr_failed = False

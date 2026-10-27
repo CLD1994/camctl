@@ -372,7 +372,7 @@ class LogChannel:
                 admission = admission_result_for(error)
                 raise
             if admission.decision.kind is not AdmissionKind.ACCEPTED:
-                return admission
+                return await entry.receipt
             try:
                 delivered = await entry.receipt
             except BaseException as error:
@@ -478,7 +478,9 @@ class LogChannel:
                             self._summary_written = (completion.delivered_for(entry.summary.level)
                                                      or completion.fallback_written)
                         except BaseException as error:
-                            self._summary_written = False
+                            completion = _exception_write_completion(error)
+                            self._summary_written = (completion.delivered_for(entry.summary.level)
+                                                     or completion.fallback_written)
                             self._remember_consumer_control(error)
                     self._stop_marker_done = True
                     break
@@ -489,9 +491,7 @@ class LogChannel:
                     try:
                         written = _write_completion(self._writer(entry.record), entry.record.level)
                     except BaseException as error:
-                        write_result = getattr(error, "write_result", None)
-                        if write_result is not None:
-                            written = write_result.completion
+                        written = _exception_write_completion(error)
                         self._remember_consumer_control(error)
                         failure = ChannelError("日志写入失败")
                         failure.__cause__ = error
@@ -622,6 +622,16 @@ def _write_completion(result: bool | LogWriteResult, level: LogLevel) -> LogWrit
         return result
     # 既有 bool writer 的 True 已表示满足本级别要求；实际文件 writer 交付完整事实。
     return LogWriteResult(appended=bool(result), durable=bool(result) and level is LogLevel.ERROR)
+
+
+def _exception_write_completion(error: BaseException) -> LogWriteResult:
+    try:
+        result = getattr(error, "write_result", None)
+        completion = getattr(result, "completion", None)
+    except BaseException:
+        # 附属属性不能替换 writer 已经交付的原异常。
+        completion = None
+    return completion if isinstance(completion, LogWriteResult) else LogWriteResult(appended=False)
 
 
 def _write_stderr(message):
