@@ -9,12 +9,9 @@ import pytest
 
 from camctl.capture import media_flow
 from camctl.capture.input_copy import InputPhase, InputStep
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import (
     diagnostic_scope, error_diagnostics_context, flush_diagnostics,
 )
-from camctl.logging_runtime.service import AdmissionResult
-from camctl.logging_runtime.models import LogLevel
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
 from camctl.operations.models import AttemptTicket
 from camctl.outputs import obtain_flow
@@ -23,15 +20,7 @@ from camctl.outputs.read_attempts import ReadContinuation, ReadDispatchPrevented
 from camctl.devices.drivers.hasselblad.driver import CameraReadError
 from camctl.devices.read_session import ReadEnd
 from camctl.outputs.read_attempts import stopped_read_result
-
-
-class Channel:
-    def __init__(self):
-        self.records = []
-
-    async def alog(self, record):
-        self.records.append(json.loads(record.message))
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
+from support.logging import recording_log_channel
 
 
 def runtime():
@@ -54,7 +43,8 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
     monkeypatch.setattr(media_flow, "_save_internal_read_and_settle", save)
     facts = {"id": 2, "output_id": 7, "action_id": 11,
         "source_device_file_id": 13, "source_intermediate_file_id": None}
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     fallback = []
     with error_diagnostics_context(channel, fallback.append):
         try:
@@ -67,12 +57,12 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
                         AttemptConfig(3, Decimal(10), Decimal(3)))
                 else:
                     await media_flow._finish_internal_read_result(flow, ticket, step, max_attempts=3)
-                assert not channel.records
+                assert not records
         except RuntimeError as failure:
             assert save_failed and str(failure) == "result not saved"
         await flush_diagnostics()
-    assert len(channel.records) == 1 and not fallback
-    recorded = channel.records[0]
+    assert len(records) == 1 and not fallback
+    recorded = json.loads(records[0].message)
     assert "actual source read failed" in json.dumps(recorded)
     assert "/source/original.mov" in json.dumps(recorded)
     assert recorded["ticket"]["run_id"] == 5
@@ -88,7 +78,8 @@ async def test_checksum_exhaustion_records_verification_error(monkeypatch, consu
     step = InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=2, error=RecopyExhausted(1, 1))
     monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
     monkeypatch.setattr(media_flow, "_save_internal_read_and_settle", AsyncMock())
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             if consumer == "device":
@@ -100,9 +91,10 @@ async def test_checksum_exhaustion_records_verification_error(monkeypatch, consu
                     AttemptConfig(3, Decimal(10), Decimal(3)))
             else:
                 await media_flow._finish_internal_read_result(flow, ticket, step, max_attempts=3)
-    assert len(channel.records) == 1
-    assert channel.records[0]["stage"] == "checksum_exhausted"
-    assert "RecopyExhausted" in json.dumps(channel.records[0])
+    assert len(records) == 1
+    recorded = json.loads(records[0].message)
+    assert recorded["stage"] == "checksum_exhausted"
+    assert "RecopyExhausted" in json.dumps(recorded)
 
 
 @pytest.mark.asyncio
@@ -110,12 +102,13 @@ async def test_normal_cancellation_before_dispatch_has_no_error_record():
     flow = runtime()
     ticket = AttemptTicket(1, "read", "2", "read/2", 5)
     flow.continuing_read_tickets[2] = ReadContinuation(ticket, True)
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             assert prevented_read_result(flow, ticket,
                 ReadDispatchPrevented("canceled_before_dispatch", canceled=True), flow.evidence)
-    assert channel.records == []
+    assert records == []
 
 
 @pytest.mark.asyncio
@@ -125,15 +118,16 @@ async def test_download_read_error_keeps_complete_readable_and_raw_stderr(monkey
     error = CameraReadError("download failed", [{"name": "download", "local_exit_code": 17,
                                                 "stderr_hex": raw.hex()}])
     monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             await obtain_flow._finish_read_attempt_phase(flow,
                 SimpleNamespace(evidence=flow.evidence, max_read_attempts=3), {"id": 2, "output_id": 7},
                 AttemptTicket(1, "read", "2", "read/2", 5),
                 InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, error=error, source_failed=True))
-    assert len(channel.records) == 1
-    details = channel.records[0]["error"]["details"]["exception"]["diagnostic_details"]["steps"][0]
+    assert len(records) == 1
+    details = json.loads(records[0].message)["error"]["details"]["exception"]["diagnostic_details"]["steps"][0]
     assert details["stderr_hex"] == raw.hex()
     assert details["stderr_text"] == raw.decode("utf-8", "backslashreplace")
 
@@ -146,21 +140,23 @@ async def test_stopped_source_preserves_real_write_error_without_logging_control
     step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, stop_requested=True,
         read_end=ReadEnd(True, 10, "stopped"),
         error=OSError(28, "disk full") if actual_write_error else RuntimeError("stopped"))
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             original = stopped_read_result(flow, ticket, step, flow.evidence, 123)
             assert original is not None
-    assert len(channel.records) == int(actual_write_error)
+    assert len(records) == int(actual_write_error)
     if actual_write_error:
-        assert channel.records[0]["error"]["errno"] == 28
+        assert json.loads(records[0].message)["error"]["errno"] == 28
 
 
 @pytest.mark.asyncio
 async def test_local_read_normal_stopped_result_is_not_error(monkeypatch):
     flow = runtime()
     monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     with error_diagnostics_context(channel, lambda _: None):
         async with diagnostic_scope():
             await obtain_flow._finish_local_attempt_phase(flow, {"id": 2},
@@ -168,4 +164,4 @@ async def test_local_read_normal_stopped_result_is_not_error(monkeypatch):
                 InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, stop_requested=True,
                     read_end=ReadEnd(True, 10, "stopped"), error=RuntimeError("stopped")),
                 AttemptConfig(3, Decimal(10), Decimal(3)))
-    assert channel.records == []
+    assert records == []

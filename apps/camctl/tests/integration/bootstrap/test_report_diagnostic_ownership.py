@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.clh_adapter import WriteResult
 from camctl.logging_runtime.copies import CopyOutcome, CopyReceipt
 from camctl.logging_runtime.diagnostics import (
@@ -14,24 +13,16 @@ from camctl.logging_runtime.diagnostics import (
     error_diagnostics_context, flush_diagnostics, record_error,
 )
 from camctl.logging_runtime.ownership import LoggingOwner
-from camctl.logging_runtime.service import AdmissionResult
 from camctl.session.service import _trigger_failure_log
 from camctl.session.supervision import Supervisor
-
-
-class Channel:
-    def __init__(self):
-        self.records = []
-
-    async def alog(self, record):
-        self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+from support.logging import recording_log_channel
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("written", [False, True])
 async def test_report_entry_reserves_prepared_error_before_parent_handoff(written):
-    channel = Channel()
+    records = []
+    channel = recording_log_channel(records)
     supervisor = Supervisor()
     entered, release = asyncio.Event(), asyncio.Event()
     copied = []
@@ -76,7 +67,7 @@ async def test_report_entry_reserves_prepared_error_before_parent_handoff(writte
             with pytest.raises(asyncio.CancelledError):
                 await task
             await asyncio.sleep(0)
-            assert not channel.records
+            assert not records
         finally:
             release.set()
             if not task.done():
@@ -86,4 +77,4 @@ async def test_report_entry_reserves_prepared_error_before_parent_handoff(writte
             await flush_diagnostics()
     assert not settled.failed
     original_record = diagnostic_record_for(diagnostic_state_for(original))
-    assert (copied, channel.records) == (([original_record], []) if written else ([], [original_record]))
+    assert (copied, records) == (([original_record], []) if written else ([], [original_record]))

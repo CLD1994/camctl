@@ -5,28 +5,25 @@ from types import SimpleNamespace
 import pytest
 
 from camctl.bootstrap.background_flow import BackgroundFlow
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import (
     error_diagnostics_context, flush_diagnostics, record_error,
 )
-from camctl.logging_runtime.service import AdmissionResult
+from support.logging import recording_log_channel
 
 
-class ObservingChannel:
-    def __init__(self, ready):
-        self.ready = ready
-        self.records = []
+def observing_channel(ready):
+    records = []
 
-    async def alog(self, record):
-        assert self.ready(), "日志接纳提前阻止了必要业务收场"
-        self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+    def before_record(_record):
+        assert ready(), "日志接纳提前阻止了必要业务收场"
+
+    return recording_log_channel(records, before_record=before_record), records
 
 
 @pytest.mark.asyncio
 async def test_background_result_logs_after_body_releases_resources():
     released = False
-    channel = ObservingChannel(lambda: released)
+    channel, records = observing_channel(lambda: released)
 
     async def flow(_context):
         nonlocal released
@@ -39,15 +36,15 @@ async def test_background_result_logs_after_body_releases_resources():
         owner = BackgroundFlow(flow)
         await owner(SimpleNamespace())
         await owner.settle()
-        assert len(channel.records) == 1
+        assert len(records) == 1
         await flush_diagnostics()
-        assert len(channel.records) == 1
+        assert len(records) == 1
 
 
 @pytest.mark.asyncio
 async def test_fatal_background_result_precedes_diagnostic_admission():
     stopped = False
-    channel = ObservingChannel(lambda: stopped)
+    channel, records = observing_channel(lambda: stopped)
     failure = RuntimeError("状态库失效前已经取得读取失败")
 
     async def flow(_context):
@@ -60,7 +57,7 @@ async def test_fatal_background_result_precedes_diagnostic_admission():
             await owner(SimpleNamespace())
             await owner.settle()
         assert caught.value is failure
-        assert not channel.records
+        assert not records
         stopped = True
         await flush_diagnostics()
-        assert len(channel.records) == 1
+        assert len(records) == 1

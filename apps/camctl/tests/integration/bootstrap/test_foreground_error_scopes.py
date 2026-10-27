@@ -4,27 +4,24 @@ from types import SimpleNamespace
 
 import pytest
 
-from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics, record_error
-from camctl.logging_runtime.service import AdmissionResult
 from camctl.session.service import _drive_flows
+from support.logging import recording_log_channel
 
 
-class ObservingChannel:
-    def __init__(self, ready):
-        self.ready = ready
-        self.records = []
+def observing_channel(ready):
+    records = []
 
-    async def alog(self, record):
-        assert self.ready(), "日志接纳提前阻止了必要业务收场"
-        self.records.append(record)
-        return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, record.level), 0)
+    def before_record(_record):
+        assert ready(), "日志接纳提前阻止了必要业务收场"
+
+    return recording_log_channel(records, before_record=before_record), records
 
 
 @pytest.mark.asyncio
 async def test_foreground_flow_logs_after_its_business_result():
     saved = False
-    channel = ObservingChannel(lambda: saved)
+    channel, records = observing_channel(lambda: saved)
 
     async def flow(_context):
         nonlocal saved
@@ -34,13 +31,13 @@ async def test_foreground_flow_logs_after_its_business_result():
     context = SimpleNamespace(flows={"motor": flow}, local_work=None)
     with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
         assert await _drive_flows(context) is None
-        assert len(channel.records) == 1
+        assert len(records) == 1
 
 
 @pytest.mark.asyncio
 async def test_fatal_foreground_flow_delivers_outcome_before_logs():
     stopped = False
-    channel = ObservingChannel(lambda: stopped)
+    channel, records = observing_channel(lambda: stopped)
 
     async def flow(_context):
         record_error(RuntimeError("实际设备错误"), stage="capture")
@@ -50,7 +47,7 @@ async def test_fatal_foreground_flow_delivers_outcome_before_logs():
     with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
         result = await _drive_flows(context)
         assert result.reason == "state_db_error"
-        assert not channel.records
+        assert not records
         stopped = True
         await flush_diagnostics()
-        assert len(channel.records) == 1
+        assert len(records) == 1
