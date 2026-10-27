@@ -88,7 +88,13 @@ class ReturnedCall:
 class CallWriteFault(ResultWriteFault):
     """只在实际调用返回后的尝试投影或 COMMIT 边界注入错误。"""
 
-    enabled = True
+    @property
+    def enabled(self):
+        return self.state["enabled"]
+
+    @enabled.setter
+    def enabled(self, value):
+        self.state["enabled"] = value
 
     def execute(self, statement, params=()):
         returned = bool(self.driver.calls)
@@ -96,7 +102,7 @@ class CallWriteFault(ResultWriteFault):
                 and statement.startswith("SELECT") and "FROM operation_runs" in statement):
             self.armed = False
             raise sqlite3.OperationalError("实际调用返回后的原流程读取失败")
-        if (self.enabled and returned and self.mode == "persistent"
+        if (self.state["enabled"] and returned and self.mode == "persistent"
                 and statement == "COMMIT"):
             raise sqlite3.OperationalError("原结果提交暂时不能可靠核实")
         if (returned and self.armed and self.mode == "projection"
@@ -139,53 +145,92 @@ def _assert_actual_saved(owned, ticket, *, assumed, confirmed, occurred_at):
 
 
 @pytest.mark.parametrize("mode", ["read", "projection", "commit_before", "commit_after"])
-async def test_stop_return_is_resaved_with_original_key_without_second_device_call(tmp_path, mode):
+async def test_stop_return_is_resaved_with_original_key_without_second_device_call(tmp_path, mode, configured, monkeypatch):
     owned = _world(tmp_path)
     try:
-        runtime = await _started(owned)
         before_result = []
-        stopper = ReturnedCall(_diagnosed_stop(runtime), returned=lambda: before_result.append(
+        stopper = ReturnedCall(None, returned=lambda: before_result.append(
             tuple(owned.connection.iterdump())))
-        proxy = CallWriteFault(owned.connection, stopper, mode)
-        runtime.owned = replace(owned, connection=proxy)
+        state = {"armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+        def wrap(connection):
+            return replace(connection, connection=CallWriteFault(
+                connection.connection, stopper, mode, state))
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)), connection_wrap=wrap)
+        runtime.evidence = _CALL_EVIDENCE
+        await capture_handler("camera_record")(12, runtime)
+        runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
+        stopper.outcome = _diagnosed_stop(runtime)
+        saved_keys = []
+        save = runtime.capture.finish_capture_stop
+        def observe(finish, key, connection):
+            saved_keys.append(key)
+            return save(finish, key, connection)
+        monkeypatch.setattr(runtime.capture, "finish_capture_stop", observe)
         runtime.stopper = stopper
         runtime.wall_us = lambda: _RETURNED_AT
-        await _stop_call(runtime, runtime.action(12))
+        runtime.monotonic_ns = lambda: 68_000_000_000
+        await capture_handler("camera_record")(12, runtime)
         request, = stopper.calls
         assert request.timeout_s == Decimal("0.125")
         _assert_actual_saved(owned, request.ticket, assumed=False, confirmed=True,
                              occurred_at=_RETURNED_AT)
-        assert len(set(proxy.result_keys)) == 1
+        assert saved_keys and len(set(saved_keys)) == 1
+        key, = owned.connection.execute(
+            "SELECT t.operation_key FROM operation_attempts a"
+            " JOIN history_events e ON e.id=a.result_event_id"
+            " JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=?",
+            (request.ticket.run_id,)).fetchone()
+        assert key == str(saved_keys[0])
         result_json, = owned.connection.execute("SELECT result_json FROM operation_attempts WHERE run_id=?", (request.ticket.run_id,)).fetchone()
         assert json.loads(result_json)["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
         if mode in ("projection", "commit_before"):
-            assert proxy.rolled_back_images == before_result
+            assert len(before_result) == 1
+            assert state["rolled_back_images"][0] == before_result[0]
     finally:
         owned.connection.close()
 
 
-async def test_stop_pending_actual_result_precedes_unknown_recovery_without_boundary(tmp_path):
+async def test_stop_pending_actual_result_precedes_unknown_recovery_without_boundary(tmp_path, configured, monkeypatch):
     owned = _world(tmp_path)
     try:
-        runtime = await _started(owned)
-        stopper = ReturnedCall(_diagnosed_stop(runtime))
-        proxy = CallWriteFault(owned.connection, stopper, "persistent")
-        runtime.owned = replace(owned, connection=proxy)
+        stopper = ReturnedCall(None)
+        state = {"armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+        def wrap(connection):
+            return replace(connection, connection=CallWriteFault(
+                connection.connection, stopper, "persistent", state))
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)), connection_wrap=wrap)
+        runtime.evidence = _CALL_EVIDENCE
+        await capture_handler("camera_record")(12, runtime)
+        runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
+        stopper.outcome = _diagnosed_stop(runtime)
+        saved_keys = []
+        save = runtime.capture.finish_capture_stop
+        def observe(finish, key, connection):
+            saved_keys.append(key)
+            return save(finish, key, connection)
+        monkeypatch.setattr(runtime.capture, "finish_capture_stop", observe)
         runtime.stopper = stopper
         runtime.wall_us = lambda: _RETURNED_AT
+        runtime.monotonic_ns = lambda: 68_000_000_000
         with pytest.raises(ConsistencyError):
-            await _stop_call(runtime, runtime.action(12))
+            await capture_handler("camera_record")(12, runtime)
         request, = stopper.calls
         assert owned.connection.execute(
             "SELECT status, result_event_id FROM operation_attempts"
             " WHERE run_id=?", (request.ticket.run_id,)).fetchone() == (1, None)
-        proxy.enabled = False
+        state["enabled"] = False
         runtime.wall_us = lambda: _RETURNED_AT + 5_000_000
-        assert runtime.recover_attempt(request.ticket)
+        await capture_handler("camera_record")(12, runtime)
         _assert_actual_saved(owned, request.ticket, assumed=False, confirmed=True,
                              occurred_at=_RETURNED_AT)
         assert len(stopper.calls) == 1
-        assert len(set(proxy.result_keys)) == 1
+        assert len(saved_keys) == 3 and len(set(saved_keys)) == 1
+        key, = owned.connection.execute(
+            "SELECT t.operation_key FROM operation_attempts a"
+            " JOIN history_events e ON e.id=a.result_event_id"
+            " JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=?",
+            (request.ticket.run_id,)).fetchone()
+        assert key == str(saved_keys[0])
     finally:
         owned.connection.close()
 
