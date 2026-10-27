@@ -14,7 +14,7 @@ from camctl.operations.models import (
 
 from .test_cancel_late_start import _cancel
 from .test_capture_contract import _NOW
-from .test_recording_start_runtime import StartDriver, _configured, _result, _world
+from .test_recording_start_runtime import StartDriver, configured, _result, _world
 
 pytestmark = pytest.mark.asyncio
 
@@ -60,11 +60,11 @@ async def _held_confirmation(runtime, *, late_error=False):
     return query, task
 
 
-async def test_cancel_waits_for_actual_start_confirmation_before_stop(tmp_path):
+async def test_cancel_waits_for_actual_start_confirmation_before_stop(tmp_path, configured):
     owned = _world(tmp_path)
     query = task = None
     try:
-        runtime = _configured(owned, StartDriver(_result()))
+        runtime = await configured(owned, StartDriver(_result()))
         runtime.evidence = EvidenceRegistry((
             runtime.evidence.contract("operation_returned", 1),
             runtime.evidence.contract("query_returned", 1),
@@ -86,12 +86,12 @@ async def test_cancel_waits_for_actual_start_confirmation_before_stop(tmp_path):
 
 
 @pytest.mark.parametrize("late_error", [False, True])
-async def test_canceled_confirmation_keeps_actual_observation_and_original_terminals(tmp_path, late_error):
+async def test_canceled_confirmation_keeps_actual_observation_and_original_terminals(tmp_path, late_error, configured):
     owned = _world(tmp_path)
     query = task = None
     try:
         driver = StartDriver(_result())
-        runtime = _configured(owned, driver)
+        runtime = await configured(owned, driver)
         query, task = await _held_confirmation(runtime, late_error=late_error)
         _cancel(owned, 12)
         query.release.set()
