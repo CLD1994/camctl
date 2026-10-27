@@ -1015,7 +1015,7 @@ async def execute_command(
         try:
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
-            await get_logger(__name__).info("开始执行 %s 命令", deps.mode.value,
+            get_logger(__name__).info("开始执行 %s 命令", deps.mode.value,
                 extra={"stage": "command", "event": "started"})
             return await _execute_command(
                 deps, source, flows=flows, restricted_flows=restricted_flows,

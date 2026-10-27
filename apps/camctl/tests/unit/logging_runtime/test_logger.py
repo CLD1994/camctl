@@ -1,11 +1,13 @@
 """通用 Logger 在调用时冻结事实，并遵守同步及异步入口契约。"""
 
 import asyncio
+import gc
 from datetime import datetime
 import inspect
 import json
 import linecache
 import logging
+import warnings
 from types import SimpleNamespace
 from unittest.mock import create_autospec
 
@@ -13,9 +15,10 @@ import pytest
 
 from camctl.logging_runtime import get_logger, get_sync_logger
 from camctl.logging_runtime import diagnostics, events
-from camctl.logging_runtime.admission import LogSource
+from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind, LogSource
 from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime.service import LogChannel
+from camctl.logging_runtime.receipt import LogReceipt
+from camctl.logging_runtime.service import AdmissionResult, LogChannel
 from camctl.operations.error_diagnostics import DiagnosticError
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.tool_diagnostics import (
@@ -23,46 +26,60 @@ from camctl.operations.tool_diagnostics import (
 )
 
 
+def complete_receipt(record, *, receipt=None):
+    receipt = receipt if receipt is not None else LogReceipt()
+    decision = AdmissionDecision(AdmissionKind.ACCEPTED, record.level)
+    receipt.complete_admission(AdmissionResult(decision, 1))
+    receipt.complete_write(AdmissionResult(decision, 1, delivered=True))
+    return receipt
+
+
 def channel_stub():
-    return create_autospec(LogChannel, instance=True, spec_set=True)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    channel.submit.side_effect = complete_receipt
+    return channel
 
 
 def document(channel):
-    return json.loads(channel.slog.call_args.args[0].rendered_message())
+    return json.loads(channel.submit.call_args.args[0].rendered_message())
 
 
 @pytest.fixture
 def diagnostic_sink(monkeypatch):
-    """替身遵守单条接缝：prepare 冻结，admit 只交接原记录。"""
+    """prepare 冻结诊断，submit 立即交接并返回原写入回执。"""
     records = []
     states = []
 
     def prepare(record, *, error=None, state=None, channel=None, fallback=None):
         prepared = SimpleNamespace(record=record, error=error, state=state,
-                                   channel=channel, fallback=fallback)
+                                   channel=channel, fallback=fallback, receipt=complete_receipt(record))
         states.append(prepared)
         return prepared
 
-    async def admit(state):
+    def submit(state):
         records.append(state.record)
-        return state
+        return state.receipt
 
     monkeypatch.setattr(diagnostics, "prepare_log_diagnostic", prepare)
-    monkeypatch.setattr(diagnostics, "admit_diagnostic", admit)
+    monkeypatch.setattr(diagnostics, "submit_diagnostic", submit)
     return SimpleNamespace(records=records, states=states)
 
 
 @pytest.mark.parametrize("method,level", [("debug", LogLevel.DEBUG), ("info", LogLevel.INFO),
                                           ("warning", LogLevel.WARNING)])
 @pytest.mark.asyncio
-async def test_low_levels_share_channel_and_finish_without_async_admission(method, level):
+async def test_low_levels_submit_at_call_time_and_return_the_write_receipt(method, level):
     channel = channel_stub()
     logger = get_logger("camctl.business")
     with events.event_logging(channel):
         pending = getattr(logger, method)("returned %s", "事实")
-        channel.slog.assert_not_called()
-        assert await pending is channel.slog.return_value
-    record = channel.slog.call_args.args[0]
+        channel.submit.assert_called_once()
+        assert isinstance(pending, LogReceipt) and not inspect.iscoroutine(pending)
+        assert await pending is pending.write_result
+        assert pending.write_result.delivered is True
+        assert await pending is pending.write_result
+        channel.submit.assert_called_once()
+    record = channel.submit.call_args.args[0]
     payload = document(channel)
     assert record.level is level and record.source is LogSource.COROUTINE
     assert payload["message"] == "returned 事实"
@@ -71,6 +88,147 @@ async def test_low_levels_share_channel_and_finish_without_async_admission(metho
     assert datetime.fromisoformat(payload["logged_at_utc"]).utcoffset().total_seconds() == 0
     assert isinstance(payload["pid"], int)
     channel.alog.assert_not_called()
+
+
+@pytest.mark.parametrize("synchronous", [False, True])
+@pytest.mark.asyncio
+async def test_waiting_for_a_log_observes_write_completion_after_admission(synchronous):
+    channel, receipt = channel_stub(), LogReceipt()
+    channel.submit.side_effect = None
+    channel.submit.return_value = receipt
+    logger = get_sync_logger("test") if synchronous else get_logger("test")
+    with events.event_logging(channel):
+        returned = logger.info("fact")
+    assert returned is receipt
+    decision = AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.INFO)
+    receipt.complete_admission(AdmissionResult(decision, 1))
+
+    async def wait():
+        return await returned
+
+    waiter = asyncio.create_task(wait())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    written = AdmissionResult(decision, 0, delivered=True)
+    receipt.complete_write(written)
+    assert await waiter is written
+    channel.submit.assert_called_once()
+
+
+def test_ignored_low_and_important_receipts_submit_without_coroutine_warnings(diagnostic_sink):
+    channel = channel_stub()
+    with warnings.catch_warnings(record=True) as observed:
+        warnings.simplefilter("always")
+        with events.event_logging(channel):
+            get_logger("test").info("low")
+            get_logger("test").error("important")
+            get_sync_logger("test").warning("sync")
+        gc.collect()
+    assert channel.submit.call_count == 2
+    assert len(diagnostic_sink.records) == 1
+    assert not any(issubclass(item.category, RuntimeWarning) for item in observed)
+
+
+@pytest.mark.asyncio
+async def test_mixed_ignored_and_awaited_logs_submit_in_call_order():
+    channel, logger = channel_stub(), get_logger("test")
+    with events.event_logging(channel):
+        logger.info("first")
+        receipt = logger.warning("second")
+        logger.error("third")
+        logger.debug("fourth")
+        assert [json.loads(call.args[0].message)["message"]
+                for call in channel.submit.call_args_list] == ["first", "second", "third", "fourth"]
+        await receipt
+    assert channel.submit.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_important_calls_share_the_original_write_receipt_after_admission():
+    channel, logger = channel_stub(), get_logger("test")
+    error = ValueError("original error")
+    decision = AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR)
+
+    def admit(record, *, receipt):
+        receipt.complete_admission(AdmissionResult(decision, 1))
+        return receipt
+
+    channel.submit.side_effect = admit
+    with events.event_logging(channel):
+        receipt = logger.error("original fact", exc_info=error)
+        repeated = logger.critical("later text", exc_info=error)
+        state = diagnostics.diagnostic_state_for(error)
+        explicit = logger.error("explicit state", state=state)
+    assert repeated is explicit is receipt
+    channel.submit.assert_called_once()
+    assert document(channel)["message"] == "original fact"
+
+    async def wait():
+        return await receipt
+
+    waiter = asyncio.create_task(wait())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    written = AdmissionResult(decision, 0, delivered=True)
+    receipt.complete_write(written)
+    assert await waiter is written and await repeated is written
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_keeps_the_submitted_log_and_other_waiters():
+    channel, receipt = channel_stub(), LogReceipt()
+    channel.submit.side_effect = None
+    channel.submit.return_value = receipt
+    with events.event_logging(channel):
+        returned = get_logger("test").info("fact")
+
+    async def wait():
+        return await returned
+
+    first, second = asyncio.create_task(wait()), asyncio.create_task(wait())
+    await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert not second.done()
+    decision = AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.INFO)
+    receipt.complete_admission(AdmissionResult(decision, 1))
+    written = AdmissionResult(decision, 0, delivered=True)
+    receipt.complete_write(written)
+    assert await second is written and await returned is written
+    channel.submit.assert_called_once()
+
+
+@pytest.mark.parametrize("kind", [AdmissionKind.FILTERED_OUT, AdmissionKind.SAMPLED_OUT,
+                                   AdmissionKind.DROPPED, AdmissionKind.CHANNEL_FAILED])
+@pytest.mark.asyncio
+async def test_unwritten_channel_result_is_preserved_by_the_logger(kind):
+    channel, receipt = channel_stub(), LogReceipt()
+    channel.submit.side_effect = None
+    channel.submit.return_value = receipt
+    result = AdmissionResult(AdmissionDecision(kind, LogLevel.INFO), 0, delivered=False)
+    receipt.complete_admission(result)
+    receipt.complete_write(result)
+    with events.event_logging(channel):
+        returned = get_logger("test").info("fact")
+    assert returned is receipt and await returned is result
+    assert result.delivered is False and result.fallback_written is False
+
+
+@pytest.mark.parametrize("synchronous", [False, True])
+@pytest.mark.asyncio
+async def test_low_submission_failure_returns_failure_without_changing_business_result(synchronous):
+    channel = channel_stub()
+    channel.submit.side_effect = RuntimeError("log unavailable")
+    logger = get_sync_logger("test") if synchronous else get_logger("test")
+    with events.event_logging(channel):
+        receipt = logger.warning("fact")
+        business_result = 17
+    assert business_result == 17
+    result = await receipt
+    assert result.decision.kind is AdmissionKind.CHANNEL_FAILED
+    assert result.queue_depth is None
+    assert result.delivered is False and result.fallback_written is False
 
 
 @pytest.mark.parametrize("message,args,expected", [
@@ -83,7 +241,7 @@ def test_sync_logger_uses_standard_log_record_message_semantics(message, args, e
     with events.event_logging(channel):
         get_sync_logger("test").info(message, *args)
     assert document(channel)["message"] == expected
-    assert channel.slog.call_args.args[0].source is LogSource.SYNC
+    assert channel.submit.call_args.args[0].source is LogSource.SYNC
 
 
 @pytest.mark.parametrize("level", [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARNING,
@@ -92,7 +250,7 @@ def test_sync_log_accepts_existing_enum_and_standard_low_levels(level):
     channel = channel_stub()
     with events.event_logging(channel):
         get_sync_logger("test").log(level, "fact")
-    assert channel.slog.call_count == 1
+    assert channel.submit.call_count == 1
 
 
 @pytest.mark.parametrize("level", [0, 15, 45, 60, True, "INFO", None])
@@ -107,7 +265,7 @@ def test_sync_logger_rejects_important_levels(level):
     channel = channel_stub()
     with events.event_logging(channel), pytest.raises(ValueError):
         get_sync_logger("test").log(level, "fact")
-    channel.slog.assert_not_called()
+    channel.submit.assert_not_called()
 
 
 @pytest.mark.parametrize("field", ["level", "logged_at_utc", "pid", "logger", "message",
@@ -131,17 +289,22 @@ async def test_call_freezes_message_nested_fields_metadata_and_original_context(
     with events.event_logging(channel), events.log_context(action_id=3, request_key="original"):
         with events.measure_stage("prepare", level=None):
             pending = get_logger("test").info("value %s", message, extra=extra)
+    assert channel.submit.call_count == 1
+    payload_at_call = document(channel)
     message.value = "after"
     extra["details"]["values"].append(2)
     monkeypatch.setattr(formatting, "utc_now", lambda: "after-await")
+    monkeypatch.setattr(formatting, "getpid", lambda: -1)
     with events.event_logging(later), events.log_context(request_key="later"):
         await pending
     payload = document(channel)
+    assert payload == payload_at_call
     assert payload["message"] == "value before"
     assert payload["details"] == {"values": [1]}
     assert payload["action_id"] == 9 and payload["request_key"] == "original"
     assert payload["stage"] == "prepare" and payload["logged_at_utc"] != "after-await"
-    later.slog.assert_not_called()
+    assert payload["pid"] != -1
+    later.submit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -157,7 +320,7 @@ async def test_module_logger_is_reusable_across_task_contexts():
         ready.set()
         await asyncio.gather(*tasks)
     assert [json.loads(call.args[0].message)["action_id"]
-            for call in channel.slog.call_args_list] == [1, 2]
+            for call in channel.submit.call_args_list] == [1, 2]
     assert logger.name == "test" and not hasattr(logger, "__dict__")
 
 
@@ -195,10 +358,11 @@ async def test_important_methods_prepare_before_await_and_preserve_output_level(
     with events.event_logging(channel, fallback=fallback.append), events.log_context(action_id=7):
         expected_line = inspect.currentframe().f_lineno + 1
         pending = getattr(get_logger("test"), method)("important %s", "fact")
-    assert len(diagnostic_sink.states) == 1 and diagnostic_sink.records == []
+    assert len(diagnostic_sink.states) == len(diagnostic_sink.records) == 1
     prepared = diagnostic_sink.states[0]
     assert prepared.channel is channel and prepared.fallback == fallback.append
-    assert await pending is prepared
+    assert pending is prepared.receipt
+    assert await pending is prepared.receipt.write_result
     record = diagnostic_sink.records[0]
     payload = json.loads(record.message)
     assert record.level is LogLevel.ERROR and payload["level"] == level
@@ -338,7 +502,7 @@ async def test_message_format_failure_keeps_typed_tool_facts_for_media_filtering
             await get_logger("test").warning("value=%d", raw)
         else:
             await get_logger("test").error("value=%d", raw)
-    record = diagnostic_sink.records[0] if entry == "error" else channel.slog.call_args.args[0]
+    record = diagnostic_sink.records[0] if entry == "error" else channel.submit.call_args.args[0]
     assert "MEDIA_SENTINEL" not in record.message and media.hex() not in record.message
     payload = json.loads(record.message)
     assert payload["message"] == "value=%d"
@@ -363,7 +527,7 @@ async def test_non_string_message_and_format_error_arguments_keep_media_boundary
             await get_logger("test").warning(raw)
         else:
             await get_logger("test").error(raw)
-    record = diagnostic_sink.records[0] if entry == "error" else channel.slog.call_args.args[0]
+    record = diagnostic_sink.records[0] if entry == "error" else channel.submit.call_args.args[0]
     assert "MEDIA_SENTINEL" not in record.message and media.hex() not in record.message
     payload = json.loads(record.message)
     assert payload["message_value"]["output"] == {"byte_count": len(media)}
@@ -387,7 +551,7 @@ async def test_tool_diagnostics_and_encoder_fallback_preserve_safe_original_stre
             await get_logger("test").warning("fact", extra={"tool": tool})
         else:
             await get_logger("test").error("fact", extra={"tool": tool})
-    record = diagnostic_sink.records[0] if entry == "error" else channel.slog.call_args.args[0]
+    record = diagnostic_sink.records[0] if entry == "error" else channel.submit.call_args.args[0]
     assert "MEDIA_SENTINEL" not in record.message and media.hex() not in record.message
     payload = json.loads(record.message)
     stdout = payload["tool"]["calls"][0]["stdout"]
@@ -403,9 +567,15 @@ async def test_tool_diagnostics_and_encoder_fallback_preserve_safe_original_stre
 
 
 @pytest.mark.asyncio
-async def test_low_log_without_context_does_not_create_an_output_channel():
-    assert await get_logger("test").info("fact") is None
-    assert get_sync_logger("test").warning("fact") is None
+@pytest.mark.parametrize("synchronous", [False, True])
+async def test_low_log_without_context_returns_an_unwritten_receipt(synchronous):
+    logger = get_sync_logger("test") if synchronous else get_logger("test")
+    receipt = logger.info("fact")
+    assert isinstance(receipt, LogReceipt) and receipt.write_result is not None
+    result = await receipt
+    assert result.decision.kind is AdmissionKind.CHANNEL_FAILED
+    assert result.queue_depth is None
+    assert result.delivered is False and result.fallback_written is False
 
 
 @pytest.mark.parametrize("kwargs,error_type", [({"extra": []}, TypeError),

@@ -1,4 +1,4 @@
-"""通用日志入口：调用时冻结事实，由当前协程交接重要诊断。"""
+"""通用日志入口：调用时冻结并提交，回执可等待实际写入。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,12 @@ import logging
 import sys
 from types import TracebackType
 
-from camctl.logging_runtime.admission import LogSource
+from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind, LogSource
 from camctl.logging_runtime.events import current_logging_context
 from camctl.logging_runtime.formatting import log_metadata
 from camctl.logging_runtime.models import LogLevel
-from camctl.logging_runtime.service import LogRecord
+from camctl.logging_runtime.receipt import LogReceipt
+from camctl.logging_runtime.service import AdmissionResult, LogRecord
 from camctl.operations.error_diagnostics import exception_diagnostic
 
 __all__ = ["Logger", "SyncLogger", "get_logger", "get_sync_logger"]
@@ -194,18 +195,19 @@ def _walk_traceback(traceback):
         traceback = traceback.tb_next
 
 
-def _slog(channel, record):
+def _submit_low(channel, record) -> LogReceipt:
     if channel is not None:
         try:
-            return channel.slog(record)
+            return channel.submit(record)
         except Exception:
             # 低级别辅助日志不改变所属业务结果。
             pass
-    return None
-
-
-async def _admit_low(channel, record):
-    return _slog(channel, record)
+    receipt = LogReceipt()
+    result = AdmissionResult(AdmissionDecision(AdmissionKind.CHANNEL_FAILED, record.level),
+                             None, delivered=False)
+    receipt.complete_admission(result)
+    receipt.complete_write(result)
+    return receipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +235,7 @@ class Logger:
         return self.log(logging.ERROR, message, *args, exc_info=exc_info, **kwargs)
 
     def log(self, level, message, *args, extra=None, exc_info=False, stack_info=False,
-            stacklevel=1, state=None):
+            stacklevel=1, state=None) -> LogReceipt:
         number = _level_number(level)
         if number < logging.ERROR and state is not None:
             raise ValueError("低于 ERROR 的日志不能持有诊断状态")
@@ -242,12 +244,12 @@ class Logger:
             extra=extra, exc_info=exc_info, stack_info=stack_info,
             stacklevel=stacklevel, source=LogSource.COROUTINE)
         if number < logging.ERROR:
-            return _admit_low(context.channel, record)
+            return _submit_low(context.channel, record)
         # 包初始化及普通操作模块的导入不加载诊断组件，避免形成导入环。
-        from camctl.logging_runtime.diagnostics import admit_diagnostic, prepare_log_diagnostic
+        from camctl.logging_runtime.diagnostics import prepare_log_diagnostic, submit_diagnostic
         prepared = prepare_log_diagnostic(record, error=error, state=state,
             channel=context.channel, fallback=context.fallback)
-        return admit_diagnostic(prepared)
+        return submit_diagnostic(prepared)
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,7 +268,7 @@ class SyncLogger:
         return self.log(logging.WARNING, message, *args, **kwargs)
 
     def log(self, level, message, *args, extra=None, exc_info=False, stack_info=False,
-            stacklevel=1, state=None):
+            stacklevel=1, state=None) -> LogReceipt:
         number = _level_number(level)
         if number >= logging.ERROR:
             raise ValueError("同步日志入口不能投递 ERROR 或 CRITICAL")
@@ -276,7 +278,7 @@ class SyncLogger:
         record, _ = _prepare(self.name, number, message, args, context=context,
             extra=extra, exc_info=exc_info, stack_info=stack_info,
             stacklevel=stacklevel, source=LogSource.SYNC)
-        return _slog(context.channel, record)
+        return _submit_low(context.channel, record)
 
 
 def get_logger(name: str) -> Logger:
