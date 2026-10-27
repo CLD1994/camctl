@@ -20,7 +20,7 @@ result = await receipt
 | `logger.error/critical(message, *args, ...)` | 调用时冻结并登记重要日志，不能因写入队列满而阻塞当前业务或丢失原责任；CRITICAL 使用 ERROR 接纳优先级并保留输出严重程度。 |
 | `logger.exception(message, *args, ...)` | 默认捕获当前异常，以 ERROR 提交完整异常图；没有当前异常时不伪造异常。 |
 | `logger.log(level, message, *args, ...)` | 接受现有 `LogLevel` 及标准 DEBUG、INFO、WARNING、ERROR、CRITICAL 数值；其他级别显式拒绝。 |
-| `await logger.info/error/...(...)` 或 `await receipt` | 调用仍先提交，再等待该条实际追加并 flush 的回执；不是仅等待入队，也不要求每条 fsync。 |
+| `await logger.info/error/...(...)` 或 `await receipt` | 调用时提交，再等待该条实际追加并 flush 的回执；不要求每条 fsync。 |
 | 同步 Logger 的 `debug/info/warning/log` | 低于 ERROR 时采用同一立即提交和回执方式；同步重要级别仍明确拒绝，工作线程经原结果通道交付错误。 |
 
 回执不是协程对象。忽略它不产生未 await 警告；重复等待不会重复提交。取消某个等待者不撤回日志，也不取消其他等待者共享的写入事实。写入、过滤、丢弃、通道故障及 stderr 降级分别给出明确结果；失败或未写入不得被表示成文件追加成功。普通日志故障继续不覆盖业务结果，显式等待返回实际结果供调用方判断。stderr 通道的完成点为 stderr 写入及 flush，不代表已有持久文件。

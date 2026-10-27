@@ -4,7 +4,7 @@
 
 ## 通用日志入口验证（2026-10-27）
 
-[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)提供 `get_logger` 的统一 await 调用及 `get_sync_logger` 的低级别同步调用；[使用示例](logging-runtime.md#日志异步投递入口与有界队列)说明入口和原错误责任的关系。生产命令开始记录及快照维护默认警告已使用通用入口，文件拥有者的真实工作线程沿每次调用复制上下文。
+[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)提供 `get_logger` 通用调用及 `get_sync_logger` 的低级别同步调用；[使用示例](logging-runtime.md#日志异步投递入口与有界队列)说明入口和原错误责任的关系。生产命令开始记录及快照维护默认警告已使用通用入口，文件拥有者的真实工作线程沿每次调用复制上下文。
 
 最终组合源码为 `c2ac8ea93718508998120117346d8766044ff7ea`，在 Linux 开发容器、Python 3.11.17、SQLite 3.53.1 下验证。工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`；显式使用本工作区的源码与测试路径，清除不应传入子进程的计时和 Python 环境变量。同一工作区的集成 pytest 按目录顺序执行。
 

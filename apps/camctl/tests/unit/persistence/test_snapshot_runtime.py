@@ -20,7 +20,7 @@ from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.logging_runtime.events import event_logging, log_context
-from camctl.logging_runtime.service import LogChannel
+from support.logging import recording_log_channel
 
 
 def _owner(mocker, *, threshold=64):
@@ -50,14 +50,15 @@ async def test_default_disabled_warning_uses_current_log_channel_once(mocker):
     store.return_value.discover_objects.side_effect = SnapshotEnqueueTimeout("queue full")
     owner = snapshot_runtime.SnapshotMaintenanceOwner(
         database, Path("/state.sqlite"), threshold=64, batch_size=16)
-    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    captured = []
+    channel = recording_log_channel(captured)
     with event_logging(channel), log_context(session_key="snapshot-session"):
         await owner.start()
         await _turns()
         await owner.start()
         owner.stop_new_work()
         await owner.settle()
-    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    records = [json.loads(record.message) for record in captured]
     assert len(records) == 1
     assert records[0]["level"] == "WARNING"
     assert records[0]["stage"] == "snapshot.maintenance"
