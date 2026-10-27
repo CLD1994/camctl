@@ -275,17 +275,25 @@ async def test_writer_control_with_unusable_facts_settles_receipt_and_keeps_orig
     waiter = asyncio.create_task(await_receipt(channel.submit(
         LogRecord(LogLevel.ERROR, "original-control-record"))))
     closing = None
+
+    async def close_and_capture():
+        try:
+            await close_logging(runtime)
+        except BaseException as error:
+            return error
+        pytest.fail("关闭没有交付原日志线程控制异常")
+
     try:
         result = await completed(waiter)
         assert result.delivered is False and result.appended is False and result.durable is False
         assert result.fallback_written is True
-        closing = asyncio.create_task(close_logging(runtime))
-        with pytest.raises(type(original)) as raised:
-            await completed(closing)
-        assert raised.value is original
+        closing = asyncio.create_task(close_and_capture())
+        assert await completed(closing) is original
         assert not channel.listener_alive
     finally:
-        await finish_tasks(waiter, *(() if closing is None else (closing,)))
+        if closing is None:
+            closing = asyncio.create_task(close_and_capture())
+        await finish_tasks(waiter, closing)
     assert len(fallback) == 1 and "original-control-record" in fallback[0]
 
 
