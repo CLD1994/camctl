@@ -19,6 +19,7 @@ from camctl.bootstrap.lifecycle import (
 from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel, WriteResult
 from camctl.logging_runtime.copies import MarkerStage, SaveOutcome
+from integration.logging_runtime.sync_support import FileSyncProbe
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import (
@@ -71,6 +72,75 @@ async def _runtime(tmp_path: Path):
     finally:
         close_runtime(submit)
     return build_runtime(CommandMode.RUN, config, catalog=RecordingCatalog())
+
+
+async def test_report_copy_sync_failure_keeps_original_receipt_and_consumes_failure(
+        tmp_path: Path, monkeypatch) -> None:
+    from camctl.logging_runtime import diagnostics
+
+    deps = await _runtime(tmp_path)
+    path = Path(deps.config.paths.log_file)
+    before = ([json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+              if path.exists() else [])
+    probe = FileSyncProbe(monkeypatch, path, fail="file")
+    stderr = io.StringIO()
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    states, requests, receipts = [], [], []
+    original_record_error = diagnostics.record_error
+    original_deliver = copies.FailureLogService.on_report_failure_with_factory
+
+    def observe_error(error, **kwargs):
+        state = original_record_error(error, **kwargs)
+        if all(state is not captured for captured in states):
+            states.append(state)
+        return state
+
+    async def observe_delivery(service, factory, *, diagnose=None):
+        def request():
+            value = factory()
+            requests.append(value)
+            return value
+
+        receipt = await original_deliver(service, request, diagnose=diagnose)
+        receipts.append(receipt)
+        return receipt
+
+    monkeypatch.setattr(diagnostics, "record_error", observe_error)
+    monkeypatch.setattr(copies.FailureLogService, "on_report_failure_with_factory", observe_delivery)
+    try:
+        outcome, report_called = await _run_with_report_failure(deps, monkeypatch)
+    finally:
+        close_runtime(deps)
+    assert outcome.reason == "report_error" and report_called["count"] == 1
+    assert len(requests) == len(receipts) == 1
+    copied = receipts[0]
+    assert copied.outcome is copies.CopyOutcome.COPY_FAILED
+    assert copied.write_result.appended is True and copied.write_result.durable is False
+    assert "controlled original file sync failure" in copied.write_result.sync_error
+    state, = [state for state in states
+              if diagnostics.diagnostic_record_for(state) is requests[0].trigger]
+    shared = diagnostics.submit_diagnostic(state)
+    assert diagnostics.submit_diagnostic(state) is shared
+    assert shared.write_result.delivered is False and shared.write_result.appended is True
+    assert shared.write_result.durable is False and shared.write_result.fallback_written is False
+    assert probe.events.count(("file", "started")) == 1
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert records[:len(before)] == before
+    assert records[len(before):] == [json.loads(requests[0].trigger.rendered_message())]
+    assert "controlled report generation failure" in json.dumps(records[-1])
+    assert deps.log_path_unsafe is True and deps.log_runtime.path_unsafe is True
+    assert deps.log_runtime.channel.disabled is True
+    assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
+    diagnostic = stderr.getvalue()
+    assert "报告失败的日志副本诊断" in diagnostic
+    assert "controlled_report_failure" in diagnostic
+    assert "controlled report generation failure" in diagnostic
+    assert "controlled original file sync failure" in diagnostic
+    assert "appended=True" in diagnostic and "durable=False" in diagnostic
+    assert "run 会话失败: report_error" in diagnostic
+    assert stdout.getvalue() == ""
 
 
 async def _seed_two_pending_reports(deps, tmp_path: Path):
