@@ -18,14 +18,15 @@ def target_rules(monkeypatch):
     definitions.DRIVER_ID = "hasselblad_cfv100c"
     monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
     members = {
-        "actions.status": SimpleNamespace(FAILED=4),
+        "actions.status": SimpleNamespace(PENDING=1, RUNNING=2, FAILED=4),
+        "actions.type": SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4),
         "device_activities.activity_state": SimpleNamespace(UNKNOWN=1),
         "device_activities.occupancy_state": SimpleNamespace(HELD=1),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
         "operation_attempts.status": SimpleNamespace(RUNNING=1),
         "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
-        "operation_runs.kind": SimpleNamespace(QUERY_ACTIVITY=6),
+        "operation_runs.kind": SimpleNamespace(START=1, QUERY_ACTIVITY=6),
         "operation_runs.query_purpose": SimpleNamespace(START_CONFIRMATION=2),
     }
     monkeypatch.setattr(enums, "enum_for", lambda column: members[column])
@@ -115,7 +116,7 @@ class _PagedConnection:
 
     def execute(self, sql, args):
         self.calls.append((sql, args))
-        after = args[1] if "FROM actions a" in sql else args[2]
+        after = args[1] if "FROM actions" in sql else args[2]
         cursor = _Cursor([row for row in self.rows if row[0] > after])
         self.cursors.append(cursor)
         return cursor
@@ -385,3 +386,46 @@ def test_creation_group_rejects_forged_context(creation_module, monkeypatch):
 def test_creation_guard_rejects_missing_kernel_group(creation_module):
     with pytest.raises(creation_module.ConsistencyError):
         creation_module.availability_guard(object(), SimpleNamespace(availability_reads=None))
+
+
+def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypatch):
+    from decimal import Decimal
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    request = creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10,
+                                                       trigger_copy_id=8)
+    rows = {
+        ("actions", 12): {"id": 12, "type": 4, "status": 2, "cancel_requested": 0},
+        ("file_copies", 8): {"id": 8, "delivery_id": 11, "source_device_file_id": 15, "slot_device_id": None},
+        ("deliveries", 11): {"action_id": 12, "output_id": 21},
+        ("device_files", 15): {"id": 15, "identity_key": "key", "locator_json": {},
+                                "source_action_id": 7, "observer_action_id": 7},
+        ("outputs", 21): {"device_file_id": 15, "source_action_id": 7},
+        ("actions", 7): {"id": 7, "device_id": "hb0", "driver_id": "hasselblad_cfv100c"},
+    }
+    monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: rows.get((table, row_id)))
+    monkeypatch.setattr(creation_module, "_one", lambda *args: None)
+    monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
+    files = ModuleType("camctl.devices.drivers.hasselblad.files")
+    fixed = SimpleNamespace(binding=SimpleNamespace(device_id="hb0", driver_id="hasselblad_cfv100c"),
+                            serial="CAMERA-1", product_id=10)
+    files.CameraFileIdentity = SimpleNamespace(from_source=lambda *args: fixed)
+    monkeypatch.setitem(sys.modules, files.__name__, files)
+    discovery = ModuleType("camctl.outputs.read_discovery")
+    discovery.first_eligible_read = lambda *args: 8
+    monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
+    preparation = ModuleType("camctl.devices.capture_preparation")
+    preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
+    monkeypatch.setitem(sys.modules, preparation.__name__, preparation)
+    resources = ModuleType("camctl.scheduling.resources")
+    resources.device_read_in_flight = lambda *args: False
+    resources.device_start_in_flight = lambda *args: False
+    monkeypatch.setitem(sys.modules, resources.__name__, resources)
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.physical_alias_conflict = lambda *args: False
+    monkeypatch.setitem(sys.modules, alias.__name__, alias)
+    connection = _PagedConnection([])
+    _, check, count = creation_module._qualify(connection, request, 99)
+    assert (check["action_id"], check["trigger_copy_id"], check["device_id"], count) == (12, 8, "hb0", 1)
+    fixed.serial = "OTHER"
+    with pytest.raises(creation_module.AvailabilityTargetIdentityMismatch):
+        creation_module._qualify(connection, request, 99)

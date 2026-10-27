@@ -28,11 +28,14 @@ class CreateAvailabilityCheck:
     prepare_lead_s: Decimal
     occurred_at: int
     batch_size: int = 128
+    trigger_copy_id: int | None = None
 
     def __post_init__(self):
         ObjectId(self.action_id)
         UtcMicros(self.trusted_wall_now)
         UtcMicros(self.occurred_at)
+        if self.trigger_copy_id is not None:
+            ObjectId(self.trigger_copy_id)
         if (not isinstance(self.identity, CameraIdentity) or not isinstance(self.prepare_lead_s, Decimal)
                 or not self.prepare_lead_s.is_finite() or self.prepare_lead_s < 0
                 or type(self.batch_size) is not int or not 1 <= self.batch_size <= 128):
@@ -63,40 +66,75 @@ def _request_document(request):
     return {"action_id": request.action_id, "identity": {"serial": request.identity.serial,
         "product_id": request.identity.product_id}, "trusted_wall_now": request.trusted_wall_now,
         "prepare_lead_s": request.prepare_lead_s, "occurred_at": request.occurred_at,
-        "batch_size": request.batch_size}
+        "batch_size": request.batch_size, "trigger_copy_id": request.trigger_copy_id}
 
 
 def _request(raw):
     if not isinstance(raw, dict) or set(raw) != {"action_id", "identity", "trusted_wall_now",
-            "prepare_lead_s", "occurred_at", "batch_size"}:
+            "prepare_lead_s", "occurred_at", "batch_size", "trigger_copy_id"}:
         raise ConsistencyError("检查创建缺少完整申请")
     try:
         return CreateAvailabilityCheck(raw["action_id"], CameraIdentity(**raw["identity"]),
-            raw["trusted_wall_now"], Decimal(raw["prepare_lead_s"]), raw["occurred_at"], raw["batch_size"])
+            raw["trusted_wall_now"], Decimal(raw["prepare_lead_s"]), raw["occurred_at"], raw["batch_size"],
+            raw["trigger_copy_id"])
     except (TypeError, ValueError, KeyError) as error:
         raise ConsistencyError("检查创建申请无效") from error
 
 
 def _qualify(connection, request, boundary):
     action = row_facts(connection, "actions", request.action_id)
-    if (action is None or not is_hasselblad_photo(action) or action["status"] != int(enum_for("actions.status").PENDING)
-            or action["execution_started"] != 0 or action["cancel_requested"] != 0):
-        raise AvailabilityTargetBlocked("触发拍摄不再具备准备资格")
-    if not (Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
-            <= request.trusted_wall_now <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
-        raise AvailabilityTargetBlocked("触发拍摄不在允许的准备时间")
-    if _one(connection, "SELECT 1 FROM device_activities WHERE action_id=?", (action["id"],)):
-        raise AvailabilityTargetBlocked("触发拍摄已有活动，沿原责任处理")
-    if _one(connection, "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? LIMIT 1",
-            (action["id"], int(enum_for("operation_runs.kind").START))):
-        raise AvailabilityTargetBlocked("触发拍摄已有 START 责任")
+    if action is None:
+        raise ConsistencyError("检查触发动作不存在")
+    if request.trigger_copy_id is None:
+        if (not is_hasselblad_photo(action) or action["status"] != int(enum_for("actions.status").PENDING)
+                or action["execution_started"] != 0 or action["cancel_requested"] != 0):
+            raise AvailabilityTargetBlocked("触发拍摄不再具备准备资格")
+        if not (Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
+                <= request.trusted_wall_now <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
+            raise AvailabilityTargetBlocked("触发拍摄不在允许的准备时间")
+        if _one(connection, "SELECT 1 FROM device_activities WHERE action_id=?", (action["id"],)):
+            raise AvailabilityTargetBlocked("触发拍摄已有活动，沿原责任处理")
+        if _one(connection, "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? LIMIT 1",
+                (action["id"], int(enum_for("operation_runs.kind").START))):
+            raise AvailabilityTargetBlocked("触发拍摄已有 START 责任")
+        device_id, driver_id = action["device_id"], action["driver_id"]
+    else:
+        copy = row_facts(connection, "file_copies", request.trigger_copy_id)
+        delivery = None if copy is None or copy["delivery_id"] is None else row_facts(connection, "deliveries", copy["delivery_id"])
+        source = None if copy is None or copy["source_device_file_id"] is None else row_facts(connection, "device_files", copy["source_device_file_id"])
+        output = None if delivery is None else row_facts(connection, "outputs", delivery["output_id"])
+        if (copy is None or delivery is None or source is None or output is None
+                or output["device_file_id"] != source["id"] or delivery["action_id"] != action["id"]
+                or action["type"] != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
+            raise ConsistencyError("检查触发拷贝缺少原设备来源或取回归属")
+        if (action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]
+                or copy["slot_device_id"] is not None):
+            raise AvailabilityTargetBlocked("取回或原拷贝不再具备检查资格")
+        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        try:
+            fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("原设备来源缺少固定机身身份") from error
+        device_id, driver_id = fixed.binding.device_id, fixed.binding.driver_id
+        origin = row_facts(connection, "actions", source["source_action_id"])
+        observer = row_facts(connection, "actions", source["observer_action_id"])
+        if (origin is None or observer is None or output["source_action_id"] != origin["id"]
+                or driver_id != DRIVER_ID or (origin["device_id"], origin["driver_id"]) != (device_id, driver_id)
+                or (observer["device_id"], observer["driver_id"]) != (device_id, driver_id)):
+            raise ConsistencyError("原设备来源绑定与拍摄动作不一致")
+        if (fixed.serial, fixed.product_id) != (request.identity.serial, request.identity.product_id):
+            raise AvailabilityTargetIdentityMismatch("设备来源的固定机身身份不同")
+        from camctl.outputs.read_discovery import first_eligible_read
+        if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
+            raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
     from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
     after = 0
     while True:
         with closing(connection.execute(
             "SELECT id,scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
             " WHERE device_id=? AND id>? AND status=1 AND execution_started=0 AND cancel_requested=0"
-            " ORDER BY id LIMIT 128", (action["device_id"], after),
+            " ORDER BY id LIMIT 128", (device_id, after),
         )) as cursor:
             page = tuple(cursor.fetchmany(128))
         if not page:
@@ -104,17 +142,18 @@ def _qualify(connection, request, boundary):
         for other_id, scheduled, plan_id, index, delay in page:
             other = row_facts(connection, "actions", other_id)
             if (other["type"] in CAPTURE_ACTION_TYPES and other_id != action["id"]
-                    and (scheduled, plan_id, index) < (action["scheduled_at"], action["plan_id"], action["input_index"])
+                    and (request.trigger_copy_id is not None or
+                         (scheduled, plan_id, index) < (action["scheduled_at"], action["plan_id"], action["input_index"]))
                     and Decimal(scheduled) - request.prepare_lead_s * 1_000_000
                     <= request.trusted_wall_now <= scheduled + delay * 1000):
                 raise AvailabilityTargetBlocked("存在更早的合格拍摄候选")
         after = page[-1][0]
         if len(page) < 128:
             break
-    if _one(connection, "SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1", (action["device_id"],)):
+    if _one(connection, "SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1", (device_id,)):
         raise AvailabilityTargetBlocked("设备读取机会尚未收场")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
-    if device_read_in_flight(connection, action["device_id"]) or device_start_in_flight(connection, action["device_id"]):
+    if device_read_in_flight(connection, device_id) or device_start_in_flight(connection, device_id):
         raise AvailabilityTargetBlocked("设备调用尚未收场")
     running = int(enum_for("operation_attempts.status").RUNNING)
     if (_one(connection, "SELECT 1 FROM device_activities d JOIN operation_runs r ON r.activity_id=d.id"
@@ -122,17 +161,17 @@ def _qualify(connection, request, boundary):
              (request.identity.resource_key, running))
             or _one(connection, "SELECT 1 FROM actions a JOIN device_activities d ON d.action_id=a.id"
                 " JOIN baseline_read_calls b ON b.activity_id=d.id WHERE a.device_id=? AND b.state=1 LIMIT 1",
-                (action["device_id"],))):
+                (device_id,))):
         raise AvailabilityTargetBlocked("原设备调用或目录读取尚未收场")
     from .physical_alias import physical_alias_conflict
-    if physical_alias_conflict(connection, action["device_id"], request.identity):
+    if physical_alias_conflict(connection, device_id, request.identity):
         raise AvailabilityTargetBlocked("其他逻辑设备仍持有该机身责任")
     if _one(connection, "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
             " JOIN device_availability_checks c ON c.id=r.availability_check_id"
             " WHERE c.resource_key=? AND t.status=? LIMIT 1", (request.identity.resource_key, running)):
         raise AvailabilityTargetBlocked("设备检查尝试尚未收场")
-    check = {"action_id": action["id"], "trigger_copy_id": None, "device_id": action["device_id"],
-        "driver_id": action["driver_id"], "expected_identity_json": {"serial": request.identity.serial,
+    check = {"action_id": action["id"], "trigger_copy_id": request.trigger_copy_id, "device_id": device_id,
+        "driver_id": driver_id, "expected_identity_json": {"serial": request.identity.serial,
         "product_id": request.identity.product_id}, "resource_key": request.identity.resource_key,
         "rule_version": 1, "target_boundary_event_id": boundary}
     count = sum(len(page) for page in iter_creation_targets(connection, check, batch_size=request.batch_size))
