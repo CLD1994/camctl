@@ -156,9 +156,12 @@ async def _save_failed_source_obtain(owned):
         owned,
     )
     assert started_capture.kind is DbOutcomeKind.COMPLETED, started_capture.error
-    runtime = _runtime(owned)
-    runtime.results = ResultsDouble({1: ()})
-    await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
+    runtime, database = await _runtime(owned, files={1: ()})
+    try:
+        results = await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
+        assert results and not isinstance(results[0][1], BaseException), results
+    finally:
+        await database.close()
     source = row_facts(owned.connection, "actions", source_id)
     assert source["status"] == 4
     assert source["error_code"] is not None

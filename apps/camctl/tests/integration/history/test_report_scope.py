@@ -18,13 +18,12 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
-from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
-from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.values import new_operation_key
 from camctl.history.queries import ReportScopeRequest, build_report_scope
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.directory_switch import canonical_to_path
 from camctl.persistence.repositories.acceptance import (
     AcceptanceRepository,
     register_acceptance_guards,
@@ -33,15 +32,9 @@ from camctl.persistence.repositories.capture import (
     CaptureRepository,
     register_capture_guards,
 )
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
+from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
-    register_timelapse_guards,
-)
+from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting.policy import (
     register_report_guards,
@@ -49,7 +42,6 @@ from camctl.reporting.policy import (
 )
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
-from camctl.scheduling.rules import LaunchWindow
 
 from ..capture.test_capture_contract import (
     DriverDouble,
@@ -57,6 +49,7 @@ from ..capture.test_capture_contract import (
     _PAGE_EVIDENCE,
     _entry,
 )
+from ..capture.public_assembly import assemble_capture
 from ..acceptance_fixtures import accept_with_database
 from ..persistence.test_runtime import _create_valid_database
 
@@ -184,23 +177,24 @@ class _ActivityDriver(DriverDouble):
         )
 
 
-def _runtime(owned) -> CaptureRuntime:
-    return CaptureRuntime(
-        owned=owned,
-        scheduling=SchedulingRepository(),
-        operations=OperationRepository(),
-        capture=CaptureRepository(),
-        timelapse=TimelapseRepository(),
-        driver=_ActivityDriver(activity_target="1"),
-        results=ResultsDouble({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
+class _ResultFiles(ResultsDouble):
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None, video_result_mode=None,
+                        reading_context=None, scope_only=False):
+        return await super().list_page(
+            ticket, cursor=cursor, timeout_s=timeout_s, output_scope=output_scope,
+            completion_context=completion_context, video_result_mode=video_result_mode)
+
+
+async def _runtime(owned, *, files=None):
+    return await assemble_capture(
+        owned, driver=_ActivityDriver(activity_target="1"),
+        results=_ResultFiles(files if files is not None else {
+            1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
         evidence=_PAGE_EVIDENCE,
+        staging=canonical_to_path(owned.metadata.staging_path),
         wall_us=lambda: int(time.time() * 1_000_000),
         monotonic_ns=time.monotonic_ns,
-        window_of=lambda action: LaunchWindow(
-            scheduled_at=action["scheduled_at"],
-            window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-        wait_config=lambda params: CaptureWaitConfig(
-            target_duration_ms=600_000, driver_margin_ms=0),
     )
 
 
@@ -213,7 +207,12 @@ async def _finish_action(owned) -> None:
         new_operation_key(), owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     descriptors = ready_capture_actions(owned.connection, now)
-    await dispatch_ready(_runtime(owned), descriptors)
+    runtime, database = await _runtime(owned)
+    try:
+        results = await dispatch_ready(runtime, descriptors)
+        assert results and not isinstance(results[0][1], BaseException), results
+    finally:
+        await database.close()
 
 
 def _boundary(connection) -> HistoryBoundary:
