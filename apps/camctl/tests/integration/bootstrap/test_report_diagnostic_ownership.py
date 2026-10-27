@@ -42,7 +42,7 @@ async def test_report_entry_reserves_prepared_error_before_parent_handoff(writte
             if written:
                 copied.append(request.trigger)
                 receipt = CopyReceipt(CopyOutcome.PUBLISHED,
-                    write_result=WriteResult(True, False, copy_handles_closed=True))
+                    write_result=WriteResult(True, False, copy_handles_closed=True, durable=True))
             else:
                 receipt = CopyReceipt(CopyOutcome.SUPPRESSED)
             await diagnose(receipt, None)

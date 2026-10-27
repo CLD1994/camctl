@@ -1182,6 +1182,7 @@ async def test_default_run_records_copy_and_cleanup_failures(
             appended=True, rotated=True,
             rotation_error="rotation denied",
             copy_handles_closed=True,
+            durable=True,
         ), "snapshot read failed")
 
     original_unlink = copies._unlink
@@ -1350,6 +1351,7 @@ async def test_unconfirmed_copy_unlock_uses_stderr_directly(
             coordination_error="coordination_unlock_failed: unlock lost",
             close_error="coordination_close_failed: close unknown",
             copy_handles_closed=True,
+            durable=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_unlock)
@@ -1388,6 +1390,7 @@ async def test_unknown_copy_close_disables_later_file_logging(
             coordination_error="coordination_unlock_failed: unlock unknown",
             close_error="coordination_close_failed: close unknown",
             copy_handles_closed=True,
+            durable=True,
         ), None)
 
     monkeypatch.setattr(FileChannel, "copy_with_write", copy_with_uncertain_close)
