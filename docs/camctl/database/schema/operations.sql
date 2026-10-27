@@ -91,6 +91,9 @@ CREATE TABLE operation_attempts (
     CHECK (status <> 2 OR (result_json IS NOT NULL AND error_json IS NULL))
 ) STRICT;
 
+CREATE INDEX operation_attempts_run_status ON operation_attempts(run_id, status);
+CREATE INDEX operation_attempts_without_result ON operation_attempts(run_id) WHERE result_json IS NULL;
+
 CREATE TABLE result_page_files (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     created_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,

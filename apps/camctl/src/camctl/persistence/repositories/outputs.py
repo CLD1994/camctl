@@ -4445,6 +4445,11 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             return self._decision(
                 FailureSaveOutcome(FailureSaveDisposition.ALREADY),
                 read_only=True)
+        action = self._owner_action(connection, delivery)
+        if (action.get("cancel_requested") == 1
+                or status in (int(_DELIVERY_STATUS.CANCELED), int(_DELIVERY_STATUS.WITHDRAWN))):
+            return self._decision(
+                FailureSaveOutcome(FailureSaveDisposition.CANCELED), read_only=True)
         if status not in (
             int(_DELIVERY_STATUS.PENDING), int(_DELIVERY_STATUS.PREPARING),
         ):
@@ -4563,28 +4568,18 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             raise ConsistencyError(f"读取流程记录缺失: {identities[0][0]}")
         self._state["operation_runs"][run["id"]] = run
         self._coverage = ReadCoverage({
-            ("operation_runs", "copy_id"): {copy_id},
-            ("operation_attempts", "run_id"): {run["id"]}})
+            ("operation_runs", "copy_id"): {copy_id}})
         self._owners[("operation_runs", run["id"])] = ("action", run["action_id"])
         return run
 
     def _require_read_finished(self, connection, run) -> None:
         """读取终局失败的保存前提：流程终态失败且无在途尝试。"""
         _RUN_STATUS = enum_for("operation_runs.status")
-        _ATTEMPT_STATUS = enum_for("operation_attempts.status")
         if run["status"] != int(_RUN_STATUS.FAILED):
             raise ConsistencyError(
                 f"读取流程未按失败终态收场: {run['status']!r}")
-        with closing(connection.execute(
-            "SELECT id FROM operation_attempts WHERE run_id = ?", (run["id"],),
-        )) as cursor:
-            active = cursor.fetchall()
-        for identity in active:
-            attempt = row_facts(connection, "operation_attempts", identity[0])
-            if attempt is not None:
-                self._state["operation_attempts"][identity[0]] = attempt
-        if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING) or attempt["result_json"] is None
-               for attempt in self._state["operation_attempts"].values()):
+        from .retry_wait_reads import RetryWaitReads
+        if not RetryWaitReads(connection).no_unsettled_attempts(run["id"]):
             raise ConsistencyError("读取仍有未保存结束结果的尝试，不能保存终局失败")
 
     def _reuse(self, saved: list[dict], connection) -> CommandPlan:
@@ -6441,6 +6436,11 @@ def _delivery_guard(event, context) -> None:
                 raise EventValidationError("交付终局失败必须保存结构化错误")
             code, stage = error.get("code"), error.get("stage")
             details = error.get("details")
+            if code in ("read_attempts_exhausted", "checksum_mismatch", "source_file_unconfirmed"):
+                delivery = context.state_rows.get("deliveries", {}).get(row.row_id)
+                action = None if delivery is None else context.state_rows.get("actions", {}).get(delivery.get("action_id"))
+                if action is None or action.get("cancel_requested") != 0:
+                    raise EventValidationError("读取失败交付要求发起动作的取消尚未生效")
             try:
                 spec = registered_error(code)
                 if stage != spec["stage"]:
@@ -7089,9 +7089,9 @@ def _read_slot_guard(event, context) -> None:
             raise EventValidationError("释放要求当前持有机会")
         if row.before.values["slot_device_id"] != binding[0]:
             raise EventValidationError("释放的机会必须属于原来源设备")
-        attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
-        if any(attempt.get("status") == int(_ATTEMPT_STATUS.RUNNING)
-               for attempt in attempts.values()):
+        from .retry_wait_reads import RetryWaitReads
+        reads = context.retry_wait_reads
+        if type(reads) is not RetryWaitReads or not reads.no_unsettled_attempts(run["id"], context.validated_events):
             raise EventValidationError("实际读取未结束，不能释放机会")
         if run["retry_wait_required"] != 0:
             raise EventValidationError("重试等待期间保留机会")
@@ -7185,9 +7185,9 @@ def _read_permission_guard(event, context) -> None:
                                    or run.get("retry_wait_required") != 0 for run in runs.values()):
                     raise EventValidationError("最终失败或取消后解除源保护要求读取及后续重试已结束")
                 for run in runs.values():
-                    attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
-                    if any(attempt.get("status") == 1 or attempt.get("result_json") is None
-                           for attempt in attempts.values()):
+                    from .retry_wait_reads import RetryWaitReads
+                    reads = context.retry_wait_reads
+                    if type(reads) is not RetryWaitReads or not reads.no_unsettled_attempts(run["id"], context.validated_events):
                         raise EventValidationError("读取没有可靠结束结果，不能解除源保护")
                 continue
             if copy.get("verification_state") not in (

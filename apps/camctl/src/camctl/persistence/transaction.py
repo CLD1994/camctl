@@ -177,6 +177,8 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     context = bind_obtain_check(context, event, transaction, connection)
     from camctl.persistence.repositories.preparation import PreparationReads
     context = replace(context, preparation_reads=PreparationReads(connection, validated))
+    from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+    context = replace(context, retry_wait_reads=RetryWaitReads(connection), validated_events=validated)
     from camctl.persistence.repositories.capture_facts import PhotoResultReads
     context = replace(context, photo_result_reads=PhotoResultReads(connection))
     from camctl.persistence.repositories.baseline_reads import bind_intent

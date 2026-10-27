@@ -4623,7 +4623,7 @@
             "report_impact",
             "retry"
           ],
-          "evidence": []
+          "evidence": ["attempt_id"]
         },
         "ABANDON": {
           "reason": 3,
@@ -5277,7 +5277,8 @@
             "retry"
           ],
           "evidence": [
-            "stale_run_request"
+            "stale_run_request",
+            "attempt_id"
           ]
         }
       }
