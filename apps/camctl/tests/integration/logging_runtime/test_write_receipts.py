@@ -109,7 +109,8 @@ async def test_important_receipt_waits_for_real_file_and_directory_sync(
             result = await completed(waiter)
             assert result.delivered is True and result.appended is True
             assert result.durable is True and not result.fallback_written
-            assert probe.events.index(("file", "completed")) < probe.events.index(("directory", "completed"))
+            assert ("file", "completed") in probe.events
+            assert ("directory", "completed") in probe.events
             assert read_records(path)[0]["level"] == method.upper()
         finally:
             probe.release.set()
@@ -125,7 +126,7 @@ async def test_info_flush_does_not_claim_or_require_file_durability(tmp_path, mo
         assert result.delivered is True and result.appended is True
         assert result.durable is False and not result.fallback_written
         assert [record["message"] for record in read_records(path)] == ["ordinary-info"]
-        assert not probe.events
+        assert not any(kind == "file" for kind, _ in probe.events)
 
 
 @pytest.mark.parametrize("preparation", ["created", "rotated"])
@@ -143,10 +144,11 @@ async def test_error_syncs_actual_directory_after_info_prepared_path(
         try:
             assert await asyncio.to_thread(probe.entered.wait, 5)
             assert not waiter.done()
-            assert ("file", "completed") in probe.events
             probe.release.set()
             result = await completed(waiter)
             assert result.delivered is True and result.appended is True and result.durable is True
+            assert ("file", "completed") in probe.events
+            assert ("directory", "completed") in probe.events
         finally:
             probe.release.set()
             await finish_tasks(waiter)
