@@ -608,6 +608,9 @@ class BeginAttemptCommand:
             self._verify_existing_run(run_facts, intent, connection)
             if intent.kind is OperationKind.READ_FILE:
                 copy = self._state["file_copies"][intent.target.copy_id]
+                from .outputs import _read_owner_eligible
+                if not _read_owner_eligible(action):
+                    return self._rejected("owner_not_running")
                 _load_read_attempt_context(connection, copy, self._state)
                 read_has_slot = _read_attempt_has_slot(self._state, intent.target.copy_id, intent.copy_round)
             if run_facts["status"] not in (
@@ -1874,6 +1877,14 @@ def _attempt_intent_guard(event, context) -> None:
             _fail(f"启动意图的基准准备未完成: {preparation_reason}")
     copy_round = attempts[0].after.values.get("copy_round")
     if kind == int(_RUN_KIND.READ_FILE):
+        from .outputs import _read_owner_eligible, _slot_owner_action
+        copy = _fixed_reference(context.state_rows, "file_copies", run_after.get("copy_id"))
+        action = _slot_owner_action(context, copy)
+        try:
+            if action.get("id") != run_after.get("action_id") or not _read_owner_eligible(action):
+                _fail("读取意图要求拷贝所属动作执行中且未取消")
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
         if attempt_no > 1 and run_row.before.values.get("retry_wait_required") == 0:
             from .retry_wait_reads import RetryWaitReads
             reads = context.retry_wait_reads
@@ -1891,7 +1902,6 @@ def _attempt_intent_guard(event, context) -> None:
             raise EventValidationError(str(error)) from error
         if not held:
             _fail("设备读取意图要求当前拷贝已取得原来源设备的读取机会")
-        copy = _fixed_reference(context.state_rows, "file_copies", run_after.get("copy_id"))
         slot = copy["slot_device_id"]
         if slot is not None:
             from .preparation import PreparationReads
