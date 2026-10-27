@@ -22,7 +22,7 @@ from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
-from camctl.history.events import EventEnvelope, RowChange, RowImage
+from camctl.history.events import EventEnvelope, RowChange, RowImage, load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.history.reads import PlanReadScope
 from camctl.operations.attempts import (
@@ -44,6 +44,7 @@ from camctl.operations.attempts import (
     responsibility_key,
     seconds_from_json,
     ticket_target_id,
+    ticket_target_for_identity,
     operation_responsibility_key,
 )
 from camctl.operations.models import (
@@ -160,6 +161,12 @@ def _load_flow_context(
     state: dict,
 ) -> None:
     """加载目标引用行及守卫所需的关联事实；缺失即拒绝。"""
+    if kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+        check = _load_row(connection, "device_availability_checks", target.availability_check_id or 0)
+        if check is None or check["action_id"] != action_id:
+            raise ConsistencyError("设备检查不存在或不属于触发动作")
+        state.setdefault("device_availability_checks", {})[check["id"]] = check
+        return
     if kind is OperationKind.READ_FILE:
         copy = _load_row(connection, "file_copies", target.copy_id or 0)
         if copy is None:
@@ -381,7 +388,8 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
             raise ValueError("查询用途必须是整数编号")
         purpose = QueryPurpose[_QUERY_PURPOSE(purpose_code).name] if purpose_code is not None else None
         target = AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"],
-                               cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"])
+                               cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"],
+                               availability_check_id=run["availability_check_id"])
         expected = operation_responsibility_key(kind, run["action_id"], target, purpose,
                                                 session_key=run["session_key"])
         delivery_id, session_key = run["delivery_id"], run["session_key"]
@@ -441,6 +449,10 @@ def _verify_run_identity(run: Mapping[str, Any], state) -> None:
         if len(matches) != 1 or not json_equal(matches[0], run.get("id")):
             raise ConsistencyError("拷贝必须关联其唯一原读取流程")
         _fixed_reference(state, "operation_runs", matches[0])
+    elif target.availability_check_id is not None:
+        check = _fixed_reference(state, "device_availability_checks", target.availability_check_id)
+        if not json_equal(check.get("action_id"), action_id):
+            raise ConsistencyError("设备检查与触发动作不符")
     elif target.obtain_item_id is not None:
         _obtain_check_is_host(state, target.obtain_item_id, action_id)
     elif target.cleanup_item_id is not None:
@@ -455,6 +467,7 @@ def _intent_identity(intent: AttemptIntent) -> dict[str, Any]:
             "responsibility_key": responsibility_key(intent), "activity_id": intent.target.activity_id,
             "copy_id": intent.target.copy_id, "cleanup_item_id": intent.target.cleanup_item_id,
             "obtain_item_id": intent.target.obtain_item_id,
+            "availability_check_id": intent.target.availability_check_id,
             "delivery_id": None, "session_key": intent.session_key}
 
 
@@ -462,7 +475,7 @@ def _verify_run_intent(run: Mapping[str, Any], intent: AttemptIntent) -> None:
     """输入必须逐列指向原责任；交付归属由实际拷贝父对象核对。"""
     expected = _intent_identity(intent)
     for name in ("action_id", "kind", "query_purpose", "responsibility_key",
-                 "activity_id", "copy_id", "cleanup_item_id", "obtain_item_id", "session_key"):
+                 "activity_id", "copy_id", "cleanup_item_id", "obtain_item_id", "availability_check_id", "session_key"):
         if name not in run or not json_equal(run[name], expected[name]):
             raise ConsistencyError(f"流程固定字段 {name} 与意图不符")
 
@@ -477,6 +490,8 @@ def _find_responsibility(connection, intent: AttemptIntent) -> int | None:
         columns = ("action_id",)
     elif kind is OperationKind.READ_FILE:
         columns = ("copy_id",)
+    elif kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+        columns = ("availability_check_id",)
     elif kind in (OperationKind.DELETE_FILE, OperationKind.CHECK_FILE_EXISTS):
         columns = ("obtain_item_id",) if intent.target.obtain_item_id is not None else ("cleanup_item_id",)
     elif kind in (OperationKind.CHECK_CAPTURE_RESULTS, OperationKind.RESOLVE_OUTPUT_SCOPE):
@@ -534,9 +549,10 @@ def _event_rows(saved: Mapping[str, Any], table: str) -> list[dict]:
 class BeginAttemptCommand:
     """一次普通尝试意图的完整事务命令。"""
 
-    def __init__(self, intent: AttemptIntent, key: OperationKey) -> None:
+    def __init__(self, intent: AttemptIntent, key: OperationKey, availability_request=None) -> None:
         self._intent = intent
         self._key = key
+        self._availability_request = availability_request
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -546,9 +562,21 @@ class BeginAttemptCommand:
         connection = scope.connection
         saved = _saved_transaction_events(connection, self._key)
         if saved is not None:
+            if self._intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                from .availability_create import _request_document
+                if (self._availability_request is None or len(saved) != 1
+                        or not json_equal(saved[0]["body"]["evidence"].get("availability_intent_request"),
+                                          _request_document(self._availability_request))):
+                    raise TransactionError("检查意图重送改变原资格申请")
             return self._reuse(connection, saved)
 
         intent = self._intent
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            from .availability_create import CreateAvailabilityCheck
+            if (not isinstance(self._availability_request, CreateAvailabilityCheck)
+                    or self._availability_request.action_id != intent.action_id
+                    or self._availability_request.occurred_at != intent.occurred_at):
+                return self._rejected("availability_request_required")
         key_str = responsibility_key(intent)
         action = _load_row(connection, "actions", intent.action_id)
         if action is None:
@@ -562,6 +590,19 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            from .availability_create import _qualify
+            from .availability_target import (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch,
+                                               AvailabilityTargetNotRequired)
+            check = self._state["device_availability_checks"][intent.target.availability_check_id]
+            try:
+                _qualify(connection, self._availability_request, check["target_boundary_event_id"], existing_check=check)
+            except AvailabilityTargetNotRequired:
+                return self._rejected("availability_targets_resolved")
+            except AvailabilityTargetIdentityMismatch:
+                return self._rejected("availability_identity_mismatch")
+            except AvailabilityTargetBlocked:
+                return self._rejected("device_busy")
         if intent_recovery_locked(connection, intent):
             return self._rejected("device_recovery")
         _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
@@ -618,6 +659,12 @@ class BeginAttemptCommand:
                 if intent.kind is OperationKind.READ_FILE:
                     return self._read_exhausted(scope, run_facts)
                 return self._rejected("budget_exhausted")
+            if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY and run_facts["attempts_used"]:
+                if run_facts["retry_wait_required"] != 0:
+                    return self._rejected("retry_wait")
+                from .retry_wait_reads import RetryWaitReads
+                if not RetryWaitReads(connection).completed(run_facts["id"], run_facts["attempts_used"]):
+                    return self._rejected("retry_wait")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
                 # 主机清理和取回源检查不应用超时或定时重试；允许下轮领取新票据的
                 # 前提是上一张 ticket 已有完整、可核实的结果事实。
@@ -630,6 +677,8 @@ class BeginAttemptCommand:
                     and run_facts["timeout_s_json"] is None
                     and intent.config.retry_interval_s is None
                     and run_facts["retry_interval_s_json"] is None)
+                if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                    immediate_cleanup_retry = True
                 if not immediate_cleanup_retry:
                     raise TransactionError("后续尝试要求先建立重试等待")
                 with closing(connection.execute(
@@ -648,6 +697,8 @@ class BeginAttemptCommand:
                 self._state.setdefault("operation_attempts", {})[original["id"]] = original
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
+            if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                raise ConsistencyError("设备检查缺少原有限操作责任")
             if intent.kind is OperationKind.READ_FILE:
                 raise ConsistencyError("已有拷贝缺少其唯一原读取流程")
             _verify_run_identity(_intent_identity(intent), self._state)
@@ -705,6 +756,7 @@ class BeginAttemptCommand:
                     "copy_id": intent.target.copy_id,
                     "cleanup_item_id": intent.target.cleanup_item_id,
                     "obtain_item_id": intent.target.obtain_item_id,
+                    "availability_check_id": intent.target.availability_check_id,
                     "session_key": intent.session_key,
                     "status": int(_RUN_STATUS.ACTIVE),
                     "attempts_used": 1,
@@ -731,6 +783,10 @@ class BeginAttemptCommand:
             )
         self._owners[("operation_runs", run_id)] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
+        evidence = None
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            from .availability_create import _request_document
+            evidence = {"availability_intent_request": _request_document(self._availability_request)}
         event = _envelope(
             event_id,
             allocation.txn_id,
@@ -738,6 +794,7 @@ class BeginAttemptCommand:
             1,
             (attempt_row, run_row),
             intent.occurred_at,
+            evidence,
         )
         ticket = AttemptTicket(
             attempt_id=attempt_no,
@@ -924,15 +981,16 @@ def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt
             or not json_equal(attempt["attempt_no"], ticket.attempt_id)
             or run["responsibility_key"] != ticket.responsibility_key):
         raise TransactionError("结果票据与原流程、尝试或责任不符")
-    if run["kind"] == int(_RUN_KIND.READ_FILE):
-        target = str(run["copy_id"])
-    elif run["kind"] in (int(_RUN_KIND.DELETE_FILE), int(_RUN_KIND.CHECK_FILE_EXISTS)):
-        target = str(run["obtain_item_id"] if run["obtain_item_id"] is not None else run["cleanup_item_id"])
-    elif (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
-          and run["query_purpose"] == int(_QUERY_PURPOSE.BEFORE_EXECUTION)):
-        target = None
-    else:
-        target = str(run["activity_id"])
+    try:
+        kind = OperationKind[_kind_name(run["kind"])]
+        references = AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"],
+            cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"],
+            availability_check_id=run["availability_check_id"])
+        purpose = (None if run["query_purpose"] is None else
+                   QueryPurpose[decode_member("operation_runs.query_purpose", run["query_purpose"]).name])
+        target = ticket_target_for_identity(kind, references, purpose)
+    except (KeyError, ValueError, AssertionError) as error:
+        raise TransactionError("结果票据的原固定目标无效") from error
     if ticket.target_id != target:
         raise TransactionError("结果票据的目标与原责任不符")
     if not json_equal(asdict(finish.outcome.ticket), asdict(ticket)):
@@ -994,6 +1052,7 @@ class FinishAttemptCommand:
                 copy_id=run_facts.get("copy_id"),
                 cleanup_item_id=run_facts.get("cleanup_item_id"),
                 obtain_item_id=run_facts.get("obtain_item_id"),
+                availability_check_id=run_facts.get("availability_check_id"),
             ),
             (
                 QueryPurpose[
@@ -1167,7 +1226,7 @@ class FinishAttemptCommand:
                 raise TransactionError("原流程处置的阶段、行身份或字段不符")
         self._state["operation_runs"] = {run["id"]: run}
         _load_flow_context(connection, OperationKind[_kind_name(run["kind"])], run["action_id"],
-            AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"]),
+            AttemptTarget(activity_id=run["activity_id"], copy_id=run["copy_id"], cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"], availability_check_id=run["availability_check_id"]),
             QueryPurpose[decode_member("operation_runs.query_purpose", run["query_purpose"]).name]
             if run["query_purpose"] is not None else None, self._state)
         _verify_run_identity(run, self._state)
@@ -1256,6 +1315,7 @@ class _FinishStaleRunsCommand:
                     copy_id=run_facts.get("copy_id"),
                     cleanup_item_id=run_facts.get("cleanup_item_id"),
                     obtain_item_id=run_facts.get("obtain_item_id"),
+                    availability_check_id=run_facts.get("availability_check_id"),
                 ),
                 (
                     QueryPurpose[
@@ -1448,6 +1508,7 @@ class _ReadResumeCommand:
             AttemptTarget(
                 activity_id=run["activity_id"], copy_id=run["copy_id"],
                 cleanup_item_id=run["cleanup_item_id"], obtain_item_id=run["obtain_item_id"],
+                availability_check_id=run["availability_check_id"],
             ),
             QueryPurpose[decode_member(
                 "operation_runs.query_purpose", run["query_purpose"]).name]
@@ -1547,6 +1608,12 @@ class OperationRepository:
     ) -> DbOutcome[FinishAttemptResult]:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
         return _outcome_of(receipt)
+
+    def begin_availability_attempt(self, intent, request, key, owned):
+        """以当前触发资格和原检查身份登记一次设备检查意图。"""
+        if intent.kind is not OperationKind.CHECK_DEVICE_AVAILABILITY:
+            raise ValueError("该入口只登记设备可用性检查")
+        return _outcome_of(commit_operation(BeginAttemptCommand(intent, key, request), key, owned))
 
     def finish_stale_runs(
         self, request: StaleRunFinish, key: OperationKey, owned: OwnedConnection
@@ -1693,6 +1760,15 @@ def _attempt_intent_guard(event, context) -> None:
             _fail("意图阶段的尝试必须为运行中且效果未知")
     run_row = run_rows[0]
     run_after = _row_after_facts(context, run_row)
+    if run_after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
+        from .availability_intent import AvailabilityIntentReads
+        reads = context.availability_reads
+        if type(reads) is not AvailabilityIntentReads:
+            _fail("设备检查意图缺少独立设备资源守卫")
+        try:
+            reads.verify(event, context, run_row.row_id)
+        except (ConsistencyError, ValueError, KeyError) as error:
+            raise EventValidationError(f"设备检查意图资格无效: {error}") from error
     attempt_no = attempts[0].after.values["attempt_no"]
     if run_after.get("attempts_used") != attempt_no:
         _fail(
@@ -1836,6 +1912,19 @@ def _attempt_result_guard(event, context) -> None:
         if not isinstance(observations, list):
             _fail("结果正文必须保存观察数组")
         run = _guard_facts(context, "operation_runs", after.get("run_id"))
+        if (run.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
+                and status == int(_ATTEMPT_STATUS.SUCCEEDED)):
+            from .availability_release import require_result_group
+            try:
+                require_result_group(event, context)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
+            from .availability_observation import require_saved_availability
+            check = _guard_facts(context, "device_availability_checks", run.get("availability_check_id"))
+            try:
+                require_saved_availability(after, run, check)
+            except (KeyError, TypeError, ValueError) as error:
+                raise EventValidationError(f"设备可用性结果无效: {error}") from error
         if run.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and status == int(_ATTEMPT_STATUS.SUCCEEDED):
             expected = {"type": "capture_preparation_completed", "version": 1,
                         "data": {"activity_id": str(run["activity_id"])}}
@@ -1897,6 +1986,20 @@ def _operation_finish_guard(event, context) -> None:
             continue
         after = _row_after_facts(context, row)
         status = after.get("status")
+        if after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
+            from .availability_finish import AvailabilityFinishReads
+            reads = context.availability_finish_reads
+            if type(reads) is not AvailabilityFinishReads:
+                _fail("设备检查终结缺少原调用收场核验")
+            try:
+                reads.require_settled(row.row_id)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
+        if (after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
+                and status == int(_RUN_STATUS.SUCCEEDED)):
+            from .availability_release import ReleaseGroup, ResolvedGroup
+            if not isinstance(context.availability_reads, (ReleaseGroup, ResolvedGroup)):
+                _fail("设备检查成功必须与目标解除事务共同核验")
         error = after.get("error_json")
         if status in (int(_RUN_STATUS.FAILED), int(_RUN_STATUS.UNCONFIRMED)):
             if error is None:
@@ -1919,9 +2022,19 @@ def _retry_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "operation_runs":
             continue
+        facts = _row_after_facts(context, row)
+        complete = load_event_registry()["events"]["RETRY_WAIT_CHANGED"]["branches"]["COMPLETE"]["reason"]
+        if (event.event_type == _RETRY_WAIT_EVENT and event.reason == complete
+                and facts.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)):
+            from .availability_retry import AvailabilityRetryReads
+            if type(context.availability_reads) is not AvailabilityRetryReads:
+                _fail("检查等待完成缺少独立原尝试核验")
+            try:
+                context.availability_reads.verify(event, context, row.row_id)
+            except (ConsistencyError, ValueError, KeyError) as error:
+                raise EventValidationError(f"检查等待完成无效: {error}") from error
         if row.after.values.get("retry_wait_required") != 1:
             continue
-        facts = _row_after_facts(context, row)
         if facts.get("retry_interval_s_json") is None:
             _fail("建立重试等待要求已保存的重试间隔")
         if facts.get("status") not in (
@@ -1933,6 +2046,8 @@ def _retry_guard(event, context) -> None:
 
 def register_operation_guards() -> None:
     """注册操作事务的正式业务守卫（装配期调用，替换测试替身）。"""
+    from .availability_create import register_availability_guard
+    register_availability_guard()
     register_guard("operation_identity", _operation_identity_guard)
     register_guard("query_configuration", _query_configuration_guard)
     register_guard("attempt_intent", _attempt_intent_guard)

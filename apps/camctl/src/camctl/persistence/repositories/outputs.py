@@ -2038,7 +2038,7 @@ class _GrantFileCommand:
                 "responsibility_key": f"read/{copy_id}",
                 "activity_id": None,
                 "copy_id": copy_id,
-                "cleanup_item_id": None, "obtain_item_id": None,
+                "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None,
                 "session_key": None,
                 "status": int(_RUN_STATUS.PENDING),
                 "attempts_used": 0,
@@ -2280,7 +2280,7 @@ class _GrantFileCommand:
         expected = {"action_id": command.action_id, "delivery_id": delivery_id,
                     "kind": int(_RUN_KIND.READ_FILE), "copy_id": copy["id"],
                     "responsibility_key": key, "activity_id": None,
-                    "cleanup_item_id": None, "obtain_item_id": None, "query_purpose": None, "session_key": None}
+                    "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None, "query_purpose": None, "session_key": None}
         if any(run[name] != value for name, value in expected.items()):
             raise ConsistencyError("原读取流程的类型、目标或归属不一致")
         return FileQualification(

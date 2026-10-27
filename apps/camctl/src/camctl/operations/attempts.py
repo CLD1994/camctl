@@ -60,6 +60,7 @@ class OperationKind(Enum):
     STOP_RESIDUAL = "followup"
     PREPARE_CAPTURE = "prepare"
     RESOLVE_OUTPUT_SCOPE = "scope"
+    CHECK_DEVICE_AVAILABILITY = "availability"
 
 
 class QueryPurpose(Enum):
@@ -168,6 +169,7 @@ class AttemptTarget:
     copy_id: int | None = None
     cleanup_item_id: int | None = None
     obtain_item_id: int | None = None
+    availability_check_id: int | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -175,6 +177,7 @@ class AttemptTarget:
             ("copy_id", self.copy_id),
             ("cleanup_item_id", self.cleanup_item_id),
             ("obtain_item_id", self.obtain_item_id),
+            ("availability_check_id", self.availability_check_id),
         ):
             if value is not None:
                 _positive_int(value, name)
@@ -191,6 +194,7 @@ _KIND_TARGET_COLUMNS = {
     OperationKind.STOP_RESIDUAL: frozenset({"activity_id"}),
     OperationKind.PREPARE_CAPTURE: frozenset({"activity_id"}),
     OperationKind.RESOLVE_OUTPUT_SCOPE: frozenset({"activity_id"}),
+    OperationKind.CHECK_DEVICE_AVAILABILITY: frozenset({"availability_check_id"}),
 }
 
 _QUERY_PURPOSE_COLUMNS = {
@@ -243,6 +247,11 @@ class AttemptIntent:
             or self.config.retry_interval_s is None
         ):
             raise AttemptConfigError("范围收尾要求 result 调用及完整超时、重试间隔配置")
+        if self.kind is OperationKind.CHECK_DEVICE_AVAILABILITY and (
+            self.operation != "availability" or self.config.timeout_s is None
+            or self.config.retry_interval_s is None
+        ):
+            raise AttemptConfigError("设备可用性检查要求独立操作类别及完整超时、重试间隔配置")
 
 
 def query_responsibility_key(
@@ -292,6 +301,7 @@ def operation_responsibility_key(
         required = frozenset({"obtain_item_id"})
     values = {"activity_id": target.activity_id, "copy_id": target.copy_id,
               "cleanup_item_id": target.cleanup_item_id, "obtain_item_id": target.obtain_item_id,
+              "availability_check_id": target.availability_check_id,
               "query_purpose": query_purpose}
     filled = {name for name, value in values.items() if value is not None}
     if filled != set(required):
@@ -310,6 +320,8 @@ def operation_responsibility_key(
         return f"followup/{action_id}/{target.activity_id}"
     if kind is OperationKind.READ_FILE:
         return f"read/{target.copy_id}"
+    if kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+        return f"availability/{target.availability_check_id}"
     if target.obtain_item_id is not None:
         return f"obtain-exists/{target.obtain_item_id}"
     return f"{kind.value}/{target.cleanup_item_id}"
@@ -317,18 +329,26 @@ def operation_responsibility_key(
 
 def ticket_target_id(intent: AttemptIntent) -> str | None:
     """观察身份核对使用的规范十进制目标；执行前检查为空。"""
-    if intent.kind is OperationKind.QUERY_ACTIVITY:
-        if intent.query_purpose is QueryPurpose.BEFORE_EXECUTION:
+    return ticket_target_for_identity(intent.kind, intent.target, intent.query_purpose)
+
+
+def ticket_target_for_identity(kind: OperationKind, target: AttemptTarget,
+                               query_purpose: QueryPurpose | None) -> str | None:
+    """按原固定责任推导票据目标，供意图与结果共同使用。"""
+    if kind is OperationKind.QUERY_ACTIVITY:
+        if query_purpose is QueryPurpose.BEFORE_EXECUTION:
             return None
-        return str(intent.target.activity_id)
-    if intent.target.activity_id is not None:
-        return str(intent.target.activity_id)
-    if intent.target.copy_id is not None:
-        return str(intent.target.copy_id)
-    if intent.target.obtain_item_id is not None:
-        return str(intent.target.obtain_item_id)
-    assert intent.target.cleanup_item_id is not None
-    return str(intent.target.cleanup_item_id)
+        return str(target.activity_id)
+    if target.activity_id is not None:
+        return str(target.activity_id)
+    if target.copy_id is not None:
+        return str(target.copy_id)
+    if target.obtain_item_id is not None:
+        return str(target.obtain_item_id)
+    if target.availability_check_id is not None:
+        return str(target.availability_check_id)
+    assert target.cleanup_item_id is not None
+    return str(target.cleanup_item_id)
 
 
 class BeginDisposition(Enum):
