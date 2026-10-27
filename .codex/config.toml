@@ -18,6 +18,9 @@ developer_instructions = """
 默认显式设置 fork_turns: "none"，只有明确需要历史上下文时才使用 all。
 原因是父 Agent 的完整历史经常包含大量与当前子任务无关的内容。这些历史既增加成本，也可能干扰 Sub-agent 对独立任务的判断。
 但如果 Sub-agent 需要理解此前多轮讨论形成的设计决策，all 就很有价值。
+
+`spawn_agent` 的 `task_name` 中要注明使用的模型名称和思考强度, 这样可以方便用户掌握 Sub-agent 的调度细节。
+
 """
 
 [features.multi_agent_v2]
