@@ -95,7 +95,8 @@ _DISPATCH_PREVENTED = EvidenceContract(
 )
 _AVAILABILITY = EvidenceContract(
     "device_availability", 1, "availability",
-    frozenset({"check_id", "expected_serial", "expected_product_id", "observed_serial", "steps"}),
+    frozenset({"check_id", "expected_serial", "expected_product_id", "observed_serial", "steps",
+               "started_monotonic_ns", "finished_monotonic_ns"}),
     identity_field="check_id",
 )
 _AVAILABILITY_RETURNED = EvidenceContract(
@@ -135,6 +136,8 @@ class AvailabilityResult:
     reason: str | None
     calls: tuple[AvailabilityCall, ...]
     settled: bool
+    started_monotonic_ns: int
+    finished_monotonic_ns: int
 
     def to_device_result(self, check_id: str) -> DeviceCallResult:
         """将已收场事实交给原结果拥有者；未知收场不能伪造成票据。"""
@@ -174,6 +177,8 @@ class AvailabilityResult:
             "check_id": check_id, "expected_serial": self.expected_serial,
             "expected_product_id": self.expected_product_id,
             "observed_serial": self.observed_serial, "steps": steps,
+            "started_monotonic_ns": self.started_monotonic_ns,
+            "finished_monotonic_ns": self.finished_monotonic_ns,
         })
         error = None if self.available else ErrorValue("device_error", "availability", {
             "reason": self.reason, "step": None if not self.calls else self.calls[-1].name,
@@ -316,7 +321,7 @@ class HasselbladDriver:
 
         def result(reason=None, *, settled=True):
             return AvailabilityResult(expected_serial, expected_product_id, serial,
-                                      reason is None, reason, tuple(calls), settled)
+                                      reason is None, reason, tuple(calls), settled, began, now())
 
         for name in ("list", "info", "doctor"):
             scope = current_call_scope()
