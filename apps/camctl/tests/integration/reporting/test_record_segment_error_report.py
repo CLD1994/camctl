@@ -9,16 +9,21 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import validate_public_json
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.directory_switch import canonical_to_path
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting.generation import generate_report_file
 
-from ..outputs.test_segment_default_scope import _source, _obtain
+from ..outputs.test_segment_default_scope import _obtain
 from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
+from ..capture.test_capture_contract import _NOW
+from ..capture.test_record_file_completion_wait import _completed_result, _stop_context
+from ..capture.test_record_segment_scope_recovery import SegmentWaitCatalog, _entry
 from camctl.persistence.repositories.segment_selections import (
     FixSegmentSelection,
     fix_segment_selection,
 )
 from .test_generation import _freeze, _spec
+from .capture_fixtures import stopped_record_world
 
 pytestmark = pytest.mark.asyncio
 
@@ -30,14 +35,26 @@ async def test_expired_prepared_source_without_segment_set_reports_selection_fai
     from camctl.persistence.repositories.scheduling import ExpireActionRequest
     from camctl.persistence.repositories.outputs import FinishObtain, OutputsRepository
     from ..capture.result_consumer_fixtures import consumer_world
+    from ..capture.result_consumer_fixtures import RESULT_EVIDENCE
+    from ..capture.public_assembly import assemble_capture
     from ..capture.test_action6_segmented_normal import (
         Action6NativeCatalog, Action6RecordCatalog,
     )
-    from ..capture.test_capture_contract import _NOW
+    from ..capture.test_capture_contract import ResultsDouble, _NOW
 
     catalog = Action6RecordCatalog() if consumer == "record" else Action6NativeCatalog(0)
+    database = None
+
+    async def assemble(owned, *, driver):
+        nonlocal database
+        runtime, database = await assemble_capture(
+            owned, driver=driver, evidence=RESULT_EVIDENCE, results=ResultsDouble({}),
+            staging=canonical_to_path(owned.metadata.staging_path),
+            wall_us=lambda: _NOW, monotonic_ns=lambda: 5_000_000_000)
+        return runtime
+
     owned, runtime, source_id, _ = await consumer_world(
-        tmp_path, consumer, catalog=catalog, start=False,
+        tmp_path, consumer, catalog=catalog, start=False, assemble=assemble,
     )
     try:
         now = _NOW + 6_000_000
@@ -45,8 +62,8 @@ async def test_expired_prepared_source_without_segment_set_reports_selection_fai
             ExpireActionRequest(source_id, now, now), new_operation_key(), owned,
         )
         assert expired.kind is DbOutcomeKind.COMPLETED, expired.error
-        assert runtime.action(source_id)["status"] == 5
-        assert runtime.action(source_id)["execution_started"] == 1
+        assert (await runtime.action(source_id))["status"] == 5
+        assert (await runtime.action(source_id))["execution_started"] == 1
         assert owned.connection.execute("SELECT COUNT(*) FROM segment_sets").fetchone() == (0,)
         action_id, selection = _obtain(owned, runtime, source_id, "preview", 2)
         fixed = fix_segment_selection(
@@ -73,11 +90,24 @@ async def test_expired_prepared_source_without_segment_set_reports_selection_fai
         assert rebuilt.path.read_bytes() == before
         assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
     finally:
+        await database.close()
         owned.connection.close()
 
 
 async def test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup(tmp_path):
-    owned, runtime, aid = await _source(tmp_path, (7, 8, 10))
+    async def read(request, _batch, owned, action_id, clock):
+        context = _stop_context(owned, action_id)
+        clock.update(wall=_NOW + 17_000_000, monotonic=22_000_000_000)
+        entries = []
+        for index in (7, 8, 10):
+            name = f"CAM_001/CAM_20261022100000_{index:04d}_D."
+            entries.extend((_entry(name + "OSV", size=10), _entry(name + "LRF")))
+        return _completed_result(request.ticket, context,
+                                 entries=sorted(entries, key=lambda item: item["identity"]),
+                                 finalized=True)
+
+    owned, runtime, aid, _, _ = await stopped_record_world(
+        tmp_path, SegmentWaitCatalog(), read)
     try:
         report = _freeze(owned)
         original = generate_report_file(_spec(tmp_path, report))
@@ -146,4 +176,5 @@ async def test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup(tmp_pa
             original.sha256,
         )
     finally:
+        await runtime.database.close()
         owned.connection.close()

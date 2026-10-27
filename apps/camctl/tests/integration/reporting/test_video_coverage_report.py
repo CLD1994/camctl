@@ -13,11 +13,10 @@ from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting.generation import generate_report_file
 
-from ..capture.result_consumer_fixtures import consumer_world
 from ..capture.test_action6_segmented_normal import (
     Action6NativeCatalog,
+    Action6RecordCatalog,
     _entry,
-    _stopped_action6_record,
 )
 from ..capture.test_capture_contract import _NOW
 from ..capture.test_record_file_completion_wait import (
@@ -27,6 +26,7 @@ from ..capture.test_record_file_completion_wait import (
 )
 from ..capture.test_result_page_history import _actual
 from .test_generation import _freeze, _spec
+from .capture_fixtures import reporting_capture_world, stopped_record_world
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,12 +46,9 @@ def _mixed_entries():
 
 async def _complete_action6(tmp_path, action_type):
     if action_type == "camera_record":
-        owned, runtime, action_id, handler, _ = await _stopped_action6_record(
-            tmp_path
-        )
-        context = _stop_context(owned, action_id)
-
-        async def read(request, _batch):
+        async def read(request, _batch, owned, action_id, clock):
+            context = _stop_context(owned, action_id)
+            clock.update(wall=_NOW + 17_000_000, monotonic=22_000_000_000)
             return _completed_result(
                 request.ticket,
                 context,
@@ -59,30 +56,32 @@ async def _complete_action6(tmp_path, action_type):
                 finalized=True,
             )
 
-        _result_port(runtime, read)
-        await capture_handler(handler)(action_id, runtime)
+        owned, runtime, action_id, handler, _ = await stopped_record_world(
+            tmp_path, Action6RecordCatalog(), read)
+        await runtime.database.close()
         return owned, action_id
 
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False
-    )
-    wall, mono = [_NOW], [5_000_000_000]
-    runtime.wall_us = lambda: wall[0]
-    runtime.monotonic_ns = lambda: mono[0]
-    runtime.wait_config = lambda _action: CaptureWaitConfig(1000, 200, 0, 0)
-    runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
-    await capture_handler(handler)(action_id, runtime)
+    owned, runtime, action_id, handler, clock = await reporting_capture_world(
+        tmp_path, "timelapse", Action6NativeCatalog(0))
+    try:
+        runtime.wait_config = lambda _action: CaptureWaitConfig(1000, 200, 0, 0)
+        runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
+        await capture_handler(handler)(action_id, runtime)
 
-    async def read(request, _batch):
-        return DeviceCallResult.from_outcome(
-            _actual(request.ticket, entries=_mixed_entries(), finalized=True)
-        )
+        async def read(request, _batch):
+            return DeviceCallResult.from_outcome(
+                _actual(request.ticket, entries=_mixed_entries(), finalized=True)
+            )
 
-    _result_port(runtime, read)
-    wall[0] = _NOW + 1_200_000
-    mono[0] += 1_200_000_000
-    await capture_handler(handler)(action_id, runtime)
-    return owned, action_id
+        _result_port(runtime, read)
+        clock.update(wall=_NOW + 1_200_000, monotonic=6_200_000_000)
+        await capture_handler(handler)(action_id, runtime)
+        return owned, action_id
+    except BaseException:
+        owned.connection.close()
+        raise
+    finally:
+        await runtime.database.close()
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
