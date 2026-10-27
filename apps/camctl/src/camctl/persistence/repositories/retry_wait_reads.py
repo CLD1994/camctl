@@ -11,19 +11,16 @@ class RetryWaitReads:
     def __init__(self, connection):
         self.connection = connection
 
-    def _require_index(self, name, expected):
-        with closing(self.connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)
-        )) as cursor:
-            index = cursor.fetchone()
-        if index is None or not isinstance(index[0], str) or " ".join(index[0].split()) != expected:
-            raise ConsistencyError(f"读取等待所需索引缺失或定义不符: {name}")
+    def _require_index(self, name):
+        from camctl.persistence.retry_wait_structure import verify_retry_wait_index
+        try:
+            verify_retry_wait_index(self.connection, name)
+        except ValueError as error:
+            raise ConsistencyError(str(error)) from error
 
     def no_unsettled_attempts(self, run_id, validated=()):
-        self._require_index("operation_attempts_run_status",
-                            "CREATE INDEX operation_attempts_run_status ON operation_attempts(run_id, status)")
-        self._require_index("operation_attempts_without_result",
-                            "CREATE INDEX operation_attempts_without_result ON operation_attempts(run_id) WHERE result_json IS NULL")
+        self._require_index("operation_attempts_run_status")
+        self._require_index("operation_attempts_without_result")
         running = int(enum_for("operation_attempts.status").RUNNING)
         with closing(self.connection.execute(
             "SELECT id FROM operation_attempts WHERE run_id=? AND status=? LIMIT 2", (run_id, running),
@@ -75,8 +72,7 @@ class RetryWaitReads:
         last = self.last_attempt(run_id, attempts_used)
         if last is None:
             return False
-        self._require_index("history_events_row", "CREATE INDEX history_events_row ON history_events(event_type, "
-                            "json_extract(body_json, '$.rows[0].table'), json_extract(body_json, '$.rows[0].id'), id)")
+        self._require_index("history_events_row")
         with closing(self.connection.execute(
             "SELECT body_json FROM history_events WHERE event_type=?"
             " AND json_extract(body_json,'$.rows[0].table')=?"

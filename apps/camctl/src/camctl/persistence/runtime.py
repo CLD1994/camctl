@@ -396,6 +396,11 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
+        from camctl.persistence.retry_wait_structure import verify_retry_wait_structure
+        try:
+            verify_retry_wait_structure(connection)
+        except (ValueError, sqlite3.Error) as error:
+            raise DatabaseInvalidError(f"读取重试索引结构无效: {error}") from error
         from camctl.persistence.output_scope_structure import (
             verify_device_activity_structure, verify_output_scope_structure,
         )

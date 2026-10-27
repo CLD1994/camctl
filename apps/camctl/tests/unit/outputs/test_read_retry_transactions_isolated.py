@@ -92,7 +92,12 @@ def load_reads():
     events.reason_for_branch = lambda event_name, branch_name: {"REQUIRE": 1, "COMPLETE": 2, "ABANDON": 3}[branch_name]
     operations = ModuleType("camctl.persistence.repositories.operations")
     operations._RETRY_WAIT_EVENT = 6
-    modules = {module.__name__: module for module in (enums, json_values, values, discovery, outputs, events, operations)}
+    structure = ModuleType("camctl.persistence.retry_wait_structure")
+    def verify_index(connection, name):
+        if connection.execute("SELECT sql FROM sqlite_master", (name,)).fetchone() is None:
+            raise ValueError(name)
+    structure.verify_retry_wait_index = verify_index
+    modules = {module.__name__: module for module in (enums, json_values, values, discovery, outputs, events, operations, structure)}
     spec = importlib.util.spec_from_file_location("camctl.persistence.repositories._isolated_retry_reads",
                                                   SOURCE / "persistence" / "repositories" / "retry_wait_reads.py")
     module = importlib.util.module_from_spec(spec)
