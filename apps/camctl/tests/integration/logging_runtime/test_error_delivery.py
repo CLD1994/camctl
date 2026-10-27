@@ -183,22 +183,26 @@ async def test_warning_configuration_filters_lower_levels():
 
 
 async def test_cancel_racing_with_successful_put_does_not_enqueue_twice(monkeypatch):
+    from camctl.logging_runtime.receipt import LogReceipt
     from camctl.logging_runtime.service import admission_result_for
     written = []
     channel = channel_for(lambda record: written.append(record) or True)
     fill(channel)
-    real_put = channel._queue.async_q.put
+    real_wait = LogReceipt.wait_admission
     accepted = asyncio.Event()
     control_errors = []
-    async def put_then_cancel_boundary(entry):
-        await real_put(entry)
+    async def admitted_then_cancel_boundary(receipt):
+        result = await real_wait(receipt)
         accepted.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError as error:
             control_errors.append(error)
+            # 仅在第一次已接纳结果与协程恢复的边界注入取消。
+            monkeypatch.setattr(LogReceipt, "wait_admission", real_wait)
             raise
-    monkeypatch.setattr(channel._queue.async_q, "put", put_then_cancel_boundary)
+        return result
+    monkeypatch.setattr(LogReceipt, "wait_admission", admitted_then_cancel_boundary)
     task = asyncio.create_task(channel.alog(LogRecord(LogLevel.ERROR, "race")))
     await advance()
     channel.start()

@@ -7,6 +7,7 @@ import queue
 import random
 import sys
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from os import getpid
 from typing import Callable
@@ -19,9 +20,10 @@ from camctl.logging_runtime.admission import (
 )
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.formatting import encode_record, utc_now
+from camctl.logging_runtime.receipt import LogReceipt
 
 __all__ = ["AdmissionResult", "ChannelError", "LogChannel", "LogRecord",
-           "PendingLog", "admission_result_for"]
+           "LogReceipt", "PendingLog", "admission_result_for"]
 
 
 @dataclass(frozen=True)
@@ -47,7 +49,7 @@ class LogRecord:
 @dataclass(frozen=True)
 class AdmissionResult:
     decision: AdmissionDecision
-    queue_depth: int
+    queue_depth: int | None
     delivered: bool | None = None
     fallback_written: bool = False
 
@@ -79,20 +81,17 @@ class PendingLog:
     entry: _QueuedRecord | None = field(default=None, repr=False)
 
 
-@dataclass(frozen=True)
-class _WriteReceipt:
-    written: bool
-    fallback_written: bool = False
-
-
 @dataclass
 class _QueuedRecord:
     record: LogRecord
+    receipt: LogReceipt = field(default_factory=LogReceipt)
     pending_id: int | None = None
     sample_value: float | None = None
     enqueued: bool = False
     fallback_written: bool | None = None
     fallback_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    admission: AdmissionResult | None = None
+    failure: ChannelError | None = None
 
 
 class _Rejected(Exception):
@@ -108,6 +107,58 @@ class _AdmissionQueue(janus.Queue):
         self.low, self.high = low, high
         self.level, self.probability = level, probability
         self.random_source = random_source
+        self.overflow: deque[_QueuedRecord] = deque()
+        self.admission_notifications: deque[_QueuedRecord] = deque()
+        self.inflight: _QueuedRecord | None = None
+
+    def admit(self, item, *, allow_overflow=True):
+        """登记与取出补位共用 Janus 接纳锁，后来者不能抢占空位。"""
+        with self._sync_mutex:
+            record = item.record
+            if _level_rank(record.level) < _level_rank(self.level):
+                kind = AdmissionKind.FILTERED_OUT
+            elif self._is_shutdown:
+                kind = AdmissionKind.CHANNEL_FAILED
+            elif self._qsize() >= self.maxsize:
+                if record.level is LogLevel.ERROR:
+                    kind = (AdmissionKind.WAITING if (allow_overflow and record.source is LogSource.COROUTINE)
+                            else AdmissionKind.FALLBACK_STDERR)
+                    if kind is AdmissionKind.WAITING:
+                        self.overflow.append(item)
+                else:
+                    kind = AdmissionKind.DROPPED
+            else:
+                try:
+                    self._put_internal(item)
+                except _Rejected as rejected:
+                    kind = rejected.decision.kind
+                else:
+                    if self._sync_not_empty_waiting:
+                        self._sync_not_empty.notify()
+                    if self._async_not_empty_waiting:
+                        self._notify_async(self._async_not_empty.notify)
+                    return item.admission
+            result = AdmissionResult(AdmissionDecision(kind, record.level), self._qsize())
+            if kind is not AdmissionKind.WAITING:
+                item.admission = result
+            return result
+
+    def _get(self):
+        item = super()._get()
+        if isinstance(item, _QueuedRecord) and not self._is_shutdown:
+            self.inflight = item
+        if self.overflow and not self._is_shutdown:
+            promoted = self.overflow.popleft()
+            self._put_internal(promoted)
+            self.admission_notifications.append(promoted)
+        return item
+
+    def publish_admissions(self):
+        with self._sync_mutex:
+            entries = list(self.admission_notifications)
+            self.admission_notifications.clear()
+        for entry in entries:
+            entry.receipt.complete_admission(entry.admission)
 
     def _put(self, item):
         if isinstance(item, _QueuedRecord):
@@ -128,6 +179,8 @@ class _AdmissionQueue(janus.Queue):
                 raise _Rejected(decision)
             super()._put(item)
             item.enqueued = True
+            item.admission = AdmissionResult(
+                AdmissionDecision(AdmissionKind.ACCEPTED, record.level), self._qsize())
         else:
             super()._put(item)
 
@@ -152,12 +205,13 @@ class LogChannel:
         self._lock = threading.Lock()
         self._counters = DropCounters()
         self._channel_failed = False
+        self._channel_error: ChannelError | None = None
         self._closing = False
         self._producers_finished = False
         self._producers = 0
         self._producer_waiters: list[asyncio.Future] = []
         self._pending_lock = threading.Lock()
-        self._pending: dict[int, PendingLog] = {}
+        self._pending: dict[int, _QueuedRecord] = {}
         self._next_pending_id = 0
         self._listener = threading.Thread(target=self._consume,
                                           name="camctl-log-listener", daemon=True)
@@ -171,22 +225,68 @@ class LogChannel:
     def _filtered(self, record):
         return _level_rank(record.level) < _level_rank(self._level)
 
-    def slog(self, record: LogRecord) -> AdmissionResult:
-        """同步来源立即接纳；ERROR 无位置或通道失效时完整转交 stderr。"""
+    def _begin_producer(self):
         with self._lock:
-            finished = self._producers_finished
-            if not finished:
-                self._producers += 1
+            if self._producers_finished:
+                return False
+            self._producers += 1
+            return True
+
+    def submit(self, record: LogRecord, *, receipt: LogReceipt | None = None) -> LogReceipt:
+        """调用时登记原记录；忽略回执也由原日志线程顺序处理。"""
+        receipt = receipt if receipt is not None else LogReceipt()
+        if not receipt._claim_submission():
+            return receipt
+        entry = _QueuedRecord(record, receipt=receipt)
+        started = self._begin_producer()
         try:
-            result = (self._result(AdmissionKind.CHANNEL_FAILED, record) if finished
-                      else self._admit(_QueuedRecord(record)))
+            self._submit_entry(entry, finished=not started)
+        finally:
+            if started:
+                self._finish_producer()
+        return receipt
+
+    def _submit_entry(self, entry, *, finished=False, allow_overflow=True):
+        record = entry.record
+        result = (self._result(AdmissionKind.CHANNEL_FAILED, record) if finished
+                  else self._queue.admit(entry, allow_overflow=allow_overflow))
+        if result.decision.kind is AdmissionKind.WAITING:
+            return
+        entry.admission = result
+        if result.decision.kind in (AdmissionKind.DROPPED, AdmissionKind.SAMPLED_OUT):
+            with self._lock:
+                self._counters = record_drop(self._counters, result.decision)
+        entry.receipt.complete_admission(result)
+        if result.decision.kind is not AdmissionKind.ACCEPTED:
+            fallback_written = False
+            try:
+                if result.decision.kind is not AdmissionKind.FILTERED_OUT:
+                    fallback_written = self._fallback_entry(entry)
+            except BaseException as error:
+                _attach_admission(error, AdmissionResult(
+                    result.decision, result.queue_depth, delivered=False))
+                raise
+            finally:
+                entry.receipt.complete_write(AdmissionResult(
+                    result.decision, result.queue_depth, delivered=False,
+                    fallback_written=fallback_written))
+
+    def slog(self, record: LogRecord) -> AdmissionResult:
+        """同步来源立即接纳；自身 ERROR 仍由协程入口承担等待责任。"""
+        # 旧同步接口不能持有尚未入队的重要记录，保持立即 stderr 语义。
+        entry = _QueuedRecord(record)
+        started = self._begin_producer()
+        try:
+            self._submit_entry(entry, finished=not started, allow_overflow=False)
+            result = entry.receipt.admission_result
             if (record.level is LogLevel.ERROR and not self._filtered(record)
                     and result.decision.kind not in (AdmissionKind.ACCEPTED, AdmissionKind.FILTERED_OUT)):
                 return AdmissionResult(AdmissionDecision(AdmissionKind.FALLBACK_STDERR, record.level),
-                                       result.queue_depth, fallback_written=self._safe_fallback(record))
+                                       result.queue_depth,
+                                       fallback_written=entry.receipt.write_result.fallback_written)
             return result
         finally:
-            if not finished:
+            if started:
                 self._finish_producer()
 
     def _finish_producer(self):
@@ -199,64 +299,31 @@ class LogChannel:
             _settle_receipt(waiter, written=True)
 
     async def alog(self, record: LogRecord) -> AdmissionResult:
-        """自身 ERROR 在当前协程异步等待位置，成功仅表示入队。"""
+        """旧接口仅等待实际入队；取消保护保留到入队或通道失效。"""
         return await self._alog(_QueuedRecord(record))
 
     async def _alog(self, entry: _QueuedRecord) -> AdmissionResult:
-        record = entry.record
-        with self._lock:
-            if self._producers_finished:
-                return self._result(AdmissionKind.CHANNEL_FAILED, record)
-            self._producers += 1
+        started = self._begin_producer()
         control = None
         try:
-            result = self._admit(entry)
-            if result.decision.kind is AdmissionKind.WAITING:
-                while True:
-                    try:
-                        # Janus 取消发生在等待处；实际插入后没有新的 await。
-                        # 同一 entry 的实际插入事实同时用于取消竞争裁决。
-                        await self._queue.async_q.put(entry)
-                        result = self._result(AdmissionKind.ACCEPTED, record)
-                        break
-                    except asyncio.CancelledError as error:
-                        if control is None:
-                            control = error
-                        if entry.enqueued:
-                            result = self._result(AdmissionKind.ACCEPTED, record)
-                            break
-                    except janus.AsyncQueueShutDown:
-                        result = self._result(AdmissionKind.CHANNEL_FAILED, record)
-                        break
+            self._submit_entry(entry, finished=not started)
+            while True:
+                try:
+                    result = await entry.receipt.wait_admission()
+                    break
+                except asyncio.CancelledError as error:
+                    if control is None:
+                        control = error
             if control is not None:
                 _attach_admission(control, result)
                 raise control.with_traceback(control.__traceback__)
             return result
         finally:
-            self._finish_producer()
-
-    def _admit(self, entry):
-        record = entry.record
-        if self._filtered(record):
-            return self._result(AdmissionKind.FILTERED_OUT, record)
-        try:
-            self._queue.sync_q.put_nowait(entry)
-            result = self._result(AdmissionKind.ACCEPTED, record)
-        except _Rejected as rejected:
-            result = AdmissionResult(rejected.decision, self._queue.sync_q.qsize())
-        except queue.Full:
-            kind = (AdmissionKind.WAITING if record.source is LogSource.COROUTINE
-                    else AdmissionKind.FALLBACK_STDERR) if record.level is LogLevel.ERROR else AdmissionKind.DROPPED
-            result = self._result(kind, record)
-        except janus.SyncQueueShutDown:
-            result = self._result(AdmissionKind.CHANNEL_FAILED, record)
-        if result.decision.kind in (AdmissionKind.DROPPED, AdmissionKind.SAMPLED_OUT):
-            with self._lock:
-                self._counters = record_drop(self._counters, result.decision)
-        return result
+            if started:
+                self._finish_producer()
 
     async def finish_producers(self) -> None:
-        """停止新增生产，等待已经开始的协程交付唯一入队结果。"""
+        """封闭新提交，原 overflow 仍由日志线程补位并消费。"""
         with self._lock:
             self._producers_finished = True
             if not self._producers:
@@ -266,20 +333,17 @@ class LogChannel:
         await waiter
 
     async def join(self) -> None:
-        """等待已接纳记录的实际消费记账。"""
+        """等待原队列及满载重要日志全部完成实际消费记账。"""
         await self._queue.async_q.join()
 
     async def deliver_important(self, record: LogRecord) -> AdmissionResult:
-        """特殊诊断等待实际写盘；每次调用独占自己的交付凭据。"""
-        pending = PendingLog(record, asyncio.get_running_loop().create_future())
-        # 取消后的凭据仍由消费侧结算；读取异常避免无人等待时产生警告。
-        pending.receipt.add_done_callback(_observe_receipt)
+        """保留特殊交付的取消、异常和独立实际写入凭据。"""
+        entry = _QueuedRecord(record)
         with self._pending_lock:
             self._next_pending_id += 1
             pending_id = self._next_pending_id
-            entry = _QueuedRecord(record, pending_id)
-            pending.entry = entry
-            self._pending[pending_id] = pending
+            entry.pending_id = pending_id
+            self._pending[pending_id] = entry
         admission = None
         try:
             try:
@@ -289,39 +353,50 @@ class LogChannel:
                 raise
             if admission.decision.kind is not AdmissionKind.ACCEPTED:
                 return admission
-            pending.enqueued = True
             try:
-                delivered = await asyncio.shield(pending.receipt)
+                delivered = await entry.receipt
             except BaseException as error:
                 if admission_result_for(error) is None:
                     _attach_admission(error, admission)
                 raise
-            return AdmissionResult(admission.decision, admission.queue_depth,
-                                   delivered.written, delivered.fallback_written)
+            if entry.failure is not None:
+                failure = ChannelError(str(entry.failure))
+                failure.__cause__ = entry.failure
+                _attach_admission(failure, delivered)
+                raise failure
+            return delivered
         finally:
             if admission is None or admission.decision.kind is not AdmissionKind.ACCEPTED:
                 with self._pending_lock:
                     self._pending.pop(pending_id, None)
-                if not pending.receipt.done():
-                    pending.receipt.cancel()
 
     def disable_channel(self, error: ChannelError) -> None:
-        """非立即关闭保留消费记账，同时唤醒所有尚未入队的生产者。"""
-        self._channel_failed = True
+        """结算未开始写出的责任；正在写入项保留 writer 的实际事实。"""
+        with self._queue._sync_mutex:
+            self._channel_failed = True
+            self._channel_error = error
+            self._queue._is_shutdown = True
+            entries = [entry for entry in self._queue._queue
+                       if isinstance(entry, _QueuedRecord)]
+            entries.extend(self._queue.overflow)
+            self._queue.overflow.clear()
+            for entry in entries:
+                entry.failure = error
+                if not entry.enqueued:
+                    entry.admission = AdmissionResult(
+                        AdmissionDecision(AdmissionKind.CHANNEL_FAILED, entry.record.level),
+                        self._queue._qsize())
         self._queue.shutdown(immediate=False)
-        with self._pending_lock:
-            pending_records = list(self._pending.values())
-            self._pending.clear()
-        for pending in pending_records:
-            fallback_written = (self._fallback_entry(pending.entry)
-                                if pending.entry.enqueued else False)
-            failure = ChannelError(str(error))
-            failure.__cause__ = error
-            _attach_admission(failure, AdmissionResult(
-                AdmissionDecision(AdmissionKind.ACCEPTED if pending.entry.enqueued
-                                  else AdmissionKind.CHANNEL_FAILED, pending.record.level),
-                self._queue.sync_q.qsize(), delivered=False, fallback_written=fallback_written))
-            _settle_receipt(pending.receipt, error=failure)
+        self._queue.publish_admissions()
+        control = None
+        for entry in entries:
+            try:
+                self._complete_entry(entry, written=False)
+            except BaseException as error:
+                if control is None:
+                    control = error
+        if control is not None:
+            raise control.with_traceback(control.__traceback__)
 
     def pending_count(self) -> int:
         with self._pending_lock:
@@ -348,29 +423,49 @@ class LogChannel:
                             self._summary_written = False
                     self._stop_marker_done = True
                     break
-                record = entry.record
+                self._queue.publish_admissions()
+                entry.receipt.complete_admission(entry.admission)
                 written = False
                 if not self._channel_failed:
                     try:
-                        written = self._writer(record)
+                        written = self._writer(entry.record)
                     except Exception as error:
-                        self.disable_channel(ChannelError(f"日志写入失败: {error}"))
-                fallback_written = self._fallback_entry(entry) if not written else False
-                self._settle_pending(entry, written, fallback_written)
+                        failure = ChannelError(f"日志写入失败: {error}")
+                        entry.failure = failure
+                        self._fallback_entry(entry)
+                        self.disable_channel(failure)
+                if not written and self._channel_failed:
+                    entry.failure = self._channel_error
+                self._complete_entry(entry, written=written)
             finally:
+                with self._queue._sync_mutex:
+                    if self._queue.inflight is entry:
+                        self._queue.inflight = None
                 self._queue.sync_q.task_done()
 
-    def _settle_pending(self, entry, written, fallback_written):
-        with self._pending_lock:
-            pending = self._pending.pop(entry.pending_id, None)
-        if pending is not None:
-            _settle_receipt(pending.receipt, written=_WriteReceipt(written, fallback_written))
+    def _complete_entry(self, entry, *, written):
+        admission = entry.admission
+        entry.receipt.complete_admission(admission)
+        fallback_written = False
+        try:
+            if not written:
+                fallback_written = self._fallback_entry(entry)
+        except BaseException as error:
+            _attach_admission(error, AdmissionResult(
+                admission.decision, admission.queue_depth, delivered=False))
+            raise
+        finally:
+            entry.receipt.complete_write(AdmissionResult(
+                admission.decision, admission.queue_depth, bool(written), fallback_written))
+            with self._pending_lock:
+                self._pending.pop(entry.pending_id, None)
 
     def _fallback_entry(self, entry):
         if entry is None or entry.record.level is not LogLevel.ERROR:
             return False
         with entry.fallback_lock:
             if entry.fallback_written is None:
+                entry.fallback_written = False
                 entry.fallback_written = self._safe_fallback(entry.record)
             return entry.fallback_written
 
@@ -426,6 +521,11 @@ class LogChannel:
         return self._channel_failed
 
     def async_close(self):
+        with self._queue._sync_mutex:
+            outstanding = bool(self._queue._qsize() or self._queue.overflow
+                               or self._queue.inflight is not None)
+        if outstanding:
+            self.disable_channel(ChannelError("日志队列已关闭"))
         self._queue.close()
 
     async def await_closed(self):
@@ -434,11 +534,6 @@ class LogChannel:
 
 def _level_rank(level):
     return {LogLevel.DEBUG: 0, LogLevel.INFO: 1, LogLevel.WARNING: 2, LogLevel.ERROR: 3}[level]
-
-
-def _observe_receipt(receipt):
-    if not receipt.cancelled():
-        receipt.exception()
 
 
 def _write_stderr(message):

@@ -60,7 +60,7 @@ class TestPendingLog:
         writer.release.set()
         await asyncio.to_thread(channel.stop_listener, timeout=10)
 
-    async def test_disable_channel_exits_waiters_with_failure(self) -> None:
+    async def test_disable_channel_preserves_inflight_writer_fact(self) -> None:
         writer = BlockingWriter()
         channel = self._channel(writer)
         channel.start()
@@ -72,13 +72,12 @@ class TestPendingLog:
         )
         await asyncio.get_running_loop().run_in_executor(None, writer.started.wait, 5)
         channel.disable_channel(ChannelError("磁盘不可用"))
-        # 等待者以通道失败凭据立即退出（未写记录不标成功）。
-        with pytest.raises(ChannelError):
-            await waiter
-        # 等待中的记录凭据未标成功；通道禁用后续接纳按通道故障分类。
+        # 当前 writer 尚未返回；禁用不能抢先否定实际追加及 flush。
+        assert not waiter.done()
         result = await channel.alog(LogRecord(level=LogLevel.ERROR, message="y"))
         assert result.decision.kind.value == "channel_failed"
         writer.release.set()
+        assert (await waiter).delivered is True
         await asyncio.to_thread(channel.stop_listener, timeout=10)
 
     async def test_accepted_record_delivers_receipt(self) -> None:
