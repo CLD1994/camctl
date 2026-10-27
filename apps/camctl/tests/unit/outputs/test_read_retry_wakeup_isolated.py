@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 
+sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl"
 
 
