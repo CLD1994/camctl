@@ -86,6 +86,21 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_elapsed_interval_does_not_schedule_an_immediate_retry(self):
+        scheduled = []
+
+        async def read_one(database, query, parameters):
+            return (1, 1, 3)
+
+        gate = SimpleNamespace(remaining=lambda *args, **kwargs: None)
+        runtime = SimpleNamespace(database=None, retry_gate=gate, monotonic_ns=lambda: 6_000_000_000,
+                                  on_read_retry_deadline=lambda target, now: scheduled.append((target, now)))
+        remaining = load_function(SOURCE / "outputs" / "obtain_flow.py", "_read_wait_remaining", {
+            "read_one": read_one,
+        })
+        self.assertIsNone(await remaining(runtime, 7, Decimal("5"), 3))
+        self.assertEqual(scheduled, [])
+
     async def test_pending_interval_schedules_exact_deadline(self):
         scheduled = []
 
