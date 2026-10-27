@@ -33,7 +33,7 @@ pytestmark = pytest.mark.asyncio
 
 @asynccontextmanager
 async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
-                       capacity=64, low=48, high=56, probability=1):
+                       capacity=64, low=48, high=56, probability=1, debug=False):
     """以真实文件适配器返回值界定追加与 flush；仅控制写入前后门闩。"""
     file = FileChannel(path, max_bytes=1 << 20, file_count=1)
     entered, release = threading.Event(), threading.Event()
@@ -56,6 +56,10 @@ async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
                          random_source=SimpleNamespace(random=lambda: 0.5),
                          writer=writer, fallback=fallback.append)
     runtime = LogRuntime(channel, level=level, file_closer=file.close)
+    loop = asyncio.get_running_loop()
+    previous_debug = loop.get_debug()
+    if debug:
+        loop.set_debug(True)
     channel.start()
     try:
         with event_logging(channel), error_diagnostics_context(channel, fallback.append):
@@ -63,8 +67,12 @@ async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
                                   release=release, fallback=fallback)
     finally:
         release.set()
-        await completed(asyncio.create_task(close_logging(runtime)))
-        assert not channel.listener_alive
+        try:
+            await completed(asyncio.create_task(close_logging(runtime)))
+            assert not channel.listener_alive
+        finally:
+            if debug:
+                loop.set_debug(previous_debug)
 
 
 async def entered_writer(world):
@@ -146,7 +154,7 @@ async def test_cancelled_receipt_waiter_does_not_cancel_other_waiter_or_write(tm
 
 async def test_full_logger_error_keeps_order_with_original_diagnostic_and_alog(tmp_path):
     path = tmp_path / "camctl.log"
-    async with logging_file(path, gate="before", capacity=3, low=1, high=2) as world:
+    async with logging_file(path, gate="before", capacity=3, low=1, high=2, debug=True) as world:
         await world.channel.alog(LogRecord(LogLevel.WARNING, "consumer-gate"))
         await entered_writer(world)
         for number in range(3):
