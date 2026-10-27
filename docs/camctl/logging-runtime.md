@@ -46,6 +46,24 @@
 
 ### 日志异步投递入口与有界队列
 
+业务通过 `camctl.logging_runtime.get_logger(name)` 取得通用协程 Logger，通过 `get_sync_logger(name)` 取得同步入口。Logger 可在模块级创建；通道、阶段和业务身份在每次调用时从当前上下文取得。完整字段、消息参数及错误状态规则由[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)维护。
+
+```python
+from camctl.logging_runtime import get_logger, get_sync_logger
+
+logger = get_logger(__name__)
+sync_logger = get_sync_logger(__name__)
+
+# 在协程中使用，extra 补充所属业务的已知字段。
+await logger.info("准备设备 %s", device_id,
+                  extra={"stage": "camera_setting", "device_id": device_id})
+
+# 在同步函数或工作线程中使用，继承当前通道和关联身份。
+sync_logger.warning("本轮维护已停用", extra={"stage": "snapshot.maintenance"})
+```
+
+`logger.exception(...)` 默认冻结当前异常，后续外层 `record_error` 复用同一诊断状态。没有异常对象的文本 ERROR 每次调用独立记录。同步入口仅用于低于 ERROR 的级别；普通设备结果仍使用 `record_call_outcome` 保存完整事实。必须先传播异常才能执行必要停止的路径，继续同步准备原诊断并先推进停止，不能在该位置先等待通用 ERROR 接纳。
+
 协程使用 `await logger.error(...)` 形式投递，异步 Logger 的 `debug`、`info`、`warning`、`error`、`critical`、`exception` 方法统一采用可等待接口，保留标准日志常用的消息参数、`extra` 和异常信息语义。日志来源须指向业务调用处，异常信息在等待前捕获。级别检查沿用本次进程生效配置，被配置级别过滤的记录不进入队列。
 
 camctl 自身的 `ERROR` / `CRITICAL` 日志只允许由主事件循环中的协程通过异步入口投递，`exception()` 按 `ERROR` 处理。数据库、文件、报告通信等工作线程通过已有结果或异常通道报告错误，由所属流程的协程统一处理并记录；这些线程可以通过同步入口记录低于 `ERROR` 的日志。主事件循环直接调用的同步函数或回调同样通过结果、异常或既有监督通道报告错误，由所属协程记录。报告子进程的同步工作通过既有任务结果与控制通信报告失败，由主进程所属协程处理和记录。
