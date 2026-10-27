@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +24,8 @@ from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import (
     build_runtime, close_runtime, execute_command,
 )
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.lifecycle import close_logging
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.service import LogRecord
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from integration.logging_runtime.sync_support import FileSyncProbe
@@ -222,3 +224,67 @@ async def test_runtime_sync_failure_preserves_append_without_file_success(
             assert waiter in done
         await asyncio.gather(waiter, return_exceptions=True)
         close_runtime(deps)
+
+
+async def test_runtime_writer_keeps_original_control_when_write_facts_are_read_only(
+        tmp_path: Path, monkeypatch):
+    cfg = _config_for(tmp_path)
+    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog())
+    FileSyncProbe(monkeypatch, Path(cfg.paths.log_file), fail="file")
+
+    class ReadOnlyControl(asyncio.CancelledError):
+        @property
+        def write_result(self):
+            return LogWriteResult(appended=True, durable=False)
+
+    original = ReadOnlyControl("original stderr control")
+
+    class FailedStderr:
+        def write(self, message):
+            raise original
+
+        def flush(self):
+            raise original
+
+    async def observe():
+        return await deps.log_runtime.channel.submit(LogRecord(
+            LogLevel.ERROR, "readonly-control-record"))
+
+    async def close_and_capture():
+        try:
+            await close_logging(deps.log_runtime)
+        except BaseException as error:
+            return error
+        pytest.fail("生产装配关闭没有交付原控制异常")
+
+    previous_stderr = sys.stderr
+    monkeypatch.setattr(sys, "stderr", FailedStderr())
+    waiter = asyncio.create_task(observe())
+    closing = None
+    try:
+        done, _ = await asyncio.wait({waiter}, timeout=5)
+        assert waiter in done
+        result = waiter.result()
+        closing = asyncio.create_task(close_and_capture())
+        done, _ = await asyncio.wait({closing}, timeout=5)
+        assert closing in done
+        control = closing.result()
+    finally:
+        monkeypatch.setattr(sys, "stderr", previous_stderr)
+        if closing is None:
+            closing = asyncio.create_task(close_and_capture())
+        done, pending = await asyncio.wait({waiter, closing}, timeout=5)
+        for task in pending:
+            task.cancel("test cleanup")
+        if pending:
+            later, pending = await asyncio.wait(pending, timeout=1)
+            done.update(later)
+        await asyncio.gather(*done, return_exceptions=True)
+        assert not pending
+        close_runtime(deps)
+    assert control is original
+    assert result.delivered is False and result.appended is True and result.durable is False
+    assert result.fallback_written is False
+    records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+    assert [record["message"] for record in records] == ["readonly-control-record"]

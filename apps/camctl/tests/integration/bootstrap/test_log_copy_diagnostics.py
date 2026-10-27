@@ -1136,15 +1136,12 @@ async def test_default_rotation_failure_is_reported_once_and_keeps_writes(
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
 
-    def fail_rollover(self):
+    def fail_rollover_check(self, record):
         raise OSError("controlled rotation failure")
 
     monkeypatch.setattr(
         concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "shouldRollover", lambda self, record: True)
-    monkeypatch.setattr(
-        concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "doRollover", fail_rollover)
+        "shouldRollover", fail_rollover_check)
     try:
         first = await deps.log_runtime.channel.deliver_important(
             LogRecord(level=LogLevel.ERROR, message="first rotation record"))
