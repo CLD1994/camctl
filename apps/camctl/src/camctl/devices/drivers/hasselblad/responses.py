@@ -59,6 +59,7 @@ _SAVED_LINE = re.compile(r"saved (.+) \(([0-9]+) bytes\)")
 _CAMERA_FILE_LINE = re.compile(r"camera file: (.+)")
 _UNREPORTED_CAMERA_FILE_LINE = "capture: camera filename was not reported"
 _NON_LF_LINE_SEPARATORS = frozenset("\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_DOCTOR_RESULT_MARKER = re.compile(r"doctor|\b(?:pass|fail)\b", re.IGNORECASE)
 
 
 def _decode(output: bytes, command: str) -> str:
@@ -126,10 +127,12 @@ def parse_serial(output: bytes) -> str:
 
 
 def doctor_passed(output: bytes, stderr: bytes) -> bool:
-    """只接受唯一且无冲突的 doctor 结果行。"""
+    """只有唯一的规范 PASS 且双流没有其他结果标记时才能确认。"""
     lines = _lines(_decode(output, "doctor"))
-    return ([line for line in lines if line.startswith("doctor:")] == ["doctor: PASS"]
-            and not any(line.startswith(b"doctor:") for line in stderr.split(b"\n")))
+    error_lines = _lines(_decode(stderr, "doctor stderr"))
+    result_lines = [line for line in lines if _DOCTOR_RESULT_MARKER.search(line)]
+    return (result_lines == ["doctor: PASS"]
+            and not any(_DOCTOR_RESULT_MARKER.search(line) for line in error_lines))
 
 
 def _canonical_absolute_directory(value: str) -> PurePosixPath:

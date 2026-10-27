@@ -13,7 +13,7 @@ from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver, AvailabilityCancelled
 from camctl.operations.process import LocalExit, RawToolOutcome, ToolCallCancelled, ToolStartError
 from camctl.operations.owned_calls import owned_tool_call
-from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
+from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState, SettlementBasis
 from camctl.operations.result_format import result_document
 from camctl.operations.validation import validate_outcome
 
@@ -100,6 +100,52 @@ async def test_failure_conversion_keeps_original_exception_and_partial_streams()
     steps = device_result.outcome.observations[0].data["steps"]
     assert steps[1]["exit"] is None and steps[1]["error"]["exception"]["message"] == "exec failed"
     assert result_document(device_result.outcome)["diagnostics"]["calls"][1]["stdout"]["hex"] is None
+    assert device_result.outcome.settlement.basis is SettlementBasis.OBSERVED
+    assert device_result.outcome.settlement.evidence.type == "availability_returned"
+
+
+@pytest.mark.asyncio
+async def test_first_start_failure_is_not_dispatched():
+    error = ToolStartError("exec failed")
+    checked_driver = driver(Transport({"list": error}))
+    result = await check(checked_driver)
+    device_result = result.to_device_result("31")
+    outcome = device_result.outcome
+    ticket = AttemptTicket(attempt_id=1, operation="availability", target_id="31",
+                           responsibility_key="availability/31", run_id=1)
+    validate_outcome(ticket, outcome, checked_driver.evidence)
+    assert outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert outcome.settlement.evidence.type == "availability_not_dispatched"
+    assert device_result.diagnostic_error is error
+    step = outcome.observations[0].data["steps"][0]
+    assert step["exit"] is None and step["error"]["exception"]["message"] == "exec failed"
+    streams = result_document(outcome)["diagnostics"]["calls"][0]
+    assert streams["stdout"]["hex"] is streams["stderr"]["hex"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_failed_start_preserves_not_dispatched_fact():
+    error = ToolStartError("exec failed")
+    cancelled = asyncio.CancelledError()
+    cancelled.__cause__ = error
+    with pytest.raises(AvailabilityCancelled) as exc:
+        await check(driver(Transport({"list": cancelled})))
+    result = exc.value.result
+    assert result.settled and result.reason == "tool_start_failed"
+    outcome = result.to_device_result("31").outcome
+    assert outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert result.calls[0].error is error
+
+
+@pytest.mark.asyncio
+async def test_deadline_before_first_dispatch_is_not_dispatched():
+    readings = iter([0, 5_000_000_000])
+    transport = Transport()
+    result = await check(driver(transport, lambda: next(readings)))
+    outcome = result.to_device_result("31").outcome
+    assert not transport.calls and result.reason == "deadline_elapsed"
+    assert outcome.settlement.basis is SettlementBasis.NOT_DISPATCHED
+    assert outcome.settlement.evidence.type == "availability_not_dispatched"
 
 
 @pytest.mark.asyncio
@@ -119,6 +165,12 @@ async def test_unsettled_result_cannot_be_presented_as_settled_outcome():
     ({"doctor": outcome(b"not doctor: PASS\n")}, "doctor_not_passed", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\ndoctor: FAIL\n")}, "doctor_not_passed", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\n", stderr=b"doctor: FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n doctor: FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"\tdoctor: FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\ndoctor : FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\nDOCTOR: FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"FAIL\n")}, "doctor_not_passed", "doctor"),
+    ({"doctor": outcome(b"doctor: PASS\n", stderr=b"\xff")}, "invalid_response", "doctor"),
     ({"doctor": outcome(b"doctor: PASS\n\xff")}, "invalid_response", "doctor"),
 ])
 async def test_rejects_identity_and_doctor_failures(overrides, reason, last):
@@ -126,6 +178,14 @@ async def test_rejects_identity_and_doctor_failures(overrides, reason, last):
     result = await check(driver(transport))
     assert not result.available and result.reason == reason
     assert result.calls[-1].name == transport.calls[-1].argv[3] == last
+
+
+@pytest.mark.asyncio
+async def test_doctor_allows_non_result_information_but_keeps_both_streams():
+    raw = outcome(b"USB connected\ndoctor: PASS\n", stderr=b"warning\n")
+    result = await check(driver(Transport({"doctor": raw})))
+    assert result.available
+    assert result.calls[-1].outcome is raw
 
 
 @pytest.mark.asyncio

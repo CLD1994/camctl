@@ -101,13 +101,16 @@ _AVAILABILITY = EvidenceContract(
 _AVAILABILITY_RETURNED = EvidenceContract(
     "availability_returned", 1, "availability", frozenset(), max_diagnostic_calls=3,
 )
+_AVAILABILITY_NOT_DISPATCHED = EvidenceContract(
+    "availability_not_dispatched", 1, "availability", frozenset(), max_diagnostic_calls=3,
+)
 EVIDENCE = EvidenceRegistry((
     _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
-    _AVAILABILITY, _AVAILABILITY_RETURNED,
+    _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
 ))
 
 _VENDOR_ID = 0x2756
@@ -175,11 +178,13 @@ class AvailabilityResult:
         error = None if self.available else ErrorValue("device_error", "availability", {
             "reason": self.reason, "step": None if not self.calls else self.calls[-1].name,
         })
+        dispatched = any(call.outcome is not None for call in self.calls)
+        settlement_contract = _AVAILABILITY_RETURNED if dispatched else _AVAILABILITY_NOT_DISPATCHED
         outcome = CallOutcome(
             status=AttemptStatus.SUCCEEDED if self.available else AttemptStatus.FAILED,
             error=error, effect=EffectState.NO_EFFECT,
-            settlement=Settlement(SettlementBasis.OBSERVED if self.calls else SettlementBasis.NOT_DISPATCHED,
-                                  EvidenceValue.of(_AVAILABILITY_RETURNED)),
+            settlement=Settlement(SettlementBasis.OBSERVED if dispatched else SettlementBasis.NOT_DISPATCHED,
+                                  EvidenceValue.of(settlement_contract)),
             observations=(observation,), diagnostics=ToolDiagnostics(3, tuple(diagnostics)),
         )
         diagnostic_error = next((call.error for call in self.calls if call.error is not None), None)
@@ -331,6 +336,9 @@ class HasselbladDriver:
                 raw = error.outcome
                 interrupted = error
             except asyncio.CancelledError as error:
+                if isinstance(error.__cause__, ToolStartError):
+                    calls.append(AvailabilityCall(name, now(), error=error.__cause__))
+                    raise AvailabilityCancelled(result("tool_start_failed")) from error
                 calls.append(AvailabilityCall(name, now(), error=error))
                 raise AvailabilityCancelled(result("cancelled", settled=False)) from error
             except ToolStartError as error:
