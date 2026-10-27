@@ -22,7 +22,9 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 
 在独立工作区 `/tmp/camctl-h1-reporting` 的提交 `e0a9c8ee` 上，使用 CPython 3.11.17 执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting/test_emergency_error_generation.py -q --tb=short`，退出码为 0，六项通过；前台输出未单独保存。集成提交为 `7fed2961`。该范围验证应急错误报告的三种活动状态、原动作错误和固定报告字节，不证明哈苏新检查报告。
 
-同一工作区的完整 reporting 目录另有一次失败：204 项通过、285 项失败、10 项错误，原始日志 `/tmp/camctl-h1-reporting-full.log` 的 SHA-256 为 `e0dab6096747e94cc3a38dfca0627bc01d26a8503d5b65def41f87dfc98aa2c8`。失败均在旧测试装配阶段，分别涉及旧 `accept_input` 调用、将连接直接交给异步数据库接口、旧 `CaptureRuntime` 和旧 `ObtainRuntime` 装配；这些用例尚未验证目标报告行为，正在迁移。
+同一工作区的完整 reporting 目录另有一次失败：204 项通过、285 项失败、10 项错误，原始日志 `/tmp/camctl-h1-reporting-full.log` 的 SHA-256 为 `e0dab6096747e94cc3a38dfca0627bc01d26a8503d5b65def41f87dfc98aa2c8`。失败均在旧测试装配阶段，分别涉及旧 `accept_input` 调用、将连接直接交给异步数据库接口、旧 `CaptureRuntime` 和旧 `ObtainRuntime` 装配；随后迁移这些装配并重新运行完整目录。
+
+完成报告目录的装配迁移后，在 `/tmp/camctl-h1-reporting` 的提交 `a4f2d225` 上使用 CPython 3.11.17 执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/reporting -q --tb=short`，退出码为 0，499 项通过。完整日志 `/tmp/camctl-h1-reporting-final.log` 的 SHA-256 为 `508529ab5aa8fba470283bda5325a0758b9b50c6042d6b2daf5c6f7c8f80903b`，该提交集成为 `d6b55655`。这证明报告组件目录，不代替哈苏新检查与报告的联合验证。
 
 在 `/tmp/camctl-h1-capture-20261028` 的提交 `47259000` 上，使用 CPython 3.11.17 对 `test_hasselblad_start_recovery.py`、`test_recording_start_release.py` 和 `test_capture_contract.py` 一同执行 pytest，退出码为 0，38 项通过；原始输出位于 `/tmp/camctl-h1-capture-final.log`，集成提交为 `ca5db88c`。原节点和参数保持：哈苏原恢复 11 项、录像释放 6 项、拍摄契约 21 项；拍摄契约通过正式处理入口和真实结果页事务保留文件登记回滚及原键恢复覆盖。完整目录仍需验证。
 
