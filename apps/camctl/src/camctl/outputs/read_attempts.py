@@ -95,6 +95,20 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         return ReadDispatchPrevented("read_slot_not_held")
     if not device_source and slot is not None:
         raise ConsistencyError("主机源读取不能持有相机机会")
+    if device_source:
+        from camctl.persistence.transaction import row_facts
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        source = row_facts(owned.connection, "device_files", source_id)
+        if source is None:
+            raise ConsistencyError("实际读取缺少原设备文件")
+        observer = row_facts(owned.connection, "actions", source["observer_action_id"])
+        origin = row_facts(owned.connection, "actions", source["source_action_id"])
+        if observer is None or origin is None:
+            raise ConsistencyError("实际读取缺少原设备绑定")
+        if observer["driver_id"] == DRIVER_ID:
+            from camctl.persistence.repositories.physical_alias import source_physical_alias_conflict
+            if source_physical_alias_conflict(owned.connection, source, observer, origin):
+                return ReadDispatchPrevented("physical_identity_conflict")
     if not read_copy_dispatch_eligible(owned.connection, int(ticket.target_id)):
         return ReadDispatchPrevented("read_input_not_needed")
     return None

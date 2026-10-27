@@ -383,6 +383,7 @@ class FailureSaveDisposition(Enum):
 
     SAVED = "saved"
     ALREADY = "already"
+    RETIRED = "retired"
 
 
 @dataclass(frozen=True)

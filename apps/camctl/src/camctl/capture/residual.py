@@ -225,7 +225,7 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
         return None
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.persistence.transaction import row_facts
-    from camctl.persistence.repositories.physical_alias import held_activity_alias_conflict
+    from camctl.persistence.repositories.physical_alias import physical_alias_conflict
     current = runtime.fixed_camera_identity
     if not isinstance(current, CameraIdentity):
         raise ConsistencyError("当前 Hasselblad 配置缺少固定机身身份")
@@ -234,7 +234,7 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
             "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
         activity = None if found is None else row_facts(owned.connection, "device_activities", found[0])
         conflict = (action["status"] == 1 and action["execution_started"] == 0
-                    and held_activity_alias_conflict(owned.connection, action["device_id"], current))
+                    and physical_alias_conflict(owned.connection, action["device_id"], current))
         return activity, conflict
     activity, conflict = await runtime.database.read(read, description="读取固定机身身份")
     if activity is None:

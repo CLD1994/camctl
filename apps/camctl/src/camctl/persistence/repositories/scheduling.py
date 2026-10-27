@@ -300,8 +300,8 @@ class StartActionCommand:
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
         if action["driver_id"] == HASSELBLAD_DRIVER_ID:
-            from .physical_alias import held_activity_alias_conflict
-            if held_activity_alias_conflict(connection, action["device_id"], request.expected_identity):
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
                 return self._rejected("physical_identity_conflict")
         preparation_holder = current_preparation_holder(connection, action["device_id"])
         if preparation_holder is not None and preparation_holder.action_id != action["id"]:
@@ -926,8 +926,8 @@ class GrantStartCommand:
                 raise ConsistencyError("原活动资源键与固定机身身份不符")
             if request.current_identity != original:
                 return self._rejected("physical_identity_mismatch")
-            from .physical_alias import held_activity_alias_conflict
-            if held_activity_alias_conflict(connection, action["device_id"], original):
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], original):
                 return self._rejected("physical_identity_conflict")
         elif request.current_identity is not None:
             raise TransactionError("其他驱动不能提供 Hasselblad 身份")
@@ -1374,8 +1374,8 @@ class ReservePreparationCommand:
             _verify_prepared_activity(activity, action, capabilities, request.expected_identity)
             return result(ReservePreparationOutcome.ALREADY, existing)
         if action["driver_id"] == HASSELBLAD_DRIVER_ID:
-            from .physical_alias import held_activity_alias_conflict
-            if held_activity_alias_conflict(connection, action["device_id"], request.expected_identity):
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
                 return result(ReservePreparationOutcome.REJECTED, reason="physical_identity_conflict")
         # 已持有活动和读取机会均由原拥有者先完成，准备不打断原工作。
         with closing(connection.execute(

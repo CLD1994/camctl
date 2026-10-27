@@ -34,14 +34,14 @@ class PreparationReads:
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         if action["driver_id"] == DRIVER_ID:
             from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-            from .physical_alias import held_activity_alias_conflict
+            from .physical_alias import physical_alias_conflict
             try:
                 identity = CameraIdentity(**activity["expected_identity_json"])
             except (TypeError, ValueError, KeyError) as error:
                 raise ConsistencyError("原活动缺少可靠固定机身身份") from error
             if activity["resource_key"] != identity.resource_key:
                 raise ConsistencyError("原活动资源键与固定机身身份不符")
-            if held_activity_alias_conflict(self.connection, action["device_id"], identity):
+            if physical_alias_conflict(self.connection, action["device_id"], identity):
                 return False
         if (not preparation_action_eligible(self.connection, action, activity)
                 or occurred_at > action["scheduled_at"] + action["max_delay_ms"] * 1000
@@ -178,12 +178,12 @@ def verify_binding_preparation_failure(connection, action, request):
     if not facts.not_started:
         raise BindingPreparationIneligible("原 START 未可靠确认未进入")
     if details["reason"] == "physical_identity_conflict":
-        from .physical_alias import held_activity_alias_conflict
+        from .physical_alias import physical_alias_conflict
         try:
             current = CameraIdentity(**request["current_identity"])
         except (TypeError, ValueError) as error:
             raise BindingPreparationIneligible("缺少当前物理身份") from error
-        if not held_activity_alias_conflict(connection, action["device_id"], current):
+        if not physical_alias_conflict(connection, action["device_id"], current):
             raise BindingPreparationIneligible("当前机身没有其他逻辑设备的活动限制")
     if facts.activity is None:
         if details["reason"] == "physical_identity_mismatch":

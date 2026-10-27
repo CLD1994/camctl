@@ -1707,6 +1707,13 @@ class _GrantFileCommand:
             if has_product_predecessor(reads, command.action_id, command.output_id, command.occurred_at):
                 return self._wait("business_order")
 
+        if (binding_failure is not None and binding_failure["reason"] == "physical_identity_conflict"
+                and command.source_device_file_id is not None):
+            observer = self._state["actions"][source_file["observer_action_id"]]
+            from .physical_alias import source_physical_alias_conflict
+            origin = self._state["actions"][source_file["source_action_id"]]
+            if not source_physical_alias_conflict(connection, source_file, observer, origin):
+                binding_failure = None
         if binding_failure is not None:
             if command.item_id is None:
                 raise ConsistencyError("内部输入的绑定失败须由所属处理责任保存")
@@ -2551,6 +2558,14 @@ class _SlotChangeCommand:
             raise ConsistencyError("拷贝的读取机会不属于原来源设备")
         if run["status"] in _RUN_TERMINAL or not _read_owner_eligible(action):
             return self._decision(SlotOutcome.FINISHED)
+        source = self._state["device_files"][copy["source_device_file_id"]]
+        observer = self._state["actions"][source["observer_action_id"]]
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if observer["driver_id"] == DRIVER_ID:
+            from .physical_alias import source_physical_alias_conflict
+            origin = self._state["actions"][source["source_action_id"]]
+            if source_physical_alias_conflict(scope.connection, source, observer, origin):
+                return self._decision(SlotOutcome.WAIT, "physical_identity_conflict")
         if not _read_is_due(action, self._request.occurred_at):
             return self._decision(SlotOutcome.WAIT, "not_due")
         retrying_source_fallback = (
@@ -4300,6 +4315,13 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
         if saved is not None:
             return self._reuse(scope, saved, facts)
         copy, delivery, action, item, run, details = facts
+        if details["reason"] == "physical_identity_conflict":
+            from .physical_alias import source_physical_alias_conflict
+            source = self._state["device_files"][self._command.source_device_file_id]
+            observer = self._state["actions"][source["observer_action_id"]]
+            origin = self._state["actions"][source["source_action_id"]]
+            if not source_physical_alias_conflict(scope.connection, source, observer, origin):
+                return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
         if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
             return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
         if (delivery["status"] not in (1, 2) or not _read_owner_eligible(action)
@@ -6455,6 +6477,22 @@ def _delivery_guard(event, context) -> None:
             if details.get("delivery_id") is not None \
                     and details.get("delivery_id") != str(row.row_id):
                 raise EventValidationError("交付失败详情必须关联本次交付")
+            if code == "device_binding_unavailable" and details.get("reason") == "physical_identity_conflict":
+                from .preparation import PreparationReads
+                from .physical_alias import source_physical_alias_conflict
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("读取失败缺少机身冲突核对")
+                copies = [copy for copy in context.state_rows.get("file_copies", {}).values()
+                          if copy.get("delivery_id") == row.row_id]
+                if len(copies) != 1:
+                    raise EventValidationError("机身冲突失败缺少唯一原拷贝")
+                source = _guard_facts(context, "device_files", copies[0]["source_device_file_id"])
+                observer = _guard_facts(context, "actions", source["observer_action_id"])
+                origin = _guard_facts(context, "actions", source["source_action_id"])
+                if (details.get("device_id") != observer["device_id"]
+                        or details.get("expected_driver_id") != observer["driver_id"]
+                        or not source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin)):
+                    raise EventValidationError("读取失败缺少其他逻辑设备的原责任")
 
 
 def _require_publishable_copy(context, delivery_id: int) -> None:
@@ -7067,6 +7105,14 @@ def _read_slot_guard(event, context) -> None:
                 raise EventValidationError("授予必须从空闲机会开始")
             if after_slot != binding[0]:
                 raise EventValidationError("授予的设备必须等于原来源设备绑定")
+            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            if binding[1] == DRIVER_ID:
+                from .preparation import PreparationReads
+                from .physical_alias import source_physical_alias_conflict
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("读取机会缺少机身冲突核对")
+                if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
+                    raise EventValidationError("读取机会越过了其他逻辑设备的机身责任")
             if run["status"] in _RUN_TERMINAL:
                 raise EventValidationError("读取责任已结束，不能再授予机会")
             if run["retry_wait_required"] != 0:
@@ -7158,6 +7204,21 @@ def _read_permission_guard(event, context) -> None:
             or after.get("error_details_json") is None
         ):
             raise EventValidationError("逐项拒绝必须保存最终失败及错误")
+        details = after.get("error_details_json")
+        if isinstance(details, Mapping) and details.get("reason") == "physical_identity_conflict":
+            from .preparation import PreparationReads
+            from .physical_alias import source_physical_alias_conflict
+            if type(context.preparation_reads) is not PreparationReads:
+                raise EventValidationError("读取机身冲突缺少原连接事实")
+            item = _guard_facts(context, "obtain_items", updates[0].row_id)
+            output = _guard_facts(context, "outputs", item["output_id"])
+            source = _guard_facts(context, "device_files", output["device_file_id"])
+            observer = _guard_facts(context, "actions", source["observer_action_id"])
+            origin = _guard_facts(context, "actions", source["source_action_id"])
+            if (details.get("device_id") != observer["device_id"]
+                    or details.get("expected_driver_id") != observer["driver_id"]
+                    or not source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin)):
+                raise EventValidationError("读取机身冲突缺少未完成原责任")
     elif event.event_type == _READ_PERMISSION_EVENT and event.reason == _RELEASE_REASON:
         for row in event.rows:
             if row.table != "obtain_items" or not row.before.exists:

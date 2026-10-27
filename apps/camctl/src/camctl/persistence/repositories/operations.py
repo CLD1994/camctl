@@ -582,14 +582,14 @@ class BeginAttemptCommand:
             from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
             if action["driver_id"] == DRIVER_ID:
                 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
-                from .physical_alias import held_activity_alias_conflict
+                from .physical_alias import physical_alias_conflict
                 try:
                     identity = CameraIdentity(**activity["expected_identity_json"])
                 except (TypeError, ValueError, KeyError) as error:
                     raise ConsistencyError("原活动缺少可靠固定机身身份") from error
                 if activity["resource_key"] != identity.resource_key:
                     raise ConsistencyError("原活动资源键与固定机身身份不符")
-                if held_activity_alias_conflict(connection, action["device_id"], identity):
+                if physical_alias_conflict(connection, action["device_id"], identity):
                     return self._rejected("physical_identity_conflict")
             if (device_read_in_flight(connection, action["device_id"])
                     or capture_scope_blocked(connection, action["device_id"], action["id"],
@@ -668,7 +668,17 @@ class BeginAttemptCommand:
         if not read_has_slot:
             return self._rejected("read_slot_not_held")
         if intent.kind is OperationKind.READ_FILE:
-            slot = self._state["file_copies"][intent.target.copy_id]["slot_device_id"]
+            copy = self._state["file_copies"][intent.target.copy_id]
+            slot = copy["slot_device_id"]
+            if slot is not None:
+                source = self._state["device_files"][copy["source_device_file_id"]]
+                observer = self._state["actions"][source["observer_action_id"]]
+                from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+                if observer["driver_id"] == DRIVER_ID:
+                    from .physical_alias import source_physical_alias_conflict
+                    origin = self._state["actions"][source["source_action_id"]]
+                    if source_physical_alias_conflict(connection, source, observer, origin):
+                        return self._rejected("physical_identity_conflict")
             if slot is not None and device_start_in_flight(connection, slot):
                 return self._rejected("device_busy")
         allocation = scope.allocate(1)
@@ -1778,8 +1788,8 @@ def _attempt_intent_guard(event, context) -> None:
                 raise EventValidationError("启动意图缺少可靠机身身份") from error
             if current != original or activity.get("resource_key") != original.resource_key:
                 _fail("启动意图与原固定机身身份不符")
-            from .physical_alias import held_activity_alias_conflict
-            if held_activity_alias_conflict(context.preparation_reads.connection, action["device_id"], original):
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(context.preparation_reads.connection, action["device_id"], original):
                 _fail("启动意图越过了其他逻辑设备的机身限制")
         elif identity is not None:
             _fail("其他驱动不能携带 Hasselblad 机身身份")
@@ -1810,6 +1820,14 @@ def _attempt_intent_guard(event, context) -> None:
             if (type(context.preparation_reads) is not PreparationReads
                     or context.preparation_reads.device_start_in_flight(slot)):
                 _fail("读取意图缺少同设备启动收场依据")
+            source = _fixed_reference(context.state_rows, "device_files", copy["source_device_file_id"])
+            observer = _fixed_reference(context.state_rows, "actions", source["observer_action_id"])
+            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            if observer["driver_id"] == DRIVER_ID:
+                from .physical_alias import source_physical_alias_conflict
+                origin = _fixed_reference(context.state_rows, "actions", source["source_action_id"])
+                if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
+                    _fail("读取意图越过了其他逻辑设备的机身责任")
     elif copy_round is not None:
         _fail("只有读取尝试保存拷贝轮次")
 

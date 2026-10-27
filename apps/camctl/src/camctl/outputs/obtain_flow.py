@@ -491,6 +491,9 @@ async def _device_source_candidate(
     if assembly is None and not failed_binding:
         raise ConsistencyError(
             f"读取设备未装配读取协作者: {device_id!r}")
+    if (binding_result is not None and binding_result.status is BindingStatus.MATCHED
+            and await _source_alias_conflict(runtime, device_file_id, device_id, driver_id)):
+        binding_result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT, binding, None)
     stem = _original_stem(original_name)
     extension = _extension_of(original_name)
     return FileCandidate(
@@ -505,6 +508,32 @@ async def _device_source_candidate(
             timeout_s=assembly.read_idle_timeout_s,
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now, binding_result=binding_result)
+
+
+async def _source_alias_conflict(runtime, source_id, device_id, driver_id):
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if driver_id != DRIVER_ID:
+        return False
+    assembly = runtime.devices.get(device_id)
+    if assembly is None:
+        raise ConsistencyError("原 Hasselblad 读取缺少设备装配")
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.persistence.repositories.physical_alias import action_physical_identity, source_physical_alias_conflict
+    from camctl.persistence.transaction import row_facts
+    config = read_camera_config(assembly.driver.devices[device_id])
+    def read_alias(owned):
+        source = row_facts(owned.connection, "device_files", source_id)
+        if source is None:
+            raise ConsistencyError("读取机身冲突缺少原设备文件")
+        observer = row_facts(owned.connection, "actions", source["observer_action_id"])
+        origin = row_facts(owned.connection, "actions", source["source_action_id"])
+        if observer is None or origin is None:
+            raise ConsistencyError("读取机身冲突缺少原动作绑定")
+        fixed = action_physical_identity(owned.connection, source["source_action_id"])
+        if (config.serial, config.product_id) != (fixed.serial, fixed.product_id):
+            return False
+        return source_physical_alias_conflict(owned.connection, source, observer, origin)
+    return await runtime.database.read(read_alias, description="读取设备文件的机身责任")
 
 
 async def _inspection_copy_read_config(
@@ -642,12 +671,19 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
             result = runtime.binding_check(DeviceBinding(device_id, driver_id))
-            if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH):
+            if (result.status is BindingStatus.MATCHED and copy_id not in runtime.pending_read_ends
+                    and await _source_alias_conflict(runtime, source_id, device_id, driver_id)):
+                result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT,
+                                       DeviceBinding(device_id, driver_id), None)
+            if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
+                                 BindingStatus.PHYSICAL_IDENTITY_CONFLICT):
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+                from camctl.outputs.handoff import FailureSaveDisposition
 
                 business = PendingReadBusiness(runtime.outputs.fail_read_binding,
                     FailReadBinding(copy_id, source_id, result, now), new_operation_key(),
-                    lambda _, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}"))
+                    lambda value, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}")
+                        if value.disposition is not FailureSaveDisposition.RETIRED else None)
                 pending = await held_binding_read_result(runtime, copy_id, result, business)
                 if pending is not None:
                     await _save_read_result_and_settle(runtime, pending)
@@ -661,7 +697,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 if failed.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(ConsistencyError,
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
-                runtime.retry_gate.cleared(f"read/{copy_id}")
+                if failed.value.disposition is not FailureSaveDisposition.RETIRED:
+                    runtime.retry_gate.cleared(f"read/{copy_id}")
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)

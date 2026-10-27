@@ -46,6 +46,7 @@ class BindingStatus(Enum):
     MATCHED = "matched"
     DEVICE_MISSING = "device_missing"
     DRIVER_MISMATCH = "driver_mismatch"
+    PHYSICAL_IDENTITY_CONFLICT = "physical_identity_conflict"
     UNAVAILABLE = "unavailable"
 
 
@@ -105,7 +106,9 @@ def binding_failure_details(result: BindingResult) -> dict[str, str] | None:
     details = {
         "device_id": result.binding.device_id,
         "expected_driver_id": result.binding.driver_id,
-        "reason": ("missing" if result.status is BindingStatus.DEVICE_MISSING else "mismatch"),
+        "reason": ("missing" if result.status is BindingStatus.DEVICE_MISSING else
+                   "physical_identity_conflict" if result.status is BindingStatus.PHYSICAL_IDENTITY_CONFLICT
+                   else "mismatch"),
     }
     if result.current_driver_id is not None:
         details["actual_driver_id"] = result.current_driver_id
