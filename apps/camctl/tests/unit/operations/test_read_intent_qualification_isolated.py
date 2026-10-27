@@ -1,6 +1,8 @@
 """隔离数据库和包资源，核对读取意图的动作资格。"""
 
 import ast
+import asyncio
+from dataclasses import dataclass, replace
 from enum import IntEnum
 from functools import lru_cache
 from pathlib import Path
@@ -204,12 +206,85 @@ class ReadConsumerTests(unittest.IsolatedAsyncioTestCase):
                                   operations=SimpleNamespace(begin_attempt=None))
         intent = SimpleNamespace(target=SimpleNamespace(copy_id=9))
         namespace = {"running_read_ticket": lambda owned, copy_id: None,
-                     "save_read_business": save, "BeginDisposition": SimpleNamespace(GRANTED="granted")}
+                     "save_read_business": save, "BeginDisposition": SimpleNamespace(GRANTED="granted"), "replace": replace}
         acquire = extract("acquire_read_attempt", namespace, source)
         ticket, reason = await acquire(runtime, intent)
         self.assertIsNone(ticket)
         self.assertEqual(reason, "owner_not_running")
         self.assertEqual(runtime.continuing_read_tickets, {})
+
+    async def test_reconciled_original_intent_marks_its_continuation_for_inspection_owner(self):
+        source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
+        continuation = extract("ReadContinuation", {"dataclass": dataclass}, source)
+        ticket = SimpleNamespace(run_id=11, attempt_id=1, target_id="9")
+        pending = SimpleNamespace(inspection_cancel_recovery=[True])
+        async def save(runtime, copy_id, operation, intent, repository, *, on_completed, retry):
+            result = SimpleNamespace(disposition="granted", ticket=ticket)
+            on_completed(result)
+            return SimpleNamespace(value=result)
+        runtime = SimpleNamespace(database=None, pending_read_business={(9, "read_intent"): pending},
+                                  continuing_read_tickets={}, operations=SimpleNamespace(begin_attempt=None))
+        intent = SimpleNamespace(target=SimpleNamespace(copy_id=9))
+        namespace = {"save_read_business": save, "BeginDisposition": SimpleNamespace(GRANTED="granted"),
+                     "ReadContinuation": continuation, "replace": replace}
+        acquire = extract("acquire_read_attempt", namespace, source)
+        recovered, reason = await acquire(runtime, intent)
+        self.assertIs(recovered, ticket)
+        self.assertIsNone(reason)
+        self.assertTrue(runtime.continuing_read_tickets[9].never_dispatched)
+        self.assertTrue(runtime.continuing_read_tickets[9].inspection_cancel_recovery)
+
+    async def test_waiter_cancellation_after_grant_preserves_unstarted_recovery_owner(self):
+        source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
+        continuation = extract("ReadContinuation", {"dataclass": dataclass}, source)
+        ticket = SimpleNamespace(run_id=11, attempt_id=1, target_id="9")
+        async def save(runtime, copy_id, operation, intent, repository, *, on_completed, retry):
+            on_completed(SimpleNamespace(disposition="granted", ticket=ticket))
+            raise asyncio.CancelledError()
+        class Database:
+            async def read(self, operation): return operation(None)
+        runtime = SimpleNamespace(database=Database(), pending_read_business={}, continuing_read_tickets={},
+                                  operations=SimpleNamespace(begin_attempt=None))
+        intent = SimpleNamespace(target=SimpleNamespace(copy_id=9))
+        namespace = {"running_read_ticket": lambda owned, copy_id: None, "save_read_business": save,
+                     "BeginDisposition": SimpleNamespace(GRANTED="granted"),
+                     "ReadContinuation": continuation, "replace": replace}
+        acquire = extract("acquire_read_attempt", namespace, source)
+        with self.assertRaises(asyncio.CancelledError):
+            await acquire(runtime, intent)
+        saved = runtime.continuing_read_tickets[9]
+        self.assertIs(saved.ticket, ticket)
+        self.assertTrue(saved.never_dispatched)
+        self.assertTrue(saved.inspection_cancel_recovery)
+
+    async def test_recovered_ticket_records_not_dispatched_without_device_effect(self):
+        source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
+        continuation = extract("ReadContinuation", {"dataclass": dataclass}, source)
+        ticket = SimpleNamespace(run_id=11, attempt_id=1, target_id="9")
+        runtime = SimpleNamespace(continuing_read_tickets={9: continuation(ticket, True, inspection_cancel_recovery=True)},
+                                  pending_read_ends={}, occurred_at=lambda: 10)
+        evidence_module = ModuleType("camctl.devices.evidence")
+        evidence_module.EvidenceContract = lambda *args: args
+        evidence = SimpleNamespace(with_contract=lambda contract: contract)
+        namespace = {"AttemptStatus": SimpleNamespace(FAILED="failed"), "EffectState": SimpleNamespace(NO_EFFECT="no_effect"),
+            "SettlementBasis": SimpleNamespace(NOT_DISPATCHED="not_dispatched"),
+            "RunOutcome": SimpleNamespace(CANCELED="canceled"), "ErrorValue": lambda code, stage: (code, stage),
+            "CallOutcome": lambda **values: SimpleNamespace(**values),
+            "Settlement": lambda basis, value: SimpleNamespace(basis=basis, evidence=value),
+            "EvidenceValue": lambda *args: args, "RunFinish": lambda status: SimpleNamespace(status=status),
+            "AttemptFinish": lambda ticket, outcome, occurred_at, **values: SimpleNamespace(
+                ticket=ticket, outcome=outcome, occurred_at=occurred_at, **values),
+            "validate_outcome": lambda ticket, outcome, evidence: outcome,
+            "hold_read_result": lambda runtime, finish, key: finish}
+        prevented = extract("prevented_read_result", namespace, source)
+        with patch.dict(sys.modules, {evidence_module.__name__: evidence_module}):
+            result = prevented(runtime, ticket, SimpleNamespace(terminal=False, canceled=True,
+                               reason="canceled_before_dispatch"), evidence)
+        self.assertIs(result.ticket, ticket)
+        self.assertEqual(result.outcome.effect, "no_effect")
+        self.assertEqual(result.outcome.settlement.basis, "not_dispatched")
+        self.assertEqual(result.run_finish.status, "canceled")
+        self.assertFalse(result.retry_wait)
 
 
 if __name__ == "__main__":

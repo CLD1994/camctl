@@ -165,9 +165,29 @@ class FinishGuardTests(unittest.TestCase):
         with self.assertRaises(GuardError): self.guard(owner_id=8)
 
 
+class SharedSaveOwnershipTests(unittest.TestCase):
+    def test_only_finished_failed_save_can_be_claimed(self):
+        shared_type = extract(ROOT / "persistence" / "business.py", "SharedSave", {})
+        shared = shared_type()
+        self.assertFalse(shared.failed())
+        shared._task = SimpleNamespace(done=lambda: False)
+        self.assertFalse(shared.failed())
+        shared._task = SimpleNamespace(done=lambda: True, cancelled=lambda: False,
+                                       exception=lambda: None, result=lambda: SimpleNamespace(error=None))
+        self.assertFalse(shared.failed())
+        shared._task = SimpleNamespace(done=lambda: True, cancelled=lambda: False,
+                                       exception=lambda: None, result=lambda: SimpleNamespace(error=ValueError()))
+        self.assertTrue(shared.failed())
+        shared.retry_failed()
+        self.assertIsNone(shared._task)
+
+
 class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
-    async def run_settlement(self, *, pending_intent=False, run_status=1, unfinished=False, slot_outcome="released"):
+    async def run_settlement(self, *, pending_intent=False, run_status=1, unfinished=False, slot_outcome="released",
+                             pending_failed=True, recovered_ticket=False, canceled=1,
+                             continuation=None, existing_result=False):
         calls = []
+        state = {"run_status": run_status}
         class Cursor:
             def __init__(self, value): self.value = value
             def fetchall(self): return self.value
@@ -175,7 +195,7 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         class Connection:
             def execute(self, query, parameters):
                 if "SELECT c.inspection_id" in query:
-                    return Cursor([(8, "camera", run_status, 0, 4)])
+                    return Cursor([(8, "camera", state["run_status"], 0, 4, canceled)])
                 if "SELECT 1 FROM operation_attempts" in query:
                     return Cursor((1,) if unfinished else None)
                 raise AssertionError(query)
@@ -185,12 +205,32 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
             calls.append((operation, kwargs.get("retry", False)))
             if operation == "read_intent":
                 flow.pending_read_business.pop((copy_id, operation))
+                if recovered_ticket:
+                    flow.continuing_read_tickets[copy_id] = SimpleNamespace(
+                        ticket=SimpleNamespace(run_id=11, attempt_id=1, target_id="9"),
+                        never_dispatched=True, inspection_cancel_recovery=True)
+                    state["run_status"] = 2
                 return SimpleNamespace(value=SimpleNamespace())
             return SimpleNamespace(value=SimpleNamespace(outcome=slot_outcome))
-        pending = {(9, "read_intent"): SimpleNamespace(request="original", save="original-save")} if pending_intent else {}
-        runtime = SimpleNamespace(database=Database(), pending_read_business=pending)
+        async def settle_result(flow, pending, *, retry):
+            calls.append(("save_result", retry))
+            state["run_status"] = 5
+            flow.continuing_read_tickets.pop(9)
+            flow.pending_read_results.pop((11, 1), None)
+        def prevented(flow, ticket, prevented, evidence):
+            calls.append(("not_dispatched", prevented.reason, prevented.canceled))
+            return SimpleNamespace(ticket=ticket)
+        pending = {(9, "read_intent"): SimpleNamespace(request="original", save="original-save",
+                    shared=SimpleNamespace(failed=lambda: pending_failed), inspection_cancel_recovery=[])} if pending_intent else {}
+        runtime = SimpleNamespace(database=Database(), pending_read_business=pending,
+                                  continuing_read_tickets={} if continuation is None else {9: continuation},
+                                  pending_read_results={(11, 1): object()} if existing_result else {}, evidence=object())
         module = ModuleType("camctl.outputs.read_attempts")
         module.save_read_business = save
+        module.prevented_read_result = prevented
+        module.ReadDispatchPrevented = lambda reason, canceled: SimpleNamespace(reason=reason, canceled=canceled)
+        media = ModuleType("camctl.capture.media_flow")
+        media._save_internal_read_and_settle = settle_result
         statuses = {"PENDING": 1, "SUCCEEDED": 3, "FAILED": 4, "CANCELED": 5}
         namespace = {"__name__": "isolated.inspections", "enum_for": lambda name: SimpleNamespace(
             READ_FILE=3) if name == "operation_runs.kind" else SimpleNamespace(RUNNING=1),
@@ -199,7 +239,7 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
             "SlotRequest": lambda copy_id, now: (copy_id, now),
             "OutputsRepository": lambda: SimpleNamespace(release_read_slot="release")}
         settle = extract(INSPECTIONS, "settle_terminal_inspection_read_slot", namespace)
-        with patch.dict(sys.modules, {module.__name__: module}):
+        with patch.dict(sys.modules, {module.__name__: module, media.__name__: media}):
             result = await settle(runtime, 9, 10)
         return result, calls
 
@@ -207,6 +247,49 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_settlement(pending_intent=True)
         self.assertTrue(result)
         self.assertEqual(calls, [("read_intent", True), ("release_read_slot", False)])
+
+    async def test_inflight_original_intent_is_not_taken_over(self):
+        result, calls = await self.run_settlement(pending_intent=True, pending_failed=False)
+        self.assertFalse(result)
+        self.assertEqual(calls, [])
+
+    async def test_unknown_receipt_granted_ticket_is_saved_as_not_dispatched_before_release(self):
+        result, calls = await self.run_settlement(pending_intent=True, recovered_ticket=True)
+        self.assertTrue(result)
+        self.assertEqual(calls, [("read_intent", True), ("not_dispatched", "canceled_before_dispatch", True),
+                                 ("save_result", False), ("release_read_slot", False)])
+
+    async def test_non_cancelled_granted_ticket_is_not_synthesized(self):
+        result, calls = await self.run_settlement(pending_intent=True, recovered_ticket=True, canceled=0)
+        self.assertFalse(result)
+        self.assertEqual(calls, [])
+
+    async def test_recovered_ticket_survives_waiter_interruption(self):
+        continuation = SimpleNamespace(ticket=SimpleNamespace(run_id=11, attempt_id=1, target_id="9"),
+                                       never_dispatched=True, inspection_cancel_recovery=True)
+        result, calls = await self.run_settlement(run_status=2, continuation=continuation)
+        self.assertTrue(result)
+        self.assertEqual(calls, [("not_dispatched", "canceled_before_dispatch", True),
+                                 ("save_result", False), ("release_read_slot", False)])
+
+    async def test_unknown_result_is_retried_without_creating_another_result(self):
+        continuation = SimpleNamespace(ticket=SimpleNamespace(run_id=11, attempt_id=1, target_id="9"),
+                                       never_dispatched=True, inspection_cancel_recovery=True)
+        result, calls = await self.run_settlement(run_status=2, continuation=continuation, existing_result=True)
+        self.assertTrue(result)
+        self.assertEqual(calls, [("save_result", True), ("release_read_slot", False)])
+
+    async def test_restart_without_local_continuation_keeps_original_running_ticket(self):
+        result, calls = await self.run_settlement(run_status=2)
+        self.assertFalse(result)
+        self.assertEqual(calls, [])
+
+    async def test_already_dispatched_ticket_is_not_declared_unstarted(self):
+        continuation = SimpleNamespace(ticket=SimpleNamespace(run_id=11, attempt_id=1, target_id="9"),
+                                       never_dispatched=False, inspection_cancel_recovery=True)
+        result, calls = await self.run_settlement(run_status=2, continuation=continuation)
+        self.assertFalse(result)
+        self.assertEqual(calls, [])
 
     async def test_running_original_intent_blocks_release(self):
         result, calls = await self.run_settlement(pending_intent=True, run_status=2)

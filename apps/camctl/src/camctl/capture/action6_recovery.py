@@ -210,9 +210,16 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                 return False
             raise db_failure(ConsistencyError, f"Action6 未结束检查收场被拒绝: {outcome.error}", outcome)
         after_inspection_id = rows[-1][0]
-    slot_flow = flow if flow is not None else SimpleNamespace(
-        database=runtime.database, pending_read_business=runtime.pending_read_business,
-    )
+    if flow is None:
+        from camctl.devices.evidence import EvidenceRegistry
+        slot_flow = SimpleNamespace(
+            database=runtime.database, pending_read_business=runtime.pending_read_business,
+            pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
+            continuing_read_tickets=runtime.continuing_read_tickets, operations=runtime.operations,
+            occurred_at=runtime.wall_us, evidence=EvidenceRegistry(()),
+        )
+    else:
+        slot_flow = flow
     # READ 仍 ACTIVE 或尚有重试等待时只保留原 slot；这不应阻断既有
     # Action6 取消终态。后续 Action6 恢复会在 READ 自身终结后补做释放。
     await settle_terminal_inspection_slots_for_action(slot_flow, action_id, runtime.wall_us())
