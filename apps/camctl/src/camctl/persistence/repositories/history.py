@@ -1022,6 +1022,8 @@ class HistoryRepository:
             yield from _ids_where(connection, "actions", "id", entity_id)
             action = entity_id
             yield from _ids_where(connection, "device_activities", "action_id", action)
+            yield from _ids_where(connection, "device_availability_checks", "action_id", action)
+            yield from _ids_where(connection, "device_availability_targets", "action_id", action)
             yield from _ids_where(connection, "motor_notifications", "action_id", action)
             # RESULT_PAGE.APPEND/INDEX_FILES 产生的观察关系归动作所有；
             # 快照与 H 恢复必须按 action_id 读取这些不可变关系行。

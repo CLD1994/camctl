@@ -373,7 +373,8 @@
         "STOP_RESIDUAL": 8,
         "EMERGENCY_STOP": 9,
         "PREPARE_CAPTURE": 10,
-        "RESOLVE_OUTPUT_SCOPE": 11
+        "RESOLVE_OUTPUT_SCOPE": 11,
+        "CHECK_DEVICE_AVAILABILITY": 12
       }
     },
     "operation_runs.query_purpose": {
@@ -918,6 +919,10 @@
     }
   },
   "fixed_columns": {
+    "device_availability_checks.rule_version": {
+      "value": 1,
+      "contract": "../hasselblad-availability-recovery.md#数据与事件模型"
+    },
     "entity_snapshots.format_version": {
       "value": 1,
       "contract": "history-formats.md#正向逆向与快照格式"

@@ -507,6 +507,7 @@
         "copy_id",
         "cleanup_item_id",
         "obtain_item_id",
+        "availability_check_id",
         "session_key"
       ],
       "mutable": [
@@ -560,6 +561,22 @@
         "status",
         "retry_wait_required"
       ]
+    },
+    "device_availability_checks": {
+      "immutable": ["action_id", "trigger_copy_id", "device_id", "driver_id", "expected_identity_json", "resource_key", "rule_version", "target_boundary_event_id"],
+      "mutable": [],
+      "derived": ["id"],
+      "write_once": [],
+      "owner": {"entity": "action", "id": "action_id", "via": []},
+      "state_columns": []
+    },
+    "device_availability_targets": {
+      "immutable": ["check_id", "action_id", "activity_id"],
+      "mutable": [],
+      "derived": ["id"],
+      "write_once": [],
+      "owner": {"entity": "action", "id": "action_id", "via": []},
+      "state_columns": []
     },
     "operation_attempts": {
       "immutable": [
@@ -619,6 +636,7 @@
         "dispatch_state",
         "activity_state",
         "occupancy_state",
+        "availability_release_attempt_id",
         "sent_at",
         "started_at",
         "result_wait_margin_ms",
@@ -641,7 +659,8 @@
         "sent_at",
         "started_at",
         "wait_completed_event_id",
-        "output_set_finalized_event_id"
+        "output_set_finalized_event_id",
+        "availability_release_attempt_id"
       ],
       "owner": {
         "entity": "action",
@@ -1230,6 +1249,11 @@
     "retry": {
       "contract": "waiting.md#重试责任的完整转换",
       "rule": "原尝试已结束且普通资格与预算允许才建立重试间隔；与失败结果共同保存。间隔完成即清零，仍受阻时不登记新尝试；新尝试、取消或额度不足与清除责任共同提交。重启只对标记为1的原责任按本次配置重新计量。",
+      "scope": "transaction"
+    },
+    "availability_check": {
+      "contract": "../hasselblad-availability-recovery.md#原子保存与历史归属",
+      "rule": "独立核对固定机身、全部目标、调用收场与成功观察；整批释放必须与原尝试结果和检查终结共同提交。",
       "scope": "transaction"
     },
     "attempt_intent": {
@@ -2316,7 +2340,8 @@
           "to": 2,
           "by": [
             "DEVICE_OBSERVED.RELEASE",
-            "EMERGENCY_RECORDED.FINAL"
+            "EMERGENCY_RECORDED.FINAL",
+            "AVAILABILITY_CHECK.RELEASE"
           ],
           "id": "transition_1"
         }
@@ -4537,7 +4562,8 @@
                   6,
                   7,
                   8,
-                  11
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -4591,7 +4617,8 @@
                   6,
                   7,
                   8,
-                  11
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -4645,7 +4672,8 @@
                   6,
                   7,
                   8,
-                  11
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -5227,7 +5255,8 @@
                   7,
                   8,
                   10,
-                  11
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -5333,7 +5362,8 @@
                   7,
                   8,
                   10,
-                  11
+                  11,
+                  12
                 ],
                 "status": [
                   1,
@@ -10627,6 +10657,32 @@
         }
       }
     },
+    "AVAILABILITY_CHECK": {
+      "id": 39,
+      "version": 1,
+      "branches": {
+        "CREATE": {
+          "reason": 1,
+          "title": "固定设备检查责任与目标",
+          "rows": [
+            {"table": "device_availability_checks", "op": "create", "after": {}},
+            {"table": "device_availability_targets", "op": "create", "after": {}},
+            {"table": "operation_runs", "op": "create", "after": {"kind": [12], "status": [1], "attempts_used": [0], "retry_wait_required": [0]}}
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "availability_check"],
+          "evidence": []
+        },
+        "RELEASE": {
+          "reason": 2,
+          "title": "按可用性检查解除旧活动限制",
+          "rows": [
+            {"table": "device_activities", "op": "update", "columns": ["occupancy_state", "availability_release_attempt_id"], "before": {"occupancy_state": [1], "activity_state": [1]}, "after": {"occupancy_state": [2]}, "required": ["occupancy_state", "availability_release_attempt_id"], "transitions": {"occupancy_state": ["transition_1"]}}
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "availability_check"],
+          "evidence": []
+        }
+      }
+    },
     "SEGMENT_INSPECTION": {
       "id": 38,
       "version": 1,
@@ -10705,6 +10761,9 @@
     }
   },
   "history_references": {
+    "device_availability_checks.target_boundary_event_id": {
+      "target": "prior_event"
+    },
     "operation_attempts.intent_event_id": {
       "target": "creating_event",
       "exception": "应急尝试为空。"

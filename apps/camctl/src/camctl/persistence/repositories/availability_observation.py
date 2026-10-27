@@ -71,3 +71,24 @@ def require_available(outcome: CallOutcome, check_id: int, identity: CameraIdent
     if (len(devices) != 1 or parse_serial(info_output.stdout.data) != identity.serial
             or not doctor_passed(doctor_output.stdout.data, doctor_output.stderr.data)):
         raise ValueError("设备数量、机身身份或 doctor 结果不符合要求")
+
+
+def require_saved_availability(attempt: Mapping, run: Mapping, check: Mapping) -> None:
+    """从持久化事实独立核对成功尝试，不采信调用方的成功结论。"""
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.operations.result_format import read_result_document
+
+    if (check.get("id") != run.get("availability_check_id")
+            or check.get("action_id") != run.get("action_id")
+            or attempt.get("run_id") != run.get("id")
+            or check.get("driver_id") != DRIVER_ID or check.get("rule_version") != 1):
+        raise ValueError("检查、流程和尝试的固定归属不一致")
+    identity = CameraIdentity(**check["expected_identity_json"])
+    if check.get("resource_key") != identity.resource_key:
+        raise ValueError("检查资源键与固定机身身份不一致")
+    timeout = attempt.get("timeout_s_json")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, Decimal)):
+        raise ValueError("检查尝试缺少有效期限")
+    outcome = read_result_document(attempt["status"], attempt["effect_state"],
+                                   attempt["result_json"], attempt["error_json"])
+    require_available(outcome, check["id"], identity, Decimal(timeout))
