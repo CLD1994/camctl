@@ -7,7 +7,7 @@ import hashlib
 from collections.abc import Mapping
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Callable
 
@@ -67,10 +67,11 @@ from .responses import (
     parse_capture,
     parse_devices,
     parse_serial,
+    doctor_passed,
 )
 from .files import CameraFileIdentity
 
-__all__ = ["EVIDENCE", "HasselbladDriver"]
+__all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
 
 _PHOTO_TAKEN = EvidenceContract(
@@ -92,17 +93,106 @@ _DISPATCH_PREVENTED = EvidenceContract(
     "dispatch_prevented", 1, "control", frozenset(),
     max_diagnostic_calls=PHOTO_START_CALL_LIMIT
 )
+_AVAILABILITY = EvidenceContract(
+    "device_availability", 1, "availability",
+    frozenset({"check_id", "expected_serial", "expected_product_id", "observed_serial", "steps"}),
+    identity_field="check_id",
+)
+_AVAILABILITY_RETURNED = EvidenceContract(
+    "availability_returned", 1, "availability", frozenset(), max_diagnostic_calls=3,
+)
 EVIDENCE = EvidenceRegistry((
     _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
+    _AVAILABILITY, _AVAILABILITY_RETURNED,
 ))
 
 _VENDOR_ID = 0x2756
 _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
 READ_PREPARATION_TIMEOUT_S = Decimal("180")
+
+
+@dataclass(frozen=True)
+class AvailabilityCall:
+    name: str
+    returned_monotonic_ns: int
+    outcome: RawToolOutcome | None = None
+    error: BaseException | None = None
+
+
+@dataclass(frozen=True)
+class AvailabilityResult:
+    expected_serial: str
+    expected_product_id: int
+    observed_serial: str | None
+    available: bool
+    reason: str | None
+    calls: tuple[AvailabilityCall, ...]
+    settled: bool
+
+    def to_device_result(self, check_id: str) -> DeviceCallResult:
+        """将已收场事实交给原结果拥有者；未知收场不能伪造成票据。"""
+        parse_object_id(check_id)
+        if not self.settled:
+            raise ValueError("检查实际收场尚未确认")
+        steps = []
+        diagnostics = []
+        for index, call in enumerate(self.calls, 1):
+            raw = call.outcome
+            error = None if raw is None else raw.error
+            if error is not None or call.error is not None:
+                error = {"tool_error": error, "exception": exception_diagnostic(call.error)}
+            steps.append({
+                "name": call.name,
+                "returned_monotonic_ns": call.returned_monotonic_ns,
+                "exit": None if raw is None or raw.exit is None else {
+                    "exit_code": raw.exit.exit_code, "signal": raw.exit.signal},
+                "error": error,
+                "used_grace_s": None if raw is None or raw.used_grace_s is None else str(raw.used_grace_s),
+                "signal_failures": [] if raw is None else [
+                    {"stage": failure.stage.value, "message": failure.message}
+                    for failure in raw.signal_failures],
+                "output_failure": None if raw is None else raw.output_failure,
+            })
+            complete = (raw is not None and raw.output is not None and raw.stderr is not None
+                        and raw.output_failure is None)
+
+            def stream(data):
+                state = ToolStreamState.UNAVAILABLE if data is None else (
+                    ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+
+            diagnostics.append(ToolCallOutput(index, call.name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+        observation = DeviceObservation(_AVAILABILITY.type, _AVAILABILITY.version, {
+            "check_id": check_id, "expected_serial": self.expected_serial,
+            "expected_product_id": self.expected_product_id,
+            "observed_serial": self.observed_serial, "steps": steps,
+        })
+        error = None if self.available else ErrorValue("device_error", "availability", {
+            "reason": self.reason, "step": None if not self.calls else self.calls[-1].name,
+        })
+        outcome = CallOutcome(
+            status=AttemptStatus.SUCCEEDED if self.available else AttemptStatus.FAILED,
+            error=error, effect=EffectState.NO_EFFECT,
+            settlement=Settlement(SettlementBasis.OBSERVED if self.calls else SettlementBasis.NOT_DISPATCHED,
+                                  EvidenceValue.of(_AVAILABILITY_RETURNED)),
+            observations=(observation,), diagnostics=ToolDiagnostics(3, tuple(diagnostics)),
+        )
+        diagnostic_error = next((call.error for call in self.calls if call.error is not None), None)
+        return DeviceCallResult(outcome.observations, DeviceCallResult._error_view(outcome), outcome,
+                                diagnostic_error=diagnostic_error)
+
+
+class AvailabilityCancelled(asyncio.CancelledError):
+    """取消仍向调用者传播，同时交付本次检查已经取得的事实。"""
+
+    def __init__(self, result: AvailabilityResult):
+        super().__init__("设备可用性检查被取消")
+        self.result = result
 
 
 class CameraReadError(ReadPreparationError, DiagnosticError):
@@ -194,6 +284,99 @@ class HasselbladDriver:
         if result.status is not BindingStatus.MATCHED:
             raise DeviceConfigurationError(f"原设备绑定在本次配置中不可用: {result.status.value}")
         return read_camera_config(self.devices[binding.device_id])
+
+    async def check_availability(
+        self, binding, *, expected_serial: str, expected_product_id: int, timeout_s: Decimal,
+    ) -> AvailabilityResult:
+        """一次独立检查只交付身份与受管工具事实，不释放活动。"""
+        if not isinstance(expected_serial, str) or not expected_serial.strip():
+            raise ValueError("检查必须携带固定的机身 serial")
+        if type(expected_product_id) is not int or not 1 <= expected_product_id <= 0xffff:
+            raise ValueError("检查必须携带固定的产品标识")
+        if not isinstance(timeout_s, Decimal) or not timeout_s.is_finite() or timeout_s <= 0:
+            raise ValueError("检查期限必须是有限正 Decimal 秒数")
+        config = self._binding_config(binding)
+        if (config.serial, config.product_id) != (expected_serial, expected_product_id):
+            raise DeviceConfigurationError("当前设备绑定与固定机身身份不一致")
+
+        def now():
+            value = self.monotonic_ns()
+            if type(value) is not int:
+                raise TypeError("monotonic_ns 必须返回整数纳秒")
+            return value
+
+        began = now()
+        calls: list[AvailabilityCall] = []
+        serial = None
+
+        def result(reason=None, *, settled=True):
+            return AvailabilityResult(expected_serial, expected_product_id, serial,
+                                      reason is None, reason, tuple(calls), settled)
+
+        for name in ("list", "info", "doctor"):
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return result("cancelled")
+            remaining = timeout_s - Decimal(now() - began) / _NANOSECONDS_PER_SECOND
+            if remaining <= 0:
+                return result("deadline_elapsed")
+            spec = ToolSpec((config.executable, "--pid", f"0x{expected_product_id:04x}", name),
+                            remaining, self.terminate_grace_s)
+            interrupted = None
+            try:
+                with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
+                                 command=(name,)):
+                    raw = await self.transport.run(spec, _NeverStop())
+            except ToolCallCancelled as error:
+                raw = error.outcome
+                interrupted = error
+            except asyncio.CancelledError as error:
+                calls.append(AvailabilityCall(name, now(), error=error))
+                raise AvailabilityCancelled(result("cancelled", settled=False)) from error
+            except ToolStartError as error:
+                calls.append(AvailabilityCall(name, now(), error=error))
+                return result("tool_start_failed")
+            except Exception as error:
+                calls.append(AvailabilityCall(name, now(), error=error))
+                return result("transport_failed", settled=False)
+            if not isinstance(raw, RawToolOutcome):
+                error = TypeError("transport.run 必须返回 RawToolOutcome")
+                calls.append(AvailabilityCall(name, now(), error=error))
+                return result("transport_failed", settled=False)
+            returned = now()
+            calls.append(AvailabilityCall(name, returned, raw))
+
+            def finish(value):
+                if interrupted is not None:
+                    raise AvailabilityCancelled(value) from interrupted
+                return value
+
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None:
+                return finish(result(failure, settled=raw.exit is not None))
+            if raw.stderr is None:
+                return finish(result("stderr_unavailable"))
+            if Decimal(returned - began) / _NANOSECONDS_PER_SECOND >= timeout_s:
+                return finish(result("deadline_elapsed"))
+            try:
+                if name == "list":
+                    matching = tuple(camera for camera in parse_devices(raw.output)
+                                     if camera.vendor_id == _VENDOR_ID
+                                     and camera.product_id == expected_product_id)
+                    if len(matching) != 1:
+                        return finish(result("no_matching_device" if not matching else "multiple_matching_devices"))
+                elif name == "info":
+                    serial = parse_serial(raw.output)
+                    if serial != expected_serial:
+                        return finish(result("serial_mismatch"))
+                elif not doctor_passed(raw.output, raw.stderr):
+                    return finish(result("doctor_not_passed"))
+            except CliParseError as error:
+                calls[-1] = replace(calls[-1], error=error)
+                return finish(result("invalid_response"))
+            if interrupted is not None:
+                raise AvailabilityCancelled(result() if name == "doctor" else result("cancelled")) from interrupted
+        return result()
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         """下载指定固定源，核验后从偏移读取；工具 stdout 不承载文件定位。"""

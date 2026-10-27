@@ -125,6 +125,13 @@ def parse_serial(output: bytes) -> str:
     return values[0]
 
 
+def doctor_passed(output: bytes, stderr: bytes) -> bool:
+    """只接受唯一且无冲突的 doctor 结果行。"""
+    lines = _lines(_decode(output, "doctor"))
+    return ([line for line in lines if line.startswith("doctor:")] == ["doctor: PASS"]
+            and not any(line.startswith(b"doctor:") for line in stderr.split(b"\n")))
+
+
 def _canonical_absolute_directory(value: str) -> PurePosixPath:
     if not isinstance(value, str) or not value or "\x00" in value or "\n" in value or "\r" in value:
         raise CliParseError("output_directory 必须是有效的绝对 POSIX 目录")
