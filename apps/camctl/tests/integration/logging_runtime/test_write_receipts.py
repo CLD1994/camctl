@@ -235,6 +235,60 @@ async def test_shutdown_summary_uses_typed_file_completion_when_file_is_closed(t
     assert not world.fallback
 
 
+@pytest.mark.parametrize("rejection", ["disabled", "finished"])
+async def test_important_delivery_rejection_retains_one_stderr_fact(tmp_path, rejection):
+    path = tmp_path / "camctl.log"
+    async with logging_file(path) as world:
+        if rejection == "disabled":
+            world.channel.disable_channel(ChannelError("controlled file failure"))
+        else:
+            await world.channel.finish_producers()
+        result = await completed(asyncio.create_task(world.channel.deliver_important(
+            LogRecord(LogLevel.ERROR, "rejected-important"))))
+        assert result.delivered is False and result.appended is False and result.durable is False
+        assert result.fallback_written is True
+    assert not path.exists()
+    assert len(world.fallback) == 1 and "rejected-important" in world.fallback[0]
+
+
+@pytest.mark.parametrize("facts_shape", ["opaque", "getter_failure"])
+async def test_writer_control_with_unusable_facts_settles_receipt_and_keeps_original(facts_shape):
+    base = KeyboardInterrupt if facts_shape == "opaque" else asyncio.CancelledError
+
+    class OriginalControl(base):
+        @property
+        def write_result(self):
+            if facts_shape == "getter_failure":
+                raise RuntimeError("write facts getter failed")
+            return object()
+
+    original = OriginalControl("original writer control")
+    fallback = []
+
+    def writer(record):
+        raise original
+
+    channel = LogChannel(capacity=4, low_watermark=1, high_watermark=3,
+                         writer=writer, fallback=fallback.append)
+    runtime = LogRuntime(channel)
+    channel.start()
+    waiter = asyncio.create_task(await_receipt(channel.submit(
+        LogRecord(LogLevel.ERROR, "original-control-record"))))
+    closing = None
+    try:
+        result = await completed(waiter)
+        assert result.delivered is False and result.appended is False and result.durable is False
+        assert result.fallback_written is True
+        closing = asyncio.create_task(close_logging(runtime))
+        with pytest.raises(type(original)) as raised:
+            await completed(closing)
+        assert raised.value is original
+        assert not channel.listener_alive
+    finally:
+        await finish_tasks(waiter, *(() if closing is None else (closing,)))
+    assert len(fallback) == 1 and "original-control-record" in fallback[0]
+
+
 async def test_ignored_mixed_logger_calls_submit_in_order_and_shutdown_drains(tmp_path, recwarn):
     path = tmp_path / "camctl.log"
     async with logging_file(path) as world:
