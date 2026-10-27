@@ -54,6 +54,8 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 
 提交 `7422ad1e` 为检查观察补充本次开始和结束的单调钟事实，使用 CPython 3.11.17 执行 `pytest apps/camctl/tests/unit/devices/test_hasselblad_availability_clock.py -q`，2 项通过。事务端尚未消费这些事实并独立核对总期限。
 
+独立可用性观察校验的单元测试与上述时钟测试一同运行，命令为 `pytest apps/camctl/tests/unit/operations/test_availability_observation.py apps/camctl/tests/unit/devices/test_hasselblad_availability_clock.py -q`，10 项通过。测试覆盖检查身份、设备数量、工具退出、步骤顺序、明确 PASS 和总期限；该校验尚未接入检查结果事务。
+
 提交 `fc003b31` 固定 DEVICE 正式源的机身、原路径、长度与摘要，并在登记及读取时核对原拍摄结果、历史事件与文件记录。在独立工作区 `/tmp/camctl-h2-identity-integrate-20261028` 同步包资源后，使用 CPython 3.11.17 运行文件身份、检查时钟及两个相关消费者单元测试文件，49 项通过；复用 `CameraIdentity` 后重新运行两份身份单元测试文件，44 项通过。首次运行因独立工作区缺少生成的包资源而在收集阶段失败，同步资源后上述测试通过。活动预留身份、读取机会前的绑定核对及完整业务联动尚未完成。
 
 ## H4：公共诊断消费者
