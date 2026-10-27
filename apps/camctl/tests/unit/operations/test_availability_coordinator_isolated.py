@@ -27,12 +27,46 @@ def coordinator_module(monkeypatch):
     stub("camctl.contracts.values", ConsistencyError=ValueError, new_operation_key=lambda: next(keys))
     stub("camctl.logging_runtime.diagnostics", DiagnosticState=type("DiagnosticState", (), {}),
          record_call_outcome=lambda *args, **kwargs: None)
-    stub("camctl.operations.attempts", **{name: type(name, (), {}) for name in
-        ("AttemptFinish", "AttemptIntent", "AttemptTarget", "OperationKind", "RetryWaitGate", "RunFinish", "RunOutcome")})
-    stub("camctl.operations.availability_owner", AvailabilityAttemptOwner=object)
-    stub("camctl.operations.models", **{name: type(name, (), {}) for name in
-        ("AttemptStatus", "AttemptTicket", "CallOutcome", "EffectState", "ErrorValue", "EvidenceValue", "Settlement", "SettlementBasis")})
-    stub("camctl.operations.validation", validate_outcome=lambda *args: None)
+    class RunOutcome(Enum):
+        SUCCEEDED = 1
+        FAILED = 2
+        CANCELED = 3
+        EXPIRED = 4
+
+    class AttemptStatus(Enum):
+        SUCCEEDED = 1
+        FAILED = 2
+
+    class EffectState(Enum):
+        NO_EFFECT = 1
+
+    class SettlementBasis(Enum):
+        NOT_DISPATCHED = 1
+
+    class Fields:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.__dict__.update(kwargs)
+
+    class Finish(Fields):
+        def __init__(self, ticket, outcome, occurred_at, *, retry_wait=False, run_finish=None):
+            super().__init__(ticket=ticket, outcome=outcome, occurred_at=occurred_at,
+                             retry_wait=retry_wait, run_finish=run_finish)
+
+    class RunFinish:
+        def __init__(self, status, error=None):
+            self.status, self.error = status, error
+
+    class Owner:
+        def __init__(self, ticket, invoke, save, cancelled_result):
+            self.ticket, self.invoke, self.save, self.cancelled_result = ticket, invoke, save, cancelled_result
+
+    stub("camctl.operations.attempts", AttemptFinish=Finish, RunFinish=RunFinish, RunOutcome=RunOutcome,
+         **{name: type(name, (), {}) for name in ("AttemptIntent", "AttemptTarget", "OperationKind", "RetryWaitGate")})
+    stub("camctl.operations.availability_owner", AvailabilityAttemptOwner=Owner)
+    stub("camctl.operations.models", AttemptStatus=AttemptStatus, EffectState=EffectState, SettlementBasis=SettlementBasis,
+         **{name: Fields for name in ("AttemptTicket", "CallOutcome", "ErrorValue", "EvidenceValue", "Settlement")})
+    stub("camctl.operations.validation", validate_outcome=lambda ticket, outcome, evidence: SimpleNamespace(outcome=outcome))
 
     class SharedSave:
         def __init__(self):
@@ -184,3 +218,35 @@ async def test_terminal_failure_is_delivered_to_original_read(coordinator_module
 
     assert result is module.AvailabilityProgress.FAILED
     coordinator._deliver_failure.assert_awaited_once_with(database, (1, 8), 9)
+
+
+@pytest.mark.asyncio
+async def test_last_failed_attempt_finishes_without_retry_wait(coordinator_module, monkeypatch):
+    module, _ = coordinator_module
+    coordinator = make_coordinator(module)
+    coordinator._write = AsyncMock()
+    monkeypatch.setattr(module, "_action_facts", lambda owned, action_id: {
+        "cancel_requested": 0, "status": 1, "scheduled_at": 100, "max_delay_ms": 10})
+    driver_module = ModuleType("camctl.devices.drivers.hasselblad.driver")
+    driver_module.AvailabilityCancelled = type("AvailabilityCancelled", (asyncio.CancelledError,), {})
+    intent_module = ModuleType("camctl.persistence.repositories.availability_intent")
+    intent_module.recheck_availability_dispatch = lambda *args: SimpleNamespace(allowed=False, reason="device_busy")
+    release_module = ModuleType("camctl.persistence.repositories.availability_release")
+    release_module.finish_availability = object()
+    for item in (driver_module, intent_module, release_module):
+        monkeypatch.setitem(sys.modules, item.__name__, item)
+    coordinator.operations.finish_attempt = object()
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(SimpleNamespace(connection=None))))
+    ticket = SimpleNamespace(attempt_id=2, run_id=7)
+    request = SimpleNamespace(action_id=1, trigger_copy_id=None)
+    config = SimpleNamespace(max_attempts=2)
+    owner = coordinator._attempt_owner(database, ticket, request, config, None, None,
+                                       SimpleNamespace(device_id="camera"), 9)
+    outcome = module.CallOutcome(status=module.AttemptStatus.FAILED, effect=module.EffectState.NO_EFFECT,
+        error=module.ErrorValue("device_error", "availability"), settlement=object())
+
+    await owner.save(outcome, object())
+
+    finish = coordinator._write.await_args.args[2]
+    assert finish.run_finish.status is module.RunOutcome.FAILED
+    assert finish.retry_wait is False
