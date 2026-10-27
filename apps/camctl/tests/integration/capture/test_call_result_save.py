@@ -27,7 +27,7 @@ from camctl.operations.models import (
 from camctl.persistence.models import DbOutcomeKind
 
 from .test_capture_contract import _NOW, _seed_action
-from .test_recording_start_runtime import StartDriver, _configured, _result, _world
+from .test_recording_start_runtime import StartDriver, configured, _configured, _result, _world
 from .test_recording_start_save_boundary import ResultWriteFault
 from ..scheduling.test_resources import _seed_activity
 
@@ -272,52 +272,61 @@ async def test_query_pending_actual_result_precedes_unknown_recovery_without_bou
 
 
 @pytest.mark.parametrize("operation", ["control", "query"])
-async def test_start_return_is_held_before_first_action_read(tmp_path, operation):
+async def test_start_return_is_held_before_first_action_read(tmp_path, operation, configured, monkeypatch):
     """第一次派生读取失败不能丢失START或启动核实实际返回。"""
     owned = _world(tmp_path)
     try:
         actual = (_result(confirmed=True, error=ErrorValue("transport_timeout", "transport"))
                   if operation == "control" else _outcome("query", confirmed=True))
         driver = StartDriver(actual if operation == "control" else _result())
-        runtime = _configured(owned, driver)
-        runtime.evidence = _CALL_EVIDENCE
         returned = driver
         if operation == "query":
-            await capture_handler("camera_record")(12, runtime)
             returned = ReturnedCall(actual)
-            runtime.state_query = returned
 
         class ActionReadFault(ResultWriteFault):
-            enabled = True
-
             def execute(self, statement, params=()):
-                if (self.enabled and self.driver.calls and statement.startswith("SELECT")
+                if (self.state["enabled"] and self.driver.calls and statement.startswith("SELECT")
                         and "FROM actions" in statement):
                     raise sqlite3.OperationalError("调用返回后的动作资格暂不能读取")
                 return super().execute(statement, params)
 
-        proxy = ActionReadFault(owned.connection, returned, "read")
-        runtime.owned = replace(owned, connection=proxy)
+        state = {"armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+        def wrap(connection):
+            return replace(connection, connection=ActionReadFault(
+                connection.connection, returned, "read", state))
+        runtime = await configured(owned, driver, connection_wrap=wrap)
+        runtime.evidence = _CALL_EVIDENCE
+        if operation == "query":
+            await capture_handler("camera_record")(12, runtime)
+            runtime.state_query = returned
+        saved_requests = []
+        save = runtime.capture.finish_start_result
+        def observe(finish, observation, key, connection, **kwargs):
+            saved_requests.append((finish, observation, key, kwargs))
+            return save(finish, observation, key, connection, **kwargs)
+        monkeypatch.setattr(runtime.capture, "finish_start_result", observe)
         runtime.wall_us = lambda: _RETURNED_AT
         runtime.monotonic_ns = lambda: 8_000_000_000
         with pytest.raises((sqlite3.Error, ConsistencyError)):
             await capture_handler("camera_record")(12, runtime)
-        pending, = runtime.pending_start_results.values()
         ticket = returned.calls[0].ticket
-        assert pending.finish.ticket == ticket
-        assert pending.finish.outcome.outcome is actual
-        original_key = pending.key
-        proxy.enabled = False
+        assert owned.connection.execute(
+            "SELECT status,result_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
+        state["enabled"] = False
         runtime.wall_us = lambda: _RETURNED_AT + 5_000_000
         runtime.monotonic_ns = lambda: 13_000_000_000
-        assert runtime.recover_attempt(ticket)
+        await capture_handler("camera_record")(12, runtime)
+        assert len(saved_requests) == 1
+        finish, _, original_key, _ = saved_requests[0]
+        assert finish.ticket == ticket and finish.outcome.outcome == actual
+        assert finish.occurred_at == _RETURNED_AT
         assert owned.connection.execute(
             "SELECT started_at FROM device_activities WHERE action_id=12"
         ).fetchone() == (_RETURNED_AT,)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == 68_000_000_000
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == 68_000_000_000
         assert len(returned.calls) == 1
-        assert set(proxy.result_keys) == {str(original_key)}
-        assert runtime.pending_start_results == {}
+        assert set(state["result_keys"]) == {str(original_key)}
     finally:
         owned.connection.close()
 
