@@ -32,7 +32,7 @@
 | --- | --- |
 | `DEBUG`、`INFO`、`WARNING` 正常写入 | 完整追加并 flush 后确认 `delivered=True`；不要求逐条持久化同步。 |
 | `ERROR`、`CRITICAL` 正常写入 | 在同一跨进程文件锁内完成追加、flush、文件 `fsync` 及路径所需的目录同步后，才确认 `delivered=True, appended=True, durable=True`。 |
-| 已经追加，但重要日志的文件或目录同步失败 | 保留 `appended=True`，返回 `delivered=False, durable=False` 及实际同步错误；不重写同一记录。 |
+| 已经追加，但重要日志的文件或目录同步失败 | 保留 `appended=True`，返回 `delivered=False, durable=False`；按文件通道故障规则诊断实际同步错误，不重写同一记录。 |
 | 过滤、丢弃、追加失败或文件通道不可用 | 不确认文件完成或持久成功。适用 stderr 降级由原责任承担。 |
 | stderr 写入并 flush 成功 | 只确认 stderr 交付；不能表示文件完成或断电持久成功。 |
 
