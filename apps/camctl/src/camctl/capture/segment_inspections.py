@@ -224,6 +224,10 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
     """检查结果可靠终态后，按原 release_read_slot 申请补齐机会释放。"""
     from camctl.outputs.read_attempts import save_read_business
 
+    pending_intent = flow.pending_read_business.get((copy_id, "read_intent"))
+    if pending_intent is not None:
+        await save_read_business(flow, copy_id, "read_intent", pending_intent.request,
+                                 pending_intent.save, retry=True)
     row = (await flow.database.read(lambda owned, inputs=("SELECT c.inspection_id,c.slot_device_id,r.status,r.retry_wait_required,s.state"
         " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " JOIN segment_inspections s ON s.id=c.inspection_id"
@@ -237,7 +241,7 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
     if slot_device_id is None and not pending_release:
         return True
     if run_status not in tuple(int(_RUN_STATUS[name])
-                               for name in ("SUCCEEDED", "FAILED", "CANCELED")):
+                               for name in ("PENDING", "SUCCEEDED", "FAILED", "CANCELED")):
         return False
     if retry_wait_required != 0:
         return False
@@ -247,11 +251,11 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
         " AND (status=? OR result_json IS NULL) LIMIT 1", (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
     if unfinished is not None:
         return False
-    (await save_read_business(
+    outcome = (await save_read_business(
         flow, copy_id, "release_read_slot",
         SlotRequest(copy_id, occurred_at), OutputsRepository().release_read_slot,
     ))
-    return True
+    return outcome.value.outcome in (SlotOutcome.RELEASED, SlotOutcome.ALREADY_RELEASED)
 
 
 async def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,

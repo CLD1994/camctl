@@ -2018,6 +2018,30 @@ def _operation_finish_guard(event, context) -> None:
             _fail("该结束结果不携带流程错误")
         if after.get("retry_wait_required") != 0:
             _fail("结束流程必须清除重试等待责任")
+        if (after.get("kind") == int(_RUN_KIND.READ_FILE) and status == int(_RUN_STATUS.CANCELED)
+                and row.before.values.get("status") == int(_RUN_STATUS.PENDING)
+                and after.get("attempts_used") == 0):
+            copy = context.state_rows.get("file_copies", {}).get(after.get("copy_id"))
+            if copy is not None and copy.get("inspection_id") is not None and copy.get("slot_device_id") is not None:
+                from .retry_wait_reads import RetryWaitReads
+                inspection = context.state_rows.get("segment_inspections", {}).get(copy["inspection_id"])
+                action = context.state_rows.get("actions", {}).get(after.get("action_id"))
+                result_copy = (None if context.transaction_rows is None else
+                               context.transaction_rows.get("file_copies", {}).get(copy["id"]))
+                reads = context.retry_wait_reads
+                inspection_state = enum_for("segment_inspections.state")
+                before_run = context.state_rows.get("operation_runs", {}).get(row.row_id)
+                if (before_run is None or before_run.get("retry_wait_required") != 0
+                        or before_run.get("error_json") is not None
+                        or inspection is None or inspection.get("action_id") != after.get("action_id")
+                        or inspection.get("state") not in (int(inspection_state.COMPLETED),
+                            int(inspection_state.FAILED), int(inspection_state.UNCONFIRMED))
+                        or action is None or type(action.get("cancel_requested")) is not int
+                        or action.get("cancel_requested") != 1
+                        or copy.get("slot_device_id") is None or result_copy is None
+                        or result_copy.get("slot_device_id") is not None
+                        or type(reads) is not RetryWaitReads or not reads.no_attempts(row.row_id)):
+                    _fail("未开始的分段检查读取取消要求原动作取消、零尝试和同事务释放机会")
         if (after.get("kind") == int(_RUN_KIND.READ_FILE) and event.event_type == _OPERATION_CONFIGURED_EVENT
                 and event.reason == 3 and isinstance(error, Mapping)
                 and error.get("code") == "read_attempts_exhausted"

@@ -2473,7 +2473,7 @@ class _SlotChangeCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, connection)
         copy = self._load_copy(connection)
         source = self._load_source(connection, copy)
         device_id = self._source_device(connection, source)
@@ -2603,6 +2603,20 @@ class _SlotChangeCommand:
             return self._decision(SlotOutcome.ALREADY_RELEASED)
         if slot != device_id:
             raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        if (copy.get("inspection_id") is not None and run["status"] == int(_RUN_STATUS.PENDING)
+                and run["attempts_used"] == 0 and run["retry_wait_required"] == 0):
+            inspection = self._state["segment_inspections"][copy["inspection_id"]]
+            action = self._load_owner_action(scope.connection, copy)
+            if (run["kind"] != int(_RUN_KIND.READ_FILE) or run["copy_id"] != copy["id"]
+                    or run["action_id"] != action["id"] or run["error_json"] is not None):
+                raise ConsistencyError("分段检查的原读取流程身份或初始状态不符")
+            from .retry_wait_reads import RetryWaitReads
+            if (inspection["state"] in (int(_SEGMENT_INSPECTION_STATE.COMPLETED),
+                                         int(_SEGMENT_INSPECTION_STATE.FAILED),
+                                         int(_SEGMENT_INSPECTION_STATE.UNCONFIRMED))
+                    and type(action["cancel_requested"]) is int and action["cancel_requested"] == 1
+                    and RetryWaitReads(scope.connection).no_attempts(run["id"])):
+                return self._cancel_unstarted_inspection(scope, copy, device_id, run, action)
         self._load_attempts(scope.connection, run["id"])
         if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING)
                for attempt in self._state["operation_attempts"].values()):
@@ -2612,6 +2626,20 @@ class _SlotChangeCommand:
         if run["status"] not in _RUN_TERMINAL and copy["committed_bytes"] < copy["source_size"]:
             return self._decision(SlotOutcome.WAIT, "still_reading")
         return self._save(scope, copy, device_id, None, SlotOutcome.RELEASED)
+
+    def _cancel_unstarted_inspection(self, scope, copy, device_id, run, action):
+        allocation = scope.allocate(2)
+        run_row = _update("operation_runs", run["id"],
+            {"status": run["status"], "retry_wait_required": 0, "error_json": run["error_json"]},
+            {"status": int(_RUN_STATUS.CANCELED), "retry_wait_required": 0, "error_json": None})
+        slot_row = _update("file_copies", copy["id"], {"slot_device_id": device_id}, {"slot_device_id": None})
+        self._owners[("operation_runs", run["id"])] = ("action", action["id"])
+        return CommandPlan(events=(
+            _envelope(allocation.first_event_id, allocation.txn_id, _OPERATION_CONFIGURED_EVENT, 3,
+                      (run_row,), self._request.occurred_at),
+            _envelope(allocation.first_event_id + 1, allocation.txn_id, _COPY_CHANGED_EVENT, _SLOT_REASON,
+                      (slot_row,), self._request.occurred_at)),
+            owners=self._owners, state_rows=self._state, result=SlotDecision(outcome=SlotOutcome.RELEASED))
 
     # ---- 事件与出口 ----
 
@@ -2648,8 +2676,20 @@ class _SlotChangeCommand:
             result=SlotDecision(outcome=outcome, reason=reason),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
         """原键恢复首次机会变化响应；不重新判定当前资格或归属。"""
+        if len(saved) == 2:
+            first = saved[0]
+            rows = first["body"]["rows"]
+            run = self._load_run(connection, self._request.copy_id)
+            if (self._direction != _SLOT_RELEASE or (first["type"], first["reason"]) != (_OPERATION_CONFIGURED_EVENT, 3)
+                    or first["occurred_at"] != self._request.occurred_at or len(rows) != 1
+                    or rows[0]["table"] != "operation_runs" or rows[0]["id"] != run["id"]
+                    or rows[0]["before"].get("exists") is not True or rows[0]["after"].get("exists") is not True
+                    or rows[0]["before"]["values"] != {"status": int(_RUN_STATUS.PENDING)}
+                    or rows[0]["after"]["values"] != {"status": int(_RUN_STATUS.CANCELED)}):
+                raise TransactionError("原分段检查取消读取的流程事实不符")
+            saved = saved[1:]
         if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT or saved[0]["reason"] != _SLOT_REASON:
             raise TransactionError("操作身份已用于其他阶段，不能作为机会变化重送")
         event = saved[0]

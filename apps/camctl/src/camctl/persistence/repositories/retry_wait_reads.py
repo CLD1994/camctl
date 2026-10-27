@@ -18,6 +18,12 @@ class RetryWaitReads:
         except ValueError as error:
             raise ConsistencyError(str(error)) from error
 
+    def no_attempts(self, run_id):
+        with closing(self.connection.execute(
+            "SELECT 1 FROM operation_attempts WHERE run_id=? LIMIT 1", (run_id,),
+        )) as cursor:
+            return cursor.fetchone() is None
+
     def no_unsettled_attempts(self, run_id, validated=()):
         self._require_index("operation_attempts_run_status")
         self._require_index("operation_attempts_without_result")

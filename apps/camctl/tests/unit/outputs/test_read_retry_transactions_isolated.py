@@ -438,7 +438,7 @@ class ExhaustGuardTests(unittest.TestCase):
         def fail(message): raise ValueError(message)
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10),
-            "_RUN_STATUS": SimpleNamespace(FAILED=4, UNCONFIRMED=6, SUCCEEDED=3),
+            "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
             "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3), "Mapping": dict,
             "_fail": fail, "_row_after_facts": lambda context, row: facts}
         exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
