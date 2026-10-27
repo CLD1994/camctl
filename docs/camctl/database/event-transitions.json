@@ -4650,7 +4650,7 @@
             "report_impact",
             "retry"
           ],
-          "evidence": []
+          "evidence": ["attempt_id"]
         },
         "ABANDON": {
           "reason": 3,
@@ -5454,7 +5454,7 @@
             "attempt_intent",
             "query_configuration"
           ],
-          "evidence": ["start_camera_identity"]
+          "evidence": ["start_camera_identity", "availability_intent_request"]
         }
       }
     },

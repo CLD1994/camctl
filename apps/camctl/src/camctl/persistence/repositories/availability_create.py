@@ -81,7 +81,7 @@ def _request(raw):
         raise ConsistencyError("检查创建申请无效") from error
 
 
-def _qualify(connection, request, boundary):
+def _qualify(connection, request, boundary, *, existing_check=None, exclude_attempt_id=None):
     action = row_facts(connection, "actions", request.action_id)
     if action is None:
         raise ConsistencyError("检查触发动作不存在")
@@ -150,6 +150,9 @@ def _qualify(connection, request, boundary):
         after = page[-1][0]
         if len(page) < 128:
             break
+    from camctl.capture.software_recovery import recovery_locked
+    if recovery_locked(connection, device_id):
+        raise AvailabilityTargetBlocked("设备的软件恢复责任尚未收场")
     if _one(connection, "SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1", (device_id,)):
         raise AvailabilityTargetBlocked("设备读取机会尚未收场")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
@@ -168,13 +171,25 @@ def _qualify(connection, request, boundary):
         raise AvailabilityTargetBlocked("其他逻辑设备仍持有该机身责任")
     if _one(connection, "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
             " JOIN device_availability_checks c ON c.id=r.availability_check_id"
-            " WHERE c.resource_key=? AND t.status=? LIMIT 1", (request.identity.resource_key, running)):
+            " WHERE c.resource_key=? AND t.status=? AND (? IS NULL OR t.id<>?) LIMIT 1",
+            (request.identity.resource_key, running, exclude_attempt_id, exclude_attempt_id)):
         raise AvailabilityTargetBlocked("设备检查尝试尚未收场")
     check = {"action_id": action["id"], "trigger_copy_id": request.trigger_copy_id, "device_id": device_id,
         "driver_id": driver_id, "expected_identity_json": {"serial": request.identity.serial,
         "product_id": request.identity.product_id}, "resource_key": request.identity.resource_key,
         "rule_version": 1, "target_boundary_event_id": boundary}
-    count = sum(len(page) for page in iter_creation_targets(connection, check, batch_size=request.batch_size))
+    if existing_check is None:
+        count = sum(len(page) for page in iter_creation_targets(connection, check, batch_size=request.batch_size))
+    else:
+        from .availability_target import iter_release_targets
+        if any(not json_equal(existing_check.get(name), value) for name, value in check.items()):
+            raise ConsistencyError("检查尝试与原固定设备或触发关联不一致")
+        count = sum(len(page) for page in iter_release_targets(connection, existing_check,
+                                                               batch_size=request.batch_size))
+        if count == 0:
+            raise AvailabilityTargetNotRequired("检查固定目标已经全部解除")
+        from .availability_release import _no_conflicts
+        _no_conflicts(connection, existing_check, exclude_attempt_id)
     return action, check, count
 
 

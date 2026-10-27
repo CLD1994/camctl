@@ -22,7 +22,7 @@ from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal
 from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
-from camctl.history.events import EventEnvelope, RowChange, RowImage
+from camctl.history.events import EventEnvelope, RowChange, RowImage, load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.history.reads import PlanReadScope
 from camctl.operations.attempts import (
@@ -549,9 +549,10 @@ def _event_rows(saved: Mapping[str, Any], table: str) -> list[dict]:
 class BeginAttemptCommand:
     """一次普通尝试意图的完整事务命令。"""
 
-    def __init__(self, intent: AttemptIntent, key: OperationKey) -> None:
+    def __init__(self, intent: AttemptIntent, key: OperationKey, availability_request=None) -> None:
         self._intent = intent
         self._key = key
+        self._availability_request = availability_request
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -561,11 +562,21 @@ class BeginAttemptCommand:
         connection = scope.connection
         saved = _saved_transaction_events(connection, self._key)
         if saved is not None:
+            if self._intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                from .availability_create import _request_document
+                if (self._availability_request is None or len(saved) != 1
+                        or not json_equal(saved[0]["body"]["evidence"].get("availability_intent_request"),
+                                          _request_document(self._availability_request))):
+                    raise TransactionError("检查意图重送改变原资格申请")
             return self._reuse(connection, saved)
 
         intent = self._intent
         if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
-            return self._rejected("availability_guard_unavailable")
+            from .availability_create import CreateAvailabilityCheck
+            if (not isinstance(self._availability_request, CreateAvailabilityCheck)
+                    or self._availability_request.action_id != intent.action_id
+                    or self._availability_request.occurred_at != intent.occurred_at):
+                return self._rejected("availability_request_required")
         key_str = responsibility_key(intent)
         action = _load_row(connection, "actions", intent.action_id)
         if action is None:
@@ -579,6 +590,19 @@ class BeginAttemptCommand:
             intent.query_purpose,
             self._state,
         )
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            from .availability_create import _qualify
+            from .availability_target import (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch,
+                                               AvailabilityTargetNotRequired)
+            check = self._state["device_availability_checks"][intent.target.availability_check_id]
+            try:
+                _qualify(connection, self._availability_request, check["target_boundary_event_id"], existing_check=check)
+            except AvailabilityTargetNotRequired:
+                return self._rejected("availability_targets_resolved")
+            except AvailabilityTargetIdentityMismatch:
+                return self._rejected("availability_identity_mismatch")
+            except AvailabilityTargetBlocked:
+                return self._rejected("device_busy")
         if intent_recovery_locked(connection, intent):
             return self._rejected("device_recovery")
         _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
@@ -635,6 +659,12 @@ class BeginAttemptCommand:
                 if intent.kind is OperationKind.READ_FILE:
                     return self._read_exhausted(scope, run_facts)
                 return self._rejected("budget_exhausted")
+            if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY and run_facts["attempts_used"]:
+                if run_facts["retry_wait_required"] != 0:
+                    return self._rejected("retry_wait")
+                from .retry_wait_reads import RetryWaitReads
+                if not RetryWaitReads(connection).completed(run_facts["id"], run_facts["attempts_used"]):
+                    return self._rejected("retry_wait")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
                 # 主机清理和取回源检查不应用超时或定时重试；允许下轮领取新票据的
                 # 前提是上一张 ticket 已有完整、可核实的结果事实。
@@ -647,6 +677,8 @@ class BeginAttemptCommand:
                     and run_facts["timeout_s_json"] is None
                     and intent.config.retry_interval_s is None
                     and run_facts["retry_interval_s_json"] is None)
+                if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                    immediate_cleanup_retry = True
                 if not immediate_cleanup_retry:
                     raise TransactionError("后续尝试要求先建立重试等待")
                 with closing(connection.execute(
@@ -665,6 +697,8 @@ class BeginAttemptCommand:
                 self._state.setdefault("operation_attempts", {})[original["id"]] = original
             attempt_no = int(run_facts["attempts_used"]) + 1
         else:
+            if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+                raise ConsistencyError("设备检查缺少原有限操作责任")
             if intent.kind is OperationKind.READ_FILE:
                 raise ConsistencyError("已有拷贝缺少其唯一原读取流程")
             _verify_run_identity(_intent_identity(intent), self._state)
@@ -749,6 +783,10 @@ class BeginAttemptCommand:
             )
         self._owners[("operation_runs", run_id)] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
+        evidence = None
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            from .availability_create import _request_document
+            evidence = {"availability_intent_request": _request_document(self._availability_request)}
         event = _envelope(
             event_id,
             allocation.txn_id,
@@ -756,6 +794,7 @@ class BeginAttemptCommand:
             1,
             (attempt_row, run_row),
             intent.occurred_at,
+            evidence,
         )
         ticket = AttemptTicket(
             attempt_id=attempt_no,
@@ -1570,6 +1609,12 @@ class OperationRepository:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
         return _outcome_of(receipt)
 
+    def begin_availability_attempt(self, intent, request, key, owned):
+        """以当前触发资格和原检查身份登记一次设备检查意图。"""
+        if intent.kind is not OperationKind.CHECK_DEVICE_AVAILABILITY:
+            raise ValueError("该入口只登记设备可用性检查")
+        return _outcome_of(commit_operation(BeginAttemptCommand(intent, key, request), key, owned))
+
     def finish_stale_runs(
         self, request: StaleRunFinish, key: OperationKey, owned: OwnedConnection
     ) -> DbOutcome[StaleRunFinishResult]:
@@ -1716,7 +1761,14 @@ def _attempt_intent_guard(event, context) -> None:
     run_row = run_rows[0]
     run_after = _row_after_facts(context, run_row)
     if run_after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
-        _fail("设备检查意图缺少独立设备资源守卫")
+        from .availability_intent import AvailabilityIntentReads
+        reads = context.availability_reads
+        if type(reads) is not AvailabilityIntentReads:
+            _fail("设备检查意图缺少独立设备资源守卫")
+        try:
+            reads.verify(event, context, run_row.row_id)
+        except (ConsistencyError, ValueError, KeyError) as error:
+            raise EventValidationError(f"设备检查意图资格无效: {error}") from error
     attempt_no = attempts[0].after.values["attempt_no"]
     if run_after.get("attempts_used") != attempt_no:
         _fail(
@@ -1956,9 +2008,19 @@ def _retry_guard(event, context) -> None:
     for row in event.rows:
         if row.table != "operation_runs":
             continue
+        facts = _row_after_facts(context, row)
+        complete = load_event_registry()["events"]["RETRY_WAIT_CHANGED"]["branches"]["COMPLETE"]["reason"]
+        if (event.event_type == _RETRY_WAIT_EVENT and event.reason == complete
+                and facts.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)):
+            from .availability_retry import AvailabilityRetryReads
+            if type(context.availability_reads) is not AvailabilityRetryReads:
+                _fail("检查等待完成缺少独立原尝试核验")
+            try:
+                context.availability_reads.verify(event, context, row.row_id)
+            except (ConsistencyError, ValueError, KeyError) as error:
+                raise EventValidationError(f"检查等待完成无效: {error}") from error
         if row.after.values.get("retry_wait_required") != 1:
             continue
-        facts = _row_after_facts(context, row)
         if facts.get("retry_interval_s_json") is None:
             _fail("建立重试等待要求已保存的重试间隔")
         if facts.get("status") not in (

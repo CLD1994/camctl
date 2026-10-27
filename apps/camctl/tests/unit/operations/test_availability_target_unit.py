@@ -24,7 +24,7 @@ def target_rules(monkeypatch):
         "device_activities.occupancy_state": SimpleNamespace(HELD=1, RELEASED=2),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
-        "operation_attempts.status": SimpleNamespace(RUNNING=1),
+        "operation_attempts.status": SimpleNamespace(RUNNING=1, FAILED=3, UNKNOWN=4),
         "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2, SUCCEEDED=3),
         "operation_runs.kind": SimpleNamespace(START=1, QUERY_ACTIVITY=6, CHECK_DEVICE_AVAILABILITY=12),
         "operation_runs.query_purpose": SimpleNamespace(START_CONFIRMATION=2),
@@ -416,6 +416,9 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     preparation = ModuleType("camctl.devices.capture_preparation")
     preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
     monkeypatch.setitem(sys.modules, preparation.__name__, preparation)
+    recovery = ModuleType("camctl.capture.software_recovery")
+    recovery.recovery_locked = lambda *args: False
+    monkeypatch.setitem(sys.modules, recovery.__name__, recovery)
     resources = ModuleType("camctl.scheduling.resources")
     resources.device_read_in_flight = lambda *args: False
     resources.device_start_in_flight = lambda *args: False
@@ -636,3 +639,142 @@ def test_blocked_release_still_saves_the_actual_pass_and_failed_conclusion(relea
     assert captured[0].run_finish.error.code == "device_availability_unconfirmed"
     assert captured[0].run_finish.error.details == {"device_id": "hb0", "operation_run_id": "3",
                                                      "attempts_used": 1, "max_attempts": 3}
+
+
+@pytest.fixture
+def intent_guard(creation_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Event:
+        event_id: int = 7
+        transaction_id: int = 2
+        change_seq: int | None = None
+        occurred_at: int = 10
+        evidence: object = None
+        rows: tuple = ()
+    attempt = SimpleNamespace(table="operation_attempts", before=SimpleNamespace(exists=False),
+        after=SimpleNamespace(values={"run_id": 3, "attempt_no": 1, "max_attempts_used": 3,
+                                      "timeout_s_json": 5, "retry_interval_s_json": 1}))
+    run_row = SimpleNamespace(table="operation_runs", row_id=3, before=SimpleNamespace(exists=True),
+        after=SimpleNamespace(values={"attempts_used": 1, "max_attempts_used": 3,
+                                      "timeout_s_json": 5, "retry_interval_s_json": 1}))
+    event = Event(evidence={"availability_intent_request": {}}, rows=(attempt, run_row))
+    run = {"id": 3, "kind": 12, "action_id": 12, "status": 1, "availability_check_id": 31,
+           "retry_wait_required": 0, "attempts_used": 0}
+    check = {"id": 31, "action_id": 12, "target_boundary_event_id": 2}
+    transaction = SimpleNamespace(txn_id=2, first_event_id=7, last_event_id=7)
+    request = SimpleNamespace(action_id=12, occurred_at=10)
+    create = ModuleType("camctl.persistence.repositories.availability_create")
+    create._qualify = lambda *args, **kwargs: None
+    create._request = lambda raw: request
+    monkeypatch.setitem(sys.modules, create.__name__, create)
+    source = find_spec("camctl.persistence.repositories.availability_intent")
+    spec = spec_from_file_location("camctl.persistence.repositories._isolated_intent", source.origin)
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "row_facts", lambda connection, table, identity: run if table == "operation_runs" else check)
+    context = SimpleNamespace(transaction=transaction, state_rows={"operation_runs": {3: run},
+                              "device_availability_checks": {31: check}})
+    return module, module.AvailabilityIntentReads(object(), event, transaction), event, context, run
+
+
+def test_first_check_intent_uses_original_facts(intent_guard):
+    _, guard, event, context, _ = intent_guard
+    guard.verify(event, context, 3)
+
+
+def test_check_intent_rejects_different_attempt_and_flow_budgets(intent_guard):
+    module, guard, event, context, _ = intent_guard
+    event.rows[0].after.values["max_attempts_used"] = 4
+    with pytest.raises(module.ConsistencyError):
+        guard.verify(event, context, 3)
+
+
+def test_check_intent_waits_until_the_original_interval_is_cleared(intent_guard):
+    module, guard, event, context, run = intent_guard
+    run["attempts_used"], run["retry_wait_required"] = 1, 1
+    event.rows[0].after.values["attempt_no"] = event.rows[1].after.values["attempts_used"] = 2
+    with pytest.raises(module.AvailabilityTargetBlocked):
+        guard.verify(event, context, 3)
+
+
+@pytest.mark.parametrize("completed", [True, False])
+def test_check_retry_requires_the_last_attempts_completed_interval(intent_guard, monkeypatch, completed):
+    module, guard, event, context, run = intent_guard
+    run["attempts_used"] = 1
+    event.rows[0].after.values["attempt_no"] = event.rows[1].after.values["attempts_used"] = 2
+    reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    reads.RetryWaitReads = lambda connection: SimpleNamespace(completed=lambda run_id, used: completed)
+    monkeypatch.setitem(sys.modules, reads.__name__, reads)
+    if completed:
+        guard.verify(event, context, 3)
+    else:
+        with pytest.raises(module.AvailabilityTargetBlocked):
+            guard.verify(event, context, 3)
+
+
+@pytest.fixture
+def retry_module(creation_module, monkeypatch):
+    transaction = sys.modules["camctl.persistence.transaction"]
+    transaction.saved_transaction_events = object()
+    source = find_spec("camctl.persistence.repositories.availability_retry")
+    spec = spec_from_file_location("camctl.persistence.repositories._isolated_retry", source.origin)
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    result_format = ModuleType("camctl.operations.result_format")
+    result_format.read_result_document = lambda *args: None
+    monkeypatch.setitem(sys.modules, result_format.__name__, result_format)
+    return module
+
+
+def test_retry_completion_verifies_original_failed_attempt(retry_module, monkeypatch):
+    run = {"kind": 12, "attempts_used": 1, "retry_wait_required": 1, "status": 2}
+    attempt = {"run_id": 3, "attempt_no": 1, "status": 3, "result_event_id": 10,
+               "result_json": {}, "effect_state": 2, "error_json": {}}
+    monkeypatch.setattr(retry_module, "row_facts", lambda conn, table, identity:
+                        run if table == "operation_runs" else attempt)
+    class Connection:
+        def execute(self, sql, args):
+            return _Cursor([(1, 1)] if "MAX(attempt_no)" in sql else [])
+    assert retry_module._verify(Connection(), 3, 5) == (run, attempt)
+
+
+def test_retry_completion_rejects_another_attempt(retry_module, monkeypatch):
+    run = {"kind": 12, "attempts_used": 2, "retry_wait_required": 1, "status": 2}
+    attempt = {"run_id": 3, "attempt_no": 1, "status": 3, "result_event_id": 10, "result_json": {}}
+    monkeypatch.setattr(retry_module, "row_facts", lambda conn, table, identity:
+                        run if table == "operation_runs" else attempt)
+    with pytest.raises(retry_module.ConsistencyError):
+        retry_module._verify(object(), 3, 5)
+
+
+def test_dispatch_recheck_uses_original_ticket_and_excludes_its_own_attempt(intent_guard, monkeypatch):
+    module, _, _, _, run = intent_guard
+    run.update(responsibility_key="availability/31", status=2, attempts_used=1)
+    check = {"id": 31, "action_id": 12, "target_boundary_event_id": 2}
+    attempt = {"id": 5, "run_id": 3, "attempt_no": 1, "status": 1, "result_event_id": None}
+    monkeypatch.setattr(module, "row_facts", lambda connection, table, identity:
+                        {"operation_runs": run, "device_availability_checks": check,
+                         "operation_attempts": attempt}[table])
+    calls = []
+    monkeypatch.setattr(module, "_qualify", lambda *args, **kwargs: calls.append(kwargs))
+    models = ModuleType("camctl.operations.models")
+    models.AttemptTicket = type("AttemptTicket", (), {})
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+    scheduling = ModuleType("camctl.scheduling.resources")
+    scheduling.DispatchRecheck = lambda allowed, reason: SimpleNamespace(allowed=allowed, reason=reason)
+    monkeypatch.setitem(sys.modules, scheduling.__name__, scheduling)
+    create = sys.modules["camctl.persistence.repositories.availability_create"]
+    create.CreateAvailabilityCheck = type("CreateAvailabilityCheck", (), {})
+    ticket = models.AttemptTicket()
+    ticket.run_id, ticket.attempt_id, ticket.operation = 3, 1, "availability"
+    ticket.responsibility_key, ticket.target_id = "availability/31", "31"
+    request = create.CreateAvailabilityCheck()
+    request.action_id = 12
+    class Connection:
+        def execute(self, *args):
+            return _Cursor([(5,)])
+    result = module.recheck_availability_dispatch(Connection(), ticket, request)
+    assert result.allowed and calls == [{"existing_check": check, "exclude_attempt_id": 5}]

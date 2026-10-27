@@ -39,10 +39,12 @@ def _release_pages(connection, check):
 
 def _no_conflicts(connection, check, attempt_id):
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.capture.software_recovery import recovery_locked
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     from .physical_alias import physical_alias_conflict
     identity = CameraIdentity(**check["expected_identity_json"])
-    if (device_read_in_flight(connection, check["device_id"])
+    if (recovery_locked(connection, check["device_id"])
+            or device_read_in_flight(connection, check["device_id"])
             or device_start_in_flight(connection, check["device_id"])
             or physical_alias_conflict(connection, check["device_id"], identity)):
         raise AvailabilityTargetBlocked("原设备仍有其他实际调用")
@@ -53,8 +55,8 @@ def _no_conflicts(connection, check, attempt_id):
          (check["resource_key"], running)),
         ("SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
          " JOIN device_availability_checks c ON c.id=r.availability_check_id"
-         " WHERE c.resource_key=? AND t.status=? AND t.id<>? LIMIT 1",
-         (check["resource_key"], running, attempt_id)),
+         " WHERE c.resource_key=? AND t.status=? AND (? IS NULL OR t.id<>?) LIMIT 1",
+         (check["resource_key"], running, attempt_id, attempt_id)),
         ("SELECT 1 FROM device_activities d WHERE d.resource_key=? AND d.occupancy_state=?"
          " AND NOT EXISTS(SELECT 1 FROM device_availability_targets t WHERE t.check_id=? AND t.activity_id=d.id) LIMIT 1",
          (check["resource_key"], int(enum_for("device_activities.occupancy_state").HELD), check["id"])),

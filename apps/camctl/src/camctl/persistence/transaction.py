@@ -177,6 +177,23 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     context = bind_obtain_check(context, event, transaction, connection)
     from camctl.persistence.repositories.preparation import PreparationReads
     context = replace(context, preparation_reads=PreparationReads(connection, validated))
+    attempt_started = load_event_registry()["events"]["ATTEMPT_STARTED"]
+    if event.event_type == attempt_started["id"]:
+        runs = [row for row in event.rows if row.table == "operation_runs"]
+        if len(runs) == 1:
+            original = row_facts(connection, "operation_runs", runs[0].row_id)
+            kind = load_enum_registry()["enums"]["operation_runs.kind"]["members"]["CHECK_DEVICE_AVAILABILITY"]
+            if original is not None and original["kind"] == kind:
+                from camctl.persistence.repositories.availability_intent import AvailabilityIntentReads
+                context = replace(context, availability_reads=AvailabilityIntentReads(connection, event, transaction))
+    retry = load_event_registry()["events"]["RETRY_WAIT_CHANGED"]
+    if (event.event_type == retry["id"] and event.reason == retry["branches"]["COMPLETE"]["reason"]
+            and len(event.rows) == 1 and event.rows[0].table == "operation_runs"):
+        original = row_facts(connection, "operation_runs", event.rows[0].row_id)
+        kind = load_enum_registry()["enums"]["operation_runs.kind"]["members"]["CHECK_DEVICE_AVAILABILITY"]
+        if original is not None and original["kind"] == kind:
+            from camctl.persistence.repositories.availability_retry import AvailabilityRetryReads
+            context = replace(context, availability_reads=AvailabilityRetryReads(connection, event, transaction))
     from camctl.persistence.repositories.capture_facts import PhotoResultReads
     context = replace(context, photo_result_reads=PhotoResultReads(connection))
     from camctl.persistence.repositories.baseline_reads import bind_intent
