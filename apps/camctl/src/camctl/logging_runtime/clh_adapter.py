@@ -257,7 +257,7 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
         if not isinstance(error, Exception) and self._control_error is None:
             self._control_error = error
 
-    def _sync_directory(self, path):
+    def _sync_directory(self, path, *, synced=None):
         if os.name != "posix" or not hasattr(os, "O_DIRECTORY"):
             error = OSError(errno.ENOTSUP, "目标环境不支持目录同步")
             self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
@@ -269,7 +269,14 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
             raise
         primary = None
         try:
-            os.fsync(fd)
+            identity = None
+            if synced is not None:
+                info = os.fstat(fd)
+                identity = info.st_dev, info.st_ino
+            if synced is None or identity not in synced:
+                os.fsync(fd)
+                if synced is not None:
+                    synced.add(identity)
         except BaseException as error:
             self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
             primary = error
@@ -281,12 +288,20 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
             raise primary.with_traceback(primary.__traceback__)
 
     def _sync_directory_chain(self):
-        directory = Path(self.baseFilename).parent
-        while True:
-            self._sync_directory(directory)
-            if directory.parent == directory:
-                return
-            directory = directory.parent
+        path = Path(self.baseFilename)
+        try:
+            actual_directory = path.resolve(strict=True).parent
+        except BaseException as error:
+            self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
+            raise
+        visited, synced = set(), set()
+        for directory in (actual_directory, path.parent):
+            while directory not in visited:
+                self._sync_directory(directory, synced=synced)
+                visited.add(directory)
+                if directory.parent == directory:
+                    break
+                directory = directory.parent
 
     def _move_name(self, source, target):
         os.link(source, target)
@@ -708,10 +723,6 @@ class FileChannel:
                 durable=handler.durable,
                 sync_error=handler.sync_error,
             )
-            if handler._control_error is not None:
-                if primary_copy_error is not None and primary_copy_error is not handler._control_error:
-                    _add_copy_close_notes(handler._control_error, (primary_copy_error,))
-                primary_copy_error = handler._control_error
             if primary_copy_error is not None or close_errors:
                 try:
                     copy_error = _raise_copy_failure(primary_copy_error, close_errors, write_result)
@@ -724,9 +735,8 @@ class FileChannel:
         handler = self._handler
         if primary is not None:
             handler._remember_control(primary)
-        error = handler._control_error
-        if error is None and propagate:
-            error = primary
+        # 副本端口已经按操作及句柄关闭次序选定主异常，不再改选。
+        error = primary if propagate else handler._control_error
         if error is not None:
             original = handler._failure_error
             try:

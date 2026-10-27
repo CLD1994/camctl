@@ -742,3 +742,76 @@ def test_result_setter_or_note_failure_never_replaces_original_control(tmp_path,
             assert original.__notes__
     finally:
         channel.close()
+
+
+@pytest.mark.parametrize("via_copy", [False, True])
+@pytest.mark.parametrize("fail_actual_directory", [False, True])
+def test_symlink_target_and_formal_name_directories_are_both_synced(tmp_path, monkeypatch, via_copy, fail_actual_directory):
+    configured, actual = tmp_path / "configured", tmp_path / "actual"
+    configured.mkdir()
+    actual.mkdir()
+    path, target = configured / "camctl.log", actual / "actual.log"
+    path.symlink_to(target)
+    assert not target.exists()
+    channel = FileChannel(path, max_bytes=4096, file_count=3)
+    original = os.fsync
+    synced = []
+    actual_identity = actual.stat().st_dev, actual.stat().st_ino
+
+    def fsync(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            identity = info.st_dev, info.st_ino
+            synced.append(identity)
+            if fail_actual_directory and identity == actual_identity:
+                raise OSError("actual directory sync denied")
+        return original(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    try:
+        if via_copy:
+            destination = tmp_path / "copy.log"
+            result, copy_error = channel.copy_with_write(record(), destination)
+            assert copy_error is None
+            assert destination.exists() is (not fail_actual_directory)
+        else:
+            result = channel.write_record(record())
+        assert result.appended and result.durable is (not fail_actual_directory)
+        assert messages(target) == ["trigger"]
+        if fail_actual_directory:
+            assert result.failure_stage is WriteFailureStage.DIRECTORY_SYNC
+            assert result.sync_error and channel.disabled
+            assert synced.count(actual_identity) == 1
+            before = list(synced)
+            assert not channel.write_record(record("later")).appended
+            assert synced == before
+        else:
+            expected = {(info.st_dev, info.st_ino) for info in
+                        (directory.stat() for directory in [actual, configured, *configured.parents])}
+            assert set(synced) == expected
+            assert len(synced) == len(expected)
+            assert not channel.disabled
+    finally:
+        channel.close()
+
+
+def test_actual_path_resolution_failure_preserves_append_and_reports_directory_sync(tmp_path, monkeypatch):
+    path = tmp_path / "camctl.log"
+    channel = FileChannel(path, max_bytes=4096, file_count=3)
+    original = Path.resolve
+
+    def resolve(candidate, *args, **kwargs):
+        if candidate == path:
+            raise OSError("actual path unresolved")
+        return original(candidate, *args, **kwargs)
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "resolve", resolve)
+            result = channel.write_record(record())
+        assert result.appended and not result.durable
+        assert result.failure_stage is WriteFailureStage.DIRECTORY_SYNC
+        assert result.sync_error and channel.disabled
+        assert messages(path) == ["trigger"]
+    finally:
+        channel.close()
