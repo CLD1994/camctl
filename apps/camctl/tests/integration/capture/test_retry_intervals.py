@@ -15,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.handlers import CaptureRuntime, capture_handler
 from camctl.capture.results import FileKind as ResultFileKind
@@ -53,6 +54,7 @@ from .test_capture_contract import (
     _value,
 )
 from .test_listing_rounds import _FlakyResults, _run_row
+from .public_assembly import assemble_capture
 
 register_operation_guards()
 register_capture_guards()
@@ -144,6 +146,29 @@ def _runtime(owned, *, driver=None, results=None, stopper=None, clock=None,
     )
 
 
+@pytest_asyncio.fixture
+async def assembled(tmp_path):
+    databases = []
+
+    async def create(owned, *, driver=None, results=None, stopper=None, clock=None,
+                     check_interval=Decimal("3"), stop_interval=Decimal("3")):
+        result_port = results if results is not None else ResultsDouble({})
+        runtime, database = await assemble_capture(
+            owned, driver=driver if driver is not None else DriverDouble(),
+            evidence=_PAGE_EVIDENCE if isinstance(result_port, ResultsDouble) else _EVIDENCE,
+            results=result_port, staging=tmp_path, wall_us=lambda: _NOW,
+            monotonic_ns=clock if clock is not None else lambda: 5_000_000_000)
+        databases.append(database)
+        runtime.stopper = stopper
+        runtime.check_config = AttemptConfig(3, Decimal("10"), check_interval)
+        runtime.stop_config = AttemptConfig(3, Decimal("10"), stop_interval)
+        return runtime
+
+    yield create
+    for database in databases:
+        await database.close()
+
+
 def _stop_row(owned, action_id: int):
     """停止流程行的当前状态：状态、累计次数与重试等待。"""
     return _value(
@@ -155,14 +180,14 @@ def _stop_row(owned, action_id: int):
 
 class TestCheckRoundInterval:
     async def test_listing_retry_waits_configured_interval(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults(
                 {11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)},
                 failures=1)
             clock = _Clock()
-            runtime = _runtime(owned, results=flaky, clock=clock)
+            runtime = await assembled(owned, results=flaky, clock=clock)
             handler = capture_handler("camera_take_photo")
             await handler(11, runtime)
             # 本轮列举失败：保存失败结果与重试等待。
@@ -183,13 +208,13 @@ class TestCheckRoundInterval:
             owned.connection.close()
 
     async def test_zero_interval_retries_next_round_immediately(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults(
                 {11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)},
                 failures=1)
-            runtime = _runtime(
+            runtime = await assembled(
                 owned, results=flaky, clock=_Clock(),
                 check_interval=Decimal("0"))
             handler = capture_handler("camera_take_photo")
@@ -202,12 +227,12 @@ class TestCheckRoundInterval:
             owned.connection.close()
 
     async def test_exhausted_budget_not_delayed_by_wait(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults({}, failures=3)
             clock = _Clock()
-            runtime = _runtime(owned, results=flaky, clock=clock)
+            runtime = await assembled(owned, results=flaky, clock=clock)
             handler = capture_handler("camera_take_photo")
             await handler(11, runtime)
             clock.advance_s(Decimal("3"))
@@ -226,12 +251,12 @@ class TestCheckRoundInterval:
 
 class TestStopInterval:
     async def test_failed_stop_waits_interval_before_next_attempt(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _RECORD)
         try:
             clock = _Clock()
             stopper = _FlakyStopper(failures=1, target="12")
-            runtime = _runtime(owned, stopper=stopper, clock=clock)
+            runtime = await assembled(owned, stopper=stopper, clock=clock)
             handler = capture_handler("camera_record")
             await handler(12, runtime)
             # 启动确认后取消生效：不经计时立即按剩余预算停止。
@@ -257,12 +282,12 @@ class TestStopInterval:
 
 class TestCrossSessionRecount:
     async def test_new_session_recounts_wait_from_first_observation(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults({}, failures=3)
             clock_a = _Clock()
-            runtime_a = _runtime(owned, results=flaky, clock=clock_a)
+            runtime_a = await assembled(owned, results=flaky, clock=clock_a)
             handler = capture_handler("camera_take_photo")
             await handler(11, runtime_a)
             clock_a.advance_s(Decimal("3"))
@@ -270,7 +295,7 @@ class TestCrossSessionRecount:
             assert flaky.calls == [11, 11]
             # 新会话（全新等待记忆）：跨会话按本次间隔从首次观察重新计时。
             clock_b = _Clock()
-            runtime_b = _runtime(owned, results=flaky, clock=clock_b)
+            runtime_b = await assembled(owned, results=flaky, clock=clock_b)
             clock_b.advance_s(Decimal("1"))
             await handler(11, runtime_b)
             assert flaky.calls == [11, 11]
