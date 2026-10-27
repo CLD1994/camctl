@@ -7133,6 +7133,13 @@ def _activity_guard(event, context) -> None:
                     raise ValueError("活动固定机身身份与资源键不一致")
             except (TypeError, ValueError, KeyError) as error:
                 raise EventValidationError("活动固定机身身份无效") from error
+            if identity is not None:
+                from .physical_alias import held_activity_alias_conflict
+                from .preparation import PreparationReads
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("活动创建缺少内核绑定的机身冲突核对")
+                if held_activity_alias_conflict(context.preparation_reads.connection, action["device_id"], identity):
+                    raise EventValidationError("活动越过了其他逻辑设备的机身限制")
             if action.get("execution_started") == 0:
                 from .preparation import PreparationReads
                 if type(context.preparation_reads) is not PreparationReads:

@@ -579,6 +579,18 @@ class BeginAttemptCommand:
                 return self._rejected("preparation_unresolved")
         if intent.kind is OperationKind.START:
             activity = self._state["device_activities"][intent.target.activity_id]
+            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            if action["driver_id"] == DRIVER_ID:
+                from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+                from .physical_alias import held_activity_alias_conflict
+                try:
+                    identity = CameraIdentity(**activity["expected_identity_json"])
+                except (TypeError, ValueError, KeyError) as error:
+                    raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+                if activity["resource_key"] != identity.resource_key:
+                    raise ConsistencyError("原活动资源键与固定机身身份不符")
+                if held_activity_alias_conflict(connection, action["device_id"], identity):
+                    return self._rejected("physical_identity_conflict")
             if (device_read_in_flight(connection, action["device_id"])
                     or capture_scope_blocked(connection, action["device_id"], action["id"],
                                              activity["ownership_mode"], activity["output_scope_json"])):
@@ -1766,6 +1778,9 @@ def _attempt_intent_guard(event, context) -> None:
                 raise EventValidationError("启动意图缺少可靠机身身份") from error
             if current != original or activity.get("resource_key") != original.resource_key:
                 _fail("启动意图与原固定机身身份不符")
+            from .physical_alias import held_activity_alias_conflict
+            if held_activity_alias_conflict(context.preparation_reads.connection, action["device_id"], original):
+                _fail("启动意图越过了其他逻辑设备的机身限制")
         elif identity is not None:
             _fail("其他驱动不能携带 Hasselblad 机身身份")
         try:

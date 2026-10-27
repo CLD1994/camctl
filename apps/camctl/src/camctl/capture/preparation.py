@@ -593,7 +593,8 @@ async def _advance_preparation(runtime, action_id):
         value = await _save_cached_request(runtime.database, cache, action_id,
             scheduling=runtime.scheduling, capture=runtime.capture)
         if value.outcome.value == "rejected":
-            return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
+            return BaselinePreparation(PreparationPhase.WAITING,
+                                       wakeup_required=value.reason == "physical_identity_conflict")
         activity = (await _activity(runtime, action_id))
     if activity is None:
         raise ConsistencyError("准备占用已可靠取得但原活动缺失")
