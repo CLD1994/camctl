@@ -101,10 +101,14 @@ class SharedSave:
 
     def retry_failed(self) -> None:
         """明确恢复原申请；成功与尚在进行的保存继续保留原任务。"""
-        task = self._task
-        if task is not None and task.done() and (task.cancelled()
-                or task.exception() is not None or task.result().error is not None):
+        if self.failed():
             self._task = None
+
+    def failed(self) -> bool:
+        """只观察原保存是否已经结束且失败，不转移任务所有权。"""
+        task = self._task
+        return bool(task is not None and task.done() and (task.cancelled()
+                    or task.exception() is not None or task.result().error is not None))
 
 
 def _check_value(value):

@@ -21,7 +21,7 @@ from typing import Any, Mapping
 from camctl.contracts.enums import decode_member, enum_for
 from camctl.contracts.history_values import HistoryBoundary
 from camctl.contracts.json_values import is_json_integer, json_equal
-from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey
+from camctl.contracts.values import ConsistencyError, ObjectId, OperationKey, UtcMicros
 from camctl.history.events import EventEnvelope, RowChange, RowImage, load_event_registry
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.history.reads import PlanReadScope
@@ -555,6 +555,7 @@ class BeginAttemptCommand:
         self._availability_request = availability_request
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
+        self._exhaust_attempt_id = None
 
     def plan(self, scope) -> CommandPlan:
         if not isinstance(self._intent, AttemptIntent):
@@ -603,7 +604,7 @@ class BeginAttemptCommand:
                 return self._rejected("availability_identity_mismatch")
             except AvailabilityTargetBlocked:
                 return self._rejected("device_busy")
-        if intent_recovery_locked(connection, intent):
+        if self._exhaust_attempt_id is None and intent_recovery_locked(connection, intent):
             return self._rejected("device_recovery")
         _verify_obtain_config({**_intent_identity(intent), "timeout_s_json": intent.config.timeout_s,
                                "retry_interval_s_json": intent.config.retry_interval_s}, self._state)
@@ -660,6 +661,9 @@ class BeginAttemptCommand:
             self._verify_existing_run(run_facts, intent, connection)
             if intent.kind is OperationKind.READ_FILE:
                 copy = self._state["file_copies"][intent.target.copy_id]
+                from .outputs import _read_owner_eligible
+                if not _read_owner_eligible(action):
+                    return self._rejected("owner_not_running")
                 _load_read_attempt_context(connection, copy, self._state)
                 read_has_slot = _read_attempt_has_slot(self._state, intent.target.copy_id, intent.copy_round)
             if run_facts["status"] not in (
@@ -677,6 +681,8 @@ class BeginAttemptCommand:
                 from .retry_wait_reads import RetryWaitReads
                 if not RetryWaitReads(connection).completed(run_facts["id"], run_facts["attempts_used"]):
                     return self._rejected("retry_wait")
+            if self._exhaust_attempt_id is not None:
+                return self._rejected("qualification_changed")
             if run_facts["attempts_used"] >= 1 and run_facts["retry_wait_required"] != 1:
                 # 主机清理和取回源检查不应用超时或定时重试；允许下轮领取新票据的
                 # 前提是上一张 ticket 已有完整、可核实的结果事实。
@@ -691,7 +697,10 @@ class BeginAttemptCommand:
                     and run_facts["retry_interval_s_json"] is None)
                 if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
                     immediate_cleanup_retry = True
-                if not immediate_cleanup_retry:
+                from .retry_wait_reads import RetryWaitReads
+                completed_wait = (intent.kind is OperationKind.READ_FILE
+                    and RetryWaitReads(connection).completed(run_facts["id"], run_facts["attempts_used"]))
+                if not immediate_cleanup_retry and not completed_wait:
                     raise TransactionError("后续尝试要求先建立重试等待")
                 with closing(connection.execute(
                     "SELECT id,status,result_json,result_event_id FROM operation_attempts"
@@ -847,18 +856,16 @@ class BeginAttemptCommand:
 
     def _read_exhausted(self, scope, run) -> CommandPlan:
         """原明确失败耗尽本次预算时，只采用新流程配置并结束原流程。"""
-        with closing(scope.connection.execute("SELECT id FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
-                                               (run["id"],))) as cursor:
-            identities = cursor.fetchall()
-        attempts = tuple(_load_row(scope.connection, "operation_attempts", identity) for (identity,) in identities)
-        if any(attempt is None for attempt in attempts):
-            raise ConsistencyError("读取耗尽引用的原尝试不存在")
-        self._state.setdefault("operation_attempts", {}).update({attempt["id"]: attempt for attempt in attempts})
-        if (not attempts or any(a["status"] == int(_ATTEMPT_STATUS.RUNNING)
-                                 or a["result_json"] is None for a in attempts)
-                or max(attempts, key=lambda a: a["attempt_no"])["status"] != int(_ATTEMPT_STATUS.FAILED)
-                or run["retry_wait_required"] != 1):
+        from .retry_wait_reads import RetryWaitReads
+        reads = RetryWaitReads(scope.connection)
+        last = reads.last_attempt(run["id"], run["attempts_used"])
+        if (last is None or last[1] != int(_ATTEMPT_STATUS.FAILED)
+                or (run["retry_wait_required"] != 1 and not reads.completed(run["id"], run["attempts_used"]))):
             raise TransactionError("读取耗尽必须已有原明确失败，不能结束原未完成尝试")
+        attempt = _load_row(scope.connection, "operation_attempts", last[0])
+        if attempt is None:
+            raise ConsistencyError("读取耗尽引用的原尝试不存在")
+        self._state.setdefault("operation_attempts", {})[attempt["id"]] = attempt
         desired = {"max_attempts_used": self._intent.config.max_attempts,
                    "timeout_s_json": self._intent.config.timeout_s,
                    "retry_interval_s_json": self._intent.config.retry_interval_s}
@@ -876,7 +883,9 @@ class BeginAttemptCommand:
         allocation = scope.allocate(len(specs))
         return CommandPlan(events=tuple(_envelope(
             allocation.first_event_id + offset, allocation.txn_id, _OPERATION_CONFIGURED_EVENT,
-            reason, (row,), self._intent.occurred_at) for offset, (reason, row) in enumerate(specs)),
+            reason, (row,), self._intent.occurred_at,
+            {"attempt_id": last[0]} if reason == 3 else None)
+            for offset, (reason, row) in enumerate(specs)),
             owners=self._owners, state_rows=self._state,
             result=BeginAttemptResult(BeginDisposition.REJECTED, reason="budget_exhausted"))
 
@@ -957,6 +966,9 @@ class BeginAttemptCommand:
     def _reuse_read_exhausted(self, connection, saved) -> CommandPlan:
         """耗尽原键核实配置、轮次、归属与结束结果，不能重开尝试。"""
         intent = self._intent
+        if (self._exhaust_attempt_id is not None
+                and saved[-1]["body"].get("evidence") != {"attempt_id": self._exhaust_attempt_id}):
+            raise TransactionError("读取耗尽原键的尝试身份不同")
         kinds = [(event["type"], event["reason"]) for event in saved]
         if kinds not in ([(_OPERATION_CONFIGURED_EVENT, 3)],
                          [(_OPERATION_CONFIGURED_EVENT, 2), (_OPERATION_CONFIGURED_EVENT, 3)]):
@@ -1613,8 +1625,97 @@ class _ReadResumeCommand:
         )
 
 
+class _ExhaustBlockedReadCommand(BeginAttemptCommand):
+    def __init__(self, intent, attempt_id, key):
+        super().__init__(intent, key)
+        ObjectId(attempt_id)
+        self._exhaust_attempt_id = attempt_id
+
+    def plan(self, scope):
+        if _saved_transaction_events(scope.connection, self._key) is not None:
+            return super().plan(scope)
+        intent = self._intent
+        if not isinstance(intent, AttemptIntent) or intent.kind is not OperationKind.READ_FILE:
+            raise TransactionError("读取耗尽申请必须指定读取责任")
+        run_id = _find_responsibility(scope.connection, intent)
+        run = None if run_id is None else _load_row(scope.connection, "operation_runs", run_id)
+        from .retry_wait_reads import RetryWaitReads
+        reads = RetryWaitReads(scope.connection)
+        last = None if run is None else reads.last_attempt(run_id, run["attempts_used"])
+        if (run is None or run["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
+                or run["attempts_used"] < intent.config.max_attempts or last is None
+                or last[0] != self._exhaust_attempt_id or last[1] != int(_ATTEMPT_STATUS.FAILED)
+                or not reads.read_eligible(run_id, intent.occurred_at)):
+            return self._rejected("qualification_changed")
+        return super().plan(scope)
+
+
+class _CompleteReadRetryWaitCommand:
+    def __init__(self, run_id, attempt_id, occurred_at, key):
+        ObjectId(run_id)
+        ObjectId(attempt_id)
+        UtcMicros(occurred_at)
+        self.run_id, self.attempt_id, self.occurred_at, self.key = run_id, attempt_id, occurred_at, key
+
+    def plan(self, scope):
+        connection = scope.connection
+        saved = _saved_transaction_events(connection, self.key)
+        if saved is not None:
+            if (len(saved) != 1 or (saved[0]["type"], saved[0]["reason"]) != (_RETRY_WAIT_EVENT, 2)
+                    or saved[0]["occurred_at"] != self.occurred_at
+                    or saved[0]["body"].get("evidence") != {"attempt_id": self.attempt_id}
+                    or len(saved[0]["body"]["rows"]) != 1
+                    or saved[0]["body"]["rows"][0]["id"] != self.run_id
+                    or saved[0]["body"]["rows"][0]["table"] != "operation_runs"):
+                raise TransactionError("等待完成原键与申请不符")
+            change = saved[0]["body"]["rows"][0]
+            if (change.get("before") != {"exists": True, "values": {"retry_wait_required": 1}}
+                    or change.get("after") != {"exists": True, "values": {"retry_wait_required": 0}}):
+                raise TransactionError("等待完成原键的状态变化不符")
+            with closing(connection.execute(
+                "SELECT run_id,attempt_no,result_event_id FROM operation_attempts WHERE id=?",
+                (self.attempt_id,),
+            )) as cursor:
+                attempt = cursor.fetchone()
+            if (attempt is None or attempt[0] != self.run_id or attempt[2] is None
+                    or attempt[2] >= saved[0]["event_id"]):
+                raise TransactionError("等待完成原键引用的尝试不符")
+            return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=True)
+        run = _load_row(connection, "operation_runs", self.run_id)
+        if run is None or run["kind"] != int(_RUN_KIND.READ_FILE):
+            raise TransactionError("等待完成缺少原读取流程")
+        state = {"operation_runs": {self.run_id: run}}
+        _load_flow_context(connection, OperationKind.READ_FILE, run["action_id"],
+                           AttemptTarget(copy_id=run["copy_id"]), None, state)
+        _verify_run_identity(run, state)
+        if run["retry_wait_required"] != 1 or run["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+            return CommandPlan(events=(), owners={}, state_rows=state, read_only=True, result=False)
+        from .retry_wait_reads import RetryWaitReads
+        reads = RetryWaitReads(connection)
+        last = reads.last_attempt(self.run_id, run["attempts_used"])
+        if last is None or last[0] != self.attempt_id:
+            return CommandPlan(events=(), owners={}, state_rows=state, read_only=True, result=False)
+        if not reads.read_eligible(self.run_id, self.occurred_at):
+            return CommandPlan(events=(), owners={}, state_rows=state, read_only=True, result=False)
+        owner = _run_owner_ref(run, state)
+        allocation = scope.allocate(1)
+        row = _update("operation_runs", self.run_id, {"retry_wait_required": 1}, {"retry_wait_required": 0})
+        event = _envelope(allocation.first_event_id, allocation.txn_id, _RETRY_WAIT_EVENT, 2,
+                          (row,), self.occurred_at, {"attempt_id": self.attempt_id})
+        return CommandPlan(events=(event,), owners={("operation_runs", self.run_id): owner},
+                           state_rows=state, result=True)
+
+
 class OperationRepository:
     """操作意图与结果事务的 SQLite 仓储。"""
+
+    def complete_read_retry_wait(self, run_id, attempt_id, occurred_at, key, owned):
+        receipt = commit_operation(_CompleteReadRetryWaitCommand(run_id, attempt_id, occurred_at, key), key, owned)
+        return _outcome_of(receipt)
+
+    def exhaust_blocked_read(self, intent, attempt_id, key, owned):
+        receipt = commit_operation(_ExhaustBlockedReadCommand(intent, attempt_id, key), key, owned)
+        return _outcome_of(receipt)
 
     def begin_attempt(
         self, intent: AttemptIntent, key: OperationKey, owned: OwnedConnection
@@ -1880,6 +1981,19 @@ def _attempt_intent_guard(event, context) -> None:
             _fail(f"启动意图的基准准备未完成: {preparation_reason}")
     copy_round = attempts[0].after.values.get("copy_round")
     if kind == int(_RUN_KIND.READ_FILE):
+        from .outputs import _read_owner_eligible, _slot_owner_action
+        copy = _fixed_reference(context.state_rows, "file_copies", run_after.get("copy_id"))
+        action = _slot_owner_action(context, copy)
+        try:
+            if action.get("id") != run_after.get("action_id") or not _read_owner_eligible(action):
+                _fail("读取意图要求拷贝所属动作执行中且未取消")
+        except ConsistencyError as error:
+            raise EventValidationError(str(error)) from error
+        if attempt_no > 1 and run_row.before.values.get("retry_wait_required") == 0:
+            from .retry_wait_reads import RetryWaitReads
+            reads = context.retry_wait_reads
+            if type(reads) is not RetryWaitReads or not reads.completed(run_row.row_id, attempt_no - 1):
+                _fail("后续读取意图缺少本次重试间隔已完成的事实")
         if (
             not isinstance(copy_round, int)
             or isinstance(copy_round, bool)
@@ -1892,7 +2006,6 @@ def _attempt_intent_guard(event, context) -> None:
             raise EventValidationError(str(error)) from error
         if not held:
             _fail("设备读取意图要求当前拷贝已取得原来源设备的读取机会")
-        copy = _fixed_reference(context.state_rows, "file_copies", run_after.get("copy_id"))
         slot = copy["slot_device_id"]
         if slot is not None:
             from .preparation import PreparationReads
@@ -2044,6 +2157,58 @@ def _operation_finish_guard(event, context) -> None:
             _fail("该结束结果不携带流程错误")
         if after.get("retry_wait_required") != 0:
             _fail("结束流程必须清除重试等待责任")
+        if (after.get("kind") == int(_RUN_KIND.READ_FILE) and status == int(_RUN_STATUS.CANCELED)
+                and row.before.values.get("status") == int(_RUN_STATUS.PENDING)
+                and after.get("attempts_used") == 0):
+            copy = context.state_rows.get("file_copies", {}).get(after.get("copy_id"))
+            if copy is not None and copy.get("inspection_id") is not None and copy.get("slot_device_id") is not None:
+                from .retry_wait_reads import RetryWaitReads
+                inspection = context.state_rows.get("segment_inspections", {}).get(copy["inspection_id"])
+                action = context.state_rows.get("actions", {}).get(after.get("action_id"))
+                result_copy = (None if context.transaction_rows is None else
+                               context.transaction_rows.get("file_copies", {}).get(copy["id"]))
+                reads = context.retry_wait_reads
+                inspection_state = enum_for("segment_inspections.state")
+                before_run = context.state_rows.get("operation_runs", {}).get(row.row_id)
+                if (before_run is None or before_run.get("retry_wait_required") != 0
+                        or before_run.get("error_json") is not None
+                        or inspection is None or inspection.get("action_id") != after.get("action_id")
+                        or inspection.get("state") not in (int(inspection_state.COMPLETED),
+                            int(inspection_state.FAILED), int(inspection_state.UNCONFIRMED))
+                        or action is None or type(action.get("cancel_requested")) is not int
+                        or action.get("cancel_requested") != 1
+                        or copy.get("slot_device_id") is None or result_copy is None
+                        or result_copy.get("slot_device_id") is not None
+                        or type(reads) is not RetryWaitReads or not reads.no_attempts(row.row_id)):
+                    _fail("未开始的分段检查读取取消要求原动作取消、零尝试和同事务释放机会")
+        if (after.get("kind") == int(_RUN_KIND.READ_FILE) and event.event_type == _OPERATION_CONFIGURED_EVENT
+                and event.reason == 3 and isinstance(error, Mapping)
+                and error.get("code") == "read_attempts_exhausted"
+                and "stale_run_request" not in event.evidence):
+            from .retry_wait_reads import RetryWaitReads
+            reads = context.retry_wait_reads
+            if type(reads) is not RetryWaitReads:
+                _fail("读取耗尽缺少原事务事实")
+            last = reads.last_attempt(row.row_id, after.get("attempts_used"))
+            if last is not None:
+                copy = context.state_rows.get("file_copies", {}).get(after.get("copy_id"))
+                if (last[0] != event.evidence.get("attempt_id")
+                        or last[1] != int(_ATTEMPT_STATUS.FAILED)
+                        or after.get("attempts_used") < after.get("max_attempts_used")
+                        or copy is None
+                        or (row.before.values.get("retry_wait_required") == 0
+                            and not reads.completed(row.row_id, after.get("attempts_used")))
+                        or (copy.get("source_device_file_id") is not None and copy.get("delivery_id") is not None
+                            and not reads.read_eligible(row.row_id, event.occurred_at))):
+                    _fail("读取耗尽要求原失败已收场、预算耗尽且所属工作仍有资格")
+            elif ("attempt_id" in event.evidence or not any(
+                    attempt.get("run_id") == row.row_id
+                    and attempt.get("attempt_no") == after.get("attempts_used")
+                    and attempt.get("status") == int(_ATTEMPT_STATUS.FAILED)
+                    and isinstance(attempt.get("result_event_id"), int)
+                    and context.transaction.first_event_id <= attempt["result_event_id"] < event.event_id
+                    for attempt in context.state_rows.get("operation_attempts", {}).values())):
+                _fail("读取耗尽要求原失败已收场、预算耗尽且所属工作仍有资格")
         if after.get("kind") == int(_RUN_KIND.PREPARE_CAPTURE) and status == int(_RUN_STATUS.SUCCEEDED):
             completed = [attempt for attempt in context.state_rows.get("operation_attempts", {}).values()
                          if attempt.get("run_id") == row.row_id
@@ -2069,6 +2234,16 @@ def _retry_guard(event, context) -> None:
                 context.availability_reads.verify(event, context, row.row_id)
             except (ConsistencyError, ValueError, KeyError) as error:
                 raise EventValidationError(f"检查等待完成无效: {error}") from error
+        if event.event_type == _RETRY_WAIT_EVENT and event.reason == complete:
+            if facts.get("kind") == int(_RUN_KIND.READ_FILE):
+                from .retry_wait_reads import RetryWaitReads
+                reads = context.retry_wait_reads
+                if type(reads) is not RetryWaitReads:
+                    _fail("读取等待完成缺少原事务事实")
+                last = reads.last_attempt(row.row_id, facts.get("attempts_used"))
+                if (last is None or event.evidence.get("attempt_id") != last[0]
+                        or not reads.read_eligible(row.row_id, event.occurred_at)):
+                    _fail("读取等待完成要求原尝试已收场且所属工作仍有资格")
         if row.after.values.get("retry_wait_required") != 1:
             continue
         if facts.get("retry_interval_s_json") is None:

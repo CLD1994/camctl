@@ -23,6 +23,8 @@ CREATE TABLE history_events (
 CREATE INDEX history_events_transaction ON history_events(transaction_id, id);
 CREATE INDEX history_events_transaction_type ON history_events(transaction_id, event_type, id);
 CREATE INDEX history_events_type ON history_events(event_type, id);
+CREATE INDEX history_events_row ON history_events(event_type,
+    json_extract(body_json, '$.rows[0].table'), json_extract(body_json, '$.rows[0].id'), id);
 
 CREATE TABLE entity_event_links (
     id INTEGER PRIMARY KEY CHECK (id > 0),

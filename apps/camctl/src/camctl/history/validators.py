@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from camctl.contracts.enums import load_registry as load_enum_registry
 from camctl.contracts.history_values import TransactionRange
@@ -74,6 +74,8 @@ class EventContext:
     photo_result_reads: object | None = None
     availability_reads: object | None = None
     availability_finish_reads: object | None = None
+    retry_wait_reads: object | None = None
+    validated_events: Sequence[ValidatedEvent] = ()
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；

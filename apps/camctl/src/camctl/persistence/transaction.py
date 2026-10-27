@@ -205,6 +205,8 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
         if original is not None and original["kind"] == kind:
             from camctl.persistence.repositories.availability_retry import AvailabilityRetryReads
             context = replace(context, availability_reads=AvailabilityRetryReads(connection, event, transaction))
+    from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+    context = replace(context, retry_wait_reads=RetryWaitReads(connection), validated_events=validated)
     from camctl.persistence.repositories.capture_facts import PhotoResultReads
     context = replace(context, photo_result_reads=PhotoResultReads(connection))
     from camctl.persistence.repositories.baseline_reads import bind_intent

@@ -162,6 +162,7 @@ class ObtainRuntime:
     pending_segment_selections: dict = field(default_factory=dict)
     pending_segment_queries: dict = field(default_factory=dict)
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
+    on_read_retry_deadline: Callable[[int, int], None] | None = None
 
 
 @dataclass
@@ -679,12 +680,67 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
                 if failed.value.disposition is not FailureSaveDisposition.RETIRED:
                     runtime.retry_gate.cleared(f"read/{copy_id}")
+    deferred_waits = {}
+    # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
+    for item in page.items:
+        if item.copy_id in binding_blocked:
+            continue
+        assembly = runtime.devices.get(item.device_id)
+        if assembly is None:
+            continue
+        if (not item.held and (item.attempts_used == 0
+                or (item.retry_wait_required == 0 and item.attempts_used < assembly.max_read_attempts))):
+            continue
+        run = await read_one(runtime.database,
+            "SELECT r.id,a.id,r.attempts_used,r.retry_wait_required,a.status,a.result_json,a.result_event_id FROM operation_runs r"
+            " LEFT JOIN operation_attempts a ON a.run_id=r.id AND a.attempt_no=r.attempts_used"
+            " WHERE r.copy_id=? AND r.kind=3", (item.copy_id,))
+        if run is None:
+            raise ConsistencyError("已持有机会的读取缺少原流程")
+        run_id, attempt_id, attempts_used, waiting, attempt_status, result, result_event_id = run
+        if (run_id, attempts_used) in runtime.pending_read_results:
+            continue
+        if (attempt_id is None or attempt_status == int(_ATTEMPT_STATUS.RUNNING)
+                or result is None or result_event_id is None):
+            continue
+        if attempt_status == int(_ATTEMPT_STATUS.SUCCEEDED):
+            continue
+        if not item.held:
+            if waiting != 1 and attempts_used < assembly.max_read_attempts:
+                continue
+            from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+            eligible = await runtime.database.read(
+                lambda owned: RetryWaitReads(owned.connection).read_eligible(run_id, runtime.occurred_at()))
+            if not eligible:
+                continue
+        from camctl.outputs.read_attempts import save_read_business
+        if attempts_used >= assembly.max_read_attempts:
+            facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, item.copy_id))
+            if facts is None:
+                continue
+            intent = _read_intent(assembly, facts, runtime.occurred_at())
+            result = await save_read_business(runtime, item.copy_id, "exhaust_read", (intent, attempt_id),
+                lambda request, key, owned: runtime.operations.exhaust_blocked_read(*request, key, owned))
+            if result.value.reason == "budget_exhausted":
+                runtime.retry_gate.cleared(f"read/{item.copy_id}")
+                await _fail_read_delivery(runtime, facts, runtime.occurred_at())
+            continue
+        if waiting != 1 or await _read_wait_remaining(
+                runtime, item.copy_id, assembly.retry_interval_s, assembly.max_read_attempts) is not None:
+            continue
+        deferred_waits[item.copy_id] = (run_id, attempt_id)
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
         owned.connection, now, capture_read_parallel=parallel,
         candidates=tuple(item for item in page.items if item.copy_id not in binding_blocked)))
+    selected = {copy_id for work in work_items
+                if not work.yield_reads and not (work.dispatch_captures and not work.capture_read_parallel)
+                for copy_id in (*work.grant_reads, *work.resume_reads)}
+    for copy_id, wait in deferred_waits.items():
+        if copy_id not in selected:
+            await _complete_read_wait(runtime, copy_id, *wait)
     for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
@@ -693,22 +749,28 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         if assembly is None:
             continue
         for copy_id in (*work.grant_reads, *work.resume_reads):
-            await _advance_read(runtime, assembly, copy_id, now)
+            started = await _advance_read(runtime, assembly, copy_id, now)
+            if not started and copy_id in deferred_waits:
+                await _complete_read_wait(runtime, copy_id, *deferred_waits[copy_id])
 
 
-def _read_result_pending(connection, copy_id: int) -> bool:
-    """原读取存在尚未可靠结束的尝试；不把合法未完当作仓储错误。"""
-    with closing(connection.execute(
-        "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
-        " WHERE r.copy_id=? AND (a.status=1 OR a.result_json IS NULL) LIMIT 1", (copy_id,),
-    )) as cursor:
-        return cursor.fetchone() is not None
+async def _complete_read_wait(runtime, copy_id, run_id, attempt_id):
+    from camctl.outputs.read_attempts import save_read_business
+
+    def cleared(value):
+        if value:
+            runtime.retry_gate.cleared(f"read/{copy_id}")
+
+    await save_read_business(runtime, copy_id, "complete_retry_wait",
+        (run_id, attempt_id, runtime.occurred_at()),
+        lambda request, key, owned: runtime.operations.complete_read_retry_wait(*request, key, owned),
+        on_completed=cleared)
 
 
 async def _advance_read(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
-        copy_id: int, now: int) -> None:
-    """在读取机会与尝试预算内推进一份交付拷贝到准备完成。"""
+        copy_id: int, now: int) -> bool:
+    """推进一份拷贝；返回是否取得读取尝试。"""
     def inputs(owned):
         facts = _read_facts(owned.connection, copy_id)
         if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
@@ -720,25 +782,26 @@ async def _advance_read(
             return facts, cursor.fetchone()
     facts, saved_binding = await runtime.database.read(inputs)
     if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
-        return
+        return False
     if saved_binding is None:
         raise ConsistencyError(f"读取源文件的原绑定缺失: {facts['source_device_file_id']}")
     if assembly.binding != DeviceBinding(*saved_binding):
         # 本次设备标识相同仍可能更换驱动；实际意图和调用只采用原绑定。
-        return
+        return False
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
-        return
+        return False
     slot = await _save_repository(runtime, runtime.outputs.grant_read_slot, SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()), new_operation_key())
     if slot.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(ConsistencyError,
             f"读取机会事务未完成（{slot.kind.value}）: {slot.error}", slot)
     if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
-        return
+        return False
     ticket = await _begin_read_attempt(runtime, assembly, facts, now)
     if ticket is None:
-        return
+        return False
     await _run_read(runtime, assembly, facts, ticket, now)
+    return True
 
 
 def _read_facts(connection, copy_id: int, *, include_terminal: bool = False) -> dict | None:
@@ -777,20 +840,37 @@ async def _read_wait_remaining(
         " FROM operation_runs WHERE responsibility_key = ?", (responsibility,))
     if row is None:
         return None
-    return runtime.retry_gate.remaining(
+    now_ns = runtime.monotonic_ns()
+    remaining = runtime.retry_gate.remaining(
         responsibility,
         attempts_used=int(row[0]),
         retry_wait_required=int(row[1]) == 1,
         max_attempts_used=int(row[2]) if maximum is None else maximum,
         interval_s=interval_s,
-        now_ns=runtime.monotonic_ns())
+        now_ns=now_ns)
+    if remaining is not None and runtime.on_read_retry_deadline is not None:
+        from decimal import ROUND_CEILING
+
+        target_ns = now_ns + int((remaining * 1_000_000_000).to_integral_value(rounding=ROUND_CEILING))
+        runtime.on_read_retry_deadline(target_ns, now_ns)
+    return remaining
 
 
 async def _begin_read_attempt(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         facts: Mapping, now: int):
     """提交读取意图；预算耗尽把交付结束为终局失败并交还机会。"""
-    intent = AttemptIntent(
+    intent = _read_intent(assembly, facts, now)
+    ticket, reason = await acquire_read_attempt(runtime, intent)
+    if ticket is not None:
+        return ticket
+    if reason == "budget_exhausted":
+        await _fail_read_delivery(runtime, facts, now)
+    return None
+
+
+def _read_intent(assembly, facts, now):
+    return AttemptIntent(
         operation="read",
         action_id=facts["action_id"],
         kind=OperationKind.READ_FILE,
@@ -802,12 +882,6 @@ async def _begin_read_attempt(
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now,
         copy_round=facts["round"])
-    ticket, reason = await acquire_read_attempt(runtime, intent)
-    if ticket is not None:
-        return ticket
-    if reason == "budget_exhausted":
-        await _fail_read_delivery(runtime, facts, now)
-    return None
 
 
 async def _fail_read_delivery(
