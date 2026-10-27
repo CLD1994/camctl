@@ -380,6 +380,7 @@ CREATE INDEX segment_member_history_ids ON segment_members(set_id, id);
 CREATE INDEX segment_gap_history_ids ON segment_gaps(set_id, id);
 CREATE INDEX segment_scope_history_ids ON segment_scope_members(set_id, id);
 CREATE INDEX operation_attempt_history_ids ON operation_attempts(run_id, id);
+CREATE INDEX operation_attempt_running ON operation_attempts(run_id) WHERE status = 1;
 
 CREATE TABLE device_file_pairing_facts (
     id INTEGER PRIMARY KEY CHECK (id > 0),

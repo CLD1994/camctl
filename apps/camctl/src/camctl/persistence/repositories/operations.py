@@ -56,7 +56,8 @@ from camctl.operations.result_format import result_document, read_result_documen
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
 from camctl.persistence.row_history import read_row_values_at_boundary
-from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked
+from camctl.scheduling.resources import (baseline_start_reason, capture_scope_blocked,
+    device_read_in_flight, device_start_in_flight)
 from camctl.persistence.transaction import (
     CommandPlan,
     TransactionError,
@@ -578,8 +579,9 @@ class BeginAttemptCommand:
                 return self._rejected("preparation_unresolved")
         if intent.kind is OperationKind.START:
             activity = self._state["device_activities"][intent.target.activity_id]
-            if capture_scope_blocked(connection, action["device_id"], action["id"],
-                                     activity["ownership_mode"], activity["output_scope_json"]):
+            if (device_read_in_flight(connection, action["device_id"])
+                    or capture_scope_blocked(connection, action["device_id"], action["id"],
+                                             activity["ownership_mode"], activity["output_scope_json"])):
                 return self._rejected("device_busy")
         if intent.kind is OperationKind.RESOLVE_OUTPUT_SCOPE:
             activity = self._state["device_activities"][intent.target.activity_id]
@@ -653,6 +655,10 @@ class BeginAttemptCommand:
 
         if not read_has_slot:
             return self._rejected("read_slot_not_held")
+        if intent.kind is OperationKind.READ_FILE:
+            slot = self._state["file_copies"][intent.target.copy_id]["slot_device_id"]
+            if slot is not None and device_start_in_flight(connection, slot):
+                return self._rejected("device_busy")
         allocation = scope.allocate(1)
         event_id = allocation.first_event_id
         attempt_id = _next_id(connection, "operation_attempts")
@@ -1745,6 +1751,10 @@ def _attempt_intent_guard(event, context) -> None:
     if kind == int(_RUN_KIND.START):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
         action = _guard_facts(context, "actions", run_after.get("action_id"))
+        from .preparation import PreparationReads
+        if (type(context.preparation_reads) is not PreparationReads
+                or context.preparation_reads.device_read_in_flight(action["device_id"])):
+            _fail("启动意图缺少同设备读取收场依据")
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         identity = event.evidence.get("start_camera_identity")
@@ -1778,6 +1788,13 @@ def _attempt_intent_guard(event, context) -> None:
             raise EventValidationError(str(error)) from error
         if not held:
             _fail("设备读取意图要求当前拷贝已取得原来源设备的读取机会")
+        copy = _fixed_reference(context.state_rows, "file_copies", run_after.get("copy_id"))
+        slot = copy["slot_device_id"]
+        if slot is not None:
+            from .preparation import PreparationReads
+            if (type(context.preparation_reads) is not PreparationReads
+                    or context.preparation_reads.device_start_in_flight(slot)):
+                _fail("读取意图缺少同设备启动收场依据")
     elif copy_round is not None:
         _fail("只有读取尝试保存拷贝轮次")
 

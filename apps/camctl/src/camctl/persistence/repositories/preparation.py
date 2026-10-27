@@ -20,6 +20,14 @@ class PreparationReads:
         self.connection = connection
         self.events = tuple(accepted.envelope for accepted in validated)
 
+    def device_read_in_flight(self, device_id):
+        from camctl.scheduling.resources import device_read_in_flight
+        return device_read_in_flight(self.connection, device_id)
+
+    def device_start_in_flight(self, device_id):
+        from camctl.scheduling.resources import device_start_in_flight
+        return device_start_in_flight(self.connection, device_id)
+
     def can_prepare(self, action, activity, occurred_at):
         from contextlib import closing
         from camctl.scheduling.resources import capture_scope_blocked

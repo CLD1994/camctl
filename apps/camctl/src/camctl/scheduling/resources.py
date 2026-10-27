@@ -81,6 +81,32 @@ def current_preparation_holder(connection, device_id):
     return None if not rows else PreparationHolder(*rows[0])
 
 
+def device_read_in_flight(connection, device_id: str) -> bool:
+    """只将尚未保存结果的设备读取视为在途调用。"""
+    kind = int(enum_for("operation_runs.kind").READ_FILE)
+    running = int(enum_for("operation_attempts.status").RUNNING)
+    with closing(connection.execute(
+        "SELECT 1 FROM file_copies c"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
+        f" JOIN operation_attempts t ON t.run_id=r.id AND t.status={running}"
+        " WHERE c.slot_device_id=? LIMIT 1", (kind, device_id),
+    )) as cursor:
+        return cursor.fetchone() is not None
+
+
+def device_start_in_flight(connection, device_id: str) -> bool:
+    """判断同设备是否有尚未保存结果的 START 尝试。"""
+    kind = int(enum_for("operation_runs.kind").START)
+    running = int(enum_for("operation_attempts.status").RUNNING)
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts t"
+        " JOIN operation_runs r ON r.id=t.run_id AND r.kind=?"
+        " JOIN actions a ON a.id=r.action_id"
+        f" WHERE t.status={running} AND a.device_id=? LIMIT 1", (kind, device_id),
+    )) as cursor:
+        return cursor.fetchone() is not None
+
+
 def baseline_start_reason(activity, action) -> str | None:
     """基准拍摄的意图前提；只读取首次固定的执行定义与可靠活动事实。"""
     ownership = enum_for("device_activities.ownership_mode")

@@ -56,7 +56,8 @@ from camctl.persistence.transaction import (
     saved_transaction_events,
     update_change as _update,
 )
-from camctl.scheduling.resources import baseline_start_reason, capture_scope_blocked, current_start_holder, current_preparation_holder
+from camctl.scheduling.resources import (baseline_start_reason, capture_scope_blocked,
+    current_start_holder, current_preparation_holder, device_read_in_flight)
 from camctl.scheduling.rules import (
     ExpirationReason,
     LaunchWindow,
@@ -891,6 +892,9 @@ class GrantStartCommand:
 
         holder = current_start_holder(connection, request.device_id)
         if holder is not None and holder.action_id != request.action_id:
+            return self._rejected("device_busy")
+
+        if device_read_in_flight(connection, request.device_id):
             return self._rejected("device_busy")
 
         preparation_holder = current_preparation_holder(connection, request.device_id)

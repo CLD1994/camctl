@@ -62,6 +62,14 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 
 活动结构校验在 `/workspaces/camctl` 使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_output_scope_structure.py -q`，退出码为 0，11 项通过。单元测试使用连接替身覆盖当前活动表的身份字段、配对约束、缺失结构，以及格式 1 和格式 6 打开时拒绝不符结构；未验证真实数据库文件或既有现场库。
 
+## H3：启动与在途读取
+
+在 `/workspaces/camctl` 使用 CPython 3.11.17 运行以下单元测试，退出码为 0，204 项通过。连接替身检查了同逻辑设备的在途读取与启动查询、双方意图提案等待、独立守卫拒绝冲突及 HOST 读取不受影响。新结构为运行中尝试增加部分索引；该范围没有验证实际查询计划、真实数据库、物理机身别名、检查尝试、读取重试让位或完整业务链。
+
+```bash
+PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/scheduling/test_start_read_exclusion.py apps/camctl/tests/unit/scheduling/test_preparation_storage.py apps/camctl/tests/unit/operations/test_preparation_guards.py apps/camctl/tests/unit/operations/test_attempt_inputs.py -q
+```
+
 ## H4：公共诊断消费者
 
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。
