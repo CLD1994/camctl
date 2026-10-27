@@ -22,7 +22,7 @@ from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult, LogChannel, LogRecord, admission_result_for
 from camctl.logging_runtime.formatting import log_metadata
 from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
-from camctl.operations.models import CallOutcome, ErrorValue
+from camctl.operations.models import AttemptTicket, CallOutcome, ErrorValue
 from camctl.operations.process import RawToolOutcome
 from camctl.operations.result_format import error_document
 from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, encode_diagnostics
@@ -484,8 +484,9 @@ def record_call_outcome(
     run_error: ErrorValue | BaseException | None = None,
     context: Mapping | None = None,
     state: DiagnosticState | None = None,
+    include_tool_stdout: bool = False,
 ) -> DiagnosticState | None:
-    """保留调用错误及伴随流程错误；正常控制分支由业务调用方分类。"""
+    """保留调用错误；调用方须按原驱动契约确认可用性检查输出不是媒体。"""
     if state is None:
         state = diagnostic_state_for(run_error)
     if state is not None and state.status is not DiagnosticStatus.NEW:
@@ -499,13 +500,16 @@ def record_call_outcome(
     state = _record({
         "stage": stage, "error": error, "outcome": outcome, "ticket": ticket,
         "run_error": run_error, "context": context,
-    }, state)
+    }, state, non_media_diagnostics=(outcome.diagnostics if include_tool_stdout
+                                      and isinstance(ticket, AttemptTicket)
+                                      and ticket.operation == "availability" else None))
     if isinstance(run_error, BaseException) and state.status is not DiagnosticStatus.NEW:
         run_error._camctl_diagnostic_state = state
     return state
 
 
-def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
+def _record(payload: Mapping, state: DiagnosticState | None, *,
+            non_media_diagnostics: ToolDiagnostics | None = None) -> DiagnosticState:
     state = state if state is not None else DiagnosticState()
     if state.status is not DiagnosticStatus.NEW:
         return state
@@ -514,12 +518,13 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
         return state
     metadata = log_metadata(LogLevel.ERROR)
     try:
-        document = _document(payload)
+        document = _document(payload, non_media_diagnostics=non_media_diagnostics)
     except Exception as error:
         # 编码器拒绝原结果时，仍沿原 dataclass 字段保存安全字节事实。
         try:
             document = {"diagnostic_format_error": _document(error, structured=False),
-                        "diagnostic": _document(payload, structured=False)}
+                        "diagnostic": _document(payload, structured=False,
+                                                non_media_diagnostics=non_media_diagnostics)}
         except Exception as fallback_error:
             # 诊断准备本身失效时只保留仍能取得的类型，结束该诊断责任。
             document = {"stage": payload["stage"],
@@ -554,10 +559,12 @@ def _record(payload: Mapping, state: DiagnosticState | None) -> DiagnosticState:
     return state
 
 
-def _document(value, *, name: str | None = None, structured: bool = True):
+def _document(value, *, name: str | None = None, structured: bool = True,
+              non_media_diagnostics: ToolDiagnostics | None = None, tool_stdout: bool = False):
     """复用原结构形成独立快照，并给已有 stderr 字节编码补可读文本。"""
     def convert(item, *, name=None):
-        return _document(item, name=name, structured=structured)
+        return _document(item, name=name, structured=structured,
+                         non_media_diagnostics=non_media_diagnostics, tool_stdout=tool_stdout)
 
     if isinstance(value, BaseException):
         if structured:
@@ -579,22 +586,25 @@ def _document(value, *, name: str | None = None, structured: bool = True):
         result = encode_diagnostics(value)
         for call in result["calls"]:
             stdout = call["stdout"]
-            encoded = stdout.pop("hex")
-            stdout["byte_count"] = None if encoded is None else len(encoded) // 2
+            if value is not non_media_diagnostics:
+                encoded = stdout.pop("hex")
+                stdout["byte_count"] = None if encoded is None else len(encoded) // 2
             stderr = call["stderr"]
             stderr["text"] = (None if stderr["hex"] is None else
                               bytes.fromhex(stderr["hex"]).decode("utf-8", "backslashreplace"))
         return result
+    if isinstance(value, ToolDiagnostics):
+        tool_stdout = value is non_media_diagnostics
     if isinstance(value, Enum):
         return convert(value.value)
     if isinstance(value, bytes):
-        if name == "stdout":
+        if name == "stdout" and not tool_stdout:
             return {"byte_count": len(value)}
         if name == "stderr":
             return {"hex": value.hex(), "text": value.decode("utf-8", "backslashreplace")}
         return {"bytes_hex": value.hex()}
     if is_dataclass(value) and not isinstance(value, type):
-        if name == "stdout" and isinstance(value, ToolStream):
+        if name == "stdout" and isinstance(value, ToolStream) and not tool_stdout:
             data = value.data
             return {"state": convert(value.state),
                     "byte_count": len(data) if isinstance(data, bytes) else None}
@@ -605,6 +615,8 @@ def _document(value, *, name: str | None = None, structured: bool = True):
                 field_name = "stdout"
             elif isinstance(value, ToolStream) and field_name == "data" and name == "stderr":
                 field_name = "stderr"
+            elif isinstance(value, ToolStream) and field_name == "data" and name == "stdout":
+                field_name = "stdout"
             result[item.name] = convert(getattr(value, item.name), name=field_name)
         return result
     if isinstance(value, Mapping):

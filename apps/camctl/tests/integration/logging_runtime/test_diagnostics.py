@@ -11,11 +11,13 @@ from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.diagnostics import (
     DiagnosticStatus, admit_diagnostic, diagnostic_scope, error_diagnostics_context,
-    flush_diagnostics, prepare_log_diagnostic, record_error,
+    flush_diagnostics, prepare_log_diagnostic, record_call_outcome, record_error,
 )
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
+from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, ErrorValue
+from camctl.operations.tool_diagnostics import ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState
 from camctl.session.service import _drive_flows
 
 pytestmark = pytest.mark.asyncio
@@ -48,6 +50,45 @@ async def full_channel(tmp_path):
         assert result.decision.kind is AdmissionKind.ACCEPTED
     runtime = LogRuntime(channel=channel, file_closer=file_channel.close)
     return channel, writer, runtime
+
+
+async def test_availability_result_delivers_both_streams_once_after_full_queue(tmp_path):
+    channel, writer, runtime = await full_channel(tmp_path)
+    stdout, stderr = b"doctor: FAIL\x00\xff", b"tool error\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    original = ValueError("original tool failure")
+    fallback = []
+    with error_diagnostics_context(channel, fallback.append, background=True):
+        try:
+            async with diagnostic_scope():
+                state = record_call_outcome(outcome, ticket=ticket, run_error=original,
+                                            include_tool_stdout=True)
+                assert record_call_outcome(outcome, ticket=ticket, state=state,
+                                           include_tool_stdout=True) is state
+            assert state.status is DiagnosticStatus.HELD
+            writer.release.set()
+            await flush_diagnostics()
+            await close_logging(runtime)
+        finally:
+            writer.release.set()
+            await close_logging(runtime)
+    records = [json.loads(line) for line in (tmp_path / "camctl.log").read_text().splitlines()]
+    payloads = [record for record in records if record.get("stage") == "doctor"]
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["ticket"]["operation"] == "availability"
+    assert payload["run_error"]["message"] == "original tool failure"
+    streams = payload["outcome"]["diagnostics"]["calls"][0]
+    assert streams["stdout"] == {"state": "complete", "hex": stdout.hex()}
+    assert streams["stderr"]["hex"] == stderr.hex()
+    assert streams["stderr"]["text"] == stderr.decode("utf-8", "backslashreplace")
+    assert not fallback
+    assert not channel.listener_alive
 
 
 async def test_full_queue_waits_after_cleanup_and_cancel_keeps_single_record(tmp_path):

@@ -550,6 +550,86 @@ async def test_tool_stderr_is_complete_and_readable_but_stdout_bytes_are_not_log
     assert b"MEDIA-SECRET".hex() not in channel.records[0].message
 
 
+async def test_non_media_call_stdout_is_lossless_and_resends_share_the_record():
+    channel = MemoryChannel()
+    stdout, stderr = b"doctor: FAIL\x00\xff", b"reason\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    media = ToolDiagnostics(1, (ToolCallOutput(
+        1, "read", ToolStream(ToolStreamState.COMPLETE, b"MEDIA-SECRET"),
+        ToolStream(ToolStreamState.COMPLETE, b"")),))
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        state = record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True,
+                                    context={"other": media})
+        assert record_call_outcome(outcome, ticket=ticket, state=state, include_tool_stdout=True) is state
+        await flush_diagnostics()
+    assert len(channel.records) == 1
+    streams = document(channel)["outcome"]["diagnostics"]["calls"][0]
+    assert streams["stdout"] == {"state": "complete", "hex": stdout.hex()}
+    assert streams["stderr"]["hex"] == stderr.hex()
+    assert streams["stderr"]["text"] == stderr.decode("utf-8", "backslashreplace")
+    assert document(channel)["context"]["other"]["calls"][0]["stdout"] == {
+        "state": "complete", "byte_count": 12}
+    assert b"MEDIA-SECRET".hex() not in channel.records[0].message
+
+
+async def test_non_media_stdout_survives_tool_encoding_failure():
+    channel, fallback = MemoryChannel(), []
+    stdout, stderr = b"doctor\xff", b"failure\xff"
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(ToolStreamState.COMPLETE, stdout),
+        ToolStream(ToolStreamState.COMPLETE, stderr)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with patch("camctl.logging_runtime.diagnostics.encode_diagnostics", side_effect=ValueError("format")):
+        with error_diagnostics_context(channel, fallback.append):
+            record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+            await flush_diagnostics()
+    assert len(fallback) == 1
+    assert stdout.hex() in fallback[0]
+    assert stderr.hex() in fallback[0]
+    assert not channel.records
+
+
+@pytest.mark.parametrize("stream_state,data", [
+    (ToolStreamState.UNCONFIRMED, b"partial\xff"),
+    (ToolStreamState.UNAVAILABLE, None),
+])
+async def test_non_media_stdout_retains_incomplete_stream_state(stream_state, data):
+    channel = MemoryChannel()
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "doctor", ToolStream(stream_state, data), ToolStream(stream_state, data)),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "doctor"),
+                          diagnostics=diagnostics)
+    ticket = AttemptTicket(2, "availability", None, "check/4", 5)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+        await flush_diagnostics()
+    stdout = document(channel)["outcome"]["diagnostics"]["calls"][0]["stdout"]
+    assert stdout == {"state": stream_state.value, "hex": None if data is None else data.hex()}
+
+
+@pytest.mark.parametrize("ticket", [None, AttemptTicket(2, "read", "3", "copy/3", 5)])
+async def test_non_availability_ticket_cannot_expose_tool_stdout(ticket):
+    channel = MemoryChannel()
+    diagnostics = ToolDiagnostics(1, (ToolCallOutput(
+        1, "read", ToolStream(ToolStreamState.COMPLETE, b"MEDIA-SECRET"),
+        ToolStream(ToolStreamState.COMPLETE, b"error")),))
+    outcome = CallOutcome(status=AttemptStatus.FAILED, error=ErrorValue("E", "read"),
+                          diagnostics=diagnostics)
+    with error_diagnostics_context(channel, lambda text: pytest.fail(text)):
+        record_call_outcome(outcome, ticket=ticket, include_tool_stdout=True)
+        await flush_diagnostics()
+    assert document(channel)["outcome"]["diagnostics"]["calls"][0]["stdout"] == {
+        "state": "complete", "byte_count": 12}
+    assert b"MEDIA-SECRET".hex() not in channel.records[0].message
+
+
 @pytest.mark.parametrize("encoding", ["hex", "base64"])
 async def test_stderr_in_existing_error_details_gets_readable_text(encoding):
     channel = MemoryChannel()
