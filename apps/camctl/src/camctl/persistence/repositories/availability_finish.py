@@ -47,3 +47,17 @@ class AvailabilityFinishReads:
             after = page[-1][0]
             if len(page) < 128:
                 return
+
+    def has_result_in_group(self, run_id):
+        from camctl.persistence.transaction import row_facts
+        event_type = load_event_registry()["events"]["ATTEMPT_RESULT"]["id"]
+        for accepted in self.validated:
+            event = accepted.envelope
+            if event.event_type != event_type:
+                continue
+            for row in event.rows:
+                if row.table == "operation_attempts" and row.before.exists and row.after.exists:
+                    attempt = row_facts(self.connection, "operation_attempts", row.row_id)
+                    if attempt is not None and attempt["run_id"] == run_id:
+                        return True
+        return False

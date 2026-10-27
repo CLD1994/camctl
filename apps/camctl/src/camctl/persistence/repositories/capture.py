@@ -720,6 +720,12 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
 
 def _action_finish_guard(event, context) -> None:
     """动作终态组合与产物同事务校验。"""
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 7:
+        from .preparation import PreparationReads
+        from .availability_failure import verify_photo_failure
+        if type(context.preparation_reads) is not PreparationReads:
+            raise EventValidationError("可用性失败缺少原连接事实")
+        verify_photo_failure(context.preparation_reads.connection, event, context)
     if event.event_type == _ACTION_FINISHED_EVENT and event.reason != 6:
         for row in event.rows:
             details = row.after.values.get("error_details_json") if row.table == "actions" else None

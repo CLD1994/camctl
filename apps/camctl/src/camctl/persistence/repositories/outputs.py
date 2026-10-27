@@ -6514,6 +6514,12 @@ def _delivery_guard(event, context) -> None:
             if details.get("delivery_id") is not None \
                     and details.get("delivery_id") != str(row.row_id):
                 raise EventValidationError("交付失败详情必须关联本次交付")
+            if code == "source_device_unavailable":
+                from .preparation import PreparationReads
+                from .availability_failure import verify_read_failure
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("设备不可用失败缺少原连接事实")
+                verify_read_failure(context.preparation_reads.connection, event, context, row)
             if code == "device_binding_unavailable" and details.get("reason") in ("physical_identity_conflict", "physical_identity_mismatch"):
                 from .preparation import PreparationReads
                 from .physical_alias import source_physical_alias_conflict, verify_source_identity_mismatch

@@ -1669,7 +1669,8 @@
           "by": [
             "MOTOR_CHANGED.CHANNEL_UNAVAILABLE",
             "ACTION_FINISHED.PREPARATION_FAILED",
-            "ACTION_FINISHED.PREPARATION_BINDING_FAILED"
+            "ACTION_FINISHED.PREPARATION_BINDING_FAILED",
+            "ACTION_FINISHED.AVAILABILITY_FAILED"
           ],
           "id": "transition_8"
         }
@@ -4984,6 +4985,22 @@
           "guards": ["row_shape", "transaction", "ownership", "report_impact", "action_finish", "plan_aggregate", "output"],
           "evidence": ["preparation_binding_request"]
         },
+        "AVAILABILITY_FAILED": {
+          "reason": 7,
+          "title": "保存拍摄准备的设备可用性失败",
+          "rows": [
+            {
+              "table": "actions", "op": "update",
+              "columns": ["status", "error_code", "error_details_json"],
+              "before": {"type": [1], "status": [1], "execution_started": [0], "cancel_requested": [0]},
+              "after": {"status": [4], "error_code": [31]},
+              "required": ["status", "error_code", "error_details_json"],
+              "transitions": {"status": ["transition_8"]}
+            }
+          ],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "action_finish", "plan_aggregate", "output"],
+          "evidence": ["availability_failure_request"]
+        },
         "PREPARATION_FAILED": {
           "reason": 5,
           "title": "保存拍摄准备失败",
@@ -5306,7 +5323,8 @@
             "retry"
           ],
           "evidence": [
-            "stale_run_request"
+            "stale_run_request",
+            "availability_wait_finish_request"
           ]
         }
       }

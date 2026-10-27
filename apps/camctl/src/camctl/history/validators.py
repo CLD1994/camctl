@@ -537,6 +537,17 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
     elif member == "preparation_request":
         parse_preparation_request(value)
+    elif member == "availability_wait_finish_request":
+        from camctl.persistence.repositories.availability_wait_finish import _request
+        try:
+            _request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"检查等待终结申请无效: {error}")
+    elif member == "availability_failure_request":
+        if (not isinstance(value, Mapping) or set(value) != {"check_id", "trusted_wall_now"}
+                or not is_json_integer(value["check_id"]) or value["check_id"] <= 0
+                or not is_json_integer(value["trusted_wall_now"]) or value["trusted_wall_now"] < 0):
+            _fail("可用性失败申请必须包含检查身份与可信时间")
     elif member == "read_current_identity":
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         try:

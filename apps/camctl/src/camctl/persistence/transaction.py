@@ -177,6 +177,11 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     context = bind_obtain_check(context, event, transaction, connection)
     from camctl.persistence.repositories.preparation import PreparationReads
     context = replace(context, preparation_reads=PreparationReads(connection, validated))
+    for row in event.rows:
+        error = row.after.values.get("error_json") if row.table == "deliveries" else None
+        if isinstance(error, dict) and error.get("code") == "source_device_unavailable":
+            from camctl.persistence.repositories.availability_failure import verify_read_failure_group
+            verify_read_failure_group(connection, event, planned_events, transaction)
     configured = load_event_registry()["events"]["OPERATION_CONFIGURED"]
     if event.event_type == configured["id"] and event.reason == configured["branches"]["FINISH"]["reason"]:
         for row in event.rows:

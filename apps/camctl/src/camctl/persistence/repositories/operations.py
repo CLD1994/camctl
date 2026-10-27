@@ -2046,6 +2046,11 @@ def _operation_finish_guard(event, context) -> None:
                 _fail("设备检查终结缺少原调用收场核验")
             try:
                 reads.require_settled(row.row_id)
+                from .availability_release import ReleaseGroup
+                if (status != int(_RUN_STATUS.SUCCEEDED) and not isinstance(context.availability_reads, ReleaseGroup)
+                        and not reads.has_result_in_group(row.row_id)):
+                    from .availability_wait_finish import verify_waiting_finish
+                    verify_waiting_finish(reads.connection, event, context, row.row_id)
             except ConsistencyError as error:
                 raise EventValidationError(str(error)) from error
         if (after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
