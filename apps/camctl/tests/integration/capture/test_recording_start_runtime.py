@@ -12,6 +12,7 @@ from decimal import Decimal
 from unittest.mock import create_autospec
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.handlers import capture_handler
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -25,7 +26,8 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.logging_runtime.events import event_logging
 from camctl.logging_runtime.service import LogChannel
 
-from .test_capture_contract import _NOW, _RECORD, _environment, _runtime
+from .public_assembly import assemble_capture
+from .test_capture_contract import _NOW, _RECORD, _environment, _runtime, ResultsDouble
 
 pytestmark = pytest.mark.asyncio
 _ANCHOR = 7_000_000_000
@@ -115,19 +117,51 @@ def _configured(owned, driver, *, wall=None, mono=None, maximum=3,
     return runtime
 
 
+@pytest_asyncio.fixture
+async def configured(tmp_path):
+    databases = []
+
+    async def create(owned, driver, *, wall=None, mono=None, maximum=3,
+                     timeout=Decimal("0.75")):
+        wall = [_NOW] if wall is None else wall
+        mono = [_ANCHOR] if mono is None else mono
+        runtime, database = await assemble_capture(
+            owned, driver=driver, evidence=_START_EVIDENCE, results=ResultsDouble({}),
+            staging=tmp_path, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0],
+            recording={"max_start_attempts": maximum, "start_timeout_s": timeout,
+                       "start_retry_interval_s": Decimal("1")})
+        databases.append(database)
+        runtime.query_config = AttemptConfig(2, Decimal("0.5"), Decimal("1"))
+        return runtime
+
+    yield create
+    for database in databases:
+        await database.close()
+
+
+@pytest_asyncio.fixture
+async def sent_configured(configured):
+    async def create(owned, driver, **kwargs):
+        runtime = await configured(owned, driver, **kwargs)
+        runtime.evidence = _START_EVIDENCE.with_contract(EvidenceContract(
+            "recording_sent", 1, "control", frozenset({"activity_id"}), identity_field="activity_id"))
+        return runtime
+    return create
+
+
 def _start(owned):
     return owned.connection.execute(
         "SELECT id, status, attempts_used, retry_wait_required FROM operation_runs"
         " WHERE responsibility_key = 'start/12'").fetchone()
 
 
-async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(tmp_path):
+async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         outcome = _result(confirmed=True, error=ErrorValue(
             "transport_timeout", "transport", {"response_received": True}))
         driver = StartDriver(outcome)
-        runtime = _configured(owned, driver)
+        runtime = await configured(owned, driver)
         await capture_handler("camera_record")(12, runtime)
         assert _start(owned)[1:] == (3, 1, 0)
         assert owned.connection.execute(
@@ -140,7 +174,7 @@ async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(
         assert json.loads(attempt[2]) == {
             "code": "transport_timeout", "stage": "transport",
             "details": {"response_received": True}}
-        state = runtime.recording_state.recording_state(12)
+        state = await runtime.recording_state.recording_state(12)
         assert state.started_confirmed and state.stop_target_ns == _ANCHOR + 60_000_000_000
         await capture_handler("camera_record")(12, runtime)
         assert len(driver.calls) == 1
@@ -148,16 +182,12 @@ async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(
         owned.connection.close()
 
 
-async def test_actual_start_info_preserves_anchor_and_wait_does_not_repeat(tmp_path):
-    from .test_global_error_diagnostics import _configured as configured_runtime
-
+async def test_actual_start_info_preserves_anchor_and_wait_does_not_repeat(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         mono = [_ANCHOR]
         driver = StartDriver(_result(confirmed=True))
-        runtime = configured_runtime(owned, driver)
-        runtime.evidence = _START_EVIDENCE
-        runtime.monotonic_ns = lambda: mono[0]
+        runtime = await configured(owned, driver, mono=mono)
         channel = create_autospec(LogChannel, instance=True, spec_set=True)
         def consume(record):
             payload = json.loads(record.message)
@@ -180,12 +210,12 @@ async def test_actual_start_info_preserves_anchor_and_wait_does_not_repeat(tmp_p
         owned.connection.close()
 
 
-async def test_reliable_permanent_start_rejection_finishes_without_using_remaining_attempts(tmp_path):
+async def test_reliable_permanent_start_rejection_finishes_without_using_remaining_attempts(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(no_effect=True, error=ErrorValue(
             "device_start_failed", "execution", {"operation_run_id": "1"})))
-        runtime = _configured(owned, driver)
+        runtime = await configured(owned, driver)
         await capture_handler("camera_record")(12, runtime)
         assert _start(owned)[1:] == (4, 1, 0)
         assert owned.connection.execute(
@@ -198,34 +228,35 @@ async def test_reliable_permanent_start_rejection_finishes_without_using_remaini
         owned.connection.close()
 
 
-async def test_confirmation_anchor_precedes_database_commit_delay(tmp_path):
+async def test_confirmation_anchor_precedes_database_commit_delay(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
         driver = StartDriver(_result(confirmed=True), returned=lambda: returned.__setitem__(0, True))
-        runtime = _configured(owned, driver, wall=wall, mono=mono)
+        runtime = await configured(owned, driver, wall=wall, mono=mono)
 
         def delay_commits(statement):
             if returned[0] and statement == "COMMIT":
                 wall[0] += 5_000_000
                 mono[0] += 5_000_000_000
 
-        owned.connection.set_trace_callback(delay_commits)
+        await runtime.database.read(lambda connection: connection.connection.set_trace_callback(delay_commits))
         await capture_handler("camera_record")(12, runtime)
+        await runtime.database.read(lambda connection: connection.connection.set_trace_callback(None))
+        assert mono[0] > _ANCHOR
         assert owned.connection.execute(
             "SELECT started_at FROM device_activities WHERE action_id = 12"
         ).fetchone() == (_NOW,)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == \
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == \
             _ANCHOR + 60_000_000_000
     finally:
-        owned.connection.set_trace_callback(None)
         owned.connection.close()
 
 
-async def test_attempt_result_and_start_observation_share_complete_transaction(tmp_path):
+async def test_attempt_result_and_start_observation_share_complete_transaction(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
         await capture_handler("camera_record")(12, runtime)
         attempt_txn = owned.connection.execute(
             "SELECT e.transaction_id FROM operation_attempts a"
@@ -241,11 +272,11 @@ async def test_attempt_result_and_start_observation_share_complete_transaction(t
         owned.connection.close()
 
 
-async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_path):
+async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(confirmed=True))
-        await capture_handler("camera_record")(12, _configured(owned, driver))
+        await capture_handler("camera_record")(12, await configured(owned, driver))
         request, = driver.calls
         assert request.ticket is not None
         assert request.ticket.responsibility_key == "start/12"
@@ -254,7 +285,7 @@ async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_pa
         owned.connection.close()
 
 
-async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_path):
+async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_path, configured, sent_configured):
     """两次运行各自的精确超时值分别到达实际调用并保存本次依据。
 
     旧尝试的期限与结果不被改写；跨运行超时变化与跨运行限额变化
@@ -264,7 +295,7 @@ async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_pat
     try:
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        first = _configured(owned, driver, wall=wall, mono=mono)
+        first = await configured(owned, driver, wall=wall, mono=mono)
         handler = capture_handler("camera_record")
         await handler(12, first)
         assert [call.timeout_s for call in driver.calls] == [Decimal("0.75")]
@@ -272,7 +303,7 @@ async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_pat
             "SELECT id, attempt_no, result_json, timeout_s_json FROM operation_attempts"
             " ORDER BY id").fetchall()
         assert Decimal(original[0][3]) == Decimal("0.75")
-        second = _configured(owned, driver, wall=wall, mono=mono, timeout=Decimal("2.5"))
+        second = await configured(owned, driver, wall=wall, mono=mono, timeout=Decimal("2.5"))
         # 跨会话恢复的等待按本次间隔从本会话首次观察重新计时。
         await handler(12, second)
         assert len(driver.calls) == 1
@@ -290,12 +321,12 @@ async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_pat
         owned.connection.close()
 
 
-async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_path):
+async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(assumed=True, error=ErrorValue(
             "transport_timeout", "transport", {"timeout_s": Decimal("0.75")})))
-        await capture_handler("camera_record")(12, _configured(owned, driver))
+        await capture_handler("camera_record")(12, await configured(owned, driver))
         result_json, error_json = owned.connection.execute(
             "SELECT result_json, error_json FROM operation_attempts").fetchone()
         saved = json.loads(result_json)
@@ -310,12 +341,12 @@ async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_pa
         owned.connection.close()
 
 
-async def test_no_effect_retries_same_run_and_activity_after_current_interval(tmp_path):
+async def test_no_effect_retries_same_run_and_activity_after_current_interval(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        runtime = _configured(owned, driver, wall=wall, mono=mono)
+        runtime = await configured(owned, driver, wall=wall, mono=mono)
         handler = capture_handler("camera_record")
         await handler(12, runtime)
         run_id = _start(owned)[0]
@@ -343,12 +374,12 @@ async def test_no_effect_retries_same_run_and_activity_after_current_interval(tm
 
 
 @pytest.mark.parametrize("new_limit,final_count", [(5, 5), (1, 2)])
-async def test_new_session_limit_preserves_original_attempts(tmp_path, new_limit, final_count):
+async def test_new_session_limit_preserves_original_attempts(tmp_path, configured, sent_configured, new_limit, final_count):
     owned = _world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        first = _configured(owned, driver, wall=wall, mono=mono, maximum=3)
+        first = await configured(owned, driver, wall=wall, mono=mono, maximum=3)
         handler = capture_handler("camera_record")
         await handler(12, first)
         mono[0] += 1_000_000_000
@@ -357,7 +388,7 @@ async def test_new_session_limit_preserves_original_attempts(tmp_path, new_limit
         original = owned.connection.execute(
             "SELECT id, attempt_no, result_json FROM operation_attempts ORDER BY id").fetchall()
         assert len(original) == 2
-        second = _configured(owned, driver, wall=wall, mono=mono, maximum=new_limit)
+        second = await configured(owned, driver, wall=wall, mono=mono, maximum=new_limit)
         await handler(12, second)
         for _ in range(4):
             mono[0] += 1_000_000_000
@@ -372,12 +403,12 @@ async def test_new_session_limit_preserves_original_attempts(tmp_path, new_limit
         owned.connection.close()
 
 
-async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt(tmp_path):
+async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         wall = [_NOW]
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver, wall=wall)
+        runtime = await configured(owned, driver, wall=wall)
 
         class EndWindowAfterGrant(SchedulingRepository):
             def grant_start(self, *args, **kwargs):
@@ -399,11 +430,11 @@ async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_atte
         owned.connection.close()
 
 
-async def test_unknown_start_uses_start_confirmation_before_any_resend(tmp_path):
+async def test_unknown_start_uses_start_confirmation_before_any_resend(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(error=ErrorValue("transport_timeout", "transport")))
-        runtime = _configured(owned, driver)
+        runtime = await configured(owned, driver)
         query = StateQuery(active=True)
         runtime.state_query = query
         handler = capture_handler("camera_record")
@@ -424,13 +455,13 @@ async def test_unknown_start_uses_start_confirmation_before_any_resend(tmp_path)
         owned.connection.close()
 
 
-async def test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_original_start(tmp_path):
+async def test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_original_start(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_result(error=ErrorValue("transport_timeout", "transport")))
         query = StateQuery()
-        runtime = _configured(owned, driver, wall=wall, mono=mono)
+        runtime = await configured(owned, driver, wall=wall, mono=mono)
         runtime.state_query = query
         handler = capture_handler("camera_record")
         await handler(12, runtime)
@@ -453,7 +484,7 @@ async def test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_origina
         owned.connection.close()
 
 
-async def test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal(tmp_path):
+async def test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     entered, released = asyncio.Event(), asyncio.Event()
     pending = None
@@ -468,7 +499,7 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
                 return DeviceCallResult.from_outcome(self.outcome)
 
         driver = PendingDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver, wall=wall)
+        runtime = await configured(owned, driver, wall=wall)
         handler = capture_handler("camera_record")
         pending = asyncio.create_task(handler(12, runtime))
         await entered.wait()
@@ -514,7 +545,7 @@ def _sent_runtime(owned, driver, **kwargs):
     ('dji-action6', 'action6_record', 18_000_000_000),
 ])
 async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actual_start(
-        tmp_path, model, parameter_type, deadline_ns):
+        tmp_path, configured, sent_configured, model, parameter_type, deadline_ns):
     from camctl.capture.models import build_capture_spec
     from camctl.devices.drivers.adb_cameras.registration import builtin_camera_contracts
 
@@ -527,7 +558,7 @@ async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actu
                                  (json.dumps(spec),))
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_sent_result())
-        runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+        runtime = await sent_configured(owned, driver, wall=wall, mono=mono)
         runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
             'stop_returned', 1, 'stop', frozenset()))
 
@@ -544,7 +575,7 @@ async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actu
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         handler = capture_handler('camera_record')
         await handler(12, runtime)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == deadline_ns
         assert deadlines == [(12, deadline_ns)]
         mono[0] = deadline_ns - 1
         await handler(12, runtime)
@@ -562,53 +593,53 @@ async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actu
         owned.connection.close()
 
 
-async def test_sent_ack_has_no_actual_started_time_and_waits_eleven_seconds(tmp_path):
+async def test_sent_ack_has_no_actual_started_time_and_waits_eleven_seconds(tmp_path, configured, sent_configured):
     owned = _sent_world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
         driver = StartDriver(_sent_result())
-        runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+        runtime = await sent_configured(owned, driver, wall=wall, mono=mono)
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None, 1)
         assert driver.calls[0].start_return_meaning == 1
-        assert runtime.recording_state.recording_state(12).stop_target_ns == 18000000000
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == 18000000000
         mono[0] += 10000000000
-        assert runtime.recording_state.recording_state(12).monotonic_now_ns < 18000000000
+        assert (await runtime.recording_state.recording_state(12)).monotonic_now_ns < 18000000000
         mono[0] += 1000000000
         from camctl.capture.recording import decide_recording_next, RecordingFacts, RecordingPhase
-        assert decide_recording_next(runtime.recording_state.recording_state(12), RecordingFacts()).phase is RecordingPhase.READY_TO_STOP
+        assert decide_recording_next(await runtime.recording_state.recording_state(12), RecordingFacts()).phase is RecordingPhase.READY_TO_STOP
     finally:
         owned.connection.close()
 
 
-async def test_legacy_unstarted_action_passes_original_started_contract_to_current_driver(tmp_path):
+async def test_legacy_unstarted_action_passes_original_started_contract_to_current_driver(tmp_path, configured, sent_configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(confirmed=True))
-        await capture_handler("camera_record")(12, _configured(owned, driver))
+        await capture_handler("camera_record")(12, await configured(owned, driver))
         assert driver.calls[0].start_return_meaning == 2
         assert owned.connection.execute("SELECT started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW,)
     finally:
         owned.connection.close()
 
 
-async def test_unrepresentable_recording_is_rejected_before_start_dispatch(tmp_path):
+async def test_unrepresentable_recording_is_rejected_before_start_dispatch(tmp_path, configured, sent_configured):
     owned = _sent_world(tmp_path, 9223372036854775807)
     try:
         driver = StartDriver(_sent_result())
         with pytest.raises(ValueError, match="时间"):
-            await capture_handler("camera_record")(12, _sent_runtime(owned, driver))
+            await capture_handler("camera_record")(12, await sent_configured(owned, driver))
         assert driver.calls == []
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])
-async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path, margin_ms):
+async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path, configured, sent_configured, margin_ms):
     owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         driver = StartDriver(_result())
-        runtime = _sent_runtime(owned, driver)
+        runtime = await sent_configured(owned, driver)
         deadlines = []
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         await capture_handler("camera_record")(12, runtime)
@@ -620,12 +651,12 @@ async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path,
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])
-async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path, margin_ms):
+async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path, configured, sent_configured, margin_ms):
     from camctl.contracts.values import new_operation_key
     owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         driver = StartDriver(_sent_result())
-        runtime = _sent_runtime(owned, driver)
+        runtime = await sent_configured(owned, driver)
         deadlines = []
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
@@ -649,36 +680,37 @@ async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path
 
 
 @pytest.mark.parametrize('margin_ms,deadline_ns', [(0, 17_000_000_000), (1000, 18_000_000_000)])
-async def test_sent_response_anchor_precedes_commit_delay(tmp_path, margin_ms, deadline_ns):
+async def test_sent_response_anchor_precedes_commit_delay(tmp_path, configured, sent_configured, margin_ms, deadline_ns):
     owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
         driver = StartDriver(_sent_result(), returned=lambda: returned.__setitem__(0, True))
-        runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+        runtime = await sent_configured(owned, driver, wall=wall, mono=mono)
         deadlines = []
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         def delay_commits(statement):
             if returned[0] and statement == "COMMIT":
                 wall[0] += 5000000
                 mono[0] += 5000000000
-        owned.connection.set_trace_callback(delay_commits)
+        await runtime.database.read(lambda connection: connection.connection.set_trace_callback(delay_commits))
         await capture_handler("camera_record")(12, runtime)
+        await runtime.database.read(lambda connection: connection.connection.set_trace_callback(None))
+        assert mono[0] > _ANCHOR
         assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == deadline_ns
         assert deadlines == [(12, deadline_ns)]
     finally:
-        owned.connection.set_trace_callback(None)
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms,before_stop_us', [(0, 9_000_000), (1000, 10_000_000)])
-async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path, margin_ms, before_stop_us):
+async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path, configured, sent_configured, margin_ms, before_stop_us):
     owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
     try:
-        first = _sent_runtime(owned, StartDriver(_sent_result()))
+        first = await sent_configured(owned, StartDriver(_sent_result()))
         await capture_handler("camera_record")(12, first)
         wall, mono = [_NOW + before_stop_us], [1]
-        second = _sent_runtime(owned, StartDriver(_sent_result()), wall=wall, mono=mono)
+        second = await sent_configured(owned, StartDriver(_sent_result()), wall=wall, mono=mono)
         second.evidence = second.evidence.with_contract(EvidenceContract("stop_returned", 1, "stop", frozenset()))
         class Stop:
             calls = []
@@ -699,7 +731,7 @@ async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(t
 
 @pytest.mark.parametrize('boundary', ['total_duration', 'utc_deadline', 'monotonic_deadline'])
 @pytest.mark.parametrize('legacy', [False, True])
-async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp_path, boundary, legacy):
+async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp_path, configured, sent_configured, boundary, legacy):
     from camctl.contracts.values import MAX_OBJECT_ID
     owned = _sent_world(tmp_path, duration_ms=MAX_OBJECT_ID if boundary == 'total_duration' else 10000)
     driver = StartDriver(_sent_result())
@@ -710,7 +742,7 @@ async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp
         owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=12', (json.dumps(spec),))
     wall = [(MAX_OBJECT_ID//1000000)*1000000 if boundary == 'utc_deadline' else _NOW]
     mono = [MAX_OBJECT_ID-1000 if boundary == 'monotonic_deadline' else _ANCHOR]
-    runtime = _sent_runtime(owned, driver, wall=wall, mono=mono)
+    runtime = await sent_configured(owned, driver, wall=wall, mono=mono)
     if boundary == 'utc_deadline':
         owned.connection.execute('UPDATE actions SET scheduled_at=?,max_delay_ms=0 WHERE id=12', (wall[0],))
     try:
