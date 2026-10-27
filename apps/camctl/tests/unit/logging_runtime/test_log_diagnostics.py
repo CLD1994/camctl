@@ -366,3 +366,91 @@ async def test_finished_target_reservation_fallback_control_settles_original_wai
             with pytest.raises(SystemExit) as stopped:
                 await diagnostics.flush_diagnostics()
             assert stopped.value is serve_control
+
+
+async def test_late_scope_control_still_settles_later_adopted_copy_waiter():
+    original = asyncio.CancelledError("first fallback control")
+    channel = MemoryChannel()
+    calls = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    states = []
+
+    def fallback(message):
+        text = json.loads(message)["message"]
+        calls.append(text)
+        if text == "first":
+            raise original
+
+    async def late_scope():
+        async with diagnostics.diagnostic_scope():
+            states.append(diagnostics.prepare_log_diagnostic(prepared("first")))
+            states.append(diagnostics.prepare_log_diagnostic(prepared("copy")))
+            reservation = diagnostics.reserve_diagnostic(states[1])
+            diagnostics.adopt_diagnostic(reservation)
+            entered.set()
+            await release.wait()
+
+    with diagnostics.error_diagnostics_context(channel, fallback, background=True):
+        task = asyncio.create_task(late_scope())
+        await entered.wait()
+        await diagnostics.flush_diagnostics()
+        waiter = asyncio.create_task(diagnostics.admit_diagnostic(states[1]))
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        release.set()
+        try:
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await task
+            assert raised.value is original
+            assert all(state.status is diagnostics.DiagnosticStatus.FALLBACK for state in states)
+            assert await waiter is states[1]
+            assert calls == ["first", "copy"]
+            assert not channel.records
+        finally:
+            diagnostics.acknowledge_diagnostic(states[1])
+            await waiter
+
+
+async def test_finished_flush_control_releases_all_reservations_and_finishes_target():
+    failed = asyncio.Event()
+    original = asyncio.CancelledError("first fallback control")
+    serve_control = SystemExit("serve control")
+    calls = []
+
+    class ControlledChannel(MemoryChannel):
+        async def alog(self, record):
+            raise serve_control
+
+    def fallback(message):
+        text = json.loads(message).get("message")
+        if text is None:
+            failed.set()
+            return
+        calls.append(text)
+        if text == "first":
+            raise original
+
+    with diagnostics.error_diagnostics_context(ControlledChannel(), fallback, background=True):
+        states = [diagnostics.prepare_log_diagnostic(prepared(text)) for text in ("first", "second")]
+        for state in states:
+            assert diagnostics.reserve_diagnostic(state) is not None
+        diagnostics.record_error(ValueError("serve failure"), stage="serve")
+        await failed.wait()
+        waiters = [asyncio.create_task(diagnostics.admit_diagnostic(state)) for state in states]
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(asyncio.CancelledError) as raised:
+                await diagnostics.flush_diagnostics()
+            assert raised.value is original
+            assert all(state.status is diagnostics.DiagnosticStatus.FALLBACK for state in states)
+            assert await asyncio.gather(*waiters) == states
+            assert calls == ["first", "second"]
+        finally:
+            for state in states:
+                diagnostics.acknowledge_diagnostic(state)
+            await asyncio.gather(*waiters)
+            try:
+                await diagnostics.flush_diagnostics()
+            except (SystemExit, asyncio.CancelledError):
+                pass

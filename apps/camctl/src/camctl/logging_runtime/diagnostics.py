@@ -164,11 +164,24 @@ async def flush_diagnostics() -> None:
     target = _target.get()
     if target is None or target.closed:
         return
+    first_control = None
     for reservation in tuple(target.reservations):
-        release_diagnostic(reservation)
+        try:
+            release_diagnostic(reservation)
+        except BaseException as error:
+            first_control = _first_control(first_control, error)
     if target.background:
-        await _finish_background(target)
+        try:
+            await _finish_background(target)
+        except BaseException as error:
+            if first_control is None:
+                raise
+            first_control = _first_control(first_control, error)
+        if first_control is not None:
+            raise first_control
         return
+    if first_control is not None:
+        raise first_control
     first_cancel = None
     while target.root.pending:
         try:
@@ -511,16 +524,30 @@ def _type_name(value: object) -> str:
 
 
 def _retain_at_root(owner: _Owner, target: _Target) -> None:
+    first_control = None
     while owner.pending:
         state = owner.pending[0]
         late = target.background and (target.finished or target.closed)
         if state.status is DiagnosticStatus.HELD:
             if late:
-                _final_fallback(state, target)
+                try:
+                    _final_fallback(state, target)
+                except BaseException as error:
+                    first_control = _first_control(first_control, error)
         _pop_pending(owner)
         if state.status is DiagnosticStatus.HELD and not late:
             _enqueue(target.root, state)
     _notify(target)
+    if first_control is not None:
+        raise first_control
+
+
+def _first_control(first: BaseException | None, error: BaseException) -> BaseException:
+    if first is None:
+        return error
+    if first is not error:
+        first.add_note(f"诊断后续控制错误: {_type_name(error)}")
+    return first
 
 
 def _enqueue(owner: _Owner, state: DiagnosticState) -> None:
