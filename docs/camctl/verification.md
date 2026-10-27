@@ -2,6 +2,28 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 调用即提交与写入回执验证（2026-10-27）
+
+[通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)在调用时立即提交，忽略返回回执也会由原日志线程继续处理。`await logger.info(...)` 或稍后 `await receipt` 等待该条文件追加并 flush 的实际结果，不要求每条 fsync。原诊断及日志副本共享同一条写入事实，底层 alog 仍只等待接纳。使用方式见[日志入口](logging-runtime.md#日志异步投递入口与有界队列)，实施进度见[回执计划](../superpowers/plans/2026-10-27-log-write-receipts.md)。
+
+最终受测生产源码为 `64b6625054ad85e40f668f00082dca8a46c2f15a`，环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1。工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`；显式使用本工作区源码路径，清除计时及 Python 环境变量。同一工作区的集成 pytest 逐进程执行。实际 UTC 为 09:51:27—09:54:20，以下各进程均退出 0。
+
+| 命令范围，统一使用 `python -m pytest <范围> -q --tb=short` | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9685 项通过、1 项跳过、2 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/logging_runtime` | 189 项通过、1 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/bootstrap/` 中的 `test_logging_composition.py`、`test_one_shot_logging.py`、`test_cli_error_diagnostics.py`、`test_foreground_error_scopes.py`、`test_report_diagnostic_ownership.py` | 22 项通过。 |
+| `apps/camctl/tests/integration/outputs/test_read_diagnostics.py` | 14 项通过。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过。 |
+
+227 项定向集成覆盖真实队列、线程、文件及诊断消费者，包含 24 项通用 Logger 组合。验证不等待时业务继续、实际 flush 后回执完成、混合级别与旧入口共同排序、满载重要日志补位、取消一个等待者不撤回记录、重复等待不重投、正常退出排空、过滤及未写入的明确结果，以及禁用途中实际写入成功的事实。日志副本覆盖实际追加后复制失败、抑制、未开始及未写入的责任归还。
+
+满载补位与接纳通知共用原通道，未创建逐条后台任务。失败路径回归覆盖按原顺序降级、writer 与 stderr 降级同时失败时全部回执终结、控制异常在收场后继续传播、回执回调相互完成时不死锁、不可格式化的 writer 异常及禁用时低层接纳等待及时结束。源位置、调用时冻结、上下文和媒体过滤保留原覆盖。
+
+最终独立审查核对上述生产源码，并以 8 个公共接口内存探针复核降级顺序、控制异常收场、回执回调锁序、不可格式化异常及原 alog 的禁用接纳；全部探针退出 0，没有未闭合项。文档的 5767 个本地文件链接检查及差异空白检查通过，新增标题锚点另行核对。
+
+完整命令、UTC、来源、环境、退出码与原始日志位于 `.local/verification/log-write-receipts/final/`，分域原始证据归档于同级 `agents/`。本项未执行全部组件集成套件、安装包或真实相机验收，未更新真机验证安装。
+
 ## 通用日志入口验证（2026-10-27）
 
 [通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)提供 `get_logger` 通用调用及 `get_sync_logger` 的低级别同步调用；[使用示例](logging-runtime.md#日志异步投递入口与有界队列)说明入口和原错误责任的关系。生产命令开始记录及快照维护默认警告已使用通用入口，文件拥有者的真实工作线程沿每次调用复制上下文。
