@@ -224,6 +224,16 @@ class CameraReadError(ReadPreparationError, DiagnosticError):
         }
 
 
+class PhysicalIdentityMismatch(ValueError):
+    """原文件的固定机身与本次合法配置不一致。"""
+
+    reason = "physical_identity_mismatch"
+
+    def __init__(self, binding):
+        self.binding = binding
+        super().__init__("相机源的原机身与本次配置不一致")
+
+
 class _NeverStop:
     """hb_cli 的 stop 子命令会关机，取消只能由受管进程边界处理。"""
 
@@ -396,7 +406,11 @@ class HasselbladDriver:
         if not isinstance(source, SourceFile):
             raise ValueError("读取必须携带固定源文件")
         identity = CameraFileIdentity.from_source(source.file_id, source.locator)
+        if source.size_bytes != identity.size_bytes:
+            raise ValueError("相机源长度与固定文件身份不一致")
         config = self._binding_config(identity.binding)
+        if (config.serial, config.product_id) != (identity.serial, identity.product_id):
+            raise PhysicalIdentityMismatch(identity.binding)
         workspace = DownloadWorkspace(self.roots.staging, ticket)
         if type(offset) is not int or not 0 <= offset <= source.size_bytes:
             raise ValueError("读取偏移不在固定长度范围内")
@@ -443,7 +457,7 @@ class HasselbladDriver:
                 if len(matching) != 1:
                     raise CameraReadError("no_matching_device" if not matching else "multiple_matching_devices", steps)
                 raw = await run("info", ("info",), stdout=True)
-                if parse_serial(raw.output) != config.serial:
+                if parse_serial(raw.output) != identity.serial:
                     raise CameraReadError("serial_mismatch", steps)
                 await run("download", ("download", identity.variant.value, identity.camera_name,
                                        "--output", str(workspace.path)), stdout=False)
@@ -748,6 +762,7 @@ class HasselbladDriver:
         steps[-1]["files"] = [{"host_name": item.host_name, "size_bytes": item.size, "media_type": item.media_type}
                               for item in (response.original, response.preview)]
         steps[-1]["camera_locator"] = response.camera_locator.as_json()
+        steps[-1]["camera_identity"] = {"serial": config.serial, "product_id": config.product_id}
         specs = tuple(CaptureFileSpec(item.host_name, item.size, item.media_type) for item in (response.original, response.preview))
         try:
             artifacts = await verify_capture_files(roots, activity_id, specs)

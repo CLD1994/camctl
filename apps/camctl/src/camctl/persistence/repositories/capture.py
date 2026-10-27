@@ -558,6 +558,7 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
             if (identity.binding != DeviceBinding(action["device_id"], action["driver_id"])
                     or identity.variant is not expected_variant
                     or identity.sha256 != captured["sha256"]
+                    or identity.size_bytes != captured["size_bytes"]
                     or not identity.camera_name.casefold().endswith(
                         "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))
                     or source.get("media_type") != photo_media_type(purpose, capture_format)):
@@ -566,7 +567,8 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
             raise _HostPhotoPairError("相机源定位与原绑定、用途及固定内容不一致") from error
         identities.append(identity)
         by_kind[kind] = source
-    if len({(identity.camera_path, identity.camera_name) for identity in identities}) != 1:
+    if len({(identity.serial, identity.product_id, identity.camera_path, identity.camera_name)
+            for identity in identities}) != 1:
         raise _HostPhotoPairError("相机原图与预览必须指向同一机内照片")
     if len(files) != len(temporary):
         raise _HostPhotoPairError("相机单张设备源集合与捕获双文件不一致")
@@ -678,6 +680,10 @@ def _guard_host_photo_completion(
         device_rows = context.complete_rows("device_files", "source_action_id", action_id)
         sources = _device_photo_source_pair(device_rows, source_rows, action_id, terminal=terminal,
             action=context.state_rows["actions"][action_id])
+        if context.photo_result_reads is None:
+            raise EventValidationError("设备源登记缺少原拍摄结果读取端口")
+        context.photo_result_reads.verify(context.state_rows["actions"][action_id], sources,
+                                         before_event_id=context.transaction.first_event_id)
     else:
         sources = _host_photo_source_pair(
             source_rows, action_id, host_spec=host_spec, terminal=terminal,
@@ -1410,7 +1416,7 @@ class FinishCaptureCommand:
                 for draft in self._command.drafts]
 
     def _verify_host_photo_terminal_pair(
-        self, action_id: int, action: Mapping[str, Any],
+        self, connection, action_id: int, action: Mapping[str, Any],
     ) -> None:
         host_spec = _host_photo_execution_spec(action)
         device = read_action_spec(action).get("output_storage") == "device"
@@ -1419,6 +1425,15 @@ class FinishCaptureCommand:
                 sources = _device_photo_source_pair(
                     self._state.get("device_files", {}), self._state.get("intermediate_files", {}),
                     action_id, terminal=True, action=action)
+                from .capture_facts import PhotoResultReads
+                from camctl.persistence.fact_reads import read_event
+                outputs = self._state.get("outputs", {})
+                output_events = [read_event(connection, row["created_event_id"])
+                                 for row in outputs.values() if row["source_action_id"] == action_id]
+                if not output_events:
+                    raise ConsistencyError("设备照片缺少原产物创建事务")
+                PhotoResultReads(connection).verify(action, sources,
+                    before_event_id=min(record.transaction.first_event_id for record in output_events))
                 _device_photo_drafts(self._command.drafts, sources)
             else:
                 sources = _host_photo_source_pair(
@@ -1506,7 +1521,7 @@ class FinishCaptureCommand:
         if (not self._canceled and self._failure is None
                 and current_action is not None
                 and current_action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO):
-            self._verify_host_photo_terminal_pair(command.action_id, current_action)
+            self._verify_host_photo_terminal_pair(connection, command.action_id, current_action)
         output_ids = tuple(registered[item] for item in expected)
         for draft, identity in zip(command.drafts, expected):
             if (draft.kind is not OutputKind.ORIGINAL
@@ -1569,7 +1584,7 @@ class FinishCaptureCommand:
         self._verify_recovered_outputs(connection, registered)
         if (not self._canceled and self._failure is None
                 and action["type"] == _ACTION_TYPE.CAMERA_TAKE_PHOTO):
-            self._verify_host_photo_terminal_pair(command.action_id, action)
+            self._verify_host_photo_terminal_pair(connection, command.action_id, action)
         plan = row_facts(connection, "plans", action["plan_id"])
         assert plan is not None
         self._state["actions"] = {action["id"]: action}

@@ -49,14 +49,17 @@ async def test_source_fact_wait_cancel_keeps_undispatched_marker():
 
 @pytest.mark.asyncio
 async def test_actual_source_dispatch_releases_marker_after_fact_read():
+    from camctl.capture.files import file_identity_key
+
     connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
     cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
     ticket = AttemptTicket(1, "read", "9", "read/9", 28)
+    identity = file_identity_key("camera", "other-driver", "original")
 
     def execute(query, parameters):
         if "FROM device_files" in query:
             assert parameters == (30,)
-            cursor.fetchone.return_value = ("original", '{"path":"original"}', 20, 3)
+            cursor.fetchone.return_value = (identity, '{"path":"original"}', 20, 3, None)
         elif query.startswith("SELECT 1"):
             assert "FROM file_copies fc" in query
             assert parameters == (9,)
@@ -78,7 +81,7 @@ async def test_actual_source_dispatch_releases_marker_after_fact_read():
     assert await sessions.open_session(30, 0, on_start=lambda: marker.pop(9)) is source
     assert not marker
     driver.open_read.assert_awaited_once_with(
-        SourceFile("original", {"path": "original"}, 20), 0, ticket,
+        SourceFile(identity, {"path": "original"}, 20), 0, ticket,
         idle_timeout_s=Decimal("10"))
 
 

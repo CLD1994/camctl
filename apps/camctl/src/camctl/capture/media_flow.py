@@ -110,18 +110,29 @@ _READ_TIMEOUT_S = Decimal("10")
 def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
     """按身份事实装载已确认写完的设备源文件；未完成不可读取。"""
     with closing(owned.connection.execute(
-        "SELECT identity_key, locator_json, size_bytes, completion_state"
+        "SELECT identity_key, locator_json, size_bytes, completion_state, sha256"
         " FROM device_files WHERE id = ?", (file_id,)
     )) as cursor:
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError(f"设备文件不存在: {file_id}")
-    identity_key, locator_raw, size_bytes, completion = row
+    identity_key, locator_raw, size_bytes, completion, sha256 = row
     if completion != 3 or size_bytes is None:
         raise ConsistencyError(
             f"设备文件尚未确认写完，不能读取: {file_id}")
-    return SourceFile(
-        identity_key, parse_exact_json(locator_raw), int(size_bytes))
+    try:
+        locator = parse_exact_json(locator_raw)
+        identity_parts = parse_exact_json(identity_key)
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if (isinstance(identity_parts, list) and len(identity_parts) == 3
+                and identity_parts[1] == DRIVER_ID):
+            from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+            identity = CameraFileIdentity.from_source(identity_key, locator)
+            if identity.size_bytes != size_bytes or identity.sha256 != sha256:
+                raise ValueError("源长度或摘要与固定身份不一致")
+        return SourceFile(identity_key, locator, int(size_bytes))
+    except (TypeError, ValueError, KeyError) as error:
+        raise ConsistencyError(f"设备文件的固定身份或定位无效: {file_id}") from error
 
 
 class DriverReadSessions:

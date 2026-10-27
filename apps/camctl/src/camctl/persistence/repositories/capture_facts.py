@@ -22,6 +22,91 @@ _KIND = enum_for("operation_runs.kind")
 _PURPOSE = enum_for("operation_runs.query_purpose")
 
 
+class PhotoResultReads:
+    """从原事务连接核对设备双源与可靠 START 结果。"""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def verify(self, action, sources, *, before_event_id):
+        from camctl.contracts.json_values import json_equal, parse_exact_json
+        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus
+        from camctl.history.validators import validate_event_structure
+        from camctl.host_files.capture_sources import CapturedArtifact
+        from camctl.operations.models import AttemptStatus, EffectState
+        from camctl.operations.result_format import read_result_document
+        from camctl.persistence.fact_reads import read_event
+
+        with closing(self.connection.execute(
+            "SELECT r.action_id,r.activity_id,r.kind,a.id,d.action_id FROM operation_runs r"
+            " JOIN operation_attempts a ON a.run_id=r.id"
+            " LEFT JOIN device_activities d ON d.id=r.activity_id"
+            " WHERE r.responsibility_key=? ORDER BY a.attempt_no DESC LIMIT 1",
+            (f"start/{action['id']}",))) as cursor:
+            row = cursor.fetchone()
+        try:
+            if (row is None or row[0] != action["id"] or row[2] != int(_KIND.START)
+                    or row[4] != action["id"]):
+                raise ValueError("缺少属于原动作和活动的 START 结果")
+            attempt = row_facts(self.connection, "operation_attempts", row[3])
+            intent = read_event(self.connection, attempt["intent_event_id"])
+            result = read_event(self.connection, attempt["result_event_id"])
+            initial = [change for change in intent.event.rows
+                       if change.table == "operation_attempts" and change.row_id == attempt["id"]]
+            changes = [change for change in result.event.rows
+                       if change.table == "operation_attempts" and change.row_id == attempt["id"]]
+            if (validate_event_structure(intent.event)[0] != "ATTEMPT_STARTED"
+                    or validate_event_structure(result.event)[:2] != ("ATTEMPT_RESULT", "SUCCEED")
+                    or intent.transaction.last_event_id >= result.transaction.first_event_id
+                    or result.transaction.last_event_id >= before_event_id
+                    or len(initial) != 1 or initial[0].before.exists or not initial[0].after.exists
+                    or len(changes) != 1 or not changes[0].before.exists or not changes[0].after.exists
+                    or any(not json_equal(initial[0].after.values.get(name), attempt[name])
+                           for name in ("run_id", "attempt_no", "intent_event_id"))
+                    or any(not json_equal(initial[0].after.values.get(name), value)
+                           for name, value in changes[0].before.values.items())):
+                raise ValueError("START 意图和结果事件的身份或时序不符")
+            saved = {**initial[0].after.values, **changes[0].after.values}
+            if any(not json_equal(saved.get(name), attempt[name]) for name in
+                   ("status", "effect_state", "result_json", "error_json", "result_event_id")):
+                raise ValueError("START 结果投影与原事件不一致")
+            outcome = read_result_document(attempt["status"], attempt["effect_state"],
+                attempt["result_json"], attempt["error_json"])
+            photos = [item for item in outcome.observations if item.type == "photo_taken"]
+            if (outcome.status is not AttemptStatus.SUCCEEDED or outcome.effect is not EffectState.CONFIRMED
+                    or len(photos) != 1 or photos[0].version != 1
+                    or photos[0].data.get("activity_id") != str(row[1])):
+                raise ValueError("原 START 没有唯一可靠照片观察")
+            data = photos[0].data
+            steps = data.get("steps")
+            if not isinstance(steps, list):
+                raise ValueError("原照片观察缺少步骤")
+            captures = [step for step in steps if isinstance(step, Mapping) and step.get("name") == "capture"]
+            if len(captures) != 1:
+                raise ValueError("原照片观察缺少唯一 capture 步骤")
+            camera = captures[0].get("camera_identity")
+            if (not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}
+                    or not isinstance(camera["serial"], str) or type(camera["product_id"]) is not int):
+                raise ValueError("原照片观察缺少机身身份")
+            locator = CameraFileLocator.from_json(captures[0].get("camera_locator"))
+            if locator.status is not CameraLocatorStatus.PATH:
+                raise ValueError("原照片观察缺少机内路径")
+            kinds = enum_for("outputs.kind")
+            for kind, role in ((int(kinds.ORIGINAL), "original"), (int(kinds.PREVIEW), "preview")):
+                source = sources[kind]
+                raw_locator = source["locator_json"]
+                identity = CameraFileIdentity.from_source(source["identity_key"],
+                    parse_exact_json(raw_locator) if isinstance(raw_locator, str) else raw_locator)
+                artifact = CapturedArtifact.from_json(data[role])
+                if ((identity.serial, identity.product_id, identity.camera_path, identity.camera_name)
+                        != (camera["serial"], camera["product_id"], locator.camera_path, locator.camera_name)
+                        or identity.size_bytes != artifact.size_bytes or identity.sha256 != artifact.sha256
+                        or source["size_bytes"] != artifact.size_bytes or source["sha256"] != artifact.sha256):
+                    raise ValueError("设备源与原照片观察不一致")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("设备源缺少一致的可靠拍摄结果") from error
+
+
 @dataclass(frozen=True)
 class StartFacts:
     activity: dict[str, Any] | None

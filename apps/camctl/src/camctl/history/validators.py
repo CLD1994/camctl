@@ -71,6 +71,7 @@ class EventContext:
     obtain_check_reads: object | None = None
     baseline_read_reads: object | None = None
     preparation_reads: object | None = None
+    photo_result_reads: object | None = None
 
     def __post_init__(self) -> None:
         # 每个事件只校验一次相关表的键，避免按主键查询时反复扫描；

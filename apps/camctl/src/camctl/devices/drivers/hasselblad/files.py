@@ -8,9 +8,10 @@ from pathlib import PurePosixPath
 import re
 import unicodedata
 
-from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.devices.bindings import DeviceBinding
 from .definitions import DRIVER_ID
+from .identity import CameraIdentity
 
 
 class DownloadVariant(StrEnum):
@@ -93,6 +94,9 @@ class CameraFileIdentity:
     camera_name: str
     variant: DownloadVariant
     sha256: str
+    serial: str
+    product_id: int
+    size_bytes: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
@@ -106,17 +110,24 @@ class CameraFileIdentity:
             raise ValueError("相机文件读取种类无效")
         if not isinstance(self.sha256, str) or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None:
             raise ValueError("相机文件必须携带拍摄时的 SHA-256")
+        CameraIdentity(self.serial, self.product_id)
+        if type(self.size_bytes) is not int or self.size_bytes <= 0:
+            raise ValueError("相机文件必须携带拍摄时的完整长度")
 
     @property
     def file_identity(self) -> str:
         return json.dumps(
-            ["hb-download-v2", self.camera_path, self.camera_name, self.variant.value, self.sha256],
+            ["hb-download-v3", self.serial, self.product_id, self.camera_path,
+             self.camera_name, self.variant.value, self.size_bytes, self.sha256],
             ensure_ascii=False,
             separators=(",", ":"),
         )
 
-    def locator(self) -> dict[str, str]:
+    def locator(self) -> dict[str, str | int]:
         return {
+            "serial": self.serial,
+            "product_id": self.product_id,
+            "size_bytes": self.size_bytes,
             "camera_path": self.camera_path,
             "camera_name": self.camera_name,
             "variant": self.variant.value,
@@ -129,16 +140,19 @@ class CameraFileIdentity:
         if not isinstance(value, list) or len(value) != 3:
             raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
         opaque = parse_exact_json(value[2])
-        if not isinstance(opaque, list) or len(opaque) != 5 or opaque[0] != "hb-download-v2":
+        if not isinstance(opaque, list) or len(opaque) != 8 or opaque[0] != "hb-download-v3":
             raise ValueError("相机固定文件身份版本或结构无效")
         identity = cls(
             DeviceBinding(value[0], value[1]),
+            opaque[3],
+            opaque[4],
+            DownloadVariant(opaque[5]),
+            opaque[7],
             opaque[1],
             opaque[2],
-            DownloadVariant(opaque[3]),
-            opaque[4],
+            opaque[6],
         )
         expected = identity.locator()
-        if not isinstance(locator, Mapping) or set(locator) != set(expected) or dict(locator) != expected:
+        if not isinstance(locator, Mapping) or not json_equal(dict(locator), expected):
             raise ValueError("相机源定位与原固定身份不一致")
         return identity

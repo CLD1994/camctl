@@ -364,6 +364,15 @@ def _capture_locator(outcome):
         raise ConsistencyError(f"相机正式源的机内定位事实无效: {failure}") from failure
 
 
+def _capture_camera_identity(outcome):
+    observation, = (item for item in outcome.observations if item.type == "photo_taken")
+    steps = [step for step in observation.data["steps"] if step.get("name") == "capture"]
+    identity = steps[0].get("camera_identity") if len(steps) == 1 else None
+    if not isinstance(identity, Mapping) or set(identity) != {"serial", "product_id"}:
+        raise ConsistencyError("相机正式源缺少原拍摄结果中的机身身份")
+    return identity
+
+
 async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     from camctl.capture.handlers import FileRegistration, ObservedFile, _binding, _register_observed
     from camctl.capture.results import FileKind
@@ -376,13 +385,17 @@ async def _device_drafts(runtime, action_id, artifacts, occurred_at, outcome):
     binding = _binding((await runtime.action(action_id)))
     original, preview = artifacts
     locator = _capture_locator(outcome)
+    camera = _capture_camera_identity(outcome)
     if locator.status is not CameraLocatorStatus.PATH:
         raise ConsistencyError("相机正式源缺少可下载的机内文件名和完整路径")
-    identities = tuple(CameraFileIdentity(
-        binding, locator.camera_path, locator.camera_name, variant, artifact.sha256
-    )
-                       for variant, artifact in zip(
-                           (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    try:
+        identities = tuple(CameraFileIdentity(
+            binding, locator.camera_path, locator.camera_name, variant, artifact.sha256,
+            camera["serial"], camera["product_id"], artifact.size_bytes,
+        ) for variant, artifact in zip(
+            (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL), artifacts))
+    except (TypeError, ValueError) as error:
+        raise ConsistencyError("相机正式源的原拍摄机身或文件事实无效") from error
     activity_id = str(await _activity_id(runtime, action_id))
     entries = tuple(ObservedFile(
         identity=identity.file_identity, locator=identity.locator(),

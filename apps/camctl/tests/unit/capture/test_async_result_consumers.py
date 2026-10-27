@@ -50,11 +50,16 @@ async def test_device_photo_drafts_register_finite_pair_with_one_activity_read(m
     register = mocker.patch("camctl.capture.handlers._register_observed", autospec=True,
         return_value=((None, 29), (None, 30)))
 
-    result = await _device_drafts(runtime, 21, artifacts, 1000, object())
+    outcome = SimpleNamespace(observations=(SimpleNamespace(type="photo_taken", data={
+        "steps": [{"name": "capture", "camera_identity": {"serial": "SERIAL", "product_id": 10}}],
+    }),))
+    result = await _device_drafts(runtime, 21, artifacts, 1000, outcome)
 
     entries = register.call_args.args[2]
     assert isinstance(entries, tuple) and len(entries) == 2
     assert tuple(entry.evidence["activity_id"] for entry in entries) == ("7", "7")
+    assert all((entry.locator["serial"], entry.locator["product_id"]) == ("SERIAL", 10)
+               for entry in entries)
     assert entries[1].paired_identity == entries[0].identity
     assert isinstance(result, tuple) and len(result) == 2
     activity.assert_awaited_once_with(runtime, 21)

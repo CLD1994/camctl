@@ -191,6 +191,13 @@ def _require_registered_device_pair(connection, action, temporary_rows):
     try:
         sources = _device_photo_source_pair(devices, {row["id"]: row for row in temporary_rows},
             action["id"], action=action, terminal=True)
+        from .capture_facts import PhotoResultReads
+        from camctl.persistence.fact_reads import read_event
+        if not outputs:
+            raise ConsistencyError("设备照片缺少原产物创建事务")
+        PhotoResultReads(connection).verify(action, sources,
+            before_event_id=min(read_event(connection, row["created_event_id"]).transaction.first_event_id
+                                for row in outputs.values()))
         _host_photo_registered_pair(outputs, origins, action["id"], sources,
                                     device=True, action=action)
     except ValueError as error:

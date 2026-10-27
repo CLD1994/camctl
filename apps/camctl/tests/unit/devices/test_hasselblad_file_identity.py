@@ -1,6 +1,8 @@
 """相机原图、缩略图及不同机内路径的固定身份互不混淆。"""
 
 import inspect
+import json
+from dataclasses import replace
 
 import pytest
 
@@ -22,6 +24,9 @@ def _identity(*, variant=DownloadVariant.ORIGINAL, sha256="a" * 64):
         camera_name="B9996039.JPG",
         variant=variant,
         sha256=sha256,
+        serial="SERIAL",
+        product_id=10,
+        size_bytes=123,
     )
 
 
@@ -41,6 +46,7 @@ def test_camera_locator_is_independent_from_host_filename():
         camera_name=locator.camera_name,
         variant=DownloadVariant.ORIGINAL,
         sha256="a" * 64,
+        serial="SERIAL", product_id=10, size_bytes=123,
     )
     key = file_identity_key("cam-1", DRIVER_ID, identity.file_identity)
     restored = CameraFileIdentity.from_source(key, identity.locator())
@@ -90,6 +96,34 @@ def test_fixed_identity_round_trip_and_distinct_variant_or_capture_content():
     assert len({original.file_identity, preview.file_identity, replaced.file_identity}) == 3
     assert preview.locator()["camera_name"] == "B9996039.JPG"
     assert preview.locator()["camera_path"] == "/mnt/media/DCIM/B9996039.JPG"
+    assert len({original.file_identity, replace(original, serial="OTHER").file_identity,
+                replace(original, product_id=11).file_identity,
+                replace(original, size_bytes=124).file_identity}) == 4
+
+
+@pytest.mark.parametrize("change", [
+    {"serial": ""}, {"serial": "bad\nserial"}, {"product_id": 0},
+    {"product_id": True}, {"product_id": 65536}, {"size_bytes": 0},
+    {"size_bytes": True},
+])
+def test_original_camera_and_length_must_be_valid(change):
+    with pytest.raises(ValueError):
+        replace(_identity(), **change)
+
+
+def test_old_file_identity_without_camera_is_rejected():
+    opaque = json.dumps(["hb-download-v2", "/mnt/media/B.JPG", "B.JPG", "original", "a" * 64])
+    with pytest.raises(ValueError):
+        CameraFileIdentity.from_source(file_identity_key("cam-1", DRIVER_ID, opaque), {})
+
+
+def test_locator_boolean_is_not_the_fixed_numeric_size():
+    identity = replace(_identity(), size_bytes=1)
+    with pytest.raises(ValueError):
+        CameraFileIdentity.from_source(
+            file_identity_key("cam-1", DRIVER_ID, identity.file_identity),
+            dict(identity.locator(), size_bytes=True),
+        )
 
 
 @pytest.mark.parametrize("path", [
@@ -115,6 +149,7 @@ def test_camera_path_must_be_a_complete_canonical_absolute_posix_path(path):
             camera_name=path.rsplit("/", 1)[-1],
             variant=DownloadVariant.ORIGINAL,
             sha256="a" * 64,
+            serial="SERIAL", product_id=10, size_bytes=123,
         )
 
 
@@ -123,6 +158,9 @@ def test_camera_path_must_be_a_complete_canonical_absolute_posix_path(path):
     {"variant": "thumbnail"},
     {"camera_name": "other.JPG"},
     {"camera_path": "/mnt/media/DCIM/other.JPG"},
+    {"serial": "OTHER"},
+    {"product_id": 11},
+    {"size_bytes": 124},
     {"extra": True},
 ])
 def test_locator_cannot_redefine_original_fixed_identity(change):
