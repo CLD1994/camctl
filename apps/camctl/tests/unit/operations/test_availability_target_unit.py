@@ -554,8 +554,7 @@ def test_pass_event_is_accepted_only_while_bound_to_complete_group(release_modul
     group.finish()
 
 
-@pytest.mark.parametrize("status", [4, 6])
-def test_blocked_pass_group_saves_failure_without_releasing_targets(release_module, release_group, monkeypatch, status):
+def test_blocked_pass_group_saves_failure_without_releasing_targets(release_module, release_group, monkeypatch):
     from dataclasses import replace
     _, events = release_group
     def blocked(*args):
@@ -566,12 +565,28 @@ def test_blocked_pass_group_saves_failure_without_releasing_targets(release_modu
     error = {"code": "device_availability_unconfirmed", "stage": "execution", "details": {
         "device_id": "hb0", "operation_run_id": "3", "attempts_used": 1, "max_attempts": 3}}
     row = SimpleNamespace(table="operation_runs", row_id=3,
-                          after=SimpleNamespace(values={"status": status, "error_json": error}))
+                          after=SimpleNamespace(values={"status": 4, "error_json": error}))
     failed = replace(events[1], rows=(row,))
     for event in (events[0], failed):
         group.bind(event, "actual context")
         group.seal(SimpleNamespace(envelope=event))
     group.finish()
+
+
+def test_blocked_complete_pass_cannot_be_labeled_unconfirmed(release_module, release_group, monkeypatch):
+    from dataclasses import replace
+    _, events = release_group
+    def blocked(*args):
+        raise release_module.AvailabilityTargetBlocked("busy")
+    monkeypatch.setattr(release_module, "_no_conflicts", blocked)
+    group = release_module.ReleaseGroup(object(), events[0],
+        SimpleNamespace(txn_id=2, first_event_id=1, last_event_id=2))
+    group.bind(events[0], "actual context")
+    group.seal(SimpleNamespace(envelope=events[0]))
+    row = SimpleNamespace(table="operation_runs", row_id=3,
+                          after=SimpleNamespace(values={"status": 6, "error_json": {}}))
+    with pytest.raises(release_module.ConsistencyError):
+        group.bind(replace(events[1], rows=(row,)), "actual context")
 
 
 def test_eligible_pass_cannot_be_disguised_as_failed_without_release(release_module, release_group):

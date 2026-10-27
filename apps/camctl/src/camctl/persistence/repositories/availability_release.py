@@ -205,8 +205,8 @@ class ReleaseGroup:
             attempt = row_facts(self.connection, "operation_attempts", self.attempt_id)
             run = row_facts(self.connection, "operation_runs", self.run_id)
             require_saved_availability(attempt, run, self.check)
-            allowed = ((int(enum_for("operation_runs.status").FAILED), int(enum_for("operation_runs.status").UNCONFIRMED))
-                       if self.blocked else (int(enum_for("operation_runs.status").SUCCEEDED),))
+            allowed = ((int(enum_for("operation_runs.status").FAILED),) if self.blocked
+                       else (int(enum_for("operation_runs.status").SUCCEEDED),))
             if (event.event_type != registry["OPERATION_CONFIGURED"]["id"]
                     or event.reason != registry["OPERATION_CONFIGURED"]["branches"]["FINISH"]["reason"]
                     or len(event.rows) != 1 or event.rows[0].table != "operation_runs"
@@ -376,13 +376,11 @@ class FinishAvailabilityCommand:
                         raise ConsistencyError("原检查结果缺少共同终结")
                     final_status = event.rows[0].after.values.get("status")
                     if final_status not in (int(enum_for("operation_runs.status").SUCCEEDED),
-                                            int(enum_for("operation_runs.status").FAILED),
-                                            int(enum_for("operation_runs.status").UNCONFIRMED)):
+                                            int(enum_for("operation_runs.status").FAILED)):
                         raise ConsistencyError("原检查结果终结状态不适用")
                     if run["status"] != final_status or run["retry_wait_required"] != 0:
                         raise ConsistencyError("原检查终态与当前流程事实不一致")
-                    if final_status in (int(enum_for("operation_runs.status").FAILED),
-                                        int(enum_for("operation_runs.status").UNCONFIRMED)):
+                    if final_status == int(enum_for("operation_runs.status").FAILED):
                         device_source = check["trigger_copy_id"] is not None
                         expected_error = {"code": "source_device_unavailable" if device_source else "device_availability_unconfirmed",
                             "stage": "source_read" if device_source else "execution", "details": {
