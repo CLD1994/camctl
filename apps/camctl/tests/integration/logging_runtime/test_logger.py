@@ -45,7 +45,7 @@ async def file_logging(path, *, level=LogLevel.DEBUG, full=False):
             entered.set()
             if not release.wait(10):
                 raise TimeoutError("测试没有释放文件消费者")
-        return file_channel.write_record(record).appended
+        return file_channel.write_record(record).completion
 
     channel = LogChannel(capacity=3 if full else 64,
                          low_watermark=1 if full else 48,
@@ -333,7 +333,10 @@ def test_one_shot_logger_writes_complete_json_only_to_stderr():
 
     async def command():
         await LOGGER.info("one-shot-info")
-        await LOGGER.error("one-shot-error")
+        result = await LOGGER.error("one-shot-error")
+        assert result.delivered is False
+        assert result.appended is False and result.durable is False
+        assert result.fallback_written is True
         SYNC_LOGGER.warning("one-shot-sync")
         return {"command_result": "kept"}
 

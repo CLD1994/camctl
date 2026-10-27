@@ -26,6 +26,7 @@ from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import ChannelError, LogChannel, LogRecord
 
 from .test_logger import LOGGER, SYNC_LOGGER, await_receipt, completed, finish_tasks, read_records
+from .sync_support import FileSyncProbe
 
 
 pytestmark = pytest.mark.asyncio
@@ -33,9 +34,10 @@ pytestmark = pytest.mark.asyncio
 
 @asynccontextmanager
 async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
-                       capacity=64, low=48, high=56, probability=1, debug=False):
-    """以真实文件适配器返回值界定追加与 flush；仅控制写入前后门闩。"""
-    file = FileChannel(path, max_bytes=1 << 20, file_count=1)
+                       capacity=64, low=48, high=56, probability=1, debug=False,
+                       max_bytes=1 << 20, file_count=1):
+    """以真实文件适配器的共同完成值交付追加及持久事实。"""
+    file = FileChannel(path, max_bytes=max_bytes, file_count=file_count)
     entered, release = threading.Event(), threading.Event()
     fallback = []
 
@@ -45,11 +47,11 @@ async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
             if not release.wait(5):
                 raise TimeoutError("测试未释放追加前门闩")
         result = file.write_record(record)
-        if gate == "after_flush" and not entered.is_set():
+        if gate == "after_write" and not entered.is_set():
             entered.set()
             if not release.wait(5):
-                raise TimeoutError("测试未释放 flush 后门闩")
-        return result.appended
+                raise TimeoutError("测试未释放实际写入完成后门闩")
+        return result.completion
 
     channel = LogChannel(capacity=capacity, low_watermark=low, high_watermark=high,
                          level=level, sample_probability=probability,
@@ -64,7 +66,7 @@ async def logging_file(path, *, gate=None, level=LogLevel.DEBUG,
     try:
         with event_logging(channel), error_diagnostics_context(channel, fallback.append):
             yield SimpleNamespace(channel=channel, file=file, entered=entered,
-                                  release=release, fallback=fallback)
+                                  release=release, fallback=fallback, runtime=runtime)
     finally:
         release.set()
         try:
@@ -85,6 +87,133 @@ async def receipt_result(receipt):
         return await completed(task)
     finally:
         await finish_tasks(task)
+
+
+@pytest.mark.parametrize("method", ["error", "critical"])
+async def test_important_receipt_waits_for_real_file_and_directory_sync(
+        tmp_path, monkeypatch, method):
+    path = tmp_path / "camctl.log"
+    probe = FileSyncProbe(monkeypatch, path, block="file")
+    business = []
+    async with logging_file(path) as world:
+        receipt = getattr(LOGGER, method)("durable-record")
+        business.append("necessary-work-completed")
+        waiter = asyncio.create_task(await_receipt(receipt))
+        try:
+            assert await asyncio.to_thread(probe.entered.wait, 5)
+            assert business == ["necessary-work-completed"]
+            assert not waiter.done()
+            assert [record["message"] for record in read_records(path)] == ["durable-record"]
+            assert ("file", "completed") not in probe.events
+            probe.release.set()
+            result = await completed(waiter)
+            assert result.delivered is True and result.appended is True
+            assert result.durable is True and not result.fallback_written
+            assert probe.events.index(("file", "completed")) < probe.events.index(("directory", "completed"))
+            assert read_records(path)[0]["level"] == method.upper()
+        finally:
+            probe.release.set()
+            await finish_tasks(waiter)
+    assert not world.fallback
+
+
+async def test_info_flush_does_not_claim_or_require_file_durability(tmp_path, monkeypatch):
+    path = tmp_path / "camctl.log"
+    probe = FileSyncProbe(monkeypatch, path)
+    async with logging_file(path):
+        result = await receipt_result(LOGGER.info("ordinary-info"))
+        assert result.delivered is True and result.appended is True
+        assert result.durable is False and not result.fallback_written
+        assert [record["message"] for record in read_records(path)] == ["ordinary-info"]
+        assert not probe.events
+
+
+@pytest.mark.parametrize("preparation", ["created", "rotated"])
+async def test_error_syncs_actual_directory_after_info_prepared_path(
+        tmp_path, monkeypatch, preparation):
+    path = tmp_path / "camctl.log"
+    async with logging_file(path, max_bytes=512 if preparation == "rotated" else 1 << 20,
+                            file_count=3) as world:
+        await receipt_result(LOGGER.info("preparation" + "x" * 600))
+        if preparation == "rotated":
+            await receipt_result(LOGGER.info("after-info-rotation"))
+            assert path.with_name("camctl.log.1").exists()
+        probe = FileSyncProbe(monkeypatch, path, block="directory")
+        waiter = asyncio.create_task(await_receipt(LOGGER.error("after-info-error")))
+        try:
+            assert await asyncio.to_thread(probe.entered.wait, 5)
+            assert not waiter.done()
+            assert ("file", "completed") in probe.events
+            probe.release.set()
+            result = await completed(waiter)
+            assert result.delivered is True and result.appended is True and result.durable is True
+        finally:
+            probe.release.set()
+            await finish_tasks(waiter)
+    assert not world.fallback
+
+
+@pytest.mark.parametrize("sync_kind", ["file", "directory"])
+async def test_sync_failure_keeps_append_fact_and_never_rewrites_original(
+        tmp_path, monkeypatch, sync_kind):
+    path = tmp_path / "camctl.log"
+    probe = FileSyncProbe(monkeypatch, path, fail=sync_kind)
+    original = ValueError("original-sync-error")
+    async with logging_file(path) as world:
+        receipt = LOGGER.error("sync-failed-record", exc_info=original)
+        result = await receipt_result(receipt)
+        assert result.delivered is False and result.appended is True
+        assert result.durable is False and result.fallback_written is True
+        assert await receipt_result(LOGGER.error("outer-message", exc_info=original)) == result
+        await flush_diagnostics()
+    assert [record["message"] for record in read_records(path)] == ["sync-failed-record"]
+    assert probe.events.count((sync_kind, "started")) == 1
+    assert (sync_kind, "completed") not in probe.events
+    assert len(world.fallback) == 1 and "original-sync-error" in world.fallback[0]
+
+
+@pytest.mark.parametrize("sync_fails", [False, True])
+async def test_disable_during_file_sync_keeps_actual_completion(tmp_path, monkeypatch, sync_fails):
+    path = tmp_path / "camctl.log"
+    probe = FileSyncProbe(monkeypatch, path, block="file", fail="file" if sync_fails else None)
+    async with logging_file(path) as world:
+        waiter = asyncio.create_task(await_receipt(LOGGER.error("inflight-sync")))
+        try:
+            assert await asyncio.to_thread(probe.entered.wait, 5)
+            world.channel.disable_channel(ChannelError("disabled during original sync"))
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            probe.release.set()
+            result = await completed(waiter)
+            assert result.appended is True
+            assert result.delivered is (not sync_fails) and result.durable is (not sync_fails)
+            assert result.fallback_written is sync_fails
+        finally:
+            probe.release.set()
+            await finish_tasks(waiter)
+    assert [record["message"] for record in read_records(path)] == ["inflight-sync"]
+    assert len(world.fallback) == int(sync_fails)
+
+
+async def test_normal_shutdown_waits_for_unawaited_important_file_sync(tmp_path, monkeypatch):
+    path = tmp_path / "camctl.log"
+    probe = FileSyncProbe(monkeypatch, path, block="file")
+    async with logging_file(path) as world:
+        receipt = LOGGER.error("shutdown-sync")
+        assert await asyncio.to_thread(probe.entered.wait, 5)
+        closing = asyncio.create_task(close_logging(world.runtime))
+        try:
+            await asyncio.sleep(0)
+            assert not closing.done() and receipt.write_result is None
+            probe.release.set()
+            assert (await completed(closing)).listener_stopped
+            result = await receipt_result(receipt)
+            assert result.delivered is True and result.appended is True and result.durable is True
+        finally:
+            probe.release.set()
+            await finish_tasks(closing)
+    assert [record["message"] for record in read_records(path)] == ["shutdown-sync"]
+    assert not world.fallback
 
 
 async def test_ignored_mixed_logger_calls_submit_in_order_and_shutdown_drains(tmp_path, recwarn):
@@ -121,32 +250,34 @@ async def test_optional_wait_confirms_file_flush_after_business_continues(tmp_pa
             result = await completed(waiter)
             assert result.decision.kind is AdmissionKind.ACCEPTED
             assert result.delivered is True and not result.fallback_written
+            assert result.appended is True and result.durable is (method == "error")
             assert [record["message"] for record in read_records(path)] == ["frozen-record"]
         finally:
             world.release.set()
             await finish_tasks(waiter)
 
 
-async def test_cancelled_receipt_waiter_does_not_cancel_other_waiter_or_write(tmp_path):
+async def test_cancelled_receipt_waiter_does_not_cancel_other_waiter_or_write(tmp_path, monkeypatch):
     path = tmp_path / "camctl.log"
-    async with logging_file(path, gate="before") as world:
+    probe = FileSyncProbe(monkeypatch, path, block="file")
+    async with logging_file(path) as world:
         receipt = LOGGER.error("shared-write")
         cancelled = asyncio.create_task(await_receipt(receipt))
         survivor = asyncio.create_task(await_receipt(receipt))
         try:
-            await entered_writer(world)
+            assert await asyncio.to_thread(probe.entered.wait, 5)
             assert not cancelled.done() and not survivor.done()
             cancelled.cancel("first cancellation")
             cancelled.cancel("repeated cancellation")
             with pytest.raises(asyncio.CancelledError):
                 await completed(cancelled)
             assert not survivor.done()
-            world.release.set()
+            probe.release.set()
             result = await completed(survivor)
-            assert result.delivered is True
+            assert result.delivered is True and result.appended is True and result.durable is True
             assert await receipt_result(receipt) == result
         finally:
-            world.release.set()
+            probe.release.set()
             await finish_tasks(cancelled, survivor)
     assert [record["message"] for record in read_records(path)] == ["shared-write"]
     assert not world.fallback
@@ -233,6 +364,7 @@ async def test_logger_receipt_reports_non_write_outcome(tmp_path, case):
             receipt = LOGGER.info("receipt-outcome")
         result = await receipt_result(receipt)
         assert result.delivered is False
+        assert result.appended is False and result.durable is False
         assert result.decision.kind is {"filtered": AdmissionKind.FILTERED_OUT,
                                         "sampled": AdmissionKind.SAMPLED_OUT,
                                         "disabled": AdmissionKind.CHANNEL_FAILED}[case]
@@ -241,9 +373,9 @@ async def test_logger_receipt_reports_non_write_outcome(tmp_path, case):
     assert len(world.fallback) == int(case == "disabled")
 
 
-async def test_disable_during_actual_flush_keeps_writer_success_fact(tmp_path):
+async def test_disable_after_durable_write_keeps_writer_success_fact(tmp_path):
     path = tmp_path / "camctl.log"
-    async with logging_file(path, gate="after_flush") as world:
+    async with logging_file(path, gate="after_write") as world:
         waiter = asyncio.create_task(await_receipt(LOGGER.error("already-flushed")))
         try:
             await entered_writer(world)
@@ -254,13 +386,15 @@ async def test_disable_during_actual_flush_keeps_writer_success_fact(tmp_path):
             world.release.set()
             result = await completed(waiter)
             assert result.delivered is True and not result.fallback_written
+            assert result.appended is True and result.durable is True
         finally:
             world.release.set()
             await finish_tasks(waiter)
     assert not world.fallback
 
 
-@pytest.mark.parametrize("copy_result", ["written", "copy_failed", "suppressed", "not_started", "unwritten"])
+@pytest.mark.parametrize("copy_result", ["written", "copy_failed", "suppressed", "not_started", "unwritten",
+                                        "file_sync_failed", "directory_sync_failed"])
 async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeypatch, copy_result):
     path = tmp_path / "camctl.log"
     if copy_result == "unwritten":
@@ -277,6 +411,9 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
             raise OSError("controlled copy failure after original append")
         monkeypatch.setattr("shutil.copyfileobj", fail_copy)
     original = OSError("original-report-error")
+    sync_failure = copy_result in ("file_sync_failed", "directory_sync_failed")
+    probe = (FileSyncProbe(monkeypatch, path, fail=copy_result.removesuffix("_sync_failed"))
+             if sync_failure else None)
     async with logging_file(path) as world:
         state = record_error(original, stage="report-generation")
         reservation = reserve_diagnostic(state)
@@ -300,10 +437,20 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
                         "written": CopyOutcome.PUBLISHED,
                         "copy_failed": CopyOutcome.COPY_FAILED,
                         "suppressed": CopyOutcome.SUPPRESSED,
-                        "unwritten": CopyOutcome.COPY_FAILED}[copy_result]
+                        "unwritten": CopyOutcome.COPY_FAILED,
+                        "file_sync_failed": CopyOutcome.COPY_FAILED,
+                        "directory_sync_failed": CopyOutcome.COPY_FAILED}[copy_result]
                     if copy_result in ("written", "copy_failed"):
                         assert copied.write_result.appended is True
+                        assert copied.write_result.durable is True
                         assert (await completed(waiter)).delivered is True
+                    elif sync_failure:
+                        assert copied.write_result.appended is True
+                        assert copied.write_result.durable is False
+                        assert copied.write_result.sync_error is not None
+                        observed = await completed(waiter)
+                        assert observed.delivered is False and observed.appended is True
+                        assert observed.durable is False
                     elif copy_result == "suppressed":
                         assert copied.write_result is None
                         assert not waiter.done()
@@ -312,9 +459,11 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
                         assert not waiter.done()
                 await flush_diagnostics()
             result = await completed(waiter)
-            assert result.delivered is (copy_result != "unwritten")
-            assert result.fallback_written is (copy_result == "unwritten")
-            if copy_result != "unwritten":
+            successful = copy_result != "unwritten" and not sync_failure
+            assert result.delivered is successful and result.durable is successful
+            assert result.appended is (copy_result != "unwritten")
+            assert result.fallback_written is (not successful)
+            if successful:
                 assert state.status is DiagnosticStatus.ADMITTED
             assert await receipt_result(receipt) == result
         finally:
@@ -329,6 +478,10 @@ async def test_original_copy_owner_settles_logger_receipt_once(tmp_path, monkeyp
     assert len(records) == 1
     assert records[0]["stage"] == "report-generation"
     assert records[0]["error"]["message"] == "original-report-error"
-    assert len(world.fallback) == int(copy_result == "unwritten")
+    assert len(world.fallback) == int(copy_result == "unwritten" or sync_failure)
+    if sync_failure:
+        assert probe.events.count((probe.fail, "started")) == 1
+        assert not list(ready.iterdir())
+        assert not list(logs.glob("log-copy-*.log"))
     if copy_result == "written":
         assert read_records(ready / copied.copy_name) == records

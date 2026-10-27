@@ -7,6 +7,7 @@ close_runtime 兜底关闭且不补写摘要。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import replace
@@ -25,6 +26,7 @@ from camctl.bootstrap.lifecycle import (
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 from camctl.persistence.initialization import InitOutcome, initialize_state
+from integration.logging_runtime.sync_support import FileSyncProbe
 
 from .test_composition import (
     RecordingCatalog, RecordingNotifier, _config_for, _parsed, _plan_body,
@@ -176,4 +178,47 @@ async def test_log_config_drives_wiring(tmp_path: Path) -> None:
             deps, await _parsed(tmp_path, _plan_body())
         )
     finally:
+        close_runtime(deps)
+
+
+@pytest.mark.parametrize("sync_kind", ["file", "directory"])
+async def test_runtime_sync_failure_preserves_append_without_file_success(
+        tmp_path: Path, monkeypatch, capsys, sync_kind):
+    cfg = _config_for(tmp_path)
+    assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=RecordingCatalog(),
+                         notifier=RecordingNotifier())
+    fallback = []
+    probe = FileSyncProbe(monkeypatch, Path(cfg.paths.log_file), fail=sync_kind)
+    receipt = deps.log_runtime.channel.submit(LogRecord(
+        LogLevel.ERROR, "runtime-sync-failure", fallback=fallback.append))
+
+    async def observe():
+        return await receipt
+
+    waiter = asyncio.create_task(observe())
+    try:
+        done, _ = await asyncio.wait({waiter}, timeout=5)
+        assert waiter in done, "生产日志装配未结算同步失败回执"
+        result = waiter.result()
+        assert result.delivered is False
+        assert result.appended is True and result.durable is False
+        assert result.fallback_written is True
+        assert probe.events.count((sync_kind, "started")) == 1
+        assert (sync_kind, "completed") not in probe.events
+        records = [json.loads(line) for line in _log_text(tmp_path).splitlines()]
+        assert [record["message"] for record in records] == ["runtime-sync-failure"]
+        assert len(fallback) == 1 and "runtime-sync-failure" in fallback[0]
+        diagnostic = capsys.readouterr().err
+        assert f"stage={sync_kind}_sync" in diagnostic
+        assert "appended=true" in diagnostic and "durable=false" in diagnostic
+        assert f"controlled original {sync_kind} sync failure" in diagnostic
+        outcome = await execute_command(deps, await _parsed(tmp_path, _plan_body()))
+        assert outcome.succeeded is True
+    finally:
+        if not waiter.done():
+            waiter.cancel("test cleanup")
+            done, _ = await asyncio.wait({waiter}, timeout=1)
+            assert waiter in done
+        await asyncio.gather(waiter, return_exceptions=True)
         close_runtime(deps)
