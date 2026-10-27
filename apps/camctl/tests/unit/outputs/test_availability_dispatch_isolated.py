@@ -1,0 +1,87 @@
+"""实际读取派发只使用内存替身核对尚未收场的设备检查。"""
+
+from importlib.util import find_spec, module_from_spec, spec_from_file_location
+import sys
+from types import ModuleType, SimpleNamespace
+
+import pytest
+
+from camctl import resources
+from camctl.contracts import enums
+
+
+@pytest.fixture
+def read_module(monkeypatch):
+    monkeypatch.setattr(resources, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
+    monkeypatch.setattr(enums, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
+    enums_by_column = {"operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
+                       "operation_attempts.status": SimpleNamespace(RUNNING=1)}
+    monkeypatch.setattr(enums, "enum_for", lambda name: enums_by_column[name])
+
+    def stub(name, names):
+        module = ModuleType(name)
+        for member in names:
+            setattr(module, member, type(member, (), {}))
+        monkeypatch.setitem(sys.modules, name, module)
+        return module
+
+    stub("camctl.capture.recovery", ("RecoveryBoundary", "RecoveryBlockedReason", "RecoveryDiagnostic"))
+    stub("camctl.operations.attempts", ("AttemptFinish", "BeginDisposition", "FinishDisposition",
+         "ReadResumeDisposition", "ReadResumeRequest", "RunFinish", "RunOutcome"))
+    stub("camctl.operations.models", ("AttemptStatus", "AttemptTicket", "CallOutcome", "EffectState", "ErrorValue",
+         "EvidenceValue", "Settlement", "SettlementBasis"))
+    validation = stub("camctl.operations.validation", ("validate_outcome",))
+    validation.validate_outcome = lambda *args: None
+    diagnostics = stub("camctl.operations.error_diagnostics", ("exception_diagnostic",))
+    diagnostics.exception_diagnostic = lambda *args: None
+    stub("camctl.persistence.models", ("DbOutcomeKind", "db_failure", "db_outcome_for"))
+    stub("camctl.persistence.business", ("SharedSave", "settle_required"))
+    stub("camctl.outputs.database_reads", ("read_one",))
+    stub("camctl.logging_runtime.diagnostics", ("DiagnosticState", "diagnostic_state_for", "record_call_outcome", "record_error"))
+    outputs = stub("camctl.persistence.repositories.outputs", ("_read_owner_eligible",))
+    outputs._read_owner_eligible = lambda action: True
+    discovery = stub("camctl.outputs.read_discovery", ("read_copy_dispatch_eligible",))
+    discovery.read_copy_dispatch_eligible = lambda *args: True
+    definitions = stub("camctl.devices.drivers.hasselblad.definitions", ("DRIVER_ID",))
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    facts = stub("camctl.persistence.transaction", ("row_facts",))
+    facts.row_facts = lambda connection, table, identity: connection.rows[(table, identity)]
+    preparation = stub("camctl.persistence.repositories.preparation", ("PreparationReads",))
+    preparation.PreparationReads = lambda connection: SimpleNamespace(
+        availability_in_flight=lambda device, identity: connection.check_running)
+    source = find_spec("camctl.outputs.read_attempts")
+    spec = spec_from_file_location("camctl.outputs._isolated_availability_dispatch", source.origin)
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Cursor:
+    def __init__(self, row):
+        self.row = row
+
+    def fetchone(self):
+        return self.row
+
+    def close(self):
+        pass
+
+
+class _Connection:
+    def __init__(self, check_running):
+        self.check_running = check_running
+        self.rows = {("device_files", 9): {"observer_action_id": 10, "source_action_id": 11},
+                     ("actions", 10): {"device_id": "camera", "driver_id": "other"},
+                     ("actions", 11): {"device_id": "camera", "driver_id": "other"}}
+
+    def execute(self, sql, args):
+        return _Cursor((2, 0, 2, 1, 1, None, 9, None, "camera"))
+
+
+@pytest.mark.parametrize("check_running", [False, True])
+def test_actual_device_read_is_blocked_only_by_running_check(read_module, check_running):
+    connection = _Connection(check_running)
+    ticket = SimpleNamespace(attempt_id=1, run_id=3, target_id="2", responsibility_key="read/2")
+    result = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9, device_source=True)
+    assert (None if result is None else result.reason) == ("device_busy" if check_running else None)

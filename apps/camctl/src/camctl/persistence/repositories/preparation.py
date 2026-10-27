@@ -315,7 +315,7 @@ def recheck_start_availability(owned, ticket):
                                     (run["id"], ticket.attempt_id))) as cursor:
         found = cursor.fetchone()
     attempt = None if found is None else row_facts(connection, "operation_attempts", found[0])
-    if (attempt is None or attempt["run_id"] != run["id"]
+    if (attempt is None or attempt["run_id"] != run["id"] or attempt["attempt_no"] != ticket.attempt_id
             or attempt["status"] != int(enum_for("operation_attempts.status").RUNNING)
             or attempt["result_event_id"] is not None):
         raise ConsistencyError("START 派发缺少尚未交付结果的原尝试")
