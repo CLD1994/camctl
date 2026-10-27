@@ -1,11 +1,12 @@
 """只用连接替身验证其他逻辑设备的活动身份读取。"""
 
+import asyncio
 import sqlite3
 import sys
 from decimal import Decimal
 from types import ModuleType
 from types import SimpleNamespace
-from unittest.mock import create_autospec, patch
+from unittest.mock import Mock, create_autospec, patch
 
 import pytest
 
@@ -22,16 +23,20 @@ with (patch.object(enums, "resource_bytes", side_effect=AssertionError("单元�
     from camctl.contracts.values import ConsistencyError
     from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding, binding_failure_details
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    identity_module = sys.modules[CameraIdentity.__module__]
     from camctl.persistence.repositories import physical_alias
     action_physical_identity = physical_alias.action_physical_identity
     physical_alias_conflict = physical_alias.physical_alias_conflict
     source_physical_alias_conflict = physical_alias.source_physical_alias_conflict
+    verify_source_identity_mismatch = physical_alias.verify_source_identity_mismatch
+    from camctl.outputs.physical_binding import source_physical_binding
 
 
 @pytest.fixture(autouse=True)
 def no_resources(monkeypatch):
     monkeypatch.setattr(enums, "resource_bytes", lambda name: pytest.fail("单元测试不能读取包资源"))
     monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
+    monkeypatch.setitem(sys.modules, identity_module.__name__, identity_module)
     monkeypatch.setitem(sys.modules, physical_alias.__name__, physical_alias)
     monkeypatch.setitem(sys.modules, files_api.__name__, files_api)
 
@@ -121,6 +126,65 @@ def test_binding_conflict_uses_registered_reason_and_original_binding():
     assert binding_failure_details(result) == {
         "device_id": "new", "expected_driver_id": definitions.DRIVER_ID,
         "reason": "physical_identity_conflict"}
+
+
+@pytest.mark.parametrize("current,expected", [
+    ({"serial": "OTHER", "product_id": 1}, True),
+    ({"serial": "SERIAL", "product_id": 2}, True),
+    ({"serial": "SERIAL", "product_id": 1}, False),
+])
+def test_device_source_mismatch_checks_exact_fixed_identity(monkeypatch, current, expected):
+    fixed = CameraIdentity("SERIAL", 1)
+    monkeypatch.setattr(physical_alias, "source_physical_identity", lambda *args: fixed)
+    assert verify_source_identity_mismatch(object(), {}, {}, {}, current) is expected
+
+
+def test_binding_mismatch_keeps_current_identity_out_of_public_error():
+    binding = DeviceBinding("new", definitions.DRIVER_ID)
+    result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_MISMATCH, binding, None,
+                           {"serial": "OTHER", "product_id": 1})
+    assert binding_failure_details(result) == {
+        "device_id": "new", "expected_driver_id": definitions.DRIVER_ID,
+        "reason": "physical_identity_mismatch"}
+
+
+@pytest.mark.parametrize("eligible,attempts,allowed", [
+    (True, [], True),
+    (False, [], False),
+    (True, [{"status": 1, "result_json": None}], False),
+    (True, [{"status": 2, "result_json": None}], False),
+    (True, [{"status": 2, "result_json": {}}], True),
+    (False, [{"status": 2, "result_json": {}}], False),
+])
+def test_mismatch_finish_preserves_cancellation_and_unsettled_read(eligible, attempts, allowed):
+    assert physical_alias.read_mismatch_can_finish(owner_eligible=eligible, attempts=attempts) is allowed
+
+
+@pytest.mark.parametrize("current,conflict,expected", [
+    (("OTHER", 1), True, BindingStatus.PHYSICAL_IDENTITY_MISMATCH),
+    (("SERIAL", 2), True, BindingStatus.PHYSICAL_IDENTITY_MISMATCH),
+    (("SERIAL", 1), True, BindingStatus.PHYSICAL_IDENTITY_CONFLICT),
+    (("SERIAL", 1), False, None),
+])
+def test_read_binding_classifies_before_any_driver_call(monkeypatch, current, conflict, expected):
+    configuration = ModuleType("camctl.devices.drivers.hasselblad.configuration")
+    configuration.read_camera_config = lambda declaration: SimpleNamespace(serial=current[0], product_id=current[1])
+    transaction = ModuleType("camctl.persistence.transaction")
+    source = {"observer_action_id": 2, "source_action_id": 3}
+    transaction.row_facts = lambda connection, table, identity: source if table == "device_files" else {"id": identity}
+    monkeypatch.setitem(sys.modules, configuration.__name__, configuration)
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    monkeypatch.setattr(physical_alias, "source_physical_identity", lambda *args: CameraIdentity("SERIAL", 1))
+    monkeypatch.setattr(physical_alias, "physical_alias_conflict", lambda *args: conflict)
+    driver_call = Mock(side_effect=AssertionError("读取前不能调用设备"))
+    driver = SimpleNamespace(devices={"camera": {}}, control=driver_call, open_read=driver_call)
+    class Database:
+        async def read(self, callback, **kwargs):
+            return callback(SimpleNamespace(connection=object()))
+    runtime = SimpleNamespace(database=Database(), devices={"camera": SimpleNamespace(driver=driver)})
+    result = asyncio.run(source_physical_binding(runtime, 1, "camera", definitions.DRIVER_ID))
+    assert (None if result is None else result.status) is expected
+    driver_call.assert_not_called()
 
 
 @pytest.mark.parametrize("raw,key", [

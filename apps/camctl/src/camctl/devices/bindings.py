@@ -46,6 +46,7 @@ class BindingStatus(Enum):
     MATCHED = "matched"
     DEVICE_MISSING = "device_missing"
     DRIVER_MISMATCH = "driver_mismatch"
+    PHYSICAL_IDENTITY_MISMATCH = "physical_identity_mismatch"
     PHYSICAL_IDENTITY_CONFLICT = "physical_identity_conflict"
     UNAVAILABLE = "unavailable"
 
@@ -57,6 +58,7 @@ class BindingResult:
     status: BindingStatus
     binding: DeviceBinding
     current_driver_id: str | None
+    current_identity: Mapping[str, Any] | None = None
 
 
 def check_binding(
@@ -99,6 +101,14 @@ def check_binding(
 
 def binding_failure_details(result: BindingResult) -> dict[str, str] | None:
     """从合法配置的核对结果产生已登记的绑定失败详情。"""
+    if result.status is BindingStatus.PHYSICAL_IDENTITY_MISMATCH:
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        try:
+            CameraIdentity(**result.current_identity)
+        except (TypeError, ValueError) as error:
+            raise DeviceConfigurationError("机身不符缺少可靠当前身份") from error
+    elif result.current_identity is not None:
+        raise DeviceConfigurationError("当前机身身份只用于机身不符结果")
     if result.status is BindingStatus.MATCHED:
         return None
     if result.status is BindingStatus.UNAVAILABLE:
@@ -107,6 +117,7 @@ def binding_failure_details(result: BindingResult) -> dict[str, str] | None:
         "device_id": result.binding.device_id,
         "expected_driver_id": result.binding.driver_id,
         "reason": ("missing" if result.status is BindingStatus.DEVICE_MISSING else
+                   "physical_identity_mismatch" if result.status is BindingStatus.PHYSICAL_IDENTITY_MISMATCH else
                    "physical_identity_conflict" if result.status is BindingStatus.PHYSICAL_IDENTITY_CONFLICT
                    else "mismatch"),
     }

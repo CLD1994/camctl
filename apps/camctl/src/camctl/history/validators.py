@@ -535,6 +535,12 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
     elif member == "preparation_request":
         parse_preparation_request(value)
+    elif member == "read_current_identity":
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        try:
+            CameraIdentity(**value)
+        except (TypeError, ValueError) as error:
+            _fail(f"读取绑定的当前机身身份无效: {error}")
     elif member == "preparation_failure_request":
         parse_preparation_failure_request(value)
     elif member == "preparation_binding_request":

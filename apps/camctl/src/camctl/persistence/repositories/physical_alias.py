@@ -87,8 +87,8 @@ def action_physical_identity(connection, action_id):
     return fixed
 
 
-def source_physical_alias_conflict(connection, source, observer, origin):
-    """核对设备文件原绑定与固定机身后检查其他逻辑设备的责任。"""
+def source_physical_identity(connection, source, observer, origin):
+    """核对设备文件原绑定与活动固定机身。"""
     from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
 
     try:
@@ -104,4 +104,25 @@ def source_physical_alias_conflict(connection, source, observer, origin):
             raise ValueError("来源机身与原活动不一致")
     except (TypeError, ValueError, KeyError) as error:
         raise ConsistencyError("设备文件缺少可靠原绑定或机身身份") from error
-    return physical_alias_conflict(connection, binding[0], fixed)
+    return fixed
+
+
+def source_physical_alias_conflict(connection, source, observer, origin):
+    """核对原身份后检查其他逻辑设备的责任。"""
+    fixed = source_physical_identity(connection, source, observer, origin)
+    return physical_alias_conflict(connection, observer["device_id"], fixed)
+
+
+def verify_source_identity_mismatch(connection, source, observer, origin, current):
+    """按固定来源与完整配置身份独立核对不符。"""
+    try:
+        identity = CameraIdentity(**current)
+    except (TypeError, ValueError) as error:
+        raise ConsistencyError("读取绑定失败缺少当前机身身份") from error
+    return source_physical_identity(connection, source, observer, origin) != identity
+
+
+def read_mismatch_can_finish(*, owner_eligible, attempts):
+    """取消或原读取未可靠收场时，不保存普通读取绑定终态。"""
+    return owner_eligible and all(attempt["status"] != 1 and attempt["result_json"] is not None
+                                  for attempt in attempts)

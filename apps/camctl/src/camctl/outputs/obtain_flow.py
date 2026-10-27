@@ -491,9 +491,11 @@ async def _device_source_candidate(
     if assembly is None and not failed_binding:
         raise ConsistencyError(
             f"读取设备未装配读取协作者: {device_id!r}")
-    if (binding_result is not None and binding_result.status is BindingStatus.MATCHED
-            and await _source_alias_conflict(runtime, device_file_id, device_id, driver_id)):
-        binding_result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT, binding, None)
+    if binding_result is not None and binding_result.status is BindingStatus.MATCHED:
+        from camctl.outputs.physical_binding import source_physical_binding
+        physical = await source_physical_binding(runtime, device_file_id, device_id, driver_id)
+        if physical is not None:
+            binding_result = physical
     stem = _original_stem(original_name)
     extension = _extension_of(original_name)
     return FileCandidate(
@@ -508,32 +510,6 @@ async def _device_source_candidate(
             timeout_s=assembly.read_idle_timeout_s,
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now, binding_result=binding_result)
-
-
-async def _source_alias_conflict(runtime, source_id, device_id, driver_id):
-    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
-    if driver_id != DRIVER_ID:
-        return False
-    assembly = runtime.devices.get(device_id)
-    if assembly is None:
-        raise ConsistencyError("原 Hasselblad 读取缺少设备装配")
-    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
-    from camctl.persistence.repositories.physical_alias import action_physical_identity, source_physical_alias_conflict
-    from camctl.persistence.transaction import row_facts
-    config = read_camera_config(assembly.driver.devices[device_id])
-    def read_alias(owned):
-        source = row_facts(owned.connection, "device_files", source_id)
-        if source is None:
-            raise ConsistencyError("读取机身冲突缺少原设备文件")
-        observer = row_facts(owned.connection, "actions", source["observer_action_id"])
-        origin = row_facts(owned.connection, "actions", source["source_action_id"])
-        if observer is None or origin is None:
-            raise ConsistencyError("读取机身冲突缺少原动作绑定")
-        fixed = action_physical_identity(owned.connection, source["source_action_id"])
-        if (config.serial, config.product_id) != (fixed.serial, fixed.product_id):
-            return False
-        return source_physical_alias_conflict(owned.connection, source, observer, origin)
-    return await runtime.database.read(read_alias, description="读取设备文件的机身责任")
 
 
 async def _inspection_copy_read_config(
@@ -667,16 +643,20 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     发不阻塞读取推进。
     """
     page = (await runtime.discovery.reads(runtime.database, "reads", now))
+    binding_blocked = set()
     if runtime.binding_check is not None:
         candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
             result = runtime.binding_check(DeviceBinding(device_id, driver_id))
-            if (result.status is BindingStatus.MATCHED and copy_id not in runtime.pending_read_ends
-                    and await _source_alias_conflict(runtime, source_id, device_id, driver_id)):
-                result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT,
-                                       DeviceBinding(device_id, driver_id), None)
+            if result.status is BindingStatus.MATCHED:
+                from camctl.outputs.physical_binding import source_physical_binding
+                physical = await source_physical_binding(runtime, source_id, device_id, driver_id)
+                if (physical is not None and (copy_id not in runtime.pending_read_ends
+                        or physical.status is BindingStatus.PHYSICAL_IDENTITY_MISMATCH)):
+                    result = physical
             if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
-                                 BindingStatus.PHYSICAL_IDENTITY_CONFLICT):
+                                 BindingStatus.PHYSICAL_IDENTITY_MISMATCH, BindingStatus.PHYSICAL_IDENTITY_CONFLICT):
+                binding_blocked.add(copy_id)
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.outputs.handoff import FailureSaveDisposition
 
@@ -703,7 +683,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
-        owned.connection, now, capture_read_parallel=parallel, candidates=page.items))
+        owned.connection, now, capture_read_parallel=parallel,
+        candidates=tuple(item for item in page.items if item.copy_id not in binding_blocked)))
     for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
