@@ -26,7 +26,7 @@ from .test_capture_contract import (
     _RECORD,
     _environment,
     _entry,
-    _runtime,
+    assembled,
     _seed_processing,
     _seed_stopped_recording,
     _value,
@@ -67,13 +67,13 @@ def _run_row(owned, action_id: int):
 
 class TestPhotoListingRounds:
     async def test_listing_failure_retries_next_round_then_succeeds(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults(
                 {11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)},
                 failures=1)
-            runtime = _runtime(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
+            runtime = await assembled(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
             await capture_handler("camera_take_photo")(11, runtime)
             # 本轮列举失败：保存失败结果与重试等待，动作保持执行中。
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
@@ -88,11 +88,11 @@ class TestPhotoListingRounds:
             owned.connection.close()
 
     async def test_exhausted_rounds_close_unconfirmed(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _PHOTO)
         try:
             flaky = _FlakyResults({}, failures=3)
-            runtime = _runtime(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
+            runtime = await assembled(owned, results=flaky, check_config=_IMMEDIATE_CHECK)
             for _ in range(3):
                 await capture_handler("camera_take_photo")(11, runtime)
             # 三轮全部失败后预算耗尽：不发起第四次设备列举。
@@ -113,9 +113,9 @@ class TestPhotoListingRounds:
 
 
 class TestRecordingListingRounds:
-    async def _stopped_tail(self, owned, results):
+    async def _stopped_tail(self, owned, results, assembled):
         """推进到停止确认后的录像尾段：启动先行，停止与处理已保存。"""
-        runtime = _runtime(owned, results=results, check_config=_IMMEDIATE_CHECK)
+        runtime = await assembled(owned, results=results, check_config=_IMMEDIATE_CHECK)
         await capture_handler("camera_record")(12, runtime)
         _seed_processing(owned.connection, 12)
         _seed_stopped_recording(owned.connection, 12)
@@ -123,11 +123,11 @@ class TestRecordingListingRounds:
         return runtime
 
     async def test_tail_failure_retries_then_succeeds(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _RECORD)
         try:
             flaky = _FlakyResults({12: (_entry("clip-1"),)}, failures=1)
-            runtime = await self._stopped_tail(owned, flaky)
+            runtime = await self._stopped_tail(owned, flaky, assembled)
             await capture_handler("camera_record")(12, runtime)
             # 尾段列举失败：保存失败结果与重试等待，终态等待下一轮。
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
@@ -143,11 +143,11 @@ class TestRecordingListingRounds:
             owned.connection.close()
 
     async def test_exhausted_rounds_close_run_without_set_conclusion(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _RECORD)
         try:
             flaky = _FlakyResults({}, failures=3)
-            runtime = await self._stopped_tail(owned, flaky)
+            runtime = await self._stopped_tail(owned, flaky, assembled)
             for _ in range(3):
                 await capture_handler("camera_record")(12, runtime)
             await capture_handler("camera_record")(12, runtime)
@@ -170,7 +170,7 @@ class TestRecordingListingRounds:
             owned.connection.close()
 
     async def test_session_listing_cache_skips_repeated_rounds(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         owned = _environment(tmp_path, _RECORD)
         try:
             # 需要检查的录像在媒体端口未装配时保持执行中，等待装配会话。
@@ -182,14 +182,14 @@ class TestRecordingListingRounds:
             owned.connection.commit()
             cache: dict = {}
             flaky = _FlakyResults({12: (_entry("clip-1"),)})
-            first = _runtime(owned, results=flaky, listing_cache=cache)
+            first = await assembled(owned, results=flaky, listing_cache=cache)
             await capture_handler("camera_record")(12, first)
             # 第一次推进只发起启动；停止与处理责任已由种子保存。
             await capture_handler("camera_record")(12, first)
             assert flaky.calls == [12]
             assert _run_row(owned, 12) == (2, 1, 1)
             # 同会话再次推进：已观察的列举事实直接复用，不消耗核实名额。
-            second = _runtime(owned, results=flaky, listing_cache=cache)
+            second = await assembled(owned, results=flaky, listing_cache=cache)
             await capture_handler("camera_record")(12, second)
             assert flaky.calls == [12]
             assert _run_row(owned, 12) == (2, 1, 1)
@@ -199,9 +199,9 @@ class TestRecordingListingRounds:
 
 
 class TestCanceledTimelapseCloseRounds:
-    async def _cancel_after_send(self, owned, results):
+    async def _cancel_after_send(self, owned, results, assembled):
         """先正常发送并安排等待，再置取消并种已确认的停止。"""
-        runtime = _runtime(owned, results=results, check_config=_IMMEDIATE_CHECK)
+        runtime = await assembled(owned, results=results, check_config=_IMMEDIATE_CHECK)
         await capture_handler("camera_timelapse")(13, runtime)
         owned.connection.execute(
             "UPDATE actions SET cancel_requested = 1 WHERE id = 13")
@@ -222,13 +222,13 @@ class TestCanceledTimelapseCloseRounds:
         return runtime
 
     async def test_close_failure_retries_then_confirms(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         from .test_capture_contract import _TIMELAPSE
 
         owned = _environment(tmp_path, _TIMELAPSE)
         try:
             flaky = _FlakyResults({13: (_entry("sequence-1"),)}, failures=1)
-            runtime = await self._cancel_after_send(owned, flaky)
+            runtime = await self._cancel_after_send(owned, flaky, assembled)
             await capture_handler("camera_timelapse")(13, runtime)
             # 收尾列举失败：保留取消待收场事实，下一轮重新核实。
             assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (2,)
@@ -243,13 +243,13 @@ class TestCanceledTimelapseCloseRounds:
             owned.connection.close()
 
     async def test_close_exhausted_cancels_without_outputs(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, assembled) -> None:
         from .test_capture_contract import _TIMELAPSE
 
         owned = _environment(tmp_path, _TIMELAPSE)
         try:
             flaky = _FlakyResults({}, failures=3)
-            runtime = await self._cancel_after_send(owned, flaky)
+            runtime = await self._cancel_after_send(owned, flaky, assembled)
             for _ in range(3):
                 await capture_handler("camera_timelapse")(13, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (2,)
