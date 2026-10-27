@@ -128,6 +128,27 @@ def _runtime(owned, settlement):
 
 
 class TestApplyTransactions:
+    def test_cancel_accepts_typed_integer_values_and_reuses_original_key(self, pipeline):
+        from camctl.contracts.values import ObjectId, UtcMicros
+
+        command = ApplyCancelTarget(ObjectId(92), CancelApplyMode.PRE_START, UtcMicros(_NOW))
+        key = new_operation_key()
+        result = CancellationRepository().apply_cancel_target(command, key, pipeline)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        assert _value(pipeline, "SELECT status, execution_started, cancel_requested FROM actions WHERE id=12") == (6, 0, 1)
+        before = tuple(pipeline.connection.iterdump())
+        replay = CancellationRepository().apply_cancel_target(command, key, pipeline)
+        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
+        assert tuple(pipeline.connection.iterdump()) == before
+
+    @pytest.mark.parametrize("item_id,occurred_at", [(True, _NOW), (92, True)])
+    def test_cancel_rejects_boolean_identity_or_time(self, pipeline, item_id, occurred_at):
+        before = tuple(pipeline.connection.iterdump())
+        with pytest.raises(ValueError):
+            command = ApplyCancelTarget(item_id, CancelApplyMode.PRE_START, occurred_at)
+            CancellationRepository().apply_cancel_target(command, new_operation_key(), pipeline)
+        assert tuple(pipeline.connection.iterdump()) == before
+
     def test_inflight_cancel_closes_start_before_late_no_effect(self, pipeline):
         from decimal import Decimal
         from camctl.operations.attempts import AttemptConfig, AttemptFinish
