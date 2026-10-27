@@ -41,6 +41,50 @@ class SmallNativeCatalog(NativeWaitCatalog):
         return definition
 
 
+async def _public_world(tmp_path, startup, canceled=False, *, catalog=None):
+    from .public_assembly import assemble_capture
+    from .result_consumer_fixtures import RESULT_EVIDENCE
+    from .test_capture_contract import ResultsDouble
+
+    wall, mono = [_NOW], [5000000000]
+    async def assemble(owned, *, driver):
+        runtime, database = await assemble_capture(
+            owned, driver=driver, evidence=RESULT_EVIDENCE, results=ResultsDouble({}),
+            staging=tmp_path, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0])
+        return runtime
+
+    owned, runtime, action_id, handler = await consumer_world(
+        tmp_path, 'timelapse', catalog=catalog or SmallNativeCatalog(startup),
+        start=False, assemble=assemble)
+    runtime.wall_us = lambda: wall[0]
+    runtime.monotonic_ns = lambda: mono[0]
+    runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 0, startup)
+    runtime.check_config = AttemptConfig(3, Decimal('1'), Decimal(0))
+    async def actual(request, batch):
+        assert request.params['completion_context']['kind'] == 'timelapse_natural'
+        return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
+    advance = capture_handler(handler)
+    try:
+        await advance(action_id, runtime)
+        assert owned.connection.execute('SELECT sent_at FROM device_activities WHERE action_id=?', (action_id,)).fetchone() == (_NOW,)
+        result = _result_port(runtime, actual)
+        stopper = create_autospec(StopDriver, instance=True)
+        if canceled:
+            _apply_public_cancel(owned, action_id, _NOW+100000)
+            stopper.stop.return_value = DeviceCallResult.from_outcome(CallOutcome(
+                status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
+                error=ErrorValue('device_error', 'device'),
+                settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('stop_returned', 1, {}))))
+            runtime.stopper = stopper
+            await advance(action_id, runtime)
+        due = _NOW+(startup+1200)*1000
+        return owned, runtime, action_id, advance, wall, mono, result, stopper, due
+    except BaseException:
+        await runtime.database.close()
+        owned.connection.close()
+        raise
+
+
 async def _world(tmp_path, startup, canceled=False, *, catalog=None):
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, 'timelapse', catalog=catalog or SmallNativeCatalog(startup), start=False)
@@ -72,7 +116,7 @@ async def _world(tmp_path, startup, canceled=False, *, catalog=None):
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('canceled', [False, True])
 async def test_elapsed_monotonic_time_does_not_save_completion_before_real_utc(tmp_path, startup, canceled):
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     try:
         mono[0] += (startup+1200)*1000000
         wall[0] = _NOW-1000000
@@ -86,21 +130,26 @@ async def test_elapsed_monotonic_time_does_not_save_completion_before_real_utc(t
         assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key LIKE 'results/%'").fetchone() == (0,)
         wall[0] = due
         await advance(action_id, runtime)
-        assert runtime.action(action_id)['status'] == (6 if canceled else 3)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (6 if canceled else 3,)
         result.list_results.assert_awaited_once()
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('canceled', [False, True])
 async def test_completed_wait_defers_new_reads_after_wall_regression(tmp_path, startup, canceled):
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     try:
         mono[0] += (startup+1200)*1000000
         wall[0] = due+100
-        event = _advance_timelapse_natural_wait(runtime, runtime.action(action_id))
-        assert event is not None
+        key = new_operation_key()
+        receipt = await runtime.database.write(
+            lambda connection: runtime.timelapse.complete_wait(
+                WaitCompletedSave(action_id, wall[0]), key, connection), key=key)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        event = receipt.value.event_id
         wall[0] = due-1000000
         for _ in range(2):
             await advance(action_id, runtime)
@@ -109,9 +158,10 @@ async def test_completed_wait_defers_new_reads_after_wall_regression(tmp_path, s
         wall[0] = due+100
         await advance(action_id, runtime)
         result.list_results.assert_awaited_once()
-        assert runtime.action(action_id)['status'] == (6 if canceled else 3)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (6 if canceled else 3,)
         assert stopper.stop.await_count == int(canceled)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -119,7 +169,7 @@ async def test_completed_wait_defers_new_reads_after_wall_regression(tmp_path, s
 @pytest.mark.parametrize('canceled', [False, True])
 @pytest.mark.parametrize('partial', [False, True])
 async def test_in_flight_regressed_page_remains_successful_but_cannot_complete_files(tmp_path, startup, canceled, partial):
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     from .test_result_page_history import _CURSOR
     calls = []
     async def actual(request, batch):
@@ -135,7 +185,7 @@ async def test_in_flight_regressed_page_remains_successful_but_cannot_complete_f
         wall[0] = due
         mono[0] += (startup+1200)*1000000
         await advance(action_id, runtime)
-        assert runtime.action(action_id)['status'] == 2
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (2,)
         page_event = load_event_registry()['events']['RESULT_PAGE']
         first = owned.connection.execute(
             "SELECT id,occurred_at,body_json FROM history_events WHERE event_type=?"
@@ -151,16 +201,17 @@ async def test_in_flight_regressed_page_remains_successful_but_cannot_complete_f
         await advance(action_id, runtime)
         assert len(calls) == 2 and calls[0].run_id == calls[1].run_id and calls[1].attempt_id == 2
         assert owned.connection.execute('SELECT id,occurred_at,body_json FROM history_events WHERE id=?', (first[0][0],)).fetchall() == first
-        assert runtime.action(action_id)['status'] == (6 if canceled else 3)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (6 if canceled else 3,)
         assert stopper.stop.await_count == int(canceled)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('branch', ['schedule', 'reconfigure', 'complete'])
 async def test_each_wait_event_rejects_wrong_formula_and_early_real_completion(tmp_path, startup, branch):
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup)
     try:
         # Real START/definition remain reliable; corrupt only the proposed branch input.
         if branch == 'schedule':
@@ -172,10 +223,12 @@ async def test_each_wait_event_rejects_wrong_formula_and_early_real_completion(t
         before = tuple(owned.connection.iterdump())
         request = (WaitCompletedSave(action_id, due-1) if branch == 'complete' else
             ScheduleWait(action_id, WaitPlan(WaitKind.WAIT_THEN_CHECK, due+1), 200, 0, _NOW))
-        receipt = save(request, new_operation_key(), runtime.owned)
+        key = new_operation_key()
+        receipt = await runtime.database.write(lambda connection: save(request, key, connection), key=key)
         assert receipt.kind is DbOutcomeKind.ROLLED_BACK
         assert tuple(owned.connection.iterdump()) == before
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -186,7 +239,7 @@ async def test_each_wait_event_rejects_wrong_formula_and_early_real_completion(t
 async def test_completion_save_resolution_keeps_original_time_across_regression_and_extra_changes(
         tmp_path, startup, canceled, failure, initial_extra, latest_extra):
     from camctl.persistence.models import DbOutcome
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     save = runtime.timelapse.complete_wait
     requests = []
     def fail(command, key, connection):
@@ -201,7 +254,7 @@ async def test_completion_save_resolution_keeps_original_time_across_regression_
         mono[0] += (startup+1200+initial_extra)*1000000
         original_time = wall[0]
         with pytest.raises(ConsistencyError):
-            _advance_timelapse_natural_wait(runtime, runtime.action(action_id))
+            await advance(action_id, runtime)
         runtime.timelapse.complete_wait = save
         wall[0] = _NOW-1000
         runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, latest_extra, startup)
@@ -217,9 +270,10 @@ async def test_completion_save_resolution_keeps_original_time_across_regression_
         mono[0] = 5000000000+(startup+1200+max(initial_extra, latest_extra))*1000000
         await advance(action_id, runtime)
         result.list_results.assert_awaited_once()
-        assert runtime.action(action_id)['status'] == (6 if canceled else 3)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (6 if canceled else 3,)
         assert stopper.stop.await_count == int(canceled)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -227,7 +281,7 @@ async def test_completion_save_resolution_keeps_original_time_across_regression_
 @pytest.mark.parametrize('committed', [False, True])
 async def test_qualified_original_page_unknown_is_reused_without_new_read_during_regression(tmp_path, startup, committed):
     from camctl.persistence.models import DbOutcome
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup)
     save = runtime.capture.save_result_page
     calls = []
     def uncertain(command, key, connection):
@@ -248,12 +302,13 @@ async def test_qualified_original_page_unknown_is_reused_without_new_read_during
         await advance(action_id, runtime)
         assert calls[0] == calls[1]
         result.list_results.assert_awaited_once()
-        assert runtime.action(action_id)['status'] == 2
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (2,)
         wall[0] = due+100
         await advance(action_id, runtime)
         result.list_results.assert_awaited_once()
-        assert runtime.action(action_id)['status'] == 3
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (3,)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -262,7 +317,7 @@ async def test_qualified_original_page_unknown_is_reused_without_new_read_during
 async def test_invalid_actual_page_exhausts_original_budget_without_fabricating_end(tmp_path, startup, canceled):
     from pathlib import Path
     from camctl.persistence.repositories.history import HistoryRepository
-    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, action_id, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     async def actual(request, batch):
         wall[0] = due-1
@@ -274,7 +329,7 @@ async def test_invalid_actual_page_exhausts_original_budget_without_fabricating_
         await advance(action_id, runtime)
         wall[0] = due+100
         await advance(action_id, runtime)
-        assert runtime.action(action_id)['status'] == (6 if canceled else 4)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone() == (6 if canceled else 4,)
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (action_id,)).fetchone() == (1, 1)
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
         assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE responsibility_key LIKE 'results/%'").fetchone() == (1,)
@@ -284,6 +339,7 @@ async def test_invalid_actual_page_exhausts_original_budget_without_fabricating_
         restored = history.restore_entity('action', action_id, history.current_boundary())
         assert restored[('actions', action_id)]['status'] == (6 if canceled else 4)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
