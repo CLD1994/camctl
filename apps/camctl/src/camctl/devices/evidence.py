@@ -31,7 +31,7 @@ _CANONICAL_IDENTITY = re.compile(r"\A[1-9][0-9]*\Z")
 
 #: 第一版登记的操作类别；观察与所属操作的契约必须一致。
 OPERATIONS = frozenset(
-    {"control", "stop", "query", "result", "read", "digest", "delete"}
+    {"control", "stop", "query", "result", "read", "digest", "delete", "availability"}
 )
 
 

@@ -110,6 +110,14 @@ CONTRACT = EvidenceContract(
 
 
 class TestEvidence:
+    def test_availability_is_an_independent_operation(self) -> None:
+        contract = EvidenceContract(
+            type="device_availability", version=1, operation="availability",
+            fields=frozenset({"check_id"}), identity_field="check_id",
+        )
+        validate_observation(DeviceObservation("device_availability", 1, {"check_id": "7"}),
+                             contract, expected_identity="7")
+
     def test_valid_observation_passes(self) -> None:
         observation = DeviceObservation(
             type="stop_confirmed", version=1, data={"activity_id": "7"}
