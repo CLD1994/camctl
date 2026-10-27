@@ -21,3 +21,19 @@ def verify_output_scope_structure(connection) -> None:
         raise ValueError("操作流程的实际 CREATE TABLE 定义缺失")
     if _tokens(found[0]) != _tokens(expected.group()):
         raise ValueError("operation_runs 的实际列或结构约束与权威 V6 定义不一致")
+
+
+def verify_device_activity_structure(connection) -> None:
+    """核对当前活动表，避免将缺少固定身份的旧结构当成当前结构。"""
+    authority = resource_bytes("sql/operations.sql").decode("utf-8")
+    expected = re.search(r"CREATE TABLE device_activities \(.*?\) STRICT", authority, re.S)
+    if expected is None:
+        raise ValueError("设备活动的权威 SQL 缺失")
+    with closing(connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='device_activities'"
+    )) as cursor:
+        found = cursor.fetchone()
+    if found is None or not isinstance(found[0], str):
+        raise ValueError("设备活动的实际 CREATE TABLE 定义缺失")
+    if _tokens(found[0]) != _tokens(expected.group()):
+        raise ValueError("device_activities 的实际列或结构约束与权威定义不一致")

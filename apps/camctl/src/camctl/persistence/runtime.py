@@ -396,12 +396,15 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
-        if format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION:
-            from camctl.persistence.output_scope_structure import verify_output_scope_structure
-            try:
+        from camctl.persistence.output_scope_structure import (
+            verify_device_activity_structure, verify_output_scope_structure,
+        )
+        try:
+            verify_device_activity_structure(connection)
+            if format_version >= OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION:
                 verify_output_scope_structure(connection)
-            except (ValueError, sqlite3.Error) as error:
-                raise DatabaseInvalidError(f"输出范围格式结构无效: {error}") from error
+        except (ValueError, sqlite3.Error) as error:
+            raise DatabaseInvalidError(f"设备活动或输出范围格式结构无效: {error}") from error
         if format_version >= int(_FORMAT_VERSIONS.V3):
             from camctl.persistence.recovery_structure import verify_recovery_structure
             try:
