@@ -1,6 +1,7 @@
 """START 原结果保存责任、复合事务和已结束动作的旧调用恢复。"""
 
 from dataclasses import replace
+from contextlib import closing
 from decimal import Decimal
 from types import SimpleNamespace
 import sqlite3
@@ -21,20 +22,20 @@ from camctl.operations.models import AttemptStatus, EffectState, ErrorValue
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import FinishCanceledCapture
-from camctl.persistence.repositories.scheduling import SchedulingRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.repositories.scheduling import GrantRequest, SchedulingRepository
+from camctl.scheduling.rules import LaunchWindow
 
 from .test_cancel_late_start import _cancel
 from .test_capture_contract import _NOW
 from .test_recording_start_runtime import (
-    _START_EVIDENCE, StartDriver, _configured, _result, _start, _world,
+    _START_EVIDENCE, StartDriver, configured, _result, _start, _world,
 )
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize("kind", [DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.UNKNOWN])
-async def test_start_grant_state_failure_stops_before_device_call(tmp_path, kind):
+async def test_start_grant_state_failure_stops_before_device_call(tmp_path, kind, configured):
     owned = _world(tmp_path)
     try:
         class UnavailableGrant(SchedulingRepository):
@@ -42,7 +43,7 @@ async def test_start_grant_state_failure_stops_before_device_call(tmp_path, kind
                 return DbOutcome(kind=kind, error=ConsistencyError("授予事务不可靠"))
 
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver)
+        runtime = await configured(owned, driver)
         runtime.scheduling = UnavailableGrant()
         with pytest.raises(ConsistencyError):
             await capture_handler("camera_record")(12, runtime)
@@ -55,14 +56,37 @@ async def test_start_grant_state_failure_stops_before_device_call(tmp_path, kind
 class ResultWriteFault:
     """真实 SQLite 写边界一次故障；保留实际提交前后分区。"""
 
-    def __init__(self, real, driver, mode):
+    def __init__(self, real, driver, mode, state=None):
         self.real, self.driver, self.mode = real, driver, mode
-        self.armed = True
-        self.result_keys = []
-        self.rolled_back_images = []
+        self.state = state if state is not None else {
+            "armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+
+    @property
+    def armed(self):
+        return self.state["armed"]
+
+    @armed.setter
+    def armed(self, value):
+        self.state["armed"] = value
+
+    @property
+    def result_keys(self):
+        return self.state["result_keys"]
+
+    @property
+    def rolled_back_images(self):
+        return self.state["rolled_back_images"]
 
     def __getattr__(self, name):
         return getattr(self.real, name)
+
+    def close(self):
+        path = self.real.execute("PRAGMA database_list").fetchone()[2]
+        record = self.mode == "commit_before" and not self.armed
+        self.real.close()
+        if record:
+            with closing(sqlite3.connect(path)) as connection:
+                self.rolled_back_images.append(tuple(connection.iterdump()))
 
     def execute(self, statement, params=()):
         result_phase = bool(self.driver.calls)
@@ -83,43 +107,53 @@ class ResultWriteFault:
         return result
 
 
-async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_same_session(tmp_path):
+async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_same_session(tmp_path, configured, monkeypatch):
     owned = _world(tmp_path)
     try:
         actual = _result(confirmed=True)
         driver = StartDriver(actual)
 
         class PersistentFault(ResultWriteFault):
-            enabled = True
-
             def execute(self, statement, params=()):
-                if self.enabled and driver.calls and statement == "COMMIT":
+                if self.state["enabled"] and driver.calls and statement == "COMMIT":
                     raise sqlite3.OperationalError("结果提交持续不可核实")
                 return super().execute(statement, params)
 
-        proxy = PersistentFault(owned.connection, driver, "commit_before")
-        runtime = _configured(replace(owned, connection=proxy), driver)
+        proxies = []
+        state = {"armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+        def wrap(connection):
+            proxy = PersistentFault(connection.connection, driver, "commit_before", state)
+            proxies.append(proxy)
+            return replace(connection, connection=proxy)
+        runtime = await configured(owned, driver, connection_wrap=wrap)
+        requests = []
+        save = runtime.capture.finish_start_result
+        def observe(finish, observation, key, connection, **kwargs):
+            requests.append((finish, observation, key, kwargs))
+            return save(finish, observation, key, connection, **kwargs)
+        monkeypatch.setattr(runtime.capture, "finish_start_result", observe)
         deadlines = []
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         with pytest.raises(ConsistencyError):
             await capture_handler("camera_record")(12, runtime)
         assert deadlines == []
-        pending, = runtime.pending_start_results.values()
-        assert pending.finish.outcome.outcome is actual
-        assert pending.finish.ticket.responsibility_key == "start/12"
-        assert pending.observation.started_at == _NOW
+        assert len(requests) == 2 and requests[0] == requests[1]
+        finish, observation, key, _ = requests[0]
+        assert finish.outcome.outcome == actual
+        assert finish.ticket.responsibility_key == "start/12"
+        assert observation.started_at == _NOW
         assert len(driver.calls) == 1
-        original_anchor = pending.confirmation_anchor_ns
-        proxy.enabled = False
-        proxy.armed = False
+        original_anchor = 7_000_000_000
+        state["enabled"] = False
+        state["armed"] = False
         runtime.wall_us = lambda: _NOW + 5_000_000
         runtime.monotonic_ns = lambda: original_anchor + 1_000_000_000
         await capture_handler("camera_record")(12, runtime)
-        assert runtime.pending_start_results == {}
+        assert len(requests) == 3 and requests[2] == requests[0]
         assert len(driver.calls) == 1
         assert owned.connection.execute(
             "SELECT started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW,)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == (
+        assert (await runtime.recording_state.recording_state(12)).stop_target_ns == (
             original_anchor + 60_000_000_000)
         assert deadlines[0] == (12, original_anchor + 60_000_000_000)
     finally:
@@ -127,14 +161,20 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
 
 
 @pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
-async def test_actual_start_result_is_verified_and_resaved_with_same_key_without_resend(tmp_path, mode):
+async def test_actual_start_result_is_verified_and_resaved_with_same_key_without_resend(tmp_path, mode, configured):
     owned = _world(tmp_path)
     try:
         before_result = []
         driver = StartDriver(_result(confirmed=True), returned=lambda: before_result.append(
             tuple(owned.connection.iterdump())))
-        proxy = ResultWriteFault(owned.connection, driver, mode)
-        runtime = _configured(replace(owned, connection=proxy), driver)
+        proxies = []
+        state = {"armed": True, "enabled": True, "result_keys": [], "rolled_back_images": []}
+        def wrap(connection):
+            proxy = ResultWriteFault(connection.connection, driver, mode, state)
+            proxies.append(proxy)
+            return replace(connection, connection=proxy)
+        runtime = await configured(owned, driver, connection_wrap=wrap)
+        proxy = proxies[0]
         await capture_handler("camera_record")(12, runtime)
         assert len(driver.calls) == 1
         assert _start(owned)[1:] == (3, 1, 0)
@@ -150,12 +190,12 @@ async def test_actual_start_result_is_verified_and_resaved_with_same_key_without
         owned.connection.close()
 
 
-async def test_dispatch_prevented_result_and_expiration_share_transaction(tmp_path):
+async def test_dispatch_prevented_result_and_expiration_share_transaction(tmp_path, configured):
     owned = _world(tmp_path)
     try:
         wall = [_NOW]
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver, wall=wall)
+        runtime = await configured(owned, driver, wall=wall)
 
         class ExpiredAfterGrant(SchedulingRepository):
             def grant_start(self, *args, **kwargs):
@@ -177,9 +217,18 @@ async def test_dispatch_prevented_result_and_expiration_share_transaction(tmp_pa
         owned.connection.close()
 
 
-def _joint_confirm(runtime):
-    ticket, reason = runtime.grant(runtime.action(12))
-    assert ticket is not None, reason
+def _grant(owned):
+    request = GrantRequest(device_id="cam-1", action_id=12,
+        window=LaunchWindow(_NOW, _NOW + 60_000_000), trusted_wall_now=_NOW,
+        config=AttemptConfig(3, Decimal("0.75"), Decimal("1")), occurred_at=_NOW)
+    receipt = SchedulingRepository().grant_start(request, new_operation_key(), owned)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    assert receipt.value.ticket is not None, receipt.value.reason
+    return receipt.value.ticket
+
+
+def _joint_confirm(owned):
+    ticket = _grant(owned)
     finish = AttemptFinish(ticket=ticket,
         outcome=validate_outcome(ticket, _result(confirmed=True), _START_EVIDENCE),
         occurred_at=_NOW, run_finish=RunFinish(RunOutcome.SUCCEEDED))
@@ -189,11 +238,11 @@ def _joint_confirm(runtime):
 
 
 @pytest.mark.parametrize("changed", ["result_time", "observation_time", "observation", "run_result"])
-async def test_joint_start_same_key_rejects_changed_original_input(tmp_path, changed):
+async def test_joint_start_same_key_rejects_changed_original_input(tmp_path, changed, configured):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
-        finish, observation = _joint_confirm(runtime)
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
+        finish, observation = _joint_confirm(owned)
         key = new_operation_key()
         first = runtime.capture.finish_start_result(finish, observation, key, owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
@@ -214,13 +263,15 @@ async def test_joint_start_same_key_rejects_changed_original_input(tmp_path, cha
         owned.connection.close()
 
 
-async def test_joint_query_same_key_rejects_changed_original_start_segment(tmp_path):
+async def test_joint_query_same_key_rejects_changed_original_start_segment(tmp_path, configured):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result()))
-        ticket, reason = runtime.grant(runtime.action(12))
-        assert ticket is not None, reason
-        runtime.finish(ticket, _result(error=ErrorValue("transport_timeout", "transport")))
+        runtime = await configured(owned, StartDriver(_result()))
+        ticket = _grant(owned)
+        result = runtime.operations.finish_attempt(AttemptFinish(ticket,
+            validate_outcome(ticket, _result(error=ErrorValue("transport_timeout", "transport")),
+                             _START_EVIDENCE), _NOW), new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
         receipt = runtime.operations.begin_attempt(AttemptIntent(
             operation="query", action_id=12, kind=OperationKind.QUERY_ACTIVITY,
             target=AttemptTarget(activity_id=12), query_purpose=QueryPurpose.START_CONFIRMATION,
@@ -256,13 +307,12 @@ async def test_joint_query_same_key_rejects_changed_original_start_segment(tmp_p
     (RecoveryBoundary.UNCONFIRMED, True),
     (RecoveryBoundary.HOST_LOCAL_SETTLED, False),
 ])
-async def test_residual_consumer_finds_unfinished_old_start_under_terminal_action(tmp_path, boundary, old_h):
+async def test_residual_consumer_finds_unfinished_old_start_under_terminal_action(tmp_path, boundary, old_h, configured):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(confirmed=True))
-        original = _configured(owned, driver)
-        ticket, reason = original.grant(original.action(12))
-        assert ticket is not None, reason
+        original = await configured(owned, driver)
+        _grant(owned)
         horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         _cancel(owned, 12)
         ended = original.capture.finish_canceled_capture(
@@ -271,16 +321,17 @@ async def test_residual_consumer_finds_unfinished_old_start_under_terminal_actio
         recovery = EvidenceRegistry((EvidenceContract(
             "adb_foreground_recovery", 1, "control", frozenset()),))
 
-        def factory(current_owned, device_id):
-            runtime = _configured(current_owned, driver)
-            runtime.recovery_boundary = boundary
-            runtime.recovery_max_event_id = horizon if old_h else 1
-            runtime.recovery_evidence_for = lambda saved, operation: (
-                recovery if saved.driver_id == "camctl-adb" and operation == "control" else None)
+        runtime = await configured(owned, driver)
+        runtime.recovery_boundary = boundary
+        runtime.recovery_max_event_id = horizon if old_h else 1
+        runtime.recovery_evidence_for = lambda saved, operation: (
+            recovery if saved.driver_id == "camctl-adb" and operation == "control" else None)
+
+        async def factory(database, device_id):
             return runtime
 
         context = SimpleNamespace(
-            open_connection=lambda: open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig()),
+            database=runtime.database,
             clock=SimpleNamespace(utc_micros=lambda: _NOW))
         await residual_flow(factory)(context)
         assert driver.calls == []

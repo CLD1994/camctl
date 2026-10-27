@@ -122,14 +122,15 @@ async def configured(tmp_path):
     databases = []
 
     async def create(owned, driver, *, wall=None, mono=None, maximum=3,
-                     timeout=Decimal("0.75")):
+                     timeout=Decimal("0.75"), connection_wrap=None):
         wall = [_NOW] if wall is None else wall
         mono = [_ANCHOR] if mono is None else mono
         runtime, database = await assemble_capture(
             owned, driver=driver, evidence=_START_EVIDENCE, results=ResultsDouble({}),
             staging=tmp_path, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0],
             recording={"max_start_attempts": maximum, "start_timeout_s": timeout,
-                       "start_retry_interval_s": Decimal("1")})
+                       "start_retry_interval_s": Decimal("1")},
+            connection_wrap=connection_wrap)
         databases.append(database)
         runtime.query_config = AttemptConfig(2, Decimal("0.5"), Decimal("1"))
         return runtime
