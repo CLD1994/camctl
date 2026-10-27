@@ -62,6 +62,8 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 
 活动结构校验在 `/workspaces/camctl` 使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_output_scope_structure.py -q`，退出码为 0，11 项通过。该文件虽然位于单元目录，但导入阶段读取了真实枚举资源，按项目测试分类涉及集成边界，不能作为纯单元验证；这是用户要求不运行集成测试后的执行偏差。连接替身覆盖了活动表身份字段、配对约束、缺失结构，以及格式 1 和格式 6 打开时拒绝不符结构；未验证真实数据库文件或既有现场库。
 
+可用性检查结构原型在独立工作区 `/tmp/camctl-h2-availability-guard-20261028` 尚未合入。该原型增加了意图和结果票据共用的目标身份规则；工作区没有生成包资源。先执行 `test_attempt_inputs.py` 时发现它在导入时尝试读取缺失的真实枚举资源，收集阶段失败，退出码为 2，没有运行用例。随后以持久化模型替身隔离协作者并禁止读取包资源，使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/operations/test_ticket_target_identity_unit.py -q`，退出码为 0，6 项通过。原型的检查事务和独立守卫仍未完成，此结果不证明持久化或恢复链。
+
 ## H3：启动与在途读取
 
 在 `/workspaces/camctl` 使用 CPython 3.11.17 执行以下命令，退出码为 0，204 项通过。测试虽然位于单元目录，但导入阶段读取了真实枚举资源，按项目测试分类涉及集成边界，不能作为纯单元验证；这是用户要求不运行集成测试后的执行偏差。此次执行的连接替身检查了同逻辑设备的在途读取与启动查询、双方意图提案等待、独立守卫拒绝冲突及 HOST 读取不受影响。新结构为运行中尝试增加部分索引；该范围没有验证实际查询计划、真实数据库、物理机身别名、检查尝试、读取重试让位或完整业务链。
