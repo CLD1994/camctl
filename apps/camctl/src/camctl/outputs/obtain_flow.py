@@ -663,8 +663,11 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                     raise db_failure(ConsistencyError,
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
                 runtime.retry_gate.cleared(f"read/{copy_id}")
+    deferred_waits = {}
     # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
     for item in page.items:
+        if not item.held and item.attempts_used == 0:
+            continue
         assembly = runtime.devices.get(item.device_id)
         if assembly is None:
             continue
@@ -705,18 +708,18 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         if waiting != 1 or await _read_wait_remaining(
                 runtime, item.copy_id, assembly.retry_interval_s, assembly.max_read_attempts) is not None:
             continue
-        def cleared(value, identity=item.copy_id):
-            if value:
-                runtime.retry_gate.cleared(f"read/{identity}")
-        await save_read_business(runtime, item.copy_id, "complete_retry_wait",
-            (run_id, attempt_id, runtime.occurred_at()),
-            lambda request, key, owned: runtime.operations.complete_read_retry_wait(*request, key, owned),
-            on_completed=cleared)
+        deferred_waits[item.copy_id] = (run_id, attempt_id)
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
         owned.connection, now, capture_read_parallel=parallel, candidates=page.items))
+    selected = {copy_id for work in work_items
+                if not work.yield_reads and not (work.dispatch_captures and not work.capture_read_parallel)
+                for copy_id in (*work.grant_reads, *work.resume_reads)}
+    for copy_id, wait in deferred_waits.items():
+        if copy_id not in selected:
+            await _complete_read_wait(runtime, copy_id, *wait)
     for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
@@ -725,7 +728,22 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         if assembly is None:
             continue
         for copy_id in (*work.grant_reads, *work.resume_reads):
-            await _advance_read(runtime, assembly, copy_id, now)
+            started = await _advance_read(runtime, assembly, copy_id, now)
+            if not started and copy_id in deferred_waits:
+                await _complete_read_wait(runtime, copy_id, *deferred_waits[copy_id])
+
+
+async def _complete_read_wait(runtime, copy_id, run_id, attempt_id):
+    from camctl.outputs.read_attempts import save_read_business
+
+    def cleared(value):
+        if value:
+            runtime.retry_gate.cleared(f"read/{copy_id}")
+
+    await save_read_business(runtime, copy_id, "complete_retry_wait",
+        (run_id, attempt_id, runtime.occurred_at()),
+        lambda request, key, owned: runtime.operations.complete_read_retry_wait(*request, key, owned),
+        on_completed=cleared)
 
 
 async def _advance_read(
@@ -760,8 +778,9 @@ async def _advance_read(
         return
     ticket = await _begin_read_attempt(runtime, assembly, facts, now)
     if ticket is None:
-        return
+        return False
     await _run_read(runtime, assembly, facts, ticket, now)
+    return True
 
 
 def _read_facts(connection, copy_id: int, *, include_terminal: bool = False) -> dict | None:

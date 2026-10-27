@@ -33,6 +33,8 @@ def load_function(path, name, collaborators):
                                 function], type_ignores=[])
     namespace = dict(collaborators)
     namespace.setdefault("_ATTEMPT_STATUS", SimpleNamespace(RUNNING=1, SUCCEEDED=2))
+    if name == "_advance_reads":
+        namespace["_complete_read_wait"] = load_function(path, "_complete_read_wait", {})
     exec(compile(ast.fix_missing_locations(isolated), str(path), "exec"), namespace)
     return namespace[name]
 
@@ -49,6 +51,30 @@ class RetryWakeupTests(unittest.TestCase):
         self.assertEqual(wakeup.next_at(11, 0), 12)
         wakeup.consume_due(12)
         self.assertIsNone(wakeup.next_at(12, 0))
+
+    def test_discovery_returns_attempt_count_in_candidate_page(self):
+        source = SOURCE / "outputs" / "read_discovery.py"
+        class Cursor:
+            def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1)]
+            def close(self): pass
+        class Connection:
+            query = None
+            def execute(self, query, parameters):
+                self.query = query
+                return Cursor()
+        connection = Connection()
+        scope = SimpleNamespace(database="db", kind="reads", device_id=None)
+        discover = load_function(source, "read_candidates", {
+            "positive_limit": lambda limit: None, "check_cursor": lambda scope, cursor: None,
+            "database_identity": lambda connection: "db", "validate_read_basis": lambda *args: None,
+            "_READ_COPY_ELIGIBLE": "eligible", "_READ_FROM": " FROM file_copies fc",
+            "closing": __import__("contextlib").closing,
+            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-1], key=(0, 0, 0, 0, 0)),
+            "Page": lambda items, position: SimpleNamespace(items=items),
+        })
+        page = discover(connection, scope, limit=100)
+        self.assertIn("r.attempts_used", connection.query)
+        self.assertEqual(page.items[0].attempts_used, 1)
 
 
 class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
@@ -89,9 +115,94 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_first_read_candidates_do_not_issue_individual_retry_queries(self):
+        candidates = tuple(SimpleNamespace(held=False, copy_id=i, device_id="camera", attempts_used=0)
+                           for i in range(1, 101))
+        assembly = SimpleNamespace(capture_read_parallel=False)
+        async def reads(database, kind, now): return SimpleNamespace(items=candidates)
+        async def read_one(*args): self.fail("首次读取不能逐项查询重试")
+        class Database:
+            count = 0
+            async def read(self, operation):
+                self.count += 1
+                return operation(SimpleNamespace(connection=None))
+        database = Database()
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=database,
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None)
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "plan_device_work": lambda *args, **kwargs: (),
+        })
+        await advance(runtime, 10)
+        self.assertEqual(database.count, 1)
+
+    async def test_selected_ready_read_keeps_wait_for_intent_transaction(self):
+        actions = []
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
+        async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
+        async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
+        async def remaining(*args): return None
+        async def advance_read(*args):
+            actions.append("intent")
+            return True
+        async def save(*args, **kwargs): actions.append("complete")
+        class Database:
+            async def read(self, operation): return operation(SimpleNamespace(connection=None))
+        class Reads:
+            def __init__(self, connection): pass
+            def read_eligible(self, run_id, now): return True
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=Database(),
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None, occurred_at=lambda: 20)
+        work = SimpleNamespace(device_id="camera", yield_reads=(), dispatch_captures=(),
+                               capture_read_parallel=False, grant_reads=(7,), resume_reads=())
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "_read_wait_remaining": remaining, "_advance_read": advance_read,
+            "plan_device_work": lambda *args, **kwargs: (work,),
+        })
+        read_attempts = ModuleType("camctl.outputs.read_attempts")
+        read_attempts.save_read_business = save
+        retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+        retry_reads.RetryWaitReads = Reads
+        with patch.dict(sys.modules, {read_attempts.__name__: read_attempts, retry_reads.__name__: retry_reads}):
+            await advance(runtime, 10)
+        self.assertEqual(actions, ["intent"])
+
+    async def test_selected_read_that_loses_opportunity_completes_wait(self):
+        actions = []
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
+        assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
+        async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
+        async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
+        async def remaining(*args): return None
+        async def advance_read(*args): actions.append("blocked"); return False
+        async def save(runtime, copy_id, operation, request, callback, *, on_completed):
+            actions.append(operation)
+            on_completed(True)
+        class Database:
+            async def read(self, operation): return operation(SimpleNamespace(connection=None))
+        class Reads:
+            def __init__(self, connection): pass
+            def read_eligible(self, run_id, now): return True
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=reads), database=Database(),
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None, occurred_at=lambda: 20,
+            retry_gate=SimpleNamespace(cleared=lambda key: None), operations=SimpleNamespace(complete_read_retry_wait=None))
+        work = SimpleNamespace(device_id="camera", yield_reads=(), dispatch_captures=(),
+                               capture_read_parallel=False, grant_reads=(7,), resume_reads=())
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "_read_wait_remaining": remaining, "_advance_read": advance_read,
+            "plan_device_work": lambda *args, **kwargs: (work,),
+        })
+        read_attempts = ModuleType("camctl.outputs.read_attempts")
+        read_attempts.save_read_business = save
+        retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+        retry_reads.RetryWaitReads = Reads
+        with patch.dict(sys.modules, {read_attempts.__name__: read_attempts, retry_reads.__name__: retry_reads}):
+            await advance(runtime, 10)
+        self.assertEqual(actions, ["blocked", "complete_retry_wait"])
+
     async def test_slotless_fallback_starts_wait_before_capture_selection(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera")
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -123,7 +234,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_unproven_candidate_does_not_start_wait(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera")
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -167,7 +278,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_completes_wait_while_capture_blocks(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera")
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=3, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 1, 3, "{}", 101)
@@ -200,7 +311,7 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_slotless_fallback_exhausts_after_wait_was_cleared(self):
         actions = []
-        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera")
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1)
         assembly = SimpleNamespace(retry_interval_s=5, max_read_attempts=1, capture_read_parallel=False)
         async def reads(database, kind, now): return SimpleNamespace(items=(candidate,))
         async def read_one(database, query, parameters): return (11, 12, 1, 0, 3, "{}", 101)
