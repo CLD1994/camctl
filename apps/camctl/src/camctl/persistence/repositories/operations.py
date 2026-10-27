@@ -1931,7 +1931,9 @@ def _operation_finish_guard(event, context) -> None:
         status = after.get("status")
         if (after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
                 and status == int(_RUN_STATUS.SUCCEEDED)):
-            _fail("设备检查成功必须与目标解除事务共同核验")
+            from .availability_release import ReleaseGroup, ResolvedGroup
+            if not isinstance(context.availability_reads, (ReleaseGroup, ResolvedGroup)):
+                _fail("设备检查成功必须与目标解除事务共同核验")
         error = after.get("error_json")
         if status in (int(_RUN_STATUS.FAILED), int(_RUN_STATUS.UNCONFIRMED)):
             if error is None:

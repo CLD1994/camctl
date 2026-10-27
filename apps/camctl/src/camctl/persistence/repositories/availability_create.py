@@ -360,7 +360,10 @@ class CreationGroup:
 
 def availability_guard(event, context):
     group = context.availability_reads
-    if not isinstance(group, CreationGroup) or group.pending != replace(event, change_seq=None):
+    if group is None:
+        raise ConsistencyError("设备检查事件缺少原内核独立事务组")
+    from .availability_release import ReleaseGroup
+    if not isinstance(group, (CreationGroup, ReleaseGroup)) or group.pending != replace(event, change_seq=None):
         raise ConsistencyError("设备检查事件缺少原内核独立事务组")
 
 

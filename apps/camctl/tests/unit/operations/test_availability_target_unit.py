@@ -25,8 +25,8 @@ def target_rules(monkeypatch):
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
         "operation_attempts.status": SimpleNamespace(RUNNING=1),
-        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
-        "operation_runs.kind": SimpleNamespace(START=1, QUERY_ACTIVITY=6),
+        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2, SUCCEEDED=3),
+        "operation_runs.kind": SimpleNamespace(START=1, QUERY_ACTIVITY=6, CHECK_DEVICE_AVAILABILITY=12),
         "operation_runs.query_purpose": SimpleNamespace(START_CONFIRMATION=2),
     }
     monkeypatch.setattr(enums, "enum_for", lambda column: members[column])
@@ -307,7 +307,7 @@ def test_target_group_rejects_another_event_branch(target_group, target_rules):
 def creation_module(target_rules, monkeypatch):
     transaction = ModuleType("camctl.persistence.transaction")
     for name in ("BoundedCommandPlan", "CommandPlan", "commit_operation", "event_envelope", "next_row_id",
-                 "row_change", "row_facts", "read_saved_transaction_page", "read_transaction_range"):
+                 "row_change", "update_change", "row_facts", "read_saved_transaction_page", "read_transaction_range"):
         setattr(transaction, name, object())
     monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
     validators = ModuleType("camctl.history.validators")
@@ -468,3 +468,171 @@ def test_all_targets_previously_released_needs_no_release_page(target_rules, rel
     check, first, second = release_facts
     first["occupancy_state"] = second["occupancy_state"] = 2
     assert list(target_rules.iter_release_targets(object(), check, batch_size=1)) == []
+
+
+@pytest.fixture
+def release_module(creation_module, monkeypatch):
+    attempts = ModuleType("camctl.operations.attempts")
+    attempts.RunFinish = object
+    attempts.RunOutcome = object
+    monkeypatch.setitem(sys.modules, attempts.__name__, attempts)
+    models = ModuleType("camctl.operations.models")
+    models.ErrorValue = object
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+    observation = ModuleType("camctl.persistence.repositories.availability_observation")
+    observation.require_saved_availability = lambda *args: None
+    monkeypatch.setitem(sys.modules, observation.__name__, observation)
+    source = find_spec("camctl.persistence.repositories.availability_release")
+    spec = spec_from_file_location("camctl.persistence.repositories._isolated_release", source.origin)
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def release_group(release_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Event:
+        event_id: int
+        event_type: int
+        reason: int
+        rows: tuple
+        transaction_id: int = 2
+        change_seq: int | None = None
+    def row(table, identity, after):
+        return SimpleNamespace(table=table, row_id=identity, before=SimpleNamespace(exists=True),
+                               after=SimpleNamespace(values=after))
+    events = (Event(1, 12, 1, (row("operation_attempts", 5, {}),)),
+              Event(2, 10, 3, (row("operation_runs", 3, {"status": 3}),)),
+              Event(3, 39, 2, (row("device_activities", 25,
+                                   {"occupancy_state": 2, "availability_release_attempt_id": 5}),)))
+    facts = {("operation_attempts", 5): {"id": 5, "run_id": 3},
+             ("operation_runs", 3): {"id": 3, "kind": 12, "status": 2,
+                                      "availability_check_id": 31, "action_id": 12},
+             ("device_availability_checks", 31): {"id": 31, "action_id": 12}}
+    monkeypatch.setattr(release_module, "row_facts", lambda connection, table, identity: facts.get((table, identity)))
+    monkeypatch.setattr(release_module, "_no_conflicts", lambda *args: None)
+    monkeypatch.setattr(release_module, "iter_release_targets", lambda *args: iter(((25,),)))
+    monkeypatch.setattr(release_module, "_release_context", lambda *args: "actual context")
+    monkeypatch.setattr(release_module, "load_event_registry", lambda: {"events": {
+        "ATTEMPT_RESULT": {"id": 12, "branches": {"SUCCEED": {"reason": 1}}},
+        "OPERATION_CONFIGURED": {"id": 10, "branches": {"FINISH": {"reason": 3}}},
+        "AVAILABILITY_CHECK": {"id": 39, "branches": {"RELEASE": {"reason": 2}}}}})
+    transaction = SimpleNamespace(txn_id=2, first_event_id=1, last_event_id=3)
+    return release_module.ReleaseGroup(object(), events[0], transaction), events
+
+
+def test_release_group_seals_result_finish_and_all_target_pages(release_group):
+    group, events = release_group
+    for event in events:
+        group.bind(event, "actual context")
+        group.seal(SimpleNamespace(envelope=event))
+    group.finish()
+
+
+def test_release_group_rejects_partial_transaction(release_module, release_group):
+    group, events = release_group
+    for event in events[:2]:
+        group.bind(event, "actual context")
+        group.seal(SimpleNamespace(envelope=event))
+    with pytest.raises(release_module.ConsistencyError):
+        group.finish()
+
+
+def test_release_pages_compact_sparse_target_pages(release_module, monkeypatch):
+    monkeypatch.setattr(release_module, "iter_release_targets", lambda *args:
+                        iter((tuple(range(1, 65)), tuple(range(65, 129)), (129,))))
+    pages = list(release_module._release_pages(object(), {}))
+    assert pages == [tuple(range(1, 129)), (129,)]
+
+
+def test_release_group_rejects_foreign_target(release_module, release_group):
+    group, events = release_group
+    for event in events[:2]:
+        group.bind(event, "actual context")
+        group.seal(SimpleNamespace(envelope=event))
+    events[2].rows[0].row_id = 26
+    with pytest.raises(release_module.ConsistencyError):
+        group.bind(events[2], "actual context")
+
+
+def test_resolved_group_ends_without_an_additional_attempt(release_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Event:
+        event_id: int
+        event_type: int
+        reason: int
+        rows: tuple
+        transaction_id: int = 2
+        change_seq: int | None = None
+    row = SimpleNamespace(table="operation_runs", row_id=3, after=SimpleNamespace(values={"status": 3}))
+    event = Event(1, 10, 3, (row,))
+    run = {"id": 3, "kind": 12, "status": 2, "availability_check_id": 31, "action_id": 12}
+    check = {"id": 31, "action_id": 12}
+    monkeypatch.setattr(release_module, "row_facts", lambda conn, table, identity:
+                        run if table == "operation_runs" else check)
+    monkeypatch.setattr(release_module, "iter_release_targets", lambda *args: iter(()))
+    monkeypatch.setattr(release_module, "_resolved_context", lambda *args: "actual context")
+    monkeypatch.setattr(release_module, "load_event_registry", lambda: {"events": {
+        "OPERATION_CONFIGURED": {"id": 10, "branches": {"FINISH": {"reason": 3}}}}})
+    class Connection:
+        def execute(self, *args):
+            return _Cursor([])
+    group = release_module.ResolvedGroup(Connection(), event,
+        SimpleNamespace(txn_id=2, first_event_id=1, last_event_id=1))
+    group.bind(event, "actual context")
+    group.seal(SimpleNamespace(envelope=event))
+    group.finish()
+
+
+def test_blocked_release_still_saves_the_actual_pass_and_failed_conclusion(release_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Finish:
+        ticket: object
+        outcome: object
+        run_finish: object
+        retry_wait: bool = False
+    success = object()
+    result = object()
+    outcome = SimpleNamespace(outcome=SimpleNamespace(status=success))
+    finish = Finish(SimpleNamespace(run_id=3, attempt_id=1), outcome,
+                    SimpleNamespace(status="succeeded"))
+    run = {"id": 3, "kind": 12, "status": 2, "attempts_used": 1, "max_attempts_used": 3}
+    check = {"id": 31, "device_id": "hb0", "trigger_copy_id": None}
+    monkeypatch.setattr(release_module, "row_facts", lambda *args: run)
+    monkeypatch.setattr(release_module, "_check", lambda *args: check)
+    monkeypatch.setattr(release_module, "iter_release_targets", lambda *args: iter(((25,),)))
+    def blocked(*args):
+        raise release_module.AvailabilityTargetBlocked("busy")
+    monkeypatch.setattr(release_module, "_no_conflicts", blocked)
+    monkeypatch.setattr(release_module, "RunOutcome", SimpleNamespace(SUCCEEDED="succeeded", FAILED="failed"))
+    monkeypatch.setattr(release_module, "RunFinish", lambda status, error: SimpleNamespace(status=status, error=error))
+    monkeypatch.setattr(release_module, "ErrorValue", lambda code, stage, details:
+                        SimpleNamespace(code=code, stage=stage, details=details))
+    monkeypatch.setattr(sys.modules["camctl.operations.models"], "AttemptStatus", SimpleNamespace(SUCCEEDED=success), raising=False)
+    capture = ModuleType("camctl.persistence.repositories.capture")
+    capture._CompositeScope = object
+    monkeypatch.setitem(sys.modules, capture.__name__, capture)
+    operations = ModuleType("camctl.persistence.repositories.operations")
+    captured = []
+    class Command:
+        def __init__(self, actual, key):
+            captured.append(actual)
+        def plan(self, scope):
+            return result
+    operations.FinishAttemptCommand = Command
+    monkeypatch.setitem(sys.modules, operations.__name__, operations)
+    class Connection:
+        def execute(self, sql, args):
+            return _Cursor([] if "history_transactions" in sql else [(5,)])
+    scope = SimpleNamespace(connection=Connection())
+    assert release_module.FinishAvailabilityCommand(finish, "key").plan(scope) is result
+    assert captured[0].outcome is outcome
+    assert captured[0].run_finish.status == "failed"
+    assert captured[0].run_finish.error.code == "device_availability_unconfirmed"
+    assert captured[0].run_finish.error.details == {"device_id": "hb0", "operation_run_id": "3",
+                                                     "attempts_used": 1, "max_attempts": 3}

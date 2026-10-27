@@ -322,6 +322,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         baseline_read_group = _baseline_read_group(plan,transaction,connection,operation_key)
         result_check_group = _result_check_group(plan,transaction,connection)
         availability_group = None
+        availability_release_group = None
     for proposed in _timed_events(plan.events):
         with db_phase(TransactionPhase.FINAL_CHECKS):
             if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
@@ -333,9 +334,31 @@ def _write_bounded_plan(plan, scope, operation_key):
         with db_phase(TransactionPhase.CONTEXT):
             context = plan.context(proposed, transaction)
             availability = load_event_registry()["events"]["AVAILABILITY_CHECK"]
-            if proposed.event_type == availability["id"]:
+            if availability_release_group is None and proposed.event_id == transaction.first_event_id:
+                result = load_event_registry()["events"]["ATTEMPT_RESULT"]
+                finish = load_event_registry()["events"]["OPERATION_CONFIGURED"]
+                if (proposed.event_type == result["id"]
+                        and proposed.reason == result["branches"]["SUCCEED"]["reason"]
+                        and len(proposed.rows) == 1 and proposed.rows[0].table == "operation_attempts"):
+                    attempt = row_facts(connection, "operation_attempts", proposed.rows[0].row_id)
+                    run = None if attempt is None else row_facts(connection, "operation_runs", attempt["run_id"])
+                    if run is not None and run["kind"] == int(load_enum_registry()["enums"]["operation_runs.kind"]["members"]["CHECK_DEVICE_AVAILABILITY"]):
+                        from camctl.persistence.repositories.availability_release import ReleaseGroup
+                        availability_release_group = ReleaseGroup(connection, proposed, transaction)
+                elif (proposed.event_type == finish["id"]
+                      and proposed.reason == finish["branches"]["FINISH"]["reason"]
+                      and len(proposed.rows) == 1 and proposed.rows[0].table == "operation_runs"
+                      and proposed.rows[0].after.values.get("status") == int(load_enum_registry()["enums"]["operation_runs.status"]["members"]["SUCCEEDED"])):
+                    run = row_facts(connection, "operation_runs", proposed.rows[0].row_id)
+                    if run is not None and run["kind"] == int(load_enum_registry()["enums"]["operation_runs.kind"]["members"]["CHECK_DEVICE_AVAILABILITY"]):
+                        from camctl.persistence.repositories.availability_release import ResolvedGroup
+                        availability_release_group = ResolvedGroup(connection, proposed, transaction)
+            if availability_release_group is not None:
+                availability_release_group.bind(proposed, context)
+                context = replace(context, availability_reads=availability_release_group)
+            elif proposed.event_type == availability["id"]:
                 if proposed.reason != availability["branches"]["CREATE"]["reason"]:
-                    raise TransactionError("设备检查释放尚未接入独立事务组")
+                    raise TransactionError("设备释放缺少原结果的独立事务组")
                 if availability_group is None:
                     from camctl.persistence.repositories.availability_create import CreationGroup
                     availability_group = CreationGroup(connection, proposed, transaction)
@@ -361,6 +384,8 @@ def _write_bounded_plan(plan, scope, operation_key):
             _seal_event_reads(reads, validated, source_guard_state,baseline_read_group,result_check_group)
             if availability_group is not None:
                 availability_group.seal(validated)
+            if availability_release_group is not None:
+                availability_release_group.seal(validated)
         with db_phase(TransactionPhase.READ_STATE):
             refs = set(validated.row_owners.values())
             before_counts = {}
@@ -403,6 +428,8 @@ def _write_bounded_plan(plan, scope, operation_key):
             raise TransactionError("实际有界事件少于预分配完整范围")
         if availability_group is not None:
             availability_group.finish()
+        if availability_release_group is not None:
+            availability_release_group.finish()
         _finish_baseline_read_group(baseline_read_group)
         _finish_result_check_group(result_check_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
