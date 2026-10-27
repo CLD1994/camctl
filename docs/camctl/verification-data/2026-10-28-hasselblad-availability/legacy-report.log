@@ -1,0 +1,64 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1] _
+apps/camctl/tests/integration/reporting/test_emergency_error_generation.py:39: in test_emergency_error_report_keeps_actual_target_reason_and_original_action
+    owned, runtime, action_id, _ = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:154: in consumer_world
+    runtime = _runtime(owned, driver=control)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]
+FAILED apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]
+6 failed in 1.55s

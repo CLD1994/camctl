@@ -1,0 +1,4 @@
+timeout_info: pid=52756 reaped=yes calls=['list', 'info'] reason=timeout exit=LocalExit(exit_code=None, signal=15) error=timeout stdout=b'info-partial-stdout\n' stderr=b'info-partial-stderr\n'
+.cancel_doctor: pid=52766 reaped=yes calls=['list', 'info', 'doctor'] reason=cancelled exit=LocalExit(exit_code=None, signal=15) error=cancelled stdout=b'doctor-partial-stdout\n' stderr=b'doctor-partial-stderr\n'
+.
+2 passed in 1.77s

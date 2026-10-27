@@ -1,0 +1,70 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+___ test_no_effect_final_start_releases_only_when_all_conditions_hold[False] ___
+apps/camctl/tests/integration/capture/test_recording_start_release.py:29: in test_no_effect_final_start_releases_only_when_all_conditions_hold
+    runtime = _configured(owned, driver, maximum=3 if permanent else 1)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+___ test_no_effect_final_start_releases_only_when_all_conditions_hold[True] ____
+apps/camctl/tests/integration/capture/test_recording_start_release.py:29: in test_no_effect_final_start_releases_only_when_all_conditions_hold
+    runtime = _configured(owned, driver, maximum=3 if permanent else 1)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+______ test_unknown_start_failure_keeps_occupancy_without_proving_release ______
+apps/camctl/tests/integration/capture/test_recording_start_release.py:51: in test_unknown_start_failure_keeps_occupancy_without_proving_release
+    runtime = _configured(owned, driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_ test_lowered_start_budget_releases_original_no_effect_activity_without_new_call _
+apps/camctl/tests/integration/capture/test_recording_start_release.py:66: in test_lowered_start_budget_releases_original_no_effect_activity_without_new_call
+    original = _configured(owned, driver, maximum=3)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_____ test_unresolved_output_preparation_keeps_occupancy_without_any_start _____
+apps/camctl/tests/integration/capture/test_recording_start_release.py:89: in test_unresolved_output_preparation_keeps_occupancy_without_any_start
+    runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+_______ test_actual_start_call_keeps_occupancy_until_its_result_arrives ________
+apps/camctl/tests/integration/capture/test_recording_start_release.py:115: in test_actual_start_call_keeps_occupancy_until_its_result_arrives
+    runtime = _configured(owned, HeldStart())
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_recording_start_runtime.py:109: in _configured
+    runtime = _runtime(owned, driver=driver)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_no_effect_final_start_releases_only_when_all_conditions_hold[False]
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_no_effect_final_start_releases_only_when_all_conditions_hold[True]
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_unknown_start_failure_keeps_occupancy_without_proving_release
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_lowered_start_budget_releases_original_no_effect_activity_without_new_call
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_unresolved_output_preparation_keeps_occupancy_without_any_start
+FAILED apps/camctl/tests/integration/capture/test_recording_start_release.py::test_actual_start_call_keeps_occupancy_until_its_result_arrives
+6 failed in 0.87s

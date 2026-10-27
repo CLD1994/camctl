@@ -1,0 +1,109 @@
+{
+  "recorded_date": "2026-10-28",
+  "environment": {
+    "platform": "Linux isolated software environment",
+    "python": "3.11.17",
+    "device": "tool-interface substitutes; no physical camera",
+    "state": "temporary databases and files; no live database"
+  },
+  "scope": "Prerequisite software evidence only; new availability recovery is not implemented or accepted by these results.",
+  "receipt_limits": "Original text logs are preserved byte for byte. Commands and missing metadata are not reconstructed from short summaries. The missing-start test changed only the isolated test copy host-startup text; target recovery did not run.",
+  "files": [
+    {
+      "file": "doctor-unit.log",
+      "original_path": "/tmp/camctl-hasselblad-doctor-unit-20261028.log",
+      "source_revision": "670871aa",
+      "result": "16 passed",
+      "bytes": 99,
+      "sha256": "0127026fa52388c28c751af7383c9cfdcedb768d53987355f81395a89e7531e3"
+    },
+    {
+      "file": "doctor-managed.log",
+      "original_path": "/tmp/camctl-hasselblad-doctor-integration-20261028.log",
+      "source_revision": "670871aa",
+      "result": "2 passed",
+      "bytes": 98,
+      "sha256": "bb0a5f4821006d64b6b05153fd85688753fec40d939d4526860905184e0822aa"
+    },
+    {
+      "file": "doctor-interruption.log",
+      "original_path": "/tmp/camctl-doctor-interruption-experiment-20261027.log",
+      "source_revision": "670871aa",
+      "result": "2 passed",
+      "bytes": 426,
+      "sha256": "d6ad03d4b4e0db89d385726db267a8b4d1fea2e1b5bf8e52de74d4f031b5c744"
+    },
+    {
+      "file": "activity-repository.log",
+      "original_path": "/tmp/camctl-activity-repository-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "4 passed",
+      "bytes": 98,
+      "sha256": "caf07b768f36d5cda6ee56b7d30a5e4b9e49c2eedf423d94eb2f56f19e168961"
+    },
+    {
+      "file": "activity-conclude.log",
+      "original_path": "/tmp/camctl-activity-conclude-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "3 passed",
+      "bytes": 98,
+      "sha256": "75f5f59b79835a6236802e60fa6d1e6bc93dbe292a4bae059c6ac072e8194b87"
+    },
+    {
+      "file": "activity-projection.log",
+      "original_path": "/tmp/camctl-activity-projection-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "9 passed",
+      "bytes": 663,
+      "sha256": "fec9c3311e352586fce22490ba00efa7be3ea7e7a758d8f1a580c46fb5760052"
+    },
+    {
+      "file": "device-bootstrap.log",
+      "original_path": "/tmp/camctl-hb-spec-gsHiLJ9d/bootstrap.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "2 passed",
+      "bytes": 910,
+      "sha256": "c8fe2283a947864f1f55a05307df74ed882397f62b41a52e9641e527d6c81acc"
+    },
+    {
+      "file": "device-read.log",
+      "original_path": "/tmp/camctl-hb-spec-gsHiLJ9d/devices.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "7 passed",
+      "bytes": 1680,
+      "sha256": "de045e522f979ebff53dc09a0f2485ea7dd1bd9c68f7c5311ed6e2635bf8249f"
+    },
+    {
+      "file": "missing-start-adjusted.log",
+      "original_path": "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-output.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "1 failed; target recovery did not run",
+      "bytes": 10492,
+      "sha256": "acfc7ba5e5d842c20c6bd85aa5670203ba5c8cb201e5ffb7dd40ce96c18fc788"
+    },
+    {
+      "file": "legacy-capture.log",
+      "original_path": "/tmp/camctl-activity-capture-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "8 failed; target behavior did not run",
+      "bytes": 5755,
+      "sha256": "bf7f87006eb2c0207d0cc753565f0f519eddaccf03e403c1add61256dba98920"
+    },
+    {
+      "file": "legacy-start-release.log",
+      "original_path": "/tmp/camctl-activity-start-release-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "6 failed; target behavior did not run",
+      "bytes": 5453,
+      "sha256": "d3b0c5119990a325fc1a6d1e7a58786864ab29bdbda3d639ce2bcd6ff1cfb9d3"
+    },
+    {
+      "file": "legacy-report.log",
+      "original_path": "/tmp/camctl-activity-report-20261028.log",
+      "source_revision": "b173ae1272ccba466cb2a2b7fbbbe380c83b2c95",
+      "result": "6 failed; target behavior did not run",
+      "bytes": 6080,
+      "sha256": "f93157ac6924b1cdaae51b194ae22d8cb838450d92c17d787853a25f87a21f46"
+    }
+  ]
+}

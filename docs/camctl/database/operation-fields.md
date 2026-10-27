@@ -46,13 +46,16 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 | `CHECK_FILE_EXISTS`（清理） | `exists/<cleanup_item_id>` | `cleanup_item_id` |
 | `CHECK_FILE_EXISTS`（显式取回源检查） | `obtain-exists/<obtain_item_id>` | `obtain_item_id` |
 | `QUERY_ACTIVITY` | 按[活动查询的责任范围](#活动查询的责任范围)唯一确定 | 执行前检查指向 `action_id` 保存的设备绑定；其余用途必填目标 `activity_id` |
+| `CHECK_DEVICE_AVAILABILITY` | 由稳定检查 ID 唯一确定，见[检查记录](../hasselblad-availability-recovery.md#数据与事件模型) | 独立检查及其固定目标集合；流程归触发动作，不冒充单一活动查询或 READ |
 | `CHECK_CAPTURE_RESULTS` | `results/<activity_id>` | `activity_id` |
 | `RESOLVE_OUTPUT_SCOPE` | `scope/<activity_id>` | 原拍摄动作的 `activity_id` |
 | `STOP_RESIDUAL` | `followup/<action_id>/<activity_id>` | 原历史 `activity_id`；动作是新的触发者 |
 | `EMERGENCY_STOP` | `emergency/<session_key>/<activity_id>` | `activity_id` 和 `session_key` |
 | `PREPARE_CAPTURE` | `prepare/<activity_id>/<session_key>` | 原动作的 `activity_id` 和当前 `session_key` |
 
-`activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，应急和独立准备流程必须填写，其他流程必须为空；它区分同一会话的唯一责任，不新增会话表。除执行前检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+`activity_id`、`copy_id`、`cleanup_item_id`、`obtain_item_id` 按表中责任填写，互不混用。CHECK 恰好选择 cleanup 或 obtain 一种 owner；DELETE 只接受 cleanup。执行前状态检查的四个目标列均为空，目标相机由发起动作已经保存的设备绑定确定；观察到的活动按实际证据关联，不改变该查询责任的身份。其余流程填写对应的目标列，其余目标列为空。`session_key` 是本次 CLI 进程取得的 UUID4 小写 32 位十六进制身份，应急和独立准备流程必须填写，其他流程必须为空；它区分同一会话的唯一责任，不新增会话表。除执行前检查和下述独立可用性检查外，设备绑定从活动原动作、拷贝实际源文件或清理目标文件取得，不从触发动作猜测。
+
+`CHECK_DEVICE_AVAILABILITY` 使用[独立检查关系](../hasselblad-availability-recovery.md#数据与事件模型)保存目标，原有 activity、copy、cleanup、obtain 目标列保持不适用；检查通过明确的专属关联定位。流程复用公共状态、尝试和原结果保存，终结与取消分区由[可用性恢复](../hasselblad-availability-recovery.md#检查责任共享与有限预算)定义。
 
 录像和延时的 `PREPARE_CAPTURE` 要求整体格式 V4，照片要求 V5。取得准备资格时，原动作保持 `PENDING + execution_started=0`，通过 `DEVICE_OBSERVED.CREATE` 建立唯一活动及占用；到计划时间开始执行时复用该活动。录像和延时的原动作已经开始且原 `START` 均可靠无效果时，新会话设置准备复用原活动和固定基准，保留执行标记及累计 `START` 次数；照片存在任一 START 责任时沿原收场或恢复路径处理。每个会话对同一活动只允许一次设置组合，流程及尝试的 `max_attempts_used=1`，`timeout_s_json` 保存本次设置准备的整体预算，包含适用的独立设备配置预算及普通控制预算，`retry_interval_s_json` 为空，`retry_wait_required=0`。准备尝试按普通意图和结果事件可靠保存，允许流程因取消或窗口结束进入 `CANCELED` 或 `EXPIRED`；已开始的调用仍须独立收场。设置成功不消耗 `START` 次数，也不替代驱动当前会话凭据和适用的固定完整基准。详细资格与恢复规则见[拍摄提前准备规格](../../superpowers/specs/2026-10-25-capture-preparation-design.md)。
 
@@ -64,7 +67,7 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 
 `retry_wait_required` 为 0 或 1，保存本流程的重试间隔责任。进入、清除、其他条件阻挡、取消、预算变化与恢复按[重试责任转换](waiting.md#重试责任的完整转换)处理。实际使用新配置时保存依据；只加载配置不写库。普通流程采用降低后的上限时，上限可以小于累计已用次数；应急限额在本会话内固定，实际次数不得超过该限额。
 
-`status` 为 `PENDING`、`ACTIVE`、`SUCCEEDED`、`FAILED`、`CANCELED`、`UNCONFIRMED`、`EXPIRED`。`EXPIRED` 用于启动或独立准备责任随动作过期结束，以及尚未尝试的后续残留收场因触发动作过期结束；启动和准备流程保留已有尝试和累计次数，后续残留收场仍要求尚未尝试。`SUCCEEDED`、`FAILED`、`CANCELED`、`EXPIRED` 表示该操作责任的最终结果；`UNCONFIRMED` 表示有限处理结束但其外部效果尚未确认，原普通责任不自动重开。后续可靠观察更新设备或文件事实，而非把原失败流程改判成功。`FAILED`、`UNCONFIRMED` 必须有 `error_json`；单次尝试失败但仍在重试时可为 `ACTIVE`，不直接结束动作。
+`status` 为 `PENDING`、`ACTIVE`、`SUCCEEDED`、`FAILED`、`CANCELED`、`UNCONFIRMED`、`EXPIRED`。`EXPIRED` 用于启动、独立准备或可用性检查责任随动作过期结束，以及尚未尝试的后续残留收场因触发动作过期结束；前三类流程保留已有尝试和累计次数，后续残留收场仍要求尚未尝试。`SUCCEEDED`、`FAILED`、`CANCELED`、`EXPIRED` 表示该操作责任的最终结果；`UNCONFIRMED` 表示有限处理结束但其外部效果尚未确认，原普通责任不自动重开。后续可靠观察更新设备或文件事实，而非把原失败流程改判成功。`FAILED`、`UNCONFIRMED` 必须有 `error_json`；单次尝试失败但仍在重试时可为 `ACTIVE`，不直接结束动作。可用性检查与取消、过期同时发生时，先消费原调用结果，再按其专属终结分区判断。
 
 录像 `START` 的合法字段组合、转换、结束条件及当前机会推导由[录像启动流程](recording-start.md)定义。首次尝试共同建立 `ACTIVE` 责任；结束状态不重新激活。流程的业务结果与尚未收场的尝试分别保存，恢复不能仅查询未结束流程。
 
@@ -72,7 +75,7 @@ SQL约束主外键、两键各自唯一、同活动序号唯一、状态与空�
 
 本地主机文件操作记录实际尝试，不套用设备调用时限或设备重试间隔。普通本地读取的首次操作上限为 1，失败后按所属文件规则结束；正式产物清理的 DELETE 与 CHECK_FILE_EXISTS 则统一采用[独立清理预算](../../architecture/output-cleanup.md#删除与查询的独立尝试预算)，涵盖主机 original、preview、repaired，不受普通本地读取上限约束。主机清理的 `timeout_s_json`、`retry_interval_s_json` 均为空，没有隐含的定时重试或新增主机配置。设备参数使用本次加载的对应操作配置，有限次数和间隔不从动作时长推算。
 
-`QUERY_ACTIVITY` 从本次目标设备的 `query` 配置取得次数、间隔及调用时限，`CHECK_CAPTURE_RESULTS` 从 `result_check` 配置取得；字段与默认值统一见[查询与核实配置](../../architecture/configuration.md#状态查询与产物核实的配置)。流程及尝试分别将实际值保存到 `max_attempts_used`、`retry_interval_s_json`、`timeout_s_json`。结果核实的 `timeout_s_json` 表示该轮每次适用设备查询的时限，不是整轮总时限；批次不增加尝试次数，轮内设备查询失败后不隐式重试。
+`QUERY_ACTIVITY` 和独立的 `CHECK_DEVICE_AVAILABILITY` 从本次目标设备的 `query` 配置取得次数、间隔及调用时限，各自责任分别计数，`CHECK_CAPTURE_RESULTS` 从 `result_check` 配置取得；字段与默认值统一见[查询与核实配置](../../architecture/configuration.md#状态查询与产物核实的配置)。流程及尝试分别将实际值保存到 `max_attempts_used`、`retry_interval_s_json`、`timeout_s_json`。结果核实的 `timeout_s_json` 表示该轮每次适用设备查询的时限，不是整轮总时限；批次不增加尝试次数，轮内设备查询失败后不隐式重试。
 
 ### 显式分段来源的文件核实
 
@@ -571,9 +574,9 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | 可能派发，既无可靠发送时间，也无法核实原任务 | 原动作保存结果无法确认并失败；设备活动与占用保持未知，不补造时间或重复启动 |
 | 有可靠发送时间，采用无状态查询的有限自主任务 | 按原等待恢复及结果检查规则推进，不创建不存在的状态查询流程 |
 | 取得设备结束证据，或满足声明的时间与全部产物结束条件 | 保存适用依据，按[释放条件](#设备活动占用的释放条件)检查剩余输出范围限制；条件全部满足后释放，动作仍按自身完成要求结束 |
-| 动作已经失败，但活动仍可能存在 | 保留独立占用记录，结束原普通处理；其他设备继续，新冲突动作按活动未解决失败，不让会话无限等待 |
+| 动作已经失败，但活动仍可能存在 | 保留独立占用记录，结束原普通处理；其他设备继续。适用驱动按独立恢复契约处理后续工作，不支持恢复或有限恢复仍未解决时保存对应失败，不让会话无限等待 |
 
-无查询、无可靠锚点且无可恢复完成证据的任务，其结果不能由框架补推。后续实际运行取得驱动允许的可靠结束证据时可以解除占用，但不重开原动作；没有证据时继续如实拒绝冲突执行。这个分支不增加轮询或无限重试；受支持的相机可按[无人值守的软件重启恢复](../../architecture/camera-recovery.md#无人值守的软件重启恢复)建立独立、有界的恢复责任。其重启意图、尝试与新启动代次观察分别可靠保存，沿原活动核对剩余释放条件，不用重启结果覆盖原动作或控制结果。支持安全停止的历史录像仍使用已规定的后续动作收场规则。
+无查询、无可靠锚点且无可恢复完成证据的任务，其结果不能由框架补推。受支持的相机按[无人值守的软件重启恢复](../../architecture/camera-recovery.md#无人值守的软件重启恢复)或 [Hasselblad 可用性恢复](../hasselblad-availability-recovery.md)建立独立、有界的责任，分别使用所属契约的依据，不覆盖原动作或控制结果。支持安全停止的历史录像仍使用后续动作收场规则。没有适用恢复或合格释放依据时，继续保持原限制。
 
 释放占用按下节区分设备活动事实、采集判定与剩余冲突限制。取消要求、协程结束或动作终态本身均不构成放行证据。
 
@@ -602,23 +605,16 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 | `dispatch_state` 为 `NOT_DISPATCHED` 或 `REJECTED_WITHOUT_EFFECT`，可靠确认本活动没有启动效果 | `activity_state` 不得为 `ACTIVE` 或 `ENDED`，采集判定不得为设备完成或时间与产物完成。可以继续检查准备及输出范围限制；单次尝试无效果不撤销此前尝试可能产生的活动 |
 | 启动可能或已经生效，已取得原活动的可靠结束证据 | 保存 `activity_state = ENDED`，可以继续检查释放条件。录像的采集判定为空；其他拍摄的采集判定可以仍待定、已完成或明确失败，不因释放而改判成功 |
 | 没有设备结束观察，满足预先声明的时间与全部产物完成契约 | 保存 `completion_basis = TIME_AND_OUTPUTS`，没有设备状态观察时保留 `activity_state = UNKNOWN`。必须具有可靠发送、适用等待完成及完整产物依据，且没有相矛盾的实际观察，才可以继续检查释放条件；采用 `SENT` 自然等待时，还须核对同一活动的原发送结果、`sent_at` 和执行定义中冻结的启动余量。旧定义缺少启动余量时沿用原规则，不补默认值。 |
-| 启动可能或已经生效，设备仍在执行或是否结束未知，且没有上述完成契约依据 | 保持 `HELD`；采集明确失败、动作已取消或已失败均不代替活动结束证据 |
+| Hasselblad 原失败单张活动为 `UNKNOWN`，满足[可用性释放契约](../hasselblad-availability-recovery.md#活动与释放依据的合法组合) | 保存独立检查引用并解除调度限制；活动、采集完成字段、原动作及文件保持原事实。 |
+| 启动可能或已经生效，设备仍在执行或是否结束未知，且没有上述完成契约或适用可用性释放依据 | 保持 `HELD`；采集明确失败、动作已取消或已失败均不代替释放依据 |
 | `completion_basis = DEVICE_EVIDENCE`，但 `activity_state` 不是 `ENDED` | 属于矛盾组合，拒绝保存；不能用完成依据绕过活动状态 |
 | `completion_basis = TIME_AND_OUTPUTS`，但完成方式不适用、必要事实缺失，或仍有可靠的活动进行中证据 | 属于不成立的完成判定，拒绝保存，不以时间或文件存在覆盖实际观察 |
 
 时间与产物分支仅用于采用该固定契约的任务，不在查询失败后启用。它要求 `completion_mode = TIME_AND_OUTPUTS`、`dispatch_state = SUCCESS_RETURNED`、按原执行定义核验的等待完成事实、结果集合及产物要求均满足；采用 `SENT` 自然等待时，等待事实还须关联同一活动的原可靠发送结果和 `sent_at`，并使用原冻结的启动余量、自然结束余量及实际采用的部署等待。不能仅凭经过目标时长释放；精确时点见[相机启动余量设计](../../superpowers/specs/2026-10-18-camera-startup-margin-design.md)。完成后另取得可靠设备结束观察时，可以保存 `ENDED`，不改写历史完成依据。
 
-行内约束保证：只有可靠未启动、活动已经结束、或时间与产物完成依据成立时，才允许 `occupancy_state = RELEASED`。用现有编号表达必要条件为：
+行内约束要求 RELEASED 具有可靠未启动、活动结束、适用的时间与全部产物完成，或独立 Hasselblad 可用性释放依据。可空字段须显式处理 SQL NULL，不能以空值绕过必要条件。`completion_basis = DEVICE_EVIDENCE` 仍要求 `activity_state = ENDED`；可用性检查不写入采集完成字段。
 
-```sql
-CHECK (occupancy_state <> 2
-       OR dispatch_state IN (1, 4)
-       OR activity_state = 3
-       OR COALESCE(completion_basis = 3, 0))
-CHECK (completion_basis IS NOT 2 OR activity_state = 3)
-```
-
-`COALESCE` 将不适用的采集判定明确视为不满足该分支，避免 SQL `NULL` 使约束绕过。所属动作类型、可靠证据、等待与结果要求、其他跨表限制仍由事件处理器校验；SQL 范围和空值约束同时遵守字段表。已有 `ENDED` 并不强制占用立即为 `RELEASED`。
+[可用性检查的数据与事件模型](../hasselblad-availability-recovery.md#数据与事件模型)定义新增引用、目标关系、合法组合和共同提交。只有原实际检查成功、关联和剩余资源条件都成立时，独立守卫才允许该路径下的 `UNKNOWN + RELEASED`；不能仅检查外键非空。已有 `ENDED` 不强制立即释放占用。
 
 ### 字段适用范围与保存校验
 
@@ -631,6 +627,7 @@ CHECK (completion_basis IS NOT 2 OR activity_state = 3)
 | 可靠未派发或启动被明确拒绝且没有效果 | 活动状态只能为 `UNKNOWN`；采集判定不能是设备完成或时间与产物完成。 | 必须排除该活动此前尝试仍可能生效的情况，单次调用没有效果不足以解除整个活动的占用。 |
 | 按设备证据判定采集完成 | 判定为 `DEVICE_EVIDENCE` 时，活动状态必须为 `ENDED`。 | 证据确实说明原活动结束；动作结果、文件检查及剩余限制分别判断。 |
 | 按时间与全部产物判定完成 | 判定为 `TIME_AND_OUTPUTS` 时，固定完成方式必须为 `TIME_AND_OUTPUTS`，发送状态必须为 `SUCCESS_RETURNED`；发送时间、预计检查时间和等待完成事件引用齐全，结果集合为 `COMPLETE`，活动状态只能为 `UNKNOWN` 或 `ENDED`。 | 等待事件确属本活动且满足原等待要求，完整集合的 `outcome` 为 `SATISFIED`，全部必要产物要求已有可靠依据；没有相矛盾的设备观察。预计检查时间的计算及配置依据也须一致。 |
+| 按 Hasselblad 可用性规则释放 | 活动仍为 `UNKNOWN`，独立释放引用与占用变化共同建立；采集完成字段保持原值。 | 逐项核对固定目标、原机身、真实检查及原调用收场，遵守[原子保存](../hasselblad-availability-recovery.md#原子保存与历史归属)。 |
 | 准备释放占用 | 必须满足前述释放必要条件，空采集判定不能绕过检查。 | 原活动的准备清理和输出范围限制已经解除；无法读取这些事实或原事务结果未知时，不放行冲突操作。 |
 
 SQL 对每次行修改即时检查这些组合。一个事件同时确定设备结束与设备完成依据时，须在同一条活动修改中保存；如果使用结果集合事件填写设备完成依据，原活动的 `ENDED` 必须已由同一事务中先应用的设备观察事件或更早的可靠历史保存。时间与产物完成依据同样只能与齐备的等待、完整结果共同成立，不能先写完成标记再补必要事实。
@@ -673,6 +670,7 @@ SQL 对每次行修改即时检查这些组合。一个事件同时确定设备�
 | --- | --- |
 | 正常完成、普通或取消停止、可靠未派发、无效果拒绝、恢复观察及后续残留收场 | 通过 `DEVICE_OBSERVED.OBSERVE` 保存真实发送或活动状态，通过适用的尝试结果事件保存调用结果；释放条件齐备时，在同一事务中使用 `DEVICE_OBSERVED.RELEASE` 释放该活动。 |
 | 核实产物后确定采集结果 | 使用 `RESULT_SET_CONFIRMED` 的对应分支保存集合及采集判定，设备观察按实际证据保存；该事务若同时释放占用，仍使用 `DEVICE_OBSERVED.RELEASE` 并检查剩余限制。 |
+| Hasselblad 设备可用性检查 | 按[原子保存规则](../hasselblad-availability-recovery.md#原子保存与历史归属)共同保存真实检查结果、固定目标的释放及检查终结；释放事件引用专属依据，不产生旧活动结束观察。 |
 | 活动已经结束，后来才确定文件归属或完成准备清理 | 保存原活动相关的文件或清理事实，并在同一事务中使用 `DEVICE_OBSERVED.RELEASE`；不重新执行停止，也不重开原动作。 |
 | 会话错误后的应急补记 | `EMERGENCY_RECORDED.FINAL` 共同保存最终流程、全部尝试及适用设备变化；只有同一释放判定成立时才同时保存 `RELEASED`，否则保留 `HELD`。 |
 

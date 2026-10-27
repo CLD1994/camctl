@@ -152,9 +152,9 @@ result_mode = "segmented"
 `devices.<id>.recording.start_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次启动前的等待。
 `devices.<id>.recording.stop_retry_interval_s`|非负秒数；`3`|具备重试资格后，再次停止前的等待。
 `devices.<id>.recording.repair_margin_s`|非负秒数；`10`|采用单原片媒体处理的任务判断多录修复的余量；多段模式按公共流程及设备特化选择整段，不使用该裁剪余量。
-`devices.<id>.query.max_attempts`|整数；`3` 次|每项设备状态查询责任的累计次数。
-`devices.<id>.query.retry_interval_s`|非负秒数；`3`|同一状态查询责任的再次查询间隔。
-`devices.<id>.query.timeout_s`|正秒数；`10`|一次设备状态查询调用的等待上限。
+`devices.<id>.query.max_attempts`|整数；`3` 次|每项设备状态查询或 Hasselblad 独立可用性检查责任的累计次数。
+`devices.<id>.query.retry_interval_s`|非负秒数；`3`|同一查询或检查责任的重试间隔。
+`devices.<id>.query.timeout_s`|正秒数；`10`|一次设备状态查询调用的等待上限；Hasselblad 可用性检查使用整次检查的共同期限。
 `devices.<id>.residual_stop.max_attempts`|整数；`3` 次|残留录像收场的独立停止次数。
 `devices.<id>.residual_stop.retry_interval_s`|非负秒数；`3`|同一残留收场责任的再次停止间隔。
 `devices.<id>.residual_stop.timeout_s`|正秒数；`10`|一次残留收场停止调用的等待上限。
@@ -163,7 +163,7 @@ result_mode = "segmented"
 `devices.<id>.result_check.call_timeout_s`|正秒数；`10`|每次设备结果查询调用的等待上限；同一轮的各次分页调用分别计时。
 `devices.<id>.capture.extra_wait_ms`|整数；`0` 毫秒|至少 0；在驱动要求的拍摄结果等待之后增加部署余量。
 
-`query` 表控制设备状态查询，`result_check` 表控制拍摄结果核实，下面的 `cleanup.query_*` 控制文件存在性查询，三者不是同一责任。当前三个内建驱动都没有声明设备状态查询能力，因此加载器接受 `query` 字段，但这些驱动不发起相应的设备状态查询。`capture.extra_wait_ms` 只用于任务声明了返回后等待的结果分支，不改变目标采集时长或正常停止时间。
+`query` 表提供设备状态查询及 [Hasselblad 独立可用性检查](hasselblad-availability-recovery.md#检查责任共享与有限预算)的执行参数，两种操作各自计数。`result_check` 表控制拍摄结果核实，下面的 `cleanup.query_*` 控制文件存在性查询。当前三个内建驱动都没有声明设备状态查询能力；Hasselblad 可用性检查也不声明该能力。`capture.extra_wait_ms` 只用于任务声明了返回后等待的结果分支，不改变目标采集时长或正常停止时间。
 
 超时不证明设备未执行，重试间隔届满也不授予重复调用资格；次数和已知结果在恢复时继续保留。完整规则见[控制超时](../architecture/configuration.md#控制调用超时)、[查询与核实](../architecture/configuration.md#状态查询与产物核实的配置)、[通信重试](../architecture/configuration.md#通信重试间隔)和[录像恢复](../architecture/camera-recovery.md)。
 

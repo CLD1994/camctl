@@ -293,15 +293,17 @@ SQLite 自动检查点使用本次会话的 `database.wal_autocheckpoint_pages`�
 
 | 本地配置 | 默认值 | 适用范围 |
 | --- | --- | --- |
-| `devices.<id>.query.max_attempts` | 3 次，包含第一次 | 每项独立状态查询责任的累计上限；五种查询用途采用同一配置值，但分别计数 |
+| `devices.<id>.query.max_attempts` | 3 次，包含第一次 | 每项独立状态查询或 Hasselblad 可用性检查责任的累计上限；五种查询用途及可用性检查分别计数 |
 | `devices.<id>.query.retry_interval_s` | 3 秒 | 同一责任因查询失败或条件暂未满足而安排再次查询的等待间隔 |
-| `devices.<id>.query.timeout_s` | 10 秒 | 一次设备状态查询调用的正常结果等待上限 |
+| `devices.<id>.query.timeout_s` | 10 秒 | 一次设备状态查询调用的正常结果等待上限；Hasselblad 可用性检查用于完整 list、info、doctor 组合的共同期限 |
 | `devices.<id>.residual_stop.max_attempts` | 3 次，包含第一次 | 同一残留收场流程停止历史录像的累计上限，不重置原停止流程次数，也不消耗触发动作自身的启动或停止次数（[残留收场](camera-recovery.md#后续动作触发的残留收场)） |
 | `devices.<id>.residual_stop.retry_interval_s` | 3 秒 | 同一收场流程停止失败或未确认后，再次停止前的等待间隔 |
 | `devices.<id>.residual_stop.timeout_s` | 10 秒 | 一次收场停止调用的正常结果等待上限 |
 | `devices.<id>.result_check.max_attempts` | 3 轮，包含第一轮 | 同一拍摄结果核实责任的累计检查轮数 |
 | `devices.<id>.result_check.retry_interval_s` | 3 秒 | 本轮失败或结果暂不能确认后，再次检查前的等待间隔 |
 | `devices.<id>.result_check.call_timeout_s` | 10 秒 | 核实中每次设备文件列举、归属或完成信息查询调用的正常结果等待上限 |
+
+[Hasselblad 可用性检查](../camctl/hasselblad-availability-recovery.md#检查责任共享与有限预算)复用 query 的次数、间隔及期限参数，使用独立操作责任，不提供活动空闲或结束查询能力。完整检查只消耗一次尝试，命令之间不各自获得新的期限，驱动内部不重试；实际进程收场仍按受管执行契约完成。部署根据实际上电时间及准备提前量调整这些现有参数，不因进程重启自动刷新次数。
 
 上述数值是第一版的初始工程默认值，与既有有限通信尝试及固定间隔策略保持一致；实际设备响应和文件规模在联调时测量，并按设备调整配置。它们不承诺任务会在固定总时长内完成。
 

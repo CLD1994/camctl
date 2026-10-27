@@ -1,0 +1,89 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________ test_installed_hasselblad_missing_start_result_never_replays _________
+
+tmp_path = PosixPath('/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7fe5f7c24e90>
+host_demo = '/tmp/camctl-host-build-957fc0ac43fd46aa8ddd54805d203b99/host-demo'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fe5f7c275d0>
+
+    def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch):
+        case = PhotoCase('jpeg', 'host', '0.00025', focus_override=('MF', 5))
+        world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+        monkeypatch.chdir(tmp_path)
+        try:
+            codes = _fault_codes(world)
+            _begin_fault(world, 'before-start-result')
+            marker = _fault_marker(world, 'before-start-result')
+            target = _capture_target(world)
+            assert marker['target'] == target and target['run_kind'] == codes['start_kind']
+            before = _attempt(world, target)
+            assert marker['in_transaction'] is False
+            assert marker['ticket'] == {'attempt_id':before['attempt_no'], 'operation':'control',
+                                        'target_id':str(target['activity_id']), 'responsibility_key':target['responsibility_key'],
+                                        'run_id':target['run_id']}
+            assert before['status'] == codes['attempt_running']
+            assert before['result_event_id'] is None and before['result_json'] is None
+            assert before['intent_event_id'] is not None
+            calls = world.argv(); capture_call, = [row for row in calls if row[3] == 'capture']
+            work = Path(capture_call[-1]); files = sorted(path for path in work.iterdir() if path.is_file())
+            assert len(files) == 2
+            assert sorted(p.read_bytes() for p in files) == sorted((world.original_bytes, world.preview_bytes))
+            assert _rows(world.deployment.state_db, 'SELECT id FROM outputs WHERE source_action_id=?', (target['action_id'],)) == []
+            (world.root / 'before-missing-result-kill.json').write_text(json.dumps({'target':target,'attempt':before}))
+            _stop_fault_host(world, marker)
+            _restart_fault_host(world)
+>           _, _, capture = world.report('capture', status='failed')
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py:1086: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py:531: in report
+    return wait_for(found, 90, f"{self.case.name}/{name} 请求 {request_id} 的 {status} 报告; {self.root}",
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function PhotoWorld.report.<locals>.found at 0x7fe5f798d440>
+timeout_s = 90
+message = 'jpeg-host-0.00025/capture 请求 4337855533568001963 的 failed 报告; /tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0'
+failure = <function HostDemo.watch_failures.<locals>.<lambda> at 0x7fe5f7956c00>
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now >= next_failure_check:
+                if reason := failure():
+>                   raise AssertionError(f"{message}: {reason}")
+E                   AssertionError: jpeg-host-0.00025/capture 请求 4337855533568001963 的 failed 报告; /tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0: 本次 host 的 run 调用 1 已失败：
+E                   call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+E                   call=1 attempt=1 command=run pid=56973 spawned execution=unknown
+E                   call=2 submit accepted path=/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0/photo-request.json
+E                   call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0/photo-request.json automatic=0 retries=0
+E                   call=2 attempt=2 command=submit pid=56974 spawned execution=unknown
+E                   call=2 command=submit pid=56974 stream=exit_observed data=exit record retained; group settlement pending
+E                   call=2 command=submit pid=56974 stream=group_reaped data=all execution stopped; child record reaped
+E                   call=2 command=submit pid=56974 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+E                   call=1 command=run pid=56973 stream=exit_observed data=exit record retained; group settlement pending
+E                   call=1 command=run pid=56973 stream=group_reaped data=all execution stopped; child record reaped
+E                   call=1 command=run pid=56973 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0
+E                   call=1 stdout={"kind" : "error", "body" : {"reason" : "state_db_error", "details" : {"error" : "后台流程异常: 'CaptureRuntime' object has no attribute 'owned'", "exception" : {"type" : "builtins.AttributeError", "traceback" : [{"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/session/service.py", "lineno" : 1392, "function" : "_drive_flows"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/background_flow.py", "lineno" : 225, "function" : "check_completed"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/flows.py", "lineno" : 190, "function" : "check_completed"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/background_flow.py", "lineno" : 97, "function" : "check_completed"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/background_flow.py", "lineno" : 70, "function" : "_consume"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/background_flow.py", "lineno" : 76, "function" : "_run"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/flows.py", "lineno" : 247, "function" : "advance"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/bootstrap/flows.py", "lineno" : 371, "function" : "_advance_device"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/capture/dispatch.py", "lineno" : 83, "function" : "dispatch_ready"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py", "lineno" : 3351, "function" : "_photo_handler"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/operations/owned_calls.py", "lineno" : 86, "function" : "owned"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/operations/owned_calls.py", "lineno" : 57, "function" : "run"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/hasselblad-photo-installed0/venv/lib/python3.11/site-packages/camctl/capture/host_photo.py", "lineno" : 490, "function" : "advance_host_photo"}, {"filename" : "/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/adjusted-pytest/test_installed_hasselblad_miss0/_hasselblad_photo_entry.py", "lineno" : 389, "function" : "recover"}], "cause" : null, "context" : null, "suppress_context" : false, "message" : "'CaptureRuntime' object has no attribute 'owned'"}}}}
+E                   
+E                   call=1 attempt=1 diagnostic_published file=camctl-host-diagnostic-56967-1-9DdLFR.log
+E                   call=3 attempt=3 command=run operation=spawn plan=(none) automatic=0 retries=0
+E                   call=3 attempt=3 command=run pid=56987 spawned execution=unknown
+
+/tmp/camctl-hb-missing-start-b173ae12-20261028-retry/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/_wsl_host_demo.py:94: AssertionError
+============================== slowest durations ===============================
+11.56s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays
+7.88s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays
+1 failed in 19.55s
