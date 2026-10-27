@@ -21,7 +21,7 @@ from concurrent_log_handler import ConcurrentRotatingFileHandler
 from camctl.logging_runtime.admission import AdmissionKind
 from camctl.logging_runtime.clh_adapter import ChannelWriteError, FileChannel
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.service import (
     ChannelError, LogChannel, LogRecord,
 )
@@ -53,6 +53,31 @@ def _read_log(tmp_path: Path) -> str:
         for path in sorted(tmp_path.iterdir())
         if path.name.startswith("camctl.log")
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("appended", [False, True])
+async def test_summary_keeps_write_fact_when_channel_becomes_unsafe(appended):
+    def writer(record):
+        if record.level is LogLevel.WARNING:
+            runtime.path_unsafe = True
+            channel.disable_channel(ChannelError("摘要写入后的文件关闭失败"))
+            return LogWriteResult(appended=appended)
+        return LogWriteResult(appended=True)
+
+    channel = _channel_with(writer)
+    runtime = LogRuntime(channel, level=LogLevel.DEBUG)
+    _make_drops(channel)
+    channel.start()
+    result = await close_logging(runtime)
+
+    assert runtime.path_unsafe is True
+    assert result.listener_stopped is True
+    assert channel.listener_alive is False
+    assert channel.summary_written is appended
+    assert result.summary_written is appended
+    assert runtime.summary_written is appended
+    assert (await close_logging(runtime)).summary_written is appended
 
 
 @pytest.mark.asyncio
