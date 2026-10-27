@@ -1921,9 +1921,9 @@ def _guard_cancel_apply(event, context, items) -> None:
         request = event.evidence.get("cancel_request")
         if (not isinstance(request, dict)
                 or set(request) != {"item_id", "mode", "occurred_at"}
-                or type(request["item_id"]) is not int
+                or isinstance(request["item_id"], bool) or not isinstance(request["item_id"], int)
                 or request["item_id"] != member.row_id
-                or type(request["occurred_at"]) is not int
+                or isinstance(request["occurred_at"], bool) or not isinstance(request["occurred_at"], int)
                 or request["occurred_at"] != event.occurred_at):
             raise EventValidationError("取消生效必须携带原成员与时间的完整 cancel_request")
         if "motor_request" in event.evidence or "motor_permit" in event.evidence:
