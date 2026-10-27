@@ -32,7 +32,7 @@ def _event_boundary(connection, event_id):
     return {**boundary, "operation_key": row["operation_key"], "first_event_id": row["first_event_id"]}
 
 
-def _assert_start_result(attempt, raw, target, expected):
+def _validated_control_result(attempt, raw, target):
     from camctl.contracts.json_values import parse_exact_json
     from camctl.operations.result_format import read_result_document
     from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
@@ -45,15 +45,11 @@ def _assert_start_result(attempt, raw, target, expected):
                            target["responsibility_key"], target["run_id"])
     validate_outcome(ticket, outcome, EVIDENCE)
     assert outcome.status is AttemptStatus.SUCCEEDED and outcome.effect is EffectState.CONFIRMED
-    assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
-    for observation in result["observations"]:
-        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
-    photo = result["observations"][0]["data"]
-    for role in ("original", "preview"):
-        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
-    steps = photo["steps"]
-    assert [step["name"] for step in steps] == expected["steps"]
-    assert expected["steps"].count("capture") == 1
+    return result, ticket
+
+
+def _assert_steps(result, steps, expected_steps, expected):
+    assert [step["name"] for step in steps] == expected_steps
     calls = result["diagnostics"]["calls"]
     assert len(calls) == len(steps)
     streams = []
@@ -79,13 +75,36 @@ def _assert_start_result(attempt, raw, target, expected):
             if name == "stdout":
                 assert len(data) == step["stdout_size_bytes"] and facts[name]["sha256"] == step["stdout_sha256"]
             else:
-                # 真实 step 只登记 stdout 摘要；本成功工具样例的 stderr 独立预期为空。
                 assert data == b""
         streams.append({"step_index": index, "step_name": step["name"], **facts})
+    return streams
+
+
+def _assert_start_result(attempt, raw, target, expected):
+    result, ticket = _validated_control_result(attempt, raw, target)
+    assert [item["type"] for item in result["observations"]] == ["photo_taken", "hasselblad_start_entered"]
+    for observation in result["observations"]:
+        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
+    photo = result["observations"][0]["data"]
+    for role in ("original", "preview"):
+        assert photo[role] == expected["artifacts"][role], ("原角色字节身份不符", role)
+    steps = photo["steps"]
+    assert expected["steps"].count("capture") == 1
+    streams = _assert_steps(result, steps, expected["steps"], expected)
     return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
             "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
                        "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
             "photo": photo, "streams": streams}
+
+
+def _assert_preparation_result(attempt, raw, target, expected):
+    result, ticket = _validated_control_result(attempt, raw, target)
+    assert [item["type"] for item in result["observations"]] == [
+        "capture_preparation_completed", "photo_preparation_steps"]
+    for observation in result["observations"]:
+        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
+    streams = _assert_steps(result, result["observations"][1]["data"]["steps"], expected["steps"], expected)
+    return {"result_json": raw, "ticket": asdict(ticket), "streams": streams}
 
 
 def _history_facts(database, request, expected, original=None):
@@ -118,7 +137,17 @@ def _history_facts(database, request, expected, original=None):
         target = {"request_id": str(plan["request_id"]), "plan_id": plan["id"], "action_id": action["id"],
                   "run_id": run["id"], "attempt_id": attempt["id"], "activity_id": activity["id"],
                   "responsibility_key": run["responsibility_key"], "result_event_id": attempt["result_event_id"]}
-        start = _assert_start_result(attempt, attempt["result_json"], target, expected)
+        preparation_run = one("SELECT * FROM operation_runs WHERE action_id=? AND kind=?",
+                              (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+        preparation_attempt = one("SELECT * FROM operation_attempts WHERE run_id=?", (preparation_run["id"],))
+        assert preparation_run["activity_id"] == activity["id"]
+        preparation_target = {**target, "run_id": preparation_run["id"],
+                              "responsibility_key": preparation_run["responsibility_key"]}
+        preparation_steps = [name for name in expected["steps"] if name not in ("focus", "autofocus", "capture")]
+        start_steps = [name for name in expected["steps"] if name in ("focus", "autofocus", "capture")]
+        preparation = _assert_preparation_result(preparation_attempt, preparation_attempt["result_json"],
+                                                 preparation_target, {**expected, "steps": preparation_steps})
+        start = _assert_start_result(attempt, attempt["result_json"], target, {**expected, "steps": start_steps})
         files = [dict(row) for row in connection.execute(
             "SELECT * FROM intermediate_files WHERE owner_action_id=? AND purpose IN (?,?) ORDER BY purpose",
             (action["id"], int(enum_for("intermediate_files.purpose").CAPTURE_ORIGINAL),
@@ -157,6 +186,7 @@ def _history_facts(database, request, expected, original=None):
         if original is not None:
             assert target == original["identity"] and entities == original["entities"]
             assert derived == original["boundaries"] and start == original["start"]
+            assert preparation == original["preparation"]
             boundaries = original["boundaries"]
         else:
             boundaries = derived
@@ -190,6 +220,9 @@ def _history_facts(database, request, expected, original=None):
             assert action_rows[("device_activities", activity["id"])]["action_id"] == action["id"]
             assert saved_attempt["result_json"] == parse_exact_json(attempt["result_json"])
             assert saved_attempt["result_event_id"] == attempt["result_event_id"]
+            historical_preparation = action_rows[("operation_attempts", preparation_attempt["id"])]
+            assert historical_preparation["result_json"] == parse_exact_json(preparation_attempt["result_json"])
+            assert historical_preparation["result_event_id"] == preparation_attempt["result_event_id"]
             for index, role in enumerate(("original", "preview")):
                 file_rows = image[f"intermediate_file/{files[index]['id']}"]
                 completed = h.last_event_id >= boundaries["files_complete"]["last_event_id"]
@@ -226,7 +259,7 @@ def _history_facts(database, request, expected, original=None):
                     assert (origin["output_id"], origin["original_output_id"]) == (outputs[1]["id"], outputs[0]["id"])
             restored[phase] = image
         return {"identity": target, "boundaries": boundaries, "entities": entities,
-                "start": start, "complete_request": complete[0][1], "snapshots": restored}
+                "preparation": preparation, "start": start, "complete_request": complete[0][1], "snapshots": restored}
     finally:
         connection.close()
 
@@ -385,21 +418,25 @@ def _install_fault(root: Path, fault: str):
             from camctl.capture.handlers import CaptureRuntime
             real_recovery = CaptureRuntime.recover_attempt
 
-            def recover(runtime, ticket, *, retry_wait=False):
-                target = _target(root, runtime.owned.connection)
+            async def recover(runtime, ticket, *, retry_wait=False):
+                target = await runtime.database.read(
+                    lambda owned: _target(root, owned.connection), description="观察原拍摄责任")
                 matches = target is not None and ticket.operation == "control" and ticket.run_id == target["run_id"]
                 observed = None
                 if matches and not (root / "start-recovery-observed.json").exists():
-                    attempt = runtime.owned.connection.execute(
-                        "SELECT intent_event_id,status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                        (ticket.run_id, ticket.attempt_id)).fetchone()
-                    maximum = runtime.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-                    local = runtime.start_entries.get(runtime.owned.metadata.instance_id, target["action_id"])
+                    def read_facts(owned):
+                        attempt = owned.connection.execute(
+                            "SELECT intent_event_id,status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                            (ticket.run_id, ticket.attempt_id)).fetchone()
+                        maximum = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+                        return attempt, maximum
+                    attempt, maximum = await runtime.database.read(read_facts, description="观察原恢复依据")
+                    local = runtime.start_entries.get(runtime.database.metadata.instance_id, target["action_id"])
                     observed = {"target":target,"ticket":asdict(ticket),
                         "boundary":runtime.recovery_boundary.name,"horizon":runtime.recovery_max_event_id,
                         "intent_event_id":attempt[0],"attempt_status_before":attempt[1],
                         "max_event_before":maximum,"local_entry_active":local is not None and local.active}
-                result = real_recovery(runtime, ticket, retry_wait=retry_wait)
+                result = await real_recovery(runtime, ticket, retry_wait=retry_wait)
                 if observed is not None:
                     diagnostic = runtime.last_recovery_diagnostic
                     _write(root, "start-recovery-observed", {**observed,"returned":result,

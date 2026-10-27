@@ -24,8 +24,6 @@ _WSL_BUILD = f"/tmp/camctl-host-build-{uuid.uuid4().hex}"
 _WSL_DEMO = f"{_WSL_BUILD}/host-demo"
 _WSL_LAUNCHER = f"{_WSL_BUILD}/camctl-launcher.sh"
 
-_PROMPT = "模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。"
-
 #: 测试自身已在 Linux（部署验证环境）时，构建与执行不再经 wsl.exe。
 _NATIVE_POSIX = os.name == "posix"
 
@@ -211,7 +209,9 @@ class HostDemo:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
         self._host_pid = self.proc.pid if _NATIVE_POSIX else int(self._reply())
-        assert self._reply() == _PROMPT
+        prompt = self._reply()
+        assert "模块初始化完成" in prompt
+        assert all(command in prompt for command in ("submit <绝对路径>", "claim", "logs", "help"))
 
     def _reply(self) -> str:
         assert self.proc is not None

@@ -1076,6 +1076,8 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
         assert before['result_event_id'] is None and before['result_json'] is None
         assert before['intent_event_id'] is not None
         calls = world.argv(); capture_call, = [row for row in calls if row[3] == 'capture']
+        assert [tuple(row[3:]) for row in calls if row[3] in ('set', 'focus', 'autofocus')] == list(case.settings_argv)
+        assert [row[3:] for row in calls if row[3] == 'focus'] == [['focus', '5']]
         work = Path(capture_call[-1]); files = sorted(path for path in work.iterdir() if path.is_file())
         assert len(files) == 2
         assert sorted(p.read_bytes() for p in files) == sorted((world.original_bytes, world.preview_bytes))
