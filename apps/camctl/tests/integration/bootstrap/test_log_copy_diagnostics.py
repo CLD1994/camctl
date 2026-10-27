@@ -938,7 +938,11 @@ async def test_default_format_failure_keeps_listener_for_later_record(
     original_format = style.format
 
     def fail_one_record(record):
-        if record.getMessage() == "controlled ordinary format failure":
+        try:
+            document = json.loads(record.getMessage())
+        except json.JSONDecodeError:
+            return original_format(record)
+        if isinstance(document, dict) and document.get("message") == "controlled ordinary format failure":
             raise ValueError("permission denied while formatting ordinary log")
         return original_format(record)
 
