@@ -204,6 +204,7 @@ class PendingReadResult:
     business_saves: dict[tuple[int, str], "PendingReadBusiness"] = field(
         default_factory=dict, compare=False, repr=False)
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    preserved_run_terminal: bool = False
 
 
 @dataclass(frozen=True)
@@ -426,29 +427,63 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
     from camctl.outputs.copy import SourceChecksumSupport
     from camctl.persistence.repositories.outputs import OutputsRepository
 
+    def determined():
+        matches = [pending for pending in runtime.pending_read_results.values()
+                   if int((pending.ticket if isinstance(pending, PendingStoppedRead)
+                           else pending.finish.ticket).target_id) == copy_id]
+        if len(matches) > 1:
+            raise ConsistencyError("同一读取具有多个已确定结束申请")
+        return matches[0] if matches else None
+
+    pending = determined()
+    if pending is not None:
+        return pending
     held = runtime.pending_read_ends.get(copy_id)
     if held is None:
         return None
     facts = await runtime.database.read(lambda owned: OutputsRepository().load_copy_state(copy_id, owned))
-    if (facts.committed_bytes != facts.source_size or facts.source_support is not SourceChecksumSupport.SUPPORTED
-            or facts.source_sha256 is not None):
-        return None
+    pending = determined()
+    if pending is not None:
+        return pending
     original = await runtime.database.read(lambda owned: running_read_ticket(owned, copy_id))
+    pending = determined()
+    if pending is not None:
+        return pending
     if original is None or original[0] != held.ticket or held.end.stopped is not True or held.end.error is not None:
         raise ConsistencyError("原必要摘要绑定失败缺少可靠原读取结束")
     if held.evidence is None:
         raise ConsistencyError("原实际读取结束缺少原驱动结果契约")
-    details = binding_failure_details(binding_result)
-    if details is None:
-        raise ConsistencyError("必要摘要绑定失败必须具有原绑定异常事实")
-    status = await read_one(runtime.database, "SELECT status FROM operation_runs WHERE id=?", (held.ticket.run_id,))
-    if status is None or status[0] not in (1, 2):
-        raise ConsistencyError("原必要摘要绑定处置尚未确定，保留原读取流程终态")
+    status = await read_one(runtime.database,
+        "SELECT r.status,a.cancel_requested FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        " WHERE r.id=? AND r.copy_id=?", (held.ticket.run_id, copy_id))
+    pending = determined()
+    if pending is not None:
+        return pending
+    if runtime.pending_read_ends.get(copy_id) is not held:
+        return None
+    if status is None or status[0] not in (1, 2, 3, 4, 5, 6, 7) or status[1] not in (0, 1):
+        raise ConsistencyError("原完整读取的流程状态或取消事实不可解释")
+    if facts.committed_bytes != facts.source_size:
+        return None
+    if status[0] not in (1, 2):
+        run_finish, selected_business = None, None
+    elif status[1] == 1:
+        run_finish, selected_business = RunFinish(RunOutcome.CANCELED), None
+    else:
+        if (facts.source_support is not SourceChecksumSupport.SUPPORTED
+                or facts.source_sha256 is not None):
+            return None
+        details = binding_failure_details(binding_result)
+        if details is None:
+            raise ConsistencyError("必要摘要绑定失败必须具有原绑定异常事实")
+        run_finish = RunFinish(RunOutcome.FAILED, ErrorValue("device_binding_unavailable", "execution", details))
+        selected_business = business
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED, effect=EffectState.UNKNOWN,
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     finish = AttemptFinish(held.ticket, validate_outcome(held.ticket, outcome, held.evidence), runtime.occurred_at(),
-        run_finish=RunFinish(RunOutcome.FAILED, ErrorValue("device_binding_unavailable", "execution", details)))
-    return hold_read_result(runtime, finish, business=business)
+        run_finish=run_finish)
+    return hold_read_result(runtime, finish, business=selected_business,
+                            preserved_run_terminal=status[0] not in (1, 2))
 
 
 @dataclass(frozen=True)
@@ -524,14 +559,15 @@ async def _prepare_stopped_read(runtime, pending):
 
 
 def hold_read_result(runtime, finish, *, business=None, key=None,
-                     context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False):
+                     context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False,
+                     preserved_run_terminal=False):
     identity = (finish.ticket.run_id, finish.ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存结果，不能覆盖")
     diagnostic = (business.diagnostic if business is not None else
                   diagnostic_state_for(diagnostic_error) or DiagnosticState())
     pending = PendingReadResult(finish, new_operation_key() if key is None else key, business,
-        diagnostic=diagnostic)
+        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal)
     runtime.pending_read_ends.pop(int(finish.ticket.target_id), None)
     runtime.pending_read_results[identity] = pending
     details = {"copy_id": int(finish.ticket.target_id), **(context or {})}

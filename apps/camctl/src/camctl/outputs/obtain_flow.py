@@ -1122,6 +1122,9 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
     pending = await save_read_result(runtime, pending, retry=retry)
     if pending is None:
         return
+    if pending.preserved_run_terminal:
+        forget_read_result(runtime, pending)
+        return
     def complete_business(_):
         runtime.retry_gate.cleared(f"read/{int(pending.finish.ticket.target_id)}")
         forget_read_result(runtime, pending)
