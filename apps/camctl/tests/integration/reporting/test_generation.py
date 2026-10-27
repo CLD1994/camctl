@@ -16,13 +16,13 @@ import pytest
 
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
+from camctl.bootstrap.obtain_assembly import session_obtain_assembly
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.workflow_errors import item_error_id, registered_error
-from camctl.operations.attempts import RetryWaitGate
-from camctl.outputs.handoff import DeliveryDirectories
-from camctl.outputs.obtain_flow import ObtainRuntime, advance_obtain
+from camctl.devices.drivers.registry import DriverRegistry
+from camctl.outputs.obtain_flow import advance_obtain
 from camctl.outputs.sources import (
     ResolutionState,
     SelectionMode,
@@ -39,7 +39,7 @@ from camctl.persistence.repositories.outputs import (
     StartObtainAction,
     load_selection_facts,
 )
-from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.transaction import encode_json_value, row_facts
 from camctl.persistence.models import DbOutcomeKind
@@ -52,7 +52,6 @@ from camctl.reporting.policy import (
     register_sync_guard,
 )
 
-from ..capture.test_capture_contract import ResultsDouble
 from ..history.test_report_scope import (
     _Catalog,
     _finish_action,
@@ -261,20 +260,16 @@ async def _save_admission_failed_source_obtain(owned, tmp_path, mode):
     assert source["status"] == 4
     assert source["execution_spec_json"] is None
 
-    runtime = ObtainRuntime(
-        owned=owned,
-        devices={},
-        directories=DeliveryDirectories(
-            tmp_path / "staging", tmp_path / "ready", tmp_path / "processing"
-        ),
-        segment_size=1024,
-        retry_gate=RetryWaitGate(),
-        monotonic_ns=time.monotonic_ns,
-        occurred_at=lambda: now,
-        outputs=OutputsRepository(),
-        operations=OperationRepository(),
-    )
-    await advance_obtain(runtime)
+    database = await BusinessDatabase.open(lambda: open_existing(
+        tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig()))
+    try:
+        factory = session_obtain_assembly(
+            devices={}, drivers=DriverRegistry(()), staging=tmp_path / "staging",
+            ready=tmp_path / "ready", processing=tmp_path / "processing",
+            segment_size=1024, monotonic_ns=time.monotonic_ns, occurred_at=lambda: now)
+        await advance_obtain(factory(database))
+    finally:
+        await database.close()
     return source_id, obtain_id, source["error_code"]
 
 

@@ -23,6 +23,7 @@ from camctl.host_files.handoff import (
     PublishStage,
 )
 from camctl.host_files.io import DirectorySyncStage
+from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import (
     DbConfig,
@@ -189,11 +190,20 @@ def _new_events(owned, after: int):
 
 def _deliver(pipeline, report_id: int, **kwargs):
     owned, directories, _ = pipeline
-    session = DbPublicationSession(_owned(owned))
-    return asyncio.run(deliver_report(
-        report_id, _PAYLOAD,
-        HandoffDirectories(directories.staging, directories.ready),
-        session, **kwargs))
+    path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+
+    async def deliver():
+        database = await BusinessDatabase.open(
+            lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()))
+        try:
+            return await deliver_report(
+                report_id, _PAYLOAD,
+                HandoffDirectories(directories.staging, directories.ready),
+                DbPublicationSession(database), **kwargs)
+        finally:
+            await database.close()
+
+    return asyncio.run(deliver())
 
 
 def _covering(report: FrozenReport) -> AckReport:

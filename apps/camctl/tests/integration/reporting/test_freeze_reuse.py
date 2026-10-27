@@ -180,7 +180,7 @@ async def test_original_freeze_preserves_nonzero_business_boundary(environment, 
     assert result.value == first.value
 
 
-@pytest.mark.parametrize("prefix", ["SELECT id FROM history_transactions", "SELECT id, transaction_id",
+@pytest.mark.parametrize("prefix", ["SELECT id FROM history_transactions", "SELECT id,transaction_id",
                                   "SELECT from_wm", "SELECT created_event_id", "SELECT MAX(change_seq)",
                                   "SELECT event.id FROM history_events AS event"])
 async def test_original_freeze_query_failure_preserves_database(environment, tmp_path, prefix):
