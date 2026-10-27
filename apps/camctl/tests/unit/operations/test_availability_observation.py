@@ -34,7 +34,7 @@ def test_complete_observation_is_accepted():
     require_available(_result(), 31, CameraIdentity("CAMERA-1", 10), Decimal("4"))
 
 
-@pytest.mark.parametrize("failure", ["deadline", "doctor", "identity", "exit", "boolean_exit", "order", "multiple"])
+@pytest.mark.parametrize("failure", ["deadline", "doctor", "identity", "exit", "boolean_exit", "order", "multiple", "version"])
 def test_forged_success_is_rejected(failure):
     outcome = _result()
     observation = outcome.observations[0]
@@ -55,7 +55,8 @@ def test_forged_success_is_rejected(failure):
         calls[0] = replace(calls[0], stdout=ToolStream(ToolStreamState.COMPLETE,
             calls[0].stdout.data * 2))
     data["steps"] = steps
-    outcome = replace(outcome, observations=(replace(observation, data=data),),
+    outcome = replace(outcome, observations=(replace(observation, data=data,
+                          version=True if failure == "version" else observation.version),),
                       diagnostics=replace(outcome.diagnostics, calls=tuple(calls)))
     with pytest.raises(ValueError):
         require_available(outcome, 31, CameraIdentity("CAMERA-1", 10),

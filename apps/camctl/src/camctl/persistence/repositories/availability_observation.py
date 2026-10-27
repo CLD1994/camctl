@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from camctl.contracts.values import ObjectId
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.drivers.hasselblad.responses import doctor_passed, parse_devices, parse_serial
+from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.tool_diagnostics import ToolStreamState, validate_diagnostics
 
@@ -19,13 +20,16 @@ def require_available(outcome: CallOutcome, check_id: int, identity: CameraIdent
             or outcome.settlement.basis is not SettlementBasis.OBSERVED
             or not isinstance(outcome.settlement.evidence, EvidenceValue)
             or outcome.settlement.evidence.type != "availability_returned"
+            or type(outcome.settlement.evidence.version) is not int
             or outcome.settlement.evidence.version != 1 or outcome.settlement.evidence.data != {}
             or not isinstance(identity, CameraIdentity)
             or not isinstance(timeout_s, Decimal) or not timeout_s.is_finite() or timeout_s <= 0):
         raise ValueError("检查结果不具备可用性释放依据")
     ObjectId(check_id)
     observations = outcome.observations
-    if len(observations) != 1 or observations[0].type != "device_availability" or observations[0].version != 1:
+    if (len(observations) != 1 or not isinstance(observations[0], DeviceObservation)
+            or observations[0].type != "device_availability"
+            or type(observations[0].version) is not int or observations[0].version != 1):
         raise ValueError("检查必须包含唯一可用性观察")
     data = observations[0].data
     fields = {"check_id", "expected_serial", "expected_product_id", "observed_serial", "steps",
