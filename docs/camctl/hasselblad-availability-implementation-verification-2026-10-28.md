@@ -26,6 +26,10 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 
 在 `/tmp/camctl-h1-capture-20261028` 的提交 `47259000` 上，使用 CPython 3.11.17 对 `test_hasselblad_start_recovery.py`、`test_recording_start_release.py` 和 `test_capture_contract.py` 一同执行 pytest，退出码为 0，38 项通过；原始输出位于 `/tmp/camctl-h1-capture-final.log`，集成提交为 `ca5db88c`。原节点和参数保持：哈苏原恢复 11 项、录像释放 6 项、拍摄契约 21 项；拍摄契约通过正式处理入口和真实结果页事务保留文件登记回滚及原键恢复覆盖。完整目录仍需验证。
 
+同一工作区在该提交执行 `apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture -q --tb=short`，退出码为 1：353 项通过、1718 项失败、119 项错误，日志为 `/tmp/camctl-h1-capture-directory.log`。堆栈中大量失败涉及旧 `CaptureRuntime(owned=...)`、旧数据库连接或未等待的会话工厂；这些堆栈数量不是互斥的节点分类，也不表示目标业务已经运行。原有测试正在按共享装配和业务场景迁移。
+
+安装版验证使用隔离入口和 `/tmp/camctl-h1-installed-20261028` 的未提交快照，完成后提交为 `aefcc589`，集成提交为 `9d811033`。证据目录 `/tmp/camctl-h1-installed-prep-20261028` 的 `summary.json` 记录入口退出码 0，实际收集八项并全部通过：missing START、两组已保存 START 和五个历史观察器反例。missing START 场景在替身真实拍摄形成两份工作文件后中断，正常重启沿原责任保存未知，原拍摄没有重放，文件及报告保留。另一轮正常链的四个任务各记录三项通过和 pytest 退出码 0，但入口主进程已消失而汇总仍为 `running`，没有总退出码；该轮不计为完整门禁通过。
+
 ## H2：固定身份和证据类别
 
 2026-10-28，在独立工作区 `/tmp/camctl-h2-availability-storage-20261028`，使用 CPython 3.11.17 执行：

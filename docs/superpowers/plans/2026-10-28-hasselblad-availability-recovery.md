@@ -53,7 +53,7 @@
 
 - [ ] 完成 H1，并在本节记录实际恢复入口、覆盖对应关系及验证证据。
 
-**当前进度。** 已将录像启动占用释放、哈苏原 START 恢复、拍摄契约及应急错误报告的目标测试迁移到正式会话装配；提交 `afbe3109`、`d47367fb`、`ca5db88c`、`7fed2961` 和[专项验证记录](../../camctl/hasselblad-availability-implementation-verification-2026-10-28.md)记录其范围。安装版故障门、完整 capture 和 reporting 目录及 V1 组合验证尚未完成；旧装配失败正在迁移。
+**当前进度。** 已将录像启动占用释放、哈苏原 START 恢复、拍摄契约及应急错误报告的目标测试迁移到正式会话装配，安装版 missing START 已沿真实恢复入口取得零重放和文件保留证据；提交 `afbe3109`、`d47367fb`、`ca5db88c`、`7fed2961`、`9d811033` 和[专项验证记录](../../camctl/hasselblad-availability-implementation-verification-2026-10-28.md)记录其范围。完整 capture 和 reporting 目录及 V1 组合验证尚未完成；旧装配失败正在迁移。
 
 **前置与业务结果。** 原检查必须等待旧 START 的实际本地执行与保存责任收场，因此先取得这一入口的有效证据。这里不需要新可用性操作；旧拍摄仍按原契约失败并保持未知，后续新拍摄仍可被旧限制阻挡。
 
