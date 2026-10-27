@@ -383,16 +383,20 @@ def _diagnosed_stop(runtime):
     return replace(_outcome("stop", confirmed=True), diagnostics=value)
 
 
-async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_path, monkeypatch):
+async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_path, monkeypatch, configured):
     from camctl.operations import result_format
     from camctl.operations.tool_diagnostics import ResultEncodingError
     owned = _world(tmp_path)
     try:
-        runtime = await _started(owned)
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
+        runtime.evidence = _CALL_EVIDENCE
+        await capture_handler("camera_record")(12, runtime)
+        runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
         actual = _diagnosed_stop(runtime)
         stopper = ReturnedCall(actual)
         runtime.stopper = stopper
         runtime.wall_us = lambda: _RETURNED_AT
+        runtime.monotonic_ns = lambda: 68_000_000_000
         encode = result_format.encode_diagnostics
         count = 0
         def failing(value):
@@ -403,17 +407,20 @@ async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_pat
             return encode(value)
         monkeypatch.setattr(result_format, "encode_diagnostics", failing)
         with pytest.raises(ConsistencyError):
-            await _stop_call(runtime, runtime.action(12))
+            await capture_handler("camera_record")(12, runtime)
         assert count == 1
-        pending, = runtime.pending_start_results.values()
-        ticket = pending.finish.ticket
-        original_key = pending.key
-        assert pending.finish.outcome.outcome is actual
-        assert pending.finish.occurred_at == _RETURNED_AT
+        ticket = stopper.calls[0].ticket
+        requests = []
+        save = runtime.capture.finish_capture_stop
+        def observe(finish, key, connection):
+            requests.append((finish, key))
+            return save(finish, key, connection)
+        monkeypatch.setattr(runtime.capture, "finish_capture_stop", observe)
         assert actual.diagnostics.calls[0].stdout.data == b"\x00\xff"
         runtime.wall_us = lambda: _RETURNED_AT + 99
-        assert runtime.recover_attempt(ticket)
-        assert not runtime.pending_start_results
+        await capture_handler("camera_record")(12, runtime)
+        finish, original_key = requests[0]
+        assert finish.outcome.outcome == actual and finish.occurred_at == _RETURNED_AT
         assert len(stopper.calls) == 1
         row = owned.connection.execute("SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id JOIN history_transactions t ON e.id BETWEEN t.first_event_id AND t.last_event_id WHERE a.run_id=?", (ticket.run_id,)).fetchone()
         assert json.loads(row[0])["diagnostics"]["calls"][0]["stdout"]["hex"] == "00ff"
@@ -424,14 +431,16 @@ async def test_encoding_failure_keeps_original_bytes_ticket_key_and_time(tmp_pat
 
 
 @pytest.mark.parametrize("operation", ["control", "stop"])
-async def test_diagnostic_validation_failure_holds_original_at_both_capture_exits(tmp_path, monkeypatch, operation):
+async def test_diagnostic_validation_failure_holds_original_at_both_capture_exits(tmp_path, monkeypatch, operation, configured):
     """录像 hold 与 STOP finish 在校验器故障前均持有原失败和字节。"""
     from camctl.operations import tool_diagnostics
     owned = _world(tmp_path)
     try:
-        runtime = (_configured(owned, StartDriver(_result())) if operation == "control"
-                   else await _started(owned))
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
         runtime.evidence = _CALL_EVIDENCE
+        if operation == "stop":
+            await capture_handler("camera_record")(12, runtime)
+            runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
         diagnosed = _diagnosed_stop(runtime)
         actual = (replace(_result(confirmed=True, error=ErrorValue("transport_timeout", "transport")),
                           diagnostics=diagnosed.diagnostics) if operation == "control" else diagnosed)
@@ -453,23 +462,25 @@ async def test_diagnostic_validation_failure_holds_original_at_both_capture_exit
             return original(value)
         monkeypatch.setattr(tool_diagnostics, "validate_diagnostics", temporary)
         runtime.wall_us = lambda: _RETURNED_AT
-        runtime.monotonic_ns = lambda: 8_000_000_000
+        returned_ns = 8_000_000_000 if operation == "control" else 68_000_000_000
+        runtime.monotonic_ns = lambda: returned_ns
         with pytest.raises(ConsistencyError, match="诊断校验失败"):
-            if operation == "control":
-                await capture_handler("camera_record")(12, runtime)
-            else:
-                await _stop_call(runtime, runtime.action(12))
+            await capture_handler("camera_record")(12, runtime)
         assert count == 1
-        pending, = runtime.pending_start_results.values()
-        ticket, key = pending.finish.ticket, pending.key
-        assert not pending.validated
-        assert pending.finish.outcome.outcome is actual
-        assert pending.finish.outcome.outcome.error is actual.error
+        ticket = returned.calls[0].ticket
+        requests = []
+        method = "finish_start_result" if operation == "control" else "finish_capture_stop"
+        save = getattr(runtime.capture, method)
+        def observe(*args, **kwargs):
+            requests.append((args, kwargs))
+            return save(*args, **kwargs)
+        monkeypatch.setattr(runtime.capture, method, observe)
         assert actual.diagnostics.calls[0].stdout.data == b"\x00\xff"
-        assert pending.finish.occurred_at == _RETURNED_AT
-        assert pending.returned_ns == 8_000_000_000
-        assert runtime.recover_attempt(ticket)
-        assert not runtime.pending_start_results
+        await capture_handler("camera_record")(12, runtime)
+        args, _ = requests[0]
+        finish = args[0]
+        key = args[2] if operation == "control" else args[1]
+        assert finish.outcome.outcome == actual and finish.occurred_at == _RETURNED_AT
         assert len(returned.calls) == 1
         saved, occurred_at, saved_key = owned.connection.execute(
             "SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a"
@@ -483,17 +494,19 @@ async def test_diagnostic_validation_failure_holds_original_at_both_capture_exit
         owned.connection.close()
 
 
-async def test_general_invalid_stop_observation_still_uses_existing_rejection(tmp_path):
+async def test_general_invalid_stop_observation_still_uses_existing_rejection(tmp_path, configured):
     owned = _world(tmp_path)
     try:
-        runtime = await _started(owned)
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
+        runtime.evidence = _CALL_EVIDENCE
+        await capture_handler("camera_record")(12, runtime)
+        runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
         actual = _outcome("stop", confirmed=True)
         actual = replace(actual, observations=(replace(actual.observations[0], type="unregistered"),))
         stopper = ReturnedCall(actual)
         runtime.stopper = stopper
-        result = await _stop_call(runtime, runtime.action(12))
-        assert result.detail == "invalid_device_result"
-        assert not runtime.pending_start_results
+        runtime.monotonic_ns = lambda: 68_000_000_000
+        await capture_handler("camera_record")(12, runtime)
         error, = owned.connection.execute(
             "SELECT a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
             " WHERE r.responsibility_key='stop/12'").fetchone()
