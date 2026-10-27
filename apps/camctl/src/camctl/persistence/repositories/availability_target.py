@@ -9,6 +9,7 @@ from camctl.contracts.json_values import json_equal
 from camctl.contracts.values import ObjectId
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.start_entry import is_hasselblad_photo
+from camctl.history.events import load_event_registry
 
 
 class AvailabilityTargetBlocked(ValueError):
@@ -48,6 +49,9 @@ class AvailabilityCreationTargets:
         self._transaction_id = ObjectId(transaction.txn_id)
         self._next_event_id = ObjectId(transaction.first_event_id) + 1
         self._last_event_id = ObjectId(transaction.last_event_id)
+        registry = load_event_registry()["events"]["AVAILABILITY_CHECK"]
+        self._event_type = registry["id"]
+        self._create_reason = registry["branches"]["CREATE"]["reason"]
         self._batch_size = batch_size
         self._pending = None
         self._count = 0
@@ -56,6 +60,7 @@ class AvailabilityCreationTargets:
     def prepare(self, event) -> None:
         """只接受下一页，不把提案自身当作完整目标依据。"""
         if (self._finished or self._pending is not None or event.transaction_id != self._transaction_id
+                or event.event_type != self._event_type or event.reason != self._create_reason
                 or event.event_id != self._next_event_id or event.event_id > self._last_event_id
                 or not 1 <= len(event.rows) <= self._batch_size):
             raise AvailabilityTargetStateError("检查目标页次序或大小无效")
@@ -70,12 +75,12 @@ class AvailabilityCreationTargets:
                     or values["check_id"] != self._check_id or values["action_id"] != self._action_id
                     or values["activity_id"] != activity_id):
                 raise AvailabilityTargetStateError("检查目标页与原连接事实不一致")
-        self._pending = (event.event_id, event.transaction_id, event.rows)
+        self._pending = (event.event_id, event.transaction_id, event.event_type, event.reason, event.rows)
 
     def seal(self, validated) -> None:
         """仅在该页通过事件校验之后推进封口。"""
         event = validated.envelope
-        if self._pending != (event.event_id, event.transaction_id, event.rows):
+        if self._pending != (event.event_id, event.transaction_id, event.event_type, event.reason, event.rows):
             raise AvailabilityTargetStateError("检查目标页没有通过原事件校验")
         self._pending = None
         self._count += 1

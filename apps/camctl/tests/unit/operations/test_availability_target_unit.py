@@ -247,12 +247,14 @@ def _target_page(event_id, activity_ids, *, check_id=31, action_id=12):
         after=SimpleNamespace(exists=True, values={"check_id": check_id, "action_id": action_id,
                                                    "activity_id": activity_id}),
     ) for index, activity_id in enumerate(activity_ids))
-    return SimpleNamespace(event_id=event_id, transaction_id=2, rows=rows)
+    return SimpleNamespace(event_id=event_id, transaction_id=2, event_type=39, reason=1, rows=rows)
 
 
 @pytest.fixture
 def target_group(target_rules, monkeypatch):
     monkeypatch.setattr(target_rules, "iter_creation_targets", lambda *args, **kwargs: iter(((4, 7), (9,))))
+    monkeypatch.setattr(target_rules, "load_event_registry", lambda: {"events": {
+        "AVAILABILITY_CHECK": {"id": 39, "branches": {"CREATE": {"reason": 1}}}}})
     transaction = SimpleNamespace(txn_id=2, first_event_id=1, last_event_id=3)
     return target_rules.AvailabilityCreationTargets(object(), {"id": 31, "action_id": 12}, transaction, batch_size=2)
 
@@ -291,3 +293,10 @@ def test_target_group_rejects_unsealed_page(target_group, target_rules):
     target_group.prepare(_target_page(2, (4, 7)))
     with pytest.raises(target_rules.AvailabilityTargetStateError):
         target_group.finish()
+
+
+def test_target_group_rejects_another_event_branch(target_group, target_rules):
+    event = _target_page(2, (4, 7))
+    event.reason = 2
+    with pytest.raises(target_rules.AvailabilityTargetStateError):
+        target_group.prepare(event)
