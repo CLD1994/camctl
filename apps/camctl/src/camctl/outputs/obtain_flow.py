@@ -162,6 +162,7 @@ class ObtainRuntime:
     pending_segment_selections: dict = field(default_factory=dict)
     pending_segment_queries: dict = field(default_factory=dict)
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
+    availability: Any = None
 
 
 @dataclass
@@ -679,12 +680,20 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
                 if failed.value.disposition is not FailureSaveDisposition.RETIRED:
                     runtime.retry_gate.cleared(f"read/{copy_id}")
+    candidates = tuple(item for item in page.items if item.copy_id not in binding_blocked)
+    if runtime.availability is not None:
+        from camctl.operations.availability import AvailabilityProgress
+        ready = []
+        for candidate in candidates:
+            if await runtime.availability.read(runtime, candidate) is AvailabilityProgress.READY:
+                ready.append(candidate)
+        candidates = tuple(ready)
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
         owned.connection, now, capture_read_parallel=parallel,
-        candidates=tuple(item for item in page.items if item.copy_id not in binding_blocked)))
+        candidates=candidates))
     for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):

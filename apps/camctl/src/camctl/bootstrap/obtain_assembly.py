@@ -59,6 +59,7 @@ def session_obtain_assembly(
     file_executor: FileTaskExecutor | None = None,
     read_discovery_batch_size: int = DEFAULT_BATCH_SIZE,
     max_query_attempts: int = 3,
+    availability: Any = None,
 ) -> Callable[[Any], ObtainRuntime]:
     """构造会话级取回推进工厂：解析各设备读取协作者并组装运行时。
 
@@ -171,6 +172,7 @@ def session_obtain_assembly(
             pending_segment_queries=pending_segment_queries,
             file_executor=file_executor,
             discovery=discovery,
+            availability=availability,
         )
 
     return factory
@@ -181,6 +183,8 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
 
     async def flow(context: Any) -> None:
         runtime = factory(context.database)
+        if runtime.availability is not None:
+            runtime.availability.coordinator.wake = context.wake
         await advance_obtain(runtime)
         if runtime.discovery.pending:
             from camctl.scheduling.notifications import WakeReason

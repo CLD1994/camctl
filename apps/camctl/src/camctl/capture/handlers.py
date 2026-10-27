@@ -1852,6 +1852,23 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
             return HandlerOutcome("not_granted", "canceled")
         if permit.phase is not EntryPhase.READY:
             raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")
+        from camctl.persistence.repositories.preparation import recheck_start_availability
+        blocked = await runtime.database.read(lambda owned: recheck_start_availability(owned, ticket),
+                                              description="复核启动设备检查占用")
+        if permit.phase is not EntryPhase.READY:
+            return HandlerOutcome("not_granted", "canceled")
+        if blocked is not None:
+            from camctl.devices.start_entry import PREVENTED
+            permit.phase = EntryPhase.BLOCKED
+            occurred = runtime.wall_us()
+            outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue("device_error", "dispatch", {"reason": blocked}),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)))
+            await runtime.finish(ticket, outcome, end_run=RunOutcome.FAILED, run_error=outcome.error,
+                activity=ActivityObservationSave(action["id"], occurred,
+                    dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)),
+                occurred_at=occurred, returned_ns=runtime.monotonic_ns())
+            return HandlerOutcome("call_failed", "device_error")
     try:
         with measure_stage("capture.start", action_id=action["id"],
                 device_id=action["device_id"], activity_id=ticket.target_id,

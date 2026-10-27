@@ -14,6 +14,7 @@ import asyncio
 import os
 import stat
 import json
+import time
 from dataclasses import dataclass, field, replace
 from uuid import uuid4
 from functools import partial
@@ -813,6 +814,19 @@ def _report_assembly(
     ready = Path(deps.config.paths.ready)
     processing = Path(deps.config.paths.processing)
     drivers = current_registry()
+    from camctl.bootstrap.availability_assembly import AvailabilityAssembly
+    from camctl.operations.availability import AvailabilityCoordinator
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+    availability_owner = AvailabilityCoordinator(
+        monotonic_ns=time.monotonic_ns, occurred_at=lambda: int(time.time() * 1_000_000),
+        recovery_boundary=deps.recovery_boundary, recovery_max_event_id=lambda: deps.recovery_max_event_id)
+    preparation_leads = {}
+    for device_id, declaration in deps.config.devices.items():
+        if declaration.get("driver") == HASSELBLAD_DRIVER_ID:
+            entry = drivers.entry(HASSELBLAD_DRIVER_ID)
+            preparation_leads[device_id] = declaration.get("connection", {}).get(
+                "prepare_lead_s", entry.driver.default_prepare_lead_s)
+    availability = AvailabilityAssembly(availability_owner, deps.config.devices, drivers, preparation_leads)
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
     from camctl.outputs.work_files import WorkFileLimits
@@ -866,10 +880,12 @@ def _report_assembly(
             resume_capture_completions=partial(_resume_capture_requests, deps),
             cleanup_pending=partial(_cleanup_pending_for_action, deps),
             preparation_pending=deps.capture_preparations.pending,
+            availability_owner=availability_owner,
         ),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
+        "availability_recovery": availability.resume,
         "scheduling": capture_flow(
             session_capture_assembly(
                 start_entries=deps.start_entries,
@@ -905,6 +921,7 @@ def _report_assembly(
             resume_media_results=deps.work_files.resume_media_results,
             resume_file_observations=resume_files,
             resume_read_results=resume_reads,
+            availability=availability,
         ),
         # 残留收场推进：触发动作终态后接管已建立的收场流程，使用剩
         # 余次数完成停止并收场其查询责任。
@@ -961,6 +978,7 @@ def _report_assembly(
                 recovery_max_event_id=lambda: deps.recovery_max_event_id,
                 on_recovery_diagnostic=recovery_logger,
                 file_executor=deps.work_files.executor,
+                availability=availability,
             )
         ),
         # 清理推进：删除与查询端口按设备声明解析，尝试上限取自
@@ -993,7 +1011,7 @@ def _report_assembly(
     capture_owner = flows["scheduling"]
     flows["report"] = ReportBackgroundFlow(flows["report"])
     flows["obtain"] = BackgroundFlow(flows["obtain"])
-    deps.background_flows = (flows["report"], capture_owner, flows["obtain"])
+    deps.background_flows = (flows["report"], capture_owner, flows["obtain"], availability_owner)
     return flows, supervisor
 
 

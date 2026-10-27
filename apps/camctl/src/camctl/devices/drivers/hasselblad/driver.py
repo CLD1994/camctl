@@ -111,6 +111,7 @@ EVIDENCE = EvidenceRegistry((
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
+    EvidenceContract("local_availability_recovery", 1, "availability", frozenset()),
     _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
 ))
 

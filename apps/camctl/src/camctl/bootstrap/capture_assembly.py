@@ -125,6 +125,15 @@ def _device_attempts(
     return value if isinstance(value, int) and not isinstance(value, bool) \
         else default
 
+
+def query_attempt_config(declaration):
+    """状态查询与独立设备检查使用同一组设备配置。"""
+    return AttemptConfig(
+        max_attempts=_device_attempts(declaration, "query", 3),
+        timeout_s=_device_seconds(declaration, "query", "timeout_s", Decimal("10")),
+        retry_interval_s=_device_seconds(declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S),
+    )
+
 #: 源端摘要观察的契约类型与版本（devices 契约测试共用同一形态）。
 _DIGEST_TYPE = "file_digest"
 _DIGEST_VERSION = 1
@@ -1023,15 +1032,7 @@ def session_capture_assembly(
                     _DEFAULT_RETRY_INTERVAL_S,
                 ),
             ),
-            query_config=AttemptConfig(
-                max_attempts=_device_attempts(declaration, "query", 3),
-                timeout_s=_device_seconds(
-                    declaration, "query", "timeout_s", Decimal("10")
-                ),
-                retry_interval_s=_device_seconds(
-                    declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S
-                ),
-            ),
+            query_config=query_attempt_config(declaration),
             residual_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "residual_stop", 3),
                 timeout_s=_device_seconds(

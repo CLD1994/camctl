@@ -153,8 +153,9 @@ class CaptureFlow:
 
     def __init__(self, capture_factory, *, resume_media_results=None,
                  resume_file_observations=None, resume_read_results=None,
-                 read_discovery_batch_size=DEFAULT_BATCH_SIZE):
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE, availability=None):
         self._factory = capture_factory
+        self._availability = availability
         self._resume_media = resume_media_results
         self._resume_files = resume_file_observations
         self._resume_reads = resume_read_results
@@ -170,7 +171,8 @@ class CaptureFlow:
 
     def next_wakeup_at(self, now, margin_s):
         recording = self._recording_wakeups.next_at(now, margin_s)
-        deadlines = [at for at in (recording, self._preparation_at) if at is not None]
+        availability = None if self._availability is None else self._availability.coordinator.next_wakeup_at(now, margin_s)
+        deadlines = [at for at in (recording, self._preparation_at, availability) if at is not None]
         return min(deadlines, default=None)
 
     def owns_device(self, device_id):
@@ -211,6 +213,8 @@ class CaptureFlow:
                 if device in self._devices and self._devices[device].unconsumed_task is task}
 
     async def __call__(self, context):
+        if self._availability is not None:
+            self._availability.coordinator.wake = context.wake
         self.check_completed()
         if self._stopping:
             return
@@ -339,6 +343,10 @@ class CaptureFlow:
                                         prepare_lead_s=lead, current_identity=runtime.fixed_camera_identity))
                                 wakeup_required |= (await runtime.action(action_id))["status"] == 4
                         continue
+                    if self._availability is not None:
+                        from camctl.operations.availability import AvailabilityProgress
+                        if await self._availability.capture(runtime, action) is not AvailabilityProgress.READY:
+                            continue
                     prepared = await advance_preparation(runtime, action_id)
                     wakeup_required |= prepared.wakeup_required
                     if prepared.phase is PreparationPhase.READY:
@@ -364,6 +372,10 @@ class CaptureFlow:
                         continue
                     if (preparation_ready is not None and action_id not in preparation_ready
                             and await _original_binding_failure(runtime, await runtime.action(action_id)) is None):
+                        if self._availability is not None:
+                            from camctl.operations.availability import AvailabilityProgress
+                            if await self._availability.capture(runtime, await runtime.action(action_id)) is not AvailabilityProgress.READY:
+                                continue
                         prepared = await advance_preparation(runtime, action_id)
                         wakeup_required |= prepared.wakeup_required
                         if prepared.phase is not PreparationPhase.READY:
@@ -422,11 +434,11 @@ class CaptureFlow:
 
 def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
                  resume_file_observations=None, resume_read_results=None,
-                 read_discovery_batch_size=DEFAULT_BATCH_SIZE) -> CaptureFlow:
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE, availability=None) -> CaptureFlow:
     """构造按设备独立推进的拍摄拥有者；工厂返回 None 表示能力未装配。"""
     return CaptureFlow(capture_factory, resume_media_results=resume_media_results,
                        resume_file_observations=resume_file_observations, resume_read_results=resume_read_results,
-                       read_discovery_batch_size=read_discovery_batch_size)
+                       read_discovery_batch_size=read_discovery_batch_size, availability=availability)
 
 
 @dataclass(frozen=True)
@@ -600,6 +612,7 @@ def cancel_flow(
     resume_capture_completions=None,
     cleanup_pending=None,
     preparation_pending=None,
+    availability_owner=None,
 ) -> Callable[[Any], Any]:
     """推进原取消集合；设备及文件等待不占用数据库线程。"""
     from camctl.host_files.tasks import FileTaskExecutor
@@ -653,6 +666,7 @@ def cancel_flow(
             occurred_at=occurred, work_files=work_files,
             withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
             cleanup_pending=cleanup_pending, preparation_pending=preparation_pending,
+            availability_owner=availability_owner,
             pending_origin_settlements=pending_origin_settlements)
         cancellation_runtime = CancellationRuntime(
             database=database, repository=repository, settlement=settlement,

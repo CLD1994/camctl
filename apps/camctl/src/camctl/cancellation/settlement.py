@@ -52,6 +52,7 @@ class TargetSettlement:
                  cleanup_pending: Callable[
                      [BusinessDatabase, int], Awaitable[bool]] | None = None,
                  preparation_pending: Callable[[int], bool] | None = None,
+                 availability_owner: Any = None,
                  pending_origin_settlements: dict | None = None) -> None:
         self._database = database
         self._outputs = outputs
@@ -62,12 +63,16 @@ class TargetSettlement:
         self._withdrawal_resume = withdrawal_resume
         self._cleanup_pending = cleanup_pending
         self._preparation_pending = preparation_pending
+        self._availability_owner = availability_owner
         self._pending_origin_settlements = (
             {} if pending_origin_settlements is None
             else pending_origin_settlements)
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
         """按动作类型推进本次取消所需的有限收场。"""
+        if self._availability_owner is not None and self._availability_owner.pending(target_action_id):
+            self._availability_owner.cancel_action(target_action_id)
+            return SettlementOutcome(complete=False)
         row = await self._database.read(
             lambda owned: _fetchone(
                 owned.connection,

@@ -70,7 +70,9 @@ def recovery_registry(entry: Any, operation: str) -> EvidenceRegistry | None:
     """
     if entry is None:
         return None
-    if operation == "control" and getattr(entry.declaration, "local_control_recovery_supported", False):
+    if operation == "availability" and getattr(entry.declaration, "local_availability_recovery_supported", False):
+        evidence_type = "local_availability_recovery"
+    elif operation == "control" and getattr(entry.declaration, "local_control_recovery_supported", False):
         evidence_type = "local_control_recovery"
     elif operation in getattr(entry.declaration, "local_file_recovery_operations", ()):
         evidence_type = "local_file_recovery"
