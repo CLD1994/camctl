@@ -10,6 +10,30 @@ from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.start_entry import is_hasselblad_photo
 
 
+class AvailabilityTargetBlocked(ValueError):
+    """旧责任尚未收场或不适用于检查，调用方应等待原责任。"""
+
+
+class AvailabilityTargetReuse(ValueError):
+    """触发动作已经为目标建立检查，应复用原责任。"""
+
+    def __init__(self, check_id: int):
+        self.check_id = ObjectId(check_id)
+        super().__init__(f"触发动作已有检查责任: {check_id}")
+
+
+class AvailabilityTargetNotRequired(ValueError):
+    """固定资源当前没有需要检查的旧活动。"""
+
+
+class AvailabilityTargetIdentityMismatch(ValueError):
+    """原逻辑设备的固定机身与当前检查身份不同。"""
+
+
+class AvailabilityTargetStateError(ValueError):
+    """保存的必要事实缺失或相互矛盾。"""
+
+
 def iter_held_activity_ids(connection, resource_key: str, *, batch_size: int = 128):
     """按固定机身资源键有界枚举 HELD 活动；读取期间须保持原写事务。"""
     if not isinstance(resource_key, str) or not resource_key:
@@ -70,20 +94,22 @@ def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> 
                     "resource_key"} <= activity.keys()
             or not {"id", "type", "status", "execution_started", "device_id", "driver_id",
                     "execution_spec_json"} <= action.keys()):
-        raise ValueError("检查或旧活动缺少必要的固定事实")
+        raise AvailabilityTargetStateError("检查或旧活动缺少必要的固定事实")
     try:
         ObjectId(check["action_id"])
         ObjectId(activity["id"])
         ObjectId(activity["action_id"])
         ObjectId(action["id"])
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("检查与旧活动缺少有效动作身份") from error
+        raise AvailabilityTargetStateError("检查与旧活动缺少有效动作身份") from error
     if (any(type(action.get(name)) is not int for name in ("type", "status", "execution_started"))
             or any(type(activity.get(name)) is not int for name in
                    ("activity_state", "occupancy_state", "ownership_mode", "dispatch_state"))):
-        raise ValueError("旧活动状态必须是有效整数")
+        raise AvailabilityTargetStateError("旧活动状态必须是有效整数")
     if not isinstance(check["device_id"], str) or not check["device_id"]:
-        raise ValueError("检查缺少有效逻辑设备身份")
+        raise AvailabilityTargetStateError("检查缺少有效逻辑设备身份")
+    if (activity["action_id"] != action["id"] or activity["availability_release_attempt_id"] is not None):
+        raise AvailabilityTargetStateError("旧活动的动作归属或释放引用矛盾")
     action_status = enum_for("actions.status")
     activity_state = enum_for("device_activities.activity_state")
     occupancy = enum_for("device_activities.occupancy_state")
@@ -93,26 +119,24 @@ def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> 
             or action.get("status") != int(action_status.FAILED)
             or action.get("execution_started") != 1
             or action.get("id") == check.get("action_id")
-            or activity.get("action_id") != action.get("id")
             or activity.get("activity_state") != int(activity_state.UNKNOWN)
             or activity.get("occupancy_state") != int(occupancy.HELD)
             or activity.get("ownership_mode") != int(ownership.TASK_SCOPE)
             or activity.get("dispatch_state") not in (
                 int(dispatch.MAY_HAVE_DISPATCHED), int(dispatch.SUCCESS_RETURNED))
-            or activity.get("availability_release_attempt_id") is not None
             or action.get("device_id") != check.get("device_id")
             or action.get("driver_id") != check.get("driver_id")):
-        raise ValueError("旧活动不符合可用性检查目标的固定条件")
+        raise AvailabilityTargetBlocked("旧活动不符合可用性检查目标的固定条件")
     try:
         identity = CameraIdentity(**check["expected_identity_json"])
         original = CameraIdentity(**activity["expected_identity_json"])
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("检查或旧活动缺少有效固定机身身份") from error
+        raise AvailabilityTargetStateError("检查或旧活动缺少有效固定机身身份") from error
     if (not json_equal(check["expected_identity_json"], activity["expected_identity_json"])
             or original != identity
             or check.get("resource_key") != identity.resource_key
             or activity.get("resource_key") != identity.resource_key):
-        raise ValueError("检查与旧活动的固定机身身份不一致")
+        raise AvailabilityTargetIdentityMismatch("检查与旧活动的固定机身身份不一致")
 
 
 def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
@@ -124,8 +148,10 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
         for action_id, activity_id in page:
             activity = row_facts(connection, "device_activities", activity_id)
             if (activity is None or activity.get("action_id") != action_id
-                    or activity.get("resource_key") != check["resource_key"]):
-                raise ValueError("逻辑设备存在未固定或不匹配的旧活动身份")
+                    or not activity.get("resource_key")):
+                raise AvailabilityTargetStateError("逻辑设备旧活动缺少固定身份或归属矛盾")
+            if activity["resource_key"] != check["resource_key"]:
+                raise AvailabilityTargetIdentityMismatch("逻辑设备旧活动的固定机身身份不同")
 
     running = int(enum_for("operation_attempts.status").RUNNING)
     statuses = enum_for("operation_runs.status")
@@ -137,7 +163,7 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
             activity = row_facts(connection, "device_activities", activity_id)
             action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
             if activity is None or action is None:
-                raise ValueError("旧活动缺少实际动作或活动事实")
+                raise AvailabilityTargetStateError("旧活动缺少实际动作或活动事实")
             require_target_facts(check, activity, action)
             with closing(connection.execute(
                 "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
@@ -145,14 +171,15 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
                 (activity_id, running),
             )) as cursor:
                 if cursor.fetchone() is not None:
-                    raise ValueError("旧活动存在尚未保存结果的实际尝试")
+                    raise AvailabilityTargetBlocked("旧活动存在尚未保存结果的实际尝试")
             start = load_start_facts(connection, action)
             if (start.activity is None or start.activity.get("id") != activity_id
                     or start.run is None or type(start.attempts_used) is not int or start.attempts_used < 1
-                    or type(start.run.get("status")) is not int
-                    or start.run.get("status") in (int(statuses.PENDING), int(statuses.ACTIVE))
+                    or type(start.run.get("status")) is not int):
+                raise AvailabilityTargetStateError("旧活动缺少一致的 START 责任")
+            if (start.run["status"] in (int(statuses.PENDING), int(statuses.ACTIVE))
                     or start.not_started or not start.preparation_resolved):
-                raise ValueError("旧活动的 START 或准备责任尚未形成适用收场")
+                raise AvailabilityTargetBlocked("旧活动的 START 或准备责任尚未形成适用收场")
             with closing(connection.execute(
                 "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? AND query_purpose=?"
                 " AND status IN (?,?) LIMIT 1",
@@ -160,7 +187,7 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
                  int(statuses.PENDING), int(statuses.ACTIVE)),
             )) as cursor:
                 if cursor.fetchone() is not None:
-                    raise ValueError("旧活动的 START 核实责任尚未终结")
+                    raise AvailabilityTargetBlocked("旧活动的 START 核实责任尚未终结")
             with closing(connection.execute(
                 "SELECT 1 FROM operation_attempts t, json_each(t.result_json,'$.observations') observation"
                 " WHERE t.run_id=? AND t.result_event_id IS NOT NULL"
@@ -168,14 +195,15 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
                 (start.run["id"],),
             )) as cursor:
                 if cursor.fetchone() is not None:
-                    raise ValueError("旧活动已有可靠照片结果，必须沿原文件责任处理")
+                    raise AvailabilityTargetBlocked("旧活动已有照片结果，必须沿原文件责任处理")
             with closing(connection.execute(
-                "SELECT 1 FROM device_availability_targets WHERE action_id=? AND activity_id=? LIMIT 1",
+                "SELECT check_id FROM device_availability_targets WHERE action_id=? AND activity_id=? LIMIT 1",
                 (check["action_id"], activity_id),
             )) as cursor:
-                if cursor.fetchone() is not None:
-                    raise ValueError("触发动作已有该活动的检查责任，必须复用")
+                existing = cursor.fetchone()
+            if existing is not None:
+                raise AvailabilityTargetReuse(existing[0])
         seen = True
         yield page
     if not seen:
-        raise ValueError("没有仍持有限制的检查目标")
+        raise AvailabilityTargetNotRequired("没有仍持有限制的检查目标")

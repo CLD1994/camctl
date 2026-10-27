@@ -204,17 +204,30 @@ def test_creation_targets_read_original_facts(target_rules, creation_facts):
     assert all(cursor.closed for cursor in connection.cursors)
 
 
-@pytest.mark.parametrize("fault", ["in_flight", "confirmation", "photo", "existing"])
-def test_creation_targets_reject_unsettled_or_existing_responsibility(target_rules, creation_facts, fault):
+@pytest.mark.parametrize("fault", ["in_flight", "confirmation", "photo"])
+def test_creation_targets_wait_for_original_responsibility(target_rules, creation_facts, fault):
     check, _ = creation_facts
     connection = _CreationConnection(25, fault)
-    with pytest.raises(ValueError):
+    with pytest.raises(target_rules.AvailabilityTargetBlocked):
         list(target_rules.iter_creation_targets(connection, check, batch_size=2))
     assert all(cursor.closed for cursor in connection.cursors)
+
+
+def test_creation_targets_identify_the_existing_responsibility(target_rules, creation_facts):
+    check, _ = creation_facts
+    with pytest.raises(target_rules.AvailabilityTargetReuse) as caught:
+        list(target_rules.iter_creation_targets(_CreationConnection(25, "existing"), check, batch_size=2))
+    assert caught.value.check_id == 1
 
 
 def test_creation_targets_reject_logical_identity_mismatch(target_rules, creation_facts):
     check, activity = creation_facts
     activity["resource_key"] = "other"
-    with pytest.raises(ValueError):
+    with pytest.raises(target_rules.AvailabilityTargetIdentityMismatch):
         list(target_rules.iter_creation_targets(_CreationConnection(25), check, batch_size=2))
+
+
+def test_creation_targets_report_no_old_restriction(target_rules, creation_facts):
+    check, _ = creation_facts
+    with pytest.raises(target_rules.AvailabilityTargetNotRequired):
+        list(target_rules.iter_creation_targets(_PagedConnection([]), check, batch_size=2))
