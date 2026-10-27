@@ -166,17 +166,25 @@ class ReleaseGroup:
             raise ConsistencyError("检查结果缺少原尝试")
         attempt = row_facts(connection, "operation_attempts", row.row_id)
         run = None if attempt is None else row_facts(connection, "operation_runs", attempt["run_id"])
-        if (run is None or run["kind"] != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
-                or run["status"] not in (int(enum_for("operation_runs.status").PENDING),
-                                         int(enum_for("operation_runs.status").ACTIVE))):
-            raise ConsistencyError("检查结果缺少开放的原检查流程")
+        if run is None or run["kind"] != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY):
+            raise ConsistencyError("检查结果缺少原检查流程")
         self.connection, self.transaction = connection, transaction
         self.run_id, self.attempt_id = run["id"], attempt["id"]
         self.check = _check(connection, run)
-        self.expected_count = sum(len(page) for page in iter_release_targets(connection, self.check))
-        if self.expected_count:
-            _no_conflicts(connection, self.check, self.attempt_id)
-        self.targets = (identity for page in iter_release_targets(connection, self.check) for identity in page)
+        self.terminal = run["status"] not in (int(enum_for("operation_runs.status").PENDING),
+                                               int(enum_for("operation_runs.status").ACTIVE))
+        self.blocked = False
+        self.expected_count = 0
+        self.targets = iter(())
+        if not self.terminal:
+            try:
+                self.expected_count = sum(len(page) for page in iter_release_targets(connection, self.check))
+                if self.expected_count:
+                    _no_conflicts(connection, self.check, self.attempt_id)
+            except AvailabilityTargetBlocked:
+                self.blocked = True
+            if not self.blocked:
+                self.targets = (identity for page in iter_release_targets(connection, self.check) for identity in page)
         self.position, self.count, self.pending = 0, 0, None
 
     def bind(self, event, context):
@@ -192,16 +200,25 @@ class ReleaseGroup:
                     or len(event.rows) != 1 or event.rows[0].row_id != self.attempt_id):
                 raise ConsistencyError("设备检查事务首事件不是原成功尝试结果")
         elif self.position == 1:
+            if self.terminal:
+                raise ConsistencyError("原检查已终态时不能改写其流程")
             attempt = row_facts(self.connection, "operation_attempts", self.attempt_id)
             run = row_facts(self.connection, "operation_runs", self.run_id)
             require_saved_availability(attempt, run, self.check)
+            allowed = ((int(enum_for("operation_runs.status").FAILED), int(enum_for("operation_runs.status").UNCONFIRMED))
+                       if self.blocked else (int(enum_for("operation_runs.status").SUCCEEDED),))
             if (event.event_type != registry["OPERATION_CONFIGURED"]["id"]
                     or event.reason != registry["OPERATION_CONFIGURED"]["branches"]["FINISH"]["reason"]
                     or len(event.rows) != 1 or event.rows[0].table != "operation_runs"
                     or event.rows[0].row_id != self.run_id
-                    or event.rows[0].after.values.get("status") != int(enum_for("operation_runs.status").SUCCEEDED)):
+                    or event.rows[0].after.values.get("status") not in allowed):
                 raise ConsistencyError("检查结果没有共同结束原流程")
+            if self.blocked and not json_equal(event.rows[0].after.values.get("error_json"),
+                                               _failure_document(self.check, run)):
+                raise ConsistencyError("检查失败结论与实际阻挡及原尝试不一致")
         else:
+            if self.terminal or self.blocked:
+                raise ConsistencyError("检查未取得释放资格，不能生成活动释放")
             if (event.event_type != registry["AVAILABILITY_CHECK"]["id"]
                     or event.reason != registry["AVAILABILITY_CHECK"]["branches"]["RELEASE"]["reason"]
                     or not 1 <= len(event.rows) <= 128):
@@ -222,16 +239,34 @@ class ReleaseGroup:
         self.position += 1
 
     def finish(self):
-        if (self.pending is not None or self.position < 2
+        expected_events = 1 if self.terminal else 2
+        if (self.pending is not None or self.position < expected_events
+                or (self.terminal or self.blocked) and self.position != expected_events
                 or self.transaction.first_event_id + self.position - 1 != self.transaction.last_event_id
-                or self.count != self.expected_count or next(self.targets, None) is not None):
+                or not self.blocked and (self.count != self.expected_count or next(self.targets, None) is not None)):
             raise ConsistencyError("检查结果和全部目标释放未共同封口")
+
+
+def _failure_document(check, run):
+    device_source = check["trigger_copy_id"] is not None
+    return {"code": "source_device_unavailable" if device_source else "device_availability_unconfirmed",
+            "stage": "source_read" if device_source else "execution", "details": {
+                "device_id": check["device_id"], "operation_run_id": str(run["id"]),
+                "attempts_used": run["attempts_used"], "max_attempts": run["max_attempts_used"]}}
 
 
 def release_guard(event, context):
     group = context.availability_reads
     if not isinstance(group, ReleaseGroup) or group.pending != replace(event, change_seq=None):
         raise ConsistencyError("设备释放缺少原内核独立事务组")
+
+
+def require_result_group(event, context):
+    """成功检查结果只接受内核正在校验的首事件。"""
+    group = context.availability_reads
+    if (type(group) is not ReleaseGroup or group.position != 0
+            or group.pending != replace(event, change_seq=None)):
+        raise ConsistencyError("设备检查成功结果必须属于内核绑定的完整结果事务")
 
 
 class FinishAvailabilityCommand:
@@ -256,26 +291,30 @@ class FinishAvailabilityCommand:
         if run is None or run["kind"] != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY):
             raise ConsistencyError("检查结果票据没有对应的检查流程")
         check = _check(db, run)
-        if run["status"] not in (int(enum_for("operation_runs.status").PENDING),
-                                  int(enum_for("operation_runs.status").ACTIVE)):
-            return FinishAttemptCommand(self.finish, self.key).plan(scope)
         found = db.execute("SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
                            (run["id"], self.finish.ticket.attempt_id)).fetchone()
         if found is None:
             raise ConsistencyError("检查结果票据没有对应的原尝试")
         attempt_id = found[0]
+        def bounded_result(finish):
+            sub = _CompositeScope(scope, scope.max_event_id + 1)
+            planned = FinishAttemptCommand(finish, self.key).plan(sub)
+            if planned.read_only:
+                return planned
+            scope.allocate(len(planned.events))
+            return BoundedCommandPlan(planned.events, lambda event, tx: _release_context(
+                db, event, tx, run["id"], check["id"], attempt_id), planned.result, lambda connection: None)
+        if run["status"] not in (int(enum_for("operation_runs.status").PENDING),
+                                  int(enum_for("operation_runs.status").ACTIVE)):
+            return bounded_result(self.finish)
         try:
             release_count = sum(len(page) for page in iter_release_targets(db, check))
             if release_count:
                 _no_conflicts(db, check, attempt_id)
         except AvailabilityTargetBlocked:
-            error = ErrorValue("source_device_unavailable" if check["trigger_copy_id"] is not None
-                               else "device_availability_unconfirmed",
-                "source_read" if check["trigger_copy_id"] is not None else "execution",
-                {"device_id": check["device_id"], "operation_run_id": str(run["id"]),
-                 "attempts_used": run["attempts_used"], "max_attempts": run["max_attempts_used"]})
+            error = ErrorValue(**_failure_document(check, run))
             finish = replace(self.finish, run_finish=RunFinish(RunOutcome.FAILED, error))
-            return FinishAttemptCommand(finish, self.key).plan(scope)
+            return bounded_result(finish)
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         result = FinishAttemptCommand(self.finish, self.key).plan(sub)
         if result.read_only or len(result.events) != 2:
@@ -337,11 +376,13 @@ class FinishAvailabilityCommand:
                         raise ConsistencyError("原检查结果缺少共同终结")
                     final_status = event.rows[0].after.values.get("status")
                     if final_status not in (int(enum_for("operation_runs.status").SUCCEEDED),
-                                            int(enum_for("operation_runs.status").FAILED)):
+                                            int(enum_for("operation_runs.status").FAILED),
+                                            int(enum_for("operation_runs.status").UNCONFIRMED)):
                         raise ConsistencyError("原检查结果终结状态不适用")
                     if run["status"] != final_status or run["retry_wait_required"] != 0:
                         raise ConsistencyError("原检查终态与当前流程事实不一致")
-                    if final_status == int(enum_for("operation_runs.status").FAILED):
+                    if final_status in (int(enum_for("operation_runs.status").FAILED),
+                                        int(enum_for("operation_runs.status").UNCONFIRMED)):
                         device_source = check["trigger_copy_id"] is not None
                         expected_error = {"code": "source_device_unavailable" if device_source else "device_availability_unconfirmed",
                             "stage": "source_read" if device_source else "execution", "details": {

@@ -177,6 +177,17 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     context = bind_obtain_check(context, event, transaction, connection)
     from camctl.persistence.repositories.preparation import PreparationReads
     context = replace(context, preparation_reads=PreparationReads(connection, validated))
+    configured = load_event_registry()["events"]["OPERATION_CONFIGURED"]
+    if event.event_type == configured["id"] and event.reason == configured["branches"]["FINISH"]["reason"]:
+        for row in event.rows:
+            if row.table != "operation_runs":
+                continue
+            original = row_facts(connection, "operation_runs", row.row_id)
+            kind = load_enum_registry()["enums"]["operation_runs.kind"]["members"]["CHECK_DEVICE_AVAILABILITY"]
+            if original is not None and original["kind"] == kind:
+                from camctl.persistence.repositories.availability_finish import AvailabilityFinishReads
+                context = replace(context, availability_finish_reads=AvailabilityFinishReads(connection, validated))
+                break
     attempt_started = load_event_registry()["events"]["ATTEMPT_STARTED"]
     if event.event_type == attempt_started["id"]:
         runs = [row for row in event.rows if row.table == "operation_runs"]
@@ -349,7 +360,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         db_count("events")
         db_count("row_changes", len(proposed.rows))
         with db_phase(TransactionPhase.CONTEXT):
-            context = plan.context(proposed, transaction)
+            context = replace(plan.context(proposed, transaction), availability_reads=None)
             availability = load_event_registry()["events"]["AVAILABILITY_CHECK"]
             if availability_release_group is None and proposed.event_id == transaction.first_event_id:
                 result = load_event_registry()["events"]["ATTEMPT_RESULT"]

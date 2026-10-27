@@ -1914,6 +1914,11 @@ def _attempt_result_guard(event, context) -> None:
         run = _guard_facts(context, "operation_runs", after.get("run_id"))
         if (run.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
                 and status == int(_ATTEMPT_STATUS.SUCCEEDED)):
+            from .availability_release import require_result_group
+            try:
+                require_result_group(event, context)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
             from .availability_observation import require_saved_availability
             check = _guard_facts(context, "device_availability_checks", run.get("availability_check_id"))
             try:
@@ -1981,6 +1986,15 @@ def _operation_finish_guard(event, context) -> None:
             continue
         after = _row_after_facts(context, row)
         status = after.get("status")
+        if after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
+            from .availability_finish import AvailabilityFinishReads
+            reads = context.availability_finish_reads
+            if type(reads) is not AvailabilityFinishReads:
+                _fail("设备检查终结缺少原调用收场核验")
+            try:
+                reads.require_settled(row.row_id)
+            except ConsistencyError as error:
+                raise EventValidationError(str(error)) from error
         if (after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
                 and status == int(_RUN_STATUS.SUCCEEDED)):
             from .availability_release import ReleaseGroup, ResolvedGroup
