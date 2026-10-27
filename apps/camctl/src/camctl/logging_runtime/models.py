@@ -36,10 +36,11 @@ class LogLevel(enum.Enum):
 
 @dataclass(frozen=True)
 class LogWriteResult:
-    """同一条记录的追加与持久事实；完成要求由记录级别决定。"""
+    """同一条记录的文件与 stderr 事实；完成要求由记录级别决定。"""
 
     appended: bool
     durable: bool = False
+    fallback_written: bool = False
 
     def delivered_for(self, level: LogLevel) -> bool:
         return self.appended and (level is not LogLevel.ERROR or self.durable)
