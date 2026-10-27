@@ -52,6 +52,10 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 
 测试覆盖独立检查的身份、超时、取消与实际受管进程收场，以及已观察结构化输出、矛盾和无法解析输出的分类。此范围不证明业务调度、事务、真实诊断消费者和真实相机的联合行为；其他工具版本若产生尚未观察的输出格式会被保守拒绝，须在目标设备上验证。
 
+提交 `7422ad1e` 为检查观察补充本次开始和结束的单调钟事实，使用 CPython 3.11.17 执行 `pytest apps/camctl/tests/unit/devices/test_hasselblad_availability_clock.py -q`，2 项通过。事务端尚未消费这些事实并独立核对总期限。
+
+提交 `fc003b31` 固定 DEVICE 正式源的机身、原路径、长度与摘要，并在登记及读取时核对原拍摄结果、历史事件与文件记录。在独立工作区 `/tmp/camctl-h2-identity-integrate-20261028` 同步包资源后，使用 CPython 3.11.17 运行文件身份、检查时钟及两个相关消费者单元测试文件，49 项通过；复用 `CameraIdentity` 后重新运行两份身份单元测试文件，44 项通过。首次运行因独立工作区缺少生成的包资源而在收集阶段失败，同步资源后上述测试通过。活动预留身份、读取机会前的绑定核对及完整业务联动尚未完成。
+
 ## H4：公共诊断消费者
 
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。
