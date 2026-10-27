@@ -44,7 +44,7 @@ CREATE TABLE obtain_items (
     status INTEGER NOT NULL CHECK (status IN (1,2,3,4,5)),
     source_dependency INTEGER NOT NULL CHECK (source_dependency IN (0,1)),
     delivery_id INTEGER UNIQUE REFERENCES deliveries(id) DEFERRABLE INITIALLY DEFERRED,
-    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,5,6,8)),
+    error_code INTEGER CHECK (error_code IS NULL OR error_code IN (1,2,3,4,5,6,7,8)),
     error_details_json TEXT CHECK (error_details_json IS NULL OR (json_valid(error_details_json) AND json_type(error_details_json) = 'object')),
     UNIQUE (selection_id, requested_output_id),
     UNIQUE (selection_id, output_id),

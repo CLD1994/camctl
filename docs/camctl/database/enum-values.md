@@ -988,6 +988,7 @@
 | 28 | `motor_notification_failed` | `execution` |
 | 29 | `motor_notification_unconfirmed` | `execution` |
 | 30 | `capture_segment_gap` | `execution` |
+| 31 | `device_availability_unconfirmed` | `execution` |
 
 ### `cancel_delivery_items.error_code`
 
@@ -1027,6 +1028,7 @@
 | 4 | `output_cleanup_started` | `output_selection` |
 | 5 | `device_binding_unavailable` | `execution` |
 | 6 | `source_file_unconfirmed` | `source_read` |
+| 7 | `source_device_unavailable` | `source_read` |
 | 8 | `preview_missing` | `output_selection` |
 
 ### `obtain_source_selections.error_code`

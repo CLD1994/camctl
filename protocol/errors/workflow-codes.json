@@ -361,6 +361,24 @@
       },
       "action_error_id": 12
     },
+    "device_availability_unconfirmed": {
+      "stage": "execution",
+      "description": "拍摄准备时有限检查未能确认设备可用。",
+      "details_schema": {
+        "$ref": "workflow-codes.json#/$defs/availability_error"
+      },
+      "action_error_id": 31
+    },
+    "source_device_unavailable": {
+      "stage": "source_read",
+      "description": "DEVICE 来源读取时有限检查未能确认设备可用。",
+      "details_schema": {
+        "$ref": "workflow-codes.json#/$defs/availability_error"
+      },
+      "item_error_ids": {
+        "obtain_items": 7
+      }
+    },
     "emergency_not_attempted": {
       "stage": "emergency",
       "description": "会话应急处理未能开始停止尝试，保留目标活动与实际未能尝试的原因。",
@@ -509,7 +527,7 @@
     },
     "device_binding_unavailable": {
       "stage": "execution",
-      "description": "本次配置缺少原设备或驱动绑定与原记录不一致。",
+      "description": "本次配置缺少原设备，或驱动、固定物理身份不一致，或物理机身与未完成责任冲突。",
       "details_schema": {
         "type": "object",
         "properties": {
@@ -528,7 +546,9 @@
           "reason": {
             "enum": [
               "missing",
-              "mismatch"
+              "mismatch",
+              "physical_identity_mismatch",
+              "physical_identity_conflict"
             ]
           }
         },
@@ -1201,6 +1221,33 @@
     }
   },
   "$defs": {
+    "availability_error": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operation_run_id": {
+          "$ref": "status-report.schema.json#/$defs/entity_id"
+        },
+        "attempts_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "device_id",
+        "operation_run_id",
+        "attempts_used",
+        "max_attempts"
+      ],
+      "additionalProperties": false
+    },
     "segment_error_header": {
       "type": "object",
       "properties": {

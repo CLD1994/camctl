@@ -169,6 +169,13 @@ class TestProjectPublicAction:
         assert fragment["error"]["code"] == "action_validation_failed"
         assert fragment["error"]["details"] == details
 
+    def test_unstarted_availability_failure_projects_registered_error(self) -> None:
+        from camctl.contracts.workflow_errors import action_error_id
+        details = {"device_id": "cam-1", "operation_run_id": "42", "attempts_used": 3, "max_attempts": 2}
+        fragment = project_public(self._action_facts(status=4, execution_started=0,
+            error_code=action_error_id("device_availability_unconfirmed"), error_details_json=details))
+        assert fragment["error"] == {"code": "device_availability_unconfirmed", "stage": "execution", "details": details}
+
     def test_no_error_field_without_code(self) -> None:
         fragment = project_public(self._action_facts())
         assert "error" not in fragment
@@ -260,6 +267,25 @@ class TestObtainFailureUnion:
             "error": {"code": "output_unavailable", "stage": "output_selection",
                       "details": details},
         }]
+
+    def test_availability_failure_projects_item_and_delivery(self) -> None:
+        from camctl.contracts.workflow_errors import item_error_id
+        details = {"device_id": "cam-1", "operation_run_id": "42", "attempts_used": 3, "max_attempts": 2}
+        error = {"code": "source_device_unavailable", "stage": "source_read", "details": details}
+        delivery = _delivery_row(61, status=6)
+        delivery["error_json"] = error
+        facts = self._facts(
+            deps={31: _dependency_row(31)}, selections={41: _selection_row(41, 31)},
+            items={51: _item_row(51, 41, status=4, output_id=9,
+                                 error_code=item_error_id("obtain_items", "source_device_unavailable"), details=details),
+                   52: _item_row(52, 41, status=3, output_id=10, delivery_id=61)},
+            deliveries={61: {**delivery, "output_id": 10}},
+            outputs={10: {"id": 10, "source_action_id": 1}},
+        )
+        assert project_public(facts)["failures"] == [
+            {"source_action_instance_id": "1", "output_id": "9", "error": error},
+            {"source_action_instance_id": "1", "output_id": "10", "delivery_id": "61", "error": error},
+        ]
 
     def test_delivery_failure_reads_delivery_output_and_error(self) -> None:
         facts = self._facts(
