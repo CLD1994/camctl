@@ -72,10 +72,15 @@ def read_records(path):
 
 
 async def completed(task):
-    # 重要日志会保留取消责任，不能用 wait_for 的取消作为硬超时。
+    # 有界观察终态，超时不隐式撤回实际交接。
     done, _ = await asyncio.wait({task}, timeout=5)
     assert task in done, "日志交接没有在释放条件后完成"
     return task.result()
+
+
+async def await_receipt(receipt):
+    """Task 仅属于测试等待者；生产回执本身不是协程对象。"""
+    return await receipt
 
 
 async def finish_tasks(*tasks):
@@ -194,13 +199,16 @@ async def test_full_queue_repeated_cancel_preserves_error_and_independent_stop(t
     facts = asyncio.Queue()
     stopped = []
     fallback = []
+    receipts = []
 
     async def producer():
         try:
             raise original
         except RuntimeError:
             facts.put_nowait(original)
-            await LOGGER.exception("device-diagnostic", extra={"action_id": 17})
+            receipt = LOGGER.exception("device-diagnostic", extra={"action_id": 17})
+            receipts.append(receipt)
+            await receipt
 
     async def necessary_stop():
         error = await facts.get()
@@ -213,20 +221,19 @@ async def test_full_queue_repeated_cancel_preserves_error_and_independent_stop(t
             try:
                 await completed(stop)
                 assert stopped == [original] and not task.done()
-                await completed(asyncio.create_task(LOGGER.info("full-async-info")))
+                await completed(asyncio.create_task(await_receipt(LOGGER.info("full-async-info"))))
                 SYNC_LOGGER.warning("full-sync-warning")
                 assert channel.counters.info_dropped == 1
                 assert channel.counters.warning_dropped == 1
                 assert channel.counters.error_dropped == 0
                 task.cancel("first cancel")
-                await asyncio.sleep(0)
                 task.cancel("repeated cancel")
-                await asyncio.sleep(0)
-                assert not task.done()
-                release.set()
-                with pytest.raises(asyncio.CancelledError) as raised:
+                with pytest.raises(asyncio.CancelledError):
                     await completed(task)
-                assert raised.value.args == ("first cancel",)
+                assert stopped == [original]
+                release.set()
+                result = await completed(asyncio.create_task(await_receipt(receipts[0])))
+                assert result.delivered is True
                 state = diagnostic_state_for(original)
                 assert state.status is DiagnosticStatus.ADMITTED
                 assert record_error(original, stage="outer-consumer") is state
@@ -254,7 +261,7 @@ async def test_logger_waits_for_original_diagnostic_already_being_admitted(tmp_p
         with event_logging(channel), error_diagnostics_context(channel, fallback.append, background=True):
             state = record_error(original, stage="original-consumer", details={"attempt": 3})
             await asyncio.sleep(0)
-            waiting = asyncio.create_task(LOGGER.error("outer-message", exc_info=original))
+            waiting = asyncio.create_task(await_receipt(LOGGER.error("outer-message", exc_info=original)))
             try:
                 await asyncio.sleep(0)
                 assert not waiting.done()
@@ -290,7 +297,7 @@ async def test_logger_respects_original_copy_reservation(tmp_path, copy_written)
             state = record_error(original, stage="report-generation")
             reservation = reserve_diagnostic(state)
             assert reservation is not None
-            waiting = asyncio.create_task(LOGGER.exception("outer-message", exc_info=original))
+            waiting = asyncio.create_task(await_receipt(LOGGER.exception("outer-message", exc_info=original)))
             try:
                 await asyncio.sleep(0)
                 assert not waiting.done()
