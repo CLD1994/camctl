@@ -17,8 +17,8 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from .result_consumer_fixtures import returned
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_native_completion_context import _osv
-from .test_natural_wait_time_eligibility import _world
-from .test_natural_wait_retention import _pages, _retained, _other
+from .test_natural_wait_time_eligibility import _public_world, _world
+from .test_natural_wait_retention import _finish_public_cancel, _pages, _retained, _other
 from .test_result_page_history import _actual, _CURSOR
 from .test_record_file_completion_wait import _completed_result
 
@@ -55,7 +55,7 @@ async def _finish_cancel(owned, wall, confirmed):
 @pytest.mark.parametrize('stop_outcome', ['confirmed', 'failed', 'unknown'])
 @pytest.mark.parametrize('bad', [False, True])
 async def test_public_cancel_during_natural_read_keeps_original_basis_and_page_time(tmp_path, startup, stop_outcome, bad):
-    owned, runtime, aid, advance, wall, mono, result, unused, due = await _world(tmp_path, startup)
+    owned, runtime, aid, advance, wall, mono, result, unused, due = await _public_world(tmp_path, startup)
     stop = _stopper(runtime, aid, stop_outcome)
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     contexts = []
@@ -72,7 +72,7 @@ async def test_public_cancel_during_natural_read_keeps_original_basis_and_page_t
         raw = _pages(owned)
         wall[0] = due+100
         for _ in range(3): await advance(aid, runtime)
-        assert runtime.action(aid)['status'] == 6
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6,)
         from camctl.contracts.json_values import parse_exact_json
         capture = owned.connection.execute('SELECT capture_json FROM device_activities WHERE action_id=?', (aid,)).fetchone()[0]
         assert capture is None or parse_exact_json(capture)['status'] != 'completed'
@@ -90,15 +90,16 @@ async def test_public_cancel_during_natural_read_keeps_original_basis_and_page_t
         assert stop.stop.await_count == result.list_results.await_count == 1
         state = owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone()
         assert state == ((1, 1) if bad and stop_outcome != 'confirmed' else (3, 2))
-        await _finish_cancel(owned, wall, stop_outcome == 'confirmed' and not bad)
+        await _finish_public_cancel(owned, runtime, wall, stop_outcome == 'confirmed' and not bad)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('bad_last', [False, True])
 async def test_natural_pages_cross_stop_with_original_context_cursor_and_budget(tmp_path, startup, bad_last):
-    owned, runtime, aid, advance, wall, mono, result, unused, due = await _world(tmp_path, startup)
+    owned, runtime, aid, advance, wall, mono, result, unused, due = await _public_world(tmp_path, startup)
     stop = _stopper(runtime, aid, 'confirmed')
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     contexts = []
@@ -119,15 +120,16 @@ async def test_natural_pages_cross_stop_with_original_context_cursor_and_budget(
         await advance(aid, runtime)
         wall[0] = due+100
         for _ in range(3): await advance(aid, runtime)
-        assert runtime.action(aid)['status'] == 6
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6,)
         assert len(contexts) == 2 and contexts[0] == contexts[1]
         assert len(_retained(owned, aid)) == (1 if bad_last else 2)
         assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE responsibility_key=?", (f'results/{aid}',)).fetchone() == (1,)
         from camctl.contracts.json_values import parse_exact_json
         capture = owned.connection.execute('SELECT capture_json FROM device_activities WHERE action_id=?', (aid,)).fetchone()[0]
         assert capture is None or parse_exact_json(capture)['status'] != 'completed'
-        await _finish_cancel(owned, wall, not bad_last)
+        await _finish_public_cancel(owned, runtime, wall, not bad_last)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 

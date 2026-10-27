@@ -44,7 +44,7 @@ def _retained(owned, action_id):
     return owned.connection.execute('SELECT o.id,o.device_file_id,f.completion_evidence_json FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=? ORDER BY o.id', (action_id,)).fetchall()
 
 
-async def _finish_public_cancel(owned, runtime, wall):
+async def _finish_public_cancel(owned, runtime, wall, confirmed=False):
     from camctl.cancellation.models import FinishCancelAction
     from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
     from camctl.cancellation.settlement import TargetSettlement
@@ -62,7 +62,7 @@ async def _finish_public_cancel(owned, runtime, wall):
         lambda connection: repository.finish_cancel_action(FinishCancelAction(origin, wall[0]), key, connection),
         key=key)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (origin,)).fetchone() == (4,)
+    assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (origin,)).fetchone() == (3 if confirmed else 4,)
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
