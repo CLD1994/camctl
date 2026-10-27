@@ -720,6 +720,19 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
 
 def _action_finish_guard(event, context) -> None:
     """动作终态组合与产物同事务校验。"""
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason != 6:
+        for row in event.rows:
+            details = row.after.values.get("error_details_json") if row.table == "actions" else None
+            if isinstance(details, Mapping) and details.get("reason") == "physical_identity_conflict":
+                from .preparation import PreparationReads
+                from .physical_alias import action_physical_identity, physical_alias_conflict
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("机身冲突失败缺少原连接事实")
+                action = _guard_facts(context, "actions", row.row_id)
+                connection = context.preparation_reads.connection
+                if not physical_alias_conflict(connection, action["device_id"],
+                                               action_physical_identity(connection, row.row_id)):
+                    raise EventValidationError("机身冲突失败缺少未完成原责任")
     if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 6:
         from .preparation import PreparationReads, verify_binding_preparation_failure
         from camctl.contracts.workflow_errors import action_error_id
@@ -4586,6 +4599,16 @@ class _FinishBindingFailureCommand:
             return self._capture_command()._recover(connection, action)
         if bool(action["cancel_requested"]) != request.canceled:
             raise TransactionError("绑定失败的取消分支与原动作事实不符")
+        if not request.canceled and request.failure.details.get("reason") == "physical_identity_conflict":
+            from .physical_alias import action_physical_identity, physical_alias_conflict
+            fixed = action_physical_identity(connection, action["id"])
+            if not physical_alias_conflict(connection, action["device_id"], fixed):
+                plan = row_facts(connection, "plans", action["plan_id"])
+                if plan is None:
+                    raise ConsistencyError("原动作缺少所属计划")
+                return CommandPlan(events=(), owners={}, read_only=True,
+                    state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                    result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         with closing(connection.execute(
             "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
             " WHERE r.action_id = ? AND t.status = 1 LIMIT 1", (request.action_id,),
@@ -7133,6 +7156,13 @@ def _activity_guard(event, context) -> None:
                     raise ValueError("活动固定机身身份与资源键不一致")
             except (TypeError, ValueError, KeyError) as error:
                 raise EventValidationError("活动固定机身身份无效") from error
+            if identity is not None:
+                from .physical_alias import physical_alias_conflict
+                from .preparation import PreparationReads
+                if type(context.preparation_reads) is not PreparationReads:
+                    raise EventValidationError("活动创建缺少内核绑定的机身冲突核对")
+                if physical_alias_conflict(context.preparation_reads.connection, action["device_id"], identity):
+                    raise EventValidationError("活动越过了其他逻辑设备的机身限制")
             if action.get("execution_started") == 0:
                 from .preparation import PreparationReads
                 if type(context.preparation_reads) is not PreparationReads:

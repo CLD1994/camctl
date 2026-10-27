@@ -491,6 +491,11 @@ async def _device_source_candidate(
     if assembly is None and not failed_binding:
         raise ConsistencyError(
             f"读取设备未装配读取协作者: {device_id!r}")
+    if binding_result is not None and binding_result.status is BindingStatus.MATCHED:
+        from camctl.outputs.physical_binding import source_physical_binding
+        physical = await source_physical_binding(runtime, device_file_id, device_id, driver_id)
+        if physical is not None:
+            binding_result = physical
     stem = _original_stem(original_name)
     extension = _extension_of(original_name)
     return FileCandidate(
@@ -638,16 +643,27 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     发不阻塞读取推进。
     """
     page = (await runtime.discovery.reads(runtime.database, "reads", now))
+    binding_blocked = set()
     if runtime.binding_check is not None:
         candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
             result = runtime.binding_check(DeviceBinding(device_id, driver_id))
-            if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH):
+            if result.status is BindingStatus.MATCHED:
+                from camctl.outputs.physical_binding import source_physical_binding
+                physical = await source_physical_binding(runtime, source_id, device_id, driver_id)
+                if (physical is not None and (copy_id not in runtime.pending_read_ends
+                        or physical.status is BindingStatus.PHYSICAL_IDENTITY_MISMATCH)):
+                    result = physical
+            if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
+                                 BindingStatus.PHYSICAL_IDENTITY_MISMATCH, BindingStatus.PHYSICAL_IDENTITY_CONFLICT):
+                binding_blocked.add(copy_id)
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+                from camctl.outputs.handoff import FailureSaveDisposition
 
                 business = PendingReadBusiness(runtime.outputs.fail_read_binding,
                     FailReadBinding(copy_id, source_id, result, now), new_operation_key(),
-                    lambda _, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}"))
+                    lambda value, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}")
+                        if value.disposition is not FailureSaveDisposition.RETIRED else None)
                 pending = await held_binding_read_result(runtime, copy_id, result, business)
                 if pending is not None:
                     await _save_read_result_and_settle(runtime, pending)
@@ -661,12 +677,14 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 if failed.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(ConsistencyError,
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
-                runtime.retry_gate.cleared(f"read/{copy_id}")
+                if failed.value.disposition is not FailureSaveDisposition.RETIRED:
+                    runtime.retry_gate.cleared(f"read/{copy_id}")
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
-        owned.connection, now, capture_read_parallel=parallel, candidates=page.items))
+        owned.connection, now, capture_read_parallel=parallel,
+        candidates=tuple(item for item in page.items if item.copy_id not in binding_blocked)))
     for work in work_items:
         if work.yield_reads or (
                 work.dispatch_captures and not work.capture_read_parallel):
@@ -1104,14 +1122,18 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
     pending = await save_read_result(runtime, pending, retry=retry)
     if pending is None:
         return
+    if pending.preserved_run_terminal:
+        forget_read_result(runtime, pending)
+        return
     def complete_business(_):
         runtime.retry_gate.cleared(f"read/{int(pending.finish.ticket.target_id)}")
         forget_read_result(runtime, pending)
 
     if pending.business is not None:
-        from camctl.outputs.read_attempts import save_prepared_read_business
+        from camctl.outputs.read_attempts import hold_prepared_read_business, save_prepared_read_business
 
         copy_id = int(pending.finish.ticket.target_id)
+        hold_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business)
         forget_read_result(runtime, pending)
         await save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business, retry=retry)
         runtime.retry_gate.cleared(f"read/{copy_id}")

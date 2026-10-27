@@ -7224,7 +7224,8 @@
             "segment_query_resolution"
           ],
           "evidence": [
-            "obtain_check_source"
+            "obtain_check_source",
+            "read_current_identity"
           ]
         },
         "RELEASE": {
@@ -7892,7 +7893,7 @@
             "delivery",
             "read_permission"
           ],
-          "evidence": []
+          "evidence": ["read_current_identity"]
         },
         "CANCEL": {
           "reason": 6,

@@ -434,6 +434,7 @@ class FinishAttemptResult:
     disposition: FinishDisposition
     attempt_status: AttemptStatus | None = None
     run_status: RunStatus | None = None
+    run_was_terminal: bool = False
 
 
 @dataclass(frozen=True)

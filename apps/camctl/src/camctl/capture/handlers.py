@@ -3133,6 +3133,20 @@ async def _handle_binding_failure(
     binding_result = runtime.binding_check(_binding(action))
     details = binding_failure_details(binding_result)
     if details is None:
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if action.get("driver_id") == DRIVER_ID and action.get("type") == 1:
+            from camctl.devices.bindings import BindingStatus
+            from camctl.persistence.repositories.physical_alias import action_physical_identity, physical_alias_conflict
+            def read_alias(owned):
+                fixed = action_physical_identity(owned.connection, action["id"])
+                if fixed != runtime.fixed_camera_identity:
+                    return False
+                return physical_alias_conflict(owned.connection, action["device_id"], fixed)
+            if await runtime.database.read(read_alias, description="读取原机身的未完成责任"):
+                binding_result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT,
+                                               _binding(action), None)
+                details = binding_failure_details(binding_result)
+    if details is None:
         return False
     if (await _local_recording_listing(runtime, action)) is not None:
         return False
@@ -3271,6 +3285,8 @@ async def _handle_binding_failure(
             raise db_failure(ConsistencyError, f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}", receipt)
     else:
         (await runtime.save_capture_completion(request))
+    if details["reason"] == "physical_identity_conflict" and (await runtime.action(action["id"]))["status"] == 2:
+        return False
     (await runtime.resume_baselines(action["id"]))
     runtime.timelapse_deadlines.pop(action["id"], None)
     runtime.natural_wait_states.pop(action["id"], None)
