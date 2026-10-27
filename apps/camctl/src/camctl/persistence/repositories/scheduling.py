@@ -300,6 +300,9 @@ class StartActionCommand:
 
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.expected_identity):
+            return self._rejected("device_busy")
         if action["driver_id"] == HASSELBLAD_DRIVER_ID:
             from .physical_alias import physical_alias_conflict
             if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
@@ -932,6 +935,9 @@ class GrantStartCommand:
                 return self._rejected("physical_identity_conflict")
         elif request.current_identity is not None:
             raise TransactionError("其他驱动不能提供 Hasselblad 身份")
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.current_identity):
+            return self._rejected("device_busy")
         preparation_reason = baseline_start_reason(activity, action)
         if preparation_reason is not None:
             return self._rejected(preparation_reason)
@@ -1378,6 +1384,9 @@ class ReservePreparationCommand:
             from .physical_alias import physical_alias_conflict
             if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
                 return result(ReservePreparationOutcome.REJECTED, reason="physical_identity_conflict")
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.expected_identity):
+            return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         # 已持有活动和读取机会均由原拥有者先完成，准备不打断原工作。
         with closing(connection.execute(
                 "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"

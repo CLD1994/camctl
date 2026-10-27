@@ -32,6 +32,7 @@ class _RunKind(IntEnum):
     START = 1
     READ_FILE = 2
     PREPARE_CAPTURE = 3
+    CHECK_DEVICE_AVAILABILITY = 4
 
 
 class _RunStatus(IntEnum):
@@ -288,7 +289,11 @@ def test_new_camera_slot_waits_for_in_flight_start_without_event(monkeypatch, pr
     )
     scope, copy, run, action = _grant_inputs(outputs, connection)
 
-    plan = _read_command(outputs)._grant(scope, copy, "camera-a", run, action)
+    copy["source_device_file_id"] = 41
+    command = _read_command(outputs)
+    command._state.update({"device_files": {41: {"observer_action_id": 22}},
+                           "actions": {22: {"driver_id": "driver-a"}}})
+    plan = command._grant(scope, copy, "camera-a", run, action)
 
     assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
     assert plan.read_only and plan.events == ()
@@ -307,6 +312,23 @@ def test_existing_slot_stays_held_while_start_is_in_flight(monkeypatch, producti
     assert plan.result.outcome is outputs.SlotOutcome.HELD
     assert plan.events == ()
     connection.execute.assert_not_called()
+
+
+def test_new_camera_slot_waits_for_in_flight_check(monkeypatch, production):
+    outputs = production.outputs
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_device_holder", lambda *_: None)
+    monkeypatch.setattr(production.preparation.PreparationReads, "availability_in_flight", lambda *args: True)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_first_candidate",
+                        lambda *_args, **_kwargs: pytest.fail("在途检查必须先阻止授予"))
+    scope, copy, run, action = _grant_inputs(outputs, connection)
+    copy["source_device_file_id"] = 41
+    command = _read_command(outputs)
+    command._state.update({"device_files": {41: {"observer_action_id": 22}},
+                           "actions": {22: {"driver_id": "driver-a"}}})
+    plan = command._grant(scope, copy, "camera-a", run, action)
+    assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
+    assert plan.read_only and plan.events == ()
 
 
 def _slot_event(outputs, before, after):
@@ -360,9 +382,19 @@ def test_slot_guard_reads_start_state_and_rejects_only_in_flight_start(productio
         else:
             outputs._read_slot_guard(event, context)
 
-        sql, parameters = connection.execute.call_args.args
+        sql, parameters = connection.execute.call_args_list[0].args
         assert "a.device_id=?" in sql
         assert parameters == (int(outputs._RUN_KIND.START), "camera-a")
+
+
+def test_slot_guard_independently_rejects_in_flight_check(production, monkeypatch):
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    connection.execute.return_value = _cursor(None)
+    monkeypatch.setattr(production.preparation.PreparationReads, "availability_in_flight", lambda *args: True)
+    reads = production.preparation.PreparationReads(connection)
+    with pytest.raises(production.validation_error):
+        production.outputs._read_slot_guard(_slot_event(production.outputs, None, "camera-a"),
+                                            _guard_context(production.outputs, reads=reads))
 
 
 def test_host_source_never_gets_a_camera_slot(production):

@@ -2573,11 +2573,16 @@ class _SlotChangeCommand:
         source = self._state["device_files"][copy["source_device_file_id"]]
         observer = self._state["actions"][source["observer_action_id"]]
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        identity = None
         if observer["driver_id"] == DRIVER_ID:
-            from .physical_alias import source_physical_alias_conflict
+            from .physical_alias import source_physical_alias_conflict, source_physical_identity
             origin = self._state["actions"][source["source_action_id"]]
             if source_physical_alias_conflict(scope.connection, source, observer, origin):
                 return self._decision(SlotOutcome.WAIT, "physical_identity_conflict")
+            identity = source_physical_identity(scope.connection, source, observer, origin)
+        from .preparation import PreparationReads
+        if PreparationReads(scope.connection).availability_in_flight(device_id, identity):
+            return self._decision(SlotOutcome.WAIT, "device_busy")
         if not _read_is_due(action, self._request.occurred_at):
             return self._decision(SlotOutcome.WAIT, "not_due")
         retrying_source_fallback = (
@@ -7146,10 +7151,14 @@ def _read_slot_guard(event, context) -> None:
                     or context.preparation_reads.device_start_in_flight(binding[0])):
                 raise EventValidationError("读取机会授予缺少同设备启动收场依据")
             from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            identity = None
             if binding[1] == DRIVER_ID:
-                from .physical_alias import source_physical_alias_conflict
+                from .physical_alias import source_physical_alias_conflict, source_physical_identity
                 if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
                     raise EventValidationError("读取机会越过了其他逻辑设备的机身责任")
+                identity = source_physical_identity(context.preparation_reads.connection, source, observer, origin)
+            if context.preparation_reads.availability_in_flight(binding[0], identity):
+                raise EventValidationError("读取机会越过了尚未收场的设备检查")
             if run["status"] in _RUN_TERMINAL:
                 raise EventValidationError("读取责任已结束，不能再授予机会")
             if run["retry_wait_required"] != 0:

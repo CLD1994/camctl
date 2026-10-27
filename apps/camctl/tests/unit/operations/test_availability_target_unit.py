@@ -785,6 +785,47 @@ def test_generic_finish_guard_accepts_the_validated_prior_result(
     isolated_result_guard._operation_finish_guard(SimpleNamespace(rows=(row,)), context)
 
 
+@pytest.mark.parametrize("kind", ["START", "READ_FILE"])
+def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_result_guard, monkeypatch, kind):
+    module = isolated_result_guard
+    module._RUN_KIND.RESOLVE_OUTPUT_SCOPE = 11
+    module._RUN_KIND.CHECK_CAPTURE_RESULTS = 7
+    module._RUN_KIND.READ_FILE = 3
+    module._ATTEMPT_STATUS.RUNNING = 1
+    module._EFFECT_STATE.UNKNOWN = 1
+    module.baseline_start_reason = lambda *args: None
+    preparation = ModuleType("camctl.persistence.repositories.preparation")
+    class Reads:
+        def device_read_in_flight(self, device_id):
+            return False
+        def device_start_in_flight(self, device_id):
+            return False
+        def availability_in_flight(self, device_id, identity):
+            return True
+    preparation.PreparationReads = Reads
+    monkeypatch.setitem(sys.modules, preparation.__name__, preparation)
+    run_kind = 1 if kind == "START" else 3
+    run = {"kind": run_kind, "action_id": 10, "activity_id": 20, "copy_id": 30, "attempts_used": 0}
+    attempt = {"run_id": 3, "attempt_no": 1, "intent_event_id": 7, "status": 1, "effect_state": 1,
+               "result_event_id": None, "result_json": None, "error_json": None,
+               "copy_round": None if kind == "START" else 1}
+    row_attempt = SimpleNamespace(table="operation_attempts", row_id=5, before=SimpleNamespace(exists=False),
+                                  after=SimpleNamespace(values=attempt))
+    row_run = SimpleNamespace(table="operation_runs", row_id=3,
+                              before=SimpleNamespace(exists=True, values={"attempts_used": 0}),
+                              after=SimpleNamespace(values={"attempts_used": 1}))
+    event = SimpleNamespace(event_id=7, rows=(row_attempt, row_run), evidence={})
+    state = {"operation_runs": {3: run}, "device_activities": {20: {"id": 20}},
+             "actions": {10: {"id": 10, "device_id": "camera", "driver_id": "driver-a"},
+                         11: {"id": 11, "device_id": "camera", "driver_id": "driver-a"}},
+             "file_copies": {30: {"id": 30, "source_device_file_id": 40,
+                                   "source_intermediate_file_id": None, "slot_device_id": "camera", "round": 1}},
+             "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
+    context = SimpleNamespace(state_rows=state, preparation_reads=Reads())
+    with pytest.raises(module.EventValidationError, match="设备检查"):
+        module._attempt_intent_guard(event, context)
+
+
 def test_release_group_rejects_partial_transaction(release_module, release_group):
     group, events = release_group
     for event in events[:2]:

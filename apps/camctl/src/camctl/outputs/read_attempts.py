@@ -105,10 +105,15 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         origin = row_facts(owned.connection, "actions", source["source_action_id"])
         if observer is None or origin is None:
             raise ConsistencyError("实际读取缺少原设备绑定")
+        identity = None
         if observer["driver_id"] == DRIVER_ID:
-            from camctl.persistence.repositories.physical_alias import source_physical_alias_conflict
+            from camctl.persistence.repositories.physical_alias import source_physical_alias_conflict, source_physical_identity
             if source_physical_alias_conflict(owned.connection, source, observer, origin):
                 return ReadDispatchPrevented("physical_identity_conflict")
+            identity = source_physical_identity(owned.connection, source, observer, origin)
+        from camctl.persistence.repositories.preparation import PreparationReads
+        if PreparationReads(owned.connection).availability_in_flight(observer["device_id"], identity):
+            return ReadDispatchPrevented("device_busy")
     if not read_copy_dispatch_eligible(owned.connection, int(ticket.target_id)):
         return ReadDispatchPrevented("read_input_not_needed")
     return None

@@ -621,6 +621,7 @@ class BeginAttemptCommand:
         if intent.kind is OperationKind.START:
             activity = self._state["device_activities"][intent.target.activity_id]
             from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            identity = None
             if action["driver_id"] == DRIVER_ID:
                 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
                 from .physical_alias import physical_alias_conflict
@@ -632,6 +633,9 @@ class BeginAttemptCommand:
                     raise ConsistencyError("原活动资源键与固定机身身份不符")
                 if physical_alias_conflict(connection, action["device_id"], identity):
                     return self._rejected("physical_identity_conflict")
+            from .preparation import PreparationReads
+            if PreparationReads(connection).availability_in_flight(action["device_id"], identity):
+                return self._rejected("device_busy")
             if (device_read_in_flight(connection, action["device_id"])
                     or capture_scope_blocked(connection, action["device_id"], action["id"],
                                              activity["ownership_mode"], activity["output_scope_json"])):
@@ -725,11 +729,16 @@ class BeginAttemptCommand:
                 source = self._state["device_files"][copy["source_device_file_id"]]
                 observer = self._state["actions"][source["observer_action_id"]]
                 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+                identity = None
                 if observer["driver_id"] == DRIVER_ID:
-                    from .physical_alias import source_physical_alias_conflict
+                    from .physical_alias import source_physical_alias_conflict, source_physical_identity
                     origin = self._state["actions"][source["source_action_id"]]
                     if source_physical_alias_conflict(connection, source, observer, origin):
                         return self._rejected("physical_identity_conflict")
+                    identity = source_physical_identity(connection, source, observer, origin)
+                from .preparation import PreparationReads
+                if PreparationReads(connection).availability_in_flight(slot, identity):
+                    return self._rejected("device_busy")
             if slot is not None and device_start_in_flight(connection, slot):
                 return self._rejected("device_busy")
         allocation = scope.allocate(1)
@@ -1859,6 +1868,7 @@ def _attempt_intent_guard(event, context) -> None:
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         identity = event.evidence.get("start_camera_identity")
+        fixed_identity = None
         if action.get("driver_id") == DRIVER_ID:
             try:
                 original = CameraIdentity(**activity["expected_identity_json"])
@@ -1867,11 +1877,14 @@ def _attempt_intent_guard(event, context) -> None:
                 raise EventValidationError("启动意图缺少可靠机身身份") from error
             if current != original or activity.get("resource_key") != original.resource_key:
                 _fail("启动意图与原固定机身身份不符")
+            fixed_identity = original
             from .physical_alias import physical_alias_conflict
             if physical_alias_conflict(context.preparation_reads.connection, action["device_id"], original):
                 _fail("启动意图越过了其他逻辑设备的机身限制")
         elif identity is not None:
             _fail("其他驱动不能携带 Hasselblad 机身身份")
+        if context.preparation_reads.availability_in_flight(action["device_id"], fixed_identity):
+            _fail("启动意图越过了尚未收场的设备检查")
         try:
             preparation_reason = baseline_start_reason(activity, action)
         except ConsistencyError as error:
@@ -1902,11 +1915,15 @@ def _attempt_intent_guard(event, context) -> None:
             source = _fixed_reference(context.state_rows, "device_files", copy["source_device_file_id"])
             observer = _fixed_reference(context.state_rows, "actions", source["observer_action_id"])
             from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            fixed_identity = None
             if observer["driver_id"] == DRIVER_ID:
-                from .physical_alias import source_physical_alias_conflict
+                from .physical_alias import source_physical_alias_conflict, source_physical_identity
                 origin = _fixed_reference(context.state_rows, "actions", source["source_action_id"])
                 if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
                     _fail("读取意图越过了其他逻辑设备的机身责任")
+                fixed_identity = source_physical_identity(context.preparation_reads.connection, source, observer, origin)
+            if context.preparation_reads.availability_in_flight(slot, fixed_identity):
+                _fail("读取意图越过了尚未收场的设备检查")
     elif copy_round is not None:
         _fail("只有读取尝试保存拷贝轮次")
 

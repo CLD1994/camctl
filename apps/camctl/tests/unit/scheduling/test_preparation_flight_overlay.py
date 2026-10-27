@@ -19,6 +19,7 @@ def reader_module(monkeypatch):
     monkeypatch.setattr(resources, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
     monkeypatch.setattr(enums, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
     definitions = {"operation_runs.kind": SimpleNamespace(START=1, READ_FILE=3, CHECK_DEVICE_AVAILABILITY=12),
+                   "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
                    "operation_attempts.status": SimpleNamespace(RUNNING=1)}
     monkeypatch.setattr(enums, "enum_for", lambda name: definitions[name])
     from camctl.scheduling import resources as scheduling_resources
@@ -62,7 +63,10 @@ class Database:
     def execute(self, sql, parameters):
         attempts = [row for (table, _), row in self.rows.items()
                     if table == "operation_attempts" and row["status"] == 1]
-        if "FROM device_availability_checks c" in sql:
+        if "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?" in sql:
+            run_id, attempt_no = parameters
+            found = [(a["id"],) for a in attempts if a["run_id"] == run_id and a["attempt_no"] == attempt_no]
+        elif "FROM device_availability_checks c" in sql:
             kind, running, device, resource, _ = parameters
             found = [(a["id"],) for a in attempts
                      if a["status"] == running
@@ -252,3 +256,25 @@ def test_forged_saved_identity_is_a_state_error(reader_module):
                    ("operation_attempts", {"id": 5, "run_id": 3, "status": 1})])
     with pytest.raises(ConsistencyError):
         reader_module.PreparationReads(db).availability_in_flight("camera", identity)
+
+
+def test_actual_start_rechecks_original_ticket_and_alias(reader_module, monkeypatch):
+    identity, check = _availability_facts("other-device")
+    db = Database([("device_availability_checks", check),
+        ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31}),
+        ("operation_attempts", {"id": 5, "run_id": 3, "status": 1}),
+        ("actions", {"id": 10, "device_id": "camera", "driver_id": "hasselblad_cfv100c"}),
+        ("device_activities", {"id": 20, "action_id": 10, "expected_identity_json": {
+            "serial": identity.serial, "product_id": identity.product_id}, "resource_key": identity.resource_key}),
+        ("operation_runs", {"id": 4, "kind": 1, "action_id": 10, "activity_id": 20,
+                            "responsibility_key": "start/10", "attempts_used": 1, "status": 2}),
+        ("operation_attempts", {"id": 6, "run_id": 4, "attempt_no": 1, "status": 1, "result_event_id": None})])
+    models = ModuleType("camctl.operations.models")
+    models.AttemptTicket = type("AttemptTicket", (), {})
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+    ticket = models.AttemptTicket()
+    ticket.run_id, ticket.attempt_id, ticket.operation = 4, 1, "control"
+    ticket.responsibility_key, ticket.target_id = "start/10", "20"
+    assert reader_module.recheck_start_availability(SimpleNamespace(connection=db), ticket) == "device_busy"
+    db.rows[("operation_attempts", 5)]["status"] = 2
+    assert reader_module.recheck_start_availability(SimpleNamespace(connection=db), ticket) is None

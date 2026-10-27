@@ -187,6 +187,7 @@ class PreparationReads:
         from contextlib import closing
         from camctl.scheduling.resources import capture_scope_blocked
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        identity = None
         if action["driver_id"] == DRIVER_ID:
             from camctl.devices.drivers.hasselblad.identity import CameraIdentity
             from .physical_alias import physical_alias_conflict
@@ -198,6 +199,8 @@ class PreparationReads:
                 raise ConsistencyError("原活动资源键与固定机身身份不符")
             if physical_alias_conflict(self.connection, action["device_id"], identity):
                 return False
+        if self.availability_in_flight(action["device_id"], identity):
+            return False
         if (not preparation_action_eligible(self.connection, action, activity)
                 or occurred_at > action["scheduled_at"] + action["max_delay_ms"] * 1000
                 or capture_scope_blocked(self.connection, action["device_id"], action["id"],
@@ -241,6 +244,8 @@ class PreparationReads:
         if (not json_equal(row.after.values.get("expected_identity_json"), expected)
                 or row.after.values.get("resource_key") != resource_key):
             raise ConsistencyError("准备活动的机身身份与原申请不符")
+        if self.availability_in_flight(action["device_id"], request.expected_identity):
+            raise ConsistencyError("准备活动越过了尚未收场的设备检查")
         for column in ("state_query_supported", "stop_supported", "safe_repeat_stop", "start_return_meaning",
                        "completion_mode", "ownership_mode", "output_scope_json"):
             if not json_equal(row.after.values.get(column), getattr(capabilities, column)):
@@ -284,6 +289,49 @@ class PreparationReads:
 
     def calls_resolved(self, activity_id):
         return preparation_calls_resolved(self.connection, activity_id, result_events=self.events)
+
+
+def recheck_start_availability(owned, ticket):
+    """实际进入 START 前核对原票据及尚未收场的检查；不保存未派发结果。"""
+    from contextlib import closing
+    from camctl.contracts.values import ConsistencyError
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.operations.models import AttemptTicket
+    from camctl.persistence.transaction import row_facts
+
+    if not isinstance(ticket, AttemptTicket) or ticket.operation != "control":
+        raise ValueError("START 派发复核需要原控制票据")
+    connection = owned.connection
+    run = row_facts(connection, "operation_runs", ticket.run_id)
+    if (run is None or run["kind"] != int(enum_for("operation_runs.kind").START)
+            or run["responsibility_key"] != ticket.responsibility_key
+            or run["responsibility_key"] != f"start/{run['action_id']}"
+            or run["status"] not in (int(enum_for("operation_runs.status").PENDING),
+                                     int(enum_for("operation_runs.status").ACTIVE))
+            or ticket.target_id != str(run["activity_id"]) or run["attempts_used"] != ticket.attempt_id):
+        raise ConsistencyError("START 派发票据与原责任不一致")
+    with closing(connection.execute("SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                                    (run["id"], ticket.attempt_id))) as cursor:
+        found = cursor.fetchone()
+    attempt = None if found is None else row_facts(connection, "operation_attempts", found[0])
+    if (attempt is None or attempt["run_id"] != run["id"]
+            or attempt["status"] != int(enum_for("operation_attempts.status").RUNNING)
+            or attempt["result_event_id"] is not None):
+        raise ConsistencyError("START 派发缺少尚未交付结果的原尝试")
+    action = row_facts(connection, "actions", run["action_id"])
+    activity = row_facts(connection, "device_activities", run["activity_id"])
+    if action is None or activity is None or activity["action_id"] != action["id"]:
+        raise ConsistencyError("START 派发缺少原活动或动作")
+    identity = None
+    if action["driver_id"] == DRIVER_ID:
+        try:
+            identity = CameraIdentity(**activity["expected_identity_json"])
+        except (TypeError, ValueError, KeyError) as error:
+            raise ConsistencyError("START 派发缺少原固定机身") from error
+        if activity["resource_key"] != identity.resource_key:
+            raise ConsistencyError("START 原机身与资源键不一致")
+    return "device_busy" if PreparationReads(connection).availability_in_flight(action["device_id"], identity) else None
 
 
 def preparation_action_eligible(connection, action, activity):
