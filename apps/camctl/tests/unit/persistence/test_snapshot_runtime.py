@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 from unittest.mock import create_autospec
@@ -18,6 +19,8 @@ from camctl.persistence import snapshot_runtime
 from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.runtime import OwnedConnection
+from camctl.logging_runtime.events import event_logging, log_context
+from camctl.logging_runtime.service import LogChannel
 
 
 def _owner(mocker, *, threshold=64):
@@ -37,6 +40,30 @@ def _owner(mocker, *, threshold=64):
 async def _turns():
     for _ in range(6):
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_default_disabled_warning_uses_current_log_channel_once(mocker):
+    database = create_autospec(BusinessDatabase, instance=True)
+    database.metadata.instance_id = "snapshot-database"
+    store = mocker.patch.object(snapshot_runtime, "SqliteSnapshotStore", autospec=True)
+    store.return_value.discover_objects.side_effect = SnapshotEnqueueTimeout("queue full")
+    owner = snapshot_runtime.SnapshotMaintenanceOwner(
+        database, Path("/state.sqlite"), threshold=64, batch_size=16)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    with event_logging(channel), log_context(session_key="snapshot-session"):
+        await owner.start()
+        await _turns()
+        await owner.start()
+        owner.stop_new_work()
+        await owner.settle()
+    records = [json.loads(call.args[0].message) for call in channel.slog.call_args_list]
+    assert len(records) == 1
+    assert records[0]["level"] == "WARNING"
+    assert records[0]["stage"] == "snapshot.maintenance"
+    assert records[0]["database_id"] == "snapshot-database"
+    assert records[0]["session_key"] == "snapshot-session"
+    assert records[0]["message"]
 
 
 def _owned(row):

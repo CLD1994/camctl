@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import closing
+from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -19,6 +19,7 @@ from camctl.history.snapshots import (
     SnapshotEnqueueTimeout, SnapshotMaintenanceError, maintain_snapshots,
 )
 from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime import get_sync_logger
 from camctl.persistence.business import BusinessDatabase, settle_required
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.history import SqliteSnapshotStore
@@ -66,7 +67,9 @@ class SnapshotMaintenanceOwner:
             threshold, batch_size, self._state, self._store)
         self._notifier = WorkNotifier()
         self._on_disabled = (on_disabled if on_disabled is not None
-                             else logging.getLogger(__name__).warning)
+                             else partial(get_sync_logger(__name__).warning,
+                                 extra={"stage": "snapshot.maintenance",
+                                        "database_id": self._database_id}))
         self._started = False
         self._task: asyncio.Task | None = None
         self._discovery_task: asyncio.Task | None = None
