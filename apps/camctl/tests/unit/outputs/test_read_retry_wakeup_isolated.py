@@ -3,6 +3,7 @@
 import asyncio
 import ast
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from decimal import Decimal
 import importlib.util
 from pathlib import Path
@@ -92,7 +93,17 @@ class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
         async def read_one(database, query, parameters):
             return (1, 1, 3)
 
-        gate = SimpleNamespace(remaining=lambda *args, **kwargs: None)
+        source_path = SOURCE / "operations" / "attempts.py"
+        tree = ast.parse(source_path.read_text())
+        selected = [node for node in tree.body
+                    if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                    and node.name in ("retry_wait_remaining_s", "RetryWaitGate")]
+        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+                                    *selected], type_ignores=[])
+        namespace = {"dataclass": dataclass, "field": field, "Decimal": Decimal, "__name__": __name__}
+        exec(compile(ast.fix_missing_locations(isolated), str(source_path), "exec"), namespace)
+        gate = namespace["RetryWaitGate"]()
+        gate.established("read/7", 1_000_000_000)
         runtime = SimpleNamespace(database=None, retry_gate=gate, monotonic_ns=lambda: 6_000_000_000,
                                   on_read_retry_deadline=lambda target, now: scheduled.append((target, now)))
         remaining = load_function(SOURCE / "outputs" / "obtain_flow.py", "_read_wait_remaining", {
