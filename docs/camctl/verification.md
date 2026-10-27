@@ -2,6 +2,33 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 错误日志的断电持久性软件验证（2026-10-27）
+
+[分级写入完成要求](../architecture/logging.md#分级写入完成与断电持久性)将 ERROR／CRITICAL 的成功回执绑定到文件及必要目录同步；普通调用继续立即提交。原记录的追加、持久性及 stderr 交付分别保存，副本失败不会重写已经追加的原记录。[实施计划](../superpowers/plans/2026-10-27-error-log-durability.md)已完成软件范围，使用方式见[通用日志入口](logging-runtime.md#日志异步投递入口与有界队列)。
+
+最终受测源码为 `b3d0ebf237f173b754c5bd56078c53cf2e37b6b8`。环境为 Linux x86_64 开发容器、CPython 3.11.17、SQLite 3.53.1，工作目录为 `/workspaces/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。显式绑定所属源码及测试路径，清除计时和 Python 环境变量，逐进程串行运行。实际 UTC 为 11:23:41—11:26:26，以下全部进程退出 0；命令统一为 `python -m pytest <范围> -q --tb=short`。
+
+| 检查范围 | 实际结果 |
+| --- | --- |
+| `apps/camctl/tests/unit` | 9696 项通过、1 项跳过、2 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/logging_runtime` | 完整目录 295 项通过、1 条既有 asyncio 标记警告。 |
+| `apps/camctl/tests/integration/bootstrap` 的五个日志文件及六个副本节点，精确命令保存在收据中 | 31 项通过；含真实生产装配、文件／目录同步失败、原控制异常及副本拥有者诊断。 |
+| `apps/camctl/tests/integration/session/test_custom_delivery_durability.py` | 6 项通过；公开 `SessionContext`／`run_session` 覆盖三种自定义交付形状及两类写入事实。 |
+| `apps/camctl/tests/integration/outputs/test_read_diagnostics.py` | 14 项通过。 |
+| `apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py` | 2 项通过。 |
+
+348 项相关集成保留取消、禁用、正常排空及原异常去重，新增真实文件同步门闩及失败见证。INFO 先创建或轮换后的 ERROR、新建目录链、日志文件符号链接的实际目标目录及正式名字目录均覆盖；同步失败仍保留实际追加事实，不确认持久成功。轮换使用正式名字间的硬链接，覆盖搬迁、删除及整理期间的中断，恢复先按文件身份去重和压紧，再判断正常淘汰。保留数为 1 的截断及最旧超限归档删除保持原规则。
+
+错误收场分别核对文件操作控制与副本既有有序异常选择，保持原异常对象、因果及完整写入事实。实际副本拥有者在原日志同步失败后交付一次完整错误诊断；原日志已持久而复制、发布或解锁失败时，仍保留原日志成功事实。stderr 入口、不可读／不可附加的异常事实和关闭摘要均通过公共入口验证，不能用附属诊断失败改写原控制或已经完成的写入。
+
+最终独立审查核对相同生产文件摘要，并以 9 个公共分区复核旧副本异常选择、独立解锁控制及两入口的符号链接目录同步，退出 0。分域较早探针各自保留实际快照，不计为最终来源重跑。完整命令、UTC、环境、来源、日志及退出码位于 `.local/verification/error-log-durability/final/`；分域、基线与独立审查原始证据分别在同级 `agents/`、`review/`，首次合并检查保存在 `attempt-df5d911b/`。
+
+文档的 5777 个本地文件链接检查及差异空白检查通过，新增标题锚点另行核对。
+
+首次合并检查为单元通过、日志集成 282 项通过及 2 项副本异常选择回归；保留旧断言修复后，最终完整日志目录通过。额外扩大 bootstrap 检查中的旧报告调度等待超时、低层接纳的 stderr 断言及报告身份文案断言，均在 `08abcafb` 隔离基线复现，未计为本轮最终范围通过。失配的格式化及轮换故障替身已迁移到实际边界，保留原断言；旧 session 三个形状因已废弃的 `open_connection` 装配在进入目标前失败，其覆盖由上述公开会话六分区承接，未将原文件称为通过。
+
+本记录证明软件同步调用、顺序、失败处理及回执接线，不替代目标 ARM Linux 文件系统和存储设备的物理断电验收。本项未部署、未更新真机验证安装，未执行真实相机、目标性能、Windows 或 macOS 验收。
+
 ## 调用即提交与写入回执验证（2026-10-27）
 
 [通用日志接口](../superpowers/specs/2026-10-27-general-logging-api.md)在调用时立即提交，忽略返回回执也会由原日志线程继续处理。`await logger.info(...)` 或稍后 `await receipt` 等待该条文件追加并 flush 的实际结果，不要求每条 fsync。原诊断及日志副本共享同一条写入事实，底层 alog 仍只等待接纳。使用方式见[日志入口](logging-runtime.md#日志异步投递入口与有界队列)，实施进度见[回执计划](../superpowers/plans/2026-10-27-log-write-receipts.md)。
