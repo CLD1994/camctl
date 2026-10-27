@@ -136,14 +136,23 @@ class ReadPlanTests(unittest.TestCase):
 
 
 class ReadGuardTests(unittest.TestCase):
-    def check(self, owner_id, run_action_id, status, canceled, source, parent_table):
+    def check(self, owner_id, run_action_id, status, canceled, source, parent_table,
+              *, hasselblad=False, preparation_held=False, capture_held=False):
         outputs = output_stubs()
         preparation = ModuleType("camctl.persistence.repositories.preparation")
         class PreparationReads:
+            connection = None
             def device_start_in_flight(self, slot): return False
+            def availability_in_flight(self, slot, identity): return False
+            def capture_holds_device(self, slot): return capture_held
         preparation.PreparationReads = PreparationReads
         definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
         definitions.DRIVER_ID = "hasselblad"
+        alias = ModuleType("camctl.persistence.repositories.physical_alias")
+        alias.source_physical_alias_conflict = lambda *args: False
+        alias.source_physical_identity = lambda *args: "identity"
+        scheduling = ModuleType("camctl.scheduling.resources")
+        scheduling.current_preparation_holder = lambda *args: object() if preparation_held else None
         def fail(message): raise GuardError(message)
         copy = {"id": 9, "delivery_id": None, "processing_id": None, "inspection_id": None,
                 "slot_device_id": "camera" if source == "device" else None,
@@ -152,8 +161,8 @@ class ReadGuardTests(unittest.TestCase):
               "segment_inspections": "inspection_id"}[parent_table]] = 8
         action = {"id": owner_id, "status": status, "cancel_requested": canceled}
         state = {"file_copies": {9: copy}, parent_table: {8: {"action_id": owner_id}},
-                 "actions": {owner_id: action, 16: {"driver_id": "other"}},
-                 "device_files": {15: {"observer_action_id": 16}}}
+                 "actions": {owner_id: action, 16: {"driver_id": "hasselblad" if hasselblad else "other"}},
+                 "device_files": {15: {"observer_action_id": 16, "source_action_id": 16}}}
         attempt = SimpleNamespace(table="operation_attempts", before=SimpleNamespace(exists=False),
             after=SimpleNamespace(values={"run_id": 11, "intent_event_id": 20, "result_event_id": None, "result_json": None,
                 "error_json": None, "status": 1, "effect_state": 1, "attempt_no": 1, "copy_round": 1}))
@@ -172,7 +181,8 @@ class ReadGuardTests(unittest.TestCase):
             "EventValidationError": GuardError}
         guard = extract("_attempt_intent_guard", namespace)
         with patch.dict(sys.modules, {outputs.__name__: outputs, preparation.__name__: preparation,
-                                      definitions.__name__: definitions}):
+                                      definitions.__name__: definitions, alias.__name__: alias,
+                                      scheduling.__name__: scheduling}):
             guard(event, context)
 
     def test_device_and_host_eligible_owners_remain_accepted(self):
@@ -198,6 +208,12 @@ class ReadGuardTests(unittest.TestCase):
     def test_trigger_action_cannot_replace_the_copy_owner(self):
         with self.assertRaises(GuardError):
             self.check(8, 7, 2, 0, "host", "deliveries")
+
+    def test_hasselblad_read_does_not_pass_capture_or_preparation(self):
+        for reason in ("preparation_held", "capture_held"):
+            with self.subTest(reason=reason), self.assertRaises(GuardError):
+                self.check(7, 7, 2, 0, "device", "deliveries", hasselblad=True, **{reason: True})
+        self.check(7, 7, 2, 0, "device", "deliveries", hasselblad=True)
 
 
 class ReadConsumerTests(unittest.IsolatedAsyncioTestCase):

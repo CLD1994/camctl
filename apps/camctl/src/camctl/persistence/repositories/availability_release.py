@@ -60,7 +60,6 @@ def _no_conflicts(connection, check, attempt_id):
         ("SELECT 1 FROM device_activities d WHERE d.resource_key=? AND d.occupancy_state=?"
          " AND NOT EXISTS(SELECT 1 FROM device_availability_targets t WHERE t.check_id=? AND t.activity_id=d.id) LIMIT 1",
          (check["resource_key"], int(enum_for("device_activities.occupancy_state").HELD), check["id"])),
-        ("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1", (check["device_id"],)),
         ("SELECT 1 FROM actions a JOIN baseline_read_calls b ON b.action_id=a.id"
          " WHERE a.device_id=? AND b.state=1 LIMIT 1", (check["device_id"],)),
     )
@@ -68,6 +67,9 @@ def _no_conflicts(connection, check, attempt_id):
         with closing(connection.execute(sql, args)) as cursor:
             if cursor.fetchone() is not None:
                 raise AvailabilityTargetBlocked("原设备仍有其他未收场责任")
+    from .retry_wait_reads import read_reservation_blocks_control
+    if read_reservation_blocks_control(connection, check["device_id"]):
+        raise AvailabilityTargetBlocked("原设备读取调用尚未收场")
 
 
 def _release_context(connection, event, transaction, run_id, check_id, attempt_id):

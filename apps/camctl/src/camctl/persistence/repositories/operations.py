@@ -746,8 +746,14 @@ class BeginAttemptCommand:
                         return self._rejected("physical_identity_conflict")
                     identity = source_physical_identity(connection, source, observer, origin)
                 from .preparation import PreparationReads
-                if PreparationReads(connection).availability_in_flight(slot, identity):
+                preparation_reads = PreparationReads(connection)
+                if preparation_reads.availability_in_flight(slot, identity):
                     return self._rejected("device_busy")
+                if observer["driver_id"] == DRIVER_ID:
+                    from camctl.scheduling.resources import current_preparation_holder
+                    if (current_preparation_holder(connection, slot) is not None
+                            or preparation_reads.capture_holds_device(slot)):
+                        return self._rejected("device_busy")
             if slot is not None and device_start_in_flight(connection, slot):
                 return self._rejected("device_busy")
         allocation = scope.allocate(1)
@@ -2037,6 +2043,11 @@ def _attempt_intent_guard(event, context) -> None:
                 fixed_identity = source_physical_identity(context.preparation_reads.connection, source, observer, origin)
             if context.preparation_reads.availability_in_flight(slot, fixed_identity):
                 _fail("读取意图越过了尚未收场的设备检查")
+            if observer["driver_id"] == DRIVER_ID:
+                from camctl.scheduling.resources import current_preparation_holder
+                if (current_preparation_holder(context.preparation_reads.connection, slot) is not None
+                        or context.preparation_reads.capture_holds_device(slot)):
+                    _fail("读取意图越过了已有拍摄或准备持有者")
     elif copy_round is not None:
         _fail("只有读取尝试保存拷贝轮次")
 

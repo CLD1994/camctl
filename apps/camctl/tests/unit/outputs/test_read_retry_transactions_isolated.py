@@ -76,6 +76,7 @@ def load_reads():
     enums.enum_for = lambda name: {
         "operation_attempts.status": SimpleNamespace(RUNNING=1, FAILED=3, UNKNOWN=4),
         "operation_runs.kind": SimpleNamespace(READ_FILE=3),
+        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
         "deliveries.status": DeliveryStatus,
         "device_files.completion_state": SimpleNamespace(COMPLETE=3),
     }[name]
@@ -107,6 +108,31 @@ def load_reads():
 
 
 class RetryReadFactsTests(unittest.TestCase):
+    def test_control_preserves_reservation_and_requires_settled_failure(self):
+        module, modules = load_reads()
+        class ReservationConnection(Connection):
+            def __init__(self, rows, **kwargs):
+                super().__init__(**kwargs)
+                self.rows = rows
+            def execute(self, query, parameters=()):
+                if "SELECT c.id,r.id,r.status,r.attempts_used" in query:
+                    return Cursor(self.rows)
+                return super().execute(query, parameters)
+        with patch.dict(sys.modules, modules):
+            check = module.read_reservation_blocks_control
+            self.assertFalse(check(ReservationConnection([]), "camera"))
+            self.assertFalse(check(ReservationConnection([(9, 7, 2, 1, 1)]), "camera"))
+            self.assertFalse(check(ReservationConnection([(9, 7, 2, 1, 0)], event=event(2)), "camera"))
+            self.assertTrue(check(ReservationConnection([(9, 7, 2, 1, 0)], event=event(3)), "camera"))
+            self.assertTrue(check(ReservationConnection([(9, 7, 2, 0, 0)]), "camera"))
+            self.assertTrue(check(ReservationConnection([(9, 7, 2, 1, 1)], running=True), "camera"))
+            self.assertTrue(check(ReservationConnection([(9, 7, 2, 1, 1)], last=(12, 1, None, None)), "camera"))
+            self.assertTrue(check(ReservationConnection([(9, 7, 2, 1, 1)], last=(12, 2, "{}", 101)), "camera"))
+            with self.assertRaises(module.ConsistencyError):
+                check(ReservationConnection([(9, None, None, None, None)]), "camera")
+            with self.assertRaises(module.ConsistencyError):
+                check(ReservationConnection([(9, 7, 2, 1, 1), (10, 8, 2, 1, 1)]), "camera")
+
     def test_complete_and_abandon_remain_distinct(self):
         module, _ = load_reads()
         with patch.dict(sys.modules, load_reads()[1]):

@@ -153,8 +153,13 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
     from camctl.capture.software_recovery import recovery_locked
     if recovery_locked(connection, device_id):
         raise AvailabilityTargetBlocked("设备的软件恢复责任尚未收场")
-    if _one(connection, "SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1", (device_id,)):
-        raise AvailabilityTargetBlocked("设备读取机会尚未收场")
+    from .retry_wait_reads import read_reservation_blocks_control
+    if read_reservation_blocks_control(connection, device_id):
+        raise AvailabilityTargetBlocked("设备读取调用尚未收场")
+    from camctl.outputs.read_discovery import device_holder
+    if (device_holder(connection, device_id) is not None
+            and (request.trigger_copy_id is not None or request.trusted_wall_now < action["scheduled_at"])):
+        raise AvailabilityTargetBlocked("设备读取机会仍由原拷贝保留")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     if device_read_in_flight(connection, device_id) or device_start_in_flight(connection, device_id):
         raise AvailabilityTargetBlocked("设备调用尚未收场")

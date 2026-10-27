@@ -32,6 +32,15 @@ class PreparationReads:
             return device_start_in_flight(self.connection, device_id)
         return self._device_in_flight(device_id, "START")
 
+    def capture_holds_device(self, device_id):
+        from contextlib import closing
+        with closing(self.connection.execute(
+            "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
+            " WHERE a.device_id=? AND d.activity_state<>3 AND d.occupancy_state=1 LIMIT 1",
+            (device_id,),
+        )) as cursor:
+            return cursor.fetchone() is not None
+
     def availability_in_flight(self, device_id, identity=None):
         """按逻辑设备和固定机身核对已提交或已验证前序的实际检查尝试。"""
         from contextlib import closing
@@ -206,10 +215,9 @@ class PreparationReads:
                 or capture_scope_blocked(self.connection, action["device_id"], action["id"],
                                          activity["ownership_mode"], activity["output_scope_json"])):
             return False
-        with closing(self.connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
-                                            (action["device_id"],))) as cursor:
-            if cursor.fetchone() is not None:
-                return False
+        from .retry_wait_reads import read_reservation_blocks_control
+        if read_reservation_blocks_control(self.connection, action["device_id"]):
+            return False
         with closing(self.connection.execute(
                 "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
                 " WHERE a.device_id=? AND d.action_id<>? AND d.occupancy_state=1"
@@ -255,10 +263,13 @@ class PreparationReads:
                 " WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (action["device_id"],))) as cursor:
             if cursor.fetchone() is not None:
                 raise ConsistencyError("准备活动越过了同设备原占用")
-        with closing(self.connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
-                                            (action["device_id"],))) as cursor:
-            if cursor.fetchone() is not None:
-                raise ConsistencyError("准备活动越过了同设备原读取调用")
+        from .retry_wait_reads import read_reservation_blocks_control
+        if read_reservation_blocks_control(self.connection, action["device_id"]):
+            raise ConsistencyError("准备活动越过了同设备原读取调用")
+        if request.trusted_wall_now < action["scheduled_at"]:
+            from camctl.outputs.read_discovery import device_holder
+            if device_holder(self.connection, action["device_id"]) is not None:
+                raise ConsistencyError("提前准备不能越过原读取机会")
         mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
         with closing(self.connection.execute(
                 "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"

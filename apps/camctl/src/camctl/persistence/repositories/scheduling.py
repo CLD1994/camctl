@@ -1393,9 +1393,12 @@ class ReservePreparationCommand:
                 " WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (action["device_id"],))) as cursor:
             if cursor.fetchone() is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
-        with closing(connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
-                                        (action["device_id"],))) as cursor:
-            if cursor.fetchone() is not None:
+        from .retry_wait_reads import read_reservation_blocks_control
+        if read_reservation_blocks_control(connection, action["device_id"]):
+            return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
+        if request.trusted_wall_now < action["scheduled_at"]:
+            from camctl.outputs.read_discovery import device_holder
+            if device_holder(connection, action["device_id"]) is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
         with closing(connection.execute(
