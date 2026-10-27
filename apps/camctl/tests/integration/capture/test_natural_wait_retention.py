@@ -20,7 +20,7 @@ from .result_consumer_fixtures import consumer_world, returned
 from .test_capture_contract import _NOW
 from .test_native_completion_context import _osv
 from .test_finite_cancel import _finish_cancel
-from .test_natural_wait_time_eligibility import SmallNativeCatalog, _world
+from .test_natural_wait_time_eligibility import SmallNativeCatalog, _public_world, _world
 from .test_result_page_history import _actual, _CURSOR
 
 pytestmark = pytest.mark.asyncio
@@ -44,12 +44,33 @@ def _retained(owned, action_id):
     return owned.connection.execute('SELECT o.id,o.device_file_id,f.completion_evidence_json FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=? ORDER BY o.id', (action_id,)).fetchall()
 
 
+async def _finish_public_cancel(owned, runtime, wall):
+    from camctl.cancellation.models import FinishCancelAction
+    from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
+    from camctl.cancellation.settlement import TargetSettlement
+    from camctl.persistence.repositories.cancellation import CancellationRepository
+
+    repository = CancellationRepository()
+    origin, = owned.connection.execute('SELECT id FROM actions WHERE type=6').fetchone()
+    items = tuple(row[0] for row in owned.connection.execute(
+        'SELECT id FROM cancel_items WHERE action_id=?', (origin,)))
+    settlement = TargetSettlement(runtime.database, None, repository, lambda _: '', lambda: wall[0])
+    await apply_cancel(ApplyCancel(origin, items),
+        CancellationRuntime(runtime.database, repository, settlement, lambda: wall[0]))
+    key = new_operation_key()
+    receipt = await runtime.database.write(
+        lambda connection: repository.finish_cancel_action(FinishCancelAction(origin, wall[0]), key, connection),
+        key=key)
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (origin,)).fetchone() == (4,)
+
+
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('canceled', [False, True])
 @pytest.mark.parametrize('mixed', [False, True])
 @pytest.mark.parametrize('budget', [1, 2])
 async def test_qualified_files_survive_bad_latest_page_without_completing_collection(tmp_path, startup, canceled, mixed, budget):
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(budget if mixed else budget+1, Decimal('1'), Decimal(0))
     calls = []
     async def actual(request, batch):
@@ -73,7 +94,7 @@ async def test_qualified_files_survive_bad_latest_page_without_completing_collec
         assert owned.connection.execute("SELECT completion_state FROM device_files WHERE json_extract(identity_key,'$[2]')='/DCIM/a.OSV'").fetchone() == (3,)
         original_file = owned.connection.execute("SELECT id,completion_evidence_json FROM device_files WHERE json_extract(identity_key,'$[2]')='/DCIM/a.OSV'").fetchone()
         assert owned.connection.execute("SELECT completion_state FROM device_files WHERE json_extract(identity_key,'$[2]')='/DCIM/b.OSV'").fetchone() == (1,)
-        assert runtime.action(aid)['status'] == 2
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (2,)
         # 校时恢复只允许沿剩余预算的新尝试，不能重新解释坏页。
         for _ in range(budget+2):
             wall[0] = due+100
@@ -81,8 +102,8 @@ async def test_qualified_files_survive_bad_latest_page_without_completing_collec
         retained = _retained(owned, aid)
         assert len(retained) == 1 and retained[0][1:] == original_file
         assert _pages(owned)[:2] == original_pages
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
-        if canceled: await _finish_cancel(owned, wall)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6 if canceled else 4,)
+        if canceled: await _finish_public_cancel(owned, runtime, wall)
         assert owned.connection.execute('SELECT activity_state,occupancy_state,result_set_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (1, 1, 4)
         assert len(calls) == (budget+1)
         assert stopper.stop.await_count == int(canceled)
@@ -93,6 +114,7 @@ async def test_qualified_files_survive_bad_latest_page_without_completing_collec
         restored = history.restore_entity('action', aid, history.current_boundary())
         assert restored[('actions', aid)]['status'] == (6 if canceled else 4)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -100,7 +122,7 @@ async def test_qualified_files_survive_bad_latest_page_without_completing_collec
 @pytest.mark.parametrize('canceled', [False, True])
 @pytest.mark.parametrize('latest', ['empty', 'missing'])
 async def test_known_complete_file_cannot_fill_current_empty_or_missing_collection(tmp_path, startup, canceled, latest):
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(2, Decimal('1'), Decimal(0))
     calls = []
     async def actual(request, batch):
@@ -116,15 +138,16 @@ async def test_known_complete_file_cannot_fill_current_empty_or_missing_collecti
         await advance(aid, runtime)
         await advance(aid, runtime)
         if latest == 'missing':
-            assert runtime.action(aid)['status'] == 2
+            assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (2,)
             await advance(aid, runtime)
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
-        if canceled: await _finish_cancel(owned, wall)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6 if canceled else 4,)
+        if canceled: await _finish_public_cancel(owned, runtime, wall)
         assert len(_retained(owned, aid)) == 1
         activity = owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone()
         assert activity == (1, 1)
         assert len(calls) == 2
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -163,7 +186,7 @@ async def test_wait_repository_uses_same_sent_semantics_as_completion_context(tm
 @pytest.mark.parametrize('canceled', [False, True])
 @pytest.mark.parametrize('original_qualified', [False, True])
 async def test_optional_preview_never_uses_bad_original_page_for_pairing(tmp_path, startup, canceled, original_qualified):
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     calls = []
     preview = {**_osv(), 'identity': '/DCIM/a.LRF', 'locator': {'path': '/DCIM/a.LRF'},
@@ -185,11 +208,12 @@ async def test_optional_preview_never_uses_bad_original_page_for_pairing(tmp_pat
         retained = _retained(owned, aid)
         assert len(retained) == int(original_qualified)
         assert owned.connection.execute('SELECT COUNT(*) FROM device_files WHERE completion_state=3').fetchone() == (int(original_qualified),)
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
-        if canceled: await _finish_cancel(owned, wall)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6 if canceled else 4,)
+        if canceled: await _finish_public_cancel(owned, runtime, wall)
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (1, 1)
         assert len(calls) == 2
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -198,7 +222,8 @@ async def test_optional_preview_never_uses_bad_original_page_for_pairing(tmp_pat
 @pytest.mark.parametrize('committed', [False, True])
 async def test_qualified_file_unknown_keeps_original_source_and_key_across_runtime_restart(tmp_path, startup, canceled, committed):
     from camctl.persistence.models import DbOutcome
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    from .public_assembly import assemble_capture
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     calls = []
     async def actual(request, batch):
@@ -226,8 +251,21 @@ async def test_qualified_file_unknown_keeps_original_source_and_key_across_runti
         with pytest.raises(ConsistencyError): await advance(aid, runtime)
         assert len(calls) == 2 and len(requests) == 2
         pages = _pages(owned)
-        # 新运行时接管未决原文件申请；时间映射为新会话，申请仍保留原键。
-        runtime = replace(runtime, natural_wait_states={}, timelapse_deadlines={})
+        # 新装配接管未决原文件申请；时间映射为新会话，申请仍保留原键。
+        previous = runtime
+        runtime, database = await assemble_capture(
+            owned, driver=previous.driver, evidence=previous.evidence,
+            results=previous.results, staging=tmp_path,
+            wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0],
+            session_state={
+                'pending_file_observations': previous.pending_file_observations,
+                'pending_result_scans': previous.pending_result_scans,
+            })
+        await previous.database.close()
+        runtime.stopper = previous.stopper
+        runtime.wait_config = previous.wait_config
+        runtime.check_config = previous.check_config
+        runtime.capture.save_file_completion = uncertain
         wall[0] = due-1
         await advance(aid, runtime)
         assert requests[0] == requests[1] == requests[2]
@@ -235,17 +273,18 @@ async def test_qualified_file_unknown_keeps_original_source_and_key_across_runti
         wall[0] = due+100
         for _ in range(3): await advance(aid, runtime)
         assert len(_retained(owned, aid)) == 1
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
-        if canceled: await _finish_cancel(owned, wall)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6 if canceled else 4,)
+        if canceled: await _finish_public_cancel(owned, runtime, wall)
         assert len(calls) == 2 and stopper.stop.await_count == int(canceled)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
 @pytest.mark.parametrize('startup', [0, 1000])
 @pytest.mark.parametrize('canceled', [False, True])
 async def test_bad_nonfinal_page_stops_remaining_pages_but_retains_good_previous_page(tmp_path, startup, canceled):
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, startup, canceled)
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, startup, canceled)
     runtime.check_config = AttemptConfig(1, Decimal('1'), Decimal(0))
     calls = []
     async def actual(request, batch):
@@ -266,10 +305,11 @@ async def test_bad_nonfinal_page_stops_remaining_pages_but_retains_good_previous
         for _ in range(3): await advance(aid, runtime)
         assert len(_retained(owned, aid)) == 1
         assert _pages(owned) == pages and len(calls) == 2
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
-        if canceled: await _finish_cancel(owned, wall)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (6 if canceled else 4,)
+        if canceled: await _finish_public_cancel(owned, runtime, wall)
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (1, 1)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -397,7 +437,7 @@ async def test_previously_held_good_page_after_bad_page_keeps_independent_file_f
 
 
 async def test_retained_sources_keep_bounded_pages_and_original_completion_metadata(tmp_path):
-    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _world(tmp_path, 1000)
+    owned, runtime, aid, advance, wall, mono, result, stopper, due = await _public_world(tmp_path, 1000)
     runtime.check_config = AttemptConfig(2, Decimal('1'), Decimal(0))
     calls, reads = [], []
     read = runtime.capture.read_result_sources
@@ -421,7 +461,8 @@ async def test_retained_sources_keep_bounded_pages_and_original_completion_metad
         await advance(aid, runtime)
         wall[0] = due+100
         await advance(aid, runtime)
-        assert runtime.action(aid)['status'] == 4 and len(_retained(owned, aid)) == 2
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (4,)
+        assert len(_retained(owned, aid)) == 2
         first = read(calls[0], None, 1, owned)
         second = read(calls[0], first.next_cursor, 1, owned)
         assert first.next_cursor is not None and second.next_cursor is None
@@ -430,4 +471,5 @@ async def test_retained_sources_keep_bounded_pages_and_original_completion_metad
         assert first.items[0][0].original_name is None
         assert reads and len(calls) == 2
     finally:
+        await runtime.database.close()
         owned.connection.close()
