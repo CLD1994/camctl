@@ -218,6 +218,13 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
             action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
             if activity is None or action is None:
                 raise AvailabilityTargetStateError("旧活动缺少实际动作或活动事实")
+            with closing(connection.execute(
+                "SELECT check_id FROM device_availability_targets WHERE action_id=? AND activity_id=? LIMIT 1",
+                (check["action_id"], activity_id),
+            )) as cursor:
+                existing = cursor.fetchone()
+            if existing is not None:
+                raise AvailabilityTargetReuse(existing[0])
             require_target_facts(check, activity, action)
             with closing(connection.execute(
                 "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
@@ -250,13 +257,6 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
             )) as cursor:
                 if cursor.fetchone() is not None:
                     raise AvailabilityTargetBlocked("旧活动已有照片结果，必须沿原文件责任处理")
-            with closing(connection.execute(
-                "SELECT check_id FROM device_availability_targets WHERE action_id=? AND activity_id=? LIMIT 1",
-                (check["action_id"], activity_id),
-            )) as cursor:
-                existing = cursor.fetchone()
-            if existing is not None:
-                raise AvailabilityTargetReuse(existing[0])
         seen = True
         yield page
     if not seen:

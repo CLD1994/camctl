@@ -170,11 +170,11 @@ class _CreationConnection(_PagedConnection):
         elif "FROM device_activities WHERE" in sql:
             rows = [(self.activity_id,)] if args[2] == 0 else []
         elif "FROM operation_attempts" in sql:
-            rows = [(1,)] if self.fault == ("photo" if "json_each" in sql else "in_flight") else []
+            rows = [(1,)] if self.fault in (("photo",) if "json_each" in sql else ("in_flight", "existing_in_flight")) else []
         elif "FROM operation_runs WHERE" in sql:
             rows = [(1,)] if self.fault == "confirmation" else []
         elif "FROM device_availability_targets" in sql:
-            rows = [(1,)] if self.fault == "existing" else []
+            rows = [(1,)] if self.fault in ("existing", "existing_in_flight") else []
         else:
             raise AssertionError(sql)
         cursor = _Cursor(rows)
@@ -217,6 +217,13 @@ def test_creation_targets_identify_the_existing_responsibility(target_rules, cre
     check, _ = creation_facts
     with pytest.raises(target_rules.AvailabilityTargetReuse) as caught:
         list(target_rules.iter_creation_targets(_CreationConnection(25, "existing"), check, batch_size=2))
+    assert caught.value.check_id == 1
+
+
+def test_existing_check_is_reused_before_classifying_unsettled_original_call(target_rules, creation_facts):
+    check, _ = creation_facts
+    with pytest.raises(target_rules.AvailabilityTargetReuse) as caught:
+        list(target_rules.iter_creation_targets(_CreationConnection(25, "existing_in_flight"), check, batch_size=2))
     assert caught.value.check_id == 1
 
 
