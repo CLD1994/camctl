@@ -216,6 +216,25 @@ async def test_normal_shutdown_waits_for_unawaited_important_file_sync(tmp_path,
     assert not world.fallback
 
 
+async def test_shutdown_summary_uses_typed_file_completion_when_file_is_closed(tmp_path):
+    path = tmp_path / "camctl.log"
+    async with logging_file(path, gate="before", capacity=3, low=1, high=2) as world:
+        await world.channel.alog(LogRecord(LogLevel.WARNING, "consumer-gate"))
+        await entered_writer(world)
+        for number in range(3):
+            assert world.channel.slog(LogRecord(LogLevel.WARNING, f"backlog-{number}")).decision.kind is AdmissionKind.ACCEPTED
+        assert (await receipt_result(LOGGER.info("dropped-info"))).decision.kind is AdmissionKind.DROPPED
+        world.release.set()
+        await completed(asyncio.create_task(world.channel.join()))
+        world.file.close()
+        result = await completed(asyncio.create_task(close_logging(world.runtime)))
+        assert result.dropped_total == 1
+        assert result.summary_written is False and result.listener_stopped is True
+    assert [record["message"] for record in read_records(path)] == [
+        "consumer-gate", "backlog-0", "backlog-1", "backlog-2"]
+    assert not world.fallback
+
+
 async def test_ignored_mixed_logger_calls_submit_in_order_and_shutdown_drains(tmp_path, recwarn):
     path = tmp_path / "camctl.log"
     async with logging_file(path) as world:
