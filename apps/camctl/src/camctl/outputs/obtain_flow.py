@@ -162,6 +162,7 @@ class ObtainRuntime:
     pending_segment_selections: dict = field(default_factory=dict)
     pending_segment_queries: dict = field(default_factory=dict)
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
+    on_read_retry_deadline: Callable[[int, int], None] | None = None
 
 
 @dataclass
@@ -638,6 +639,14 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     发不阻塞读取推进。
     """
     page = (await runtime.discovery.reads(runtime.database, "reads", now))
+    # 已持有机会的重试间隔与拍摄占用并行计时。
+    for item in page.items:
+        if not item.held or item.copy_id in runtime.pending_read_results:
+            continue
+        assembly = runtime.devices.get(item.device_id)
+        if assembly is not None:
+            await _read_wait_remaining(runtime, item.copy_id, assembly.retry_interval_s,
+                                       assembly.max_read_attempts)
     if runtime.binding_check is not None:
         candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
         for copy_id, source_id, device_id, driver_id in candidates:
@@ -759,13 +768,20 @@ async def _read_wait_remaining(
         " FROM operation_runs WHERE responsibility_key = ?", (responsibility,))
     if row is None:
         return None
-    return runtime.retry_gate.remaining(
+    now_ns = runtime.monotonic_ns()
+    remaining = runtime.retry_gate.remaining(
         responsibility,
         attempts_used=int(row[0]),
         retry_wait_required=int(row[1]) == 1,
         max_attempts_used=int(row[2]) if maximum is None else maximum,
         interval_s=interval_s,
-        now_ns=runtime.monotonic_ns())
+        now_ns=now_ns)
+    if remaining is not None and runtime.on_read_retry_deadline is not None:
+        from decimal import ROUND_CEILING
+
+        target_ns = now_ns + int((remaining * 1_000_000_000).to_integral_value(rounding=ROUND_CEILING))
+        runtime.on_read_retry_deadline(target_ns, now_ns)
+    return remaining
 
 
 async def _begin_read_attempt(
