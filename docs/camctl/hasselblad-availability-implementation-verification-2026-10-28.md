@@ -43,6 +43,15 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 两条命令退出码均为 0，分别为 37 项和 15 项通过。验证时的提交分别为 `57d58d7a` 和 `fd2b0e56`，集成提交为 `e7409865` 和 `035016f5`。前台输出未保存原始日志。这些测试覆盖身份值、资源键、配置解析和证据类别；不证明身份已经在活动预留时固定，也不证明可用性事务、历史回放或业务调用已经接通。
 
+在 `/tmp/camctl-h2-doctor` 的提交 `34e49c1e` 上使用 CPython 3.11.17 执行以下命令，退出码均为 0，分别为 78 项和 164 项通过；前台输出未保存原始日志。相应集成提交为 `495b7d00`、`10198813` 和 `01bc4dbf`。
+
+```bash
+PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/devices/test_hasselblad_availability.py apps/camctl/tests/integration/devices/test_hasselblad_registration.py apps/camctl/tests/integration/devices/test_hasselblad_managed_capture.py apps/camctl/tests/integration/devices/test_hasselblad_download.py -q
+PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_hasselblad_responses.py -q
+```
+
+测试覆盖独立检查的身份、超时、取消与实际受管进程收场，以及已观察结构化输出、矛盾和无法解析输出的分类。此范围不证明业务调度、事务、真实诊断消费者和真实相机的联合行为；其他工具版本若产生尚未观察的输出格式会被保守拒绝，须在目标设备上验证。
+
 ## H4：公共诊断消费者
 
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。
