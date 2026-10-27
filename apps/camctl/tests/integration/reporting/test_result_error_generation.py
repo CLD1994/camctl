@@ -28,8 +28,9 @@ from camctl.reporting.policy import (
     ReportDecisionKind, ReportingRepository, register_report_guards, register_sync_guard,
 )
 
-from ..capture.result_consumer_fixtures import ResultCatalog, consumer_world
-from ..capture.test_capture_contract import ResultsDouble, _entry
+from ..capture.public_assembly import assemble_capture
+from ..capture.result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, consumer_world
+from ..capture.test_capture_contract import ResultsDouble, _NOW, _entry
 
 register_outputs_guards()
 register_report_guards()
@@ -38,8 +39,20 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _exhausted_world(tmp_path, consumer, independent_activity):
+    database = None
+    clock = {"wall": _NOW, "monotonic": 5_000_000_000}
+
+    async def assemble(owned, *, driver):
+        nonlocal database
+        runtime, database = await assemble_capture(
+            owned, driver=driver, evidence=RESULT_EVIDENCE, results=ResultsDouble({}),
+            staging=canonical_to_path(owned.metadata.staging_path),
+            wall_us=lambda: clock["wall"], monotonic_ns=lambda: clock["monotonic"])
+        return runtime
+
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, consumer, independent_activity=independent_activity)
+        tmp_path, consumer, independent_activity=independent_activity, start=False,
+        assemble=assemble)
     try:
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
@@ -50,12 +63,15 @@ async def _exhausted_world(tmp_path, consumer, independent_activity):
         runtime.results = results
         runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal(0))
         advance = capture_handler(handler)
+        if consumer == "timelapse":
+            await advance(action_id, runtime)
+            clock.update(wall=_NOW + 700_000_000, monotonic=705_000_000_000)
         for _ in range(2):
             await advance(action_id, runtime)
-            assert runtime.action(action_id)["status"] == int(enum_for("actions.status").RUNNING)
+            assert (await runtime.action(action_id))["status"] == int(enum_for("actions.status").RUNNING)
         attempts = owned.connection.execute("SELECT * FROM operation_attempts ORDER BY id").fetchall()
         await advance(action_id, runtime)
-        assert runtime.action(action_id)["status"] == int(enum_for("actions.status").FAILED)
+        assert (await runtime.action(action_id))["status"] == int(enum_for("actions.status").FAILED)
         run_status, count, raw_error = owned.connection.execute(
             "SELECT status,attempts_used,error_json FROM operation_runs WHERE responsibility_key=?",
             (f"results/{activity_id}",)).fetchone()
@@ -78,6 +94,8 @@ async def _exhausted_world(tmp_path, consumer, independent_activity):
         assert runtime.driver.control.await_count == 1
         return owned, runtime, action_id, error
     except BaseException:
+        if database is not None:
+            await database.close()
         owned.connection.close()
         raise
 
@@ -130,6 +148,7 @@ async def test_exhausted_results_generate_schema_valid_public_errors(
         _assert_document(generated, report, action_id, error, execution_status)
         assert (tuple(runtime.results.calls), runtime.driver.control.await_count) == calls
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -165,6 +184,7 @@ async def test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen
             (report.boundary.last_event_id,)).fetchall() == history
         assert (tuple(runtime.results.calls), runtime.driver.control.await_count) == calls
     finally:
+        await runtime.database.close()
         if reopened is not None:
             reopened.connection.close()
         else:

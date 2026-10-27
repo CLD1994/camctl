@@ -117,6 +117,7 @@ async def test_historical_error_shape_is_state_failure(tmp_path):
         finally:
             _assert_preserved(owned, report, runtime, spec, before)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -141,6 +142,7 @@ async def test_uninterpretable_frozen_error_stops_worker_without_publish(tmp_pat
         finally:
             _assert_preserved(owned, report, runtime, spec, before)
     finally:
+        await runtime.database.close()
         owned.connection.close()
 
 
@@ -171,4 +173,5 @@ async def test_output_fsync_error_remains_report_failure(tmp_path, monkeypatch):
         finally:
             _assert_preserved(owned, report, runtime, spec, before)
     finally:
+        await runtime.database.close()
         owned.connection.close()
