@@ -216,6 +216,11 @@ def production(monkeypatch):
     monkeypatch.setattr(workflow_errors, "validate_error_details", lambda *_: None)
 
     from camctl.scheduling import resources as scheduling_resources
+    monkeypatch.setattr(
+        scheduling_resources,
+        "enum_for",
+        lambda column: _ENUMS.get(column, SimpleNamespace()),
+    )
     source = find_spec("camctl")
     assert source is not None and source.origin is not None
     module_name = "camctl.persistence.repositories._isolated_read_slot_tests"

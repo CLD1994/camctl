@@ -22,11 +22,102 @@ class PreparationReads:
 
     def device_read_in_flight(self, device_id):
         from camctl.scheduling.resources import device_read_in_flight
-        return device_read_in_flight(self.connection, device_id)
+        if not self.events:
+            return device_read_in_flight(self.connection, device_id)
+        return self._device_in_flight(device_id, "READ_FILE")
 
     def device_start_in_flight(self, device_id):
         from camctl.scheduling.resources import device_start_in_flight
-        return device_start_in_flight(self.connection, device_id)
+        if not self.events:
+            return device_start_in_flight(self.connection, device_id)
+        return self._device_in_flight(device_id, "START")
+
+    def _device_in_flight(self, device_id, kind_name):
+        from contextlib import closing
+        from camctl.contracts.values import ConsistencyError
+        from camctl.persistence.transaction import row_facts
+
+        projected = {}
+        changed_bindings = {"actions": set(), "file_copies": set()}
+        tables = {"operation_attempts", "operation_runs", "actions", "file_copies"}
+        for event in self.events:
+            for row in event.rows:
+                if row.table not in tables:
+                    continue
+                key = (row.table, row.row_id)
+                if key not in projected:
+                    original = row_facts(self.connection, *key)
+                    if row.before.exists and original is None:
+                        raise ConsistencyError("前序设备调用事实缺少原记录")
+                    projected[key] = {} if original is None else dict(original)
+                if not row.after.exists:
+                    raise ConsistencyError("前序设备调用事实不能删除")
+                projected[key].update(row.after.values)
+                projected[key]["id"] = row.row_id
+                if ((row.table == "actions" and "device_id" in row.after.values)
+                        or (row.table == "file_copies" and "slot_device_id" in row.after.values)):
+                    changed_bindings[row.table].add(row.row_id)
+
+        def required(table, identity):
+            facts = projected.get((table, identity))
+            if facts is None and identity is not None:
+                facts = row_facts(self.connection, table, identity)
+            if facts is None:
+                raise ConsistencyError(f"设备调用缺少关联记录: {table}#{identity}")
+            return facts
+
+        kind = int(getattr(enum_for("operation_runs.kind"), kind_name))
+        running = int(enum_for("operation_attempts.status").RUNNING)
+        attempts = {identity: facts for (table, identity), facts in projected.items()
+                    if table == "operation_attempts"}
+        def matches(attempt):
+            if attempt.get("status") != running:
+                return False
+            run = required("operation_runs", attempt.get("run_id"))
+            if run.get("kind") != kind:
+                return False
+            if kind_name == "START":
+                owner = required("actions", run.get("action_id"))
+                target = owner.get("device_id")
+                if target is None:
+                    raise ConsistencyError("启动调用缺少设备绑定")
+            else:
+                owner = required("file_copies", run.get("copy_id"))
+                if "slot_device_id" not in owner:
+                    raise ConsistencyError("读取调用缺少设备机会事实")
+                target = owner["slot_device_id"]
+            return target == device_id
+
+        if any(matches(attempt) for attempt in attempts.values()):
+            return True
+
+        if kind_name == "START":
+            sql = ("SELECT t.id FROM operation_attempts t"
+                   " JOIN operation_runs r ON r.id=t.run_id AND r.kind=?"
+                   " JOIN actions a ON a.id=r.action_id"
+                   f" WHERE t.status={running} AND a.device_id=?")
+        else:
+            sql = ("SELECT t.id FROM file_copies c"
+                   " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
+                   f" JOIN operation_attempts t ON t.run_id=r.id AND t.status={running}"
+                   " WHERE c.slot_device_id=?")
+        def query_matches(sql, identity):
+            with closing(self.connection.execute(sql, (kind, identity))) as cursor:
+                return any(matches(required("operation_attempts", attempt_id))
+                           for attempt_id, in cursor)
+
+        if query_matches(sql, device_id):
+            return True
+        if kind_name == "START":
+            table, column, reference = "actions", "device_id", "action_id"
+        else:
+            table, column, reference = "file_copies", "slot_device_id", "copy_id"
+        target_sql = ("SELECT t.id FROM operation_runs r"
+                      " JOIN operation_attempts t ON t.run_id=r.id"
+                      f" AND t.status={running} WHERE r.kind=? AND r.{reference}=?")
+        return any(query_matches(target_sql, identity)
+                   for identity in changed_bindings[table]
+                   if projected[(table, identity)].get(column) == device_id)
 
     def can_prepare(self, action, activity, occurred_at):
         from contextlib import closing

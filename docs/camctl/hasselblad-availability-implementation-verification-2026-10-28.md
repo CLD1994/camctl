@@ -80,6 +80,8 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl
 
 读取机会事务和独立守卫补充了同逻辑设备的在途 START 核对。在 `/workspaces/camctl` 使用 Python 3.11.17 执行 `PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_read_slot_start_isolation.py -q --tb=short -p no:cacheprovider`，退出码为 0，6 项通过。测试以受控枚举、事件、数据库及其他协作者替身覆盖授予等待、已有机会、释放与守卫；不证明真实数据库事务或同事务前序事件投影。
 
+资源守卫接入普通事务的已验证前序投影后，使用同一环境运行 `PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/scheduling/test_preparation_flight_overlay.py apps/camctl/tests/unit/scheduling/test_start_read_exclusion.py apps/camctl/tests/unit/operations/test_intent_run_identity_isolated.py apps/camctl/tests/unit/persistence/test_read_slot_start_isolation.py -q --tb=short -p no:cacheprovider`，退出码为 0，31 项通过。首次组合运行因测试模块缓存共享使 2 项失败、29 项通过；隔离模块引用后重跑通过。测试核对前序创建、结束、关联变化、意图行基数和机会守卫；不证明真实数据库或完整设备调度。
+
 ## H4：公共诊断消费者
 
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。

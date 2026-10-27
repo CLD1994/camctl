@@ -1669,15 +1669,15 @@ def _attempt_intent_guard(event, context) -> None:
     attempts = [
         row
         for row in event.rows
-        if row.table == "operation_attempts" and not row.before.exists
+        if row.table == "operation_attempts"
     ]
-    if not attempts:
-        return
     run_rows = [row for row in event.rows if row.table == "operation_runs"]
-    if not run_rows:
-        _fail("尝试意图必须与流程事实同事务保存")
+    if len(attempts) != 1 or attempts[0].before.exists or len(run_rows) != 1:
+        _fail("尝试意图必须包含一条新尝试及其唯一流程")
     for attempt in attempts:
         after = attempt.after.values
+        if after.get("run_id") != run_rows[0].row_id:
+            _fail("尝试意图必须属于同事件的流程")
         if after.get("intent_event_id") != event.event_id:
             _fail("普通尝试的意图引用不可省略，且指向本次事件")
         if (
