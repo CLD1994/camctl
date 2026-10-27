@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT, page_from_outcome
@@ -43,6 +44,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity
+from .public_assembly import assemble_capture
 
 register_operation_guards()
 register_capture_guards()
@@ -126,7 +128,8 @@ class ResultsDouble:
         self.set_finalized = set_finalized
 
     async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
-                        completion_context=None, video_result_mode=None):
+                        completion_context=None, video_result_mode=None,
+                        reading_context=None):
         if cursor is not None:
             raise ValueError("替身单批完整集合没有后续游标")
         listed = await self.list_round(ticket, timeout_s=timeout_s)
@@ -368,11 +371,42 @@ def _value(owned, sql: str, *params):
 pytestmark = pytest.mark.asyncio
 
 
+@pytest_asyncio.fixture
+async def assembled(tmp_path):
+    databases = []
+
+    async def create(owned, *, driver=None, files=None, wall=None,
+                     recording_state=None, results=None, listing_cache=None,
+                     check_config=None, stop_config=None, evidence=None,
+                     session_state=None):
+        result_port = results if results is not None else ResultsDouble(files or {})
+        runtime, database = await assemble_capture(
+            owned, driver=driver if driver is not None else DriverDouble(),
+            evidence=evidence or (_PAGE_EVIDENCE if isinstance(result_port, ResultsDouble) else _EVIDENCE),
+            results=result_port, staging=tmp_path,
+            wall_us=lambda: wall if wall is not None else _NOW,
+            monotonic_ns=lambda: 5_000_000_000, session_state=session_state)
+        databases.append(database)
+        if recording_state is not None:
+            runtime.recording_state = recording_state
+        if listing_cache is not None:
+            runtime.listing_cache = listing_cache
+        if check_config is not None:
+            runtime.check_config = check_config
+        if stop_config is not None:
+            runtime.stop_config = stop_config
+        return runtime
+
+    yield create
+    for database in databases:
+        await database.close()
+
+
 class TestPhotoHandler:
-    async def test_normal_path_registers_output_and_succeeds(self, tmp_path: Path):
+    async def test_normal_path_registers_output_and_succeeds(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
-            runtime = _runtime(owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+            runtime = await assembled(owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
             await capture_handler("camera_take_photo")(11, runtime)
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
             output = _value(
@@ -397,10 +431,10 @@ class TestPhotoHandler:
         finally:
             owned.connection.close()
 
-    async def test_failed_call_keeps_files_and_fails_action(self, tmp_path: Path):
+    async def test_failed_call_keeps_files_and_fails_action(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
-            runtime = _runtime(
+            runtime = await assembled(
                 owned, driver=DriverDouble(error={"code": "device_error"}),
                 files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
             await capture_handler("camera_take_photo")(11, runtime)
@@ -416,10 +450,10 @@ class TestPhotoHandler:
         finally:
             owned.connection.close()
 
-    async def test_incomplete_listing_waits_then_recovers(self, tmp_path: Path):
+    async def test_incomplete_listing_waits_then_recovers(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             runtime.results.set_finalized = False
             now = [5_000_000_000]
             runtime.monotonic_ns = lambda: now[0]
@@ -445,12 +479,12 @@ class TestPhotoHandler:
             owned.connection.close()
 
     async def test_invalid_observation_settles_start_and_fails_action(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
             # 驱动确认观察的身份与操作目标（活动 11）不符：结果不可
             # 采纳，调用按失败收场，不遗留执行中的启动流程。
-            runtime = _runtime(
+            runtime = await assembled(
                 owned, driver=DriverDouble(identity_override="99"),
                 files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
             await capture_handler("camera_take_photo")(11, runtime)
@@ -470,12 +504,12 @@ class TestPhotoHandler:
         finally:
             owned.connection.close()
 
-    async def test_open_start_with_outputs_recovers_success(self, tmp_path: Path):
+    async def test_open_start_with_outputs_recovers_success(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
             _seed_open_start(owned.connection, 11)
             owned.connection.commit()
-            runtime = _runtime(owned, files={11: (
+            runtime = await assembled(owned, files={11: (
                 _entry("shot-1", kind=ResultFileKind.PHOTO),)})
             # 在途启动尝试没有可采纳的响应结果：不折叠为失败，由
             # 产物核实证明完成。
@@ -490,12 +524,12 @@ class TestPhotoHandler:
             owned.connection.close()
 
     async def test_open_start_without_outputs_keeps_verifying(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _PHOTO)
         try:
             _seed_open_start(owned.connection, 11)
             owned.connection.commit()
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             await capture_handler("camera_take_photo")(11, runtime)
             # 结果未知且暂无产物：保持运行等待核实轮次，不折叠失败。
             assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
@@ -508,10 +542,10 @@ class TestPhotoHandler:
 
 
 class TestRecordHandler:
-    async def test_start_then_stopped_tail_finishes(self, tmp_path: Path):
+    async def test_start_then_stopped_tail_finishes(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _RECORD)
         try:
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             # 第一次推进：尚未启动，只发起启动调用。
             await capture_handler("camera_record")(12, runtime)
             assert _value(
@@ -534,18 +568,18 @@ class TestRecordHandler:
             owned.connection.close()
 
     async def test_invalid_stop_observation_settles_stop_attempt(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _RECORD)
         try:
             # 真实启动后到达停止阶段：驱动停止确认观察的身份与操作
             # 目标（活动 12）不符时，结果不可采纳，停止尝试按调用失
             # 败收场，不遗留执行中的停止流程与在途尝试。
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             await capture_handler("camera_record")(12, runtime)
-            from camctl.capture.handlers import _stop_call
             runtime.stopper = StopDouble(identity="99")
-            step = await _stop_call(runtime, runtime.action(12))
-            assert step.phase == "call_failed"
+            runtime.wall_us = lambda: _NOW + 60_000_000
+            runtime.monotonic_ns = lambda: 65_000_000_000
+            await capture_handler("camera_record")(12, runtime)
             stop_run = _value(
                 owned, "SELECT status, error_json FROM operation_runs"
                 " WHERE responsibility_key = 'stop/12'")
@@ -559,10 +593,10 @@ class TestRecordHandler:
         finally:
             owned.connection.close()
 
-    async def test_processing_pending_keeps_action_running(self, tmp_path: Path):
+    async def test_processing_pending_keeps_action_running(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _RECORD)
         try:
-            runtime = _runtime(owned, files={12: (_entry("clip-1"),)})
+            runtime = await assembled(owned, files={12: (_entry("clip-1"),)})
             await capture_handler("camera_record")(12, runtime)
             # 启动调用先行保存；处理责任未建立，终态等待媒体链。
             assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
@@ -571,14 +605,18 @@ class TestRecordHandler:
             owned.connection.close()
 
     async def test_open_start_without_sent_at_fails_unconfirmed(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _RECORD)
         try:
-            original = _runtime(owned)
-            ticket, reason = original.grant(original.action(12))
-            assert ticket is not None, reason
+            class InterruptedStart:
+                async def control(self, request):
+                    raise OSError("原启动调用中断")
+
+            original = await assembled(owned, driver=InterruptedStart())
+            with pytest.raises(OSError, match="原启动调用中断"):
+                await capture_handler("camera_record")(12, original)
             horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             from camctl.capture.recovery import RecoveryBoundary
 
             recovery = EvidenceRegistry((EvidenceContract(
@@ -611,10 +649,10 @@ class TestRecordHandler:
 
 
 class TestTimelapseHandler:
-    async def test_send_wait_then_finish(self, tmp_path: Path):
+    async def test_send_wait_then_finish(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _TIMELAPSE)
         try:
-            runtime = _runtime(owned, files={13: (_entry("sequence-1"),)})
+            runtime = await assembled(owned, files={13: (_entry("sequence-1"),)})
             # 第一次推进：发送并安排等待。
             await capture_handler("camera_timelapse")(13, runtime)
             assert _value(
@@ -622,7 +660,7 @@ class TestTimelapseHandler:
             ) == (_NOW + 600_000_000,)
             assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (2,)
             # 到达预计检查时间后再次推进：核实并保存终态。
-            late = _runtime(owned, wall=_NOW + 700_000_000,
+            late = await assembled(owned, wall=_NOW + 700_000_000,
                             files={13: (_entry("sequence-1"),)})
             late.driver.calls = list(runtime.driver.calls)
             await capture_handler("camera_timelapse")(13, late)
@@ -632,12 +670,12 @@ class TestTimelapseHandler:
             owned.connection.close()
 
     async def test_open_start_without_sent_at_fails_unconfirmed(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, _TIMELAPSE)
         try:
             _seed_open_start(owned.connection, 13)
             owned.connection.commit()
-            runtime = _runtime(owned, files={})
+            runtime = await assembled(owned, files={})
             # 等待锚点依赖可靠发送时间：可能派发但没有发送时间的
             # 启动无法核实原任务，按无法确认失败收场；不重复启动、
             # 不补造时间。
@@ -664,7 +702,7 @@ class TestDispatchLoop:
     @pytest.mark.parametrize("action_id,action_type", [(11, 1), (12, 2), (13, 3)])
     @pytest.mark.parametrize("canceled", [False, True])
     async def test_unstarted_action_finishes_without_device_work(
-            self, tmp_path, action_id, action_type, canceled):
+            self, tmp_path, assembled, action_id, action_type, canceled):
         from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 
         owned = _environment(tmp_path, ((action_id, action_type),))
@@ -675,7 +713,7 @@ class TestDispatchLoop:
                 owned.connection.commit()
             driver = DriverDouble()
             files = ResultsDouble({})
-            runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
+            runtime = await assembled(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
             outcomes = await dispatch_ready(
                 runtime, ready_capture_actions(owned.connection, _NOW + 1_000_001))
             assert len(outcomes) == 1
@@ -691,7 +729,7 @@ class TestDispatchLoop:
         finally:
             owned.connection.close()
 
-    async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path):
+    async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path, assembled):
         owned = _environment(tmp_path, ((11, 1), (12, 2), (13, 3)))
         # 各能力单独计划，避免同计划更早动作阻塞授予。
         for action_id in (12, 13):
@@ -706,7 +744,7 @@ class TestDispatchLoop:
         owned.connection.commit()
         from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 
-        runtime = _runtime(owned, files={
+        runtime = await assembled(owned, files={
             11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         results = await dispatch_ready(
             runtime, ready_capture_actions(owned.connection, _NOW))
@@ -718,90 +756,89 @@ class TestDispatchLoop:
 
 class TestInterruptionRecovery:
     async def test_fault_at_file_registration_rolls_back_and_recovers(
-            self, tmp_path: Path):
-        from dataclasses import replace
-
+            self, tmp_path: Path, assembled, monkeypatch):
         from camctl.contracts.values import ConsistencyError
-        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+        from camctl.operations.attempts import RetryWaitGate
         from camctl.persistence.transaction import saved_transaction_events
-
         from ..operations.test_result_reuse import _FaultConnection
         from .result_consumer_fixtures import consumer_world
-        from .test_result_consumer_saves import _actual, _assert_actual_saved, _result_port
-        from .test_result_file_recovery import FileObservationSpy, _fresh_runtime
+        from .test_result_consumer_saves import _actual, _assert_actual_saved
 
-        owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo")
+        action_id = 1
         actual = _actual(action_id, with_files=True, complete=True)
         actual.observations[0].data["entries"][0]["kind"] = "photo"
-        results_driver = _result_port(runtime, actual)
-        spy = FileObservationSpy()
-        runtime.capture = spy
-        original_wall = runtime.wall_us()
-        original_monotonic = runtime.monotonic_ns()
-        path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-        metadata = owned.metadata
-        runtime.owned = replace(
-            owned, connection=_FaultConnection(owned.connection, "INSERT INTO device_files"))
+
+        class ResultPort(ResultsDouble):
+            async def list_page(self, ticket, **kwargs):
+                if not self.calls:
+                    self.calls.append(int(ticket.target_id))
+                    return page_from_outcome(ticket, actual, cursor=kwargs["cursor"])
+                return await super().list_page(ticket, **kwargs)
+
+        results = ResultPort({action_id: (replace(
+            _entry("original", kind=ResultFileKind.PHOTO, size=41),
+            locator={"path": "/DCIM/original.mp4"}),)})
+        evidence = _PAGE_EVIDENCE.with_contract(EvidenceContract(
+            "adb_foreground_assumption", 1, "result", frozenset({"terminate_grace_s"})))
+        state = {"pending_call_results": {}, "pending_file_observations": {}, "pending_result_scans": {},
+                 "retry_wait_gate": RetryWaitGate()}
+        async def assemble(owned, *, driver):
+            return await assembled(owned, driver=driver, results=results,
+                                   evidence=evidence, session_state=state)
+
+        owned, runtime, action_id, handler = await consumer_world(
+            tmp_path, "photo", start=False, assemble=assemble)
+        runtime.evidence = evidence
+        driver = runtime.driver
+        requests = []
+        save = CaptureRepository.save_result_page
+
+        def fault(repository, command, key, connection):
+            requests.append((command, key))
+            if len(requests) == 1:
+                connection = replace(connection, connection=_FaultConnection(
+                    connection.connection, "INSERT INTO device_files"))
+            return save(repository, command, key, connection)
+
+        monkeypatch.setattr(CaptureRepository, "save_result_page", fault)
         try:
             with pytest.raises(ConsistencyError):
                 await capture_handler(handler)(action_id, runtime)
-            assert len(spy.requests) == 2 and spy.requests[1] == spy.requests[0]
-            pending, = runtime.pending_start_results.values()
-            ticket, result_key = pending.finish.ticket, pending.key
-            assert pending.finish.outcome.outcome is actual
-            assert pending.finish.occurred_at == original_wall
-            assert pending.returned_ns == original_monotonic
-            file_pending = runtime.pending_file_observations[(action_id, "original")]
-            assert file_pending.entries == pending.result_listing
-            request, file_key = spy.requests[0]
-            assert file_pending.command is request and file_pending.key == file_key
-            assert request.occurred_at == original_wall and request.locator == {"path": "/DCIM/original.mp4"}
+            assert len(requests) == 1
+            request, file_key = requests[0]
+            assert request.occurred_at == _NOW and request.outcome.outcome == actual
             assert saved_transaction_events(owned.connection, file_key) is None
             assert _value(owned, "SELECT COUNT(*) FROM device_files") == (0,)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
             before_attempts = owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
             assert len(before_attempts) == 2
-
-            owned.connection.close()
-            owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-            assert owned.metadata == metadata
-            recovery = _fresh_runtime(owned, runtime)
-            recovery.capture = spy
-            recovery.wall_us = lambda: original_wall + 5_000_000
-            assert recovery.pending_start_results is runtime.pending_start_results
-            assert recovery.pending_file_observations is runtime.pending_file_observations
-            assert recovery.retry_gate is runtime.retry_gate
-            original_held = recovery.pending_start_results[(ticket.run_id, ticket.attempt_id)]
-            assert original_held is pending and original_held.key == result_key
-
+            metadata = runtime.database.metadata
+            await runtime.database.close()
+            recovery = await assembled(owned, driver=driver, results=results,
+                                       evidence=evidence, session_state=state,
+                                       wall=_NOW + 5_000_000)
+            assert recovery.database.metadata == metadata
             await capture_handler(handler)(action_id, recovery)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
             _assert_actual_saved(owned, action_id, actual)
             assert owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall() == before_attempts
-            assert len(spy.requests) == 3 and all(value == (request, file_key) for value in spy.requests)
+            assert requests == [(request, file_key), (request, file_key)]
             # 原读取错误和无集合保证的输入不能证明成功；下一轮取得
             # 明确的完整集合，再使用原文件事实收尾。
-            recovered_file = replace(_entry("original", kind=ResultFileKind.PHOTO, size=41),
-                                     locator={"path": "/DCIM/original.mp4"})
-            recovery.results = ResultsDouble({action_id: (recovered_file,)})
-            recovery.evidence = _PAGE_EVIDENCE
-            recovery.monotonic_ns = lambda: original_monotonic + 5_000_000_000
+            recovery.monotonic_ns = lambda: 10_000_000_000
             await capture_handler(handler)(action_id, recovery)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
             attempts = owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
             assert attempts[:-1] == before_attempts
-            assert attempts[-1][1:] == (ticket.run_id, ticket.attempt_id + 1)
+            assert attempts[-1][1:] == (before_attempts[-1][1], 2)
             saved_file = saved_transaction_events(owned.connection, file_key)
-            assert saved_file is not None and saved_file[0]["occurred_at"] == original_wall
-            saved_result = saved_transaction_events(owned.connection, result_key)
-            assert saved_result is not None and saved_result[0]["occurred_at"] == original_wall
+            assert saved_file is not None and saved_file[0]["occurred_at"] == _NOW
             _assert_actual_saved(owned, action_id, actual, attempts_used=2)
-            results_driver.list_results.assert_awaited_once()
-            runtime.driver.control.assert_awaited_once()
-            assert not recovery.pending_start_results and not recovery.pending_file_observations
+            assert results.calls == [action_id, action_id]
+            driver.control.assert_awaited_once()
             assert _value(owned, "SELECT source_action_id,presence_state,completion_state,size_bytes"
                           " FROM device_files") == (action_id, 2, 3, 41)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
@@ -809,11 +846,11 @@ class TestInterruptionRecovery:
             owned.connection.close()
 
     async def test_history_bytes_stable_after_terminal_redispatch(
-            self, tmp_path: Path):
+            self, tmp_path: Path, assembled):
         from camctl.capture.dispatch import dispatch_ready
 
         owned = _environment(tmp_path, _PHOTO)
-        runtime = _runtime(
+        runtime = await assembled(
             owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         await dispatch_ready(runtime, [
             __import__("camctl.scheduling.service", fromlist=["ActionDescriptor"])

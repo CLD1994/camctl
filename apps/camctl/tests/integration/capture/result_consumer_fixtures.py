@@ -110,6 +110,7 @@ async def consumer_world(
     record_control_elapsed_ns=None,
     invalid_sibling=False,
     pending_capture_group=None,
+    assemble=None,
 ):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
@@ -151,7 +152,8 @@ async def consumer_world(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         control = create_autospec(ControlDriver, instance=True)
         control.control.return_value = DeviceCallResult.from_outcome(returned("operation", observation, activity_id))
-        runtime = _runtime(owned, driver=control)
+        runtime = (_runtime(owned, driver=control) if assemble is None
+                   else await assemble(owned, driver=control))
         runtime.evidence = RESULT_EVIDENCE
         runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
         from camctl.contracts.pages import Page

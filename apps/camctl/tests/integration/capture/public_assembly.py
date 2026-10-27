@@ -13,7 +13,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 async def assemble_capture(owned, *, driver, evidence, results, staging,
                            wall_us, monotonic_ns, recording=None,
                            recovery_boundary=None, recovery_max_event_id=None,
-                           declaration=None):
+                           declaration=None, session_state=None):
     """使用独立连接和正式会话工厂装配；调用方负责关闭返回的数据库。"""
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     database = await BusinessDatabase.open(
@@ -22,7 +22,7 @@ async def assemble_capture(owned, *, driver, evidence, results, staging,
         declaration = DriverDeclaration(True, False, False, False, False, False, False)
     entry = DriverEntry("camctl-adb", driver, declaration, evidence,
                         DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
-    options = {}
+    options = dict(session_state or {})
     if recovery_boundary is not None:
         options["recovery_boundary"] = recovery_boundary
         options["recovery_max_event_id"] = recovery_max_event_id
