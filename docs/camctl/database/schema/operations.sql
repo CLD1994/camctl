@@ -66,6 +66,7 @@ CREATE INDEX operations_action ON operation_runs(action_id, id);
 CREATE INDEX operations_delivery ON operation_runs(delivery_id, id) WHERE delivery_id IS NOT NULL;
 CREATE INDEX operations_activity ON operation_runs(activity_id, kind, id) WHERE activity_id IS NOT NULL;
 CREATE UNIQUE INDEX one_read_flow ON operation_runs(copy_id) WHERE kind = 3;
+CREATE INDEX open_read_runs ON operation_runs(id, copy_id) WHERE kind = 3 AND status IN (1,2);
 CREATE UNIQUE INDEX one_obtain_check_flow ON operation_runs(obtain_item_id, kind) WHERE kind = 5 AND obtain_item_id IS NOT NULL;
 CREATE UNIQUE INDEX one_cleanup_flow ON operation_runs(cleanup_item_id, kind) WHERE kind IN (4,5);
 CREATE UNIQUE INDEX one_availability_flow ON operation_runs(availability_check_id) WHERE kind = 12;

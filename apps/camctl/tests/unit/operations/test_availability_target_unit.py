@@ -231,3 +231,56 @@ def test_creation_targets_report_no_old_restriction(target_rules, creation_facts
     check, _ = creation_facts
     with pytest.raises(target_rules.AvailabilityTargetNotRequired):
         list(target_rules.iter_creation_targets(_PagedConnection([]), check, batch_size=2))
+
+
+def _target_page(event_id, activity_ids, *, check_id=31, action_id=12):
+    rows = tuple(SimpleNamespace(
+        table="device_availability_targets", row_id=100 + index,
+        before=SimpleNamespace(exists=False),
+        after=SimpleNamespace(exists=True, values={"check_id": check_id, "action_id": action_id,
+                                                   "activity_id": activity_id}),
+    ) for index, activity_id in enumerate(activity_ids))
+    return SimpleNamespace(event_id=event_id, transaction_id=2, rows=rows)
+
+
+@pytest.fixture
+def target_group(target_rules, monkeypatch):
+    monkeypatch.setattr(target_rules, "iter_creation_targets", lambda *args, **kwargs: iter(((4, 7), (9,))))
+    transaction = SimpleNamespace(txn_id=2, first_event_id=1, last_event_id=3)
+    return target_rules.AvailabilityCreationTargets(object(), {"id": 31, "action_id": 12}, transaction, batch_size=2)
+
+
+def test_target_group_seals_only_the_complete_original_pages(target_group):
+    for event in (_target_page(2, (4, 7)), _target_page(3, (9,))):
+        target_group.prepare(event)
+        target_group.seal(SimpleNamespace(envelope=event))
+    target_group.finish()
+
+
+def test_target_group_rejects_partial_target_set(target_group, target_rules):
+    event = _target_page(2, (4, 7))
+    target_group.prepare(event)
+    target_group.seal(SimpleNamespace(envelope=event))
+    with pytest.raises(target_rules.AvailabilityTargetStateError):
+        target_group.finish()
+
+
+@pytest.mark.parametrize("event", [
+    _target_page(2, (7, 4)), _target_page(2, (4, 8)),
+    _target_page(2, (4, 7), check_id=32), _target_page(2, (4, 7), action_id=13),
+])
+def test_target_group_rejects_forged_page(target_group, target_rules, event):
+    with pytest.raises(target_rules.AvailabilityTargetStateError):
+        target_group.prepare(event)
+
+
+def test_target_group_requires_the_same_validated_event(target_group, target_rules):
+    target_group.prepare(_target_page(2, (4, 7)))
+    with pytest.raises(target_rules.AvailabilityTargetStateError):
+        target_group.seal(SimpleNamespace(envelope=_target_page(3, (4, 7))))
+
+
+def test_target_group_rejects_unsealed_page(target_group, target_rules):
+    target_group.prepare(_target_page(2, (4, 7)))
+    with pytest.raises(target_rules.AvailabilityTargetStateError):
+        target_group.finish()

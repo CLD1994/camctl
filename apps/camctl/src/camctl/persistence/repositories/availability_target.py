@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from contextlib import closing
+from copy import deepcopy
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
@@ -32,6 +33,59 @@ class AvailabilityTargetIdentityMismatch(ValueError):
 
 class AvailabilityTargetStateError(ValueError):
     """保存的必要事实缺失或相互矛盾。"""
+
+
+class AvailabilityCreationTargets:
+    """独立消费原连接目标，验证已经固定的创建头之后的全部目标页。"""
+
+    def __init__(self, connection, check: Mapping, transaction, *, batch_size: int = 128):
+        if type(batch_size) is not int or not 1 <= batch_size <= 128:
+            raise ValueError("活动读取每批必须为 1 至 128 项")
+        fixed = deepcopy(check)
+        self._check_id = ObjectId(fixed["id"])
+        self._action_id = ObjectId(fixed["action_id"])
+        self._pages = iter(iter_creation_targets(connection, fixed, batch_size=batch_size))
+        self._transaction_id = ObjectId(transaction.txn_id)
+        self._next_event_id = ObjectId(transaction.first_event_id) + 1
+        self._last_event_id = ObjectId(transaction.last_event_id)
+        self._batch_size = batch_size
+        self._pending = None
+        self._count = 0
+        self._finished = False
+
+    def prepare(self, event) -> None:
+        """只接受下一页，不把提案自身当作完整目标依据。"""
+        if (self._finished or self._pending is not None or event.transaction_id != self._transaction_id
+                or event.event_id != self._next_event_id or event.event_id > self._last_event_id
+                or not 1 <= len(event.rows) <= self._batch_size):
+            raise AvailabilityTargetStateError("检查目标页次序或大小无效")
+        expected = next(self._pages, None)
+        if expected is None or len(event.rows) != len(expected):
+            raise AvailabilityTargetStateError("检查目标页与原连接事实数量不同")
+        for row, activity_id in zip(event.rows, expected):
+            values = row.after.values
+            if (row.table != "device_availability_targets" or row.before.exists or not row.after.exists
+                    or set(values) != {"check_id", "action_id", "activity_id"}
+                    or any(isinstance(values[name], bool) or not isinstance(values[name], int) for name in values)
+                    or values["check_id"] != self._check_id or values["action_id"] != self._action_id
+                    or values["activity_id"] != activity_id):
+                raise AvailabilityTargetStateError("检查目标页与原连接事实不一致")
+        self._pending = (event.event_id, event.transaction_id, event.rows)
+
+    def seal(self, validated) -> None:
+        """仅在该页通过事件校验之后推进封口。"""
+        event = validated.envelope
+        if self._pending != (event.event_id, event.transaction_id, event.rows):
+            raise AvailabilityTargetStateError("检查目标页没有通过原事件校验")
+        self._pending = None
+        self._count += 1
+        self._next_event_id += 1
+
+    def finish(self) -> None:
+        if (self._finished or self._pending is not None or self._count == 0
+                or self._next_event_id != self._last_event_id + 1 or next(self._pages, None) is not None):
+            raise AvailabilityTargetStateError("检查目标事务没有完整覆盖原连接目标")
+        self._finished = True
 
 
 def iter_held_activity_ids(connection, resource_key: str, *, batch_size: int = 128):
