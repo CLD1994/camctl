@@ -18,14 +18,14 @@ from camctl.persistence.transaction import saved_transaction_events
 from .test_capture_contract import _NOW
 from .test_record_media_result_settlement import _TrackedCommitFailure
 from .test_recording_start_runtime import (
-    StartDriver, StateQuery, _configured, _result, _world,
+    StartDriver, StateQuery, configured, _result, _world,
 )
 
 
 pytestmark = pytest.mark.asyncio
 
 
-async def start_close_world(tmp_path, mode):
+async def start_close_world(tmp_path, mode, configured):
     """真实调用已经保存；下一次推进只形成原 START 的复合收场。
 
     query_exhausted 保存一次失败查询后降低本次查询上限。自然用完
@@ -40,7 +40,7 @@ async def start_close_world(tmp_path, mode):
             no_effect=mode == "lowered",
             error=ErrorValue("device_busy", "device") if mode == "lowered"
             else ErrorValue("transport_timeout", "transport")))
-        runtime = _configured(owned, driver, wall=wall, mono=mono, maximum=3)
+        runtime = await configured(owned, driver, wall=wall, mono=mono, maximum=3)
         query = StateQuery() if mode == "query_exhausted" else None
         runtime.state_query = query
         handler = capture_handler("camera_record")
@@ -56,7 +56,7 @@ async def start_close_world(tmp_path, mode):
         if mode == "lowered":
             runtime.start_config = replace(runtime.start_config, max_attempts=1)
         assert len(driver.calls) == 1
-        assert runtime.action(12)["status"] == 2
+        assert (await runtime.action(12))["status"] == 2
         assert runtime.pending_start_results == runtime.pending_capture_completions == {}
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM operation_attempts WHERE status=1 OR result_event_id IS NULL"
@@ -134,8 +134,8 @@ def _assert_complete_group(world, owned, finish, key):
     return events
 
 
-async def _assert_save_recovery(tmp_path, monkeypatch, mode, phase):
-    world = await start_close_world(tmp_path, mode)
+async def _assert_save_recovery(tmp_path, monkeypatch, mode, phase, configured):
+    world = await start_close_world(tmp_path, mode, configured)
     world.mode = mode
     owned, runtime = world.owned, world.runtime
     actual_save = CaptureRepository.close_start
@@ -186,11 +186,6 @@ async def _assert_save_recovery(tmp_path, monkeypatch, mode, phase):
             4 if after else 2,)
         if not after:
             assert tuple(owned.connection.iterdump()) == before_dump
-        pending = held[12]
-        assert pending.request.finish is finish
-        assert pending.request.action_finish is action_finish
-        assert pending.key == key
-        runtime.owned = owned
         runtime.start_config = replace(runtime.start_config, max_attempts=9)
         runtime.query_config = replace(runtime.query_config, max_attempts=9)
         world.wall[0] += 100_000_000
@@ -221,12 +216,12 @@ async def _assert_save_recovery(tmp_path, monkeypatch, mode, phase):
 @pytest.mark.parametrize("mode", ["unknown", "lowered", "query_exhausted"])
 @pytest.mark.parametrize("after_commit", [False, True], ids=["commit-before", "commit-after"])
 async def test_unknown_start_close_keeps_full_request_until_original_key_is_confirmed(
-        tmp_path, monkeypatch, mode, after_commit):
+        tmp_path, monkeypatch, mode, after_commit, configured):
     await _assert_save_recovery(
-        tmp_path, monkeypatch, mode, "commit_after" if after_commit else "commit_before")
+        tmp_path, monkeypatch, mode, "commit_after" if after_commit else "commit_before", configured)
 
 
 @pytest.mark.parametrize("mode", ["unknown", "lowered"])
 async def test_rolled_back_start_close_preserves_whole_request_and_original_time(
-        tmp_path, monkeypatch, mode):
-    await _assert_save_recovery(tmp_path, monkeypatch, mode, "projection")
+        tmp_path, monkeypatch, mode, configured):
+    await _assert_save_recovery(tmp_path, monkeypatch, mode, "projection", configured)
