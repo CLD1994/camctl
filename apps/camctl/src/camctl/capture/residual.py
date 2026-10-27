@@ -217,7 +217,34 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
 
     if runtime.binding_check is None:
         return None
-    return binding_failure_details(runtime.binding_check(_binding(action)))
+    failure = binding_failure_details(runtime.binding_check(_binding(action)))
+    if failure is not None:
+        return failure
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if action.get("driver_id") != DRIVER_ID or action.get("type") != 1:
+        return None
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.persistence.transaction import row_facts
+    def read(owned):
+        found = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
+        return None if found is None else row_facts(owned.connection, "device_activities", found[0])
+    activity = await runtime.database.read(read, description="读取固定机身身份")
+    if activity is None:
+        return None
+    try:
+        original = CameraIdentity(**activity["expected_identity_json"])
+    except (TypeError, ValueError, KeyError) as error:
+        raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+    if activity["resource_key"] != original.resource_key:
+        raise ConsistencyError("原活动资源键与固定机身身份不符")
+    current = runtime.fixed_camera_identity
+    if not isinstance(current, CameraIdentity):
+        raise ConsistencyError("当前 Hasselblad 配置缺少固定机身身份")
+    if current != original:
+        return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                "reason": "physical_identity_mismatch"}
+    return None
 
 
 async def _finish_original_binding_failure(

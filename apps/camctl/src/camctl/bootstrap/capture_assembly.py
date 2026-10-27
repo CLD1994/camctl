@@ -54,6 +54,7 @@ from camctl.capture.recovery import RecoveryBoundary, RecoveryDiagnostic, recove
 from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.bindings import DeviceBinding, DeviceConfigurationError, check_binding
+from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
 from camctl.devices.capture_preparation import preparation_lead_s
 from camctl.devices.drivers.registry import (
     CapabilityNotDeclaredError,
@@ -627,6 +628,14 @@ def _digest_reader_factory(
     return resolve
 
 
+def _hasselblad_identity(declaration):
+    from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+
+    config = read_camera_config(declaration)
+    return CameraIdentity(config.serial, config.product_id)
+
+
 def execution_wait_config(action: Mapping[str, Any]) -> CaptureWaitConfig:
     """从已保存的动作行取得延时等待配置。
 
@@ -945,6 +954,8 @@ def session_capture_assembly(
             window_of=_window_of,
             wait_config=current_wait_config,
             binding_check=lambda saved: check_binding(saved, current_config),
+            fixed_camera_identity=(
+                _hasselblad_identity(declaration) if driver_id == HASSELBLAD_DRIVER_ID else None),
             recovery_boundary=recovery_boundary,
             recovery_max_event_id=fixed_recovery_boundary(),
             recovery_evidence_for=original_recovery_evidence,

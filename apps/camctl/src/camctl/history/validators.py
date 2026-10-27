@@ -441,8 +441,8 @@ register_guard("report_impact", _report_impact_guard)
 def parse_preparation_request(value: Any) -> dict[str, Any]:
     """解析准备占用的完整原申请，保留秒数的精确表示。"""
     if (not isinstance(value, Mapping)
-            or set(value) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at"}):
-        _fail("准备申请必须包含 action_id、trusted_wall_now、prepare_lead_s 和 occurred_at")
+            or set(value) != {"action_id", "trusted_wall_now", "prepare_lead_s", "occurred_at", "expected_identity"}):
+        _fail("准备申请必须包含动作、时间、提前量及固定身份")
     try:
         ObjectId(value["action_id"])
         UtcMicros(value["trusted_wall_now"])
@@ -453,7 +453,17 @@ def parse_preparation_request(value: Any) -> dict[str, Any]:
     if (isinstance(lead, bool) or not isinstance(lead, (int, Decimal))
             or (isinstance(lead, Decimal) and not lead.is_finite()) or lead < 0):
         _fail("准备申请的 prepare_lead_s 必须是有限非负精确数字")
-    return dict(value)
+    result = dict(value)
+    identity = value["expected_identity"]
+    if identity is not None:
+        if not isinstance(identity, Mapping) or set(identity) != {"serial", "product_id"}:
+            _fail("准备申请的固定机身身份格式无效")
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        try:
+            result["expected_identity"] = CameraIdentity(**identity)
+        except (TypeError, ValueError) as error:
+            raise EventValidationError("准备申请的固定机身身份无效") from error
+    return result
 
 
 def parse_preparation_failure_request(value: Any) -> dict[str, Any]:
@@ -527,6 +537,19 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
         parse_preparation_request(value)
     elif member == "preparation_failure_request":
         parse_preparation_failure_request(value)
+    elif member == "preparation_binding_request":
+        from camctl.persistence.repositories.scheduling import FailBindingPreparationRequest
+        if not isinstance(value, Mapping) or set(value) != {
+                "action_id", "trusted_wall_now", "occurred_at", "details", "prepare_lead_s", "current_identity"}:
+            _fail("准备绑定失败申请成员无效")
+        try:
+            parsed = dict(value)
+            if parsed["current_identity"] is not None:
+                from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+                parsed["current_identity"] = CameraIdentity(**parsed["current_identity"])
+            FailBindingPreparationRequest(**parsed)
+        except (TypeError, ValueError) as error:
+            _fail(f"准备绑定失败申请无效: {error}")
     elif member == "preparation_resolved":
         if value is not True:
             _fail(f"事件 {event_id} 的 evidence.preparation_resolved 只能为实际可靠的 true")

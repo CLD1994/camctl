@@ -121,6 +121,8 @@ CREATE TABLE device_activities (
     action_id INTEGER NOT NULL UNIQUE REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
     task_key TEXT NOT NULL UNIQUE CHECK (length(task_key) = 32 AND task_key NOT GLOB '*[^0-9a-f]*'),
     task_locator_json TEXT CHECK (task_locator_json IS NULL OR (json_valid(task_locator_json) AND json_type(task_locator_json) = 'object')),
+    expected_identity_json TEXT CHECK (expected_identity_json IS NULL OR (json_valid(expected_identity_json) AND json_type(expected_identity_json) = 'object')),
+    resource_key TEXT CHECK (resource_key IS NULL OR length(resource_key) > 0),
     state_query_supported INTEGER NOT NULL CHECK (state_query_supported IN (0,1)),
     stop_supported INTEGER NOT NULL CHECK (stop_supported IN (0,1)),
     safe_repeat_stop INTEGER NOT NULL CHECK (safe_repeat_stop IN (0,1)),
@@ -149,6 +151,7 @@ CREATE TABLE device_activities (
     output_set_finalized_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     last_error_json TEXT CHECK (last_error_json IS NULL OR (json_valid(last_error_json) AND json_type(last_error_json) = 'object')),
     CHECK (safe_repeat_stop = 0 OR stop_supported = 1),
+    CHECK ((expected_identity_json IS NULL) = (resource_key IS NULL)),
     CHECK ((baseline_first_event_id IS NULL) = (baseline_last_event_id IS NULL)),
     CHECK (baseline_first_event_id IS NULL OR baseline_last_event_id >= baseline_first_event_id),
     CHECK ((ownership_mode = 1 AND baseline_state = 1 AND baseline_first_event_id IS NULL)

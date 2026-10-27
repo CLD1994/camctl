@@ -45,7 +45,7 @@ class PreparationReads:
         from camctl.contracts.values import ConsistencyError
         from camctl.contracts.json_values import json_equal
         from camctl.capture.models import activity_capabilities
-        from .scheduling import ReservePreparationRequest
+        from .scheduling import ReservePreparationRequest, _fixed_identity
         raw = event.evidence.get("preparation_request")
         from camctl.history.validators import parse_preparation_request
         request = ReservePreparationRequest(**parse_preparation_request(raw))
@@ -62,6 +62,10 @@ class PreparationReads:
             raise ConsistencyError("准备活动没有原提前区间的时间资格")
         capabilities = activity_capabilities(decode_member("actions.type", action["type"]).name.lower(),
                                             action["execution_spec_json"])
+        expected, resource_key = _fixed_identity(action, request.expected_identity)
+        if (not json_equal(row.after.values.get("expected_identity_json"), expected)
+                or row.after.values.get("resource_key") != resource_key):
+            raise ConsistencyError("准备活动的机身身份与原申请不符")
         for column in ("state_query_supported", "stop_supported", "safe_repeat_stop", "start_return_meaning",
                        "completion_mode", "ownership_mode", "output_scope_json"):
             if not json_equal(row.after.values.get(column), getattr(capabilities, column)):
@@ -119,6 +123,67 @@ def preparation_action_eligible(connection, action, activity):
     facts = load_start_facts(connection, action)
     return (facts.activity is not None and facts.activity["id"] == activity["id"]
             and facts.not_started)
+
+
+from camctl.contracts.values import ConsistencyError
+
+
+class BindingPreparationIneligible(ConsistencyError):
+    """真实业务事实不允许此时终结绑定失败。"""
+
+
+def verify_binding_preparation_failure(connection, action, request):
+    """在原连接核对尚无活动及调用的逻辑绑定失败。"""
+    from decimal import Decimal
+    from camctl.contracts.workflow_errors import validate_error_details
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+
+    details = request["details"]
+    validate_error_details("device_binding_unavailable", details)
+    if (action.get("driver_id") != DRIVER_ID or action.get("type") != 1
+            or action.get("status") != 1 or action.get("execution_started") != 0
+            or action.get("cancel_requested") != 0 or action.get("execution_spec_json") is None
+            or details["device_id"] != action["device_id"]
+            or details["expected_driver_id"] != action["driver_id"]
+            or details["reason"] not in ("missing", "mismatch", "physical_identity_mismatch")
+            or (details["reason"] == "missing" and "actual_driver_id" in details)
+            or (details["reason"] == "mismatch" and details.get("actual_driver_id") == action["driver_id"])
+            or (details["reason"] != "physical_identity_mismatch" and request["current_identity"] is not None)
+            or not (Decimal(action["scheduled_at"]) - Decimal(request["prepare_lead_s"]) * 1_000_000
+                    <= request["trusted_wall_now"] <= action["scheduled_at"] + action["max_delay_ms"] * 1000)):
+        raise BindingPreparationIneligible("绑定失败不属于具备准备资格的原 Hasselblad 动作")
+    from .capture_facts import load_start_facts
+    facts = load_start_facts(connection, action)
+    if not facts.not_started:
+        raise BindingPreparationIneligible("原 START 未可靠确认未进入")
+    if facts.activity is None:
+        if details["reason"] == "physical_identity_mismatch":
+            raise BindingPreparationIneligible("没有固定机身可核对物理身份")
+        if connection.execute("SELECT 1 FROM operation_runs WHERE action_id=? LIMIT 1", (action["id"],)).fetchone():
+            raise ConsistencyError("无活动但已有原操作责任")
+        return
+    if details["reason"] == "physical_identity_mismatch":
+        raw = facts.activity["expected_identity_json"]
+        try:
+            original = CameraIdentity(**raw)
+        except (TypeError, ValueError) as error:
+            raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+        if facts.activity["resource_key"] != original.resource_key:
+            raise ConsistencyError("原活动资源键与固定机身身份不符")
+        try:
+            current = CameraIdentity(**request["current_identity"])
+        except (TypeError, ValueError) as error:
+            raise BindingPreparationIneligible("缺少当前物理身份") from error
+        if current == original:
+            raise BindingPreparationIneligible("当前物理身份与原机身一致")
+    if not preparation_calls_resolved(connection, facts.activity["id"]):
+        raise BindingPreparationIneligible("原准备调用尚未可靠收场")
+    if connection.execute("SELECT 1 FROM baseline_read_calls WHERE activity_id=? AND state=1 LIMIT 1",
+                          (facts.activity["id"],)).fetchone():
+        raise BindingPreparationIneligible("原基准调用尚未可靠收场")
+    if connection.execute("SELECT 1 FROM outputs WHERE source_action_id=? LIMIT 1", (action["id"],)).fetchone():
+        raise ConsistencyError("未启动的绑定失败不能已有正式产物")
 
 
 def photo_start_recorded(connection, action):

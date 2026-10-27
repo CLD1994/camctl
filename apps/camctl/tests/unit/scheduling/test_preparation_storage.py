@@ -14,6 +14,11 @@ from camctl.persistence.repositories.capture_facts import unstarted_events
 from camctl.contracts.workflow_errors import validate_error_details
 from camctl.history.changes import event_report_targets
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+
+
+def _identity(action):
+    return CameraIdentity("CAMERA-1", 10) if action["driver_id"] == "hasselblad_cfv100c" else None
 
 
 @pytest.fixture
@@ -52,7 +57,7 @@ def photo_reserve(reserve, mocker):
 def test_photo_reservation_saves_only_original_photo_capabilities(photo_reserve):
     action, scope = photo_reserve
     plan = scheduling.ReservePreparationCommand(
-        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10")),
+        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10"), _identity(action)),
         new_operation_key()).plan(scope)
     assert plan.result.outcome is scheduling.ReservePreparationOutcome.RESERVED
     assert [(event.event_type, event.reason) for event in plan.events] == [(13, 1)]
@@ -70,12 +75,12 @@ def test_photo_reservation_saves_only_original_photo_capabilities(photo_reserve)
 def test_photo_reservation_reuses_original_activity(photo_reserve, mocker):
     action, scope = photo_reserve
     capabilities = activity_capabilities("camera_take_photo", action["execution_spec_json"])
-    activity = dict(scheduling._new_activity_values(action, capabilities), id=11)
+    activity = dict(scheduling._new_activity_values(action, capabilities, _identity(action)), id=11)
     mocker.patch.object(scheduling.StartActionCommand, "_existing_activity_id", return_value=11)
     mocker.patch.object(scheduling, "row_facts", side_effect=lambda db, table, identity:
         action if table == "actions" else activity)
     plan = scheduling.ReservePreparationCommand(
-        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_000, Decimal("10")),
+        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_000, Decimal("10"), _identity(action)),
         new_operation_key()).plan(scope)
     assert plan.result.outcome is scheduling.ReservePreparationOutcome.ALREADY
     assert plan.result.activity_id == 11 and not plan.events
@@ -156,7 +161,7 @@ def test_preparation_reservation_supplies_before_facts_for_report_target(
     action, scope = request.getfixturevalue(fixture_name)
     action["type"] = action_type
     plan = scheduling.ReservePreparationCommand(
-        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10")),
+        scheduling.ReservePreparationRequest(7, 10_000_000, 10_000_001, Decimal("10"), _identity(action)),
         new_operation_key()).plan(scope)
 
     assert event_report_targets(plan.events[0], plan.state_rows) == ((1, 7),)
@@ -188,7 +193,7 @@ def test_preparation_failure_preserves_public_error_identity(request, fixture_na
     action, scope = request.getfixturevalue(fixture_name)
     literal = "camera_take_photo" if action["type"] == 1 else "camera_record"
     activity = dict(scheduling._new_activity_values(action,
-        scheduling.activity_capabilities(literal, action["execution_spec_json"])), id=11)
+        scheduling.activity_capabilities(literal, action["execution_spec_json"]), _identity(action)), id=11)
     mocker.patch.object(scheduling, "load_start_facts", return_value=
         StartFacts(activity, None, 0, True, 1, preparation_resolved=True))
     mocker.patch("camctl.persistence.repositories.capture_facts.preparation_calls_resolved", return_value=True)
@@ -218,7 +223,7 @@ def test_start_action_reuses_prepared_activity_and_original_holder(request, fixt
     action, scope = request.getfixturevalue(fixture_name)
     literal = "camera_take_photo" if action["type"] == 1 else "camera_record"
     capabilities = scheduling.activity_capabilities(literal, action["execution_spec_json"])
-    activity = dict(scheduling._new_activity_values(action, capabilities), id=11)
+    activity = dict(scheduling._new_activity_values(action, capabilities, _identity(action)), id=11)
     if action["type"] == 2:
         activity["baseline_state"] = 3
     mocker.patch.object(scheduling.StartActionCommand, "_existing_activity_id", return_value=11)
@@ -227,7 +232,7 @@ def test_start_action_reuses_prepared_activity_and_original_holder(request, fixt
     mocker.patch.object(scheduling, "current_preparation_holder", return_value=PreparationHolder(7, 11))
     mocker.patch("camctl.persistence.repositories.capture_facts.preparation_calls_resolved", return_value=True)
     plan = scheduling.StartActionCommand(
-        scheduling.StartActionRequest(7, 20_000_000, 20_000_000), new_operation_key()).plan(scope)
+        scheduling.StartActionRequest(7, 20_000_000, 20_000_000, _identity(action)), new_operation_key()).plan(scope)
     assert plan.result.activity_id == 11
     assert [(event.event_type, event.reason) for event in plan.events] == [(5, 1), (9, 1)]
     assert all(row.table != "device_activities" for event in plan.events for row in event.rows)
@@ -237,7 +242,7 @@ def test_start_action_reuses_prepared_activity_and_original_holder(request, fixt
 def test_original_reservation_does_not_compete_again(reserve, mocker):
     action, scope = reserve
     capabilities = scheduling.activity_capabilities("camera_record", {})
-    activity = dict(scheduling._new_activity_values(action, capabilities), id=11)
+    activity = dict(scheduling._new_activity_values(action, capabilities, _identity(action)), id=11)
     mocker.patch.object(scheduling.StartActionCommand, "_existing_activity_id", return_value=11)
     mocker.patch.object(scheduling, "row_facts", side_effect=lambda db, table, identity:
         action if table == "actions" else activity)

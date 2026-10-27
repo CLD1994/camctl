@@ -948,6 +948,8 @@ class CaptureRuntime(_FileObservationSaves):
     scope_closure_supported: bool = False
     #: 核对已保存设备身份与本次固定配置；未提供时由调用方保证绑定匹配。
     binding_check: Callable[[DeviceBinding], BindingResult] | None = None
+    #: 本次会话的预期机身，用于首次建立活动；不是实际设备观察。
+    fixed_camera_identity: Any = None
     recording_state: RecordingStatePort | None = None
     #: 只发布本会话普通录像的原停止截止；None 清除对应动作的提示。
     on_recording_deadline: Callable[[int, int | None], None] | None = None
@@ -1144,6 +1146,7 @@ class CaptureRuntime(_FileObservationSaves):
             config=(self.start_config if action["type"] == int(_ACTION_TYPE.CAMERA_RECORD)
                     else AttemptConfig(max_attempts=1, timeout_s=_start_call_timeout(action))),
             occurred_at=self.wall_us(),
+            current_identity=self.fixed_camera_identity,
         )
         permit = None
         if is_hasselblad_photo(action):

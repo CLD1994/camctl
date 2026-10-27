@@ -720,6 +720,24 @@ def _guard_facts(context, table: str, row_id: int) -> dict[str, Any]:
 
 def _action_finish_guard(event, context) -> None:
     """动作终态组合与产物同事务校验。"""
+    if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 6:
+        from .preparation import PreparationReads, verify_binding_preparation_failure
+        from camctl.contracts.workflow_errors import action_error_id
+        if type(context.preparation_reads) is not PreparationReads:
+            raise EventValidationError("准备绑定失败缺少原连接事实")
+        request = event.evidence.get("preparation_binding_request")
+        for row in event.rows:
+            if row.table != "actions":
+                continue
+            action = _guard_facts(context, "actions", row.row_id)
+            if (request["action_id"] != row.row_id or request["occurred_at"] != event.occurred_at
+                    or row.after.values.get("error_code") != action_error_id("device_binding_unavailable")
+                    or not json_equal(row.after.values.get("error_details_json"), request["details"])):
+                raise EventValidationError("准备绑定失败与原申请不符")
+            try:
+                verify_binding_preparation_failure(context.preparation_reads.connection, action, request)
+            except (ValueError, TypeError, KeyError) as error:
+                raise EventValidationError(str(error)) from error
     if event.event_type == _ACTION_FINISHED_EVENT and event.reason == 5:
         from .preparation import PreparationReads
         from camctl.contracts.workflow_errors import validate_error_details, action_error_id
@@ -7104,6 +7122,17 @@ def _activity_guard(event, context) -> None:
         _validate_activity_result(row, context)
         if not row.before.exists:
             action = context.state_rows.get("actions", {}).get(row.after.values.get("action_id"), {})
+            from .scheduling import _fixed_identity
+            from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+            raw_identity = row.after.values.get("expected_identity_json")
+            try:
+                identity = None if raw_identity is None else CameraIdentity(**raw_identity)
+                expected, resource_key = _fixed_identity(action, identity)
+                if (not json_equal(raw_identity, expected)
+                        or row.after.values.get("resource_key") != resource_key):
+                    raise ValueError("活动固定机身身份与资源键不一致")
+            except (TypeError, ValueError, KeyError) as error:
+                raise EventValidationError("活动固定机身身份无效") from error
             if action.get("execution_started") == 0:
                 from .preparation import PreparationReads
                 if type(context.preparation_reads) is not PreparationReads:

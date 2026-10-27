@@ -587,7 +587,8 @@ async def _advance_preparation(runtime, action_id):
     if activity is None:
         from camctl.persistence.repositories.scheduling import ReservePreparationRequest
         if action_id not in cache.reservations:
-            request = ReservePreparationRequest(action_id, now, now, lead)
+            request = ReservePreparationRequest(action_id, now, now, lead,
+                expected_identity=runtime.fixed_camera_identity)
             cache.reservations[action_id] = request, new_operation_key()
         value = await _save_cached_request(runtime.database, cache, action_id,
             scheduling=runtime.scheduling, capture=runtime.capture)

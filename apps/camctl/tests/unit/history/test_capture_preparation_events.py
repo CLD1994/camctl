@@ -62,7 +62,7 @@ def test_preparation_failure_cannot_claim_execution_started():
 
 def _photo_action():
     return dict(id=8, type=1, status=1, execution_started=0, cancel_requested=0,
-        device_id="cam", scheduled_at=20_000_000, max_delay_ms=3000, plan_id=3, input_index=0,
+        device_id="cam", driver_id="driver", scheduled_at=20_000_000, max_delay_ms=3000, plan_id=3, input_index=0,
         execution_spec_json={"output_storage": "host", "start_call_timeout_s": Decimal("60")})
 
 
@@ -78,10 +78,11 @@ def _database():
 def test_photo_pending_activity_has_the_original_photo_contract():
     action = _photo_action()
     values = scheduling._new_activity_values(action,
-        activity_capabilities("camera_take_photo", action["execution_spec_json"]))
+        activity_capabilities("camera_take_photo", action["execution_spec_json"]), None)
     event = event_envelope(101, 7, 13, 1, (row_change("device_activities", 11, values),),
         10_000_000, evidence={"preparation_request": {"action_id": 8,
-            "trusted_wall_now": 10_000_000, "occurred_at": 10_000_000, "prepare_lead_s": Decimal("10")}})
+            "trusted_wall_now": 10_000_000, "occurred_at": 10_000_000, "prepare_lead_s": Decimal("10"),
+            "expected_identity": None}})
     context = EventContext(TransactionRange(7, 101, 101), {}, {"actions": {8: action}})
     PreparationReads(_database()).verify_create(event, context, event.rows[0])
 
@@ -101,7 +102,7 @@ def test_photo_preparation_failure_uses_the_original_connection_reader(mocker):
 def test_photo_preparation_release_waits_for_actual_calls(mocker, resolved):
     action = {**_photo_action(), "status": 6}
     activity = dict(id=11, **scheduling._new_activity_values(action,
-        activity_capabilities("camera_take_photo", action["execution_spec_json"])))
+        activity_capabilities("camera_take_photo", action["execution_spec_json"]), None))
     reader = PreparationReads(_database())
     mocker.patch.object(PreparationReads, "calls_resolved", autospec=True, return_value=resolved)
     event = event_envelope(101, 7, 13, 3, (update_change("device_activities", 11,

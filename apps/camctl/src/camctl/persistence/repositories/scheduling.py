@@ -31,6 +31,8 @@ from camctl.contracts.values import (
 )
 from camctl.capture.models import activity_capabilities
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.operations.attempts import (
     AttemptConfig,
@@ -159,6 +161,7 @@ class StartActionRequest:
     action_id: int
     trusted_wall_now: int
     occurred_at: int
+    expected_identity: CameraIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -170,12 +173,25 @@ class StartActionResult:
     reason: str | None = None
 
 
-def _new_activity_values(action, capabilities):
+def _fixed_identity(action, identity):
+    if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+        if not isinstance(identity, CameraIdentity):
+            raise ConsistencyError("Hasselblad 活动缺少固定机身身份")
+        return {"serial": identity.serial, "product_id": identity.product_id}, identity.resource_key
+    if identity is not None:
+        raise ConsistencyError("其他驱动不能使用 Hasselblad 机身身份")
+    return None, None
+
+
+def _new_activity_values(action, capabilities, identity):
     """准备和执行入口共用的唯一活动初始映像。"""
+    expected, resource_key = _fixed_identity(action, identity)
     return {
         "action_id": action["id"],
         "task_key": uuid.uuid4().hex,
         "task_locator_json": None,
+        "expected_identity_json": expected,
+        "resource_key": resource_key,
         "state_query_supported": capabilities.state_query_supported,
         "stop_supported": capabilities.stop_supported,
         "safe_repeat_stop": capabilities.safe_repeat_stop,
@@ -286,7 +302,7 @@ class StartActionCommand:
         if preparation_holder is not None and preparation_holder.action_id != action["id"]:
             return self._rejected("device_busy")
         if prepared_activity is not None:
-            _verify_prepared_activity(prepared_activity, action, capabilities)
+            _verify_prepared_activity(prepared_activity, action, capabilities, request.expected_identity)
             reason = baseline_start_reason(prepared_activity, action)
             if reason is not None:
                 return self._rejected(reason)
@@ -341,7 +357,7 @@ class StartActionCommand:
         create = None
         if prepared_activity is None:
             activity_id = _next_id(connection, "device_activities")
-            activity_values = _new_activity_values(action, capabilities)
+            activity_values = _new_activity_values(action, capabilities, request.expected_identity)
             activity_row = _row("device_activities", activity_id, activity_values)
             self._owners[("device_activities", activity_id)] = owner
             self._state["device_activities"] = {
@@ -428,6 +444,11 @@ class StartActionCommand:
             identity = self._existing_activity_id(scope.connection, request.action_id)
             if action is None or action["execution_started"] != 1 or identity is None:
                 raise TransactionError("原开始事实及准备活动不可核实")
+            activity = row_facts(scope.connection, "device_activities", identity)
+            expected, resource_key = _fixed_identity(action, request.expected_identity)
+            if (activity is None or not json_equal(activity["expected_identity_json"], expected)
+                    or activity["resource_key"] != resource_key):
+                raise TransactionError("原开始事务的准备活动机身身份与输入不符")
             return self._already(identity)
         if (len(saved) not in (2, 3)
                 or saved[0]["type"] != _ACTION_STARTED_EVENT
@@ -455,6 +476,10 @@ class StartActionCommand:
                 or action["status"] != 2 or action["execution_started"] != 1
                 or activity["action_id"] != request.action_id):
             raise TransactionError("原开始事务的可靠记录与输入不符")
+        expected, resource_key = _fixed_identity(action, request.expected_identity)
+        if (not json_equal(activity_row["after"]["values"]["expected_identity_json"], expected)
+                or activity_row["after"]["values"]["resource_key"] != resource_key):
+            raise TransactionError("原开始事务的固定机身身份与输入不符")
         return self._already(int(activity_row["id"]))
 
 
@@ -810,6 +835,7 @@ class GrantRequest:
     trusted_wall_now: int
     config: AttemptConfig
     occurred_at: int
+    current_identity: CameraIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -883,6 +909,17 @@ class GrantStartCommand:
             # 首次机会记录必须包含活动身份；缺活动整组拒绝。
             raise TransactionError(f"设备活动不存在: {request.action_id}")
         self._state["device_activities"] = {activity["id"]: activity}
+        if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+            try:
+                original = CameraIdentity(**activity["expected_identity_json"])
+            except (TypeError, ValueError, KeyError) as error:
+                raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+            if activity["resource_key"] != original.resource_key:
+                raise ConsistencyError("原活动资源键与固定机身身份不符")
+            if request.current_identity != original:
+                return self._rejected("physical_identity_mismatch")
+        elif request.current_identity is not None:
+            raise TransactionError("其他驱动不能提供 Hasselblad 身份")
         preparation_reason = baseline_start_reason(activity, action)
         if preparation_reason is not None:
             return self._rejected(preparation_reason)
@@ -995,6 +1032,9 @@ class GrantStartCommand:
             1,
             (attempt_row, run_row, activity_row),
             request.occurred_at,
+            evidence=({"start_camera_identity": {"serial": request.current_identity.serial,
+                       "product_id": request.current_identity.product_id}}
+                      if request.current_identity is not None else {}),
         )
         ticket = AttemptTicket(
             attempt_id=attempt_no,
@@ -1099,6 +1139,10 @@ class GrantStartCommand:
         if (event["occurred_at"] != request.occurred_at or len(rows) != 3
                 or set(by_table) != {"operation_attempts", "operation_runs", "device_activities"}):
             raise TransactionError("原授予的事务组成或事实时刻与输入不符")
+        expected_identity = None if request.current_identity is None else {
+            "serial": request.current_identity.serial, "product_id": request.current_identity.product_id}
+        if not json_equal(event["body"]["evidence"].get("start_camera_identity"), expected_identity):
+            raise TransactionError("原授予的机身身份与输入不符")
         attempt_row = by_table["operation_attempts"]
         run_row = by_table["operation_runs"]
         activity_row = by_table["device_activities"]
@@ -1184,6 +1228,9 @@ class SchedulingRepository:
         require_action_preparation_format(owned, request.action_id)
         return _preparation_outcome(commit_operation(FailPreparationCommand(request, key), key, owned))
 
+    def fail_binding_preparation(self, request, key, owned):
+        return _preparation_outcome(commit_operation(FailBindingPreparationCommand(request, key), key, owned))
+
     def start_action(
         self, request: StartActionRequest, key: OperationKey,
         owned: OwnedConnection,
@@ -1242,6 +1289,7 @@ class ReservePreparationRequest:
     trusted_wall_now: int
     occurred_at: int
     prepare_lead_s: Decimal
+    expected_identity: CameraIdentity | None = None
 
     def __post_init__(self):
         ObjectId(self.action_id)
@@ -1312,7 +1360,7 @@ class ReservePreparationCommand:
         existing = StartActionCommand._existing_activity_id(connection, action["id"])
         if existing is not None:
             activity = row_facts(connection, "device_activities", existing)
-            _verify_prepared_activity(activity, action, capabilities)
+            _verify_prepared_activity(activity, action, capabilities, request.expected_identity)
             return result(ReservePreparationOutcome.ALREADY, existing)
         # 已持有活动和读取机会均由原拥有者先完成，准备不打断原工作。
         with closing(connection.execute(
@@ -1339,7 +1387,7 @@ class ReservePreparationCommand:
                     return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
         allocation = scope.allocate(1)
         identity = _next_id(connection, "device_activities")
-        values = _new_activity_values(action, capabilities)
+        values = _new_activity_values(action, capabilities, request.expected_identity)
         state["device_activities"] = {}
         event = _envelope(allocation.first_event_id, allocation.txn_id, 13, 1,
             (_row("device_activities", identity, values),), request.occurred_at,
@@ -1351,14 +1399,20 @@ class ReservePreparationCommand:
         return {"action_id": self.request.action_id,
             "trusted_wall_now": self.request.trusted_wall_now,
             "prepare_lead_s": self.request.prepare_lead_s,
-            "occurred_at": self.request.occurred_at}
+            "occurred_at": self.request.occurred_at,
+            "expected_identity": None if self.request.expected_identity is None else {
+                "serial": self.request.expected_identity.serial,
+                "product_id": self.request.expected_identity.product_id}}
 
 
-def _verify_prepared_activity(activity, action, capabilities):
+def _verify_prepared_activity(activity, action, capabilities, identity):
     if (activity is None or activity["action_id"] != action["id"]
             or activity["occupancy_state"] != 1 or activity["dispatch_state"] != 1
             or activity["activity_state"] != 1 or activity["started_at"] is not None):
         raise ConsistencyError("原准备活动不再满足未派发占用条件")
+    expected, resource_key = _fixed_identity(action, identity)
+    if not json_equal(activity["expected_identity_json"], expected) or activity["resource_key"] != resource_key:
+        raise ConsistencyError("原准备活动的固定机身身份与当前配置不符")
     for column in ("state_query_supported", "stop_supported", "safe_repeat_stop", "start_return_meaning",
                    "completion_mode", "ownership_mode", "output_scope_json"):
         if not json_equal(activity[column], getattr(capabilities, column)):
@@ -1388,6 +1442,115 @@ class FailPreparationRequest:
 class FailPreparationResult:
     outcome: FailPreparationOutcome
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class FailBindingPreparationRequest:
+    action_id: int
+    trusted_wall_now: int
+    occurred_at: int
+    details: Mapping[str, Any]
+    prepare_lead_s: Decimal = Decimal(0)
+    current_identity: CameraIdentity | None = None
+
+    def __post_init__(self):
+        from camctl.contracts.workflow_errors import validate_error_details
+        ObjectId(self.action_id)
+        UtcMicros(self.trusted_wall_now)
+        UtcMicros(self.occurred_at)
+        validate_error_details("device_binding_unavailable", self.details)
+        if self.current_identity is not None and not isinstance(self.current_identity, CameraIdentity):
+            raise TypeError("当前机身身份必须是 CameraIdentity")
+        if (isinstance(self.prepare_lead_s, bool)
+                or not isinstance(self.prepare_lead_s, (int, Decimal))
+                or not Decimal(self.prepare_lead_s).is_finite() or self.prepare_lead_s < 0):
+            raise ValueError("准备提前量必须是有限非负秒数")
+
+
+class FailBindingPreparationCommand:
+    """没有活动和调用时，保存准备阶段的原绑定失败。"""
+
+    def __init__(self, request, key):
+        self.request, self.key = request, key
+
+    def _evidence(self):
+        r = self.request
+        return {"action_id": r.action_id, "trusted_wall_now": r.trusted_wall_now,
+                "occurred_at": r.occurred_at, "details": dict(r.details),
+                "prepare_lead_s": r.prepare_lead_s,
+                "current_identity": None if r.current_identity is None else {
+                    "serial": r.current_identity.serial, "product_id": r.current_identity.product_id}}
+
+    def plan(self, scope):
+        from camctl.contracts.workflow_errors import action_error_id
+        from .preparation import BindingPreparationIneligible, verify_binding_preparation_failure
+        connection, request = scope.connection, self.request
+        action = row_facts(connection, "actions", request.action_id)
+        if action is None:
+            raise TransactionError("绑定失败缺少原动作")
+        state, owners = {"actions": {action["id"]: action}}, {}
+        def result(outcome, reason=None):
+            return CommandPlan((), owners, state, FailPreparationResult(outcome, reason), read_only=True)
+        saved = saved_transaction_events(connection, self.key)
+        if saved is not None:
+            if (not saved or (saved[0]["type"], saved[0]["reason"]) != (8, 6)
+                    or not json_equal(saved[0]["body"]["evidence"].get("preparation_binding_request"), self._evidence())
+                    or any(event["occurred_at"] != request.occurred_at for event in saved)
+                    or any((event["type"], event["reason"]) not in ((8, 6), (13, 2), (13, 3), (9, 2))
+                           for event in saved)
+                    or sum((event["type"], event["reason"]) == (8, 6) for event in saved) != 1
+                    or sum((event["type"], event["reason"]) == (9, 2) for event in saved) > 1
+                    or action["status"] != 4 or action["execution_started"] != 0
+                    or action["error_code"] != action_error_id("device_binding_unavailable")
+                    or not json_equal(action["error_details_json"], request.details)):
+                raise TransactionError("绑定失败原键与完整申请或保存结果不符")
+            rows = saved[0]["body"]["rows"]
+            if (len(rows) != 1 or rows[0]["table"] != "actions" or rows[0]["id"] != action["id"]
+                    or not json_equal(rows[0]["before"]["values"], {
+                        "status": 1, "error_code": None, "error_details_json": None})
+                    or not json_equal(rows[0]["after"]["values"], {
+                        "status": 4, "error_code": action_error_id("device_binding_unavailable"),
+                        "error_details_json": request.details})):
+                raise TransactionError("绑定失败原事件与动作或申请不符")
+            verify_unstarted_final(connection, action, saved)
+            return result(FailPreparationOutcome.ALREADY)
+        if action["status"] in _ACTION_TERMINAL:
+            return result(FailPreparationOutcome.ALREADY)
+        if action["cancel_requested"]:
+            return result(FailPreparationOutcome.REJECTED, "canceled")
+        if request.trusted_wall_now > action["scheduled_at"] + action["max_delay_ms"] * 1000:
+            return result(FailPreparationOutcome.REJECTED, "window_ended")
+        try:
+            verify_binding_preparation_failure(connection, action, self._evidence())
+        except BindingPreparationIneligible:
+            return result(FailPreparationOutcome.REJECTED, "not_eligible")
+        facts = load_start_facts(connection, action)
+        include_start_facts(facts, state, owners)
+        owners[("actions", action["id"])] = ("action", action["id"])
+        events = [_envelope(0, 0, 8, 6, (_update("actions", action["id"],
+            {"status": 1, "error_code": None, "error_details_json": None},
+            {"status": 4, "error_code": action_error_id("device_binding_unavailable"),
+             "error_details_json": dict(request.details)}),), request.occurred_at,
+            evidence={"preparation_binding_request": self._evidence()})]
+        if facts.activity is not None:
+            events.extend(unstarted_events(facts, request.occurred_at, run_status=None,
+                                           preparation_resolved=True))
+        siblings = _sibling_actions(connection, action)
+        state["actions"].update(siblings)
+        plan = row_facts(connection, "plans", action["plan_id"])
+        if plan is None:
+            raise ConsistencyError("绑定失败缺少原计划")
+        state["plans"] = {plan["id"]: plan}
+        if plan["status"] in (1, 2) and all(row["id"] == action["id"] or row["status"] in _ACTION_TERMINAL
+                                            for row in siblings.values()):
+            owners[("plans", plan["id"])] = ("plan", plan["id"])
+            events.append(_envelope(0, 0, 9, 2, (_update("plans", plan["id"],
+                {"status": plan["status"]}, {"status": 3}),), request.occurred_at))
+        allocation = scope.allocate(len(events))
+        return CommandPlan(tuple(replace(event, event_id=allocation.first_event_id + index,
+                                         transaction_id=allocation.txn_id)
+                                 for index, event in enumerate(events)), owners, state,
+                           FailPreparationResult(FailPreparationOutcome.FAILED))
 
 
 class FailPreparationCommand:

@@ -514,6 +514,7 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 
 | 字段 | 固定含义或空值规则 |
 | --- | --- |
+| `expected_identity_json`、`resource_key` | Hasselblad 活动在首次预留前固定预期 serial 和产品标识，以及由驱动和精确 serial 规范编码的资源键；两列同时为空或同时有值。其他驱动不使用该身份。固定身份表示操作目标，不是实际设备观察。 |
 | `state_query_supported`、`stop_supported`、`safe_repeat_stop` | 第一次建立活动时实际使用的能力，均为 0/1；可安全重复停止必然要求支持停止 |
 | `start_return_meaning` | `SENT`、`STARTED`、`COMPLETED`，声明成功返回保证的范围；与动作首次冻结的执行定义保持一致。`SENT` 只表达驱动契约规定的可靠发送成功返回，不表示设备已经开始采集。 |
 | `completion_mode` | `DEVICE_EVIDENCE`、`TIME_AND_OUTPUTS`；与固定任务契约一致，不在查询失败后改为另一种 |

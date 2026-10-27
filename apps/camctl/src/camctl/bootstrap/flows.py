@@ -30,6 +30,7 @@ from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
 from camctl.logging_runtime.events import measure_stage, record_event
 from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind, db_failure
 from camctl.persistence.business import settle_required
@@ -40,6 +41,7 @@ from camctl.persistence.repositories.scheduling import (
     StartActionRequest,
     StartOutcome,
     ExpireOutcome,
+    FailBindingPreparationRequest,
 )
 from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork, FlowWakeup
@@ -356,8 +358,23 @@ class CaptureFlow:
                     return
                 # 执行前查询可能等待；建立准备活动时重新使用实际窗口时刻。
                 current = context.clock.utc_micros()
+                if runtime is not None:
+                    action = await runtime.action(action_id)
+                    binding_failure = await _original_binding_failure(runtime, action)
+                    if (action["driver_id"] == HASSELBLAD_DRIVER_ID
+                            and action["type"] == 1 and binding_failure is not None):
+                        from camctl.capture.preparation import _end, recover_preparation
+                        if not await recover_preparation(runtime, action_id, on_progress=progressed):
+                            continue
+                        await _end(runtime, action_id, "fail_binding_preparation",
+                            FailBindingPreparationRequest(action_id, current, current, binding_failure,
+                                current_identity=(runtime.fixed_camera_identity
+                                    if binding_failure["reason"] == "physical_identity_mismatch" else None)))
+                        wakeup_required |= (await runtime.action(action_id))["status"] == 4
+                        continue
                 outcome = await _save_command(database, scheduling.start_action,
-                    StartActionRequest(action_id, current, current))
+                    StartActionRequest(action_id, current, current,
+                        expected_identity=None if runtime is None else runtime.fixed_camera_identity))
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(StateDbFailure, f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
                 wakeup_required |= outcome.value.outcome is StartOutcome.STARTED

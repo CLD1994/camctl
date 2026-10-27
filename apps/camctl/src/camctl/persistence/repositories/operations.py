@@ -1745,6 +1745,19 @@ def _attempt_intent_guard(event, context) -> None:
     if kind == int(_RUN_KIND.START):
         activity = _guard_facts(context, "device_activities", run_after.get("activity_id"))
         action = _guard_facts(context, "actions", run_after.get("action_id"))
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        identity = event.evidence.get("start_camera_identity")
+        if action.get("driver_id") == DRIVER_ID:
+            try:
+                original = CameraIdentity(**activity["expected_identity_json"])
+                current = CameraIdentity(**identity)
+            except (TypeError, ValueError, KeyError) as error:
+                raise EventValidationError("启动意图缺少可靠机身身份") from error
+            if current != original or activity.get("resource_key") != original.resource_key:
+                _fail("启动意图与原固定机身身份不符")
+        elif identity is not None:
+            _fail("其他驱动不能携带 Hasselblad 机身身份")
         try:
             preparation_reason = baseline_start_reason(activity, action)
         except ConsistencyError as error:

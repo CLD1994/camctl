@@ -22,6 +22,16 @@ _KIND = enum_for("operation_runs.kind")
 _PURPOSE = enum_for("operation_runs.query_purpose")
 
 
+def _require_photo_camera(camera, activity):
+    from camctl.contracts.json_values import json_equal
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+
+    fixed = CameraIdentity(**activity["expected_identity_json"])
+    if (not json_equal(camera, activity["expected_identity_json"])
+            or activity["resource_key"] != fixed.resource_key):
+        raise ValueError("原照片观察与活动固定机身不一致")
+
+
 class PhotoResultReads:
     """从原事务连接核对设备双源与可靠 START 结果。"""
 
@@ -88,6 +98,8 @@ class PhotoResultReads:
             if (not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}
                     or not isinstance(camera["serial"], str) or type(camera["product_id"]) is not int):
                 raise ValueError("原照片观察缺少机身身份")
+            activity = row_facts(self.connection, "device_activities", row[1])
+            _require_photo_camera(camera, activity)
             locator = CameraFileLocator.from_json(captures[0].get("camera_locator"))
             if locator.status is not CameraLocatorStatus.PATH:
                 raise ValueError("原照片观察缺少机内路径")
