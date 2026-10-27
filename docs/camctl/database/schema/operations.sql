@@ -84,6 +84,7 @@ CREATE TABLE device_availability_checks (
     UNIQUE (id, action_id)
 ) STRICT;
 CREATE INDEX availability_checks_resource ON device_availability_checks(resource_key, id);
+CREATE INDEX availability_checks_device ON device_availability_checks(device_id, id);
 CREATE INDEX availability_checks_action ON device_availability_checks(action_id, id);
 
 CREATE TABLE device_availability_targets (

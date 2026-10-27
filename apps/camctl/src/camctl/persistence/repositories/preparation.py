@@ -32,6 +32,70 @@ class PreparationReads:
             return device_start_in_flight(self.connection, device_id)
         return self._device_in_flight(device_id, "START")
 
+    def availability_in_flight(self, device_id, identity=None):
+        """按逻辑设备和固定机身核对已提交或已验证前序的实际检查尝试。"""
+        from contextlib import closing
+        from camctl.contracts.values import ConsistencyError
+        from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+        from camctl.persistence.transaction import row_facts
+
+        if not isinstance(device_id, str) or not device_id:
+            raise ConsistencyError("设备检查缺少逻辑设备身份")
+        if identity is not None and not isinstance(identity, CameraIdentity):
+            raise ConsistencyError("设备检查缺少有效机身身份")
+        key = None if identity is None else identity.resource_key
+        kind = int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
+        running = int(enum_for("operation_attempts.status").RUNNING)
+        projected = {}
+        for event in self.events:
+            for row in event.rows:
+                if row.table not in ("operation_attempts", "operation_runs", "device_availability_checks"):
+                    continue
+                ref = (row.table, row.row_id)
+                if ref not in projected:
+                    original = row_facts(self.connection, *ref)
+                    if row.before.exists and original is None:
+                        raise ConsistencyError("前序设备检查事实缺少原记录")
+                    projected[ref] = {} if original is None else dict(original)
+                if not row.after.exists:
+                    raise ConsistencyError("前序设备检查事实不能删除")
+                projected[ref].update(row.after.values)
+                projected[ref]["id"] = row.row_id
+
+        def required(table, row_id):
+            facts = projected.get((table, row_id))
+            if facts is None and row_id is not None:
+                facts = row_facts(self.connection, table, row_id)
+            if facts is None:
+                raise ConsistencyError(f"设备检查缺少关联记录: {table}#{row_id}")
+            return facts
+
+        def matches(attempt):
+            if attempt.get("status") != running:
+                return False
+            run = required("operation_runs", attempt.get("run_id"))
+            if run.get("kind") != kind:
+                return False
+            check = required("device_availability_checks", run.get("availability_check_id"))
+            try:
+                fixed = CameraIdentity(**check["expected_identity_json"])
+            except (TypeError, ValueError, KeyError) as error:
+                raise ConsistencyError("设备检查缺少可靠固定机身身份") from error
+            if (check.get("resource_key") != fixed.resource_key or check.get("action_id") != run.get("action_id")
+                    or not isinstance(check.get("device_id"), str) or not check["device_id"]):
+                raise ConsistencyError("设备检查资源键或原责任不一致")
+            return check["device_id"] == device_id or (key is not None and check["resource_key"] == key)
+
+        attempts = (facts for (table, _), facts in projected.items() if table == "operation_attempts")
+        if any(matches(attempt) for attempt in attempts):
+            return True
+        sql = ("SELECT t.id FROM device_availability_checks c"
+               " JOIN operation_runs r ON r.availability_check_id=c.id AND r.kind=?"
+               " JOIN operation_attempts t ON t.run_id=r.id AND t.status=?"
+               " WHERE c.device_id=? OR (? IS NOT NULL AND c.resource_key=?)")
+        with closing(self.connection.execute(sql, (kind, running, device_id, key, key))) as cursor:
+            return any(matches(required("operation_attempts", attempt_id)) for attempt_id, in cursor)
+
     def _device_in_flight(self, device_id, kind_name):
         from contextlib import closing
         from camctl.contracts.values import ConsistencyError
