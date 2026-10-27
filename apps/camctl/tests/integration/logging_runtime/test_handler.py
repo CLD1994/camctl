@@ -44,17 +44,10 @@ class TestFileChannel:
             tmp_path / "camctl.log", max_bytes=32, file_count=2
         )
         channel.write_record(_record("w" * 40))  # 先超过阈值，使下一条触发轮换
-        # 注入轮换失败：追加结果不被掩盖。
-        def broken_rollover():
-            raise OSError("轮换失败")
-
         import unittest.mock as mock
-        from concurrent_log_handler import ConcurrentRotatingFileHandler
-
-        # 在追踪层之下注入轮换失败：追加结果不被掩盖。
-        with mock.patch.object(
-            ConcurrentRotatingFileHandler,
-            "doRollover",
+        # 正式归档名建立失败时，当前文件仍可以独立追加。
+        with mock.patch(
+            "os.link",
             side_effect=OSError("轮换失败"),
         ):
             result = channel.write_record(_record("x" * 40))

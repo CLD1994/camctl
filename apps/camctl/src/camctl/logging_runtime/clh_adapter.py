@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import enum
+import errno
 import os
 import shutil
 import sys
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 
-from camctl.logging_runtime.models import LogLevel
+from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.service import LogRecord
 
 __all__ = [
@@ -39,6 +40,10 @@ class WriteFailureStage(str, enum.Enum):
     FORMAT = "format"
     LOCK_ACQUIRE = "lock_acquire"
     FILE_IO = "file_io"
+    FILE_SYNC = "file_sync"
+    DIRECTORY_SYNC = "directory_sync"
+    DIRECTORY_CLOSE = "directory_close"
+    FILE_CLOSE = "file_close"
     LOCK_RELEASE = "lock_release"
 
 
@@ -54,6 +59,12 @@ class WriteResult:
     copy_handles_closed: bool | None = None
     copy_source_close_error: str | None = None
     copy_target_close_error: str | None = None
+    durable: bool = False
+    sync_error: str | None = None
+
+    @property
+    def completion(self) -> LogWriteResult:
+        return LogWriteResult(self.appended, self.durable)
 
     @property
     def disables_file_logging(self) -> bool:
@@ -76,12 +87,23 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
     append_error: str | None = None
     coordination_error: str | None = None
     failure_stage: WriteFailureStage | None = None
+    sync_error: str | None = None
+    resource_close_error: str | None = None
+    appended = False
+    durable = False
+    important = False
 
-    def reset_failures(self) -> None:
+    def reset_failures(self, *, important=False) -> None:
         self.rotation_error = None
         self.append_error = None
         self.coordination_error = None
         self.failure_stage = None
+        self.sync_error = None
+        self.resource_close_error = None
+        self.appended = self.durable = False
+        self.important = important
+        self._prepared = False
+        self._resource_control = None
 
     def format(self, record: logging.LogRecord) -> str:
         try:
@@ -92,6 +114,11 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
             raise
 
     def _do_lock(self) -> None:
+        try:
+            Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
+        except Exception as error:
+            self._record_file_failure(error)
+            raise
         try:
             super()._do_lock()
         except Exception as error:
@@ -109,6 +136,9 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
 
     def _check_stream(self) -> None:
         try:
+            if not self._prepared:
+                self._prepare_archives()
+                self._prepared = True
             super()._check_stream()
         except Exception as error:
             self._record_file_failure(error)
@@ -117,13 +147,44 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
     def do_write(self, message: str) -> None:
         # CLH 捕获轮换检查错误后仍会调用 do_write；若该检查已确认
         # 当前日志打开失败，禁止在同一记录中再次尝试打开。
-        if (self.failure_stage is WriteFailureStage.FILE_IO
-                and self.append_error is not None):
-            raise OSError(self.append_error)
+        if self.failure_stage in (WriteFailureStage.FILE_IO, WriteFailureStage.FILE_SYNC,
+                                  WriteFailureStage.DIRECTORY_SYNC):
+            raise OSError(self.append_error or self.sync_error or "日志文件准备失败")
         try:
-            super().do_write(message)
+            if self.stream is None or self.stream.closed:
+                self.stream = self.do_open()
+            message += self.terminator
+            try:
+                self.stream.write(message)
+            except UnicodeError:
+                encoding = getattr(self.stream, "encoding", self.encoding or "us-ascii")
+                message = message.encode(encoding, self.unicode_error_policy).decode(encoding)
+                self.stream.write(message)
+            self.flush()
+            self.appended = True
+            if self.important:
+                try:
+                    os.fsync(self.stream.fileno())
+                except BaseException as error:
+                    self._record_sync_failure(WriteFailureStage.FILE_SYNC, error)
+                    raise
+                self._sync_directory_chain()
+                self.durable = True
+            if not self._actual_keep_log_stream_open:
+                try:
+                    self.stream.close()
+                except BaseException as error:
+                    self._record_close_failure(WriteFailureStage.FILE_CLOSE, error)
+                    raise
+                finally:
+                    self.stream = None
+            if self._resource_control is not None:
+                raise self._resource_control
         except Exception as error:
-            self._record_file_failure(error)
+            if self.failure_stage not in (WriteFailureStage.FILE_SYNC,
+                                          WriteFailureStage.DIRECTORY_SYNC,
+                                          WriteFailureStage.FILE_CLOSE):
+                self._record_file_failure(error)
             raise
 
     def do_open(self, mode: str | None = None):
@@ -152,10 +213,99 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
             return False
 
     def _record_file_failure(self, error: BaseException) -> None:
-        if self.failure_stage is None:
+        if self.failure_stage in (WriteFailureStage.FILE_SYNC, WriteFailureStage.DIRECTORY_SYNC):
+            return
+        if self.failure_stage in (None, WriteFailureStage.DIRECTORY_CLOSE, WriteFailureStage.FILE_CLOSE):
             self.failure_stage = WriteFailureStage.FILE_IO
         self.append_error = self.append_error or (
-            f"{type(error).__name__}: {error}")
+            _failure_description(error))
+
+    def _record_sync_failure(self, stage, error):
+        self.failure_stage = stage
+        self.sync_error = self.sync_error or _failure_description(error)
+
+    def _record_close_failure(self, stage, error):
+        if self.failure_stage is None:
+            self.failure_stage = stage
+        self.resource_close_error = self.resource_close_error or _failure_description(error)
+
+    def _sync_directory(self, path):
+        if os.name != "posix" or not hasattr(os, "O_DIRECTORY"):
+            error = OSError(errno.ENOTSUP, "目标环境不支持目录同步")
+            self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
+            raise error
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        except BaseException as error:
+            self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
+            raise
+        primary = None
+        try:
+            os.fsync(fd)
+        except BaseException as error:
+            self._record_sync_failure(WriteFailureStage.DIRECTORY_SYNC, error)
+            primary = error
+        try:
+            os.close(fd)
+        except BaseException as error:
+            self._record_close_failure(WriteFailureStage.DIRECTORY_CLOSE, error)
+            if not isinstance(error, Exception) and self._resource_control is None:
+                self._resource_control = error
+        if primary is not None:
+            raise primary.with_traceback(primary.__traceback__)
+
+    def _sync_directory_chain(self):
+        directory = Path(self.baseFilename).parent
+        while True:
+            self._sync_directory(directory)
+            if directory.parent == directory:
+                return
+            directory = directory.parent
+
+    def _move_name(self, source, target):
+        os.link(source, target)
+        self._sync_directory(Path(self.baseFilename).parent)
+        os.unlink(source)
+        self._sync_directory(Path(self.baseFilename).parent)
+
+    def _archive_names(self):
+        path = Path(self.baseFilename)
+        prefix = path.name + "."
+        result = []
+        for candidate in path.parent.iterdir():
+            suffix = candidate.name[len(prefix):] if candidate.name.startswith(prefix) else ""
+            if suffix.isascii() and suffix.isdecimal() and int(suffix) > 0 and suffix == str(int(suffix)):
+                result.append((int(suffix), candidate))
+        return sorted(result)
+
+    def _prepare_archives(self):
+        path = Path(self.baseFilename)
+        names = ([(0, path)] if path.exists() else []) + self._archive_names()
+        identities = {}
+        duplicates = []
+        for index, name in reversed(names):
+            info = name.stat()
+            identity = info.st_dev, info.st_ino
+            if identity in identities:
+                duplicates.append(name)
+            else:
+                identities[identity] = name
+        if duplicates:
+            self._sync_directory(path.parent)
+            if path in duplicates and self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            for name in duplicates:
+                os.unlink(name)
+                self._sync_directory(path.parent)
+        archives = self._archive_names()
+        for expected, (index, source) in enumerate(archives, 1):
+            if index != expected:
+                self._move_name(source, Path(f"{self.baseFilename}.{expected}"))
+        archives = self._archive_names()
+        for _, name in reversed(archives[self.backupCount:]):
+            os.unlink(name)
+            self._sync_directory(path.parent)
 
     def _record_coordination_failure(
         self, stage: WriteFailureStage, error: BaseException,
@@ -175,10 +325,25 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
 
     def doRollover(self) -> None:  # noqa: D102 - 覆盖以分类错误
         try:
-            super().doRollover()
+            if self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            if self.backupCount <= 0:
+                self.stream = self.do_open("w")
+            else:
+                archives = self._archive_names()
+                for _, name in reversed(archives[max(0, self.backupCount - 1):]):
+                    os.unlink(name)
+                    self._sync_directory(Path(self.baseFilename).parent)
+                for index, source in reversed(self._archive_names()):
+                    self._move_name(source, Path(f"{self.baseFilename}.{index + 1}"))
+                path = Path(self.baseFilename)
+                if path.exists():
+                    self._move_name(path, Path(f"{self.baseFilename}.1"))
+            self.num_rollovers += 1
         except Exception as error:
             # 轮换失败不掩盖追加：记录错误并继续以当前文件追加。
-            self.rotation_error = str(error)
+            self.rotation_error = _failure_description(error)
 
     def handleError(self, record: logging.LogRecord | None = None) -> None:
         import traceback
@@ -190,10 +355,22 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
                                   WriteFailureStage.LOCK_RELEASE):
             if self.coordination_error is None:
                 self.coordination_error = detail
-        else:
+        elif self.failure_stage not in (WriteFailureStage.FILE_SYNC, WriteFailureStage.DIRECTORY_SYNC,
+                                        WriteFailureStage.DIRECTORY_CLOSE, WriteFailureStage.FILE_CLOSE):
             if self.failure_stage is None:
                 self.failure_stage = WriteFailureStage.FILE_IO
             self.append_error = self.append_error or detail
+
+
+def _failure_description(error: BaseException) -> str:
+    try:
+        return f"{type(error).__name__}: {error}"
+    except Exception:
+        return type(error).__name__
+
+
+def _join_errors(*errors):
+    return "; ".join(error for error in errors if error) or None
 
 
 def _describe_copy_failure(failure: BaseException) -> str:
@@ -315,12 +492,16 @@ class FileChannel:
                     appended=False, rotated=False,
                     append_error="file_channel_disabled",
                 )
-            self._handler.reset_failures()
+            self._handler.reset_failures(important=record.level is LogLevel.ERROR)
             entry = self._build_entry(record)
+            primary = None
             try:
                 self._handler.emit(entry)
-            except Exception as error:  # pragma: no cover - emit 内部已捕获
-                self._handler._record_file_failure(error)
+            except BaseException as error:
+                if isinstance(error, Exception):
+                    self._handler._record_file_failure(error)
+                else:
+                    primary = error
             handler = self._handler
             failure_stage = handler.failure_stage
             if failure_stage is not None and failure_stage is not WriteFailureStage.FORMAT:
@@ -330,19 +511,21 @@ class FileChannel:
                 close_error = self._disable_and_close(close_kind)
             else:
                 close_error = None
-            return WriteResult(
-                appended=(handler.append_error is None and failure_stage not in (
-                    WriteFailureStage.FORMAT,
-                    WriteFailureStage.LOCK_ACQUIRE,
-                    WriteFailureStage.FILE_IO,
-                )),
+            result = WriteResult(
+                appended=handler.appended,
                 rotated=failure_stage is not WriteFailureStage.FORMAT,
                 rotation_error=handler.rotation_error,
                 append_error=handler.append_error,
                 coordination_error=handler.coordination_error,
-                close_error=close_error,
+                close_error=_join_errors(handler.resource_close_error, close_error),
                 failure_stage=failure_stage,
+                durable=handler.durable,
+                sync_error=handler.sync_error,
             )
+            if primary is not None:
+                _attach_write_result(primary, result)
+                raise primary.with_traceback(primary.__traceback__)
+            return result
 
     def copy_with_write(self, record: LogRecord,
                         destination: Path) -> tuple[WriteResult, str | None]:
@@ -362,7 +545,7 @@ class FileChannel:
                     copy_handles_closed=True,
                 ), None)
             handler = self._handler
-            handler.reset_failures()
+            handler.reset_failures(important=record.level is LogLevel.ERROR)
             entry = self._build_entry(record)
             try:
                 message = handler.format(entry)
@@ -411,10 +594,12 @@ class FileChannel:
                             raise
                         handler.rotation_error = f"{type(error).__name__}: {error}"
                     handler.do_write(message)
-                    handler.flush()
                 except Exception as error:
                     file_io_failed = True
                     handler._record_file_failure(error)
+                except BaseException as error:
+                    primary_copy_error = error
+                    file_io_failed = True
                 if not file_io_failed:
                     try:
                         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -447,19 +632,20 @@ class FileChannel:
                     # 禁用辅助通道并只尝试一次关闭。
                     close_error = self._disable_and_close(
                         "file_handler" if file_io_failed else "coordination")
-            if file_io_failed and not self._disabled:
+            if (file_io_failed or handler.failure_stage in (
+                    WriteFailureStage.DIRECTORY_CLOSE, WriteFailureStage.FILE_CLOSE)) and not self._disabled:
                 close_error = self._disable_and_close("file_handler")
 
             close_errors = tuple(error for error in (
                 target_close_exception, source_close_exception) if error is not None)
             copy_handles_closed = not close_errors
             write_result = WriteResult(
-                appended=not file_io_failed and handler.append_error is None,
+                appended=handler.appended,
                 rotated=True,
                 rotation_error=handler.rotation_error,
                 append_error=handler.append_error,
                 coordination_error=coordination_error,
-                close_error=close_error,
+                close_error=_join_errors(handler.resource_close_error, close_error),
                 failure_stage=handler.failure_stage,
                 copy_handles_closed=copy_handles_closed,
                 copy_source_close_error=(
@@ -468,6 +654,8 @@ class FileChannel:
                 copy_target_close_error=(
                     None if target_close_exception is None else
                     _copy_close_failure(target_close_exception)),
+                durable=handler.durable,
+                sync_error=handler.sync_error,
             )
             if primary_copy_error is not None or close_errors:
                 copy_error = _raise_copy_failure(
