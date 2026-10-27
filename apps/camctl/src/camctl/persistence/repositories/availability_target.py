@@ -198,10 +198,49 @@ def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> 
         raise AvailabilityTargetIdentityMismatch("检查与旧活动的固定机身身份不一致")
 
 
+def require_original_settled(connection, activity, action):
+    """核对旧拍摄的原本地调用、结果和有限核实已经收场。"""
+    from .capture_facts import load_start_facts
+    running = int(enum_for("operation_attempts.status").RUNNING)
+    statuses = enum_for("operation_runs.status")
+    kinds = enum_for("operation_runs.kind")
+    purposes = enum_for("operation_runs.query_purpose")
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.activity_id=? AND (t.status=? OR t.result_event_id IS NULL) LIMIT 1",
+        (activity["id"], running),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            raise AvailabilityTargetBlocked("旧活动存在尚未保存结果的实际尝试")
+    start = load_start_facts(connection, action)
+    if (start.activity is None or start.activity.get("id") != activity["id"]
+            or start.run is None or type(start.attempts_used) is not int or start.attempts_used < 1
+            or type(start.run.get("status")) is not int):
+        raise AvailabilityTargetStateError("旧活动缺少一致的 START 责任")
+    if (start.run["status"] in (int(statuses.PENDING), int(statuses.ACTIVE))
+            or start.not_started or not start.preparation_resolved):
+        raise AvailabilityTargetBlocked("旧活动的 START 或准备责任尚未形成适用收场")
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? AND query_purpose=?"
+        " AND status IN (?,?) LIMIT 1",
+        (action["id"], int(kinds.QUERY_ACTIVITY), int(purposes.START_CONFIRMATION),
+         int(statuses.PENDING), int(statuses.ACTIVE)),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            raise AvailabilityTargetBlocked("旧活动的 START 核实责任尚未终结")
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts t, json_each(t.result_json,'$.observations') observation"
+        " WHERE t.run_id=? AND t.result_event_id IS NOT NULL"
+        " AND json_extract(observation.value,'$.type')='photo_taken' LIMIT 1",
+        (start.run["id"],),
+    )) as cursor:
+        if cursor.fetchone() is not None:
+            raise AvailabilityTargetBlocked("旧活动已有照片结果，必须沿原文件责任处理")
+
+
 def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
     """从原写事务读取检查的完整旧目标；结果不授予设备执行资格。"""
     from camctl.persistence.transaction import row_facts
-    from .capture_facts import load_start_facts
 
     for page in iter_logical_held_activities(connection, check["device_id"], batch_size=batch_size):
         for action_id, activity_id in page:
@@ -212,10 +251,6 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
             if activity["resource_key"] != check["resource_key"]:
                 raise AvailabilityTargetIdentityMismatch("逻辑设备旧活动的固定机身身份不同")
 
-    running = int(enum_for("operation_attempts.status").RUNNING)
-    statuses = enum_for("operation_runs.status")
-    kinds = enum_for("operation_runs.kind")
-    purposes = enum_for("operation_runs.query_purpose")
     seen = False
     for page in iter_held_activity_ids(connection, check["resource_key"], batch_size=batch_size):
         for activity_id in page:
@@ -231,38 +266,68 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
             if existing is not None:
                 raise AvailabilityTargetReuse(existing[0])
             require_target_facts(check, activity, action)
-            with closing(connection.execute(
-                "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
-                " WHERE r.activity_id=? AND (t.status=? OR t.result_event_id IS NULL) LIMIT 1",
-                (activity_id, running),
-            )) as cursor:
-                if cursor.fetchone() is not None:
-                    raise AvailabilityTargetBlocked("旧活动存在尚未保存结果的实际尝试")
-            start = load_start_facts(connection, action)
-            if (start.activity is None or start.activity.get("id") != activity_id
-                    or start.run is None or type(start.attempts_used) is not int or start.attempts_used < 1
-                    or type(start.run.get("status")) is not int):
-                raise AvailabilityTargetStateError("旧活动缺少一致的 START 责任")
-            if (start.run["status"] in (int(statuses.PENDING), int(statuses.ACTIVE))
-                    or start.not_started or not start.preparation_resolved):
-                raise AvailabilityTargetBlocked("旧活动的 START 或准备责任尚未形成适用收场")
-            with closing(connection.execute(
-                "SELECT 1 FROM operation_runs WHERE action_id=? AND kind=? AND query_purpose=?"
-                " AND status IN (?,?) LIMIT 1",
-                (action["id"], int(kinds.QUERY_ACTIVITY), int(purposes.START_CONFIRMATION),
-                 int(statuses.PENDING), int(statuses.ACTIVE)),
-            )) as cursor:
-                if cursor.fetchone() is not None:
-                    raise AvailabilityTargetBlocked("旧活动的 START 核实责任尚未终结")
-            with closing(connection.execute(
-                "SELECT 1 FROM operation_attempts t, json_each(t.result_json,'$.observations') observation"
-                " WHERE t.run_id=? AND t.result_event_id IS NOT NULL"
-                " AND json_extract(observation.value,'$.type')='photo_taken' LIMIT 1",
-                (start.run["id"],),
-            )) as cursor:
-                if cursor.fetchone() is not None:
-                    raise AvailabilityTargetBlocked("旧活动已有照片结果，必须沿原文件责任处理")
+            require_original_settled(connection, activity, action)
         seen = True
         yield page
     if not seen:
         raise AvailabilityTargetNotRequired("没有仍持有限制的检查目标")
+
+
+def iter_fixed_targets(connection, check_id: int, *, batch_size: int = 128):
+    """按固定目标关联主键分页，允许旧活动已经由其他路径释放。"""
+    ObjectId(check_id)
+    if type(batch_size) is not int or not 1 <= batch_size <= 128:
+        raise ValueError("目标读取每批必须为 1 至 128 项")
+    after = 0
+    while True:
+        with closing(connection.execute(
+            "SELECT id,action_id,activity_id FROM device_availability_targets"
+            " WHERE check_id=? AND id>? ORDER BY id LIMIT ?", (check_id, after, batch_size),
+        )) as cursor:
+            page = tuple(cursor.fetchmany(batch_size))
+        if not page:
+            return
+        normalized = tuple(tuple(ObjectId(value) for value in row) for row in page)
+        ids = tuple(row[0] for row in normalized)
+        if any(left >= right for left, right in zip((after, *ids), ids)):
+            raise AvailabilityTargetStateError("固定目标页不是严格递增的有效身份")
+        yield normalized
+        after = ids[-1]
+        if len(page) < batch_size:
+            return
+
+
+def iter_release_targets(connection, check: Mapping, *, batch_size: int = 128):
+    """先核对完整固定目标，再分页返回仍须按本次检查释放的活动。"""
+    from camctl.persistence.transaction import row_facts
+    identity = CameraIdentity(**check["expected_identity_json"])
+    if check["resource_key"] != identity.resource_key:
+        raise AvailabilityTargetStateError("检查资源键与固定机身身份不一致")
+    held = int(enum_for("device_activities.occupancy_state").HELD)
+    released = int(enum_for("device_activities.occupancy_state").RELEASED)
+    count = 0
+    for page in iter_fixed_targets(connection, check["id"], batch_size=batch_size):
+        for _, action_id, activity_id in page:
+            activity = row_facts(connection, "device_activities", activity_id)
+            action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
+            if (action_id != check["action_id"] or activity is None or action is None
+                    or activity.get("resource_key") != identity.resource_key
+                    or not json_equal(activity.get("expected_identity_json"), check["expected_identity_json"])
+                    or (action.get("device_id"), action.get("driver_id")) != (check["device_id"], check["driver_id"])):
+                raise AvailabilityTargetStateError("固定目标与原机身或动作关系不一致")
+            if activity.get("occupancy_state") == held:
+                require_target_facts(check, activity, action)
+                require_original_settled(connection, activity, action)
+            elif activity.get("occupancy_state") != released:
+                raise AvailabilityTargetStateError("固定目标的占用状态无效")
+            count += 1
+    if count == 0:
+        raise AvailabilityTargetStateError("检查缺少固定目标")
+    for page in iter_fixed_targets(connection, check["id"], batch_size=batch_size):
+        pending = []
+        for _, _, activity_id in page:
+            activity = row_facts(connection, "device_activities", activity_id)
+            if activity["occupancy_state"] == held:
+                pending.append(activity_id)
+        if pending:
+            yield tuple(pending)

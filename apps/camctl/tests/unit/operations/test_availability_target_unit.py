@@ -21,7 +21,7 @@ def target_rules(monkeypatch):
         "actions.status": SimpleNamespace(PENDING=1, RUNNING=2, FAILED=4),
         "actions.type": SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4),
         "device_activities.activity_state": SimpleNamespace(UNKNOWN=1),
-        "device_activities.occupancy_state": SimpleNamespace(HELD=1),
+        "device_activities.occupancy_state": SimpleNamespace(HELD=1, RELEASED=2),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
         "operation_attempts.status": SimpleNamespace(RUNNING=1),
@@ -429,3 +429,42 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     fixed.serial = "OTHER"
     with pytest.raises(creation_module.AvailabilityTargetIdentityMismatch):
         creation_module._qualify(connection, request, 99)
+
+
+@pytest.fixture
+def release_facts(target_rules, facts, monkeypatch):
+    check, first, action = deepcopy(facts)
+    check["id"] = 31
+    second = deepcopy(first)
+    second["id"], second["action_id"] = 26, 8
+    second_action = deepcopy(action)
+    second_action["id"] = 8
+    rows = {("device_activities", 25): first, ("actions", 7): action,
+            ("device_activities", 26): second, ("actions", 8): second_action}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    monkeypatch.setattr(target_rules, "iter_fixed_targets", lambda *args, **kwargs:
+                        iter((((101, 12, 25),), ((102, 12, 26),))))
+    monkeypatch.setattr(target_rules, "require_original_settled", lambda *args: None)
+    return check, first, second
+
+
+def test_release_skips_targets_already_released_by_another_path(target_rules, release_facts):
+    check, first, _ = release_facts
+    first["occupancy_state"] = 2
+    assert list(target_rules.iter_release_targets(object(), check, batch_size=1)) == [(26,)]
+
+
+def test_release_rejects_the_whole_batch_before_yielding_when_later_target_is_ineligible(target_rules, release_facts):
+    check, _, second = release_facts
+    second["activity_state"] = 2
+    targets = target_rules.iter_release_targets(object(), check, batch_size=1)
+    with pytest.raises(target_rules.AvailabilityTargetBlocked):
+        next(targets)
+
+
+def test_all_targets_previously_released_needs_no_release_page(target_rules, release_facts):
+    check, first, second = release_facts
+    first["occupancy_state"] = second["occupancy_state"] = 2
+    assert list(target_rules.iter_release_targets(object(), check, batch_size=1)) == []
