@@ -62,6 +62,8 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 
 活动结构校验在 `/workspaces/camctl` 使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_output_scope_structure.py -q`，退出码为 0，11 项通过。该文件虽然位于单元目录，但导入阶段读取了真实枚举资源，按项目测试分类涉及集成边界，不能作为纯单元验证；这是用户要求不运行集成测试后的执行偏差。连接替身覆盖了活动表身份字段、配对约束、缺失结构，以及格式 1 和格式 6 打开时拒绝不符结构；未验证真实数据库文件或既有现场库。
 
+随后将新增活动结构和打开入口用例迁移到隔离测试，恢复原输出范围测试的资源隔离；以内存枚举、权威 SQL 和连接替身验证同一分区。在 `/workspaces/camctl` 使用 CPython 3.11.17 执行 `PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_device_activity_structure_isolated.py apps/camctl/tests/unit/persistence/test_output_scope_structure.py -q`，退出码为 0，11 项通过。此结果不证明真实数据库文件的初始化或打开行为。
+
 可用性检查结构原型在独立工作区 `/tmp/camctl-h2-availability-guard-20261028` 尚未合入。该原型增加了意图和结果票据共用的目标身份规则；工作区没有生成包资源。先执行 `test_attempt_inputs.py` 时发现它在导入时尝试读取缺失的真实枚举资源，收集阶段失败，退出码为 2，没有运行用例。随后以持久化模型替身隔离协作者并禁止读取包资源，使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/operations/test_ticket_target_identity_unit.py -q`，退出码为 0，6 项通过。原型的检查事务和独立守卫仍未完成，此结果不证明持久化或恢复链。
 
 原型还将已保存的可用性成功结果交给独立事实校验，核对检查归属、固定机身、实际期限及三步工具观察。测试最初因驱动身份和响应解析模块的导入链尝试读取缺失的枚举资源而两次在收集阶段失败，退出码均为 2，没有运行用例。改为分别隔离这些协作者，并将检查输入的新增分区从资源依赖测试迁入隔离测试后，使用 CPython 3.11.17 运行 `PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/operations/test_saved_availability_unit.py apps/camctl/tests/unit/operations/test_ticket_target_identity_unit.py -q`，最终退出码为 0，25 项通过。测试替身只覆盖事先给定的工具响应；事务守卫与真实解析器的组合没有验证。
