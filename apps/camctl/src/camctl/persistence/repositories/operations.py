@@ -1045,6 +1045,7 @@ class FinishAttemptCommand:
                     disposition=FinishDisposition.ALREADY_ENDED,
                     attempt_status=_attempt_status_of(attempt_facts["status"]),
                     run_status=RunStatus[_run_status_name(run_facts["status"])],
+                    run_was_terminal=run_facts["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)),
                 ),
             )
 
@@ -1143,6 +1144,7 @@ class FinishAttemptCommand:
                 disposition=FinishDisposition.SAVED,
                 attempt_status=outcome.status,
                 run_status=run_status_after,
+                run_was_terminal=not run_active,
             ),
         )
 
@@ -1223,6 +1225,7 @@ class FinishAttemptCommand:
                 disposition=FinishDisposition.SAVED,
                 attempt_status=_attempt_status_of(attempt["status"]),
                 run_status=RunStatus[_run_status_name(original["status"])],
+                run_was_terminal=terminal_result_only,
             ),
         )
 

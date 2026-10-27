@@ -1130,9 +1130,10 @@ async def _save_read_result_and_settle_phase(runtime: ObtainRuntime, pending, fa
         forget_read_result(runtime, pending)
 
     if pending.business is not None:
-        from camctl.outputs.read_attempts import save_prepared_read_business
+        from camctl.outputs.read_attempts import hold_prepared_read_business, save_prepared_read_business
 
         copy_id = int(pending.finish.ticket.target_id)
+        hold_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business)
         forget_read_result(runtime, pending)
         await save_prepared_read_business(runtime, copy_id, "read_binding_failure", pending.business, retry=retry)
         runtime.retry_gate.cleared(f"read/{copy_id}")

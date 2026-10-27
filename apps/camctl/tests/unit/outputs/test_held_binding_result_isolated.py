@@ -45,6 +45,11 @@ class DbOutcomeKind(Enum):
     UNKNOWN = "unknown"
 
 
+class FinishDisposition(Enum):
+    SAVED = "saved"
+    ALREADY_ENDED = "already_ended"
+
+
 class SharedSave:
     async def run(self, callback):
         return await callback()
@@ -76,7 +81,8 @@ def settlement(basis, evidence):
 stub_modules = [
     module("camctl.capture.recovery", RecoveryBoundary=object, RecoveryBlockedReason=object, RecoveryDiagnostic=object),
     module("camctl.operations.attempts", AttemptFinish=attempt_finish, BeginDisposition=object,
-           ReadResumeDisposition=object, ReadResumeRequest=object, RunFinish=run_finish, RunOutcome=RunOutcome),
+           FinishDisposition=FinishDisposition, ReadResumeDisposition=object, ReadResumeRequest=object,
+           RunFinish=run_finish, RunOutcome=RunOutcome),
     module("camctl.operations.models", AttemptStatus=AttemptStatus, AttemptTicket=object, CallOutcome=outcome,
            EffectState=EffectState, ErrorValue=value, EvidenceValue=value, Settlement=settlement,
            SettlementBasis=SettlementBasis),
@@ -206,7 +212,8 @@ def test_unknown_save_keeps_original_finish_and_key_after_cancel(monkeypatch):
         def finish_attempt(self, finish, key, owned):
             saved.append((finish, key))
             return SimpleNamespace(kind=DbOutcomeKind.UNKNOWN if len(saved) == 1 else DbOutcomeKind.COMPLETED,
-                                   error="unknown")
+                                   error="unknown", value=SimpleNamespace(run_was_terminal=False,
+                                                                          disposition=FinishDisposition.SAVED))
     async def write(callback, *, key):
         return callback(object())
     runtime.operations = Operations()
@@ -216,3 +223,37 @@ def test_unknown_save_keeps_original_finish_and_key_after_cancel(monkeypatch):
     assert runtime.pending_read_results[(5, 1)] is pending
     assert asyncio.run(read_attempts.save_read_result(runtime, pending, retry=True)) is pending
     assert saved == [(pending.finish, pending.key), (pending.finish, pending.key)]
+
+
+@pytest.mark.parametrize("terminal,disposition,preserved", [
+    (True, FinishDisposition.SAVED, True),
+    (False, FinishDisposition.ALREADY_ENDED, True),
+    (False, FinishDisposition.SAVED, False),
+])
+def test_save_receipt_controls_terminal_handling(monkeypatch, terminal, disposition, preserved):
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    pending = asyncio.run(read_attempts.held_binding_read_result(
+        runtime, 2, object(), SimpleNamespace(diagnostic=object())))
+    class Operations:
+        def finish_attempt(self, finish, key, owned):
+            return SimpleNamespace(kind=DbOutcomeKind.COMPLETED,
+                                   value=SimpleNamespace(run_was_terminal=terminal, disposition=disposition))
+    async def write(callback, *, key):
+        return callback(object())
+    runtime.operations = Operations()
+    runtime.database.write = write
+    result = asyncio.run(read_attempts.save_read_result(runtime, pending))
+    assert result.preserved_run_terminal is preserved
+    assert result.finish is pending.finish and result.key == pending.key
+    assert runtime.pending_read_results[(5, 1)] is result
+
+
+def test_business_held_before_diagnostic_control_error(monkeypatch):
+    runtime = SimpleNamespace(pending_read_business={})
+    business = SimpleNamespace(diagnostic=object())
+    def fail_diagnostic(pending):
+        raise KeyboardInterrupt("diagnostic interruption")
+    monkeypatch.setattr(read_attempts, "_record_read_business_error", fail_diagnostic)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(read_attempts.save_prepared_read_business(runtime, 2, "read_binding_failure", business))
+    assert runtime.pending_read_business[(2, "read_binding_failure")] is business

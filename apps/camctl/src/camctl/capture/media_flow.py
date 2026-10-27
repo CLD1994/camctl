@@ -923,8 +923,9 @@ async def _save_internal_read_result(flow, pending, *, retry=False):
         forget_read_result(flow, pending)
         return
     if pending.business is not None:
-        from camctl.outputs.read_attempts import save_prepared_read_business
+        from camctl.outputs.read_attempts import hold_prepared_read_business, save_prepared_read_business
 
+        hold_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
         forget_read_result(flow, pending)
         await save_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
         return

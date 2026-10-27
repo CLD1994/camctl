@@ -1,13 +1,13 @@
 """设备文件读取的原尝试选择；连接恢复不消耗新的读取次数。"""
 
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.operations.attempts import (
-    AttemptFinish, BeginDisposition, ReadResumeDisposition, ReadResumeRequest, RunFinish, RunOutcome,
+    AttemptFinish, BeginDisposition, FinishDisposition, ReadResumeDisposition, ReadResumeRequest, RunFinish, RunOutcome,
 )
 from camctl.operations.models import (
     AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue,
@@ -364,6 +364,7 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
 
 
 async def _save_pending_read_business(runtime, identity, pending, *, retry=False):
+    hold_prepared_read_business(runtime, identity[0], identity[1], pending)
     _record_read_business_error(pending)
     # 已完成的控制错误也属于原回执；只有仍未收场的业务责任可以重新核实。
     if retry and runtime.pending_read_business.get(identity) is pending:
@@ -419,6 +420,15 @@ async def save_prepared_read_business(runtime, copy_id, operation, pending, *, r
     """完整结束结果预先确定的原业务申请，可靠结果之后才提交。"""
     identity = (copy_id, operation)
     return await _save_pending_read_business(runtime, identity, pending, retry=retry)
+
+
+def hold_prepared_read_business(runtime, copy_id, operation, pending):
+    """在交接诊断和释放原结果前持有原业务申请。"""
+    identity = (copy_id, operation)
+    held = runtime.pending_read_business.get(identity)
+    if held is not None and held is not pending:
+        raise ConsistencyError("原读取结束所属申请与已持有的申请不同")
+    runtime.pending_read_business[identity] = pending
 
 
 async def held_binding_read_result(runtime, copy_id, binding_result, business):
@@ -602,6 +612,14 @@ async def save_read_result(runtime, pending, *, retry=False):
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise db_failure(ConsistencyError,
                 f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}", outcome)
+        result = outcome.value
+        if result is None:
+            raise ConsistencyError("原读取结果缺少可靠事务回执")
+        if result.run_was_terminal or result.disposition is FinishDisposition.ALREADY_ENDED:
+            prepared = replace(prepared, preserved_run_terminal=True)
+            identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
+            if runtime.pending_read_results.get(identity) is pending:
+                runtime.pending_read_results[identity] = prepared
         return prepared
 
     return await pending.result_save.run(save)
