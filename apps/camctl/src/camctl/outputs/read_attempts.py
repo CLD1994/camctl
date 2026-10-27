@@ -49,6 +49,7 @@ class ReadContinuation:
     occurred_at: int | None = None
     result_key: OperationKey | None = None
     evidence: Any = None
+    inspection_cancel_recovery: bool = False
 
 
 @dataclass(frozen=True)
@@ -345,6 +346,7 @@ class PendingReadBusiness:
     on_completed: Callable[[Any], None] | None = None
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    inspection_cancel_recovery: list = field(default_factory=list, compare=False, repr=False)
 
 
 async def retry_read_business(runtime):
@@ -749,11 +751,24 @@ async def acquire_read_attempt(runtime, intent):
                 return None, "run_ended"
             runtime.last_recovery_diagnostic = None
             return ticket, None
+    granted_by_save = None
     def remember(value):
+        nonlocal granted_by_save
         if value.disposition is BeginDisposition.GRANTED:
-            runtime.continuing_read_tickets[copy_id] = ReadContinuation(value.ticket, True)
-    outcome = await save_read_business(runtime, copy_id, "read_intent", intent,
-        runtime.operations.begin_attempt, on_completed=remember, retry=pending_begin is not None)
+            granted_by_save = value.ticket
+            original = runtime.pending_read_business.get((copy_id, "read_intent"))
+            runtime.continuing_read_tickets[copy_id] = ReadContinuation(
+                value.ticket, True, inspection_cancel_recovery=(
+                    original is not None and bool(original.inspection_cancel_recovery)))
+    try:
+        outcome = await save_read_business(runtime, copy_id, "read_intent", intent,
+            runtime.operations.begin_attempt, on_completed=remember, retry=pending_begin is not None)
+    except BaseException:
+        continuation = runtime.continuing_read_tickets.get(copy_id)
+        if (granted_by_save is not None and continuation is not None
+                and continuation.ticket == granted_by_save and continuation.never_dispatched):
+            runtime.continuing_read_tickets[copy_id] = replace(continuation, inspection_cancel_recovery=True)
+        raise
     if outcome.value.disposition is BeginDisposition.GRANTED:
         return outcome.value.ticket, None
     return None, outcome.value.reason

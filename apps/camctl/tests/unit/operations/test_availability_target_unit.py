@@ -720,7 +720,7 @@ def isolated_result_guard(target_rules, monkeypatch):
     from camctl.contracts import enums
     enum_values = {
         "operation_runs.kind": SimpleNamespace(START=1, STOP=2, STOP_RESIDUAL=8,
-            CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10),
+            CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10, READ_FILE=3),
         "operation_runs.status": SimpleNamespace(SUCCEEDED=3, FAILED=4, UNCONFIRMED=6),
         "operation_runs.query_purpose": SimpleNamespace(),
         "operation_attempts.status": SimpleNamespace(RUNNING=1, SUCCEEDED=2, FAILED=3, UNKNOWN=4),

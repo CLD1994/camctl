@@ -33,6 +33,17 @@ class BackgroundFlow:
         self._task: asyncio.Task | None = None
         self._stopping = False
         self._last_context = None
+        self._deadline_waiting_for_completion = False
+
+    def next_wakeup_at(self, now, margin_s):
+        next_wakeup = getattr(self._flow, "next_wakeup_at", None)
+        if next_wakeup is None:
+            return None
+        at = next_wakeup(now, margin_s)
+        if at is not None and self._task is not None and not self._task.done():
+            self._deadline_waiting_for_completion = True
+            return None
+        return at
 
     @property
     def unconsumed_task(self):
@@ -87,6 +98,14 @@ class BackgroundFlow:
         if self._stopping:
             return
         self._task = asyncio.create_task(self._run(context))
+        def wake_after_deadline_wait(task):
+            if self._deadline_waiting_for_completion and not self._stopping:
+                self._deadline_waiting_for_completion = False
+                notifier = getattr(context, "wake", None)
+                if notifier is not None:
+                    from camctl.scheduling.notifications import WakeReason
+                    notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
+        self._task.add_done_callback(wake_after_deadline_wait)
         # 只让执行体开始；实际等待及连接生命周期由原流程拥有。
         await asyncio.sleep(0)
         if self._task.done():

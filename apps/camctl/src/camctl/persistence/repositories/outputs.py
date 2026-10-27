@@ -2492,7 +2492,7 @@ class _SlotChangeCommand:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
         if saved is not None:
-            return self._reuse(saved)
+            return self._reuse(saved, connection)
         copy = self._load_copy(connection)
         source = self._load_source(connection, copy)
         device_id = self._source_device(connection, source)
@@ -2637,6 +2637,20 @@ class _SlotChangeCommand:
             return self._decision(SlotOutcome.ALREADY_RELEASED)
         if slot != device_id:
             raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        if (copy.get("inspection_id") is not None and run["status"] == int(_RUN_STATUS.PENDING)
+                and run["attempts_used"] == 0 and run["retry_wait_required"] == 0):
+            inspection = self._state["segment_inspections"][copy["inspection_id"]]
+            action = self._load_owner_action(scope.connection, copy)
+            if (run["kind"] != int(_RUN_KIND.READ_FILE) or run["copy_id"] != copy["id"]
+                    or run["action_id"] != action["id"] or run["error_json"] is not None):
+                raise ConsistencyError("分段检查的原读取流程身份或初始状态不符")
+            from .retry_wait_reads import RetryWaitReads
+            if (inspection["state"] in (int(_SEGMENT_INSPECTION_STATE.COMPLETED),
+                                         int(_SEGMENT_INSPECTION_STATE.FAILED),
+                                         int(_SEGMENT_INSPECTION_STATE.UNCONFIRMED))
+                    and type(action["cancel_requested"]) is int and action["cancel_requested"] == 1
+                    and RetryWaitReads(scope.connection).no_attempts(run["id"])):
+                return self._cancel_unstarted_inspection(scope, copy, device_id, run, action)
         self._load_attempts(scope.connection, run["id"])
         if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING)
                for attempt in self._state["operation_attempts"].values()):
@@ -2646,6 +2660,20 @@ class _SlotChangeCommand:
         if run["status"] not in _RUN_TERMINAL and copy["committed_bytes"] < copy["source_size"]:
             return self._decision(SlotOutcome.WAIT, "still_reading")
         return self._save(scope, copy, device_id, None, SlotOutcome.RELEASED)
+
+    def _cancel_unstarted_inspection(self, scope, copy, device_id, run, action):
+        allocation = scope.allocate(2)
+        run_row = _update("operation_runs", run["id"],
+            {"status": run["status"], "retry_wait_required": 0, "error_json": run["error_json"]},
+            {"status": int(_RUN_STATUS.CANCELED), "retry_wait_required": 0, "error_json": None})
+        slot_row = _update("file_copies", copy["id"], {"slot_device_id": device_id}, {"slot_device_id": None})
+        self._owners[("operation_runs", run["id"])] = ("action", action["id"])
+        return CommandPlan(events=(
+            _envelope(allocation.first_event_id, allocation.txn_id, _OPERATION_CONFIGURED_EVENT, 3,
+                      (run_row,), self._request.occurred_at),
+            _envelope(allocation.first_event_id + 1, allocation.txn_id, _COPY_CHANGED_EVENT, _SLOT_REASON,
+                      (slot_row,), self._request.occurred_at)),
+            owners=self._owners, state_rows=self._state, result=SlotDecision(outcome=SlotOutcome.RELEASED))
 
     # ---- 事件与出口 ----
 
@@ -2682,8 +2710,20 @@ class _SlotChangeCommand:
             result=SlotDecision(outcome=outcome, reason=reason),
         )
 
-    def _reuse(self, saved: list[dict]) -> CommandPlan:
+    def _reuse(self, saved: list[dict], connection) -> CommandPlan:
         """原键恢复首次机会变化响应；不重新判定当前资格或归属。"""
+        if len(saved) == 2:
+            first = saved[0]
+            rows = first["body"]["rows"]
+            run = self._load_run(connection, self._request.copy_id)
+            if (self._direction != _SLOT_RELEASE or (first["type"], first["reason"]) != (_OPERATION_CONFIGURED_EVENT, 3)
+                    or first["occurred_at"] != self._request.occurred_at or len(rows) != 1
+                    or rows[0]["table"] != "operation_runs" or rows[0]["id"] != run["id"]
+                    or rows[0]["before"].get("exists") is not True or rows[0]["after"].get("exists") is not True
+                    or rows[0]["before"]["values"] != {"status": int(_RUN_STATUS.PENDING)}
+                    or rows[0]["after"]["values"] != {"status": int(_RUN_STATUS.CANCELED)}):
+                raise TransactionError("原分段检查取消读取的流程事实不符")
+            saved = saved[1:]
         if len(saved) != 1 or saved[0]["type"] != _COPY_CHANGED_EVENT or saved[0]["reason"] != _SLOT_REASON:
             raise TransactionError("操作身份已用于其他阶段，不能作为机会变化重送")
         event = saved[0]
@@ -4504,6 +4544,11 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             return self._decision(
                 FailureSaveOutcome(FailureSaveDisposition.ALREADY),
                 read_only=True)
+        action = self._owner_action(connection, delivery)
+        if (action.get("cancel_requested") == 1
+                or status in (int(_DELIVERY_STATUS.CANCELED), int(_DELIVERY_STATUS.WITHDRAWN))):
+            return self._decision(
+                FailureSaveOutcome(FailureSaveDisposition.CANCELED), read_only=True)
         if status not in (
             int(_DELIVERY_STATUS.PENDING), int(_DELIVERY_STATUS.PREPARING),
         ):
@@ -4622,28 +4667,18 @@ class _ReadDeliveryFailCommand(_DeliveryPublicationMixin):
             raise ConsistencyError(f"读取流程记录缺失: {identities[0][0]}")
         self._state["operation_runs"][run["id"]] = run
         self._coverage = ReadCoverage({
-            ("operation_runs", "copy_id"): {copy_id},
-            ("operation_attempts", "run_id"): {run["id"]}})
+            ("operation_runs", "copy_id"): {copy_id}})
         self._owners[("operation_runs", run["id"])] = ("action", run["action_id"])
         return run
 
     def _require_read_finished(self, connection, run) -> None:
         """读取终局失败的保存前提：流程终态失败且无在途尝试。"""
         _RUN_STATUS = enum_for("operation_runs.status")
-        _ATTEMPT_STATUS = enum_for("operation_attempts.status")
         if run["status"] != int(_RUN_STATUS.FAILED):
             raise ConsistencyError(
                 f"读取流程未按失败终态收场: {run['status']!r}")
-        with closing(connection.execute(
-            "SELECT id FROM operation_attempts WHERE run_id = ?", (run["id"],),
-        )) as cursor:
-            active = cursor.fetchall()
-        for identity in active:
-            attempt = row_facts(connection, "operation_attempts", identity[0])
-            if attempt is not None:
-                self._state["operation_attempts"][identity[0]] = attempt
-        if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING) or attempt["result_json"] is None
-               for attempt in self._state["operation_attempts"].values()):
+        from .retry_wait_reads import RetryWaitReads
+        if not RetryWaitReads(connection).no_unsettled_attempts(run["id"]):
             raise ConsistencyError("读取仍有未保存结束结果的尝试，不能保存终局失败")
 
     def _reuse(self, saved: list[dict], connection) -> CommandPlan:
@@ -6500,6 +6535,11 @@ def _delivery_guard(event, context) -> None:
                 raise EventValidationError("交付终局失败必须保存结构化错误")
             code, stage = error.get("code"), error.get("stage")
             details = error.get("details")
+            if code in ("read_attempts_exhausted", "checksum_mismatch", "source_file_unconfirmed"):
+                delivery = context.state_rows.get("deliveries", {}).get(row.row_id)
+                action = None if delivery is None else context.state_rows.get("actions", {}).get(delivery.get("action_id"))
+                if action is None or action.get("cancel_requested") != 0:
+                    raise EventValidationError("读取失败交付要求发起动作的取消尚未生效")
             try:
                 spec = registered_error(code)
                 if stage != spec["stage"]:
@@ -7046,22 +7086,29 @@ def _slot_run(context, copy_id: int) -> dict[str, Any]:
 def _has_source_fallback_retry_proof(connection, copy, attempt) -> bool:
     """核实原失败尝试已有指向同一拷贝和设备文件的换源事件。"""
     if (connection is None or not is_json_integer(attempt.get("id"))
+            or not is_json_integer(attempt.get("result_event_id"))
             or not is_json_integer(copy.get("id"))
             or not is_json_integer(copy.get("source_device_file_id"))):
         return False
+    from camctl.persistence.retry_wait_structure import verify_retry_wait_index
+    try:
+        verify_retry_wait_index(connection, "history_events_row")
+    except ValueError as error:
+        raise ConsistencyError(str(error)) from error
     with closing(connection.execute(
-        "SELECT 1 FROM history_events e, json_each(e.body_json,'$.rows') r"
-        " WHERE e.event_type=? AND json_extract(e.body_json,'$.reason')=?"
+        "SELECT 1 FROM history_events e"
+        " WHERE e.event_type=? AND json_extract(e.body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(e.body_json,'$.rows[0].id')=? AND e.id>?"
+        " AND json_extract(e.body_json,'$.reason')=?"
         " AND json_extract(e.body_json,'$.evidence.attempt_id')=?"
-        " AND json_extract(r.value,'$.table')='file_copies'"
-        " AND json_extract(r.value,'$.id')=?"
-        " AND json_extract(r.value,'$.before.values.source_device_file_id') IS NULL"
-        " AND json_extract(r.value,'$.before.values.source_intermediate_file_id') IS NOT NULL"
-        " AND json_extract(r.value,'$.after.values.source_device_file_id')=?"
-        " AND json_extract(r.value,'$.after.values.source_intermediate_file_id') IS NULL"
+        " AND json_array_length(e.body_json,'$.rows')=1"
+        " AND json_extract(e.body_json,'$.rows[0].before.values.source_device_file_id') IS NULL"
+        " AND json_extract(e.body_json,'$.rows[0].before.values.source_intermediate_file_id') IS NOT NULL"
+        " AND json_extract(e.body_json,'$.rows[0].after.values.source_device_file_id')=?"
+        " AND json_extract(e.body_json,'$.rows[0].after.values.source_intermediate_file_id') IS NULL"
         " LIMIT 1",
-        (_COPY_CHANGED_EVENT, _COPY_SOURCE_FALLBACK_REASON,
-         attempt["id"], copy["id"], copy["source_device_file_id"]),
+        (_COPY_CHANGED_EVENT, copy["id"], attempt["result_event_id"], _COPY_SOURCE_FALLBACK_REASON,
+         attempt["id"], copy["source_device_file_id"]),
     )) as cursor:
         return cursor.fetchone() is not None
 
@@ -7187,9 +7234,9 @@ def _read_slot_guard(event, context) -> None:
             raise EventValidationError("释放要求当前持有机会")
         if row.before.values["slot_device_id"] != binding[0]:
             raise EventValidationError("释放的机会必须属于原来源设备")
-        attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
-        if any(attempt.get("status") == int(_ATTEMPT_STATUS.RUNNING)
-               for attempt in attempts.values()):
+        from .retry_wait_reads import RetryWaitReads
+        reads = context.retry_wait_reads
+        if type(reads) is not RetryWaitReads or not reads.no_unsettled_attempts(run["id"], context.validated_events):
             raise EventValidationError("实际读取未结束，不能释放机会")
         if run["retry_wait_required"] != 0:
             raise EventValidationError("重试等待期间保留机会")
@@ -7302,9 +7349,9 @@ def _read_permission_guard(event, context) -> None:
                                    or run.get("retry_wait_required") != 0 for run in runs.values()):
                     raise EventValidationError("最终失败或取消后解除源保护要求读取及后续重试已结束")
                 for run in runs.values():
-                    attempts = context.complete_rows("operation_attempts", "run_id", run["id"])
-                    if any(attempt.get("status") == 1 or attempt.get("result_json") is None
-                           for attempt in attempts.values()):
+                    from .retry_wait_reads import RetryWaitReads
+                    reads = context.retry_wait_reads
+                    if type(reads) is not RetryWaitReads or not reads.no_unsettled_attempts(run["id"], context.validated_events):
                         raise EventValidationError("读取没有可靠结束结果，不能解除源保护")
                 continue
             if copy.get("verification_state") not in (

@@ -224,20 +224,58 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
     """检查结果可靠终态后，按原 release_read_slot 申请补齐机会释放。"""
     from camctl.outputs.read_attempts import save_read_business
 
-    row = (await flow.database.read(lambda owned, inputs=("SELECT c.inspection_id,c.slot_device_id,r.status,r.retry_wait_required,s.state"
+    query = ("SELECT c.inspection_id,c.slot_device_id,r.status,r.retry_wait_required,s.state,a.cancel_requested"
         " FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
         " JOIN segment_inspections s ON s.id=c.inspection_id"
-        " WHERE c.id=? AND r.kind=? LIMIT 2", (copy_id, int(enum_for("operation_runs.kind").READ_FILE))): owned.connection.execute(*inputs).fetchall(), description="读取拍摄直接事实"))
+        " JOIN actions a ON a.id=s.action_id"
+        " WHERE c.id=? AND r.kind=? AND r.action_id=s.action_id LIMIT 2",
+        (copy_id, int(enum_for("operation_runs.kind").READ_FILE)))
+    row = await flow.database.read(lambda owned: owned.connection.execute(*query).fetchall(), description="读取拍摄直接事实")
     if len(row) != 1 or row[0][0] is None:
         raise ConsistencyError("终态分段检查缺少唯一的检查读取副本")
-    inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state = row[0]
+    inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state, canceled = row[0]
     if inspection_state == int(_INSPECTION_STATE.PENDING):
         return False
+    if type(canceled) is not int or canceled not in (0, 1):
+        raise ConsistencyError("终态分段检查的所属动作取消状态无效")
+    pending_intent = flow.pending_read_business.get((copy_id, "read_intent"))
+    if pending_intent is not None:
+        if canceled != 1 or not pending_intent.shared.failed():
+            return False
+        if not pending_intent.inspection_cancel_recovery:
+            pending_intent.inspection_cancel_recovery.append(True)
+        await save_read_business(flow, copy_id, "read_intent", pending_intent.request,
+                                 pending_intent.save, retry=True)
+        row = await flow.database.read(lambda owned: owned.connection.execute(*query).fetchall(), description="读取拍摄直接事实")
+        if len(row) != 1:
+            raise ConsistencyError("分段检查原读取意图核实后缺少唯一责任")
+        inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state, canceled = row[0]
+        if inspection_state == int(_INSPECTION_STATE.PENDING) or canceled != 1:
+            raise ConsistencyError("分段检查原读取意图核实后的取消资格不一致")
+    continuation = flow.continuing_read_tickets.get(copy_id)
+    if canceled == 1 and continuation is not None and continuation.inspection_cancel_recovery:
+        ticket = continuation.ticket
+        identity = (ticket.run_id, ticket.attempt_id)
+        pending = flow.pending_read_results.get(identity)
+        retry = pending is not None
+        if pending is None and continuation.never_dispatched:
+            from camctl.outputs.read_attempts import ReadDispatchPrevented, prevented_read_result
+            pending = prevented_read_result(flow, ticket,
+                ReadDispatchPrevented("canceled_before_dispatch", canceled=True), flow.evidence)
+        if pending is not None:
+            from camctl.capture.media_flow import _save_internal_read_and_settle
+            await _save_internal_read_and_settle(flow, pending, retry=retry)
+            row = await flow.database.read(lambda owned: owned.connection.execute(*query).fetchall(), description="读取拍摄直接事实")
+            if len(row) != 1:
+                raise ConsistencyError("分段检查原读取结果保存后缺少唯一责任")
+            inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state, canceled = row[0]
+            if inspection_state == int(_INSPECTION_STATE.PENDING) or canceled != 1:
+                raise ConsistencyError("分段检查原读取结果保存后的取消资格不一致")
     pending_release = (copy_id, "release_read_slot") in flow.pending_read_business
     if slot_device_id is None and not pending_release:
         return True
     if run_status not in tuple(int(_RUN_STATUS[name])
-                               for name in ("SUCCEEDED", "FAILED", "CANCELED")):
+                               for name in ("PENDING", "SUCCEEDED", "FAILED", "CANCELED")):
         return False
     if retry_wait_required != 0:
         return False
@@ -247,11 +285,11 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
         " AND (status=? OR result_json IS NULL) LIMIT 1", (copy_id, int(enum_for("operation_runs.kind").READ_FILE), attempt_running)): owned.connection.execute(*inputs).fetchone(), description="读取拍摄直接事实"))
     if unfinished is not None:
         return False
-    (await save_read_business(
+    outcome = (await save_read_business(
         flow, copy_id, "release_read_slot",
         SlotRequest(copy_id, occurred_at), OutputsRepository().release_read_slot,
     ))
-    return True
+    return outcome.value.outcome in (SlotOutcome.RELEASED, SlotOutcome.ALREADY_RELEASED)
 
 
 async def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,

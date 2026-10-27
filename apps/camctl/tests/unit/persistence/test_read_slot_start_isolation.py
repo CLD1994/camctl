@@ -111,10 +111,18 @@ class _GuardContext:
     def __init__(self, state_rows, preparation_reads=None):
         self.state_rows = state_rows
         self.preparation_reads = preparation_reads
+        self.retry_wait_reads = _SettledReads()
+        self.validated_events = ()
 
     def complete_rows(self, table, column, identity):
         assert (table, column, identity) == ("operation_attempts", "run_id", 31)
         return {}
+
+
+class _SettledReads:
+    def no_unsettled_attempts(self, run_id, validated):
+        assert (run_id, validated) == (31, ())
+        return True
 
 
 def _cursor(row=None, rows=()):
@@ -173,6 +181,8 @@ def production(monkeypatch):
     operations = ModuleType("camctl.persistence.repositories.operations")
     for name in ("BeginAttemptCommand", "FinishAttemptCommand", "_FinishStaleRunsCommand"):
         setattr(operations, name, type(name, (), {}))
+    retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retry_reads.RetryWaitReads = _SettledReads
 
     obtain_summary = ModuleType("camctl.outputs.obtain_summary")
     for name in (
@@ -200,6 +210,7 @@ def production(monkeypatch):
     monkeypatch.setitem(sys.modules, "camctl.host_files.paths", paths)
     monkeypatch.setitem(sys.modules, "camctl.outputs.obtain_summary", obtain_summary)
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.operations", operations)
+    monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
 
     monkeypatch.setattr(events, "resource_bytes", forbidden_resource)
     monkeypatch.setattr(events, "load_event_registry", lambda: {
@@ -265,7 +276,7 @@ def _read_command(outputs, *, slot=None):
 
 def _grant_inputs(outputs, connection, *, slot=None):
     scope = SimpleNamespace(connection=connection)
-    copy = {"id": 11, "slot_device_id": slot}
+    copy = {"id": 11, "slot_device_id": slot, "source_device_file_id": 41}
     run = {
         "id": 31, "status": int(outputs._RUN_STATUS.ACTIVE),
         "retry_wait_required": 0,
