@@ -564,6 +564,8 @@ class BeginAttemptCommand:
             return self._reuse(connection, saved)
 
         intent = self._intent
+        if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
+            return self._rejected("availability_guard_unavailable")
         key_str = responsibility_key(intent)
         action = _load_row(connection, "actions", intent.action_id)
         if action is None:
@@ -1713,6 +1715,8 @@ def _attempt_intent_guard(event, context) -> None:
             _fail("意图阶段的尝试必须为运行中且效果未知")
     run_row = run_rows[0]
     run_after = _row_after_facts(context, run_row)
+    if run_after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
+        _fail("设备检查意图缺少独立设备资源守卫")
     attempt_no = attempts[0].after.values["attempt_no"]
     if run_after.get("attempts_used") != attempt_no:
         _fail(
@@ -1925,6 +1929,9 @@ def _operation_finish_guard(event, context) -> None:
             continue
         after = _row_after_facts(context, row)
         status = after.get("status")
+        if (after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
+                and status == int(_RUN_STATUS.SUCCEEDED)):
+            _fail("设备检查成功必须与目标解除事务共同核验")
         error = after.get("error_json")
         if status in (int(_RUN_STATUS.FAILED), int(_RUN_STATUS.UNCONFIRMED)):
             if error is None:
@@ -1961,6 +1968,8 @@ def _retry_guard(event, context) -> None:
 
 def register_operation_guards() -> None:
     """注册操作事务的正式业务守卫（装配期调用，替换测试替身）。"""
+    from .availability_create import register_availability_guard
+    register_availability_guard()
     register_guard("operation_identity", _operation_identity_guard)
     register_guard("query_configuration", _query_configuration_guard)
     register_guard("attempt_intent", _attempt_intent_guard)

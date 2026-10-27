@@ -300,3 +300,88 @@ def test_target_group_rejects_another_event_branch(target_group, target_rules):
     event.reason = 2
     with pytest.raises(target_rules.AvailabilityTargetStateError):
         target_group.prepare(event)
+
+
+@pytest.fixture
+def creation_module(target_rules, monkeypatch):
+    transaction = ModuleType("camctl.persistence.transaction")
+    for name in ("BoundedCommandPlan", "CommandPlan", "commit_operation", "event_envelope", "next_row_id",
+                 "row_change", "row_facts", "read_saved_transaction_page", "read_transaction_range"):
+        setattr(transaction, name, object())
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    validators = ModuleType("camctl.history.validators")
+    validators.EventContext = object
+    validators.register_guard = lambda *args: None
+    monkeypatch.setitem(sys.modules, validators.__name__, validators)
+    monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_target", target_rules)
+    source = find_spec("camctl.persistence.repositories.availability_create")
+    spec = spec_from_file_location("camctl.persistence.repositories._isolated_create", source.origin)
+    module = module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_creation_request_rejects_invalid_budget_type(creation_module):
+    from decimal import Decimal
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    for batch in (True, 0, 129):
+        with pytest.raises(ValueError):
+            creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10, batch)
+
+
+def test_creation_group_requires_all_events_before_final_seal(creation_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Event:
+        event_id: int
+        transaction_id: int = 2
+        change_seq: int | None = None
+        evidence: object = None
+        rows: tuple = ()
+    events = (Event(1, evidence={"availability_create_request": {}}), Event(2))
+    request = SimpleNamespace(batch_size=2, action_id=12)
+    monkeypatch.setattr(creation_module, "_request", lambda raw: request)
+    monkeypatch.setattr(creation_module, "_head", lambda *args: (None, {"id": 31}, 3, None, 1, 1))
+    monkeypatch.setattr(creation_module, "_events", lambda *args: iter(events))
+    monkeypatch.setattr(creation_module, "_context", lambda *args: "actual context")
+    class Targets:
+        def __init__(self, *args, **kwargs):
+            self.sealed = False
+        def prepare(self, event):
+            assert event.event_id == 2
+        def seal(self, validated):
+            self.sealed = True
+        def finish(self):
+            assert self.sealed
+    monkeypatch.setattr(creation_module, "AvailabilityCreationTargets", Targets)
+    transaction = SimpleNamespace(first_event_id=1, last_event_id=2)
+    group = creation_module.CreationGroup(object(), events[0], transaction)
+    group.bind(events[0], "actual context")
+    group.seal(SimpleNamespace(envelope=events[0]))
+    with pytest.raises(creation_module.ConsistencyError):
+        group.finish()
+
+
+def test_creation_group_rejects_forged_context(creation_module, monkeypatch):
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class Event:
+        event_id: int = 1
+        transaction_id: int = 2
+        change_seq: int | None = None
+        evidence: object = None
+    event = Event(evidence={"availability_create_request": {}})
+    monkeypatch.setattr(creation_module, "_request", lambda raw: SimpleNamespace(batch_size=2, action_id=12))
+    monkeypatch.setattr(creation_module, "_head", lambda *args: (None, {"id": 31}, 3, None, 1, 1))
+    monkeypatch.setattr(creation_module, "_events", lambda *args: iter((event,)))
+    monkeypatch.setattr(creation_module, "_context", lambda *args: "actual context")
+    monkeypatch.setattr(creation_module, "AvailabilityCreationTargets", lambda *args, **kwargs: object())
+    group = creation_module.CreationGroup(object(), event, SimpleNamespace(first_event_id=1, last_event_id=2))
+    with pytest.raises(creation_module.ConsistencyError):
+        group.bind(event, "forged context")
+
+
+def test_creation_guard_rejects_missing_kernel_group(creation_module):
+    with pytest.raises(creation_module.ConsistencyError):
+        creation_module.availability_guard(object(), SimpleNamespace(availability_reads=None))

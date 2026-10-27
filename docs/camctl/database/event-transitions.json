@@ -10670,7 +10670,7 @@
             {"table": "operation_runs", "op": "create", "after": {"kind": [12], "status": [1], "attempts_used": [0], "retry_wait_required": [0]}}
           ],
           "guards": ["row_shape", "transaction", "ownership", "report_impact", "availability_check"],
-          "evidence": []
+          "evidence": ["availability_create_request"]
         },
         "RELEASE": {
           "reason": 2,

@@ -321,6 +321,7 @@ def _write_bounded_plan(plan, scope, operation_key):
         result_page_guard_state = _new_result_page_guard_state(plan.result_page_write_scope,transaction,connection)
         baseline_read_group = _baseline_read_group(plan,transaction,connection,operation_key)
         result_check_group = _result_check_group(plan,transaction,connection)
+        availability_group = None
     for proposed in _timed_events(plan.events):
         with db_phase(TransactionPhase.FINAL_CHECKS):
             if proposed.event_id != expected or proposed.transaction_id != allocation.txn_id or expected > allocation.last_event_id:
@@ -331,6 +332,17 @@ def _write_bounded_plan(plan, scope, operation_key):
         db_count("row_changes", len(proposed.rows))
         with db_phase(TransactionPhase.CONTEXT):
             context = plan.context(proposed, transaction)
+            availability = load_event_registry()["events"]["AVAILABILITY_CHECK"]
+            if proposed.event_type == availability["id"]:
+                if proposed.reason != availability["branches"]["CREATE"]["reason"]:
+                    raise TransactionError("设备检查释放尚未接入独立事务组")
+                if availability_group is None:
+                    from camctl.persistence.repositories.availability_create import CreationGroup
+                    availability_group = CreationGroup(connection, proposed, transaction)
+                availability_group.bind(proposed, context)
+                context = replace(context, availability_reads=availability_group)
+            elif availability_group is not None:
+                raise TransactionError("检查创建事务不能混入其他事件")
             context, reads = _bind_event_reads(
                 context, proposed, transaction, segment_guard_state,
                 source_guard_state, connection, operation_key,
@@ -347,6 +359,8 @@ def _write_bounded_plan(plan, scope, operation_key):
             validated = validate_event(event,context)
         with db_phase(TransactionPhase.CONTEXT):
             _seal_event_reads(reads, validated, source_guard_state,baseline_read_group,result_check_group)
+            if availability_group is not None:
+                availability_group.seal(validated)
         with db_phase(TransactionPhase.READ_STATE):
             refs = set(validated.row_owners.values())
             before_counts = {}
@@ -387,6 +401,8 @@ def _write_bounded_plan(plan, scope, operation_key):
     with db_phase(TransactionPhase.FINAL_CHECKS):
         if expected != allocation.last_event_id+1:
             raise TransactionError("实际有界事件少于预分配完整范围")
+        if availability_group is not None:
+            availability_group.finish()
         _finish_baseline_read_group(baseline_read_group)
         _finish_result_check_group(result_check_group)
         _finalize_result_page_write(result_page_guard_state,plan.result_page_write_scope,transaction,connection)
@@ -740,6 +756,9 @@ def _commit_operation(command, operation_key, connection) -> WriteReceipt:
                 return rollback_error(error)
         with db_phase(TransactionPhase.FINAL_CHECKS):
             events = plan.events
+            availability_event = load_event_registry()["events"]["AVAILABILITY_CHECK"]["id"]
+            if any(event.event_type == availability_event for event in events):
+                raise TransactionError("设备检查事件必须使用内核绑定的有界事务")
             scopes = (
                 plan.software_recovery_read_scope, plan.product_read_scope, plan.plan_read_scope,
                 plan.capture_result_read_scope, plan.segment_read_scope,
