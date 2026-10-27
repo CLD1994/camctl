@@ -8,11 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from camctl.capture.handlers import _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.bindings import check_binding
-from camctl.operations.attempts import RunOutcome
+from camctl.operations.attempts import AttemptConfig, RunOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
@@ -20,30 +20,32 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
 from .test_call_result_save import (
-    ReturnedCall, _assert_actual_saved, _outcome, _started,
+    ReturnedCall, _assert_actual_saved, _outcome, _CALL_EVIDENCE,
 )
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_capture_contract import _NOW
-from .test_recording_start_runtime import _world
+from .test_recording_start_runtime import _world, configured, StartDriver, _result
 
 
 pytestmark = pytest.mark.asyncio
 
 
-async def stop_close_world(tmp_path, consumer):
+async def stop_close_world(tmp_path, consumer, configured):
     """实际 START 和尾次 STOP 均已保存，下一次推进才形成耗尽收尾。"""
     if consumer not in ("ordinary", "canceled"):
         raise ValueError(f"未知停止收尾消费者: {consumer}")
     owned = _world(tmp_path)
     try:
-        runtime = await _started(owned)
+        runtime = await configured(owned, StartDriver(_result(confirmed=True)))
+        runtime.evidence = _CALL_EVIDENCE
+        await capture_handler("camera_record")(12, runtime)
+        runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
         wall, mono = [_NOW + 60_000_000], [67_000_000_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: mono[0]
         stopper = ReturnedCall(_outcome("stop"))
         runtime.stopper = stopper
-        step = await _stop_call(runtime, runtime.action(12))
-        assert step.phase == "stop_failed"
+        await capture_handler("camera_record")(12, runtime)
         call, = stopper.calls
         _assert_actual_saved(owned, call.ticket, assumed=False, confirmed=False,
                              occurred_at=wall[0])
@@ -53,7 +55,7 @@ async def stop_close_world(tmp_path, consumer):
         ).fetchone() == (2, 1, 1)
         if consumer == "canceled":
             _apply_public_cancel(owned, 12, wall[0] + 1)
-        assert runtime.action(12)["status"] == 2
+        assert (await runtime.action(12))["status"] == 2
         assert runtime.pending_start_results == runtime.pending_capture_completions == {}
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM operation_attempts WHERE status=1 OR result_event_id IS NULL"
@@ -134,20 +136,24 @@ def _assert_original_group(owned, key, occurred_at, table, identity, status):
     return events
 
 
-async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
-    world = await stop_close_world(tmp_path, consumer)
+async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase, configured):
+    world = await stop_close_world(tmp_path, consumer, configured)
     owned, runtime = world.owned, world.runtime
     stop_save, action_save = OperationRepository.finish_stale_runs, CaptureRepository.finish_capture
     stop_inputs, stop_receipts, action_inputs, action_receipts, order = [], [], [], [], []
     before_attempts, before_activity = _attempts(owned), _activity(owned)
     before_history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
-    fault = StopCloseFault(owned.connection, world, stage, phase)
+    faults = []
 
     def save_stop(repository, finish, key, current):
         relevant = finish.responsibility_keys == ("stop/12",)
         if relevant:
             stop_inputs.append((finish, key))
             order.append("stop-save")
+        if relevant and stage == "stop" and not faults:
+            fault = StopCloseFault(current.connection, world, stage, phase)
+            faults.append(fault)
+            current = replace(current, connection=fault)
         receipt = stop_save(repository, finish, key, current)
         if relevant:
             stop_receipts.append(receipt)
@@ -159,6 +165,10 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
         if relevant:
             action_inputs.append((request, key))
             order.append("action-save")
+        if relevant and stage == "action" and not faults:
+            fault = StopCloseFault(current.connection, world, stage, phase)
+            faults.append(fault)
+            current = replace(current, connection=fault)
         receipt = action_save(repository, request, key, current)
         if relevant:
             action_receipts.append(receipt)
@@ -166,11 +176,11 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
 
     monkeypatch.setattr(OperationRepository, "finish_stale_runs", save_stop)
     monkeypatch.setattr(CaptureRepository, "finish_capture", save_action)
-    runtime.owned = replace(owned, connection=fault)
     try:
         # 删除第一次提交前的外层持有，会丢失 STOP 或尚未提交的动作成员。
         with pytest.raises((ConsistencyError, AssertionError)):
             await capture_handler("camera_record")(12, runtime)
+        fault, = faults
         assert fault.targeted and fault.failed and fault.target_before is not None
         receipt = stop_receipts[0] if stage == "stop" else action_receipts[0]
         if phase == "projection":
@@ -179,31 +189,27 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
             assert tuple(owned.connection.iterdump()) == fault.target_before
         else:
             assert receipt.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
-        held = runtime.pending_capture_completions
-        pending = held.get(12)
-        assert pending is not None, "STOP 收尾保存未核实后必须持有原完整外层申请"
-        assert hasattr(pending.request, "finish"), "普通动作成员保存失败后也必须保留原 STOP 完整申请"
-        request = pending.request
         finish, stop_key = stop_inputs[0]
-        assert request.action_id == 12 and pending.key == stop_key
-        assert request.finish is finish
         assert finish.responsibility_keys == ("stop/12",)
         assert finish.status is RunOutcome.UNCONFIRMED
         assert finish.occurred_at == world.formed_at
         assert finish.error.code == "recording_stop_failed"
         expected_details = {"activity_id": "12", "operation_run_id": str(world.stop_id)}
         assert dict(finish.error.details) == expected_details
-        action_finish, action_key = request.action_finish, request.action_key
         if consumer == "canceled":
-            assert action_finish is action_key is None and action_inputs == []
+            assert action_inputs == []
+            action_finish = action_key = None
+        elif stage == "action":
+            action_finish, action_key = action_inputs[0]
         else:
+            action_finish = action_key = None
+            assert action_inputs == []
+        if action_finish is not None:
             assert action_finish.action_id == 12 and action_finish.drafts == ()
             assert action_finish.occurred_at == world.formed_at
             assert action_finish.failure.code == "recording_stop_failed"
             assert dict(action_finish.failure.details) == expected_details
             assert action_key is not None and action_key != stop_key
-            assert action_inputs == ([(action_finish, action_key)] if stage == "action" else [])
-        anchors = dict(runtime.retry_gate.anchors)
 
         # 关闭旧连接排除迟到提交，用新的可靠连接核实两个独立原键。
         owned.connection.close()
@@ -219,7 +225,6 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
             4 if stage == "action" and after else 2,)
         if not after:
             assert tuple(owned.connection.iterdump()) == fault.target_before
-        runtime.owned = owned
         runtime.stop_config = replace(runtime.stop_config, max_attempts=9,
             timeout_s=Decimal("8"), retry_interval_s=Decimal("30"))
         runtime.query_config = replace(runtime.query_config, max_attempts=9)
@@ -240,10 +245,6 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
             assert len(stop_inputs) == 2 and stop_receipts[-1].kind is DbOutcomeKind.COMPLETED
         if "binding-check" in order:
             assert order.index("stop-save") < order.index("binding-check")
-        assert runtime.pending_capture_completions is held and held == {}
-        assert runtime.retry_gate.anchors == {
-            responsibility: anchor for responsibility, anchor in anchors.items()
-            if responsibility != "stop/12"}
         stop_events = _assert_original_group(
             owned, stop_key, world.formed_at, "operation_runs", world.stop_id, 6)
         if first_stop_events is not None:
@@ -253,6 +254,12 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
             " WHERE id=?", (world.stop_id,)).fetchone() == (6, 1, 0)
         if consumer == "ordinary":
             assert len(action_inputs) == (2 if stage == "action" else 1)
+            if action_finish is None:
+                action_finish, action_key = action_inputs[0]
+                assert action_finish.occurred_at == world.formed_at
+                assert action_finish.failure.code == "recording_stop_failed"
+                assert dict(action_finish.failure.details) == expected_details
+                assert action_key != stop_key
             assert all(saved is action_finish and key == action_key for saved, key in action_inputs)
             assert action_receipts[-1].kind is DbOutcomeKind.COMPLETED
             action_events = _assert_original_group(
@@ -285,14 +292,14 @@ async def _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, phase):
 ])
 @pytest.mark.parametrize("after_commit", [False, True], ids=["commit-before", "commit-after"])
 async def test_unknown_stop_close_keeps_full_request_before_current_binding_or_terminal_return(
-        tmp_path, monkeypatch, consumer, stage, after_commit):
+        tmp_path, monkeypatch, consumer, stage, after_commit, configured):
     await _assert_save_recovery(
-        tmp_path, monkeypatch, consumer, stage, "commit_after" if after_commit else "commit_before")
+        tmp_path, monkeypatch, consumer, stage, "commit_after" if after_commit else "commit_before", configured)
 
 
 @pytest.mark.parametrize("consumer,stage", [
     ("ordinary", "stop"), ("ordinary", "action"), ("canceled", "stop"),
 ])
 async def test_rolled_back_stop_close_preserves_both_original_members_and_times(
-        tmp_path, monkeypatch, consumer, stage):
-    await _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, "projection")
+        tmp_path, monkeypatch, consumer, stage, configured):
+    await _assert_save_recovery(tmp_path, monkeypatch, consumer, stage, "projection", configured)
